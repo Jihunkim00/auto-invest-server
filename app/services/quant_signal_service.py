@@ -8,48 +8,48 @@ class QuantSignalService:
         reasons: list[str] = []
 
         if indicators["ema20"] > indicators["ema50"]:
-            buy += 0.20
+            buy += 20.0
             reasons.append("EMA20>EMA50 uptrend")
         else:
-            sell += 0.20
+            sell += 20.0
             reasons.append("EMA20<=EMA50 down/range")
 
         if indicators["price"] > indicators["vwap"]:
-            buy += 0.15
+            buy += 15.0
             reasons.append("price above VWAP")
         else:
-            sell += 0.15
+            sell += 15.0
             reasons.append("price below VWAP")
 
         rsi = indicators["rsi"]
         if 45 <= rsi <= 65:
-            buy += 0.10
+            buy += 10.0
             reasons.append("RSI healthy for continuation")
         elif rsi >= 75:
-            sell += 0.10
+            sell += 10.0
             reasons.append("RSI overbought")
         elif rsi <= 30:
-            buy += 0.05
+            buy += 5.0
             reasons.append("RSI oversold bounce candidate")
 
         if indicators["volume_ratio"] >= 1.1:
-            buy += 0.10
+            buy += 10.0
             reasons.append("volume confirmation")
 
         if indicators["short_momentum"] > 0.001:
-            buy += 0.15
+            buy += 15.0
             reasons.append("short momentum positive")
         elif indicators["short_momentum"] < -0.001:
-            sell += 0.15
+            sell += 15.0
             reasons.append("short momentum negative")
 
         if indicators["price"] > indicators["day_open"]:
-            buy += 0.05
+            buy += 5.0
         else:
-            sell += 0.05
+            sell += 5.0
 
-        quant_buy = min(max(buy, 0.0), 1.0)
-        quant_sell = min(max(sell, 0.0), 1.0)
+        quant_buy = min(max(buy, 0.0), 100.0)
+        quant_sell = min(max(sell, 0.0), 100.0)
 
         return {
             "quant_buy_score": quant_buy,

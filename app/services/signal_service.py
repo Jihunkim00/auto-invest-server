@@ -10,6 +10,7 @@ from app.core.constants import (
     HOLD_SCORE_BAND,
     QUANT_WEIGHT,
     SIGNAL_STATUS_CREATED,
+    SIGNAL_STATUS_SKIPPED,
 )
 from app.db.models import SignalLog
 from app.services.ai_signal_service import AISignalService
@@ -30,7 +31,7 @@ class SignalService:
     @staticmethod
     def _resolve_action(final_buy: float, final_sell: float) -> tuple[str, float]:
         spread = final_buy - final_sell
-        confidence = max(final_buy, final_sell)
+        confidence = min(max(max(final_buy, final_sell) / 100.0, 0.0), 1.0)
 
         if abs(spread) < HOLD_SCORE_BAND:
             return "hold", confidence
@@ -62,6 +63,8 @@ class SignalService:
 
         if not market_analysis.entry_allowed and action == "buy":
             action = "hold"
+            
+        is_hold = action == "hold"
 
         signal = SignalLog(
             symbol=symbol,
@@ -84,8 +87,8 @@ class SignalService:
             quant_reason=quant["quant_reason"],
             ai_reason=ai["ai_reason"],
             risk_flags=json.dumps([], ensure_ascii=False),
-            approved_by_risk=None,
-            signal_status=SIGNAL_STATUS_CREATED,
+            approved_by_risk=False if is_hold else None,
+            signal_status=SIGNAL_STATUS_SKIPPED if is_hold else SIGNAL_STATUS_CREATED,
             trigger_source=trigger_source,
             timeframe=timeframe,
         )

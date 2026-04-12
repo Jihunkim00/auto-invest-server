@@ -29,6 +29,27 @@ class TradingService:
     def run_once(self, db: Session, *, symbol: str, trigger_source: str = "manual") -> dict:
         signal = self.signal_service.run(db, symbol=symbol, trigger_source=trigger_source)
 
+        if signal.action == "hold":
+            risk = {
+                "approved": False,
+                "risk_flags": '["hold_action"]',
+            }
+            signal.risk_flags = risk["risk_flags"]
+            signal.approved_by_risk = False
+            signal.signal_status = SIGNAL_STATUS_SKIPPED
+            signal.related_order_id = None
+            db.commit()
+            db.refresh(signal)
+            return {
+                "signal_id": signal.id,
+                "action": "hold",
+                "executed": False,
+                "signal_status": signal.signal_status,
+                "reason": "signal action is HOLD; execution skipped",
+                "related_order_id": signal.related_order_id,
+                "risk": risk,
+            }
+
         risk = self.risk_service.evaluate(
             db,
             symbol=signal.symbol,
@@ -41,15 +62,17 @@ class TradingService:
 
         if not risk["approved"]:
             signal.signal_status = SIGNAL_STATUS_REJECTED
+            signal.related_order_id = None
             db.commit()
             db.refresh(signal)
-            return {"signal_id": signal.id, "action": signal.action, "executed": False, "risk": risk}
-
-        if signal.action == "hold":
-            signal.signal_status = SIGNAL_STATUS_SKIPPED
-            db.commit()
-            db.refresh(signal)
-            return {"signal_id": signal.id, "action": "hold", "executed": False, "risk": risk}
+            return {
+                "signal_id": signal.id,
+                "action": signal.action,
+                "executed": False,
+                "signal_status": signal.signal_status,
+                "related_order_id": signal.related_order_id,
+                "risk": risk,
+            }
 
         signal.signal_status = SIGNAL_STATUS_APPROVED
         db.commit()
@@ -104,6 +127,7 @@ class TradingService:
             "signal_id": signal.id,
             "action": signal.action,
             "executed": True,
+            "signal_status": signal.signal_status,
             "related_order_id": signal.related_order_id,
             "risk": risk,
         }
