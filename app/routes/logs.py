@@ -61,7 +61,12 @@ def get_signal_logs(
             "sell_score": row.sell_score,
             "confidence": row.confidence,
             "reason": row.reason,
+            "quant_reason": row.quant_reason,
+            "ai_reason": row.ai_reason,
             "indicator_payload": row.indicator_payload,
+            "risk_flags": row.risk_flags,
+            "approved_by_risk": row.approved_by_risk,
+            "signal_status": row.signal_status,
             "related_order_id": row.related_order_id,
             "created_at": row.created_at,
         }

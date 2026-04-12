@@ -1,8 +1,12 @@
+from datetime import datetime, timedelta, UTC
+
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, GetOrderByIdRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestTradeRequest
+from alpaca.data.requests import StockLatestTradeRequest, StockBarsRequest
+from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
 from app.config import get_settings
 
 
@@ -46,6 +50,26 @@ class AlpacaClient:
             "price": float(latest.price),
             "timestamp": str(latest.timestamp),
         }
+
+    def get_recent_bars(self, symbol: str, *, limit: int = 120, timeframe: str = "1Min"):
+        end = datetime.now(UTC)
+        start = end - timedelta(days=5)
+
+        tf = TimeFrame(amount=1, unit=TimeFrameUnit.Minute)
+        if timeframe.lower() in ("5min", "5m"):
+            tf = TimeFrame(amount=5, unit=TimeFrameUnit.Minute)
+
+        request = StockBarsRequest(
+            symbol_or_symbols=symbol,
+            timeframe=tf,
+            start=start,
+            end=end,
+            limit=limit,
+            adjustment="raw",
+            feed="iex",
+        )
+        bars = self.data_client.get_stock_bars(request)
+        return bars.data.get(symbol, [])
 
     def submit_market_buy(self, symbol: str, notional: float):
         order_data = MarketOrderRequest(
