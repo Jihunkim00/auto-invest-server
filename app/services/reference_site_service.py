@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     import yaml
-except Exception:  # pragma: no cover - optional dependency guard
+except Exception:  # pragma: no cover
     yaml = None
 
 
@@ -17,7 +18,7 @@ class ReferenceSite:
     category: str
     enabled: bool = True
     priority: int = 100
-    symbols: list[str] | None = None
+    symbols: tuple[str, ...] = ()
 
 
 class ReferenceSiteService:
@@ -36,27 +37,25 @@ class ReferenceSiteService:
         if not isinstance(payload, dict):
             return []
 
-        raw_sites = payload.get("sites", [])
+        raw_sites = payload.get("sites")
         if not isinstance(raw_sites, list):
             return []
 
         sites: list[ReferenceSite] = []
         for raw in raw_sites:
             site = self._to_site(raw)
-            if site:
+            if site is not None:
                 sites.append(site)
         return sites
 
     def get_sites_for_symbol(self, symbol: str) -> list[ReferenceSite]:
-        target = symbol.upper()
-        sites = [site for site in self.load_sites() if site.enabled and self._matches_symbol(site, target)]
-        return sorted(sites, key=lambda s: (s.priority, s.name))
+        target = symbol.upper().strip()
+        matches = [site for site in self.load_sites() if site.enabled and self._matches_symbol(site, target)]
+        return sorted(matches, key=lambda item: (item.priority, item.name))
 
     @staticmethod
     def _matches_symbol(site: ReferenceSite, symbol: str) -> bool:
-        if not site.symbols:
-            return True
-        return symbol in {item.upper() for item in site.symbols}
+        return not site.symbols or symbol in site.symbols
 
     @staticmethod
     def _to_site(raw: Any) -> ReferenceSite | None:
@@ -66,14 +65,12 @@ class ReferenceSiteService:
         name = str(raw.get("name", "")).strip()
         url = str(raw.get("url", "")).strip()
         category = str(raw.get("category", "general")).strip() or "general"
-
         if not name or not url:
             return None
 
-        symbols_raw = raw.get("symbols")
-        symbols: list[str] | None = None
-        if isinstance(symbols_raw, list):
-            symbols = [str(item).strip().upper() for item in symbols_raw if str(item).strip()]
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return None
 
         priority_raw = raw.get("priority", 100)
         try:
@@ -81,11 +78,19 @@ class ReferenceSiteService:
         except (TypeError, ValueError):
             priority = 100
 
+        symbols_raw = raw.get("symbols", [])
+        symbols: tuple[str, ...] = ()
+        if isinstance(symbols_raw, list):
+            symbols = tuple(str(item).strip().upper() for item in symbols_raw if str(item).strip())
+
+        enabled_raw = raw.get("enabled", True)
+        enabled = enabled_raw if isinstance(enabled_raw, bool) else str(enabled_raw).strip().lower() in {"true", "1", "yes"}
+
         return ReferenceSite(
             name=name,
             url=url,
             category=category,
-            enabled=bool(raw.get("enabled", True)),
+            enabled=enabled,
             priority=priority,
             symbols=symbols,
         )
