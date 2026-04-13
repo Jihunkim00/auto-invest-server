@@ -1,0 +1,21 @@
+sites:
+  - name: yahoo_finance_aapl
+    url: "https://finance.yahoo.com/quote/AAPL"
+    category: "market_data"
+    enabled: true
+    priority: 1
+    symbols: ["AAPL"]
+
+  - name: marketwatch_aapl
+    url: "https://www.marketwatch.com/investing/stock/aapl"
+    category: "market_news"
+    enabled: true
+    priority: 2
+    symbols: ["AAPL"]
+
+  - name: investing_spy
+    url: "https://www.investing.com/etfs/spdr-s-p-500"
+    category: "macro"
+    enabled: true
+    priority: 3
+    symbols: ["AAPL", "SPY"]
