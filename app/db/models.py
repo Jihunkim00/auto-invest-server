@@ -57,6 +57,19 @@ class MarketAnalysis(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class ReferenceSiteCache(Base):
+    __tablename__ = "reference_site_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    site_name = Column(String(120), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    category = Column(String(50), nullable=True)
+    summary = Column(Text, nullable=False)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    source_status = Column(String(20), nullable=False, default="fresh")
+
 class SignalLog(Base):
     __tablename__ = "signals"
 
