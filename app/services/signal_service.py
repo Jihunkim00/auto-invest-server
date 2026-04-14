@@ -4,11 +4,16 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import (
     AI_WEIGHT,
+    BUY_AI_MIN,
+    BUY_FINAL_MIN,
+    BUY_QUANT_MIN,
     DEFAULT_BARS_LIMIT,
     DEFAULT_TIMEFRAME,
-    FINAL_SCORE_ACTION_THRESHOLD,
-    HOLD_SCORE_BAND,
+    MIN_BUY_SELL_SPREAD,
     QUANT_WEIGHT,
+    SELL_AI_MIN,
+    SELL_FINAL_MIN,
+    SELL_QUANT_MIN,
     SIGNAL_STATUS_CREATED,
     SIGNAL_STATUS_SKIPPED,
 )
@@ -29,15 +34,28 @@ class SignalService:
         self.ai_signal_service = AISignalService()
 
     @staticmethod
-    def _resolve_action(final_buy: float, final_sell: float) -> tuple[str, float]:
-        spread = final_buy - final_sell
+    def _resolve_action(*, market_entry_allowed: bool, quant_buy: float, quant_sell: float, ai_buy: float, ai_sell: float, final_buy: float, final_sell: float) -> tuple[str, float]:
         confidence = min(max(max(final_buy, final_sell) / 100.0, 0.0), 1.0)
 
-        if abs(spread) < HOLD_SCORE_BAND:
+        if not market_entry_allowed:
             return "hold", confidence
-        if final_buy >= FINAL_SCORE_ACTION_THRESHOLD and spread > 0:
+
+        buy_candidate = (
+            quant_buy >= BUY_QUANT_MIN
+            and ai_buy >= BUY_AI_MIN
+            and final_buy >= BUY_FINAL_MIN
+            and (final_buy - final_sell) >= MIN_BUY_SELL_SPREAD
+        )
+        sell_candidate = (
+            quant_sell >= SELL_QUANT_MIN
+            and ai_sell >= SELL_AI_MIN
+            and final_sell >= SELL_FINAL_MIN
+            and (final_sell - final_buy) >= MIN_BUY_SELL_SPREAD
+        )
+
+        if buy_candidate:
             return "buy", confidence
-        if final_sell >= FINAL_SCORE_ACTION_THRESHOLD and spread < 0:
+        if sell_candidate:
             return "sell", confidence
         return "hold", confidence
 
@@ -56,14 +74,19 @@ class SignalService:
             quant_sell_score=quant["quant_sell_score"],
         )
 
-        final_buy = (quant["quant_buy_score"] * QUANT_WEIGHT) + (ai["ai_buy_score"] * AI_WEIGHT)
-        final_sell = (quant["quant_sell_score"] * QUANT_WEIGHT) + (ai["ai_sell_score"] * AI_WEIGHT)
+        final_buy = min(max((quant["quant_buy_score"] * QUANT_WEIGHT) + (ai["ai_buy_score"] * AI_WEIGHT), 0.0), 100.0)
+        final_sell = min(max((quant["quant_sell_score"] * QUANT_WEIGHT) + (ai["ai_sell_score"] * AI_WEIGHT), 0.0), 100.0)
 
-        action, confidence = self._resolve_action(final_buy, final_sell)
+        action, confidence = self._resolve_action(
+            market_entry_allowed=bool(market_analysis.entry_allowed),
+            quant_buy=quant["quant_buy_score"],
+            quant_sell=quant["quant_sell_score"],
+            ai_buy=ai["ai_buy_score"],
+            ai_sell=ai["ai_sell_score"],
+            final_buy=final_buy,
+            final_sell=final_sell,
+        )
 
-        if not market_analysis.entry_allowed and action == "buy":
-            action = "hold"
-            
         is_hold = action == "hold"
 
         signal = SignalLog(
@@ -88,6 +111,7 @@ class SignalService:
             ai_reason=ai["ai_reason"],
             risk_flags=json.dumps([], ensure_ascii=False),
             approved_by_risk=False if is_hold else None,
+            related_order_id=None,
             signal_status=SIGNAL_STATUS_SKIPPED if is_hold else SIGNAL_STATUS_CREATED,
             trigger_source=trigger_source,
             timeframe=timeframe,

@@ -99,6 +99,9 @@ class SignalLog(Base):
     ai_reason = Column(Text, nullable=True)
     risk_flags = Column(Text, nullable=True)
     approved_by_risk = Column(Boolean, nullable=True)
+    position_size_pct = Column(Float, nullable=True)
+    planned_stop_loss_pct = Column(Float, nullable=True)
+    planned_take_profit_pct = Column(Float, nullable=True)
 
     related_order_id = Column(Integer, nullable=True)
     signal_status = Column(String(30), nullable=True)
