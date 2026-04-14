@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
-    openai_reasoning_effort: str = "minimal"
+    openai_reasoning_effort: str = "medium"
 
     reference_sites_config_path: str = "config/reference_sites.yaml"
     reference_site_cache_ttl_minutes: int = 90
