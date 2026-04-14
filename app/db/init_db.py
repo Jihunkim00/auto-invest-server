@@ -17,8 +17,37 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _create_reference_site_cache_table_if_missing():
+    inspector = inspect(engine)
+    if "reference_site_cache" in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS reference_site_cache (
+                    id INTEGER PRIMARY KEY,
+                    site_name VARCHAR(120) NOT NULL,
+                    symbol VARCHAR(20) NOT NULL,
+                    url TEXT NOT NULL,
+                    category VARCHAR(50),
+                    summary TEXT NOT NULL,
+                    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    source_status VARCHAR(20) NOT NULL DEFAULT 'fresh'
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_site_cache_symbol ON reference_site_cache (symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_site_cache_site_name ON reference_site_cache (site_name)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_site_cache_expires_at ON reference_site_cache (expires_at)"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _create_reference_site_cache_table_if_missing()
 
     # Lightweight SQLite-friendly migration for existing signals table
     signal_columns = {
