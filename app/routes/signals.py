@@ -28,6 +28,12 @@ def run_signal(
         "final_buy_score": row.final_buy_score,
         "final_sell_score": row.final_sell_score,
         "signal_status": row.signal_status,
+        "approved_by_risk": row.approved_by_risk,
+        "risk_flags": row.risk_flags,
+        "position_size_pct": row.position_size_pct,
+        "planned_stop_loss_pct": row.planned_stop_loss_pct,
+        "planned_take_profit_pct": row.planned_take_profit_pct,
+        "related_order_id": row.related_order_id,
         "created_at": row.created_at,
     }
 
@@ -52,6 +58,10 @@ def list_signals(
             "signal_status": row.signal_status,
             "approved_by_risk": row.approved_by_risk,
             "related_order_id": row.related_order_id,
+            "risk_flags": row.risk_flags,
+            "position_size_pct": row.position_size_pct,
+            "planned_stop_loss_pct": row.planned_stop_loss_pct,
+            "planned_take_profit_pct": row.planned_take_profit_pct,
             "created_at": row.created_at,
         }
         for row in rows

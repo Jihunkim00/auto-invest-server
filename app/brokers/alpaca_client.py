@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, UTC
 
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, GetOrderByIdRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
+
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.requests import GetOrderByIdRequest, MarketOrderRequest
 
 from app.config import get_settings
 
@@ -75,6 +76,15 @@ class AlpacaClient:
         order_data = MarketOrderRequest(
             symbol=symbol,
             notional=notional,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+        )
+        return self.trading_client.submit_order(order_data=order_data)
+    
+    def submit_market_buy_qty(self, symbol: str, qty: float):
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
             side=OrderSide.BUY,
             time_in_force=TimeInForce.DAY,
         )
