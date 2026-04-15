@@ -58,6 +58,7 @@ class MarketAnalysis(Base):
     gate_level = Column(Integer, nullable=True)
     gate_profile_name = Column(String(50), nullable=True)
     hard_block_reason = Column(String(120), nullable=True)
+    hard_blocked = Column(Boolean, nullable=False, default=False)
     gating_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -118,6 +119,7 @@ class SignalLog(Base):
     gate_level = Column(Integer, nullable=True)
     gate_profile_name = Column(String(50), nullable=True)
     hard_block_reason = Column(String(120), nullable=True)
+    hard_blocked = Column(Boolean, nullable=False, default=False)
     gating_notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

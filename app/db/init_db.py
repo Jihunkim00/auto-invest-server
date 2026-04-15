@@ -74,6 +74,7 @@ def init_db():
         "gate_level": "INTEGER",
         "gate_profile_name": "VARCHAR(50)",
         "hard_block_reason": "VARCHAR(120)",
+        "hard_blocked": "BOOLEAN DEFAULT 0",
         "gating_notes": "TEXT",
     }
 
@@ -81,6 +82,7 @@ def init_db():
         "gate_level": "INTEGER",
         "gate_profile_name": "VARCHAR(50)",
         "hard_block_reason": "VARCHAR(120)",
+        "hard_blocked": "BOOLEAN DEFAULT 0",
         "gating_notes": "TEXT",
     }
 

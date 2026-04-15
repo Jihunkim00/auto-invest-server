@@ -32,7 +32,10 @@ class SignalService:
     def _resolve_action(
         *,
         market_entry_allowed: bool,
+        hard_blocked: bool,
+        hard_block_reason: str | None,
         regime: str,
+        regime_confidence: float,
         quant_buy: float,
         quant_sell: float,
         ai_buy: float,
@@ -43,29 +46,35 @@ class SignalService:
     ) -> tuple[str, float, list[str]]:
         profile = get_gate_profile(gate_level)
         notes: list[str] = []
-        confidence = min(max(max(final_buy, final_sell) / 100.0, 0.0), 1.0)
+        score_confidence = min(max(max(final_buy, final_sell) / 100.0, 0.0), 1.0)
+        confidence = min(max(max(score_confidence, regime_confidence), 0.0), 1.0)
+
+        if hard_blocked:
+            notes.append(f"hard_block={hard_block_reason or 'unknown'}")
+            return "hold", confidence, notes
 
         if not market_entry_allowed:
-            notes.append("market_entry_not_allowed")
-            return "hold", confidence, notes
+            notes.append("market_entry_not_allowed_advisory")
+            if gate_level <= 2:
+                confidence = max(0.0, confidence - 0.03)
 
         if regime == "range" and not profile.allow_neutral_regime_entry:
-            notes.append("neutral_regime_blocked_by_profile")
-            return "hold", confidence, notes
+            notes.append("neutral_regime_penalty")
+            confidence = max(0.0, confidence - 0.05)
 
         if confidence < profile.min_confidence_to_trade:
             notes.append("confidence_below_profile_min")
 
         buy_candidate = (
-            quant_buy >= (profile.min_buy_score - 5)
-            and ai_buy >= (profile.min_buy_score - 8)
+            quant_buy >= (profile.min_buy_score - 6)
+            and ai_buy >= (profile.min_buy_score - 10)
             and final_buy >= profile.min_buy_score
             and (final_buy - final_sell) >= profile.min_score_spread
             and confidence >= profile.min_confidence_to_trade
         )
         sell_candidate = (
-            quant_sell >= (profile.min_sell_score - 5)
-            and ai_sell >= (profile.min_sell_score - 8)
+            quant_sell >= (profile.min_sell_score - 6)
+            and ai_sell >= (profile.min_sell_score - 10)
             and final_sell >= profile.min_sell_score
             and (final_sell - final_buy) >= profile.min_score_spread
             and confidence >= max(profile.min_confidence_to_trade - 0.04, 0.45)
@@ -108,7 +117,10 @@ class SignalService:
 
         action, confidence, action_notes = self._resolve_action(
             market_entry_allowed=bool(market_analysis.entry_allowed),
+            hard_blocked=bool(market_analysis.hard_blocked),
+            hard_block_reason=market_analysis.hard_block_reason,
             regime=(market_analysis.market_regime or "unknown"),
+            regime_confidence=float(market_analysis.market_confidence or 0),
             quant_buy=quant["quant_buy_score"],
             quant_sell=quant["quant_sell_score"],
             ai_buy=ai["ai_buy_score"],
@@ -127,8 +139,8 @@ class SignalService:
             sell_score=final_sell,
             confidence=confidence,
             reason=(
-                f"gate_level={resolved_gate_level}({profile.name}); gpt_gate={market_analysis.entry_allowed}; "
-                "quant+ai blended"
+                f"gate_level={resolved_gate_level}({profile.name}); "
+                f"hard_blocked={bool(market_analysis.hard_blocked)}; quant+ai blended"
             ),
             indicator_payload=json.dumps(indicators, ensure_ascii=False),
             market_analysis_id=market_analysis.id,
@@ -152,6 +164,7 @@ class SignalService:
             gate_level=resolved_gate_level,
             gate_profile_name=profile.name,
             hard_block_reason=market_analysis.hard_block_reason,
+            hard_blocked=bool(market_analysis.hard_blocked),
             gating_notes=json.dumps(gating_notes, ensure_ascii=False),
         )
         db.add(signal)

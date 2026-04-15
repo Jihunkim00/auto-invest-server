@@ -35,7 +35,7 @@ class QuantSignalService:
             buy += 18.0
             reasons.append("EMA20>EMA50 uptrend")
         else:
-            sell += 18.0
+            sell += 16.0
             reasons.append("EMA20<=EMA50 down/range")
 
         alignment_hits = sum([above_ema20, above_ema50, above_vwap])
@@ -43,25 +43,25 @@ class QuantSignalService:
             buy += 15.0
             reasons.append("price aligned above EMA20/EMA50/VWAP")
         elif alignment_hits == 2:
-            buy += 8.0
-            sell += 4.0
+            buy += 10.0
+            sell += 3.0
             reasons.append("partial trend alignment")
         elif alignment_hits == 1:
-            buy += 3.0
-            sell += 8.0
+            buy += 4.0
+            sell += 7.0
             reasons.append("weak trend alignment")
         else:
-            sell += 15.0
+            sell += 14.0
             reasons.append("price below EMA20/EMA50/VWAP")
 
         if profile.strict_alignment == "strict" and alignment_hits < 3:
             sell += 12.0
             notes.append("strict alignment penalty")
         elif profile.strict_alignment == "moderate" and alignment_hits == 0:
-            sell += 8.0
+            sell += 7.0
             notes.append("moderate alignment penalty")
         elif profile.strict_alignment == "loose" and alignment_hits == 0:
-            sell += 4.0
+            sell += 3.0
             notes.append("loose alignment penalty")
 
         if 45 <= rsi <= 65:
@@ -72,7 +72,7 @@ class QuantSignalService:
             reasons.append("RSI overbought")
         elif rsi <= 30:
             if profile.allow_oversold_bounce:
-                buy += 8.0
+                buy += 10.0
                 reasons.append("RSI oversold bounce candidate")
             else:
                 sell += 4.0
@@ -89,15 +89,24 @@ class QuantSignalService:
             buy += 14.0
             reasons.append("short momentum positive")
         elif short_momentum < -0.001:
-            sell += 12.0
+            sell += 11.0
             reasons.append("short momentum negative")
+            if profile.level >= 3 and short_momentum > -0.003:
+                buy += 4.0
+                notes.append("early_recovery_momentum_credit")
         else:
             notes.append("momentum flat")
+            if profile.level >= 3:
+                buy += 3.0
 
         if price > day_open:
             buy += 5.0
         else:
             sell += 5.0
+
+        if profile.level >= 3 and alignment_hits >= 1 and rsi <= 42 and short_momentum > -0.003:
+            buy += 4.0
+            notes.append("testing_mode_recovery_setup_credit")
 
         quant_buy = min(max(buy, 0.0), 100.0)
         quant_sell = min(max(sell, 0.0), 100.0)

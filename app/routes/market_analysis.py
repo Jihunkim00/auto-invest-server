@@ -17,6 +17,18 @@ from app.services.web_content_service import WebContentService
 router = APIRouter(prefix="/market-analysis", tags=["market-analysis"])
 
 
+def _parse_json_array(raw_value: str | None) -> list:
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        return []
+    return []
+
+
 @router.post("/run")
 def run_market_analysis(
     symbol: str = Query(default="AAPL", min_length=1),
@@ -42,7 +54,8 @@ def run_market_analysis(
         "gate_level": row.gate_level,
         "gate_profile_name": row.gate_profile_name,
         "hard_block_reason": row.hard_block_reason,
-        "gating_notes": json.loads(row.gating_notes or "[]"),
+        "hard_blocked": bool(row.hard_blocked),
+        "gating_notes": _parse_json_array(row.gating_notes),
         "reason": row.risk_note,
         "risk_note": row.risk_note,
         "macro_summary": row.macro_summary,
@@ -95,7 +108,8 @@ def list_market_analysis(
             "gate_level": row.gate_level,
             "gate_profile_name": row.gate_profile_name,
             "hard_block_reason": row.hard_block_reason,
-            "gating_notes": json.loads(row.gating_notes or "[]"),
+            "hard_blocked": bool(row.hard_blocked),
+            "gating_notes": _parse_json_array(row.gating_notes),
             "reason": row.risk_note,
             "risk_note": row.risk_note,
             "macro_summary": row.macro_summary,

@@ -192,6 +192,7 @@ class GPTMarketService:
                 "entry_allowed": False,
                 "regime_confidence": 0.20,
                 "hard_block_reason": "insufficient_indicators",
+                "hard_blocked": True,
                 "gating_notes": ["Insufficient indicator history"],
                 "reason": "Insufficient indicator history; HOLD-safe fallback.",
             }
@@ -239,6 +240,7 @@ class GPTMarketService:
                 "entry_allowed": False,
                 "regime_confidence": 0.30,
                 "hard_block_reason": "extreme_bearish_regime",
+                "hard_blocked": True,
                 "gating_notes": notes + ["hard_block_extreme_bearish_regime"],
                 "reason": "Hard-blocked: extreme bearish regime under strict profile.",
             }
@@ -261,6 +263,7 @@ class GPTMarketService:
             "entry_allowed": entry_allowed,
             "regime_confidence": regime_confidence,
             "hard_block_reason": None,
+            "hard_blocked": False,
             "gating_notes": notes,
             "reason": "Rule-based market gate scored with penalty model (non-hard-block factors penalized).",
         }
@@ -465,6 +468,7 @@ class GPTMarketService:
             result["regime_confidence"] = round(effective_conf, 4)
 
         result["hard_block_reason"] = hard_block_reason
+        result["hard_blocked"] = bool(hard_block_reason)
         result["gating_notes"] = notes
         if not result.get("reason"):
             result["reason"] = "Market gate evaluated by profile-aware guardrails."
@@ -500,6 +504,7 @@ class GPTMarketService:
         )
         result["gate_level"] = gate_level
         result["gate_profile_name"] = profile.name
+        result["hard_blocked"] = bool(result.get("hard_block_reason"))
         result["market_confidence"] = result.get("regime_confidence", result.get("market_confidence", 0.0))
         result["audit"] = {
             "gpt_used": gpt_used,
@@ -537,6 +542,7 @@ class GPTMarketService:
             gate_level=payload.get("gate_level"),
             gate_profile_name=payload.get("gate_profile_name"),
             hard_block_reason=payload.get("hard_block_reason"),
+            hard_blocked=bool(payload.get("hard_blocked", False)),
             gating_notes=json.dumps(payload.get("gating_notes") or [], ensure_ascii=False),
             raw_payload=json.dumps(payload, ensure_ascii=False),
         )

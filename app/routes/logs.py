@@ -1,9 +1,24 @@
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+
 from app.db.database import get_db
 from app.db.models import OrderLog, SignalLog
 
 router = APIRouter(prefix="/logs", tags=["logs"])
+
+
+def _parse_json_array(raw_value: str | None) -> list:
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        return []
+    return []
 
 
 @router.get("/orders")
@@ -60,6 +75,7 @@ def get_signal_logs(
             "buy_score": row.buy_score,
             "sell_score": row.sell_score,
             "confidence": row.confidence,
+            "regime_confidence": row.gpt_market_confidence,
             "quant_buy_score": row.quant_buy_score,
             "quant_sell_score": row.quant_sell_score,
             "ai_buy_score": row.ai_buy_score,
@@ -70,13 +86,14 @@ def get_signal_logs(
             "quant_reason": row.quant_reason,
             "ai_reason": row.ai_reason,
             "indicator_payload": row.indicator_payload,
-            "risk_flags": row.risk_flags,
+            "risk_flags": _parse_json_array(row.risk_flags),
             "approved_by_risk": row.approved_by_risk,
             "signal_status": row.signal_status,
             "gate_level": row.gate_level,
             "gate_profile_name": row.gate_profile_name,
             "hard_block_reason": row.hard_block_reason,
-            "gating_notes": row.gating_notes,
+            "hard_blocked": bool(row.hard_blocked),
+            "gating_notes": _parse_json_array(row.gating_notes),
             "related_order_id": row.related_order_id,
             "created_at": row.created_at,
         }
