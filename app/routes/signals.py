@@ -1,6 +1,9 @@
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
 from app.db.models import SignalLog
 from app.services.signal_service import SignalService
@@ -12,10 +15,11 @@ router = APIRouter(prefix="/signals", tags=["signals"])
 def run_signal(
     symbol: str = Query(default="AAPL", min_length=1),
     trigger_source: str = Query(default="manual"),
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
     db: Session = Depends(get_db),
 ):
     svc = SignalService()
-    row = svc.run(db, symbol=symbol.upper(), trigger_source=trigger_source)
+    row = svc.run(db, symbol=symbol.upper(), trigger_source=trigger_source, gate_level=gate_level)
     return {
         "id": row.id,
         "symbol": row.symbol,
@@ -28,6 +32,10 @@ def run_signal(
         "final_buy_score": row.final_buy_score,
         "final_sell_score": row.final_sell_score,
         "signal_status": row.signal_status,
+        "gate_level": row.gate_level,
+        "gate_profile_name": row.gate_profile_name,
+        "hard_block_reason": row.hard_block_reason,
+        "gating_notes": json.loads(row.gating_notes or "[]"),
         "approved_by_risk": row.approved_by_risk,
         "risk_flags": row.risk_flags,
         "position_size_pct": row.position_size_pct,
@@ -56,6 +64,10 @@ def list_signals(
             "action": row.action,
             "confidence": row.confidence,
             "signal_status": row.signal_status,
+            "gate_level": row.gate_level,
+            "gate_profile_name": row.gate_profile_name,
+            "hard_block_reason": row.hard_block_reason,
+            "gating_notes": json.loads(row.gating_notes or "[]"),
             "approved_by_risk": row.approved_by_risk,
             "related_order_id": row.related_order_id,
             "risk_flags": row.risk_flags,

@@ -1,7 +1,10 @@
+import json
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
 from app.db.models import MarketAnalysis
 from app.services.gpt_market_service import GPTMarketService
@@ -10,18 +13,23 @@ from app.services.market_data_service import MarketDataService
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
 from app.services.reference_site_service import ReferenceSiteService
 from app.services.web_content_service import WebContentService
+
 router = APIRouter(prefix="/market-analysis", tags=["market-analysis"])
 
 
 @router.post("/run")
-def run_market_analysis(symbol: str = Query(default="AAPL", min_length=1), db: Session = Depends(get_db)):
+def run_market_analysis(
+    symbol: str = Query(default="AAPL", min_length=1),
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
     mds = MarketDataService()
     ids = IndicatorService()
     svc = GPTMarketService()
 
     bars = mds.get_recent_bars(symbol.upper())
     indicators = ids.calculate(bars)
-    row = svc.run_and_save(db, symbol.upper(), indicators)
+    row = svc.run_and_save(db, symbol.upper(), indicators, gate_level=gate_level)
 
     return {
         "id": row.id,
@@ -29,13 +37,19 @@ def run_market_analysis(symbol: str = Query(default="AAPL", min_length=1), db: S
         "market_regime": row.market_regime,
         "entry_bias": row.entry_bias,
         "entry_allowed": row.entry_allowed,
+        "regime_confidence": row.market_confidence,
         "market_confidence": row.market_confidence,
+        "gate_level": row.gate_level,
+        "gate_profile_name": row.gate_profile_name,
+        "hard_block_reason": row.hard_block_reason,
+        "gating_notes": json.loads(row.gating_notes or "[]"),
         "reason": row.risk_note,
         "risk_note": row.risk_note,
         "macro_summary": row.macro_summary,
         "created_at": row.created_at,
     }
-    
+
+
 @router.post("/refresh-context")
 def refresh_reference_context(symbol: str = Query(default="AAPL", min_length=1), db: Session = Depends(get_db)):
     settings = get_settings()
@@ -58,8 +72,6 @@ def refresh_reference_context(symbol: str = Query(default="AAPL", min_length=1),
     }
 
 
-
-
 @router.get("")
 def list_market_analysis(
     symbol: str | None = None,
@@ -78,7 +90,12 @@ def list_market_analysis(
             "market_regime": row.market_regime,
             "entry_bias": row.entry_bias,
             "entry_allowed": row.entry_allowed,
+            "regime_confidence": row.market_confidence,
             "market_confidence": row.market_confidence,
+            "gate_level": row.gate_level,
+            "gate_profile_name": row.gate_profile_name,
+            "hard_block_reason": row.hard_block_reason,
+            "gating_notes": json.loads(row.gating_notes or "[]"),
             "reason": row.risk_note,
             "risk_note": row.risk_note,
             "macro_summary": row.macro_summary,

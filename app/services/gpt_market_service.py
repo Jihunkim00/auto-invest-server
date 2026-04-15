@@ -16,6 +16,7 @@ from openai import (
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.constants import KILL_SWITCH_DEFAULT, get_gate_profile, resolve_gate_level
 from app.db.models import MarketAnalysis
 from app.services.market_gate_schema import parse_market_gate_response
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
@@ -45,7 +46,6 @@ class GPTMarketService:
         self.openai_api_key = settings.openai_api_key
         self.openai_model = settings.openai_model
         self.openai_reasoning_effort = settings.openai_reasoning_effort
-        self.market_gate_min_confidence = settings.market_gate_min_confidence
 
         self.cache_service = ReferenceSiteCacheService(
             settings.reference_site_cache_ttl_minutes
@@ -67,8 +67,11 @@ class GPTMarketService:
         db: Session,
         symbol: str,
         indicators: dict[str, Any],
+        gate_level: int | None = None,
     ) -> dict[str, Any]:
-        fallback = self._rule_based_analysis(indicators)
+        resolved_gate_level = resolve_gate_level(gate_level)
+        profile = get_gate_profile(resolved_gate_level)
+        fallback = self._rule_based_analysis(indicators, resolved_gate_level)
         context = self._load_context_from_cache(db, symbol)
 
         if not indicators:
@@ -78,6 +81,7 @@ class GPTMarketService:
                 gpt_used=False,
                 fallback_used=True,
                 fallback_reason="insufficient indicators",
+                gate_level=resolved_gate_level,
             )
 
         if not self.client:
@@ -87,6 +91,7 @@ class GPTMarketService:
                 gpt_used=False,
                 fallback_used=True,
                 fallback_reason="OPENAI_API_KEY missing",
+                gate_level=resolved_gate_level,
             )
 
         try:
@@ -94,23 +99,24 @@ class GPTMarketService:
                 symbol=symbol,
                 indicators=indicators,
                 context=context,
+                gate_level=resolved_gate_level,
+                gate_profile_name=profile.name,
             )
-            logger.info("OpenAI raw candidate payload: %s", candidate)
-
             normalized = self._normalize_candidate(candidate)
-            logger.info("OpenAI normalized candidate payload: %s", normalized)
-
             parsed = parse_market_gate_response(normalized)
-            logger.info("Schema-validated market gate response: %s", parsed)
-
-            hardened = self._apply_guardrails(parsed, fallback)
-            logger.info("Final hardened market gate response: %s", hardened)
+            hardened = self._apply_guardrails(
+                parsed,
+                fallback,
+                indicators=indicators,
+                gate_level=resolved_gate_level,
+            )
 
             return self._with_metadata(
                 hardened,
                 context=context,
                 gpt_used=True,
                 fallback_used=False,
+                gate_level=resolved_gate_level,
             )
         except Exception as e:
             logger.exception("OpenAI market analysis failed: %s", e)
@@ -120,6 +126,7 @@ class GPTMarketService:
                 gpt_used=False,
                 fallback_used=True,
                 fallback_reason=self._safe_exc_message(e),
+                gate_level=resolved_gate_level,
             )
 
     def _load_context_from_cache(self, db: Session, symbol: str) -> MarketGateContext:
@@ -172,40 +179,90 @@ class GPTMarketService:
             logger.exception("Best-effort reference cache refresh failed: %s", e)
             return 0
 
-    def _rule_based_analysis(self, indicators: dict[str, Any]) -> dict[str, Any]:
+    def _rule_based_analysis(
+        self,
+        indicators: dict[str, Any],
+        gate_level: int,
+    ) -> dict[str, Any]:
+        profile = get_gate_profile(gate_level)
         if not indicators:
             return {
                 "market_regime": "unknown",
                 "entry_bias": "neutral",
                 "entry_allowed": False,
-                "market_confidence": 0.20,
-                "reason": "Insufficient indicator history; conservative HOLD-safe fallback.",
+                "regime_confidence": 0.20,
+                "hard_block_reason": "insufficient_indicators",
+                "gating_notes": ["Insufficient indicator history"],
+                "reason": "Insufficient indicator history; HOLD-safe fallback.",
             }
 
         ema20 = float(indicators.get("ema20", 0) or 0)
         ema50 = float(indicators.get("ema50", 0) or 0)
         rsi = float(indicators.get("rsi", 50) or 50)
         short_momentum = float(indicators.get("short_momentum", 0) or 0)
+        volume_ratio = float(indicators.get("volume_ratio", 1) or 1)
+        vwap = float(indicators.get("vwap", 0) or 0)
         price = max(float(indicators.get("price", 0) or 0), 1e-9)
 
-        trend_up = ema20 > ema50
-        momentum_ok = short_momentum > 0
-        rsi_mid = 45 <= rsi <= 70
+        notes: list[str] = []
+        score = 62.0
 
-        allowed = bool(trend_up and momentum_ok and rsi_mid)
-        spread = abs(ema20 - ema50) / price
-        regime = "trend" if spread > 0.002 else "range"
-        confidence = 0.70 if allowed else 0.45
+        trend_up = ema20 > ema50
+        if trend_up:
+            score += 10.0
+        else:
+            score -= 10.0
+            notes.append("ema20_below_ema50")
+
+        below_levels = sum([price < ema20, price < ema50, price < vwap])
+        score -= below_levels * 6.0
+        if below_levels:
+            notes.append(f"below_key_levels={below_levels}")
+
+        if short_momentum < -0.003:
+            score -= 10.0
+            notes.append("negative_momentum")
+        elif short_momentum > 0.001:
+            score += 8.0
+
+        if volume_ratio < 0.9:
+            score -= profile.weak_volume_penalty
+            notes.append("weak_volume")
+        elif volume_ratio > 1.1:
+            score += 6.0
+
+        bearish_extreme = (not trend_up) and short_momentum < -0.006 and rsi < 35 and below_levels >= 2
+        if bearish_extreme and profile.bearish_is_hard_block:
+            return {
+                "market_regime": "trend",
+                "entry_bias": "neutral",
+                "entry_allowed": False,
+                "regime_confidence": 0.30,
+                "hard_block_reason": "extreme_bearish_regime",
+                "gating_notes": notes + ["hard_block_extreme_bearish_regime"],
+                "reason": "Hard-blocked: extreme bearish regime under strict profile.",
+            }
+
+        regime = "trend" if abs(ema20 - ema50) / price > 0.002 else "range"
+        if regime == "range" and not profile.allow_neutral_regime_entry:
+            score -= 14.0
+            notes.append("neutral_regime_penalty")
+
+        if rsi <= 30 and not profile.allow_oversold_bounce:
+            score -= 8.0
+            notes.append("oversold_bounce_disabled")
+
+        regime_confidence = max(0.2, min(score / 100.0, 0.95))
+        entry_allowed = regime_confidence >= max(profile.min_confidence_to_trade - 0.07, 0.45)
 
         return {
             "market_regime": regime,
             "entry_bias": "long" if trend_up else "neutral",
-            "entry_allowed": allowed,
-            "market_confidence": confidence,
-            "reason": (
-                "Conservative quant-first gate active; "
-                "entry blocked unless trend, momentum, and RSI alignment hold."
-            ),
+            "entry_allowed": entry_allowed,
+            "regime_confidence": regime_confidence,
+            "hard_block_reason": None,
+            "gating_notes": notes,
+            "reason": "Rule-based market gate scored with penalty model (non-hard-block factors penalized).",
         }
 
     def _build_prompt(
@@ -213,15 +270,15 @@ class GPTMarketService:
         symbol: str,
         indicators: dict[str, Any],
         context: MarketGateContext,
+        gate_level: int,
+        gate_profile_name: str,
     ) -> tuple[str, str]:
         system_prompt = (
-            "You are a conservative market-entry gate assistant for an auto-trading MVP.\n"
+            "You are a market-entry gate assistant for an auto-trading MVP.\n"
             "Quant indicators are primary. Website context is secondary and may be stale or noisy.\n"
-            "Default to hold-safe behavior.\n"
-            "If quant and website context conflict, prefer no entry.\n"
-            "If confidence is unclear, set entry_allowed to false.\n"
+            "Score weak factors as penalties; avoid hard-blocking except extreme risk states.\n"
             "Do not approve orders. The risk engine is the final authority.\n"
-            "Return JSON only. No markdown fences. No commentary outside JSON.\n"
+            "Return JSON only. No markdown fences.\n"
             "Use exactly these keys and allowed values:\n"
             "- market_regime: one of ['unknown', 'range', 'trend']\n"
             "- entry_bias: one of ['neutral', 'long']\n"
@@ -234,12 +291,15 @@ class GPTMarketService:
             "symbol": symbol,
             "indicators": indicators,
             "cached_site_summaries": context.cached_site_summaries,
+            "gate_config": {
+                "gate_level": gate_level,
+                "gate_profile_name": gate_profile_name,
+            },
             "notes": {
                 "website_context_secondary": True,
                 "used_cache": context.used_cache,
                 "refreshed_this_run": context.refreshed_this_run,
                 "summary_count": len(context.cached_site_summaries),
-                "default_behavior": "hold_safe",
             },
         }
 
@@ -252,11 +312,19 @@ class GPTMarketService:
         symbol: str,
         indicators: dict[str, Any],
         context: MarketGateContext,
+        gate_level: int,
+        gate_profile_name: str,
     ) -> dict[str, Any]:
         if not self.client:
             raise RuntimeError("OpenAI client is not initialized")
 
-        system_prompt, user_prompt = self._build_prompt(symbol, indicators, context)
+        system_prompt, user_prompt = self._build_prompt(
+            symbol,
+            indicators,
+            context,
+            gate_level,
+            gate_profile_name,
+        )
 
         try:
             response = self.client.responses.create(
@@ -271,8 +339,6 @@ class GPTMarketService:
             raise
 
         raw_text = (response.output_text or "").strip()
-        logger.info("OpenAI output_text: %s", raw_text)
-
         if not raw_text:
             raise ValueError("OpenAI returned empty output_text")
 
@@ -350,7 +416,6 @@ class GPTMarketService:
             confidence = 0.0
 
         if confidence > 1.0:
-            # Best effort: if model returns 70 instead of 0.70
             confidence = confidence / 100.0
 
         result["market_confidence"] = max(0.0, min(confidence, 1.0))
@@ -364,30 +429,45 @@ class GPTMarketService:
         self,
         payload: dict[str, Any],
         fallback: dict[str, Any],
+        *,
+        indicators: dict[str, Any],
+        gate_level: int,
     ) -> dict[str, Any]:
+        profile = get_gate_profile(gate_level)
         result = dict(payload)
 
-        try:
-            result["market_confidence"] = float(result.get("market_confidence", 0) or 0)
-        except Exception:
-            result["market_confidence"] = 0.0
+        gpt_conf = float(result.get("market_confidence", 0) or 0)
+        fallback_conf = float(fallback.get("regime_confidence", 0) or 0)
+        result["regime_confidence"] = round(max(gpt_conf, fallback_conf), 4)
 
-        if result["market_confidence"] < self.market_gate_min_confidence:
-            result["entry_allowed"] = False
+        notes = list(fallback.get("gating_notes") or [])
+        if gpt_conf < 0.35:
+            notes.append("low_gpt_confidence")
 
-        trend_up = fallback.get("entry_bias") == "long"
-        if not trend_up:
-            result["entry_allowed"] = False
+        hard_block_reason = fallback.get("hard_block_reason")
+        if KILL_SWITCH_DEFAULT:
+            hard_block_reason = "kill_switch_active"
 
-        if not bool(result.get("entry_allowed", False)):
+        if hard_block_reason:
             result["entry_allowed"] = False
             result["entry_bias"] = "neutral"
+            notes.append(f"hard_block={hard_block_reason}")
+        else:
+            bearish_penalty = 0.0
+            trend_up = bool(indicators.get("ema20", 0) > indicators.get("ema50", 0))
+            if not trend_up and not profile.bearish_is_hard_block:
+                bearish_penalty = 0.07
+                notes.append("bearish_regime_score_penalty")
 
-        result["reason"] = str(result.get("reason", "") or "").strip()
-        if not result["reason"]:
-            result["reason"] = (
-                "Model returned no reason; conservative HOLD-safe fallback applied."
-            )
+            effective_conf = max(0.0, result["regime_confidence"] - bearish_penalty)
+            result["entry_allowed"] = effective_conf >= max(profile.min_confidence_to_trade - 0.08, 0.45)
+            result["entry_bias"] = "long" if result["entry_allowed"] else "neutral"
+            result["regime_confidence"] = round(effective_conf, 4)
+
+        result["hard_block_reason"] = hard_block_reason
+        result["gating_notes"] = notes
+        if not result.get("reason"):
+            result["reason"] = "Market gate evaluated by profile-aware guardrails."
 
         return result
 
@@ -398,8 +478,10 @@ class GPTMarketService:
         context: MarketGateContext,
         gpt_used: bool,
         fallback_used: bool,
+        gate_level: int,
         fallback_reason: str | None = None,
     ) -> dict[str, Any]:
+        profile = get_gate_profile(gate_level)
         reason = str(payload.get("reason", "") or "").strip()
         if fallback_reason:
             reason = (
@@ -416,6 +498,9 @@ class GPTMarketService:
             if context.used_cache
             else "no fresh cached reference context"
         )
+        result["gate_level"] = gate_level
+        result["gate_profile_name"] = profile.name
+        result["market_confidence"] = result.get("regime_confidence", result.get("market_confidence", 0.0))
         result["audit"] = {
             "gpt_used": gpt_used,
             "fallback_used": fallback_used,
@@ -446,9 +531,13 @@ class GPTMarketService:
             market_regime=payload.get("market_regime"),
             entry_bias=payload.get("entry_bias"),
             entry_allowed=bool(payload.get("entry_allowed", False)),
-            market_confidence=float(payload.get("market_confidence", 0) or 0),
+            market_confidence=float(payload.get("regime_confidence", payload.get("market_confidence", 0)) or 0),
             risk_note=payload.get("risk_note") or payload.get("reason"),
             macro_summary=payload.get("macro_summary"),
+            gate_level=payload.get("gate_level"),
+            gate_profile_name=payload.get("gate_profile_name"),
+            hard_block_reason=payload.get("hard_block_reason"),
+            gating_notes=json.dumps(payload.get("gating_notes") or [], ensure_ascii=False),
             raw_payload=json.dumps(payload, ensure_ascii=False),
         )
         db.add(row)
@@ -461,6 +550,7 @@ class GPTMarketService:
         db: Session,
         symbol: str,
         indicators: dict[str, Any],
+        gate_level: int | None = None,
     ) -> MarketAnalysis:
-        payload = self.analyze(db, symbol, indicators)
+        payload = self.analyze(db, symbol, indicators, gate_level=gate_level)
         return self.save_analysis(db, symbol, payload)

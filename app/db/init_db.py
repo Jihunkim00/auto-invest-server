@@ -49,7 +49,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
 
-    # Lightweight SQLite-friendly migration for existing signals table
+    # Lightweight SQLite-friendly migrations
     signal_columns = {
         "market_analysis_id": "INTEGER",
         "gpt_entry_allowed": "BOOLEAN",
@@ -71,7 +71,21 @@ def init_db():
         "signal_status": "VARCHAR(30)",
         "trigger_source": "VARCHAR(30)",
         "timeframe": "VARCHAR(20)",
+        "gate_level": "INTEGER",
+        "gate_profile_name": "VARCHAR(50)",
+        "hard_block_reason": "VARCHAR(120)",
+        "gating_notes": "TEXT",
+    }
+
+    market_analysis_columns = {
+        "gate_level": "INTEGER",
+        "gate_profile_name": "VARCHAR(50)",
+        "hard_block_reason": "VARCHAR(120)",
+        "gating_notes": "TEXT",
     }
 
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)
+
+    for name, ddl in market_analysis_columns.items():
+        _add_column_if_missing("market_analysis", name, ddl)

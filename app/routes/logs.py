@@ -73,6 +73,10 @@ def get_signal_logs(
             "risk_flags": row.risk_flags,
             "approved_by_risk": row.approved_by_risk,
             "signal_status": row.signal_status,
+            "gate_level": row.gate_level,
+            "gate_profile_name": row.gate_profile_name,
+            "hard_block_reason": row.hard_block_reason,
+            "gating_notes": row.gating_notes,
             "related_order_id": row.related_order_id,
             "created_at": row.created_at,
         }
