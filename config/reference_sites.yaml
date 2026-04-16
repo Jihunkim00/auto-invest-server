@@ -1,0 +1,24 @@
+sites:
+  - name: Yahoo Finance
+    url: https://finance.yahoo.com
+    category: news
+    enabled: true
+    priority: 10
+
+  - name: Investing
+    url: https://www.investing.com
+    category: news
+    enabled: true
+    priority: 20
+
+  - name: CNBC
+    url: https://www.cnbc.com
+    category: news
+    enabled: true
+    priority: 30
+
+  - name: Stocknow
+    url: https://stocknow.ai/
+    category: news
+    enabled: true
+    priority: 40

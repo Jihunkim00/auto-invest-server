@@ -54,8 +54,13 @@ class MarketAnalysis(Base):
     risk_note = Column(Text, nullable=True)
     macro_summary = Column(Text, nullable=True)
     raw_payload = Column(Text, nullable=True)
+    gate_level = Column(Integer, nullable=True)
+    gate_profile_name = Column(String(50), nullable=True)
+    hard_block_reason = Column(String(120), nullable=True)
+    hard_blocked = Column(Boolean, nullable=False, default=False)
+    gating_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
+    
 class ReferenceSiteCache(Base):
     __tablename__ = "reference_site_cache"
 
@@ -107,5 +112,11 @@ class SignalLog(Base):
     signal_status = Column(String(30), nullable=True)
     trigger_source = Column(String(30), nullable=True)
     timeframe = Column(String(20), nullable=True)
+
+    gate_level = Column(Integer, nullable=True)
+    gate_profile_name = Column(String(50), nullable=True)
+    hard_block_reason = Column(String(120), nullable=True)
+    hard_blocked = Column(Boolean, nullable=False, default=False)
+    gating_notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
