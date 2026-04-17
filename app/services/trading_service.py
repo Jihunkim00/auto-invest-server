@@ -61,6 +61,7 @@ class TradingService:
         symbol: str,
         trigger_source: str = "manual",
         gate_level: int | None = None,
+        pre_execution_check_fn=None,
     ) -> dict:
         signal = self.signal_service.run(
             db,
@@ -147,6 +148,25 @@ class TradingService:
                     )
                     response["risk"] = risk
                     return response
+                
+                if pre_execution_check_fn:
+                    guard_response = pre_execution_check_fn("sell", signal)
+                    if guard_response:
+                        db.refresh(signal)
+                        response = self._base_response(
+                            signal,
+                            result=guard_response.get("result", RUN_RESULT_SKIPPED),
+                            stage=guard_response.get("stage", "precheck"),
+                            reason=guard_response.get("reason", "blocked by action guard"),
+                        )
+                        response["risk"] = {
+                            "approved": False,
+                            "risk_flags": [guard_response.get("reason", "blocked")],
+                            "position_size_pct": 0.0,
+                            "stop_loss_pct": 0.0,
+                            "take_profit_pct": 0.0,
+                        }
+                        return response               
 
                 risk = {
                     "approved": True,
@@ -243,6 +263,20 @@ class TradingService:
             )
             response["risk"] = risk
             return response
+        
+        if pre_execution_check_fn:
+            guard_response = pre_execution_check_fn(signal.action, signal)
+            if guard_response:
+                db.refresh(signal)
+                response = self._base_response(
+                    signal,
+                    result=guard_response.get("result", RUN_RESULT_SKIPPED),
+                    stage=guard_response.get("stage", "precheck"),
+                    reason=guard_response.get("reason", "blocked by action guard"),
+                )
+                response["risk"] = risk
+                return response
+
 
         try:
             latest = self.broker.get_latest_price(signal.symbol)

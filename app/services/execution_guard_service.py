@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from app.core.enums import InternalOrderStatus
+from app.db.models import OrderLog, SignalLog
+from app.services.runtime_setting_service import RuntimeSettingService
+
+NY_TZ = ZoneInfo("America/New_York")
+
+
+class ExecutionGuardService:
+    def __init__(self):
+        self.runtime_settings = RuntimeSettingService()
+
+    def precheck(self, db: Session, symbol: str) -> dict:
+        settings = self.runtime_settings.get_settings(db)
+        symbol = symbol.upper()
+
+        if not settings["bot_enabled"]:
+            return self._blocked("precheck", "skipped", "bot_disabled", settings)
+
+        if settings["kill_switch"]:
+            return self._blocked("precheck", "rejected", "kill_switch_enabled", settings)
+
+        if self._daily_trade_count(db, symbol) >= int(settings["max_trades_per_day"]):
+            return self._blocked("precheck", "skipped", "max_trades_per_day_reached", settings)
+
+        open_order = (
+            db.query(OrderLog)
+            .filter(
+                OrderLog.symbol == symbol,
+                OrderLog.internal_status.in_(
+                    [
+                        InternalOrderStatus.REQUESTED.value,
+                        InternalOrderStatus.SUBMITTED.value,
+                        InternalOrderStatus.ACCEPTED.value,
+                        InternalOrderStatus.PENDING.value,
+                        InternalOrderStatus.PARTIALLY_FILLED.value,
+                    ]
+                ),
+            )
+            .order_by(OrderLog.created_at.desc())
+            .first()
+        )
+        if open_order:
+            return self._blocked("precheck", "skipped", "conflicting_open_order_exists", settings)
+
+        return {
+            "allowed": True,
+            "stage": "precheck",
+            "result": "passed",
+            "reason": "precheck_passed",
+            "settings": settings,
+        }
+
+    def action_check(self, db: Session, symbol: str, action: str) -> dict:
+        settings = self.runtime_settings.get_settings(db)
+        symbol = symbol.upper()
+        action = (action or "").lower()
+
+        if action != "buy":
+            return {
+                "allowed": True,
+                "stage": "precheck",
+                "result": "passed",
+                "reason": "action_guard_not_applicable",
+                "settings": settings,
+            }
+
+        if self._is_near_close_blocked(settings["near_close_block_minutes"]):
+            return self._blocked("precheck", "skipped", "near_market_close_entry_block", settings)
+
+        cooldown_minutes = int(settings["same_direction_cooldown_minutes"])
+        if cooldown_minutes > 0:
+            cutoff = datetime.utcnow() - timedelta(minutes=cooldown_minutes)
+            recent_buy = (
+                db.query(SignalLog)
+                .filter(
+                    SignalLog.symbol == symbol,
+                    SignalLog.signal_status == "executed",
+                    SignalLog.action == "buy",
+                    SignalLog.created_at >= cutoff,
+                )
+                .order_by(SignalLog.created_at.desc())
+                .first()
+            )
+            if recent_buy:
+                return self._blocked("precheck", "skipped", "same_direction_cooldown_active", settings)
+
+        return {
+            "allowed": True,
+            "stage": "precheck",
+            "result": "passed",
+            "reason": "action_guard_passed",
+            "settings": settings,
+        }
+
+    def _daily_trade_count(self, db: Session, symbol: str) -> int:
+        now_ny = datetime.now(NY_TZ)
+        start_ny = now_ny.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_ny = start_ny + timedelta(days=1)
+        start_utc = start_ny.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        end_utc = end_ny.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+        return (
+            db.query(OrderLog)
+            .filter(
+                OrderLog.symbol == symbol,
+                OrderLog.created_at >= start_utc,
+                OrderLog.created_at < end_utc,
+                or_(
+                    OrderLog.internal_status == InternalOrderStatus.FILLED.value,
+                    OrderLog.internal_status == InternalOrderStatus.PARTIALLY_FILLED.value,
+                    OrderLog.broker_status.in_(["filled", "partially_filled", "partial_fill"]),
+                ),
+            )
+            .count()
+        )
+
+    def _is_near_close_blocked(self, near_close_block_minutes: int) -> bool:
+        now_ny = datetime.now(NY_TZ)
+        close_ny = now_ny.replace(hour=16, minute=0, second=0, microsecond=0)
+        open_ny = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
+
+        if now_ny < open_ny or now_ny > close_ny:
+            return True
+
+        return now_ny >= close_ny - timedelta(minutes=max(0, int(near_close_block_minutes)))
+
+    def _blocked(self, stage: str, result: str, reason: str, settings: dict) -> dict:
+        return {
+            "allowed": False,
+            "stage": stage,
+            "result": result,
+            "reason": reason,
+            "settings": settings,
+        }

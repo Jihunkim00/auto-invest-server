@@ -45,9 +45,61 @@ def _create_reference_site_cache_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_site_cache_expires_at ON reference_site_cache (expires_at)"))
 
 
+def _create_runtime_settings_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS runtime_settings (
+                    id INTEGER PRIMARY KEY,
+                    bot_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    kill_switch BOOLEAN NOT NULL DEFAULT 0,
+                    default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
+                    default_gate_level INTEGER NOT NULL DEFAULT 2,
+                    max_trades_per_day INTEGER NOT NULL DEFAULT 3,
+                    near_close_block_minutes INTEGER NOT NULL DEFAULT 15,
+                    same_direction_cooldown_minutes INTEGER NOT NULL DEFAULT 120,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+
+
+def _create_trade_run_logs_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS trade_run_logs (
+                    id INTEGER PRIMARY KEY,
+                    run_key VARCHAR(64) NOT NULL,
+                    trigger_source VARCHAR(20) NOT NULL,
+                    symbol VARCHAR(20) NOT NULL,
+                    gate_level INTEGER,
+                    stage VARCHAR(20) NOT NULL DEFAULT 'precheck',
+                    result VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    reason TEXT,
+                    signal_id INTEGER,
+                    order_id INTEGER,
+                    request_payload TEXT,
+                    response_payload TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_run_key ON trade_run_logs (run_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_trigger_source ON trade_run_logs (trigger_source)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol ON trade_run_logs (symbol)"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
+    _create_runtime_settings_table_if_missing()
+    _create_trade_run_logs_table_if_missing()
 
     # Lightweight SQLite-friendly migrations
     signal_columns = {
@@ -86,8 +138,21 @@ def init_db():
         "gating_notes": "TEXT",
     }
 
+    runtime_setting_columns = {
+        "bot_enabled": "BOOLEAN DEFAULT 1",
+        "kill_switch": "BOOLEAN DEFAULT 0",
+        "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",
+        "default_gate_level": "INTEGER DEFAULT 2",
+        "max_trades_per_day": "INTEGER DEFAULT 3",
+        "near_close_block_minutes": "INTEGER DEFAULT 15",
+        "same_direction_cooldown_minutes": "INTEGER DEFAULT 120",
+    }
+
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)
 
     for name, ddl in market_analysis_columns.items():
         _add_column_if_missing("market_analysis", name, ddl)
+
+    for name, ddl in runtime_setting_columns.items():
+        _add_column_if_missing("runtime_settings", name, ddl)

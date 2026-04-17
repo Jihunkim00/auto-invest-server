@@ -1,15 +1,18 @@
 from fastapi import FastAPI
+
 from app.config import get_settings
 from app.db.init_db import init_db
-from app.routes.health import router as health_router
 from app.routes.account import router as account_router
-from app.routes.positions import router as positions_router
-from app.routes.market import router as market_router
-from app.routes.orders import router as orders_router
+from app.routes.health import router as health_router
 from app.routes.logs import router as logs_router
+from app.routes.market import router as market_router
 from app.routes.market_analysis import router as market_analysis_router
+from app.routes.ops import router as ops_router
+from app.routes.orders import router as orders_router
+from app.routes.positions import router as positions_router
 from app.routes.signals import router as signals_router
 from app.routes.trading import router as trading_router
+from app.services.scheduler_service import scheduler_service
 
 settings = get_settings()
 
@@ -22,6 +25,12 @@ app = FastAPI(
 @app.on_event("startup")
 def on_startup():
     init_db()
+    scheduler_service.start()
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    scheduler_service.stop()
 
 
 app.include_router(health_router)
@@ -33,6 +42,7 @@ app.include_router(logs_router)
 app.include_router(market_analysis_router)
 app.include_router(signals_router)
 app.include_router(trading_router)
+app.include_router(ops_router)
 
 
 @app.get("/")

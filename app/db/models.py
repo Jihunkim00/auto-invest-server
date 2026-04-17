@@ -61,6 +61,7 @@ class MarketAnalysis(Base):
     gating_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
+    
 class ReferenceSiteCache(Base):
     __tablename__ = "reference_site_cache"
 
@@ -73,6 +74,7 @@ class ReferenceSiteCache(Base):
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     source_status = Column(String(20), nullable=False, default="fresh")
+
 
 class SignalLog(Base):
     __tablename__ = "signals"
@@ -119,4 +121,37 @@ class SignalLog(Base):
     hard_blocked = Column(Boolean, nullable=False, default=False)
     gating_notes = Column(Text, nullable=True)
 
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class RuntimeSetting(Base):
+    __tablename__ = "runtime_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bot_enabled = Column(Boolean, nullable=False, default=True)
+    kill_switch = Column(Boolean, nullable=False, default=False)
+    default_symbol = Column(String(20), nullable=False, default="AAPL")
+    default_gate_level = Column(Integer, nullable=False, default=2)
+    max_trades_per_day = Column(Integer, nullable=False, default=3)
+    near_close_block_minutes = Column(Integer, nullable=False, default=15)
+    same_direction_cooldown_minutes = Column(Integer, nullable=False, default=120)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class TradeRunLog(Base):
+    __tablename__ = "trade_run_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_key = Column(String(64), nullable=False, index=True)
+    trigger_source = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    gate_level = Column(Integer, nullable=True)
+    stage = Column(String(20), nullable=False, default="precheck")
+    result = Column(String(20), nullable=False, default="pending")
+    reason = Column(Text, nullable=True)
+    signal_id = Column(Integer, nullable=True, index=True)
+    order_id = Column(Integer, nullable=True, index=True)
+    request_payload = Column(Text, nullable=True)
+    response_payload = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
