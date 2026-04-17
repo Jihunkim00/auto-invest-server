@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, SignalLog
+from app.services.order_sync_service import OrderSyncService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 NY_TZ = ZoneInfo("America/New_York")
@@ -16,6 +17,7 @@ NY_TZ = ZoneInfo("America/New_York")
 class ExecutionGuardService:
     def __init__(self):
         self.runtime_settings = RuntimeSettingService()
+        self.order_sync = OrderSyncService()
 
     def precheck(self, db: Session, symbol: str) -> dict:
         settings = self.runtime_settings.get_settings(db)
@@ -30,24 +32,8 @@ class ExecutionGuardService:
         if self._daily_trade_count(db, symbol) >= int(settings["max_trades_per_day"]):
             return self._blocked("precheck", "skipped", "max_trades_per_day_reached", settings)
 
-        open_order = (
-            db.query(OrderLog)
-            .filter(
-                OrderLog.symbol == symbol,
-                OrderLog.internal_status.in_(
-                    [
-                        InternalOrderStatus.REQUESTED.value,
-                        InternalOrderStatus.SUBMITTED.value,
-                        InternalOrderStatus.ACCEPTED.value,
-                        InternalOrderStatus.PENDING.value,
-                        InternalOrderStatus.PARTIALLY_FILLED.value,
-                    ]
-                ),
-            )
-            .order_by(OrderLog.created_at.desc())
-            .first()
-        )
-        if open_order:
+        self.order_sync.sync_open_orders_for_symbol(db, symbol)
+        if self.order_sync.has_conflicting_open_order(db, symbol):
             return self._blocked("precheck", "skipped", "conflicting_open_order_exists", settings)
 
         return {

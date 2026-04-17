@@ -4,14 +4,24 @@ from app.db.models import OrderLog
 from app.core.enums import InternalOrderStatus
 
 
+def normalize_broker_status(broker_status: str | None) -> str | None:
+    if broker_status is None:
+        return None
+
+    normalized = str(broker_status).strip().lower()
+    if not normalized:
+        return None
+
+    if "." in normalized:
+        normalized = normalized.split(".")[-1]
+
+    return normalized
+
+
 def map_broker_status_to_internal(broker_status: str | None) -> str:
-    if not broker_status:
+    s = normalize_broker_status(broker_status)
+    if not s:
         return InternalOrderStatus.SUBMITTED.value
-
-    s = str(broker_status).lower()
-
-    if "." in s:
-        s = s.split(".")[-1]
 
     if s == "accepted":
         return InternalOrderStatus.ACCEPTED.value
@@ -64,7 +74,7 @@ def create_order_log(
 
 
 def update_order_from_broker_response(db: Session, order: OrderLog, broker_order):
-    broker_status = str(getattr(broker_order, "status", None))
+    broker_status = normalize_broker_status(getattr(broker_order, "status", None))
 
     order.broker_order_id = str(getattr(broker_order, "id", None))
     order.client_order_id = str(getattr(broker_order, "client_order_id", None)) if getattr(broker_order, "client_order_id", None) else None
@@ -91,7 +101,7 @@ def update_order_from_broker_response(db: Session, order: OrderLog, broker_order
 
 
 def sync_order_status(db: Session, order: OrderLog, broker_order):
-    broker_status = str(getattr(broker_order, "status", None))
+    broker_status = normalize_broker_status(getattr(broker_order, "status", None))
 
     order.broker_status = broker_status
     order.internal_status = map_broker_status_to_internal(broker_status)
