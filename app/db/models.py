@@ -146,6 +146,7 @@ class TradeRunLog(Base):
     run_key = Column(String(64), nullable=False, index=True)
     trigger_source = Column(String(20), nullable=False, index=True)
     symbol = Column(String(20), nullable=False, index=True)
+    mode = Column(String(30), nullable=False, default="entry_scan", index=True)
     gate_level = Column(Integer, nullable=True)
     stage = Column(String(20), nullable=False, default="precheck")
     result = Column(String(20), nullable=False, default="pending")
