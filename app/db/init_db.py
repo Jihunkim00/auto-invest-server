@@ -91,6 +91,8 @@ def _create_trade_run_logs_table_if_missing():
                     trigger_source VARCHAR(20) NOT NULL,
                     symbol VARCHAR(20) NOT NULL,
                     mode VARCHAR(30) NOT NULL DEFAULT 'entry_scan',
+                    parent_run_key VARCHAR(64),
+                    symbol_role VARCHAR(30),
                     gate_level INTEGER,
                     stage VARCHAR(20) NOT NULL DEFAULT 'precheck',
                     result VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -107,6 +109,8 @@ def _create_trade_run_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_run_key ON trade_run_logs (run_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_trigger_source ON trade_run_logs (trigger_source)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol ON trade_run_logs (symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_parent_run_key ON trade_run_logs (parent_run_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol_role ON trade_run_logs (symbol_role)"))
 
 
 
@@ -165,6 +169,8 @@ def init_db():
 
     trade_run_log_columns = {
         "mode": "VARCHAR(30) DEFAULT 'entry_scan'",
+        "parent_run_key": "VARCHAR(64)",
+        "symbol_role": "VARCHAR(30)",
     }
 
     for name, ddl in signal_columns.items():
@@ -180,3 +186,6 @@ def init_db():
         _add_column_if_missing("trade_run_logs", name, ddl)
         
     _create_trade_run_logs_mode_index_if_possible()
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_parent_run_key ON trade_run_logs (parent_run_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol_role ON trade_run_logs (symbol_role)"))

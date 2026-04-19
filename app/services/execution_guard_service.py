@@ -29,7 +29,7 @@ class ExecutionGuardService:
         if settings["kill_switch"]:
             return self._blocked("precheck", "rejected", "kill_switch_enabled", settings)
 
-        if self._daily_trade_count(db, symbol) >= int(settings["max_trades_per_day"]):
+        if self._daily_trade_count(db) >= int(settings["max_trades_per_day"]):
             return self._blocked("precheck", "skipped", "max_trades_per_day_reached", settings)
 
         self.order_sync.sync_open_orders_for_symbol(db, symbol)
@@ -86,7 +86,7 @@ class ExecutionGuardService:
             "settings": settings,
         }
 
-    def _daily_trade_count(self, db: Session, symbol: str) -> int:
+    def _daily_trade_count(self, db: Session) -> int:
         now_ny = datetime.now(NY_TZ)
         start_ny = now_ny.replace(hour=0, minute=0, second=0, microsecond=0)
         end_ny = start_ny + timedelta(days=1)
@@ -96,7 +96,6 @@ class ExecutionGuardService:
         return (
             db.query(OrderLog)
             .filter(
-                OrderLog.symbol == symbol,
                 OrderLog.created_at >= start_utc,
                 OrderLog.created_at < end_utc,
                 or_(
