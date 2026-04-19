@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.models import TradeRunLog
 from app.services.execution_guard_service import ExecutionGuardService
+from app.services.position_lifecycle_service import PositionLifecycleService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_service import TradingService
 
@@ -17,6 +18,7 @@ class TradingOrchestratorService:
     def __init__(self):
         self.runtime_settings = RuntimeSettingService()
         self.guard = ExecutionGuardService()
+        self.position_lifecycle = PositionLifecycleService()
         self.trading_service = TradingService()
 
     def run(
@@ -29,8 +31,13 @@ class TradingOrchestratorService:
         request_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         settings = self.runtime_settings.get_settings(db)
-
-        run_symbol = (symbol or settings["default_symbol"] or "AAPL").upper()
+        lifecycle = self.position_lifecycle.resolve_mode(
+            default_symbol=settings["default_symbol"],
+            requested_symbol=symbol,
+        )
+        run_symbol = lifecycle["symbol"]
+        run_mode = lifecycle["mode"]
+        run_allowed_actions = lifecycle["allowed_actions"]
         run_gate_level = int(gate_level if gate_level is not None else settings.get("default_gate_level", DEFAULT_GATE_LEVEL))
 
         run_log = self._create_run_log(
@@ -38,11 +45,19 @@ class TradingOrchestratorService:
             run_key=f"run_{uuid.uuid4().hex[:12]}",
             trigger_source=trigger_source,
             symbol=run_symbol,
+            mode=run_mode,
             gate_level=run_gate_level,
             stage="precheck",
             result="pending",
             reason="started",
-            request_payload=request_payload or {},
+            request_payload={
+                **(request_payload or {}),
+                "mode": run_mode,
+                "allowed_actions": run_allowed_actions,
+                "requested_symbol": symbol.upper() if symbol else None,
+                "resolved_symbol": run_symbol,
+                "open_position": lifecycle.get("position"),
+            },
         )
 
         precheck = self.guard.precheck(db, run_symbol)
@@ -79,7 +94,12 @@ class TradingOrchestratorService:
                 trigger_source=trigger_source,
                 gate_level=run_gate_level,
                 pre_execution_check_fn=_action_guard,
+                mode=run_mode,
+                allowed_actions=run_allowed_actions,
             )
+            trading_result["mode"] = run_mode
+            trading_result["allowed_actions"] = run_allowed_actions
+            trading_result["symbol"] = run_symbol
 
             return self._finish(
                 db,
@@ -114,6 +134,7 @@ class TradingOrchestratorService:
             run_key=kwargs["run_key"],
             trigger_source=kwargs["trigger_source"],
             symbol=kwargs["symbol"],
+            mode=kwargs.get("mode", "entry_scan"),
             gate_level=kwargs["gate_level"],
             stage=kwargs["stage"],
             result=kwargs["result"],
@@ -151,6 +172,7 @@ class TradingOrchestratorService:
             "run_key": run_log.run_key,
             "trigger_source": run_log.trigger_source,
             "symbol": run_log.symbol,
+            "mode": run_log.mode,
             "gate_level": run_log.gate_level,
             "stage": run_log.stage,
             "result": run_log.result,
@@ -180,6 +202,7 @@ class TradingOrchestratorService:
             "run_key": row.run_key,
             "trigger_source": row.trigger_source,
             "symbol": row.symbol,
+            "mode": row.mode,
             "gate_level": row.gate_level,
             "stage": row.stage,
             "result": row.result,

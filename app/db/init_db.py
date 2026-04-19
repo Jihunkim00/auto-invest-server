@@ -17,6 +17,19 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _create_trade_run_logs_mode_index_if_possible():
+    inspector = inspect(engine)
+    if "trade_run_logs" not in inspector.get_table_names():
+        return
+
+    existing = {col["name"] for col in inspector.get_columns("trade_run_logs")}
+    if "mode" not in existing:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_mode ON trade_run_logs (mode)"))
+
+
 def _create_reference_site_cache_table_if_missing():
     inspector = inspect(engine)
     if "reference_site_cache" in inspector.get_table_names():
@@ -77,6 +90,7 @@ def _create_trade_run_logs_table_if_missing():
                     run_key VARCHAR(64) NOT NULL,
                     trigger_source VARCHAR(20) NOT NULL,
                     symbol VARCHAR(20) NOT NULL,
+                    mode VARCHAR(30) NOT NULL DEFAULT 'entry_scan',
                     gate_level INTEGER,
                     stage VARCHAR(20) NOT NULL DEFAULT 'precheck',
                     result VARCHAR(20) NOT NULL DEFAULT 'pending',
@@ -93,6 +107,7 @@ def _create_trade_run_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_run_key ON trade_run_logs (run_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_trigger_source ON trade_run_logs (trigger_source)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol ON trade_run_logs (symbol)"))
+
 
 
 def init_db():
@@ -148,6 +163,10 @@ def init_db():
         "same_direction_cooldown_minutes": "INTEGER DEFAULT 120",
     }
 
+    trade_run_log_columns = {
+        "mode": "VARCHAR(30) DEFAULT 'entry_scan'",
+    }
+
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)
 
@@ -156,3 +175,8 @@ def init_db():
 
     for name, ddl in runtime_setting_columns.items():
         _add_column_if_missing("runtime_settings", name, ddl)
+
+    for name, ddl in trade_run_log_columns.items():
+        _add_column_if_missing("trade_run_logs", name, ddl)
+        
+    _create_trade_run_logs_mode_index_if_possible()
