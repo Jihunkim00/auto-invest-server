@@ -62,6 +62,8 @@ class TradingService:
         trigger_source: str = "manual",
         gate_level: int | None = None,
         pre_execution_check_fn=None,
+        mode: str | None = None,
+        allowed_actions: list[str] | None = None,
     ) -> dict:
         signal = self.signal_service.run(
             db,
@@ -69,6 +71,17 @@ class TradingService:
             trigger_source=trigger_source,
             gate_level=gate_level,
         )
+        allowed_actions_set = {a.lower() for a in (allowed_actions or ["hold", "buy", "sell"])}
+        original_action = signal.action
+        if signal.action not in allowed_actions_set:
+            signal.action = "hold"
+            flags = _parse_json_array(signal.risk_flags)
+            flags.append(f"action_suppressed_by_mode:{mode or 'unknown'}:{original_action}")
+            signal.risk_flags = json.dumps(flags, ensure_ascii=False)
+            signal.signal_status = SIGNAL_STATUS_SKIPPED
+            signal.related_order_id = None
+            db.commit()
+            db.refresh(signal)
 
         if signal.action == "hold":
             risk = {
@@ -94,6 +107,9 @@ class TradingService:
                 reason="signal action is HOLD; execution skipped",
             )
             response["risk"] = risk
+            response["mode"] = mode
+            response["allowed_actions"] = sorted(list(allowed_actions_set))
+            response["original_action"] = original_action
             return response
 
         if signal.action == "sell":
@@ -122,6 +138,9 @@ class TradingService:
                     reason="no position to sell",
                 )
                 response["risk"] = risk
+                response["mode"] = mode
+                response["allowed_actions"] = sorted(list(allowed_actions_set))
+                response["original_action"] = original_action
                 return response
 
             try:
@@ -147,6 +166,9 @@ class TradingService:
                         reason="invalid position quantity for sell",
                     )
                     response["risk"] = risk
+                    response["mode"] = mode
+                    response["allowed_actions"] = sorted(list(allowed_actions_set))
+                    response["original_action"] = original_action
                     return response
                 
                 if pre_execution_check_fn:
@@ -166,6 +188,9 @@ class TradingService:
                             "stop_loss_pct": 0.0,
                             "take_profit_pct": 0.0,
                         }
+                        response["mode"] = mode
+                        response["allowed_actions"] = sorted(list(allowed_actions_set))
+                        response["original_action"] = original_action
                         return response               
 
                 risk = {
@@ -220,6 +245,9 @@ class TradingService:
                     "price": price,
                     "notional": notional,
                 }
+                response["mode"] = mode
+                response["allowed_actions"] = sorted(list(allowed_actions_set))
+                response["original_action"] = original_action
                 return response
             except Exception as exc:
                 signal.signal_status = SIGNAL_STATUS_REJECTED
@@ -235,6 +263,9 @@ class TradingService:
                     reason=str(exc),
                 )
                 response["error"] = str(exc)
+                response["mode"] = mode
+                response["allowed_actions"] = sorted(list(allowed_actions_set))
+                response["original_action"] = original_action
                 return response
 
         risk = self.risk_service.evaluate(
@@ -262,6 +293,9 @@ class TradingService:
                 reason="risk evaluation rejected execution",
             )
             response["risk"] = risk
+            response["mode"] = mode
+            response["allowed_actions"] = sorted(list(allowed_actions_set))
+            response["original_action"] = original_action
             return response
         
         if pre_execution_check_fn:
@@ -275,6 +309,9 @@ class TradingService:
                     reason=guard_response.get("reason", "blocked by action guard"),
                 )
                 response["risk"] = risk
+                response["mode"] = mode
+                response["allowed_actions"] = sorted(list(allowed_actions_set))
+                response["original_action"] = original_action
                 return response
 
 
@@ -301,6 +338,9 @@ class TradingService:
                     reason="computed order quantity is invalid",
                 )
                 response["risk"] = risk
+                response["mode"] = mode
+                response["allowed_actions"] = sorted(list(allowed_actions_set))
+                response["original_action"] = original_action
                 return response
 
             signal.signal_status = SIGNAL_STATUS_APPROVED
@@ -343,6 +383,9 @@ class TradingService:
                 "price": price,
                 "notional": notional,
             }
+            response["mode"] = mode
+            response["allowed_actions"] = sorted(list(allowed_actions_set))
+            response["original_action"] = original_action
             return response
         except Exception as exc:
             signal.signal_status = SIGNAL_STATUS_REJECTED
@@ -359,4 +402,7 @@ class TradingService:
             )
             response["error"] = str(exc)
             response["risk"] = risk
+            response["mode"] = mode
+            response["allowed_actions"] = sorted(list(allowed_actions_set))
+            response["original_action"] = original_action
             return response
