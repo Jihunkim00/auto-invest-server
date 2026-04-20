@@ -12,6 +12,7 @@ from app.services.order_sync_service import OrderSyncService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 NY_TZ = ZoneInfo("America/New_York")
+DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT = 1
 
 
 class ExecutionGuardService:
@@ -19,7 +20,7 @@ class ExecutionGuardService:
         self.runtime_settings = RuntimeSettingService()
         self.order_sync = OrderSyncService()
 
-    def precheck(self, db: Session, symbol: str) -> dict:
+    def precheck(self, db: Session, symbol: str, *, enforce_entry_limits: bool = True) -> dict:
         settings = self.runtime_settings.get_settings(db)
         symbol = symbol.upper()
 
@@ -29,8 +30,13 @@ class ExecutionGuardService:
         if settings["kill_switch"]:
             return self._blocked("precheck", "rejected", "kill_switch_enabled", settings)
 
-        if self._daily_trade_count(db, symbol) >= int(settings["max_trades_per_day"]):
-            return self._blocked("precheck", "skipped", "max_trades_per_day_reached", settings)
+        if enforce_entry_limits:
+            global_daily_entry_limit = int(settings["max_trades_per_day"])
+            if self._daily_entry_count(db) >= global_daily_entry_limit:
+                return self._blocked("precheck", "skipped", "global_daily_entry_limit_reached", settings)
+
+            if self._daily_entry_count(db, symbol=symbol) >= DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT:
+                return self._blocked("precheck", "skipped", "per_symbol_daily_entry_limit_reached", settings)
 
         self.order_sync.sync_open_orders_for_symbol(db, symbol)
         if self.order_sync.has_conflicting_open_order(db, symbol):
@@ -77,6 +83,13 @@ class ExecutionGuardService:
             )
             if recent_buy:
                 return self._blocked("precheck", "skipped", "same_direction_cooldown_active", settings)
+            
+        if self._daily_entry_count(db) >= int(settings["max_trades_per_day"]):
+            return self._blocked("precheck", "skipped", "global_daily_entry_limit_reached", settings)
+
+        if self._daily_entry_count(db, symbol=symbol) >= DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT:
+            return self._blocked("precheck", "skipped", "per_symbol_daily_entry_limit_reached", settings)
+
 
         return {
             "allowed": True,
@@ -86,27 +99,33 @@ class ExecutionGuardService:
             "settings": settings,
         }
 
-    def _daily_trade_count(self, db: Session, symbol: str) -> int:
+    def _daily_entry_count(self, db: Session, symbol: str | None = None) -> int:
+        start_utc, end_utc = self._day_bounds_utc()
+
+        query = db.query(OrderLog).filter(
+            OrderLog.side == "buy",
+            OrderLog.created_at >= start_utc,
+            OrderLog.created_at < end_utc,
+            or_(
+                OrderLog.internal_status == InternalOrderStatus.FILLED.value,
+                OrderLog.internal_status == InternalOrderStatus.PARTIALLY_FILLED.value,
+                OrderLog.broker_status.in_(["filled", "partially_filled", "partial_fill"]),
+            ),
+        )
+
+        if symbol:
+            query = query.filter(OrderLog.symbol == symbol.upper())
+
+        return query.count()
+
+    def _day_bounds_utc(self) -> tuple[datetime, datetime]:
         now_ny = datetime.now(NY_TZ)
         start_ny = now_ny.replace(hour=0, minute=0, second=0, microsecond=0)
         end_ny = start_ny + timedelta(days=1)
         start_utc = start_ny.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
         end_utc = end_ny.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
-        return (
-            db.query(OrderLog)
-            .filter(
-                OrderLog.symbol == symbol,
-                OrderLog.created_at >= start_utc,
-                OrderLog.created_at < end_utc,
-                or_(
-                    OrderLog.internal_status == InternalOrderStatus.FILLED.value,
-                    OrderLog.internal_status == InternalOrderStatus.PARTIALLY_FILLED.value,
-                    OrderLog.broker_status.in_(["filled", "partially_filled", "partial_fill"]),
-                ),
-            )
-            .count()
-        )
+        return start_utc, end_utc
 
     def _is_near_close_blocked(self, near_close_block_minutes: int) -> bool:
         now_ny = datetime.now(NY_TZ)
