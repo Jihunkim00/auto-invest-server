@@ -19,6 +19,10 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     default_symbol: str | None = Field(default=None, min_length=1, max_length=20)
     default_gate_level: int | None = Field(default=None, ge=1, le=4)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=20)
+    global_daily_entry_limit: int | None = Field(default=None, ge=0, le=20)
+    per_symbol_daily_entry_limit: int | None = Field(default=None, ge=0, le=20)
+    per_slot_new_entry_limit: int | None = Field(default=None, ge=0, le=20)
+    max_open_positions: int | None = Field(default=None, ge=1, le=100)
     near_close_block_minutes: int | None = Field(default=None, ge=0, le=120)
     same_direction_cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
 

@@ -40,7 +40,10 @@ class TradingOrchestratorService:
         lifecycle = self.position_lifecycle.resolve_portfolio(
             default_symbol=settings["default_symbol"],
             requested_symbol=symbol,
+            max_open_positions=int(settings["max_open_positions"]),
         )
+        per_slot_new_entry_limit = max(0, int(settings["per_slot_new_entry_limit"]))
+        remaining_slot_entry_budget = per_slot_new_entry_limit
         run_gate_level = int(gate_level if gate_level is not None else settings.get("default_gate_level", DEFAULT_GATE_LEVEL))
         parent_run_key = f"portfolio_{uuid.uuid4().hex[:12]}"
 
@@ -60,6 +63,7 @@ class TradingOrchestratorService:
                 "resolved_entry_candidate": lifecycle["entry_candidate_symbol"],
                 "open_position_symbols": [p["symbol"] for p in lifecycle["open_positions"]],
                 "max_open_positions": lifecycle["max_open_positions"],
+                "per_slot_new_entry_limit": per_slot_new_entry_limit,
             },
         )
 
@@ -83,8 +87,9 @@ class TradingOrchestratorService:
             )
 
         entry_evaluated = False
-        if lifecycle["can_scan_new_entry"]:
+        if lifecycle["can_scan_new_entry"] and remaining_slot_entry_budget > 0:
             entry_evaluated = True
+            remaining_slot_entry_budget -= 1
             child_results.append(
                 self._run_symbol_child(
                     db,
@@ -99,6 +104,8 @@ class TradingOrchestratorService:
                     request_payload={"source": "requested_symbol" if symbol else "runtime_default_symbol"},
                 )
             )
+        elif lifecycle["can_scan_new_entry"] and remaining_slot_entry_budget <= 0:
+            entry_skip_reason = "per_slot_new_entry_limit_reached"
         elif not lifecycle["portfolio_has_room"]:
             entry_skip_reason = "max_open_positions_reached"
         else:

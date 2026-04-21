@@ -9,17 +9,18 @@ from app.core.constants import (
     KILL_SWITCH_DEFAULT,
     MAX_DAILY_LOSS_PCT,
     MAX_POSITION_EQUITY_PCT,
-    MAX_TRADES_PER_DAY,
     NEAR_CLOSE_MINUTES,
     STRONG_SETUP_POSITION_PCT,
     WEAK_SETUP_POSITION_PCT,
 )
 from app.db.models import OrderLog
+from app.services.runtime_setting_service import RuntimeSettingService
 
 
 class RiskService:
     def __init__(self):
         self.broker = AlpacaClient()
+        self.runtime_settings = RuntimeSettingService()
 
     @staticmethod
     def _position_size_pct(final_buy_score: float) -> float:
@@ -80,14 +81,18 @@ class RiskService:
             flags.append("near_market_close_block")
 
         day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        runtime_settings = self.runtime_settings.get_settings(db)
+        global_daily_entry_limit = max(0, int(runtime_settings["global_daily_entry_limit"]))
+        per_symbol_daily_entry_limit = max(0, int(runtime_settings["per_symbol_daily_entry_limit"]))
+        
         daily_count = (
             db.query(OrderLog)
-            .filter(OrderLog.symbol == symbol)
+            .filter(OrderLog.side == "buy")
             .filter(OrderLog.created_at >= day_start)
             .count()
         )
-        if daily_count >= MAX_TRADES_PER_DAY:
-            flags.append("max_trades_per_day_reached")
+        if daily_count >= global_daily_entry_limit:
+            flags.append("global_daily_entry_limit_reached")
 
         open_position = self.broker.get_position(symbol)
         if open_position is not None:
@@ -100,8 +105,8 @@ class RiskService:
             .filter(OrderLog.created_at >= day_start)
             .count()
         )
-        if same_direction_reentry > 0:
-            flags.append("same_day_buy_reentry_blocked")
+        if same_direction_reentry >= per_symbol_daily_entry_limit:
+            flags.append("per_symbol_daily_entry_limit_reached")
 
         account = self.broker.get_account()
         equity = float(account.equity)

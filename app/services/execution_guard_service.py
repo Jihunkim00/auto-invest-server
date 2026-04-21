@@ -12,7 +12,6 @@ from app.services.order_sync_service import OrderSyncService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 NY_TZ = ZoneInfo("America/New_York")
-DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT = 1
 
 
 class ExecutionGuardService:
@@ -31,11 +30,12 @@ class ExecutionGuardService:
             return self._blocked("precheck", "rejected", "kill_switch_enabled", settings)
 
         if enforce_entry_limits:
-            global_daily_entry_limit = int(settings["max_trades_per_day"])
+            global_daily_entry_limit = max(0, int(settings["global_daily_entry_limit"]))
             if self._daily_entry_count(db) >= global_daily_entry_limit:
                 return self._blocked("precheck", "skipped", "global_daily_entry_limit_reached", settings)
 
-            if self._daily_entry_count(db, symbol=symbol) >= DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT:
+            per_symbol_daily_entry_limit = max(0, int(settings["per_symbol_daily_entry_limit"]))
+            if self._daily_entry_count(db, symbol=symbol) >= per_symbol_daily_entry_limit:
                 return self._blocked("precheck", "skipped", "per_symbol_daily_entry_limit_reached", settings)
 
         self.order_sync.sync_open_orders_for_symbol(db, symbol)
@@ -84,10 +84,10 @@ class ExecutionGuardService:
             if recent_buy:
                 return self._blocked("precheck", "skipped", "same_direction_cooldown_active", settings)
             
-        if self._daily_entry_count(db) >= int(settings["max_trades_per_day"]):
+        if self._daily_entry_count(db) >= max(0, int(settings["global_daily_entry_limit"])):
             return self._blocked("precheck", "skipped", "global_daily_entry_limit_reached", settings)
 
-        if self._daily_entry_count(db, symbol=symbol) >= DEFAULT_PER_SYMBOL_DAILY_ENTRY_LIMIT:
+        if self._daily_entry_count(db, symbol=symbol) >= max(0, int(settings["per_symbol_daily_entry_limit"])):
             return self._blocked("precheck", "skipped", "per_symbol_daily_entry_limit_reached", settings)
 
 

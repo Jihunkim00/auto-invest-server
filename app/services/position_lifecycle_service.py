@@ -41,10 +41,12 @@ class PositionLifecycleService:
         *,
         default_symbol: str,
         requested_symbol: str | None = None,
+        max_open_positions: int | None = None,
     ) -> dict:
+        resolved_max_open_positions = int(max_open_positions if max_open_positions is not None else self.max_open_positions)
         open_positions = self.list_open_positions()
         has_open_positions = len(open_positions) > 0
-        portfolio_has_room = len(open_positions) < self.max_open_positions
+        portfolio_has_room = len(open_positions) < resolved_max_open_positions
         candidate_symbol = (requested_symbol or default_symbol or "AAPL").upper()
 
         can_scan_new_entry = portfolio_has_room
@@ -58,7 +60,7 @@ class PositionLifecycleService:
             "open_positions": open_positions,
             "has_open_positions": has_open_positions,
             "open_position_count": len(open_positions),
-            "max_open_positions": self.max_open_positions,
+            "max_open_positions": resolved_max_open_positions,
             "portfolio_has_room": portfolio_has_room,
             "entry_candidate_symbol": candidate_symbol,
             "can_scan_new_entry": can_scan_new_entry,
