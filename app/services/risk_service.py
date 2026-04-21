@@ -126,3 +126,36 @@ class RiskService:
             "daily_trade_count": daily_count,
             "estimated_daily_pnl": round(est_daily_pnl, 2),
         }
+
+    def evaluate_exit(
+        self,
+        *,
+        position,
+        final_sell_score: float,
+        final_buy_score: float,
+    ) -> dict:
+        reasons: list[str] = []
+
+        try:
+            unrealized_plpc = float(getattr(position, "unrealized_plpc", 0) or 0)
+        except Exception:
+            unrealized_plpc = 0.0
+
+        # Conservative first-pass exits:
+        # 1) protect downside
+        # 2) lock obvious gains
+        # 3) confirm weakening trend/momentum
+        if unrealized_plpc <= -0.015:
+            reasons.append("stop_loss_triggered")
+        if unrealized_plpc >= 0.03:
+            reasons.append("take_profit_triggered")
+
+        sell_dominance = float(final_sell_score or 0) - float(final_buy_score or 0)
+        if float(final_sell_score or 0) >= 68.0 and sell_dominance >= 10.0:
+            reasons.append("trend_breakdown_confirmed")
+
+        return {
+            "should_exit": len(reasons) > 0,
+            "reasons": reasons,
+            "unrealized_plpc": unrealized_plpc,
+        }
