@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.trading_service import TradingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -30,6 +31,16 @@ class RuntimeSettingsUpdateRequest(BaseModel):
 class RunNowRequest(BaseModel):
     symbol: str | None = Field(default=None, min_length=1, max_length=20)
     gate_level: int | None = Field(default=None, ge=1, le=4)
+
+
+class ManualCloseResponse(BaseModel):
+    result: str
+    reason: str
+    symbol: str
+    executed: bool
+    run_id: int
+    order_id: int | None = None
+    order: dict[str, Any] | None = None
 
 
 @router.get("/settings")
@@ -55,6 +66,12 @@ def run_now(payload: RunNowRequest, db: Session = Depends(get_db)):
         gate_level=payload.gate_level,
         request_payload=payload.model_dump(exclude_none=True),
     )
+
+
+@router.post("/positions/{symbol}/close", response_model=ManualCloseResponse)
+def manual_close_position(symbol: str, db: Session = Depends(get_db)):
+    svc = TradingService()
+    return svc.manual_close_position(db, symbol=symbol, trigger_source="manual_close")
 
 
 @router.get("/runs")

@@ -19,9 +19,17 @@ class ExecutionGuardService:
         self.runtime_settings = RuntimeSettingService()
         self.order_sync = OrderSyncService()
 
-    def precheck(self, db: Session, symbol: str, *, enforce_entry_limits: bool = True) -> dict:
+    def precheck(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        enforce_entry_limits: bool = True,
+        intent: str = "entry",
+    ) -> dict:
         settings = self.runtime_settings.get_settings(db)
         symbol = symbol.upper()
+        intent = (intent or "entry").lower()
 
         if not settings["bot_enabled"]:
             return self._blocked("precheck", "skipped", "bot_disabled", settings)
@@ -29,7 +37,7 @@ class ExecutionGuardService:
         if settings["kill_switch"]:
             return self._blocked("precheck", "rejected", "kill_switch_enabled", settings)
 
-        if enforce_entry_limits:
+        if enforce_entry_limits and intent == "entry":
             global_daily_entry_limit = max(0, int(settings["global_daily_entry_limit"]))
             if self._daily_entry_count(db) >= global_daily_entry_limit:
                 return self._blocked("precheck", "skipped", "global_daily_entry_limit_reached", settings)
@@ -50,7 +58,7 @@ class ExecutionGuardService:
             "settings": settings,
         }
 
-    def action_check(self, db: Session, symbol: str, action: str) -> dict:
+    def entry_action_check(self, db: Session, symbol: str, action: str) -> dict:
         settings = self.runtime_settings.get_settings(db)
         symbol = symbol.upper()
         action = (action or "").lower()
@@ -98,6 +106,36 @@ class ExecutionGuardService:
             "reason": "action_guard_passed",
             "settings": settings,
         }
+
+    def exit_action_check(self, db: Session, symbol: str, action: str) -> dict:
+        settings = self.runtime_settings.get_settings(db)
+        action = (action or "").lower()
+        if action != "sell":
+            return {
+                "allowed": True,
+                "stage": "precheck",
+                "result": "passed",
+                "reason": "exit_action_guard_not_applicable",
+                "settings": settings,
+            }
+
+        symbol = symbol.upper()
+        self.order_sync.sync_open_orders_for_symbol(db, symbol)
+        if self.order_sync.has_conflicting_open_order(db, symbol):
+            return self._blocked("precheck", "skipped", "conflicting_open_order_exists", settings)
+
+        return {
+            "allowed": True,
+            "stage": "precheck",
+            "result": "passed",
+            "reason": "exit_action_guard_passed",
+            "settings": settings,
+        }
+
+    def action_check(self, db: Session, symbol: str, action: str, *, intent: str = "entry") -> dict:
+        if (intent or "entry").lower() == "exit":
+            return self.exit_action_check(db, symbol, action)
+        return self.entry_action_check(db, symbol, action)
 
     def _daily_entry_count(self, db: Session, symbol: str | None = None) -> int:
         start_utc, end_utc = self._day_bounds_utc()
