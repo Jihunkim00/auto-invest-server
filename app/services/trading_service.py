@@ -41,18 +41,18 @@ class TradingService:
         self.execution_guard_service = ExecutionGuardService()
 
     @staticmethod
-    def _safe_int_qty(raw_qty) -> int:
+    def _safe_float_qty(raw_qty) -> float:
         try:
-            return int(float(raw_qty or 0))
+            return float(raw_qty or 0)
         except Exception:
-            return 0
+            return 0.0
 
     def _execute_market_sell(
         self,
         db: Session,
         *,
         symbol: str,
-        qty: int,
+        qty: float,
         source: str,
         request_payload: dict | None = None,
     ) -> dict:
@@ -212,7 +212,7 @@ class TradingService:
                 return response
 
             try:
-                qty = self._safe_int_qty(getattr(position, "qty", 0))
+                qty = self._safe_float_qty(getattr(position, "qty", 0))
                 if qty <= 0:
                     risk = {
                         "approved": False,
@@ -497,7 +497,7 @@ class TradingService:
                 "order_id": None,
             }
 
-        qty = self._safe_int_qty(getattr(position, "qty", 0))
+        qty = self._safe_float_qty(getattr(position, "qty", 0))
         if qty <= 0:
             run_log.stage = "done"
             run_log.result = RUN_RESULT_SKIPPED
@@ -518,7 +518,7 @@ class TradingService:
             run_log.stage = "done"
             run_log.result = RUN_RESULT_SKIPPED
             run_log.reason = exit_guard["reason"]
-            run_log.response_payload = json.dumps({"guard": exit_guard}, ensure_ascii=False)
+            run_log.response_payload = json.dumps({"guard": exit_guard}, ensure_ascii=False, default=str)
             db.commit()
             db.refresh(run_log)
             return {
@@ -550,6 +550,7 @@ class TradingService:
                     "notional": sell_result["notional"],
                 },
                 ensure_ascii=False,
+                default=str,
             )
             db.commit()
             db.refresh(run_log)
@@ -571,7 +572,7 @@ class TradingService:
             run_log.stage = "done"
             run_log.result = RUN_RESULT_ERROR
             run_log.reason = str(exc)
-            run_log.response_payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
+            run_log.response_payload = json.dumps({"error": str(exc)}, ensure_ascii=False, default=str)
             db.commit()
             db.refresh(run_log)
             return {
