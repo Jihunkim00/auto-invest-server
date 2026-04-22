@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.core.constants import (
     SIGNAL_STATUS_SKIPPED,
 )
 from app.db.models import TradeRunLog
+from app.services.execution_guard_service import ExecutionGuardService
 from app.services.order_service import create_order_log, update_order_from_broker_response
 from app.services.risk_service import RiskService
 from app.services.signal_service import SignalService
@@ -36,6 +38,7 @@ class TradingService:
         self.signal_service = SignalService()
         self.risk_service = RiskService()
         self.broker = AlpacaClient()
+        self.execution_guard_service = ExecutionGuardService()
 
     @staticmethod
     def _safe_int_qty(raw_qty) -> int:
@@ -464,7 +467,7 @@ class TradingService:
     ) -> dict:
         symbol = symbol.upper()
         run_log = TradeRunLog(
-            run_key=f"manual_close_{symbol}",
+            run_key=f"manual_close_{symbol}_{uuid.uuid4().hex[:8]}",
             trigger_source=trigger_source,
             symbol=symbol,
             mode="position_management",
@@ -510,39 +513,72 @@ class TradingService:
                 "order_id": None,
             }
 
-        sell_result = self._execute_market_sell(
-            db,
-            symbol=symbol,
-            qty=qty,
-            source="manual_close",
-            request_payload={"run_id": run_log.id, "trigger_source": trigger_source},
-        )
-        run_log.stage = "done"
-        run_log.result = RUN_RESULT_EXECUTED
-        run_log.reason = "manual_close_executed"
-        run_log.order_id = sell_result["order_id"]
-        run_log.response_payload = json.dumps(
-            {
+        exit_guard = self.execution_guard_service.action_check(db, symbol, "sell", intent="exit")
+        if not exit_guard["allowed"]:
+            run_log.stage = "done"
+            run_log.result = RUN_RESULT_SKIPPED
+            run_log.reason = exit_guard["reason"]
+            run_log.response_payload = json.dumps({"guard": exit_guard}, ensure_ascii=False)
+            db.commit()
+            db.refresh(run_log)
+            return {
+                "result": RUN_RESULT_SKIPPED,
+                "reason": exit_guard["reason"],
                 "symbol": symbol,
-                "qty": sell_result["qty"],
-                "price": sell_result["price"],
-                "notional": sell_result["notional"],
-            },
-            ensure_ascii=False,
-        )
-        db.commit()
-        db.refresh(run_log)
-        return {
-            "result": RUN_RESULT_EXECUTED,
-            "reason": "manual_close_executed",
-            "symbol": symbol,
-            "executed": True,
-            "run_id": run_log.id,
-            "order_id": sell_result["order_id"],
-            "order": {
-                "side": "sell",
-                "qty": sell_result["qty"],
-                "price": sell_result["price"],
-                "notional": sell_result["notional"],
-            },
-        }
+                "executed": False,
+                "run_id": run_log.id,
+                "order_id": None,
+            }
+
+        try:
+            sell_result = self._execute_market_sell(
+                db,
+                symbol=symbol,
+                qty=qty,
+                source="manual_close",
+                request_payload={"run_id": run_log.id, "trigger_source": trigger_source},
+            )
+            run_log.stage = "done"
+            run_log.result = RUN_RESULT_EXECUTED
+            run_log.reason = "manual_close_executed"
+            run_log.order_id = sell_result["order_id"]
+            run_log.response_payload = json.dumps(
+                {
+                    "symbol": symbol,
+                    "qty": sell_result["qty"],
+                    "price": sell_result["price"],
+                    "notional": sell_result["notional"],
+                },
+                ensure_ascii=False,
+            )
+            db.commit()
+            db.refresh(run_log)
+            return {
+                "result": RUN_RESULT_EXECUTED,
+                "reason": "manual_close_executed",
+                "symbol": symbol,
+                "executed": True,
+                "run_id": run_log.id,
+                "order_id": sell_result["order_id"],
+                "order": {
+                    "side": "sell",
+                    "qty": sell_result["qty"],
+                    "price": sell_result["price"],
+                    "notional": sell_result["notional"],
+                },
+            }
+        except Exception as exc:
+            run_log.stage = "done"
+            run_log.result = RUN_RESULT_ERROR
+            run_log.reason = str(exc)
+            run_log.response_payload = json.dumps({"error": str(exc)}, ensure_ascii=False)
+            db.commit()
+            db.refresh(run_log)
+            return {
+                "result": RUN_RESULT_ERROR,
+                "reason": str(exc),
+                "symbol": symbol,
+                "executed": False,
+                "run_id": run_log.id,
+                "order_id": None,
+            }
