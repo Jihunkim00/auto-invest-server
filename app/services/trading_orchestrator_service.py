@@ -156,7 +156,13 @@ class TradingOrchestratorService:
             },
         )
 
-        precheck = self.guard.precheck(db, symbol, enforce_entry_limits=enforce_entry_limits)
+        guard_intent = "exit" if "sell" in {a.lower() for a in allowed_actions} else "entry"
+        precheck = self.guard.precheck(
+            db,
+            symbol,
+            enforce_entry_limits=enforce_entry_limits,
+            intent=guard_intent,
+        )
         if not precheck["allowed"]:
             return self._finish(
                 db,
@@ -168,7 +174,7 @@ class TradingOrchestratorService:
             )
 
         def _action_guard(signal_action: str, signal_obj) -> dict[str, Any] | None:
-            action_guard = self.guard.action_check(db, symbol, signal_action)
+            action_guard = self.guard.action_check(db, symbol, signal_action, intent=guard_intent)
             if action_guard["allowed"]:
                 return None
 
