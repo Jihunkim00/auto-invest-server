@@ -13,6 +13,19 @@ from app.services.watchlist_service import WatchlistService
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
+_RISK_LEVEL_ORDER = {"low": 0, "normal": 1, "medium": 2, "high": 3}
+
+
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _risk_rank(value: object) -> int:
+    risk = str(value).strip().lower()
+    return _RISK_LEVEL_ORDER.get(risk, _RISK_LEVEL_ORDER["medium"])
 
 @router.post("/run-once")
 def run_once(
@@ -74,6 +87,9 @@ def run_watchlist_once(
     ]
 
     researched_candidates: list[dict[str, object]] = []
+    watchlist_order_map = {
+        str(row.get("symbol", "")).upper(): index for index, row in enumerate(watchlist_rows)
+    }
     for candidate in quant_candidates:
         symbol = candidate["symbol"].upper()
         scored_candidate, indicators = watchlist._score_symbol(symbol, gate_level=gate_level)
@@ -94,11 +110,21 @@ def run_watchlist_once(
         )
         researched_candidates.append(researched_candidate)
 
-    final_candidates = sorted(
-        researched_candidates,
-        key=lambda row: float(row.get("final_entry_score", 0)),
-        reverse=True,
-    )
+    def final_candidate_sort_key(row: dict[str, object]):
+        symbol = str(row.get("symbol", "")).upper()
+        return (
+            -_safe_float(row.get("final_entry_score", 0)),
+            _safe_float(row.get("quant_sell_score", 100), 100.0),
+            -_safe_float(row.get("market_confidence", 0), 0.0),
+            _risk_rank(row.get("event_risk")),
+            _risk_rank(row.get("news_risk")),
+            _risk_rank(row.get("macro_risk")),
+            0 if bool(row.get("has_indicators")) else 1,
+            watchlist_order_map.get(symbol, len(watchlist_order_map)),
+        )
+
+    final_candidates = sorted(researched_candidates, key=final_candidate_sort_key)
+    final_ranked_candidates = final_candidates
     final_best_candidate = final_candidates[0] if final_candidates else None
     second_final_candidate = final_candidates[1] if len(final_candidates) > 1 else None
     final_score_gap = round(
@@ -109,6 +135,19 @@ def run_watchlist_once(
         2,
     )
     candidate_symbol = final_best_candidate["symbol"].upper() if final_best_candidate else None
+    best_score = _safe_float(final_best_candidate.get("final_entry_score", 0)) if final_best_candidate else 0.0
+
+    tied_final_candidates = [
+        {"symbol": candidate.get("symbol"), "final_entry_score": _safe_float(candidate.get("final_entry_score", 0))}
+        for candidate in final_candidates
+        if _safe_float(candidate.get("final_entry_score", 0)) == best_score
+    ]
+    near_tied_candidates = [
+        {"symbol": candidate.get("symbol"), "final_entry_score": _safe_float(candidate.get("final_entry_score", 0))}
+        for candidate in final_candidates
+        if abs(best_score - _safe_float(candidate.get("final_entry_score", 0))) <= 1.0
+    ]
+    tie_breaker_applied = len(tied_final_candidates) > 1 or len(near_tied_candidates) > 1
 
     svc = TradingOrchestratorService()
     parent_run_key = f"watchlist_{uuid.uuid4().hex[:12]}"
@@ -158,6 +197,21 @@ def run_watchlist_once(
         trigger_block_reason = "sell_pressure_too_high"
     else:
         should_trade = True
+    
+    if not final_best_candidate:
+        final_candidate_selection_reason = "No final candidate was available after research scoring."
+    elif tie_breaker_applied:
+        final_candidate_selection_reason = (
+            f"{candidate_symbol} selected after tie-breaker ordering; "
+            f"best_score={best_score:.2f}, final_score_gap={final_score_gap:.2f}, "
+            f"min_score_gap={float(min_score_gap):.2f}."
+        )
+    else:
+        final_candidate_selection_reason = (
+            f"{candidate_symbol} selected with highest final_entry_score={best_score:.2f} "
+            f"and clear separation from other researched candidates."
+        )
+
 
     result = {
         "watchlist_source": analysis["watchlist_source"],
@@ -169,10 +223,15 @@ def run_watchlist_once(
         "researched_candidates_count": len(researched_candidates),
         "top_quant_candidates": top_quant_candidates,
         "researched_candidates": researched_candidates,
+        "final_ranked_candidates": final_ranked_candidates,
         "final_best_candidate": final_best_candidate,
         "second_final_candidate": second_final_candidate,
+        "tied_final_candidates": tied_final_candidates,
+        "near_tied_candidates": near_tied_candidates,
+        "tie_breaker_applied": tie_breaker_applied,
+        "final_candidate_selection_reason": final_candidate_selection_reason,
         "final_score_gap": final_score_gap,
-        "best_score": float(final_best_candidate.get("final_entry_score", 0)) if final_best_candidate else 0.0,
+        "best_score": best_score,
         "min_entry_score": min_entry_score,
         "strong_entry_score": strong_entry_score,
         "min_score_gap": min_score_gap,
@@ -198,10 +257,15 @@ def run_watchlist_once(
             "researched_candidates_count": len(researched_candidates),
             "top_quant_candidates": top_quant_candidates,
             "researched_candidates": researched_candidates,
+            "final_ranked_candidates": final_ranked_candidates,
             "final_best_candidate": final_best_candidate,
             "second_final_candidate": second_final_candidate,
+            "tied_final_candidates": tied_final_candidates,
+            "near_tied_candidates": near_tied_candidates,
+            "tie_breaker_applied": tie_breaker_applied,
+            "final_candidate_selection_reason": final_candidate_selection_reason,
             "final_score_gap": final_score_gap,
-            "best_score": float(final_best_candidate.get("final_entry_score", 0)) if final_best_candidate else 0.0,
+            "best_score": best_score,
             "min_entry_score": min_entry_score,
             "strong_entry_score": strong_entry_score,
             "min_score_gap": min_score_gap,
@@ -259,8 +323,13 @@ def run_watchlist_once(
         "triggered_symbol": symbol,
         "trade_result": trade_result,
         "child_run": child_result,
+        "final_ranked_candidates": final_ranked_candidates,
         "final_best_candidate": final_best_candidate,
         "second_final_candidate": second_final_candidate,
+        "tied_final_candidates": tied_final_candidates,
+        "near_tied_candidates": near_tied_candidates,
+        "tie_breaker_applied": tie_breaker_applied,
+        "final_candidate_selection_reason": final_candidate_selection_reason,
         "final_score_gap": final_score_gap,
     }
 

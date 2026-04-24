@@ -99,6 +99,11 @@ def test_trading_run_watchlist_once_holds_when_final_score_is_too_low(monkeypatc
         assert trade_payload["quant_candidates_count"] == 5
         assert trade_payload["researched_candidates_count"] == 5
         assert trade_payload["final_score_gap"] == 0.0
+        assert "final_candidate_selection_reason" in trade_payload
+        assert trade_payload["tie_breaker_applied"] is True
+        assert len(trade_payload["tied_final_candidates"]) == 5
+        assert len(trade_payload["near_tied_candidates"]) == 5
+        assert len(trade_payload["final_ranked_candidates"]) == 5
         assert trade_payload["trade_result"]["action"] == "hold"
         assert trade_payload["trade_result"]["order_id"] is None
         assert trade_payload["trade_result"]["reason"] == "final_score_below_min_entry"
@@ -218,6 +223,11 @@ def test_trading_run_watchlist_once_executes_one_order_when_best_candidate_passe
         assert trade_payload["trade_result"]["risk_approved"] is True
         assert trade_payload["trade_result"]["order_id"] == 1
         assert trade_payload["final_best_candidate"]["symbol"] == "AMD"
+        assert "final_candidate_selection_reason" in trade_payload
+        assert "tie_breaker_applied" in trade_payload
+        assert "tied_final_candidates" in trade_payload
+        assert "near_tied_candidates" in trade_payload
+        assert "final_ranked_candidates" in trade_payload
         assert trade_payload["quant_candidates_count"] == 5
         assert trade_payload["researched_candidates_count"] == 5
 
