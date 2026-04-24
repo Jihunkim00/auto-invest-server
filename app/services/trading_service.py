@@ -9,6 +9,8 @@ from app.core.constants import (
     RUN_RESULT_EXECUTED,
     RUN_RESULT_REJECTED,
     RUN_RESULT_SKIPPED,
+    SIGNAL_STATUS_CREATED,
+    SIGNAL_STATUS_CREATED,
     SIGNAL_STATUS_APPROVED,
     SIGNAL_STATUS_EXECUTED,
     SIGNAL_STATUS_REJECTED,
@@ -124,6 +126,7 @@ class TradingService:
         )
         allowed_actions_set = {a.lower() for a in (allowed_actions or ["hold", "buy", "sell"])}
         original_action = signal.action
+        auto_exit_context: dict | None = None
         if signal.action not in allowed_actions_set:
             signal.action = "hold"
             flags = _parse_json_array(signal.risk_flags)
@@ -148,6 +151,11 @@ class TradingService:
                     flags.extend(exit_eval["reasons"])
                     signal.risk_flags = json.dumps(flags, ensure_ascii=False)
                     signal.signal_status = SIGNAL_STATUS_CREATED
+                    auto_exit_context = {
+                        "source": "position_management",
+                        "reasons": exit_eval["reasons"],
+                        "unrealized_plpc": exit_eval["unrealized_plpc"],
+                    }
                     db.commit()
                     db.refresh(signal)
 
@@ -260,15 +268,15 @@ class TradingService:
                         response["allowed_actions"] = sorted(list(allowed_actions_set))
                         response["original_action"] = original_action
                         return response               
-
+                preserved_sell_flags = _parse_json_array(signal.risk_flags)
                 risk = {
                     "approved": True,
-                    "risk_flags": [],
+                    "risk_flags": preserved_sell_flags,
                     "position_size_pct": 0.0,
                     "stop_loss_pct": 0.0,
                     "take_profit_pct": 0.0,
                 }
-                signal.risk_flags = json.dumps([], ensure_ascii=False)
+                signal.risk_flags = json.dumps(preserved_sell_flags, ensure_ascii=False)
                 signal.approved_by_risk = True
                 signal.position_size_pct = 0.0
                 signal.planned_stop_loss_pct = 0.0
@@ -299,6 +307,9 @@ class TradingService:
                 response["mode"] = mode
                 response["allowed_actions"] = sorted(list(allowed_actions_set))
                 response["original_action"] = original_action
+                if auto_exit_context:
+                    response["exit_reasons"] = auto_exit_context["reasons"]
+                    response["exit_context"] = auto_exit_context
                 return response
             except Exception as exc:
                 signal.signal_status = SIGNAL_STATUS_REJECTED

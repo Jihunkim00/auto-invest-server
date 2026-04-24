@@ -114,6 +114,8 @@ def test_position_management_hold_can_be_escalated_to_sell(monkeypatch, db_sessi
     assert result["action"] == "sell"
     assert result["order"]["side"] == "sell"
     assert result["order"]["qty"] == 2.0
+    assert result["exit_reasons"] == ["stop_loss_triggered", "trend_breakdown_confirmed"]
+    assert result["exit_context"]["unrealized_plpc"] == -0.02
     assert broker.last_submit_qty == 2.0
 
 
@@ -152,6 +154,7 @@ def test_position_management_sell_uses_fractional_qty(monkeypatch, db_session):
     assert result["result"] == "executed"
     assert result["action"] == "sell"
     assert result["order"]["qty"] == 1.938832397
+    assert result["exit_context"]["unrealized_plpc"] == -0.02
     assert broker.last_submit_qty == 1.938832397
 
 
