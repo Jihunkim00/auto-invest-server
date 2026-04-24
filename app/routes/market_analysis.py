@@ -8,8 +8,8 @@ from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
 from app.db.models import MarketAnalysis
 from app.services.gpt_market_service import GPTMarketService
-from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
+from app.services.watchlist_service import WatchlistService
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
 from app.services.reference_site_service import ReferenceSiteService
 from app.services.web_content_service import WebContentService
@@ -62,7 +62,15 @@ def run_market_analysis(
         "created_at": row.created_at,
     }
 
-    
+
+@router.post("/watchlist")
+def analyze_watchlist(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+):
+    svc = WatchlistService()
+    return svc.analyze(gate_level=gate_level)
+
+
 @router.post("/refresh-context")
 def refresh_reference_context(symbol: str = Query(default="AAPL", min_length=1), db: Session = Depends(get_db)):
     settings = get_settings()

@@ -2,6 +2,7 @@ from sqlalchemy import inspect, text
 
 from app.db.database import engine
 from app.db.models import Base
+from app.db import models  # noqa: F401
 
 
 def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):

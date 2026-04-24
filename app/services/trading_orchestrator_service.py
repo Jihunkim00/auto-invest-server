@@ -35,6 +35,7 @@ class TradingOrchestratorService:
         symbol: str | None = None,
         gate_level: int | None = None,
         request_payload: dict[str, Any] | None = None,
+        run_open_positions: bool = True,
     ) -> dict[str, Any]:
         settings = self.runtime_settings.get_settings(db)
         lifecycle = self.position_lifecycle.resolve_portfolio(
@@ -70,21 +71,22 @@ class TradingOrchestratorService:
         child_results: list[dict[str, Any]] = []
         entry_skip_reason: str | None = None
 
-        for position in lifecycle["open_positions"]:
-            child_results.append(
-                self._run_symbol_child(
-                    db,
-                    trigger_source=trigger_source,
-                    symbol=position["symbol"],
-                    mode=POSITION_MANAGEMENT_MODE,
-                    allowed_actions=["hold", "sell"],
-                    gate_level=run_gate_level,
-                    parent_run_key=parent_run_key,
-                    symbol_role=SYMBOL_ROLE_OPEN_POSITION,
-                    enforce_entry_limits=False,
-                    request_payload={"position": position},
+        if run_open_positions:
+            for position in lifecycle["open_positions"]:
+                child_results.append(
+                    self._run_symbol_child(
+                        db,
+                        trigger_source=trigger_source,
+                        symbol=position["symbol"],
+                        mode=POSITION_MANAGEMENT_MODE,
+                        allowed_actions=["hold", "sell"],
+                        gate_level=run_gate_level,
+                        parent_run_key=parent_run_key,
+                        symbol_role=SYMBOL_ROLE_OPEN_POSITION,
+                        enforce_entry_limits=False,
+                        request_payload={"position": position},
+                    )
                 )
-            )
 
         entry_evaluated = False
         if lifecycle["can_scan_new_entry"] and remaining_slot_entry_budget > 0:

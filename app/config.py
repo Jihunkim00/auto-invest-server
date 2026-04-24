@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = "medium"
 
     reference_sites_config_path: str = "config/reference_sites.yaml"
+    watchlist_config_path: str = "config/watchlist.yaml"
+    max_watchlist_size: int = 50
+    watchlist_top_candidates_for_research: int = 5
+    watchlist_min_entry_score: int = 65
+    watchlist_min_quant_score: int = 60
+    watchlist_min_research_score: int = 55
+    watchlist_strong_entry_score: int = 75
+    watchlist_min_score_gap: int = 3
+    watchlist_max_sell_score: int = 25
+    watchlist_quant_weight: float = 0.75
+    watchlist_research_weight: float = 0.25
     reference_site_cache_ttl_minutes: int = 90
     reference_site_fetch_timeout_seconds: float = 4.0
     reference_site_max_summary_chars: int = 1200
