@@ -17,6 +17,7 @@ class RuntimeSettingService:
         return {
             "bot_enabled": True,
             "kill_switch": False,
+            "scheduler_enabled": False,
             "default_symbol": self.settings.default_symbol.upper(),
             "default_gate_level": DEFAULT_GATE_LEVEL,
             "max_trades_per_day": MAX_TRADES_PER_DAY,
@@ -45,6 +46,7 @@ class RuntimeSettingService:
         return {
             "bot_enabled": bool(row.bot_enabled),
             "kill_switch": bool(row.kill_switch),
+            "scheduler_enabled": bool(row.scheduler_enabled),
             "default_symbol": row.default_symbol,
             "default_gate_level": int(row.default_gate_level),
             "max_trades_per_day": int(row.max_trades_per_day),
@@ -63,6 +65,7 @@ class RuntimeSettingService:
         for key in (
             "bot_enabled",
             "kill_switch",
+            "scheduler_enabled",
             "default_symbol",
             "default_gate_level",
             "max_trades_per_day",
@@ -90,3 +93,6 @@ class RuntimeSettingService:
 
     def set_kill_switch(self, db: Session, enabled: bool) -> dict[str, Any]:
         return self.update_settings(db, {"kill_switch": enabled})
+
+    def set_scheduler_enabled(self, db: Session, enabled: bool) -> dict[str, Any]:
+        return self.update_settings(db, {"scheduler_enabled": enabled})

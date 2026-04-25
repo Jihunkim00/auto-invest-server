@@ -5,8 +5,11 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
+from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
+from app.services.watchlist_run_service import WatchlistRunService
 
 NY_TZ = ZoneInfo("America/New_York")
 
@@ -14,6 +17,8 @@ NY_TZ = ZoneInfo("America/New_York")
 class SchedulerService:
     def __init__(self):
         self.orchestrator = TradingOrchestratorService()
+        self.runtime_settings = RuntimeSettingService()
+        self.watchlist_run_service = WatchlistRunService()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._slot_runs: set[str] = set()
@@ -53,10 +58,36 @@ class SchedulerService:
     def _run_scheduled_once(self, slot_name: str):
         db = SessionLocal()
         try:
-            self.orchestrator.run(
+            settings = self.runtime_settings.get_settings(db)
+            if not settings.get("scheduler_enabled", False):
+                run_log = self.orchestrator._create_run_log(
+                    db,
+                    run_key=f"scheduler_{datetime.now(NY_TZ).strftime('%Y%m%d_%H%M%S')}_{slot_name}",
+                    trigger_source="scheduler",
+                    symbol="WATCHLIST",
+                    mode="watchlist_trade_trigger",
+                    gate_level=DEFAULT_GATE_LEVEL,
+                    stage="orchestration",
+                    result="pending",
+                    reason="scheduler_disabled",
+                    request_payload={"scheduler_slot": slot_name, "source": "scheduler"},
+                )
+                self.orchestrator._finish(
+                    db,
+                    run_log,
+                    stage="done",
+                    result="skipped",
+                    reason="scheduler_disabled",
+                    response_payload={"scheduler_slot": slot_name, "scheduler_enabled": False},
+                )
+                return
+
+            self.watchlist_run_service.run_once(
                 db,
-                trigger_source="schedule",
-                request_payload={"scheduler_slot": slot_name},
+                trigger_source="scheduler",
+                gate_level=DEFAULT_GATE_LEVEL,
+                source_endpoint="scheduler_service",
+                scheduler_slot=slot_name,
             )
         finally:
             db.close()

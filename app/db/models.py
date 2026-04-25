@@ -130,6 +130,7 @@ class RuntimeSetting(Base):
     id = Column(Integer, primary_key=True, index=True)
     bot_enabled = Column(Boolean, nullable=False, default=True)
     kill_switch = Column(Boolean, nullable=False, default=False)
+    scheduler_enabled = Column(Boolean, nullable=False, default=False)
     default_symbol = Column(String(20), nullable=False, default="AAPL")
     default_gate_level = Column(Integer, nullable=False, default=2)
     max_trades_per_day = Column(Integer, nullable=False, default=3)

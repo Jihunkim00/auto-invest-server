@@ -81,6 +81,7 @@ def _create_runtime_settings_table_if_missing():
                     id INTEGER PRIMARY KEY,
                     bot_enabled BOOLEAN NOT NULL DEFAULT 1,
                     kill_switch BOOLEAN NOT NULL DEFAULT 0,
+                    scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
                     default_gate_level INTEGER NOT NULL DEFAULT 2,
                     max_trades_per_day INTEGER NOT NULL DEFAULT 3,
@@ -175,6 +176,7 @@ def init_db():
     runtime_setting_columns = {
         "bot_enabled": "BOOLEAN DEFAULT 1",
         "kill_switch": "BOOLEAN DEFAULT 0",
+        "scheduler_enabled": "BOOLEAN DEFAULT 0",        
         "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",
         "default_gate_level": "INTEGER DEFAULT 2",
         "max_trades_per_day": "INTEGER DEFAULT 3",

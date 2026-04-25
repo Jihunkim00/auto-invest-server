@@ -17,6 +17,7 @@ router = APIRouter(prefix="/ops", tags=["ops"])
 class RuntimeSettingsUpdateRequest(BaseModel):
     bot_enabled: bool | None = None
     kill_switch: bool | None = None
+    scheduler_enabled: bool | None = None
     default_symbol: str | None = Field(default=None, min_length=1, max_length=20)
     default_gate_level: int | None = Field(default=None, ge=1, le=4)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=20)
@@ -92,6 +93,19 @@ def bot_on(db: Session = Depends(get_db)):
 def bot_off(db: Session = Depends(get_db)):
     svc = RuntimeSettingService()
     return {"result": "updated", "settings": svc.set_bot_enabled(db, False)}
+
+@router.post("/scheduler/on")
+def scheduler_on(db: Session = Depends(get_db)):
+    svc = RuntimeSettingService()
+    return {"result": "updated", "settings": svc.set_scheduler_enabled(db, True)}
+
+
+
+
+@router.post("/scheduler/off")
+def scheduler_off(db: Session = Depends(get_db)):
+    svc = RuntimeSettingService()
+    return {"result": "updated", "settings": svc.set_scheduler_enabled(db, False)}
 
 
 @router.post("/kill-switch/on")
