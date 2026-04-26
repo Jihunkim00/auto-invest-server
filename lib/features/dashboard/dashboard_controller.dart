@@ -5,9 +5,13 @@ import '../../models/ops_settings.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
+enum BackendConnectionStatus { connected, offline, error }
+
+enum SettingKey { scheduler, bot, dryRun, killSwitch }
+
 class DashboardController extends ChangeNotifier {
   DashboardController(this.apiClient) {
-    load();
+    loadInitial();
   }
 
   final ApiClient apiClient;
@@ -23,7 +27,6 @@ class DashboardController extends ChangeNotifier {
     minEntryScore: 65,
     minScoreGap: 3,
   );
-
   WatchlistRunResult runResult = const WatchlistRunResult(
     configuredSymbolCount: 50,
     analyzedSymbolCount: 50,
@@ -53,109 +56,152 @@ class DashboardController extends ChangeNotifier {
   );
 
   List<TradingRun> recentRuns = const [];
-  String? error;
-  bool loading = false;
+  final Set<SettingKey> pendingSettings = <SettingKey>{};
+  final Set<SettingKey> unavailableControls = <SettingKey>{};
 
-  Future<void> load() async {
+  bool loading = false;
+  bool runInProgress = false;
+  String? bannerWarning;
+  String? lastActionMessage;
+  DateTime? lastActionAt;
+  DateTime? lastSettingsSyncAt;
+  BackendConnectionStatus connectionStatus = BackendConnectionStatus.offline;
+
+  bool isPending(SettingKey key) => pendingSettings.contains(key);
+  bool isControlAvailable(SettingKey key) => !unavailableControls.contains(key);
+
+  Future<void> loadInitial() async {
     loading = true;
     notifyListeners();
     try {
-      settings = await apiClient.getOpsSettings();
+      await refreshSettings();
+      try {
+        recentRuns = await apiClient.getRecentTradingRuns();
+      } catch (_) {
+        recentRuns = const [];
+      }
       runResult = apiClient.getMockRunResult();
-      recentRuns = await apiClient.getRecentTradingRuns();
-      error = null;
-    } catch (e) {
-      error = e.toString();
     } finally {
       loading = false;
       notifyListeners();
     }
   }
 
-  Future<void> runOnce() async {
+  Future<void> refreshSettings() async {
     try {
-      await apiClient.runWatchlistOnce();
+      settings = await apiClient.getOpsSettings();
+      connectionStatus = BackendConnectionStatus.connected;
+      bannerWarning = null;
+      lastSettingsSyncAt = DateTime.now();
+    } on ApiException catch (e) {
+      connectionStatus = e.message.contains('unreachable') ? BackendConnectionStatus.offline : BackendConnectionStatus.error;
+      bannerWarning = e.message;
     } catch (e) {
-      error = 'Run request failed: $e';
+      connectionStatus = BackendConnectionStatus.error;
+      bannerWarning = e.toString();
     }
     notifyListeners();
   }
 
-  Future<void> toggleScheduler(bool v) async {
-    settings = OpsSettings(
-      schedulerEnabled: v,
-      botEnabled: settings.botEnabled,
-      dryRun: settings.dryRun,
-      killSwitch: settings.killSwitch,
-      brokerMode: settings.brokerMode,
-      maxDailyTrades: settings.maxDailyTrades,
-      maxDailyEntries: settings.maxDailyEntries,
-      minEntryScore: settings.minEntryScore,
-      minScoreGap: settings.minScoreGap,
-    );
+  Future<String> runWatchlistOnce() async {
+    runInProgress = true;
     notifyListeners();
     try {
-      v ? await apiClient.schedulerOn() : await apiClient.schedulerOff();
-    } catch (e) {
-      error = 'Scheduler call failed: $e';
+      final result = await apiClient.runWatchlistOnce();
+      runResult = result;
+      lastActionAt = DateTime.now();
+      lastActionMessage = 'Watchlist run completed: ${result.action} / ${result.result}';
+      connectionStatus = BackendConnectionStatus.connected;
+      return lastActionMessage!;
+    } on ApiException catch (e) {
+      connectionStatus = e.message.contains('unreachable') ? BackendConnectionStatus.offline : BackendConnectionStatus.error;
+      final msg = 'Failed watchlist run: ${e.message}';
+      bannerWarning = msg;
+      return msg;
+    } finally {
+      runInProgress = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
-  Future<void> toggleBot(bool v) async {
-    settings = OpsSettings(
-      schedulerEnabled: settings.schedulerEnabled,
-      botEnabled: v,
-      dryRun: settings.dryRun,
-      killSwitch: settings.killSwitch,
-      brokerMode: settings.brokerMode,
-      maxDailyTrades: settings.maxDailyTrades,
-      maxDailyEntries: settings.maxDailyEntries,
-      minEntryScore: settings.minEntryScore,
-      minScoreGap: settings.minScoreGap,
-    );
+  Future<String> toggleScheduler(bool enable) => _toggleSetting(
+        key: SettingKey.scheduler,
+        updater: () => enable ? apiClient.schedulerOn() : apiClient.schedulerOff(),
+        applyOptimistic: () => settings = settings.copyWith(schedulerEnabled: enable),
+        success: enable ? 'Scheduler enabled' : 'Scheduler disabled',
+      );
+
+  Future<String> toggleBot(bool enable) => _toggleSetting(
+        key: SettingKey.bot,
+        updater: () => enable ? apiClient.botOn() : apiClient.botOff(),
+        applyOptimistic: () => settings = settings.copyWith(botEnabled: enable),
+        success: enable ? 'Bot enabled' : 'Bot disabled',
+      );
+
+  Future<String> toggleDryRun(bool enable) => _toggleSetting(
+        key: SettingKey.dryRun,
+        updater: () => enable ? apiClient.dryRunOn() : apiClient.dryRunOff(),
+        applyOptimistic: () => settings = settings.copyWith(dryRun: enable),
+        success: enable ? 'Dry Run enabled' : 'Dry Run disabled',
+      );
+
+  Future<String> toggleKillSwitch(bool enable) => _toggleSetting(
+        key: SettingKey.killSwitch,
+        updater: () => enable ? apiClient.killSwitchOn() : apiClient.killSwitchOff(),
+        applyOptimistic: () => settings = settings.copyWith(killSwitch: enable),
+        success: enable ? 'Kill Switch enabled' : 'Kill Switch disabled',
+      );
+
+  Future<String> _toggleSetting({
+    required SettingKey key,
+    required Future<OpsSettings> Function() updater,
+    required VoidCallback applyOptimistic,
+    required String success,
+  }) async {
+    final previous = settings;
+    pendingSettings.add(key);
+    applyOptimistic();
     notifyListeners();
     try {
-      v ? await apiClient.botOn() : await apiClient.botOff();
+      settings = await updater();
+      connectionStatus = BackendConnectionStatus.connected;
+      bannerWarning = null;
+      lastSettingsSyncAt = DateTime.now();
+      lastActionAt = DateTime.now();
+      lastActionMessage = '$success at ${_clock(lastActionAt!)}';
+      return success;
+    } on ApiException catch (e) {
+      settings = previous;
+      if (e.notImplemented) unavailableControls.add(key);
+      final msg = 'Failed to update ${_name(key)}: ${e.message}';
+      bannerWarning = msg;
+      connectionStatus = e.message.contains('unreachable') ? BackendConnectionStatus.offline : BackendConnectionStatus.error;
+      return msg;
     } catch (e) {
-      error = 'Bot call failed: $e';
+      settings = previous;
+      final msg = 'Failed to update ${_name(key)}: $e';
+      bannerWarning = msg;
+      connectionStatus = BackendConnectionStatus.error;
+      return msg;
+    } finally {
+      pendingSettings.remove(key);
+      notifyListeners();
     }
-    notifyListeners();
   }
 
-  Future<void> toggleKillSwitch(bool v) async {
-    settings = OpsSettings(
-      schedulerEnabled: settings.schedulerEnabled,
-      botEnabled: settings.botEnabled,
-      dryRun: settings.dryRun,
-      killSwitch: v,
-      brokerMode: settings.brokerMode,
-      maxDailyTrades: settings.maxDailyTrades,
-      maxDailyEntries: settings.maxDailyEntries,
-      minEntryScore: settings.minEntryScore,
-      minScoreGap: settings.minScoreGap,
-    );
-    notifyListeners();
-    try {
-      v ? await apiClient.killSwitchOn() : await apiClient.killSwitchOff();
-    } catch (e) {
-      error = 'Kill switch call failed: $e';
+  String _name(SettingKey key) {
+    switch (key) {
+      case SettingKey.scheduler:
+        return 'scheduler';
+      case SettingKey.bot:
+        return 'bot';
+      case SettingKey.dryRun:
+        return 'dry run';
+      case SettingKey.killSwitch:
+        return 'kill switch';
     }
-    notifyListeners();
   }
 
-  void setDryRun(bool v) {
-    settings = OpsSettings(
-      schedulerEnabled: settings.schedulerEnabled,
-      botEnabled: settings.botEnabled,
-      dryRun: v,
-      killSwitch: settings.killSwitch,
-      brokerMode: settings.brokerMode,
-      maxDailyTrades: settings.maxDailyTrades,
-      maxDailyEntries: settings.maxDailyEntries,
-      minEntryScore: settings.minEntryScore,
-      minScoreGap: settings.minScoreGap,
-    );
-    notifyListeners();
-  }
+  String _clock(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 }

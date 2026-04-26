@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db.init_db import init_db
@@ -21,14 +22,33 @@ app = FastAPI(
     debug=settings.app_debug,
 )
 
+# Local development CORS for Flutter Web and local dashboards.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        'http://localhost:3000',
+        'http://localhost:5000',
+        'http://localhost:5173',
+        'http://localhost:8000',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:5000',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:8000',
+    ],
+    allow_origin_regex=r'http://127\.0\.0\.1:\d+',
+    allow_credentials=True,
+    allow_methods=['*'],
+    allow_headers=['*'],
+)
 
-@app.on_event("startup")
+
+@app.on_event('startup')
 def on_startup():
     init_db()
     scheduler_service.start()
 
 
-@app.on_event("shutdown")
+@app.on_event('shutdown')
 def on_shutdown():
     scheduler_service.stop()
 
@@ -45,10 +65,10 @@ app.include_router(trading_router)
 app.include_router(ops_router)
 
 
-@app.get("/")
+@app.get('/')
 def read_root():
     return {
-        "message": f"{settings.app_name} is running",
-        "default_symbol": settings.default_symbol,
-        "env": settings.app_env,
+        'message': f'{settings.app_name} is running',
+        'default_symbol': settings.default_symbol,
+        'env': settings.app_env,
     }

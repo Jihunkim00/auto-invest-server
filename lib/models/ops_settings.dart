@@ -9,6 +9,7 @@ class OpsSettings {
     required this.maxDailyEntries,
     required this.minEntryScore,
     required this.minScoreGap,
+    this.updatedAt,
   });
 
   final bool schedulerEnabled;
@@ -20,4 +21,31 @@ class OpsSettings {
   final int maxDailyEntries;
   final int minEntryScore;
   final int minScoreGap;
+  final DateTime? updatedAt;
+
+  OpsSettings copyWith({
+    bool? schedulerEnabled,
+    bool? botEnabled,
+    bool? dryRun,
+    bool? killSwitch,
+    String? brokerMode,
+    int? maxDailyTrades,
+    int? maxDailyEntries,
+    int? minEntryScore,
+    int? minScoreGap,
+    DateTime? updatedAt,
+  }) {
+    return OpsSettings(
+      schedulerEnabled: schedulerEnabled ?? this.schedulerEnabled,
+      botEnabled: botEnabled ?? this.botEnabled,
+      dryRun: dryRun ?? this.dryRun,
+      killSwitch: killSwitch ?? this.killSwitch,
+      brokerMode: brokerMode ?? this.brokerMode,
+      maxDailyTrades: maxDailyTrades ?? this.maxDailyTrades,
+      maxDailyEntries: maxDailyEntries ?? this.maxDailyEntries,
+      minEntryScore: minEntryScore ?? this.minEntryScore,
+      minScoreGap: minScoreGap ?? this.minScoreGap,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 }

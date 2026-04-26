@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/widgets/status_badge.dart';
 import 'dashboard_controller.dart';
 import 'widgets/last_run_summary_card.dart';
@@ -11,11 +12,26 @@ class DashboardScreen extends StatelessWidget {
 
   final DashboardController controller;
 
+  void _toast(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _connectionLabel(BackendConnectionStatus s) {
+    switch (s) {
+      case BackendConnectionStatus.connected:
+        return 'Connected';
+      case BackendConnectionStatus.offline:
+        return 'Offline';
+      case BackendConnectionStatus.error:
+        return 'Error';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
       child: RefreshIndicator(
-        onRefresh: controller.load,
+        onRefresh: controller.refreshSettings,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -26,34 +42,50 @@ class DashboardScreen extends StatelessWidget {
             Row(children: [
               StatusBadge(text: 'Paper Mode', active: true),
               const SizedBox(width: 8),
-              StatusBadge(text: controller.runResult.action, active: false, alert: controller.runResult.action == 'hold'),
+              StatusBadge(text: _connectionLabel(controller.connectionStatus), active: controller.connectionStatus == BackendConnectionStatus.connected, alert: controller.connectionStatus != BackendConnectionStatus.connected),
             ]),
+            const SizedBox(height: 6),
+            Text('Backend: ${AppConfig.resolvedApiBaseUrl}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+            Text('Last settings sync: ${controller.lastSettingsSyncAt?.toIso8601String() ?? 'N/A'}', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+            if (controller.lastActionMessage != null)
+              Text(controller.lastActionMessage!, style: const TextStyle(color: Colors.greenAccent, fontSize: 12)),
+            if (controller.bannerWarning != null)
+              Container(
+                margin: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.16), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orangeAccent.withOpacity(0.5))),
+                child: Text(controller.bannerWarning!, style: const TextStyle(color: Colors.orangeAccent)),
+              ),
             const SizedBox(height: 16),
             LayoutBuilder(
               builder: (context, c) {
                 final vertical = c.maxWidth < 900;
+                final quick = QuickActionsSection(
+                  controller: controller,
+                  onRunOnce: () async => _toast(context, await controller.runWatchlistOnce()),
+                  onToggleScheduler: () async => _toast(context, await controller.toggleScheduler(!controller.settings.schedulerEnabled)),
+                  onToggleBot: () async => _toast(context, await controller.toggleBot(!controller.settings.botEnabled)),
+                  onToggleKillSwitch: () async => _toast(context, await controller.toggleKillSwitch(!controller.settings.killSwitch)),
+                );
                 if (vertical) {
                   return Column(children: [
                     SystemStatusSection(controller: controller),
                     const SizedBox(height: 12),
                     LastRunSummaryCard(controller: controller),
                     const SizedBox(height: 12),
-                    QuickActionsSection(controller: controller),
+                    quick,
                   ]);
                 }
                 return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Expanded(
-                      flex: 8,
-                      child: Column(children: [SystemStatusSection(controller: controller), const SizedBox(height: 12), LastRunSummaryCard(controller: controller)])),
+                    flex: 8,
+                    child: Column(children: [SystemStatusSection(controller: controller), const SizedBox(height: 12), LastRunSummaryCard(controller: controller)]),
+                  ),
                   const SizedBox(width: 12),
-                  Expanded(flex: 4, child: QuickActionsSection(controller: controller)),
+                  Expanded(flex: 4, child: quick),
                 ]);
               },
             ),
-            if (controller.error != null) ...[
-              const SizedBox(height: 12),
-              Text(controller.error!, style: const TextStyle(color: Colors.orangeAccent)),
-            ]
           ],
         ),
       ),
