@@ -1,0 +1,1210 @@
+<!-- Design System -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Quantum Trading System - Home Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface-variant": "#c4c7c8",
+                        "secondary-container": "#474746",
+                        "on-tertiary": "#303030",
+                        "error-container": "#93000a",
+                        "on-tertiary-container": "#656464",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-container": "#e2e2e2",
+                        "surface-tint": "#c6c6c7",
+                        "surface-dim": "#141313",
+                        "secondary-fixed": "#e5e2e1",
+                        "surface": "#141313",
+                        "on-primary-container": "#636565",
+                        "on-primary-fixed": "#1a1c1c",
+                        "on-secondary": "#313030",
+                        "on-secondary-fixed": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-highest": "#353434",
+                        "tertiary-fixed": "#e4e2e1",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "primary-fixed": "#e2e2e2",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-container": "#b7b5b4",
+                        "inverse-primary": "#5d5f5f",
+                        "on-surface": "#e5e2e1",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "error": "#ffb4ab",
+                        "on-error": "#690005",
+                        "inverse-on-surface": "#313030",
+                        "outline-variant": "#444748",
+                        "on-error-container": "#ffdad6",
+                        "tertiary": "#ffffff",
+                        "on-tertiary-fixed-variant": "#474746",
+                        "outline": "#8e9192",
+                        "on-primary": "#2f3131",
+                        "surface-container": "#201f1f",
+                        "secondary": "#c8c6c5",
+                        "background": "#141313",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "surface-variant": "#353434",
+                        "primary": "#ffffff",
+                        "tertiary-fixed-dim": "#c8c6c5",
+                        "on-background": "#e5e2e1",
+                        "surface-bright": "#3a3939",
+                        "tertiary-container": "#e4e2e1",
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-container-high": "#2a2a2a",
+                        "on-primary-fixed-variant": "#454747"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "xs": "4px",
+                        "container-padding": "32px",
+                        "base": "8px",
+                        "md": "24px",
+                        "sm": "12px",
+                        "lg": "40px",
+                        "gutter": "16px",
+                        "xl": "64px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "tabular-nums": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-caps": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "tabular-nums": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "label-caps": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; background-color: #000000; }
+        .glass-panel { background: rgba(10, 10, 10, 0.6); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .gradient-text { background: linear-gradient(180deg, #ffffff 0%, #a3a3a3 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .status-dot-active { background-color: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, 0.4); }
+        .status-dot-idle { background-color: #9ca3af; }
+        .status-dot-alert { background-color: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.4); animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        .chart-glow-success { filter: drop-shadow(0 0 4px rgba(74, 222, 128, 0.3)); }
+        .chart-glow-danger { filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.3)); }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background min-h-screen flex flex-col antialiased selection:bg-surface-variant selection:text-white pb-24 md:pb-0 md:pt-16">
+<!-- TopAppBar (Web) -->
+<header class="hidden md:flex fixed top-0 left-0 w-full z-50 justify-between items-center px-6 h-16 bg-black/95 dark:bg-black/95 backdrop-blur-md shadow-none border-b border-white/10">
+<div class="flex items-center gap-4">
+<div class="w-8 h-8 rounded-full bg-surface-variant overflow-hidden">
+<img alt="Executive Profile" class="w-full h-full object-cover" data-alt="professional executive headshot portrait in dark studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBaZ4qm25NVo05fDqdEZaUHCCV7hpv11A-9mjpmSG7B03xY73Jm-TbnMv3w4xGS7hni1wHGEPsSxvu8vKZRIXDBrH7sICGoU7RIJuoHRBs6Jy_pLnn4Q7yAl2gSQW97S9JTp4d6HK1-RmZAXcZkkRGs8ROad9g2NvwqS9ymdIHlGQH06ZxHWHjg__ixe3Hcbbjn5xIn_fDpWwdxMpfd0cr0blrJw5IdrjzdDSMOGMutkR_csB4zdHpm0-B20m_vlokf2KjOhIcnS_4"/>
+</div>
+<span class="text-lg font-black tracking-tighter text-white uppercase font-display-lg text-[20px]">QUANTUM</span>
+</div>
+<nav class="flex items-center gap-8">
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-white opacity-80 transition-opacity" href="#">Home</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:bg-white/5 transition-colors px-2 py-1 rounded" href="#">Analysis</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:bg-white/5 transition-colors px-2 py-1 rounded" href="#">Logs</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:bg-white/5 transition-colors px-2 py-1 rounded" href="#">Settings</a>
+</nav>
+<button class="text-neutral-100 dark:text-neutral-100 hover:bg-white/5 transition-colors p-2 rounded-full">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</header>
+<main class="flex-grow max-w-[1440px] mx-auto w-full p-gutter md:p-container-padding flex flex-col gap-md pt-4 md:pt-md">
+<!-- Header Section -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-end gap-sm mb-sm">
+<div>
+<h1 class="font-display-lg text-display-lg gradient-text mb-xs">Command Center</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">System fully operational. Monitoring 142 live pairs.</p>
+</div>
+<div class="flex items-center gap-sm">
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">UTC 14:23:05</span>
+<div class="h-4 w-px bg-surface-variant"></div>
+<div class="flex items-center gap-xs bg-surface-container-high px-3 py-1 rounded-full border border-white/5">
+<div class="w-2 h-2 rounded-full status-dot-active"></div>
+<span class="font-label-caps text-label-caps text-primary">LIVE TRADING</span>
+</div>
+</div>
+</div>
+<!-- Main Grid -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-gutter md:gap-md">
+<!-- System Status Widget (Span 8) -->
+<div class="md:col-span-8 glass-panel rounded-xl p-md flex flex-col gap-md relative overflow-hidden">
+<!-- Decorative background element -->
+<div class="absolute -top-24 -right-24 w-64 h-64 bg-surface-variant rounded-full blur-[80px] opacity-20 pointer-events-none"></div>
+<h2 class="font-headline-md text-headline-md text-primary">System Integrity</h2>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-sm">
+<!-- Bot Status -->
+<div class="bg-surface-container flex flex-col p-sm rounded-lg border border-white/5 relative">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-xs">BOT STATUS</span>
+<div class="flex items-center gap-2 mt-auto">
+<span class="material-symbols-outlined text-primary text-[20px]">smart_toy</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">ACTIVE</span>
+</div>
+<div class="absolute top-sm right-sm w-1.5 h-1.5 rounded-full status-dot-active"></div>
+</div>
+<!-- Scheduler -->
+<div class="bg-surface-container flex flex-col p-sm rounded-lg border border-white/5 relative">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-xs">SCHEDULER</span>
+<div class="flex items-center gap-2 mt-auto">
+<span class="material-symbols-outlined text-primary text-[20px]">schedule</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">RUNNING</span>
+</div>
+<div class="absolute top-sm right-sm w-1.5 h-1.5 rounded-full status-dot-active"></div>
+</div>
+<!-- Dry Run -->
+<div class="bg-surface-container flex flex-col p-sm rounded-lg border border-white/5 relative">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-xs">DRY RUN</span>
+<div class="flex items-center gap-2 mt-auto">
+<span class="material-symbols-outlined text-on-surface-variant text-[20px]">science</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">DISABLED</span>
+</div>
+<div class="absolute top-sm right-sm w-1.5 h-1.5 rounded-full status-dot-idle"></div>
+</div>
+<!-- Broker Mode -->
+<div class="bg-surface-container flex flex-col p-sm rounded-lg border border-white/5 relative">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-xs">BROKER MODE</span>
+<div class="flex items-center gap-2 mt-auto">
+<span class="material-symbols-outlined text-primary text-[20px]">account_balance</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">ALPACA-LIVE</span>
+</div>
+<div class="absolute top-sm right-sm w-1.5 h-1.5 rounded-full status-dot-active"></div>
+</div>
+</div>
+<!-- Last Run Summary -->
+<div class="mt-auto pt-sm border-t border-white/5">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-sm">LAST RUN SUMMARY</h3>
+<div class="flex flex-col md:flex-row justify-between bg-surface-container-low p-sm rounded-lg border border-white/5 gap-sm">
+<div>
+<span class="block font-label-caps text-[10px] text-on-tertiary-container mb-1">BEST CANDIDATE</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">NVDA</span>
+</div>
+<div>
+<span class="block font-label-caps text-[10px] text-on-tertiary-container mb-1">BEST SCORE</span>
+<span class="font-tabular-nums text-tabular-nums text-[#4ade80]">94.2%</span>
+</div>
+<div>
+<span class="block font-label-caps text-[10px] text-on-tertiary-container mb-1">SCORE GAP</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">+2.4%</span>
+</div>
+<div>
+<span class="block font-label-caps text-[10px] text-on-tertiary-container mb-1">ORDER ID</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">#ORD-992-A</span>
+</div>
+<div>
+<span class="block font-label-caps text-[10px] text-on-tertiary-container mb-1">TRIGGER BLOCK</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">NONE</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Quick Actions & Kill Switch (Span 4) -->
+<div class="md:col-span-4 flex flex-col gap-sm">
+<!-- Kill Switch Card -->
+<div class="glass-panel rounded-xl p-md flex flex-col items-center justify-center text-center border-error-container/30 h-48 relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-b from-error-container/10 to-transparent"></div>
+<span class="font-label-caps text-label-caps text-error mb-2 relative z-10">EMERGENCY PROTOCOL</span>
+<h3 class="font-headline-md text-headline-md text-on-error-container mb-sm relative z-10">KILL SWITCH</h3>
+<button class="w-full relative z-10 bg-gradient-to-b from-[#b91c1c] to-[#991b1b] hover:from-[#dc2626] hover:to-[#b91c1c] text-white font-label-caps text-label-caps py-4 rounded-lg shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all active:scale-95 border border-[#ef4444]/50">
+                        HALT ALL TRADING
+                    </button>
+<div class="absolute top-sm right-sm w-2 h-2 rounded-full status-dot-alert"></div>
+</div>
+<!-- Operations Controls -->
+<div class="glass-panel rounded-xl p-sm flex-grow flex flex-col gap-xs">
+<button class="flex items-center justify-between p-sm bg-surface-container rounded-lg border border-white/5 hover:bg-surface-container-high transition-colors text-left group">
+<div>
+<span class="block font-label-caps text-label-caps text-primary mb-1 group-hover:text-white transition-colors">Run Watchlist Once</span>
+<span class="block font-body-sm text-[12px] text-on-surface-variant">Execute immediate manual scan</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-white transition-colors">play_arrow</span>
+</button>
+<div class="grid grid-cols-2 gap-xs h-full">
+<button class="flex flex-col items-center justify-center gap-2 p-sm bg-surface-container rounded-lg border border-white/5 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">toggle_on</span>
+<span class="font-label-caps text-[10px] text-primary">SCHEDULER OFF</span>
+</button>
+<button class="flex flex-col items-center justify-center gap-2 p-sm bg-surface-container rounded-lg border border-white/5 hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">power_settings_new</span>
+<span class="font-label-caps text-[10px] text-primary">BOT OFF</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe bg-neutral-950 dark:bg-neutral-950 shadow-2xl border-t border-white/5">
+<a class="flex flex-col items-center justify-center text-white bg-neutral-900 rounded-lg p-2 scale-95 duration-150" href="#">
+<span class="material-symbols-outlined text-[24px]">home</span>
+<span class="font-inter text-[10px] font-bold tracking-tight text-white mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined text-[24px]">analytics</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Analysis</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined text-[24px]">receipt_long</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Logs</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Settings</span>
+</a>
+</nav>
+</body></html>
+
+<!-- Home Dashboard -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Quantum - Analysis</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-surface-variant": "#c4c7c8",
+                    "secondary-container": "#474746",
+                    "on-tertiary": "#303030",
+                    "error-container": "#93000a",
+                    "on-tertiary-container": "#656464",
+                    "surface-container-lowest": "#0e0e0e",
+                    "primary-container": "#e2e2e2",
+                    "surface-tint": "#c6c6c7",
+                    "surface-dim": "#141313",
+                    "secondary-fixed": "#e5e2e1",
+                    "surface": "#141313",
+                    "on-primary-container": "#636565",
+                    "on-primary-fixed": "#1a1c1c",
+                    "on-secondary": "#313030",
+                    "on-secondary-fixed": "#1c1b1b",
+                    "inverse-surface": "#e5e2e1",
+                    "surface-container-highest": "#353434",
+                    "tertiary-fixed": "#e4e2e1",
+                    "secondary-fixed-dim": "#c8c6c5",
+                    "primary-fixed": "#e2e2e2",
+                    "surface-container-low": "#1c1b1b",
+                    "on-secondary-container": "#b7b5b4",
+                    "inverse-primary": "#5d5f5f",
+                    "on-surface": "#e5e2e1",
+                    "on-tertiary-fixed": "#1b1c1c",
+                    "error": "#ffb4ab",
+                    "on-error": "#690005",
+                    "inverse-on-surface": "#313030",
+                    "outline-variant": "#444748",
+                    "on-error-container": "#ffdad6",
+                    "tertiary": "#ffffff",
+                    "on-tertiary-fixed-variant": "#474746",
+                    "outline": "#8e9192",
+                    "on-primary": "#2f3131",
+                    "surface-container": "#201f1f",
+                    "secondary": "#c8c6c5",
+                    "background": "#141313",
+                    "primary-fixed-dim": "#c6c6c7",
+                    "surface-variant": "#353434",
+                    "primary": "#ffffff",
+                    "tertiary-fixed-dim": "#c8c6c5",
+                    "on-background": "#e5e2e1",
+                    "surface-bright": "#3a3939",
+                    "tertiary-container": "#e4e2e1",
+                    "on-secondary-fixed-variant": "#474746",
+                    "surface-container-high": "#2a2a2a",
+                    "on-primary-fixed-variant": "#454747"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "xs": "4px",
+                    "container-padding": "32px",
+                    "base": "8px",
+                    "md": "24px",
+                    "sm": "12px",
+                    "lg": "40px",
+                    "gutter": "16px",
+                    "xl": "64px"
+            },
+            "fontFamily": {
+                    "body-sm": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "display-lg": ["Inter"],
+                    "tabular-nums": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "label-caps": ["Inter"]
+            },
+            "fontSize": {
+                    "body-sm": ["14px", {"lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400"}],
+                    "headline-md": ["24px", {"lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                    "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "tabular-nums": ["14px", {"lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                    "body-lg": ["16px", {"lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400"}],
+                    "label-caps": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "700"}]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom scrollbar for premium feel */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #353434; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #474746; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-lowest text-on-surface font-body-sm antialiased selection:bg-primary/20 selection:text-primary">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-black/95 dark:bg-black/95 backdrop-blur-md border-b border-white/10 shadow-none">
+<div class="flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container-high overflow-hidden border border-white/5 flex items-center justify-center">
+<span class="material-symbols-outlined text-on-surface-variant text-[18px]">person</span>
+</div>
+</div>
+<div class="absolute left-1/2 -translate-x-1/2">
+<h1 class="font-inter text-lg font-black tracking-tighter text-white uppercase">QUANTUM</h1>
+</div>
+<div class="flex items-center">
+<button class="w-10 h-10 rounded-full flex items-center justify-center text-neutral-100 dark:text-neutral-100 hover:bg-white/5 transition-colors opacity-80 transition-opacity">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="w-full max-w-[1440px] mx-auto pt-[88px] pb-[100px] px-container-padding @container">
+<!-- Header / Stats Row -->
+<div class="grid grid-cols-1 md:grid-cols-12 gap-gutter mb-gutter">
+<!-- Global Metrics -->
+<div class="col-span-1 md:col-span-8 grid grid-cols-2 gap-gutter">
+<div class="bg-surface-container-low border border-white/5 rounded-lg p-md flex flex-col justify-between">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-base">Cycle Throughput</span>
+<div class="flex items-end gap-sm">
+<div class="flex flex-col">
+<span class="font-tabular-nums text-tabular-nums text-primary text-[32px] leading-none">4,096</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Configured</span>
+</div>
+<span class="text-outline-variant mb-1">/</span>
+<div class="flex flex-col">
+<span class="font-tabular-nums text-tabular-nums text-on-surface text-[32px] leading-none">1,204</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Analyzed</span>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-low border border-white/5 rounded-lg p-md flex flex-col justify-between items-start">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-base">System Status</span>
+<div class="flex items-center gap-sm px-sm py-xs bg-[#002e1a] border border-[#005230] rounded-full mt-auto">
+<span class="w-2 h-2 rounded-full bg-[#00e676] shadow-[0_0_8px_#00e676]"></span>
+<span class="font-label-caps text-label-caps text-[#00e676] tracking-widest">TRADE APPROVED</span>
+</div>
+</div>
+</div>
+<!-- Trade Result / Decision Summary -->
+<div class="col-span-1 md:col-span-4 bg-surface-container border border-white/5 rounded-lg p-md relative overflow-hidden flex flex-col">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-base relative z-10">Execution Target</span>
+<div class="flex items-center justify-between mt-xs relative z-10">
+<h2 class="font-display-lg text-display-lg text-primary tracking-tighter">NVDA</h2>
+<span class="font-tabular-nums text-tabular-nums text-on-surface bg-white/10 px-sm py-xs rounded">Long</span>
+</div>
+<div class="mt-auto flex flex-col gap-xs relative z-10 pt-sm border-t border-white/5">
+<div class="flex justify-between items-center">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Trade Result</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface">Executed @ $135.42</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Trigger Block</span>
+<span class="font-body-sm text-body-sm text-on-surface">None</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Details Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter mb-gutter">
+<!-- Rankings Panel (Spans 8) -->
+<div class="col-span-1 lg:col-span-8 bg-surface-container-low border border-white/5 rounded-lg p-md flex flex-col">
+<div class="flex justify-between items-end mb-md border-b border-white/5 pb-sm">
+<span class="font-label-caps text-label-caps text-primary tracking-widest">Final Ranked Candidates</span>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Top 3 Selection</span>
+</div>
+<!-- Winner Row -->
+<div class="flex items-center justify-between p-sm bg-surface-container border border-primary/20 rounded-lg mb-sm">
+<div class="flex items-center gap-md">
+<div class="w-8 h-8 rounded bg-primary/10 flex items-center justify-center text-primary font-label-caps text-label-caps">1</div>
+<div>
+<div class="font-headline-md text-headline-md text-primary">NVDA</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px]">psychiatry</span> Alpha Target
+                            </div>
+</div>
+</div>
+<div class="text-right">
+<div class="font-tabular-nums text-tabular-nums text-primary text-lg">0.942</div>
+<div class="font-label-caps text-label-caps text-on-surface-variant">Best Score</div>
+</div>
+</div>
+<!-- 2nd Place Row -->
+<div class="flex items-center justify-between p-sm border border-white/5 rounded-lg hover:bg-white/5 transition-colors mb-sm">
+<div class="flex items-center gap-md">
+<div class="w-8 h-8 rounded bg-surface-container-high flex items-center justify-center text-on-surface-variant font-label-caps text-label-caps">2</div>
+<div>
+<div class="font-headline-md text-headline-md text-on-surface text-[20px]">AMD</div>
+<div class="font-body-sm text-body-sm text-on-surface-variant flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px]">warning</span> Tied Score
+                            </div>
+</div>
+</div>
+<div class="text-right">
+<div class="font-tabular-nums text-tabular-nums text-on-surface text-lg">0.942</div>
+<div class="font-label-caps text-label-caps text-on-surface-variant">Score</div>
+</div>
+</div>
+<!-- Tie Breaker Alert -->
+<div class="mt-sm p-sm bg-[#1a1500] border border-[#665200] rounded-lg flex items-start gap-sm">
+<span class="material-symbols-outlined text-[#ffc800] mt-0.5">account_tree</span>
+<div>
+<div class="font-body-sm text-body-sm text-[#ffc800] font-medium">Tie-Breaker Applied: Volume Momentum</div>
+<div class="font-body-sm text-body-sm text-[#ffc800]/70 mt-xs">NVDA exhibited higher relative volume over the preceding 5-minute window compared to AMD, prioritizing execution to capture implied momentum.</div>
+</div>
+</div>
+</div>
+<!-- Metrics Panel (Spans 4) -->
+<div class="col-span-1 lg:col-span-4 flex flex-col gap-gutter">
+<div class="bg-surface-container-low border border-white/5 rounded-lg p-md flex-1">
+<span class="font-label-caps text-label-caps text-on-surface-variant mb-md block border-b border-white/5 pb-sm">Score Analysis</span>
+<div class="flex justify-between items-center py-sm border-b border-white/5">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Max Score Limit</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface">1.000</span>
+</div>
+<div class="flex justify-between items-center py-sm border-b border-white/5">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Best Achieved</span>
+<span class="font-tabular-nums text-tabular-nums text-primary">0.942</span>
+</div>
+<div class="flex justify-between items-center py-sm border-b border-white/5">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Final Score Gap</span>
+<span class="font-tabular-nums text-tabular-nums text-error">0.058</span>
+</div>
+<div class="flex justify-between items-center py-sm">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Confidence Level</span>
+<div class="flex items-center gap-xs">
+<span class="w-1.5 h-1.5 rounded-full bg-[#00e676]"></span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface">High (94%)</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Pipelines Lists -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
+<!-- List 1: Quant Candidates -->
+<div class="bg-surface-container-lowest border border-white/5 rounded-lg flex flex-col">
+<div class="p-sm border-b border-white/5 flex justify-between items-center bg-surface-container-low/50 rounded-t-lg">
+<span class="font-label-caps text-label-caps text-on-surface-variant">Top Quant Candidates</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant text-[10px] bg-white/5 px-2 py-0.5 rounded-full">Top 10</span>
+</div>
+<div class="p-xs flex flex-col gap-xs max-h-[300px] overflow-y-auto">
+<!-- Item -->
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">NVDA</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.891</span>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">AMD</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.885</span>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">TSLA</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.872</span>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">MSFT</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.860</span>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">AAPL</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.855</span>
+</div>
+</div>
+</div>
+<!-- List 2: Researched Candidates -->
+<div class="bg-surface-container-lowest border border-white/5 rounded-lg flex flex-col">
+<div class="p-sm border-b border-white/5 flex justify-between items-center bg-surface-container-low/50 rounded-t-lg">
+<span class="font-label-caps text-label-caps text-on-surface-variant">Researched Candidates</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant text-[10px] bg-white/5 px-2 py-0.5 rounded-full">Refined</span>
+</div>
+<div class="p-xs flex flex-col gap-xs max-h-[300px] overflow-y-auto">
+<!-- Item -->
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">NVDA</span>
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-[#00e676]">arrow_upward</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.930</span>
+</div>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">AMD</span>
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-[#00e676]">arrow_upward</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">0.925</span>
+</div>
+</div>
+<div class="flex justify-between items-center px-sm py-xs rounded hover:bg-surface-container-low transition-colors opacity-50">
+<span class="font-tabular-nums text-tabular-nums text-on-surface line-through">TSLA</span>
+<div class="flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-error">close</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant">Drop</span>
+</div>
+</div>
+</div>
+</div>
+<!-- List 3: Dropped -->
+<div class="bg-surface-container-lowest border border-white/5 rounded-lg flex flex-col hidden lg:flex">
+<div class="p-sm border-b border-white/5 flex justify-between items-center bg-surface-container-low/50 rounded-t-lg">
+<span class="font-label-caps text-label-caps text-on-surface-variant">Filter Logs</span>
+<span class="font-tabular-nums text-tabular-nums text-on-surface-variant text-[10px] bg-white/5 px-2 py-0.5 rounded-full">Exceptions</span>
+</div>
+<div class="p-xs flex flex-col gap-xs max-h-[300px] overflow-y-auto">
+<div class="flex flex-col gap-0.5 px-sm py-xs rounded">
+<div class="flex justify-between items-center">
+<span class="font-tabular-nums text-tabular-nums text-on-surface">TSLA</span>
+<span class="font-tabular-nums text-tabular-nums text-error">Blocked</span>
+</div>
+<span class="font-body-sm text-[11px] text-on-surface-variant">Reason: Volatility limit exceeded (&gt;4%)</span>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Web View) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe bg-neutral-950 dark:bg-neutral-950 border-t border-white/5 shadow-2xl md:hidden">
+<!-- Inactive -->
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1">home</span>
+<span class="font-inter text-[10px] font-bold tracking-tight">Home</span>
+</a>
+<!-- Active -->
+<a class="flex flex-col items-center justify-center text-white bg-neutral-900 rounded-lg p-2 scale-95 duration-150" href="#">
+<span class="material-symbols-outlined mb-1">analytics</span>
+<span class="font-inter text-[10px] font-bold tracking-tight">Analysis</span>
+</a>
+<!-- Inactive -->
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1">receipt_long</span>
+<span class="font-inter text-[10px] font-bold tracking-tight">Logs</span>
+</a>
+<!-- Inactive -->
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1">settings</span>
+<span class="font-inter text-[10px] font-bold tracking-tight">Settings</span>
+</a>
+</nav>
+<!-- Full Nav Appended to TopAppBar for Desktop (Following standard rule for hidden md:flex) -->
+<div class="hidden md:flex fixed top-0 left-1/2 -translate-x-1/2 h-16 items-center gap-8 z-[51]">
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:text-white transition-colors" href="#">Home</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-white hover:text-white transition-colors" href="#">Analysis</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:text-white transition-colors" href="#">Logs</a>
+<a class="font-inter text-sm font-semibold tracking-wider uppercase text-neutral-500 hover:text-white transition-colors" href="#">Settings</a>
+</div>
+</body></html>
+
+<!-- Analysis -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Quantum - Execution Logs</title>
+<!-- Fonts & Icons -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-surface-variant": "#c4c7c8",
+                        "secondary-container": "#474746",
+                        "on-tertiary": "#303030",
+                        "error-container": "#93000a",
+                        "on-tertiary-container": "#656464",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-container": "#e2e2e2",
+                        "surface-tint": "#c6c6c7",
+                        "surface-dim": "#141313",
+                        "secondary-fixed": "#e5e2e1",
+                        "surface": "#141313",
+                        "on-primary-container": "#636565",
+                        "on-primary-fixed": "#1a1c1c",
+                        "on-secondary": "#313030",
+                        "on-secondary-fixed": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-highest": "#353434",
+                        "tertiary-fixed": "#e4e2e1",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "primary-fixed": "#e2e2e2",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-container": "#b7b5b4",
+                        "inverse-primary": "#5d5f5f",
+                        "on-surface": "#e5e2e1",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "error": "#ffb4ab",
+                        "on-error": "#690005",
+                        "inverse-on-surface": "#313030",
+                        "outline-variant": "#444748",
+                        "on-error-container": "#ffdad6",
+                        "tertiary": "#ffffff",
+                        "on-tertiary-fixed-variant": "#474746",
+                        "outline": "#8e9192",
+                        "on-primary": "#2f3131",
+                        "surface-container": "#201f1f",
+                        "secondary": "#c8c6c5",
+                        "background": "#141313",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "surface-variant": "#353434",
+                        "primary": "#ffffff",
+                        "tertiary-fixed-dim": "#c8c6c5",
+                        "on-background": "#e5e2e1",
+                        "surface-bright": "#3a3939",
+                        "tertiary-container": "#e4e2e1",
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-container-high": "#2a2a2a",
+                        "on-primary-fixed-variant": "#454747"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "xs": "4px",
+                        "container-padding": "32px",
+                        "base": "8px",
+                        "md": "24px",
+                        "sm": "12px",
+                        "lg": "40px",
+                        "gutter": "16px",
+                        "xl": "64px"
+                    },
+                    fontFamily: {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "tabular-nums": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-caps": ["Inter"]
+                    },
+                    fontSize: {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "tabular-nums": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "label-caps": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-lg min-h-screen antialiased selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-black/95 dark:bg-black/95 backdrop-blur-md text-neutral-100 dark:text-neutral-100 shadow-none border-b border-white/10">
+<div class="flex items-center gap-md">
+<div class="w-8 h-8 rounded-full bg-surface-container overflow-hidden ring-1 ring-outline-variant">
+<img alt="Executive Profile" class="w-full h-full object-cover" data-alt="minimalist corporate avatar portrait dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDctleFbhHfKqNsKpAfRbCv8xG0mxBcBlaIC4ZNw0u0fy2kI4PHdLFhJTSis7bX8ewM-UZwSMfGACfTHL79vPWKAG3EAMNDuMobpGTuLwaIWAPbr-u_Y81apmQ5AU27fNjNkPwTlMdteMFFPFAcom-6U6w3q9OyacEFku_OtPD0mOe4zf7m9uKgVePFzAgIYKKyNsUeVpK_0-i0Tj6vrCSVFUE6Us3dY9gDEixuaheXhDts6UTY7HP8_0J4d335fLwaGzBIVEByMng"/>
+</div>
+<h1 class="text-lg font-black tracking-tighter text-white uppercase font-inter text-sm font-semibold tracking-wider uppercase">QUANTUM</h1>
+</div>
+<!-- Desktop Navigation Cluster (Hidden on Mobile) -->
+<nav class="hidden md:flex items-center gap-sm">
+<a class="px-sm py-xs rounded-full font-body-sm text-body-sm text-neutral-500 hover:bg-white/5 transition-colors" href="#">Home</a>
+<a class="px-sm py-xs rounded-full font-body-sm text-body-sm text-neutral-500 hover:bg-white/5 transition-colors" href="#">Analysis</a>
+<a class="px-sm py-xs rounded-full font-body-sm text-body-sm text-white bg-white/10 transition-colors" href="#">Logs</a>
+<a class="px-sm py-xs rounded-full font-body-sm text-body-sm text-neutral-500 hover:bg-white/5 transition-colors" href="#">Settings</a>
+</nav>
+<button class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 transition-colors text-neutral-100 dark:text-neutral-100">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</header>
+<!-- Main Canvas -->
+<main class="pt-[88px] pb-[100px] md:pb-xl max-w-[1440px] mx-auto px-4 md:px-container-padding flex flex-col gap-lg">
+<!-- Page Header & Filters -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-md">
+<div class="flex flex-col gap-xs">
+<h2 class="font-display-lg text-display-lg text-on-surface">System Logs</h2>
+<p class="font-body-lg text-body-lg text-on-surface-variant">Real-time execution matrix and algorithm health reports.</p>
+</div>
+<div class="flex flex-wrap items-center gap-sm">
+<button class="px-sm py-xs rounded-full bg-primary text-on-primary font-body-sm text-body-sm ring-1 ring-primary">All Entries</button>
+<button class="px-sm py-xs rounded-full bg-surface-container-highest text-on-surface-variant font-body-sm text-body-sm ring-1 ring-outline-variant hover:bg-surface-container transition-colors">Success</button>
+<button class="px-sm py-xs rounded-full bg-surface-container-highest text-on-surface-variant font-body-sm text-body-sm ring-1 ring-outline-variant hover:bg-surface-container transition-colors flex items-center gap-xs">
+                    Warnings
+                    <span class="w-2 h-2 rounded-full bg-primary-fixed-dim"></span>
+</button>
+<button class="px-sm py-xs rounded-full bg-error-container/20 text-on-error-container font-body-sm text-body-sm ring-1 ring-error-container hover:bg-error-container/30 transition-colors flex items-center gap-xs">
+                    Errors
+                    <span class="w-2 h-2 rounded-full bg-error"></span>
+</button>
+</div>
+</div>
+<!-- Log List Container -->
+<div class="flex flex-col gap-xs">
+<!-- List Header (Desktop Only) -->
+<div class="hidden md:grid grid-cols-[100px_80px_1fr_180px_120px_120px] gap-gutter px-md py-sm border-b border-outline-variant/30 text-on-surface-variant font-label-caps text-label-caps">
+<div>Timestamp</div>
+<div>Symbol</div>
+<div>Log Details &amp; Reason</div>
+<div>Trigger Source</div>
+<div>Order ID</div>
+<div>Status</div>
+</div>
+<!-- Log Entry: Error -->
+<div class="group flex flex-col md:grid md:grid-cols-[100px_80px_1fr_180px_120px_120px] gap-sm md:gap-gutter md:items-center p-sm md:px-md md:py-sm bg-surface-container-lowest border border-outline-variant/20 rounded-lg hover:bg-surface-container transition-colors relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-error"></div>
+<div class="font-tabular-nums text-tabular-nums text-on-surface-variant order-1">14:02:44.102</div>
+<div class="order-3 md:order-2 self-start md:self-auto"><span class="bg-surface-container-high px-2 py-1 rounded font-label-caps text-label-caps text-on-surface tracking-widest">NVDA</span></div>
+<div class="order-4 md:order-3 flex flex-col">
+<span class="font-body-sm text-body-sm text-on-surface truncate">API Rate Limit Exceeded - Connection Dropped</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate md:hidden">Source: Alpha-Theta-2</span>
+</div>
+<div class="hidden md:block order-4 font-body-sm text-body-sm text-on-surface-variant truncate">Alpha-Theta-2</div>
+<div class="order-5 font-tabular-nums text-tabular-nums text-on-surface-variant truncate">ERR-9402X</div>
+<div class="order-2 md:order-6 flex items-center self-end md:self-auto ml-auto md:ml-0">
+<div class="flex items-center gap-xs px-2 py-1 rounded-full bg-error-container text-on-error-container font-label-caps text-label-caps ring-1 ring-error/20">
+<span class="w-1.5 h-1.5 rounded-full bg-error animate-pulse"></span>
+                        FAILED
+                    </div>
+</div>
+</div>
+<!-- Log Entry: Success -->
+<div class="group flex flex-col md:grid md:grid-cols-[100px_80px_1fr_180px_120px_120px] gap-sm md:gap-gutter md:items-center p-sm md:px-md md:py-sm bg-surface-container-lowest border border-outline-variant/20 rounded-lg hover:bg-surface-container transition-colors">
+<div class="font-tabular-nums text-tabular-nums text-on-surface-variant order-1">14:01:12.055</div>
+<div class="order-3 md:order-2 self-start md:self-auto"><span class="bg-surface-container-high px-2 py-1 rounded font-label-caps text-label-caps text-on-surface tracking-widest">TSLA</span></div>
+<div class="order-4 md:order-3 flex flex-col">
+<span class="font-body-sm text-body-sm text-on-surface truncate">VWAP Crossover Strategy Executed Successfully</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate md:hidden">Source: Momentum-Core</span>
+</div>
+<div class="hidden md:block order-4 font-body-sm text-body-sm text-on-surface-variant truncate">Momentum-Core</div>
+<div class="order-5 font-tabular-nums text-tabular-nums text-on-surface-variant truncate">ORD-7719A</div>
+<div class="order-2 md:order-6 flex items-center self-end md:self-auto ml-auto md:ml-0">
+<div class="flex items-center gap-xs px-2 py-1 rounded-full bg-surface-container-high text-on-surface font-label-caps text-label-caps ring-1 ring-outline-variant/50">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                        COMPLETE
+                    </div>
+</div>
+</div>
+<!-- Log Entry: Success 2 -->
+<div class="group flex flex-col md:grid md:grid-cols-[100px_80px_1fr_180px_120px_120px] gap-sm md:gap-gutter md:items-center p-sm md:px-md md:py-sm bg-surface-container-lowest border border-outline-variant/20 rounded-lg hover:bg-surface-container transition-colors">
+<div class="font-tabular-nums text-tabular-nums text-on-surface-variant order-1">13:58:30.901</div>
+<div class="order-3 md:order-2 self-start md:self-auto"><span class="bg-surface-container-high px-2 py-1 rounded font-label-caps text-label-caps text-on-surface tracking-widest">AAPL</span></div>
+<div class="order-4 md:order-3 flex flex-col">
+<span class="font-body-sm text-body-sm text-on-surface truncate">Mean Reversion Signal Confirmed, Position Sized</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate md:hidden">Source: Delta-Neutral-Bot</span>
+</div>
+<div class="hidden md:block order-4 font-body-sm text-body-sm text-on-surface-variant truncate">Delta-Neutral-Bot</div>
+<div class="order-5 font-tabular-nums text-tabular-nums text-on-surface-variant truncate">ORD-7718A</div>
+<div class="order-2 md:order-6 flex items-center self-end md:self-auto ml-auto md:ml-0">
+<div class="flex items-center gap-xs px-2 py-1 rounded-full bg-surface-container-high text-on-surface font-label-caps text-label-caps ring-1 ring-outline-variant/50">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                        COMPLETE
+                    </div>
+</div>
+</div>
+<!-- Log Entry: Neutral/Idle -->
+<div class="group flex flex-col md:grid md:grid-cols-[100px_80px_1fr_180px_120px_120px] gap-sm md:gap-gutter md:items-center p-sm md:px-md md:py-sm bg-surface-container-lowest border border-outline-variant/20 rounded-lg hover:bg-surface-container transition-colors">
+<div class="font-tabular-nums text-tabular-nums text-on-surface-variant order-1">13:45:00.000</div>
+<div class="order-3 md:order-2 self-start md:self-auto"><span class="bg-surface-container-high px-2 py-1 rounded font-label-caps text-label-caps text-on-surface-variant tracking-widest">SYS</span></div>
+<div class="order-4 md:order-3 flex flex-col">
+<span class="font-body-sm text-body-sm text-on-surface truncate">Routine Health Check Passed. Latency: 12ms</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate md:hidden">Source: System-Watchdog</span>
+</div>
+<div class="hidden md:block order-4 font-body-sm text-body-sm text-on-surface-variant truncate">System-Watchdog</div>
+<div class="order-5 font-tabular-nums text-tabular-nums text-on-surface-variant truncate text-outline-variant">---</div>
+<div class="order-2 md:order-6 flex items-center self-end md:self-auto ml-auto md:ml-0">
+<div class="flex items-center gap-xs px-2 py-1 rounded-full bg-surface-container text-on-surface-variant font-label-caps text-label-caps ring-1 ring-outline-variant/30">
+<span class="w-1.5 h-1.5 rounded-full bg-outline-variant"></span>
+                        IDLE
+                    </div>
+</div>
+</div>
+<!-- Log Entry: Warning -->
+<div class="group flex flex-col md:grid md:grid-cols-[100px_80px_1fr_180px_120px_120px] gap-sm md:gap-gutter md:items-center p-sm md:px-md md:py-sm bg-surface-container-lowest border border-outline-variant/20 rounded-lg hover:bg-surface-container transition-colors relative overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary-fixed-dim"></div>
+<div class="font-tabular-nums text-tabular-nums text-on-surface-variant order-1">13:30:15.550</div>
+<div class="order-3 md:order-2 self-start md:self-auto"><span class="bg-surface-container-high px-2 py-1 rounded font-label-caps text-label-caps text-on-surface tracking-widest">MSFT</span></div>
+<div class="order-4 md:order-3 flex flex-col">
+<span class="font-body-sm text-body-sm text-on-surface truncate">Slippage Tolerance Approaching Threshold (0.4%)</span>
+<span class="font-body-sm text-[12px] text-on-surface-variant truncate md:hidden">Source: Execution-Router</span>
+</div>
+<div class="hidden md:block order-4 font-body-sm text-body-sm text-on-surface-variant truncate">Execution-Router</div>
+<div class="order-5 font-tabular-nums text-tabular-nums text-on-surface-variant truncate">ORD-7702C</div>
+<div class="order-2 md:order-6 flex items-center self-end md:self-auto ml-auto md:ml-0">
+<div class="flex items-center gap-xs px-2 py-1 rounded-full bg-surface-container text-on-surface font-label-caps text-label-caps ring-1 ring-outline-variant/50">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-fixed-dim"></span>
+                        WARNING
+                    </div>
+</div>
+</div>
+</div>
+<div class="flex justify-center mt-md">
+<button class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-surface px-md py-sm rounded-lg hover:bg-surface-container-highest transition-colors flex items-center gap-xs">
+                Load Older Logs
+                <span class="material-symbols-outlined text-[16px]">expand_more</span>
+</button>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe bg-neutral-950 dark:bg-neutral-950 text-white dark:text-white font-inter text-[10px] font-bold tracking-tight border-t border-white/5 shadow-2xl">
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">home</span>
+<span>Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">analytics</span>
+<span>Analysis</span>
+</a>
+<a class="flex flex-col items-center justify-center text-white bg-neutral-900 rounded-lg p-2 scale-95 duration-150" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">receipt_long</span>
+<span>Logs</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">settings</span>
+<span>Settings</span>
+</a>
+</nav>
+</body></html>
+
+<!-- Logs -->
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Quantum - Settings</title>
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-surface-variant": "#c4c7c8",
+                        "secondary-container": "#474746",
+                        "on-tertiary": "#303030",
+                        "error-container": "#93000a",
+                        "on-tertiary-container": "#656464",
+                        "surface-container-lowest": "#0e0e0e",
+                        "primary-container": "#e2e2e2",
+                        "surface-tint": "#c6c6c7",
+                        "surface-dim": "#141313",
+                        "secondary-fixed": "#e5e2e1",
+                        "surface": "#141313",
+                        "on-primary-container": "#636565",
+                        "on-primary-fixed": "#1a1c1c",
+                        "on-secondary": "#313030",
+                        "on-secondary-fixed": "#1c1b1b",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-highest": "#353434",
+                        "tertiary-fixed": "#e4e2e1",
+                        "secondary-fixed-dim": "#c8c6c5",
+                        "primary-fixed": "#e2e2e2",
+                        "surface-container-low": "#1c1b1b",
+                        "on-secondary-container": "#b7b5b4",
+                        "inverse-primary": "#5d5f5f",
+                        "on-surface": "#e5e2e1",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "error": "#ffb4ab",
+                        "on-error": "#690005",
+                        "inverse-on-surface": "#313030",
+                        "outline-variant": "#444748",
+                        "on-error-container": "#ffdad6",
+                        "tertiary": "#ffffff",
+                        "on-tertiary-fixed-variant": "#474746",
+                        "outline": "#8e9192",
+                        "on-primary": "#2f3131",
+                        "surface-container": "#201f1f",
+                        "secondary": "#c8c6c5",
+                        "background": "#141313",
+                        "primary-fixed-dim": "#c6c6c7",
+                        "surface-variant": "#353434",
+                        "primary": "#ffffff",
+                        "tertiary-fixed-dim": "#c8c6c5",
+                        "on-background": "#e5e2e1",
+                        "surface-bright": "#3a3939",
+                        "tertiary-container": "#e4e2e1",
+                        "on-secondary-fixed-variant": "#474746",
+                        "surface-container-high": "#2a2a2a",
+                        "on-primary-fixed-variant": "#454747"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "xs": "4px",
+                        "container-padding": "32px",
+                        "base": "8px",
+                        "md": "24px",
+                        "sm": "12px",
+                        "lg": "40px",
+                        "gutter": "16px",
+                        "xl": "64px"
+                    },
+                    "fontFamily": {
+                        "body-sm": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "display-lg": ["Inter"],
+                        "tabular-nums": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-caps": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-sm": ["14px", { "lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "display-lg": ["48px", { "lineHeight": "1.1", "letterSpacing": "-0.02em", "fontWeight": "600" }],
+                        "tabular-nums": ["14px", { "lineHeight": "1.4", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "body-lg": ["16px", { "lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400" }],
+                        "label-caps": ["12px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "700" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-lowest text-on-surface font-body-sm antialiased selection:bg-primary-container selection:text-on-primary-container min-h-screen">
+<!-- TopAppBar -->
+<header class="bg-black/95 dark:bg-black/95 backdrop-blur-md text-neutral-100 dark:text-neutral-100 font-inter text-sm font-semibold tracking-wider uppercase border-b border-white/10 shadow-none fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 h-16">
+<div class="flex items-center gap-4">
+<div class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-high border border-outline-variant/30 flex items-center justify-center">
+<img alt="Executive Profile" class="w-full h-full object-cover" data-alt="professional corporate headshot of an executive with dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDOIgZT-SBtenpsuo90lVmA1RLDPwpxGOs6tnaUOerRn4zy73qI0y_1VZ3f6_wB65qJwAORhmJLxrZVV-kmcFxhOK51Zz7zxcEZeIAzcavFjLSKOex9lCppv1BjrFu4qydqywtEE4zgfiA92y8dBrrnqPahMF6eYoBDoHhQnCrESdwWmKp8Y8DNwEkIiwYwrDBOY1Nz__zvXFWW-lnhmpMTxzc7MySQ2EPHOh5cPNauk9wlJpUfejSj4Q73PWVTcW-ciD43l_oEITc"/>
+</div>
+<span class="text-lg font-black tracking-tighter text-white uppercase">QUANTUM</span>
+</div>
+<div class="flex items-center">
+<button aria-label="Notifications" class="hover:bg-white/5 transition-colors p-2 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+</div>
+</header>
+<!-- Main Content Canvas -->
+<main class="max-w-[1440px] mx-auto pt-24 pb-32 md:pb-24 px-container-padding">
+<div class="mb-lg flex justify-between items-end">
+<div>
+<h1 class="font-headline-md text-headline-md text-on-surface mb-xs">System Preferences</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Configure core algorithmic parameters and operational safeguards.</p>
+</div>
+<button class="bg-gradient-to-b from-primary to-surface-tint text-on-primary font-label-caps text-label-caps px-md py-sm rounded-md shadow-[0_1px_2px_rgba(0,0,0,0.5)] border border-white/20 hover:opacity-90 transition-opacity">
+                SAVE CHANGES
+            </button>
+</div>
+<!-- Settings Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-md">
+<!-- Operational Status -->
+<section class="lg:col-span-4 bg-surface-container-low border border-outline-variant/20 rounded-xl p-md flex flex-col gap-sm">
+<div class="flex items-center gap-2 mb-sm">
+<span class="material-symbols-outlined text-primary" data-icon="power_settings_new" data-weight="fill" style="font-variation-settings: 'FILL' 1;">power_settings_new</span>
+<h2 class="font-body-lg text-body-lg font-semibold text-on-surface">Operational Status</h2>
+</div>
+<div class="flex items-center justify-between py-xs border-b border-outline-variant/10">
+<div>
+<span class="font-body-sm text-body-sm text-on-surface block">Algorithmic Bot</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant font-normal">ENABLE AUTO-EXECUTION</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value=""/>
+<div class="w-10 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-outline after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+<div class="flex items-center justify-between py-xs border-b border-outline-variant/10">
+<div>
+<span class="font-body-sm text-body-sm text-on-surface block">Scheduler</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant font-normal">FOLLOW MARKET HOURS</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox" value=""/>
+<div class="w-10 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-outline after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+<div class="flex items-center justify-between py-xs">
+<div>
+<span class="font-body-sm text-body-sm text-on-surface block">Dry Run Mode</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant font-normal">SIMULATE TRADES ONLY</span>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input class="sr-only peer" type="checkbox" value=""/>
+<div class="w-10 h-5 bg-surface-container-highest peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-surface after:border-outline after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-container"></div>
+</label>
+</div>
+</section>
+<!-- Risk Parameters -->
+<section class="lg:col-span-4 bg-surface-container-low border border-outline-variant/20 rounded-xl p-md flex flex-col gap-sm">
+<div class="flex items-center gap-2 mb-sm">
+<span class="material-symbols-outlined text-secondary" data-icon="monitoring">monitoring</span>
+<h2 class="font-body-lg text-body-lg font-semibold text-on-surface">Risk Parameters</h2>
+</div>
+<div class="flex flex-col gap-1 mb-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant">MAX DAILY TRADES</label>
+<input class="bg-surface-dim border border-outline-variant text-on-surface font-tabular-nums text-tabular-nums focus:border-primary focus:ring-1 focus:ring-primary rounded-md px-3 py-2 w-full outline-none transition-colors" type="number" value="150"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-caps text-label-caps text-on-surface-variant">MAX DAILY ENTRIES (PER TICKER)</label>
+<input class="bg-surface-dim border border-outline-variant text-on-surface font-tabular-nums text-tabular-nums focus:border-primary focus:ring-1 focus:ring-primary rounded-md px-3 py-2 w-full outline-none transition-colors" type="number" value="5"/>
+</div>
+</section>
+<!-- Algo Thresholds -->
+<section class="lg:col-span-4 bg-surface-container-low border border-outline-variant/20 rounded-xl p-md flex flex-col gap-sm">
+<div class="flex items-center gap-2 mb-sm">
+<span class="material-symbols-outlined text-secondary" data-icon="tune">tune</span>
+<h2 class="font-body-lg text-body-lg font-semibold text-on-surface">Algo Thresholds</h2>
+</div>
+<div class="flex flex-col gap-1 mb-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant">MIN ENTRY SCORE (0-100)</label>
+<input class="bg-surface-dim border border-outline-variant text-on-surface font-tabular-nums text-tabular-nums focus:border-primary focus:ring-1 focus:ring-primary rounded-md px-3 py-2 w-full outline-none transition-colors" step="0.1" type="number" value="82.5"/>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-caps text-label-caps text-on-surface-variant">MIN SCORE GAP</label>
+<input class="bg-surface-dim border border-outline-variant text-on-surface font-tabular-nums text-tabular-nums focus:border-primary focus:ring-1 focus:ring-primary rounded-md px-3 py-2 w-full outline-none transition-colors" step="0.1" type="number" value="5.0"/>
+</div>
+</section>
+<!-- Broker Configuration -->
+<section class="lg:col-span-6 bg-surface-container-low border border-outline-variant/20 rounded-xl p-md flex flex-col gap-sm">
+<div class="flex items-center gap-2 mb-sm">
+<span class="material-symbols-outlined text-secondary" data-icon="account_balance">account_balance</span>
+<h2 class="font-body-lg text-body-lg font-semibold text-on-surface">Broker Configuration</h2>
+</div>
+<div class="flex flex-col gap-1 mb-2">
+<label class="font-label-caps text-label-caps text-on-surface-variant">BROKER MODE</label>
+<div class="relative">
+<select class="appearance-none bg-surface-dim border border-outline-variant text-on-surface font-body-sm text-body-sm focus:border-primary focus:ring-1 focus:ring-primary rounded-md px-3 py-2 w-full outline-none transition-colors pr-10">
+<option>Institutional Routing (Direct)</option>
+<option>Retail API (Interactive Brokers)</option>
+<option>Retail API (TD Ameritrade)</option>
+</select>
+<span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant pointer-events-none" data-icon="expand_more">expand_more</span>
+</div>
+</div>
+<div class="flex flex-col gap-1">
+<label class="font-label-caps text-label-caps text-on-surface-variant">API ENDPOINT</label>
+<input class="bg-surface-container border border-outline-variant/50 text-on-surface-variant font-tabular-nums text-tabular-nums rounded-md px-3 py-2 w-full outline-none opacity-70 cursor-not-allowed" disabled="" type="text" value="wss://api.quantum-routing.net/v3/stream"/>
+</div>
+</section>
+<!-- Safety Section -->
+<section class="lg:col-span-6 bg-[#1A0505] border border-error-container/30 rounded-xl p-md flex flex-col gap-sm relative overflow-hidden">
+<!-- Subtle warning glow -->
+<div class="absolute top-0 right-0 w-32 h-32 bg-error-container/20 blur-3xl rounded-full pointer-events-none"></div>
+<div class="flex items-center gap-2 mb-sm relative z-10">
+<span class="material-symbols-outlined text-error" data-icon="warning" data-weight="fill" style="font-variation-settings: 'FILL' 1;">warning</span>
+<h2 class="font-body-lg text-body-lg font-semibold text-error">Safety Protocol</h2>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-auto relative z-10">
+                    Engaging the kill switch will immediately halt all active algorithmic trading, cancel pending orders, and flatten all open positions at market price. <br/><br/>
+<span class="text-on-surface/70 italic">Note: High-impact actions will require biometric or 2FA confirmation via a secure modal before execution.</span>
+</p>
+<div class="mt-sm relative z-10 border-t border-error-container/20 pt-sm">
+<button class="w-full bg-gradient-to-b from-error-container to-error text-on-error font-label-caps text-label-caps px-4 py-3 rounded-md shadow-[0_1px_4px_rgba(0,0,0,0.8)] border border-error/50 hover:opacity-90 transition-opacity flex items-center justify-center gap-2 uppercase tracking-wider font-bold">
+<span class="material-symbols-outlined text-on-error" data-icon="eject">eject</span>
+                        Initiate Global Kill Switch
+                    </button>
+</div>
+</section>
+</div>
+</main>
+<!-- BottomNavBar (Hidden on md as per instructions) -->
+<nav class="md:hidden bg-neutral-950 dark:bg-neutral-950 border-t border-white/5 fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 py-3 pb-safe shadow-2xl">
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Analysis</span>
+</a>
+<a class="flex flex-col items-center justify-center text-neutral-500 p-2 hover:text-neutral-200" href="#">
+<span class="material-symbols-outlined" data-icon="receipt_long">receipt_long</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Logs</span>
+</a>
+<a class="flex flex-col items-center justify-center text-white bg-neutral-900 rounded-lg p-2 scale-95 duration-150" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-inter text-[10px] font-bold tracking-tight mt-1">Settings</span>
+</a>
+</nav>
+</body></html>
