@@ -24,10 +24,32 @@ class LastRunSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!controller.hasLatestRunResult && !controller.showingOfflineFallback) {
+      return const SectionCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Last Run Summary',
+              style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.white70,
+                  fontWeight: FontWeight.w700)),
+          SizedBox(height: 12),
+          Text('No watchlist run yet',
+              style:
+                  TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        ]),
+      );
+    }
+
     final r = controller.runResult;
     final triggerText =
         r.shouldTrade ? 'Trade trigger ready' : 'No trade trigger';
     final orderText = r.orderId == null ? 'No order created' : r.orderId!;
+    final resultText = r.result.isEmpty ? 'No run yet' : r.result;
+    final triggerSourceText =
+        r.triggerSource.isEmpty ? 'No run yet' : r.triggerSource;
+    final finalBestCandidate =
+        r.finalBestCandidate.isEmpty ? 'None' : r.finalBestCandidate;
+    final actionText = r.action.isEmpty ? 'HOLD' : r.action.toUpperCase();
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Last Run Summary',
@@ -35,16 +57,22 @@ class LastRunSummaryCard extends StatelessWidget {
                 fontSize: 14,
                 color: Colors.white70,
                 fontWeight: FontWeight.w700)),
+        if (controller.showingOfflineFallback) ...[
+          const SizedBox(height: 8),
+          const Text('Offline sample data',
+              style: TextStyle(
+                  color: Colors.orangeAccent, fontWeight: FontWeight.w600)),
+        ],
         const SizedBox(height: 12),
         Wrap(
           runSpacing: 10,
           children: [
             Row(children: [
-              _item('Result', r.result),
-              _item('Trigger Source', r.triggerSource)
+              _item('Result', resultText),
+              _item('Trigger Source', triggerSourceText)
             ]),
             Row(children: [
-              _item('Final Best Candidate', r.finalBestCandidate),
+              _item('Final Best Candidate', finalBestCandidate),
               _item('Best Score', '${r.bestScore}')
             ]),
             Row(children: [
@@ -64,8 +92,7 @@ class LastRunSummaryCard extends StatelessWidget {
             Row(children: [
               _item('Trigger Block Reason', r.triggerBlockReason,
                   color: Colors.orangeAccent),
-              _item(
-                  'Action', r.action.isEmpty ? 'HOLD' : r.action.toUpperCase())
+              _item('Action', actionText)
             ]),
           ],
         )

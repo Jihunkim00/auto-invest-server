@@ -17,6 +17,10 @@ class DashboardScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final runAction =
+            controller.hasLatestRunResult || controller.showingOfflineFallback
+                ? controller.runResult.action
+                : 'No run yet';
         return SafeArea(
           child: RefreshIndicator(
             onRefresh: controller.load,
@@ -34,9 +38,9 @@ class DashboardScreen extends StatelessWidget {
                   StatusBadge(text: 'Paper Mode', active: true),
                   const SizedBox(width: 8),
                   StatusBadge(
-                      text: controller.runResult.action,
+                      text: runAction.isEmpty ? 'No run yet' : runAction,
                       active: false,
-                      alert: controller.runResult.action == 'hold'),
+                      alert: runAction == 'hold'),
                 ]),
                 const SizedBox(height: 16),
                 LayoutBuilder(

@@ -264,6 +264,7 @@ class WatchlistRunService:
             response_payload = {
                 **analysis,
                 "triggered_symbol": None,
+                "should_trade": False,
                 "trade_result": trade_result,
                 "trigger_block_reason": trigger_block_reason,
                 "quant_candidates_count": len(quant_candidates),
@@ -334,8 +335,14 @@ class WatchlistRunService:
         response_payload = {
             **analysis,
             "triggered_symbol": symbol,
+            "should_trade": should_trade,
             "trade_result": trade_result,
             "child_run": child_result,
+            "trigger_block_reason": trigger_block_reason,
+            "quant_candidates_count": len(quant_candidates),
+            "researched_candidates_count": len(researched_candidates),
+            "top_quant_candidates": top_quant_candidates,
+            "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
             "final_best_candidate": final_best_candidate,
             "second_final_candidate": second_final_candidate,
@@ -344,6 +351,11 @@ class WatchlistRunService:
             "tie_breaker_applied": tie_breaker_applied,
             "final_candidate_selection_reason": final_candidate_selection_reason,
             "final_score_gap": final_score_gap,
+            "best_score": best_score,
+            "min_entry_score": min_entry_score,
+            "strong_entry_score": strong_entry_score,
+            "min_score_gap": min_score_gap,
+            "max_sell_score": max_sell_score,
         }
 
         result["trade_result"] = trade_result

@@ -6,6 +6,36 @@ import '../../models/ops_settings.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
+const _emptyRunResult = WatchlistRunResult(
+  configuredSymbolCount: 0,
+  analyzedSymbolCount: 0,
+  quantCandidatesCount: 0,
+  researchedCandidatesCount: 0,
+  finalBestCandidate: '',
+  secondFinalCandidate: '',
+  tiedFinalCandidates: [],
+  nearTiedCandidates: [],
+  tieBreakerApplied: false,
+  finalCandidateSelectionReason: '',
+  bestScore: 0,
+  finalScoreGap: 0,
+  minEntryScore: 0,
+  minScoreGap: 0,
+  shouldTrade: false,
+  triggeredSymbol: null,
+  triggerBlockReason: '',
+  finalEntryReady: false,
+  finalActionHint: 'watch',
+  action: '',
+  orderId: null,
+  topQuantCandidates: [],
+  researchedCandidates: [],
+  finalRankedCandidates: [],
+  result: '',
+  reason: '',
+  triggerSource: '',
+);
+
 class ActionResult {
   const ActionResult({required this.success, required this.message});
 
@@ -14,8 +44,10 @@ class ActionResult {
 }
 
 class DashboardController extends ChangeNotifier {
-  DashboardController(this.apiClient) {
-    load();
+  DashboardController(this.apiClient, {bool autoload = true}) {
+    if (autoload) {
+      load();
+    }
   }
 
   final ApiClient apiClient;
@@ -33,39 +65,12 @@ class DashboardController extends ChangeNotifier {
     minScoreGap: 3,
   );
 
-  WatchlistRunResult runResult = const WatchlistRunResult(
-    configuredSymbolCount: 50,
-    analyzedSymbolCount: 50,
-    quantCandidatesCount: 5,
-    researchedCandidatesCount: 5,
-    finalBestCandidate: 'WMT',
-    secondFinalCandidate: 'CSCO',
-    tiedFinalCandidates: ['WMT', 'CSCO', 'APP'],
-    nearTiedCandidates: ['WMT', 'CSCO', 'APP'],
-    tieBreakerApplied: true,
-    finalCandidateSelectionReason:
-        'Tie-breaker prioritized stability and volume momentum among near-tied final candidates.',
-    bestScore: 68,
-    finalScoreGap: 0,
-    minEntryScore: 65,
-    minScoreGap: 3,
-    shouldTrade: false,
-    triggeredSymbol: null,
-    triggerBlockReason: 'weak_final_score_gap',
-    finalEntryReady: false,
-    finalActionHint: 'watch',
-    action: 'hold',
-    orderId: null,
-    topQuantCandidates: [],
-    researchedCandidates: [],
-    finalRankedCandidates: [],
-    result: 'skipped',
-    reason: 'weak_final_score_gap',
-    triggerSource: 'manual',
-  );
+  WatchlistRunResult runResult = _emptyRunResult;
 
   List<TradingRun> recentRuns = const [];
   String? error;
+  bool hasLatestRunResult = false;
+  bool showingOfflineFallback = false;
   bool loading = false;
   bool schedulerLoading = false;
   bool botLoading = false;
@@ -80,9 +85,28 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
-      runResult = apiClient.getMockRunResult();
+      try {
+        final latestRun = await apiClient.fetchLatestWatchlistRunResult();
+        if (latestRun == null) {
+          runResult = _emptyRunResult;
+          hasLatestRunResult = false;
+          showingOfflineFallback = false;
+        } else {
+          runResult = latestRun;
+          hasLatestRunResult = true;
+          showingOfflineFallback = false;
+        }
+        error = null;
+      } catch (_) {
+        if (!hasLatestRunResult) {
+          runResult = apiClient.getMockRunResult();
+          showingOfflineFallback = true;
+        }
+        error = showingOfflineFallback
+            ? 'Backend latest watchlist run unavailable; showing offline sample data.'
+            : 'Backend latest watchlist run unavailable; keeping current result.';
+      }
       recentRuns = await apiClient.getRecentTradingRuns();
-      error = null;
     } catch (e) {
       error = e.toString();
     } finally {
@@ -98,6 +122,8 @@ class DashboardController extends ChangeNotifier {
     try {
       final result = await apiClient.runWatchlistOnce();
       runResult = result;
+      hasLatestRunResult = true;
+      showingOfflineFallback = false;
       recentRuns = await apiClient.getRecentTradingRuns();
       return ActionResult(
           success: true, message: 'Watchlist analysis completed.');

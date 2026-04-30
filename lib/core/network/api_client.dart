@@ -90,6 +90,47 @@ class ApiClient {
     return WatchlistRunResult.fromJson(j);
   }
 
+  Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/trading/watchlist/latest')
+        .replace(queryParameters: {
+      '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+    });
+
+    try {
+      final r = await _client.get(uri, headers: const {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      });
+      if (r.statusCode == 404 || r.statusCode == 204) return null;
+      if (r.statusCode >= 400) {
+        throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      }
+
+      final decoded = jsonDecode(r.body);
+      if (decoded is! Map) {
+        throw const ApiRequestException('Invalid latest run response.');
+      }
+
+      final body = Map<String, dynamic>.from(decoded);
+      final rawItem = body.containsKey('item') ? body['item'] : body;
+      if (body['has_data'] == false || rawItem == null) return null;
+      if (rawItem is! Map) {
+        throw const ApiRequestException('Invalid latest run item.');
+      }
+
+      return WatchlistRunResult.fromJson(Map<String, dynamic>.from(rawItem));
+    } on ApiRequestException {
+      rethrow;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend response: $e');
+    } on http.ClientException {
+      throw const ApiRequestException(
+          'Backend unreachable. Check API_BASE_URL and server status.');
+    } catch (e) {
+      throw ApiRequestException('Latest watchlist run unavailable: $e');
+    }
+  }
+
   Future<ManualTradingRunResult> runTradingOnce({
     required String symbol,
     required int gateLevel,
