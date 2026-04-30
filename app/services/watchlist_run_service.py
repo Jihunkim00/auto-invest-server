@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
+from app.services.entry_readiness_service import evaluate_entry_readiness
 from app.services.position_lifecycle_service import ENTRY_SCAN_MODE
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_research_service import WatchlistResearchService
@@ -57,14 +58,20 @@ class WatchlistRunService:
 
         quant_candidates = sorted(
             watchlist_rows,
-            key=lambda row: float(row.get("quant_score", 0)),
-            reverse=True,
+            key=lambda row: (
+                0 if bool(row.get("entry_ready")) else 1,
+                -_safe_float(row.get("quant_score", 0)),
+                _safe_float(row.get("quant_sell_score", 100), 100.0),
+            ),
         )[:top_candidate_count]
         top_quant_candidates = [
             {
                 "symbol": candidate["symbol"],
                 "quant_score": candidate["quant_score"],
                 "quant_reason": candidate.get("quant_reason"),
+                "entry_ready": bool(candidate.get("entry_ready")),
+                "action_hint": candidate.get("action_hint", "watch"),
+                "block_reason": candidate.get("block_reason"),
             }
             for candidate in quant_candidates
         ]
@@ -91,11 +98,30 @@ class WatchlistRunService:
                 + researched_candidate["market_research_score"] * research_weight,
                 2,
             )
+            sell_score = researched_candidate.get("sell_score")
+            if sell_score is None:
+                sell_score = researched_candidate.get("quant_sell_score", 100)
+            readiness = evaluate_entry_readiness(
+                has_indicators=bool(researched_candidate.get("has_indicators")),
+                hard_blocked=bool(researched_candidate.get("hard_blocked")),
+                entry_score=_safe_float(researched_candidate.get("final_entry_score", 0)),
+                buy_score=_safe_float(researched_candidate.get("final_entry_score", 0)),
+                sell_score=_safe_float(sell_score, 100.0),
+                gate_level=gate_level,
+                min_entry_score=min_entry_score,
+                max_sell_score=max_sell_score,
+                gating_notes=list(researched_candidate.get("quant_notes") or []),
+                market_research_blocked=bool(researched_candidate.get("market_research_blocked"))
+                or researched_candidate.get("gpt_action_hint") == "block_entry",
+            )
+            researched_candidate.update(readiness)
+            researched_candidate["should_trade"] = bool(readiness["entry_ready"])
             researched_candidates.append(researched_candidate)
 
         def final_candidate_sort_key(row: dict[str, object]):
             symbol = str(row.get("symbol", "")).upper()
             return (
+                0 if bool(row.get("entry_ready")) else 1,
                 -_safe_float(row.get("final_entry_score", 0)),
                 _safe_float(row.get("quant_sell_score", 100), 100.0),
                 -_safe_float(row.get("market_confidence", 0), 0.0),
@@ -165,6 +191,8 @@ class WatchlistRunService:
         should_trade = False
         if not final_best_candidate:
             trigger_block_reason = "no_best_candidate"
+        elif not bool(final_best_candidate.get("entry_ready")):
+            trigger_block_reason = str(final_best_candidate.get("block_reason") or "no_entry_ready_candidate")
         elif float(final_best_candidate.get("final_entry_score", 0)) < min_entry_score:
             trigger_block_reason = "final_score_below_min_entry"
         elif float(final_best_candidate.get("quant_score", 0)) < min_quant_score:

@@ -16,7 +16,7 @@ def run_once(
     db: Session = Depends(get_db),
 ):
     svc = TradingOrchestratorService()
-    return svc.run(
+    return svc.run_single_symbol(
         db,
         symbol=symbol.upper(),
         trigger_source=trigger_source,

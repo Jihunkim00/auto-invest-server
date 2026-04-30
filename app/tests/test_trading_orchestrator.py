@@ -130,6 +130,35 @@ def test_held_symbol_buy_signal_suppressed_in_position_management(monkeypatch, d
     assert result["original_action"] == "buy"
 
 
+def test_trading_run_once_skips_hold_signal_when_threshold_not_met(monkeypatch, db_session):
+    service = TradingService()
+
+    signal = SignalLog(
+        symbol="AAPL",
+        action="hold",
+        gate_level=2,
+        gate_profile_name="conservative",
+        gating_notes='["score_threshold_not_met"]',
+        risk_flags="[]",
+        final_sell_score=20,
+        final_buy_score=50,
+        signal_status="skipped",
+    )
+    db_session.add(signal)
+    db_session.commit()
+    db_session.refresh(signal)
+
+    monkeypatch.setattr(service.signal_service, "run", lambda *a, **k: signal)
+
+    result = service.run_once(db_session, symbol="AAPL", mode="entry_scan", allowed_actions=["hold", "buy"])
+
+    assert result["result"] == "skipped"
+    assert result["action"] == "hold"
+    assert result["signal_status"] == "skipped"
+    assert result["risk"]["approved"] is False
+    assert result["related_order_id"] is None
+
+
 def test_position_management_auto_exit_reasons_preserved_in_run_log(monkeypatch, db_session):
     class AutoExitBroker:
         def __init__(self):

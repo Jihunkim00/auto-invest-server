@@ -5,6 +5,7 @@ import yaml
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.services.ai_signal_service import AISignalService
+from app.services.entry_readiness_service import evaluate_entry_readiness
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
 from app.services.quant_signal_service import QuantSignalService
@@ -116,20 +117,32 @@ class WatchlistService:
             quant_sell_score=quant["quant_sell_score"],
         )
         entry_score = min(max((quant["quant_buy_score"] * 0.75) + (ai["ai_buy_score"] * 0.25), 0.0), 100.0)
-        should_trade = entry_score >= 75.0
+        readiness = evaluate_entry_readiness(
+            has_indicators=bool(indicators),
+            hard_blocked=False,
+            entry_score=entry_score,
+            buy_score=entry_score,
+            sell_score=quant["quant_sell_score"],
+            gate_level=gate_level,
+            min_entry_score=self._settings.watchlist_min_entry_score,
+            max_sell_score=self._settings.watchlist_max_sell_score,
+            gating_notes=list(quant.get("quant_notes") or []),
+        )
 
         symbol_result = {
             "symbol": symbol.upper(),
             "entry_score": round(entry_score, 2),
-            "should_trade": should_trade,
+            "should_trade": bool(readiness["entry_ready"]),
             "quant_score": quant["quant_buy_score"],
             "quant_buy_score": quant["quant_buy_score"],
             "quant_sell_score": quant["quant_sell_score"],
             "ai_buy_score": ai["ai_buy_score"],
             "ai_sell_score": ai["ai_sell_score"],
             "quant_reason": quant["quant_reason"],
+            "quant_notes": list(quant.get("quant_notes") or []),
             "ai_reason": ai["ai_reason"],
             "has_indicators": bool(indicators),
+            **readiness,
         }
         return symbol_result, indicators
 
@@ -142,7 +155,7 @@ class WatchlistService:
             symbol_result, _ = self._score_symbol(symbol, gate_level=gate_level)
             watchlist_results.append(symbol_result)
 
-            if best_candidate is None or symbol_result["entry_score"] > best_candidate["entry_score"]:
+            if best_candidate is None or self._candidate_sort_key(symbol_result) < self._candidate_sort_key(best_candidate):
                 best_candidate = symbol_result
 
         best_score = best_candidate["entry_score"] if best_candidate is not None else 0.0
@@ -154,5 +167,14 @@ class WatchlistService:
             "watchlist": watchlist_results,
             "best_candidate": best_candidate,
             "best_score": best_score,
-            "should_trade": best_score >= 75.0,
+            "should_trade": bool(best_candidate and best_candidate.get("entry_ready")),
         }
+
+    @staticmethod
+    def _candidate_sort_key(row: dict[str, object]):
+        return (
+            0 if bool(row.get("entry_ready")) else 1,
+            -float(row.get("entry_score", 0) or 0),
+            float(row.get("quant_sell_score", 100) or 100),
+            str(row.get("symbol", "")),
+        )

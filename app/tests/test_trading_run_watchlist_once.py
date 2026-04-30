@@ -95,7 +95,7 @@ def test_trading_run_watchlist_once_holds_when_final_score_is_too_low(monkeypatc
 
         assert trade_payload["should_trade"] is False
         assert trade_payload["triggered_symbol"] is None
-        assert trade_payload["trigger_block_reason"] == "final_score_below_min_entry"
+        assert trade_payload["trigger_block_reason"] == "score_threshold_not_met"
         assert trade_payload["quant_candidates_count"] == 5
         assert trade_payload["researched_candidates_count"] == 5
         assert trade_payload["final_score_gap"] == 0.0
@@ -106,11 +106,83 @@ def test_trading_run_watchlist_once_holds_when_final_score_is_too_low(monkeypatc
         assert len(trade_payload["final_ranked_candidates"]) == 5
         assert trade_payload["trade_result"]["action"] == "hold"
         assert trade_payload["trade_result"]["order_id"] is None
-        assert trade_payload["trade_result"]["reason"] == "final_score_below_min_entry"
+        assert trade_payload["trade_result"]["reason"] == "score_threshold_not_met"
 
     with SessionLocal() as db:
         assert db.query(TradeRunLog).count() == initial_runs + 1
         assert db.query(SignalLog).count() == initial_signals
+        assert db.query(OrderLog).count() == initial_orders
+
+
+def test_trading_run_watchlist_once_blocks_when_no_entry_ready_candidate(monkeypatch):
+    settings = get_settings()
+    settings.alpaca_base_url = "https://paper-api.alpaca.markets"
+
+    symbols = [f"SYM{i}" for i in range(10)]
+    watchlist = [
+        {
+            **make_watchlist_entry(symbol, quant_score=68.0),
+            "entry_ready": False,
+            "action_hint": "watch",
+            "block_reason": "score_threshold_not_met",
+        }
+        for symbol in symbols
+    ]
+
+    def fake_analyze(self, gate_level):
+        return {
+            "watchlist": watchlist,
+            "best_candidate": watchlist[0],
+            "best_score": 68.0,
+            "should_trade": False,
+            "watchlist_source": "config/watchlist.yaml",
+            "configured_symbol_count": len(symbols),
+            "analyzed_symbol_count": len(symbols),
+            "max_watchlist_size": 50,
+        }
+
+    def fake_score_symbol(self, symbol, gate_level):
+        return (
+            {
+                **make_watchlist_entry(symbol, quant_score=68.0),
+                "entry_ready": False,
+                "action_hint": "watch",
+                "block_reason": "score_threshold_not_met",
+            },
+            {"dummy": True},
+        )
+
+    def fake_gpt_analyze(self, db, symbol, indicators, gate_level):
+        return {
+            "market_confidence": 0.80,
+            "entry_allowed": True,
+            "hard_blocked": False,
+            "market_regime": "range",
+            "entry_bias": "neutral",
+            "reason": "No strong long entry edge; setup lacks a clean long edge.",
+            "audit": {"fallback_used": False},
+        }
+
+    monkeypatch.setattr("app.services.watchlist_service.WatchlistService.analyze", fake_analyze)
+    monkeypatch.setattr("app.services.watchlist_service.WatchlistService._score_symbol", fake_score_symbol)
+    monkeypatch.setattr("app.services.gpt_market_service.GPTMarketService.analyze", fake_gpt_analyze)
+
+    with SessionLocal() as db:
+        initial_orders = db.query(OrderLog).count()
+
+    with TestClient(app) as client:
+        response = client.post("/trading/run-watchlist-once")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["should_trade"] is False
+    assert payload["triggered_symbol"] is None
+    assert payload["final_best_candidate"]["entry_ready"] is False
+    assert payload["final_best_candidate"]["action_hint"] != "buy_candidate"
+    assert payload["trigger_block_reason"] == "market_research_blocked"
+    assert payload["trade_result"]["order_id"] is None
+
+    with SessionLocal() as db:
         assert db.query(OrderLog).count() == initial_orders
 
 

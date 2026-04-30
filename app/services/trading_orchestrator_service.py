@@ -123,6 +123,53 @@ class TradingOrchestratorService:
 
         return [self._serialize_run(row) for row in rows]
 
+    def run_single_symbol(
+        self,
+        db: Session,
+        *,
+        trigger_source: str,
+        symbol: str,
+        gate_level: int | None = None,
+        request_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        settings = self.runtime_settings.get_settings(db)
+        resolved_symbol = (symbol or settings["default_symbol"]).upper()
+        run_gate_level = int(gate_level if gate_level is not None else settings.get("default_gate_level", DEFAULT_GATE_LEVEL))
+        parent_run_key = f"manual_{uuid.uuid4().hex[:12]}"
+
+        position = self.trading_service.broker.get_position(resolved_symbol)
+        if position is not None:
+            mode = POSITION_MANAGEMENT_MODE
+            allowed_actions = ["hold", "sell"]
+            enforce_entry_limits = False
+            position_payload = {
+                "symbol": str(getattr(position, "symbol", resolved_symbol) or resolved_symbol).upper(),
+                "qty": str(getattr(position, "qty", "")),
+                "side": str(getattr(position, "side", "")),
+            }
+        else:
+            mode = ENTRY_SCAN_MODE
+            allowed_actions = ["hold", "buy"]
+            enforce_entry_limits = True
+            position_payload = None
+
+        return self._run_symbol_child(
+            db,
+            trigger_source=trigger_source,
+            symbol=resolved_symbol,
+            mode=mode,
+            allowed_actions=allowed_actions,
+            gate_level=run_gate_level,
+            parent_run_key=parent_run_key,
+            symbol_role="manual_single_symbol",
+            enforce_entry_limits=enforce_entry_limits,
+            request_payload={
+                **(request_payload or {}),
+                "source": "manual_single_symbol",
+                "position": position_payload,
+            },
+        )
+
     def _run_symbol_child(
         self,
         db: Session,

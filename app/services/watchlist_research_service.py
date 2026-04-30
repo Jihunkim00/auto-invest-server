@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.services.entry_readiness_service import market_research_blocks_entry
 from app.services.gpt_market_service import GPTMarketService
 
 
@@ -46,14 +47,21 @@ class WatchlistResearchService:
         entry_allowed = bool(analysis.get("entry_allowed"))
         reason = str(analysis.get("reason", "") or "").strip()
 
+        research_blocks_entry = market_research_blocks_entry(
+            entry_allowed=entry_allowed,
+            hard_blocked=hard_blocked,
+            reason=reason,
+            entry_bias=analysis.get("entry_bias"),
+        )
+
         if fallback_used:
             research_score = 50
             gpt_action_hint = "neutral"
-            if hard_blocked:
+            if research_blocks_entry:
                 gpt_action_hint = "block_entry"
         else:
             research_score = self._normalize_score(market_confidence)
-            if hard_blocked or not entry_allowed:
+            if research_blocks_entry:
                 gpt_action_hint = "block_entry"
             else:
                 gpt_action_hint = "allow_entry"
@@ -73,7 +81,9 @@ class WatchlistResearchService:
             "gpt_action_hint": gpt_action_hint,
             "market_research_reason": reason or "No research reason provided.",
             "hard_blocked": hard_blocked,
+            "soft_entry_allowed": bool(entry_allowed and not hard_blocked),
             "entry_allowed": entry_allowed,
+            "market_research_blocked": research_blocks_entry,
             "fallback_used": fallback_used,
         }
 

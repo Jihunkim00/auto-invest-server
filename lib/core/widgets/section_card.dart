@@ -3,7 +3,10 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 class SectionCard extends StatelessWidget {
-  const SectionCard({super.key, required this.child, this.padding = const EdgeInsets.all(16)});
+  const SectionCard(
+      {super.key,
+      required this.child,
+      this.padding = const EdgeInsets.all(16)});
 
   final Widget child;
   final EdgeInsets padding;
@@ -17,9 +20,9 @@ class SectionCard extends StatelessWidget {
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withOpacity(0.10)),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
           ),
           child: child,
         ),

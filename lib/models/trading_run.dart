@@ -8,6 +8,7 @@ class TradingRun {
     required this.bestScore,
     required this.orderId,
     required this.action,
+    required this.gateLevel,
   });
 
   final String timestamp;
@@ -18,4 +19,5 @@ class TradingRun {
   final int bestScore;
   final String? orderId;
   final String action;
+  final int gateLevel;
 }

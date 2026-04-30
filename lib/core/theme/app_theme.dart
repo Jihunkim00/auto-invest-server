@@ -6,7 +6,9 @@ class AppTheme {
   static const panelInner = Color(0xFF201F1F);
 
   static ThemeData get darkTheme {
-    final scheme = ColorScheme.fromSeed(seedColor: Colors.white, brightness: Brightness.dark).copyWith(
+    final scheme = ColorScheme.fromSeed(
+            seedColor: Colors.white, brightness: Brightness.dark)
+        .copyWith(
       surface: background,
       primary: Colors.white,
       secondary: const Color(0xFFC4C7C8),
@@ -23,7 +25,7 @@ class AppTheme {
         titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: Colors.black.withOpacity(0.95),
+        backgroundColor: Colors.black.withValues(alpha: 0.95),
         indicatorColor: Colors.white12,
       ),
     );

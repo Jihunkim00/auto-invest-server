@@ -31,29 +31,26 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
       debugShowCheckedModeBanner: false,
       title: 'AUTO INVEST',
       theme: AppTheme.darkTheme,
-      home: ValueListenableBuilder(
-        valueListenable: _controller,
-        builder: (context, _, __) {
-          final screens = [
+      home: Scaffold(
+        body: IndexedStack(
+          index: _index,
+          children: [
             DashboardScreen(controller: _controller),
             AnalysisScreen(controller: _controller),
             LogsScreen(controller: _controller),
             SettingsScreen(controller: _controller),
-          ];
-          return Scaffold(
-            body: screens[_index],
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: _index,
-              onDestinationSelected: (v) => setState(() => _index = v),
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'Analysis'),
-                NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Logs'),
-                NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
-              ],
-            ),
-          );
-        },
+          ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (v) => setState(() => _index = v),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+            NavigationDestination(icon: Icon(Icons.analytics_outlined), selectedIcon: Icon(Icons.analytics), label: 'Analysis'),
+            NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Logs'),
+            NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings), label: 'Settings'),
+          ],
+        ),
       ),
     );
   }

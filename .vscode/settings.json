@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^d:\\\\auto-invest-server\\\\\\.venv\\\\Scripts\\\\python\\.exe -m pip install pytest$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

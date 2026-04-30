@@ -13,9 +13,11 @@ class SafetySettingsSection extends StatelessWidget {
     final s = controller.settings;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Safety Limits', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text('Safety Limits',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         Text('Broker Mode: ${s.brokerMode}'),
+        Text('Default Gate Level: Gate ${s.defaultGateLevel}'),
         Text('Max Daily Trades: ${s.maxDailyTrades}'),
         Text('Max Daily Entries: ${s.maxDailyEntries}'),
         Text('Watchlist Min Entry Score: ${s.minEntryScore}'),

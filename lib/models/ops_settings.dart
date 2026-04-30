@@ -5,6 +5,7 @@ class OpsSettings {
     required this.dryRun,
     required this.killSwitch,
     required this.brokerMode,
+    required this.defaultGateLevel,
     required this.maxDailyTrades,
     required this.maxDailyEntries,
     required this.minEntryScore,
@@ -16,6 +17,7 @@ class OpsSettings {
   final bool dryRun;
   final bool killSwitch;
   final String brokerMode;
+  final int defaultGateLevel;
   final int maxDailyTrades;
   final int maxDailyEntries;
   final int minEntryScore;
