@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
+import '../../models/log_items.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
 import '../../models/trading_run.dart';
@@ -26,17 +27,6 @@ class ApiClient {
   static int _readInt(Object? value, int fallback) {
     if (value is num) return value.toInt();
     return int.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
-  static Map<String, dynamic> _readMap(Object? value) {
-    if (value is Map<String, dynamic>) return value;
-    return <String, dynamic>{};
-  }
-
-  static String? _readNullableString(Object? value) {
-    final text = value?.toString();
-    if (text == null || text.isEmpty) return null;
-    return text;
   }
 
   Future<Map<String, dynamic>> _getJson(String path) async {
@@ -141,33 +131,18 @@ class ApiClient {
 
   Future<List<TradingRun>> getRecentTradingRuns() async {
     try {
-      final j = await _getJson('/ops/runs?limit=50');
-      final list =
-          (j['runs'] as List<dynamic>? ?? j['items'] as List<dynamic>? ?? []);
-      return list.whereType<Map<String, dynamic>>().map((e) {
-        final responsePayload = _readMap(e['response_payload']);
-        final tradeResult = _readMap(responsePayload['trade_result']);
+      final runs = await fetchRecentRuns(limit: 50);
+      return runs.map((e) {
         return TradingRun(
-          timestamp: (e['created_at'] ?? e['timestamp'] ?? '').toString(),
-          triggerSource: (e['trigger_source'] ?? 'manual').toString(),
-          symbol: (e['symbol'] ?? 'WMT').toString(),
-          result: (e['result'] ?? 'skipped').toString(),
-          reason: (e['reason'] ??
-                  responsePayload['reason'] ??
-                  tradeResult['reason'] ??
-                  '')
-              .toString(),
-          bestScore:
-              _readInt(e['best_score'] ?? responsePayload['best_score'], 0),
-          orderId: _readNullableString(e['order_id'] ??
-              responsePayload['related_order_id'] ??
-              tradeResult['order_id']),
-          action: (responsePayload['action'] ??
-                  tradeResult['action'] ??
-                  e['action'] ??
-                  'hold')
-              .toString(),
-          gateLevel: _readInt(e['gate_level'], 0),
+          timestamp: e.createdAt,
+          triggerSource: e.triggerSource,
+          symbol: e.symbol,
+          result: e.result,
+          reason: e.reason,
+          bestScore: 0,
+          orderId: e.relatedOrderId,
+          action: e.action,
+          gateLevel: e.gateLevel,
         );
       }).toList();
     } catch (_) {
@@ -175,10 +150,53 @@ class ApiClient {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getRecentOrders() async =>
-      [(await _getJson('/orders/recent'))];
-  Future<List<Map<String, dynamic>>> getRecentSignals() async =>
-      [(await _getJson('/signals/recent'))];
+  Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
+    try {
+      final j = await _getJson('/runs/recent?limit=$limit');
+      final items = j['items'] as List<dynamic>? ?? [];
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(TradingLogItem.fromJson)
+          .toList();
+    } catch (_) {
+      return mockTradingLogs;
+    }
+  }
+
+  Future<List<OrderLogItem>> fetchRecentOrders({int limit = 20}) async {
+    try {
+      final j = await _getJson('/orders/recent?limit=$limit');
+      final items = j['items'] as List<dynamic>? ?? [];
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(OrderLogItem.fromJson)
+          .toList();
+    } catch (_) {
+      return mockOrderLogs;
+    }
+  }
+
+  Future<List<SignalLogItem>> fetchRecentSignals({int limit = 20}) async {
+    try {
+      final j = await _getJson('/signals/recent?limit=$limit');
+      final items = j['items'] as List<dynamic>? ?? [];
+      return items
+          .whereType<Map<String, dynamic>>()
+          .map(SignalLogItem.fromJson)
+          .toList();
+    } catch (_) {
+      return mockSignalLogs;
+    }
+  }
+
+  Future<LogsSummary> fetchLogsSummary() async {
+    try {
+      final j = await _getJson('/logs/summary');
+      return LogsSummary.fromJson(j);
+    } catch (_) {
+      return mockLogsSummary;
+    }
+  }
 
   WatchlistRunResult getMockRunResult() {
     return const WatchlistRunResult(
