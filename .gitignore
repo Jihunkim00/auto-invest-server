@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .env
+auto_invest.db
+build/
