@@ -2,3 +2,11 @@
 __pycache__/
 *.pyc
 .env
+.dart_tool/
+build/
+auto_invest.db
+*.db
+.tmp_pytest*/
+tmp_pytest*/
+__pycache__/
+.pytest_cache/
