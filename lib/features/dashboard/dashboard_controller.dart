@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
+import '../../models/portfolio_summary.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -66,6 +67,7 @@ class DashboardController extends ChangeNotifier {
   );
 
   WatchlistRunResult runResult = _emptyRunResult;
+  PortfolioSummary portfolioSummary = PortfolioSummary.empty();
 
   List<TradingRun> recentRuns = const [];
   String? error;
@@ -85,6 +87,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
+      await _refreshPortfolioSummary();
       try {
         final latestRun = await apiClient.fetchLatestWatchlistRunResult();
         if (latestRun == null) {
@@ -125,6 +128,7 @@ class DashboardController extends ChangeNotifier {
       hasLatestRunResult = true;
       showingOfflineFallback = false;
       recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshPortfolioSummary();
       return ActionResult(
           success: true, message: 'Watchlist analysis completed.');
     } catch (e) {
@@ -150,6 +154,7 @@ class DashboardController extends ChangeNotifier {
           symbol: normalizedSymbol, gateLevel: gateLevel);
       manualRunResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshPortfolioSummary();
       final action = result.action.toUpperCase();
       final orderText =
           result.noOrderCreated ? 'no order created' : 'order created';
@@ -280,5 +285,13 @@ class DashboardController extends ChangeNotifier {
       minScoreGap: settings.minScoreGap,
     );
     notifyListeners();
+  }
+
+  Future<void> _refreshPortfolioSummary() async {
+    try {
+      portfolioSummary = await apiClient.fetchPortfolioSummary();
+    } catch (_) {
+      // Keep the last live snapshot if the backend returns a transient error.
+    }
   }
 }

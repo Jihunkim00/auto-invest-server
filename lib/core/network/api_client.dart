@@ -7,6 +7,7 @@ import '../../models/candidate.dart';
 import '../../models/log_items.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
+import '../../models/portfolio_summary.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -44,6 +45,36 @@ class ApiClient {
   Future<void> _post(String path) async {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
+  }
+
+  Future<PortfolioSummary> fetchPortfolioSummary() async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/portfolio/summary').replace(
+      queryParameters: {
+        '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+      },
+    );
+
+    try {
+      final r = await _client.get(uri, headers: const {
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      });
+      if (r.statusCode == 404 || r.statusCode == 204) {
+        return PortfolioSummary.empty();
+      }
+      if (r.statusCode >= 400) {
+        throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      }
+
+      final decoded = jsonDecode(r.body);
+      if (decoded is! Map) {
+        throw const ApiRequestException('Invalid portfolio summary response.');
+      }
+
+      return PortfolioSummary.fromJson(Map<String, dynamic>.from(decoded));
+    } on http.ClientException {
+      return PortfolioSummary.empty();
+    }
   }
 
   Future<OpsSettings> getOpsSettings() async {

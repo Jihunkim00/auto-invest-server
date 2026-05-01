@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
@@ -72,6 +73,10 @@ class _FakeApiClient extends ApiClient {
         minEntryScore: 65,
         minScoreGap: 3,
       );
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummary() async =>
+      PortfolioSummary.empty();
 
   @override
   Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async {

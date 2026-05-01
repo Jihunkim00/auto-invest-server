@@ -5,8 +5,8 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestTradeRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import GetOrderByIdRequest, MarketOrderRequest
+from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.requests import GetOrderByIdRequest, GetOrdersRequest, MarketOrderRequest
 
 from app.config import get_settings
 
@@ -37,6 +37,14 @@ class AlpacaClient:
 
     def list_positions(self):
         return self.trading_client.get_all_positions()
+
+    def list_open_orders(self):
+        request = GetOrdersRequest(
+            status=QueryOrderStatus.OPEN,
+            limit=100,
+            nested=True,
+        )
+        return self.trading_client.get_orders(filter=request)
 
     def get_latest_price(self, symbol: str):
         request = StockLatestTradeRequest(symbol_or_symbols=symbol)

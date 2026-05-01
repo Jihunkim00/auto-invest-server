@@ -12,6 +12,7 @@ from app.routes.market_analysis import router as market_analysis_router
 from app.routes.ops import router as ops_router
 from app.routes.orders import router as orders_router
 from app.routes.positions import router as positions_router
+from app.routes.portfolio import router as portfolio_router
 from app.routes.signals import router as signals_router
 from app.routes.trading import router as trading_router
 from app.services.scheduler_service import scheduler_service
@@ -46,6 +47,7 @@ def on_shutdown():
 app.include_router(health_router)
 app.include_router(account_router)
 app.include_router(positions_router)
+app.include_router(portfolio_router)
 app.include_router(market_router)
 app.include_router(history_router)
 app.include_router(orders_router)
