@@ -99,6 +99,30 @@ def _create_runtime_settings_table_if_missing():
         )
 
 
+def _create_broker_auth_tokens_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS broker_auth_tokens (
+                    id INTEGER PRIMARY KEY,
+                    provider VARCHAR(20) NOT NULL,
+                    token_type VARCHAR(40) NOT NULL,
+                    token_value TEXT NOT NULL,
+                    expires_at DATETIME,
+                    issued_at DATETIME NOT NULL,
+                    environment VARCHAR(20) NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_broker_auth_tokens_provider ON broker_auth_tokens (provider)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_broker_auth_tokens_token_type ON broker_auth_tokens (token_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_broker_auth_tokens_environment ON broker_auth_tokens (environment)"))
+
+
 def _create_trade_run_logs_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -134,6 +158,7 @@ def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
 
     # Lightweight SQLite-friendly migrations

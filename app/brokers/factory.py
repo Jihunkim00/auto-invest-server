@@ -1,5 +1,6 @@
 from app.brokers.alpaca_broker import AlpacaBroker
 from app.brokers.base import Broker, BrokerConfigurationError, BrokerNotEnabledError
+from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
@@ -22,18 +23,21 @@ def get_broker(settings=None) -> Broker:
     raise BrokerConfigurationError(f"Unknown BROKER_PROVIDER: {settings.broker_provider}")
 
 
-def get_broker_status(settings=None) -> dict:
+def get_broker_status(settings=None, db=None) -> dict:
     settings = settings or get_settings()
     active_provider = _normalize_provider(settings.broker_provider)
-    kis_client = KisClient(settings)
+    kis_auth = KisAuthManager(settings, db)
+    kis_auth_status = kis_auth.get_auth_status()
 
     return {
         "active_provider": active_provider,
         "alpaca_available": bool(settings.alpaca_api_key and settings.alpaca_secret_key),
         "kis_enabled": bool(settings.kis_enabled),
-        "kis_configured": kis_client.is_configured(),
+        "kis_configured": kis_auth_status["kis_configured"],
         "kis_env": settings.kis_env,
         "kis_account_no_masked": mask_account_no(settings.kis_account_no),
+        "kis_has_access_token": kis_auth_status["has_access_token"],
+        "kis_has_approval_key": kis_auth_status["has_approval_key"],
     }
 
 

@@ -5,6 +5,14 @@ class BrokerConfigurationError(RuntimeError):
     """Raised when a broker is selected without the required safe configuration."""
 
 
+class KisConfigurationError(BrokerConfigurationError):
+    """Raised when KIS auth/config values are missing for an explicit KIS call."""
+
+
+class KisAuthError(RuntimeError):
+    """Raised when an explicit KIS auth request fails safely."""
+
+
 class BrokerNotEnabledError(RuntimeError):
     """Raised when a broker or broker action is deliberately disabled."""
 

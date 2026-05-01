@@ -3,6 +3,20 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 
+class BrokerAuthToken(Base):
+    __tablename__ = "broker_auth_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    token_type = Column(String(40), nullable=False, index=True)
+    token_value = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    issued_at = Column(DateTime(timezone=True), nullable=False)
+    environment = Column(String(20), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class OrderLog(Base):
     __tablename__ = "orders"
 
