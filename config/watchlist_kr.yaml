@@ -1,5 +1,3 @@
-# config/watchlist_kr.yaml
-
 market: KR
 currency: KRW
 timezone: Asia/Seoul
@@ -15,4 +13,16 @@ symbols:
     market: "KOSPI"
   - symbol: "035720"
     name: "카카오"
+    market: "KOSPI"
+  - symbol: "051910"
+    name: "LG화학"
+    market: "KOSPI"
+  - symbol: "005380"
+    name: "현대차"
+    market: "KOSPI"
+  - symbol: "068270"
+    name: "셀트리온"
+    market: "KOSPI"
+  - symbol: "207940"
+    name: "삼성바이오로직스"
     market: "KOSPI"

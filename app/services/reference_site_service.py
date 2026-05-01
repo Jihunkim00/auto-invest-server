@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from app.services.market_profile_service import MarketProfileService
+
 try:
     import yaml
 except Exception:  # pragma: no cover
@@ -22,8 +24,16 @@ class ReferenceSite:
 
 
 class ReferenceSiteService:
-    def __init__(self, config_path: str = "config/reference_sites.yaml") -> None:
+    def __init__(
+        self,
+        config_path: str = "config/reference_sites.yaml",
+        market: str | None = None,
+    ) -> None:
+        if market:
+            config_path = MarketProfileService().get_reference_sites_path(market)
         self.config_path = Path(config_path)
+        if not self.config_path.is_absolute():
+            self.config_path = Path(__file__).resolve().parents[2] / self.config_path
 
     def load_sites(self) -> list[ReferenceSite]:
         if not self.config_path.exists() or yaml is None:

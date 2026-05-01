@@ -20,12 +20,6 @@ KIS_BALANCE_TR_ID_REAL = "TTTC8434R"
 KIS_BALANCE_TR_ID_DEMO = "VTTC8434R"
 KIS_OPEN_ORDERS_PATH = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
 KIS_OPEN_ORDERS_TR_ID = "TTTC0084R"
-KIS_CASH_ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
-KIS_CASH_BUY_TR_ID_REAL = "TTTC0802U"
-KIS_CASH_SELL_TR_ID_REAL = "TTTC0801U"
-KIS_CASH_BUY_TR_ID_DEMO = "VTTC0802U"
-KIS_CASH_SELL_TR_ID_DEMO = "VTTC0801U"
-KIS_MARKET_ORDER_DIVISION = "01"
 
 
 class KisClient:
@@ -234,47 +228,6 @@ class KisClient:
         raise BrokerNotEnabledError(
             "KIS order submission is disabled. This connector is read-only here."
         )
-
-    def domestic_cash_order_tr_id(self, side: str) -> str:
-        normalized_side = str(side or "").strip().lower()
-        if normalized_side not in ("buy", "sell"):
-            raise ValueError("KIS domestic cash order side must be buy or sell.")
-
-        env = str(self.settings.kis_env or "").lower()
-        is_demo = env in ("paper", "vps", "demo", "mock")
-        if normalized_side == "buy":
-            return KIS_CASH_BUY_TR_ID_DEMO if is_demo else KIS_CASH_BUY_TR_ID_REAL
-        return KIS_CASH_SELL_TR_ID_DEMO if is_demo else KIS_CASH_SELL_TR_ID_REAL
-
-    def build_domestic_order_payload(
-        self,
-        *,
-        symbol: str,
-        side: str,
-        qty: int,
-        order_type: str = "market",
-        price: float | None = None,
-    ) -> dict[str, str]:
-        """Build a KIS domestic cash order payload without submitting it.
-
-        Mirrors the official domestic stock cash order sample fields for
-        /uapi/domestic-stock/v1/trading/order-cash. This helper is intentionally
-        payload-only; callers must not use it to send an order in this PR.
-        """
-        self.auth_manager.require_configured()
-
-        normalized_order_type = str(order_type or "market").strip().lower()
-        if normalized_order_type != "market":
-            raise ValueError("Only market KIS domestic order previews are supported.")
-
-        return {
-            "CANO": str(self.settings.kis_account_no),
-            "ACNT_PRDT_CD": str(self.settings.kis_account_product_code),
-            "PDNO": str(symbol).strip(),
-            "ORD_DVSN": KIS_MARKET_ORDER_DIVISION,
-            "ORD_QTY": str(int(qty)),
-            "ORD_UNPR": "0",
-        }
 
     def _request_balance(self) -> dict:
         return self.request_get(

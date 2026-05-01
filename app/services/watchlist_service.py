@@ -8,6 +8,7 @@ from app.services.ai_signal_service import AISignalService
 from app.services.entry_readiness_service import evaluate_entry_readiness
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
+from app.services.market_profile_service import MarketProfileService
 from app.services.quant_signal_service import QuantSignalService
 
 WATCHLIST_DEFAULT_SYMBOLS = [
@@ -72,8 +73,11 @@ class WatchlistService:
         indicator_service: IndicatorService | None = None,
         quant_signal_service: QuantSignalService | None = None,
         ai_signal_service: AISignalService | None = None,
+        market: str | None = None,
     ):
         self._settings = get_settings()
+        self.market = market
+        self.market_profile_service = MarketProfileService()
         self.market_data_service = market_data_service or MarketDataService()
         self.indicator_service = indicator_service or IndicatorService()
         self.quant_signal_service = quant_signal_service or QuantSignalService()
@@ -83,7 +87,12 @@ class WatchlistService:
 
     def _load_symbols(self) -> list[str] | None:
         settings = get_settings()
-        config_path = Path(settings.watchlist_config_path)
+        source_path = (
+            self.market_profile_service.get_watchlist_path(self.market)
+            if self.market
+            else settings.watchlist_config_path
+        )
+        config_path = Path(source_path)
         if not config_path.is_absolute():
             config_path = Path(__file__).resolve().parents[2] / config_path
 
@@ -91,7 +100,7 @@ class WatchlistService:
             return None
 
         try:
-            raw = yaml.safe_load(config_path.read_text())
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         except Exception:
             return None
 
@@ -104,7 +113,20 @@ class WatchlistService:
         if not isinstance(symbols, list):
             return None
 
-        valid_symbols = [str(symbol).upper() for symbol in symbols if symbol]
+        valid_symbols = []
+        for symbol in symbols:
+            raw_symbol = symbol.get("symbol") if isinstance(symbol, dict) else symbol
+            if not raw_symbol:
+                continue
+            if self.market:
+                valid_symbols.append(
+                    self.market_profile_service.normalize_symbol(
+                        str(raw_symbol),
+                        self.market,
+                    )
+                )
+            else:
+                valid_symbols.append(str(raw_symbol).upper())
         return valid_symbols or None
 
     def _score_symbol(self, symbol: str, gate_level: int = DEFAULT_GATE_LEVEL) -> tuple[dict[str, object], dict[str, object]]:
@@ -160,7 +182,11 @@ class WatchlistService:
 
         best_score = best_candidate["entry_score"] if best_candidate is not None else 0.0
         return {
-            "watchlist_source": self._settings.watchlist_config_path,
+            "watchlist_source": (
+                self.market_profile_service.get_watchlist_path(self.market)
+                if self.market
+                else self._settings.watchlist_config_path
+            ),
             "configured_symbol_count": len(self.symbols),
             "analyzed_symbol_count": len(analyzed_symbols),
             "max_watchlist_size": self.max_watchlist_size,

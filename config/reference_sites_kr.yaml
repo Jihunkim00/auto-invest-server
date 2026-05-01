@@ -1,21 +1,23 @@
-# config/reference_sites_kr.yaml
+market: KR
+currency: KRW
+timezone: Asia/Seoul
+sources:
+  - name: "KIS Domestic Stock API"
+    type: "broker_api"
+    purpose: "current_price_daily_bars_account_data"
+    enabled: true
 
-market_data:
-  - name: KIS domestic stock price
-    type: api
-    purpose: current_price
+  - name: "KRX Listed Stock Information"
+    type: "official_market_data"
+    purpose: "listed_stock_master"
+    enabled: true
 
-exchange_data:
-  - name: KRX listed stock information
-    type: official_data
-    purpose: listed_stock_master
+  - name: "OpenDART"
+    type: "official_disclosure"
+    purpose: "company_disclosure_financials"
+    enabled: true
 
-disclosure:
-  - name: OpenDART
-    type: official_disclosure
-    purpose: company_disclosure_financials
-
-exchange_disclosure:
-  - name: KIND
-    type: official_exchange_disclosure
-    purpose: trading_halt_listing_disclosure
+  - name: "KIND"
+    type: "official_exchange_disclosure"
+    purpose: "trading_halt_listing_disclosure"
+    enabled: true

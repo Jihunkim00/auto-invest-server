@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     reference_sites_config_path: str = "config/reference_sites.yaml"
     watchlist_config_path: str = "config/watchlist.yaml"
+    market_profiles_config_path: str = "config/market_profiles.yaml"
     max_watchlist_size: int = 50
     watchlist_top_candidates_for_research: int = 5
     watchlist_min_entry_score: int = 65

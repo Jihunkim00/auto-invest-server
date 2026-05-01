@@ -1,0 +1,22 @@
+default_market: "US"
+
+markets:
+  US:
+    label: "US / Alpaca"
+    broker_provider: "alpaca"
+    currency: "USD"
+    timezone: "America/New_York"
+    watchlist_file: "config/watchlist_us.yaml"
+    reference_sites_file: "config/reference_sites_us.yaml"
+    symbol_format: "ticker"
+    enabled_for_trading: true
+
+  KR:
+    label: "KR / KIS"
+    broker_provider: "kis"
+    currency: "KRW"
+    timezone: "Asia/Seoul"
+    watchlist_file: "config/watchlist_kr.yaml"
+    reference_sites_file: "config/reference_sites_kr.yaml"
+    symbol_format: "6_digit_numeric"
+    enabled_for_trading: false
