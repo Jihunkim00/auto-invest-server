@@ -120,9 +120,13 @@ class KisOrderValidationService:
         available_cash: float | None = None
         held_qty: float | None = None
 
-        market_session = self.session_service.get_status(request.market, now=now)
+        market_session = self.session_service.get_session_status(request.market, now=now)
         if not market_session["is_market_open"]:
             warnings.append("market_closed")
+            block_reasons.append("market_closed")
+            closure_reason = market_session.get("closure_reason")
+            if closure_reason:
+                warnings.append(f"market_closed_{closure_reason}")
         if request.side == "buy" and not market_session["is_entry_allowed_now"]:
             warnings.append("after_no_new_entry_time")
             block_reasons.append("after_no_new_entry_time")
@@ -185,13 +189,7 @@ class KisOrderValidationService:
             held_qty=held_qty,
             warnings=_dedupe(warnings),
             block_reasons=_dedupe(block_reasons),
-            market_session={
-                "market": market_session["market"],
-                "timezone": market_session["timezone"],
-                "is_market_open": market_session["is_market_open"],
-                "is_entry_allowed_now": market_session["is_entry_allowed_now"],
-                "is_near_close": market_session["is_near_close"],
-            },
+            market_session=_public_market_session(market_session),
             order_preview=preview,
         )
 
@@ -244,3 +242,20 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in result:
             result.append(value)
     return result
+
+
+def _public_market_session(market_session: dict) -> dict:
+    keys = [
+        "market",
+        "timezone",
+        "is_market_open",
+        "is_entry_allowed_now",
+        "is_near_close",
+        "closure_reason",
+        "closure_name",
+        "regular_open",
+        "regular_close",
+        "effective_close",
+        "no_new_entry_after",
+    ]
+    return {key: market_session.get(key) for key in keys}

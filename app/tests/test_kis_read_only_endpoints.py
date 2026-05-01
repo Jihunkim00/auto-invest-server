@@ -47,12 +47,17 @@ def client(db_session):
         app.dependency_overrides.clear()
 
 
-def _add_access_token(db_session, value="secret-cached-access-token", environment="prod"):
+def _add_access_token(
+    db_session,
+    value="secret-cached-access-token",
+    environment="prod",
+    expires_at=None,
+):
     row = BrokerAuthToken(
         provider="kis",
         token_type="access_token",
         token_value=value,
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
         issued_at=datetime.now(UTC),
         environment=environment,
     )
@@ -298,6 +303,43 @@ def test_kis_read_only_does_not_call_submit_order(monkeypatch, client, db_sessio
     response = client.get("/kis/market/price/005930")
 
     assert response.status_code == 200
+
+
+def test_kis_read_only_refreshes_expired_token_lazily(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _add_access_token(
+        db_session,
+        value="expired-read-token",
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    auth_calls = []
+
+    def fake_post(url, data, headers, timeout):
+        auth_calls.append(url)
+        return _FakeResponse(
+            {
+                "access_token": "fresh-read-token",
+                "expires_in": 3600,
+            }
+        )
+
+    def fake_get(url, params, headers, timeout):
+        assert headers["authorization"] == "Bearer fresh-read-token"
+        return _FakeResponse({"rt_cd": "0", "output": {"stck_prpr": "72000"}})
+
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_post)
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+
+    response = client.get("/kis/market/price/005930")
+
+    assert response.status_code == 200
+    assert response.json()["current_price"] == 72000.0
+    assert len(auth_calls) == 1
+    assert "fresh-read-token" not in response.text
 
 
 def test_kis_enabled_false_still_allows_read_only_with_valid_credentials(

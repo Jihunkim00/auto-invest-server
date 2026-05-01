@@ -1,0 +1,113 @@
+markets:
+  KR:
+    timezone: "Asia/Seoul"
+    holidays:
+      - date: "2026-01-01"
+        name: "New Year's Day"
+        reason: "holiday_new_year"
+        full_day: true
+      - date: "2026-02-16"
+        name: "Seollal Holiday"
+        reason: "holiday_seollal"
+        full_day: true
+      - date: "2026-02-17"
+        name: "Seollal"
+        reason: "holiday_seollal"
+        full_day: true
+      - date: "2026-02-18"
+        name: "Seollal Holiday"
+        reason: "holiday_seollal"
+        full_day: true
+      - date: "2026-03-02"
+        name: "Substitute Holiday"
+        reason: "holiday_substitute"
+        full_day: true
+      - date: "2026-05-01"
+        name: "Labor Day"
+        reason: "holiday_labor_day"
+        full_day: true
+      - date: "2026-05-05"
+        name: "Children's Day"
+        reason: "holiday_childrens_day"
+        full_day: true
+      - date: "2026-05-25"
+        name: "Buddha's Birthday"
+        reason: "holiday_buddhas_birthday"
+        full_day: true
+      - date: "2026-08-17"
+        name: "Substitute Holiday"
+        reason: "holiday_substitute"
+        full_day: true
+      - date: "2026-09-24"
+        name: "Chuseok Holiday"
+        reason: "holiday_chuseok"
+        full_day: true
+      - date: "2026-09-25"
+        name: "Chuseok"
+        reason: "holiday_chuseok"
+        full_day: true
+      - date: "2026-10-05"
+        name: "Substitute Holiday"
+        reason: "holiday_substitute"
+        full_day: true
+      - date: "2026-12-25"
+        name: "Christmas Day"
+        reason: "holiday_christmas"
+        full_day: true
+      - date: "2026-12-31"
+        name: "Year-end Closing"
+        reason: "holiday_year_end_closing"
+        full_day: true
+
+  US:
+    timezone: "America/New_York"
+    holidays:
+      - date: "2026-01-01"
+        name: "New Year's Day"
+        reason: "holiday_new_year"
+        full_day: true
+      - date: "2026-01-19"
+        name: "Martin Luther King Jr. Day"
+        reason: "holiday_mlk_day"
+        full_day: true
+      - date: "2026-02-16"
+        name: "Presidents' Day"
+        reason: "holiday_presidents_day"
+        full_day: true
+      - date: "2026-04-03"
+        name: "Good Friday"
+        reason: "holiday_good_friday"
+        full_day: true
+      - date: "2026-05-25"
+        name: "Memorial Day"
+        reason: "holiday_memorial_day"
+        full_day: true
+      - date: "2026-06-19"
+        name: "Juneteenth"
+        reason: "holiday_juneteenth"
+        full_day: true
+      - date: "2026-07-03"
+        name: "Independence Day Observed"
+        reason: "holiday_independence_day_observed"
+        full_day: true
+      - date: "2026-09-07"
+        name: "Labor Day"
+        reason: "holiday_labor_day"
+        full_day: true
+      - date: "2026-11-26"
+        name: "Thanksgiving Day"
+        reason: "holiday_thanksgiving"
+        full_day: true
+      - date: "2026-12-25"
+        name: "Christmas Day"
+        reason: "holiday_christmas"
+        full_day: true
+    early_closes:
+      - date: "2026-11-27"
+        name: "Day after Thanksgiving"
+        reason: "early_close_thanksgiving"
+        close: "13:00"
+      - date: "2026-12-24"
+        name: "Christmas Eve"
+        reason: "early_close_christmas_eve"
+        close: "13:00"

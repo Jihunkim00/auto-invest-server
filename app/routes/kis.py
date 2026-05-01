@@ -11,7 +11,9 @@ from app.services.kis_order_validation_service import (
     KisOrderValidationRequest,
     KisOrderValidationService,
 )
+from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
+from app.services.market_session_service import MarketSessionError
 
 router = APIRouter(prefix="/kis", tags=["kis"])
 
@@ -97,6 +99,18 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except KisApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/watchlist/preview")
+def preview_kis_watchlist(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisWatchlistPreviewService(client)
+    try:
+        return service.run_preview(include_gpt=True)
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _client(db: Session) -> KisClient:

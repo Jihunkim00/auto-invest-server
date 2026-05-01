@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
+import '../../models/kis_watchlist_preview.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -82,6 +83,9 @@ class DashboardController extends ChangeNotifier {
   MarketWatchlist krWatchlist = MarketWatchlist.empty('KR');
   bool watchlistLoading = false;
   String? watchlistError;
+  bool krWatchlistPreviewLoading = false;
+  KisWatchlistPreview? krWatchlistPreview;
+  String? krWatchlistPreviewError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
@@ -391,6 +395,26 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: false, message: orderValidationError!);
     } finally {
       orderValidationLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKrWatchlistPreview() async {
+    krWatchlistPreviewLoading = true;
+    krWatchlistPreviewError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisWatchlistPreview();
+      krWatchlistPreview = result;
+      return const ActionResult(
+        success: true,
+        message: 'KR preview completed. No real order submitted.',
+      );
+    } catch (e) {
+      krWatchlistPreviewError = 'KR preview failed: $e';
+      return ActionResult(success: false, message: krWatchlistPreviewError!);
+    } finally {
+      krWatchlistPreviewLoading = false;
       notifyListeners();
     }
   }

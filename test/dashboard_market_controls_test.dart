@@ -5,6 +5,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
+import 'package:auto_invest_dashboard/models/kis_watchlist_preview.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 
@@ -44,9 +45,10 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('watchlist defaults to US and KR run button is disabled',
+  testWidgets('watchlist defaults to US and KR preview run is enabled',
       (tester) async {
-    final controller = DashboardController(_FakeApiClient(), autoload: false)
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
       ..usWatchlist = _usWatchlist
       ..krWatchlist = _krWatchlist;
 
@@ -65,8 +67,33 @@ void main() {
     expect(find.text('KR Watchlist / KIS'), findsOneWidget);
     expect(find.text(_krLabel), findsOneWidget);
     expect(find.text('READ-ONLY'), findsOneWidget);
-    expect(find.text('KR run disabled'), findsOneWidget);
+    expect(find.text('Run KR Preview'), findsOneWidget);
     expect(find.text('Run US Watchlist Once'), findsNothing);
+
+    await tester.tap(find.text('Run KR Preview'));
+    await tester.pumpAndSettle();
+
+    expect(api.previewCalls, 1);
+    expect(
+        find.text('Quant-first | GPT advisory only | No real order submitted'),
+        findsOneWidget);
+    expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
+    expect(find.text('GPT ADVISORY'), findsOneWidget);
+    expect(find.text('PRICE ONLY'), findsOneWidget);
+    expect(
+        find.text(
+            'Technical score not calculated. Reason: insufficient indicator data.'),
+        findsOneWidget);
+    expect(find.text('KIS OHLCV indicators not available yet'), findsOneWidget);
+    expect(find.text('GPT ADVISORY CONTEXT'), findsOneWidget);
+    expect(find.text('QUANT BUY'), findsNothing);
+    expect(find.text('FINAL BUY'), findsNothing);
+    expect(
+        find.text(
+            'Only current price is available; technical indicator score was not calculated.'),
+        findsOneWidget);
+    expect(
+        find.textContaining('submit real', findRichText: true), findsNothing);
 
     controller.dispose();
   });
@@ -88,6 +115,7 @@ Widget _wrap(DashboardController controller, Widget Function() buildChild) {
 
 class _FakeApiClient extends ApiClient {
   int validationCalls = 0;
+  int previewCalls = 0;
 
   @override
   Future<OrderValidationResult> validateKisOrder({
@@ -131,6 +159,65 @@ class _FakeApiClient extends ApiClient {
         kisTrIdPreview: 'TTTC0802U',
         payloadPreview: {'CANO': '12****78', 'PDNO': '005930'},
       ),
+    );
+  }
+
+  @override
+  Future<KisWatchlistPreview> runKisWatchlistPreview() async {
+    previewCalls += 1;
+    return const KisWatchlistPreview(
+      market: 'KR',
+      provider: 'kis',
+      currency: 'KRW',
+      dryRun: true,
+      previewOnly: true,
+      tradingEnabled: false,
+      gptAnalysisIncluded: true,
+      marketSession: {'is_market_open': true},
+      warnings: [],
+      configuredSymbolCount: 1,
+      analyzedSymbolCount: 1,
+      quantCandidatesCount: 0,
+      researchedCandidatesCount: 0,
+      finalBestCandidate: null,
+      bestScore: null,
+      shouldTrade: false,
+      action: 'hold',
+      result: 'preview_only',
+      reason: 'kr_trading_disabled',
+      count: 1,
+      items: [
+        KisWatchlistPreviewItem(
+          symbol: '005930',
+          name: _samsungName,
+          market: 'KOSPI',
+          currentPrice: 72000,
+          currency: 'KRW',
+          indicatorStatus: 'price_only',
+          indicatorPayload: {
+            'ema20': null,
+            'ema50': null,
+            'rsi': null,
+          },
+          quantBuyScore: null,
+          quantSellScore: null,
+          aiBuyScore: null,
+          aiSellScore: null,
+          finalBuyScore: null,
+          finalSellScore: null,
+          confidence: null,
+          actionHint: 'watch',
+          entryReady: false,
+          tradeAllowed: false,
+          blockReason: 'insufficient_indicator_data',
+          reason:
+              'Only current price is available; technical indicator score was not calculated.',
+          gptReason: 'Advisory context only. No executable trade decision.',
+          blockReasons: ['preview_only', 'kr_trading_disabled'],
+          warnings: [],
+          error: null,
+        ),
+      ],
     );
   }
 }

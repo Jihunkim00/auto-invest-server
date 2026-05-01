@@ -72,6 +72,10 @@ class MarketSessionStatus {
     required this.isMarketOpen,
     required this.isEntryAllowedNow,
     required this.isNearClose,
+    this.closureReason,
+    this.closureName,
+    this.effectiveClose,
+    this.noNewEntryAfter,
   });
 
   factory MarketSessionStatus.fromJson(Map<String, dynamic> json) {
@@ -81,6 +85,10 @@ class MarketSessionStatus {
       isMarketOpen: json['is_market_open'] == true,
       isEntryAllowedNow: json['is_entry_allowed_now'] == true,
       isNearClose: json['is_near_close'] == true,
+      closureReason: _readNullableString(json['closure_reason']),
+      closureName: _readNullableString(json['closure_name']),
+      effectiveClose: _readNullableString(json['effective_close']),
+      noNewEntryAfter: _readNullableString(json['no_new_entry_after']),
     );
   }
 
@@ -89,6 +97,10 @@ class MarketSessionStatus {
   final bool isMarketOpen;
   final bool isEntryAllowedNow;
   final bool isNearClose;
+  final String? closureReason;
+  final String? closureName;
+  final String? effectiveClose;
+  final String? noNewEntryAfter;
 }
 
 class OrderPreview {
@@ -143,6 +155,14 @@ double? _readNullableDouble(Object? value) {
 String _readString(Object? value, String fallback) {
   final text = value?.toString();
   if (text == null || text.isEmpty) return fallback;
+  return text;
+}
+
+String? _readNullableString(Object? value) {
+  final raw = value?.toString();
+  if (raw == null) return null;
+  final text = raw.trim();
+  if (text.isEmpty) return null;
   return text;
 }
 

@@ -191,6 +191,9 @@ class _ValidationResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final blocked = !result.validatedForSubmission;
+    final closureLabel = result.marketSession.closureName?.isNotEmpty == true
+        ? result.marketSession.closureName!
+        : result.marketSession.closureReason;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -226,6 +229,16 @@ class _ValidationResultCard extends StatelessWidget {
                 label: 'Available Cash', value: _krw(result.availableCash!)),
           if (result.heldQty != null)
             _DataPair(label: 'Held Qty', value: _quantity(result.heldQty!)),
+          if (closureLabel != null && closureLabel.isNotEmpty)
+            _DataPair(label: 'Closed Reason', value: closureLabel),
+          if (result.marketSession.effectiveClose?.isNotEmpty == true)
+            _DataPair(
+                label: 'Effective Close',
+                value: result.marketSession.effectiveClose!),
+          if (result.marketSession.noNewEntryAfter?.isNotEmpty == true)
+            _DataPair(
+                label: 'No New Entry After',
+                value: result.marketSession.noNewEntryAfter!),
           _DataPair(
               label: 'Account',
               value: result.orderPreview.accountNoMasked.isEmpty
@@ -256,6 +269,10 @@ class _ValidationResultCard extends StatelessWidget {
           if (result.marketSession.isNearClose)
             const _SoftBadge(text: 'NEAR CLOSE', color: Colors.amberAccent),
         ]),
+        if (!result.marketSession.isMarketOpen && closureLabel != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(text: 'Market closed: $closureLabel'),
+        ],
         if (result.warnings.isNotEmpty) ...[
           const SizedBox(height: 12),
           _ReasonList(title: 'Warnings', items: result.warnings),

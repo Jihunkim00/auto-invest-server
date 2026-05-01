@@ -59,6 +59,8 @@ def test_kis_auth_status_returns_200_and_hides_secrets(monkeypatch, client):
     assert body["kis_enabled"] is True
     assert body["kis_configured"] is True
     assert body["kis_env"] == "paper"
+    assert "access_token_seconds_until_expiry" in body
+    assert "access_token_needs_refresh" in body
     assert "real-app-key" not in response.text
     assert "real-app-secret" not in response.text
     assert "env-access-token" not in response.text

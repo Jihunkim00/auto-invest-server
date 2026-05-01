@@ -1,8 +1,11 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.db.database import get_db
+from app.db.models import BrokerAuthToken
 from app.main import app
 
 
@@ -54,13 +57,19 @@ def _safe_kis(monkeypatch):
         lambda self: [{"symbol": "005930", "qty": 3.0}],
     )
     monkeypatch.setattr(
-        "app.services.kis_order_validation_service.MarketSessionService.get_status",
+        "app.services.kis_order_validation_service.MarketSessionService.get_session_status",
         lambda self, market, now=None: {
             "market": "KR",
             "timezone": "Asia/Seoul",
             "is_market_open": True,
             "is_entry_allowed_now": True,
             "is_near_close": False,
+            "closure_reason": None,
+            "closure_name": None,
+            "regular_open": "09:00",
+            "regular_close": "15:30",
+            "effective_close": "15:30",
+            "no_new_entry_after": "15:00",
         },
     )
 
@@ -219,13 +228,19 @@ def test_kis_enabled_false_still_allows_dry_run_validation(client):
 
 def test_after_kr_no_new_entry_time_blocks_buy(monkeypatch, client):
     monkeypatch.setattr(
-        "app.services.kis_order_validation_service.MarketSessionService.get_status",
+        "app.services.kis_order_validation_service.MarketSessionService.get_session_status",
         lambda self, market, now=None: {
             "market": "KR",
             "timezone": "Asia/Seoul",
             "is_market_open": True,
             "is_entry_allowed_now": False,
             "is_near_close": True,
+            "closure_reason": None,
+            "closure_name": None,
+            "regular_open": "09:00",
+            "regular_close": "15:30",
+            "effective_close": "15:30",
+            "no_new_entry_after": "15:00",
         },
     )
 
@@ -237,3 +252,86 @@ def test_after_kr_no_new_entry_time_blocks_buy(monkeypatch, client):
     assert "after_no_new_entry_time" in body["warnings"]
     assert "after_no_new_entry_time" in body["block_reasons"]
     assert "near_close" in body["warnings"]
+
+
+def test_holiday_closure_reason_is_returned(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.services.kis_order_validation_service.MarketSessionService.get_session_status",
+        lambda self, market, now=None: {
+            "market": "KR",
+            "timezone": "Asia/Seoul",
+            "is_market_open": False,
+            "is_entry_allowed_now": False,
+            "is_near_close": False,
+            "closure_reason": "holiday_labor_day",
+            "closure_name": "Labor Day",
+            "regular_open": "09:00",
+            "regular_close": "15:30",
+            "effective_close": "15:30",
+            "no_new_entry_after": "15:00",
+        },
+    )
+
+    response = client.post("/kis/orders/validate", json=_buy_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validated_for_submission"] is False
+    assert body["market_session"]["closure_reason"] == "holiday_labor_day"
+    assert body["market_session"]["closure_name"] == "Labor Day"
+    assert "market_closed" in body["block_reasons"]
+    assert "market_closed_holiday_labor_day" in body["warnings"]
+
+
+def test_dry_run_validation_refreshes_expired_token_lazily(
+    monkeypatch,
+    client,
+    db_session,
+):
+    db_session.add(
+        BrokerAuthToken(
+            provider="kis",
+            token_type="access_token",
+            token_value="expired-access-token",
+            expires_at=datetime.now(UTC) - timedelta(minutes=1),
+            issued_at=datetime.now(UTC) - timedelta(hours=24),
+            environment="prod",
+        )
+    )
+    db_session.commit()
+    calls = []
+
+    def fake_post(url, data, headers, timeout):
+        calls.append(url)
+        return _FakeResponse(
+            {
+                "access_token": "refreshed-access-token",
+                "expires_in": 3600,
+            }
+        )
+
+    def fake_price(self, symbol):
+        token = self.get_access_token()
+        assert token.token == "refreshed-access-token"
+        return {"symbol": symbol, "current_price": 72000.0}
+
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_post)
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_stock_price",
+        fake_price,
+    )
+
+    response = client.post("/kis/orders/validate", json=_buy_payload())
+
+    assert response.status_code == 200
+    assert response.json()["validated_for_submission"] is True
+    assert len(calls) == 1
+
+
+class _FakeResponse:
+    def __init__(self, body, status_code=200):
+        self._body = body
+        self.status_code = status_code
+
+    def json(self):
+        return self._body

@@ -13,6 +13,8 @@ from app.config import get_settings
 from app.db.database import SessionLocal
 from app.db.models import BrokerAuthToken
 
+ACCESS_TOKEN_REFRESH_BUFFER = timedelta(minutes=10)
+
 
 @dataclass(frozen=True)
 class KisTokenResult:
@@ -128,6 +130,22 @@ class KisAuthManager:
     def get_valid_approval_key(self, force_refresh: bool = False) -> KisTokenResult:
         return self.issue_approval_key(force_refresh=force_refresh)
 
+    def token_needs_refresh(self, token_type: str = "access_token") -> bool:
+        row = self._get_latest_token(token_type)
+        if row is None or not row.token_value:
+            return True
+        return self._token_needs_refresh(token_type, row.expires_at)
+
+    def seconds_until_expiry(self, token_type: str = "access_token") -> int | None:
+        row = self._get_latest_token(token_type)
+        if row is None:
+            return None
+        normalized = self._as_utc(row.expires_at)
+        if normalized is None:
+            return None
+        remaining = int((normalized - self._now()).total_seconds())
+        return max(remaining, 0)
+
     def clear_cached_tokens(self) -> None:
         self._with_session(
             lambda db: db.query(BrokerAuthToken)
@@ -137,20 +155,28 @@ class KisAuthManager:
         )
 
     def get_auth_status(self) -> dict:
-        access = self._get_cached_token("access_token")
-        approval = self._get_cached_token("approval_key")
+        access = self._get_latest_token("access_token")
+        approval = self._get_latest_token("approval_key")
         return {
             "kis_enabled": bool(self.settings.kis_enabled),
             "kis_configured": self.is_configured(),
             "kis_env": self.settings.kis_env,
-            "has_access_token": access is not None,
+            "has_access_token": access is not None and bool(access.token_value),
             "access_token_expires_at": self._iso_or_none(
                 access.expires_at if access else None
             ),
-            "has_approval_key": approval is not None,
+            "access_token_seconds_until_expiry": self.seconds_until_expiry(
+                "access_token"
+            ),
+            "access_token_needs_refresh": self.token_needs_refresh("access_token"),
+            "has_approval_key": approval is not None and bool(approval.token_value),
             "approval_key_expires_at": self._iso_or_none(
                 approval.expires_at if approval else None
             ),
+            "approval_key_seconds_until_expiry": self.seconds_until_expiry(
+                "approval_key"
+            ),
+            "approval_key_needs_refresh": self.token_needs_refresh("approval_key"),
         }
 
     def _post_auth_json(self, path: str, payload: dict, token_type: str) -> dict:
@@ -211,9 +237,27 @@ class KisAuthManager:
                 .all()
             )
             for row in rows:
-                if row.token_value and self._is_unexpired(row.expires_at):
+                if row.token_value and not self._token_needs_refresh(
+                    token_type,
+                    row.expires_at,
+                ):
                     return row
             return None
+
+        return self._with_session(query)
+
+    def _get_latest_token(self, token_type: str) -> BrokerAuthToken | None:
+        def query(db: Session):
+            return (
+                db.query(BrokerAuthToken)
+                .filter(
+                    BrokerAuthToken.provider == "kis",
+                    BrokerAuthToken.token_type == token_type,
+                    BrokerAuthToken.environment == self.settings.kis_env,
+                )
+                .order_by(BrokerAuthToken.updated_at.desc(), BrokerAuthToken.id.desc())
+                .first()
+            )
 
         return self._with_session(query)
 
@@ -323,6 +367,21 @@ class KisAuthManager:
         if normalized is None:
             return True
         return normalized > self._now()
+
+    def _token_needs_refresh(
+        self,
+        token_type: str,
+        expires_at: datetime | None,
+    ) -> bool:
+        normalized = self._as_utc(expires_at)
+        if normalized is None:
+            return token_type == "access_token"
+        buffer = (
+            ACCESS_TOKEN_REFRESH_BUFFER
+            if token_type == "access_token"
+            else timedelta()
+        )
+        return normalized <= self._now() + buffer
 
     def _as_utc(self, value: datetime | None) -> datetime | None:
         if value is None:

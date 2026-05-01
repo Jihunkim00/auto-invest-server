@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from app.config import get_settings
+from app.services.market_calendar_service import (
+    MarketCalendarError,
+    MarketCalendarService,
+)
 
 
 class MarketSessionError(ValueError):
@@ -41,10 +45,16 @@ class MarketSession:
 
 
 class MarketSessionService:
-    def __init__(self, config_path: str | None = None):
+    def __init__(
+        self,
+        config_path: str | None = None,
+        *,
+        calendar_service: MarketCalendarService | None = None,
+    ):
         settings = get_settings()
         self.config_path = config_path or settings.market_sessions_config_path
         self._root = Path(__file__).resolve().parents[2]
+        self.calendar_service = calendar_service or MarketCalendarService()
 
     def list_sessions(self) -> list[dict[str, Any]]:
         payload = self._load_config()
@@ -78,10 +88,11 @@ class MarketSessionService:
     def is_market_open(self, market: str, now: datetime | None = None) -> bool:
         session = self.get_session(market)
         local_now = self._local_now(session, now)
+        if self._calendar_status(session, local_now)["is_holiday"]:
+            return False
         current = local_now.time()
-        return self._parse_time(session.regular_open) <= current <= self._parse_time(
-            session.regular_close
-        )
+        effective_close = self._effective_close(session, local_now)
+        return self._parse_time(session.regular_open) <= current <= effective_close
 
     def is_entry_allowed_now(
         self,
@@ -99,12 +110,14 @@ class MarketSessionService:
     def is_near_close(self, market: str, now: datetime | None = None) -> bool:
         session = self.get_session(market)
         local_now = self._local_now(session, now)
+        if self._calendar_status(session, local_now)["is_holiday"]:
+            return False
         current = local_now.time()
         close_start = self._minutes_before(
-            self._parse_time(session.regular_close),
+            self._effective_close(session, local_now),
             session.avoid_close_minutes,
         )
-        return close_start <= current <= self._parse_time(session.regular_close)
+        return close_start <= current <= self._effective_close(session, local_now)
 
     def get_next_entry_slots(
         self,
@@ -120,21 +133,56 @@ class MarketSessionService:
                 upcoming.append(asdict(slot))
         return upcoming
 
-    def get_status(self, market: str, now: datetime | None = None) -> dict[str, Any]:
+    def get_session_status(
+        self,
+        market: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         session = self.get_session(market)
         local_now = self._local_now(session, now)
+        calendar_status = self._calendar_status(session, local_now)
+        effective_close = self._effective_close(session, local_now).strftime("%H:%M")
+        is_market_open = self.is_market_open(session.market, local_now)
+        closure_reason = None
+        closure_name = None
+
+        if calendar_status["is_holiday"]:
+            closure_reason = calendar_status["closure_reason"]
+            closure_name = calendar_status["holiday_name"]
+        elif not is_market_open:
+            current = local_now.time()
+            close_time = self._parse_time(effective_close)
+            if calendar_status["is_early_close"] and current > close_time:
+                closure_reason = calendar_status["early_close_reason"]
+                closure_name = calendar_status["early_close_name"]
+            else:
+                closure_reason = "outside_regular_hours"
+
         return {
             "market": session.market,
             "timezone": session.timezone,
-            "is_market_open": self.is_market_open(session.market, local_now),
+            "is_market_open": is_market_open,
             "is_entry_allowed_now": self.is_entry_allowed_now(
                 session.market,
                 local_now,
             ),
             "is_near_close": self.is_near_close(session.market, local_now),
+            "closure_reason": closure_reason,
+            "closure_name": closure_name,
+            "regular_open": session.regular_open,
+            "regular_close": session.regular_close,
+            "effective_close": effective_close,
+            "no_new_entry_after": session.no_new_entry_after,
+            "is_holiday": calendar_status["is_holiday"],
+            "is_early_close": calendar_status["is_early_close"],
+            "early_close_name": calendar_status["early_close_name"],
+            "early_close_reason": calendar_status["early_close_reason"],
             "local_time": local_now.isoformat(),
             "enabled_for_scheduler": session.enabled_for_scheduler,
         }
+
+    def get_status(self, market: str, now: datetime | None = None) -> dict[str, Any]:
+        return self.get_session_status(market, now)
 
     def get_default_market_key(self) -> str:
         payload = self._load_config()
@@ -176,11 +224,19 @@ class MarketSessionService:
             )
         raw_slots = raw.get("entry_slots")
         if not isinstance(raw_slots, list):
-            raise MarketSessionError(f"Market session {market} entry_slots must be a list.")
+            raise MarketSessionError(
+                f"Market session {market} entry_slots must be a list."
+            )
         slots = []
         for raw_slot in raw_slots:
-            if not isinstance(raw_slot, dict) or not raw_slot.get("name") or not raw_slot.get("time"):
-                raise MarketSessionError(f"Market session {market} has invalid entry slot.")
+            if (
+                not isinstance(raw_slot, dict)
+                or not raw_slot.get("name")
+                or not raw_slot.get("time")
+            ):
+                raise MarketSessionError(
+                    f"Market session {market} has invalid entry slot."
+                )
             slots.append(
                 MarketEntrySlot(name=str(raw_slot["name"]), time=str(raw_slot["time"]))
             )
@@ -193,7 +249,9 @@ class MarketSessionService:
             entry_slots=slots,
             no_new_entry_after=str(raw["no_new_entry_after"]),
             force_manage_until=(
-                str(raw["force_manage_until"]) if raw.get("force_manage_until") else None
+                str(raw["force_manage_until"])
+                if raw.get("force_manage_until")
+                else None
             ),
             avoid_open_minutes=int(raw["avoid_open_minutes"]),
             avoid_close_minutes=int(raw["avoid_close_minutes"]),
@@ -207,6 +265,35 @@ class MarketSessionService:
         if now.tzinfo is None:
             return now.replace(tzinfo=timezone)
         return now.astimezone(timezone)
+
+    def _calendar_status(
+        self,
+        session: MarketSession,
+        local_now: datetime,
+    ) -> dict[str, Any]:
+        try:
+            return self.calendar_service.get_calendar_status(session.market, local_now)
+        except MarketCalendarError:
+            return {
+                "is_holiday": False,
+                "holiday_name": None,
+                "closure_reason": None,
+                "is_early_close": False,
+                "early_close_name": None,
+                "early_close_reason": None,
+                "early_close_time": None,
+            }
+
+    def _effective_close(self, session: MarketSession, local_now: datetime) -> time:
+        try:
+            close_text = self.calendar_service.get_close_time_for_date(
+                session.market,
+                local_now,
+                session.regular_close,
+            )
+        except MarketCalendarError:
+            close_text = session.regular_close
+        return self._parse_time(close_text)
 
     @staticmethod
     def _parse_time(value: str) -> time:

@@ -33,6 +33,6 @@ def get_market_session(market: str):
 def get_market_session_status(market: str):
     service = MarketSessionService()
     try:
-        return service.get_status(market)
+        return service.get_session_status(market)
     except MarketSessionError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

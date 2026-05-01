@@ -144,6 +144,85 @@ def test_expired_access_token_triggers_refresh(db_session, monkeypatch):
     assert result.token == "refreshed-access-token"
 
 
+def test_access_token_expiring_within_refresh_buffer_is_refreshed(
+    db_session,
+    monkeypatch,
+):
+    _add_token(
+        db_session,
+        token_type="access_token",
+        token_value="nearly-expired-access-token",
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    calls = []
+
+    def fake_post(url, data, headers, timeout):
+        calls.append(url)
+        return _FakeResponse(
+            {
+                "access_token": "refreshed-buffer-token",
+                "expires_in": 3600,
+            }
+        )
+
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_post)
+    manager = KisAuthManager(_settings(), db_session)
+
+    result = manager.get_valid_access_token()
+
+    assert result.source == "issued"
+    assert result.token == "refreshed-buffer-token"
+    assert calls
+
+
+def test_access_token_missing_expiry_defaults_to_23_hours(db_session, monkeypatch):
+    def fake_post(url, data, headers, timeout):
+        return _FakeResponse({"access_token": "default-expiry-token"})
+
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_post)
+    manager = KisAuthManager(_settings(), db_session)
+
+    before = datetime.now(UTC)
+    result = manager.get_valid_access_token(force_refresh=True)
+    after = datetime.now(UTC)
+
+    assert result.expires_at is not None
+    assert before + timedelta(hours=23) <= result.expires_at <= after + timedelta(
+        hours=23,
+        seconds=1,
+    )
+
+
+def test_token_status_reports_seconds_and_refresh_need(db_session):
+    _add_token(
+        db_session,
+        token_type="access_token",
+        token_value="status-access-token",
+        expires_at=datetime.now(UTC) + timedelta(hours=1),
+    )
+    manager = KisAuthManager(_settings(), db_session)
+
+    status = manager.get_auth_status()
+
+    assert status["has_access_token"] is True
+    assert status["access_token_seconds_until_expiry"] > 3500
+    assert status["access_token_needs_refresh"] is False
+    assert "status-access-token" not in str(status)
+
+
+def test_token_needs_refresh_true_for_expired_access_token(db_session):
+    _add_token(
+        db_session,
+        token_type="access_token",
+        token_value="expired-status-access-token",
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    manager = KisAuthManager(_settings(), db_session)
+
+    assert manager.token_needs_refresh("access_token") is True
+    assert manager.seconds_until_expiry("access_token") == 0
+
+
 def test_approval_key_cache_is_reused(db_session, monkeypatch):
     _add_token(
         db_session,
