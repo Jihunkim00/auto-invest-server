@@ -44,6 +44,8 @@ class ActionResult {
   final String message;
 }
 
+enum PortfolioMarket { us, kr }
+
 class DashboardController extends ChangeNotifier {
   DashboardController(this.apiClient, {bool autoload = true}) {
     if (autoload) {
@@ -67,7 +69,21 @@ class DashboardController extends ChangeNotifier {
   );
 
   WatchlistRunResult runResult = _emptyRunResult;
-  PortfolioSummary portfolioSummary = PortfolioSummary.empty();
+  PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
+  PortfolioSummary krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+  PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
+  bool krPortfolioUnavailable = false;
+  String? krPortfolioError;
+
+  PortfolioSummary get portfolioSummary => usPortfolioSummary;
+
+  PortfolioSummary get selectedPortfolioSummary =>
+      selectedPortfolioMarket == PortfolioMarket.kr
+          ? krPortfolioSummary
+          : usPortfolioSummary;
+
+  bool get selectedPortfolioUnavailable =>
+      selectedPortfolioMarket == PortfolioMarket.kr && krPortfolioUnavailable;
 
   List<TradingRun> recentRuns = const [];
   String? error;
@@ -87,7 +103,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
-      await _refreshPortfolioSummary();
+      await _refreshPortfolioSummaries();
       try {
         final latestRun = await apiClient.fetchLatestWatchlistRunResult();
         if (latestRun == null) {
@@ -128,7 +144,7 @@ class DashboardController extends ChangeNotifier {
       hasLatestRunResult = true;
       showingOfflineFallback = false;
       recentRuns = await apiClient.getRecentTradingRuns();
-      await _refreshPortfolioSummary();
+      await _refreshPortfolioSummaries();
       return ActionResult(
           success: true, message: 'Watchlist analysis completed.');
     } catch (e) {
@@ -154,7 +170,7 @@ class DashboardController extends ChangeNotifier {
           symbol: normalizedSymbol, gateLevel: gateLevel);
       manualRunResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
-      await _refreshPortfolioSummary();
+      await _refreshPortfolioSummaries();
       final action = result.action.toUpperCase();
       final orderText =
           result.noOrderCreated ? 'no order created' : 'order created';
@@ -287,11 +303,34 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _refreshPortfolioSummary() async {
+  void selectPortfolioMarket(PortfolioMarket market) {
+    if (selectedPortfolioMarket == market) return;
+    selectedPortfolioMarket = market;
+    notifyListeners();
+  }
+
+  Future<void> _refreshPortfolioSummaries() async {
+    await _refreshUsPortfolioSummary();
+    await _refreshKrPortfolioSummary();
+  }
+
+  Future<void> _refreshUsPortfolioSummary() async {
     try {
-      portfolioSummary = await apiClient.fetchPortfolioSummary();
+      usPortfolioSummary = await apiClient.fetchUsPortfolioSummary();
     } catch (_) {
       // Keep the last live snapshot if the backend returns a transient error.
+    }
+  }
+
+  Future<void> _refreshKrPortfolioSummary() async {
+    try {
+      krPortfolioSummary = await apiClient.fetchKrPortfolioSummary();
+      krPortfolioUnavailable = false;
+      krPortfolioError = null;
+    } catch (_) {
+      krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+      krPortfolioUnavailable = true;
+      krPortfolioError = 'KIS account data unavailable';
     }
   }
 }

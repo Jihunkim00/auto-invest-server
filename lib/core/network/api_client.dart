@@ -30,10 +30,38 @@ class ApiClient {
     return int.tryParse(value?.toString() ?? '') ?? fallback;
   }
 
+  static double? _readNullableDouble(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    final text = value.toString().trim().replaceAll(',', '');
+    if (text.isEmpty) return null;
+    return double.tryParse(text);
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _client.get(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
     return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _getJsonNoCache(String path) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}$path').replace(
+      queryParameters: {
+        '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+      },
+    );
+    final r = await _client.get(uri, headers: const {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    });
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid backend response.');
+    }
+    return Map<String, dynamic>.from(decoded);
   }
 
   Future<Map<String, dynamic>> _postJson(String path) async {
@@ -75,6 +103,60 @@ class ApiClient {
     } on http.ClientException {
       return PortfolioSummary.empty();
     }
+  }
+
+  Future<PortfolioSummary> fetchUsPortfolioSummary() => fetchPortfolioSummary();
+
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async {
+    final balance = await _getJsonNoCache('/kis/account/balance');
+    final positionsPayload = await _getJsonNoCache('/kis/account/positions');
+    final ordersPayload = await _getJsonNoCache('/kis/account/open-orders');
+
+    final rawPositions =
+        positionsPayload['positions'] as List<dynamic>? ?? const [];
+    final positions = rawPositions
+        .whereType<Map>()
+        .map((item) => PositionSummary.fromJson(
+            Map<String, dynamic>.from(item.cast<String, dynamic>())))
+        .toList();
+
+    final rawOrders = ordersPayload['orders'] as List<dynamic>? ?? const [];
+    final pendingOrders = rawOrders
+        .whereType<Map>()
+        .map((item) => PendingOrderSummary.fromJson(
+            Map<String, dynamic>.from(item.cast<String, dynamic>())))
+        .toList();
+
+    final summedCostBasis = positions.fold<double>(
+        0, (total, position) => total + position.costBasis);
+    final summedMarketValue = positions.fold<double>(
+        0, (total, position) => total + position.marketValue);
+    final summedUnrealizedPl = positions.fold<double>(
+        0, (total, position) => total + position.unrealizedPl);
+
+    final totalCostBasis =
+        _readNullableDouble(balance['purchase_amount']) ?? summedCostBasis;
+    final totalMarketValue =
+        _readNullableDouble(balance['stock_evaluation_amount']) ??
+            _readNullableDouble(balance['total_market_value']) ??
+            _readNullableDouble(balance['total_asset_value']) ??
+            summedMarketValue;
+    final totalUnrealizedPl =
+        _readNullableDouble(balance['unrealized_pl']) ?? summedUnrealizedPl;
+    final totalUnrealizedPlpc = _readNullableDouble(balance['unrealized_plpc']) ??
+        (totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0);
+
+    return PortfolioSummary(
+      currency: 'KRW',
+      positionsCount: _readInt(positionsPayload['count'], positions.length),
+      pendingOrdersCount: _readInt(ordersPayload['count'], pendingOrders.length),
+      totalCostBasis: totalCostBasis,
+      totalMarketValue: totalMarketValue,
+      totalUnrealizedPl: totalUnrealizedPl,
+      totalUnrealizedPlpc: totalUnrealizedPlpc,
+      positions: positions,
+      pendingOrders: pendingOrders,
+    );
   }
 
   Future<OpsSettings> getOpsSettings() async {

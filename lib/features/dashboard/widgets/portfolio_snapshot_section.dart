@@ -13,7 +13,15 @@ class PortfolioSnapshotSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final summary = controller.portfolioSummary;
+    final summary = controller.selectedPortfolioSummary;
+    final selectedMarket = controller.selectedPortfolioMarket;
+    final isKr = selectedMarket == PortfolioMarket.kr;
+    final marketTitle =
+        isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';
+    final noPositionsText =
+        isKr ? 'No open KR positions' : 'No open US positions';
+    final noOrdersText =
+        isKr ? 'No pending KR orders' : 'No pending US orders';
     final plColor = _valueColor(summary.totalUnrealizedPl);
 
     return SectionCard(
@@ -29,6 +37,37 @@ class PortfolioSnapshotSection extends StatelessWidget {
               text:
                   '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending'),
         ]),
+        const SizedBox(height: 12),
+        SegmentedButton<PortfolioMarket>(
+          segments: const [
+            ButtonSegment(
+                value: PortfolioMarket.us,
+                label: Text('US / Alpaca'),
+                icon: Icon(Icons.public, size: 16)),
+            ButtonSegment(
+                value: PortfolioMarket.kr,
+                label: Text('KR / KIS'),
+                icon: Icon(Icons.account_balance, size: 16)),
+          ],
+          selected: {selectedMarket},
+          onSelectionChanged: (selection) =>
+              controller.selectPortfolioMarket(selection.first),
+        ),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+          Text(marketTitle,
+              style: const TextStyle(
+                  color: Colors.white70, fontWeight: FontWeight.w800)),
+          if (isKr) ...[
+            const _SoftBadge(text: 'READ-ONLY', color: Colors.lightBlueAccent),
+            const _SoftBadge(
+                text: 'TRADING DISABLED', color: Colors.amberAccent),
+          ],
+        ]),
+        if (controller.selectedPortfolioUnavailable) ...[
+          const SizedBox(height: 10),
+          const _EmptyLine(text: 'KIS account data unavailable'),
+        ],
         const SizedBox(height: 14),
         LayoutBuilder(builder: (context, constraints) {
           final tileWidth = _metricTileWidth(constraints.maxWidth);
@@ -36,17 +75,20 @@ class PortfolioSnapshotSection extends StatelessWidget {
             _MetricTile(
                 width: tileWidth,
                 label: 'Total Market Value',
-                value: _money(summary.totalMarketValue),
+                value: _money(summary.totalMarketValue,
+                    currency: summary.currency),
                 color: Colors.white),
             _MetricTile(
                 width: tileWidth,
                 label: 'Total Cost',
-                value: _money(summary.totalCostBasis),
+                value: _money(summary.totalCostBasis,
+                    currency: summary.currency),
                 color: Colors.white70),
             _MetricTile(
                 width: tileWidth,
                 label: 'Unrealized P/L',
-                value: _money(summary.totalUnrealizedPl, signed: true),
+                value: _money(summary.totalUnrealizedPl,
+                    currency: summary.currency, signed: true),
                 color: plColor),
             _MetricTile(
                 width: tileWidth,
@@ -59,11 +101,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
         const _SubsectionTitle('Current Holdings'),
         const SizedBox(height: 8),
         if (summary.positions.isEmpty)
-          const _EmptyLine(text: 'No open positions')
+          _EmptyLine(text: noPositionsText)
         else
           Column(children: [
             for (final position in summary.positions) ...[
-              _PositionTile(position: position),
+              _PositionTile(position: position, currency: summary.currency),
               if (position != summary.positions.last) const SizedBox(height: 8),
             ],
           ]),
@@ -71,11 +113,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
         const _SubsectionTitle('Pending Orders'),
         const SizedBox(height: 8),
         if (summary.pendingOrders.isEmpty)
-          const _EmptyLine(text: 'No pending orders')
+          _EmptyLine(text: noOrdersText)
         else
           Column(children: [
             for (final order in summary.pendingOrders) ...[
-              _PendingOrderTile(order: order),
+              _PendingOrderTile(order: order, currency: summary.currency),
               if (order != summary.pendingOrders.last)
                 const SizedBox(height: 8),
             ],
@@ -139,9 +181,10 @@ class _MetricTile extends StatelessWidget {
 }
 
 class _PositionTile extends StatelessWidget {
-  const _PositionTile({required this.position});
+  const _PositionTile({required this.position, required this.currency});
 
   final PositionSummary position;
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -157,12 +200,27 @@ class _PositionTile extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Text(position.symbol,
-              style:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(position.symbol,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+              if (position.name.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(position.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ]),
+          ),
           const SizedBox(width: 8),
           _SoftBadge(text: position.side.toUpperCase(), color: Colors.white70),
-          const Spacer(),
+          const SizedBox(width: 8),
           Text('Qty ${_quantity(position.qty)}',
               style: const TextStyle(
                   color: Colors.white70, fontWeight: FontWeight.w700)),
@@ -170,18 +228,23 @@ class _PositionTile extends StatelessWidget {
         const SizedBox(height: 10),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _DataPair(
-              label: 'Avg Buy / Share', value: _money(position.avgEntryPrice)),
+              label: 'Avg Buy / Share',
+              value: _money(position.avgEntryPrice, currency: currency)),
           _DataPair(
               label: 'Current / Share',
               value: position.currentPrice == null
                   ? 'n/a'
-                  : _money(position.currentPrice!)),
-          _DataPair(label: 'Cost', value: _money(position.costBasis)),
+                  : _money(position.currentPrice!, currency: currency)),
           _DataPair(
-              label: 'Current Value', value: _money(position.marketValue)),
+              label: 'Cost',
+              value: _money(position.costBasis, currency: currency)),
+          _DataPair(
+              label: 'Current Value',
+              value: _money(position.marketValue, currency: currency)),
           _DataPair(
               label: 'P/L',
-              value: _money(position.unrealizedPl, signed: true),
+              value:
+                  _money(position.unrealizedPl, currency: currency, signed: true),
               color: plColor),
           _DataPair(
               label: 'Profit',
@@ -194,9 +257,10 @@ class _PositionTile extends StatelessWidget {
 }
 
 class _PendingOrderTile extends StatelessWidget {
-  const _PendingOrderTile({required this.order});
+  const _PendingOrderTile({required this.order, required this.currency});
 
   final PendingOrderSummary order;
+  final String currency;
 
   @override
   Widget build(BuildContext context) {
@@ -217,9 +281,21 @@ class _PendingOrderTile extends StatelessWidget {
           _SoftBadge(text: side.isEmpty ? 'ORDER' : side, color: sideColor),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(order.symbol,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(order.symbol,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+              if (order.name.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(order.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: Colors.white60,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ]),
           ),
           Text(_cleanStatus(order.status),
               style: const TextStyle(
@@ -228,14 +304,19 @@ class _PendingOrderTile extends StatelessWidget {
         const SizedBox(height: 10),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _DataPair(label: 'Quantity', value: _orderQuantity(order)),
+          if (order.unfilledQty != null)
+            _DataPair(
+                label: 'Unfilled', value: _quantity(order.unfilledQty!)),
+          if (order.price != null)
+            _DataPair(
+                label: 'Price', value: _money(order.price!, currency: currency)),
           _DataPair(
               label: 'Estimated Amount',
               value: order.estimatedAmount == null
                   ? 'n/a'
-                  : _money(order.estimatedAmount!)),
-          _DataPair(
-              label: 'Type',
-              value: order.type.isEmpty ? 'n/a' : _cleanStatus(order.type)),
+                  : _money(order.estimatedAmount!, currency: currency)),
+          if (order.type.isNotEmpty)
+            _DataPair(label: 'Type', value: _cleanStatus(order.type)),
           if (order.submittedAt != null)
             _DataPair(label: 'Submitted', value: order.submittedAt!),
         ]),
@@ -245,7 +326,9 @@ class _PendingOrderTile extends StatelessWidget {
 
   String _orderQuantity(PendingOrderSummary order) {
     if (order.qty != null) return _quantity(order.qty!);
-    if (order.notional != null) return _money(order.notional!);
+    if (order.notional != null) {
+      return _money(order.notional!, currency: currency);
+    }
     return 'n/a';
   }
 }
@@ -366,7 +449,11 @@ Color _valueColor(double value) {
   return Colors.white70;
 }
 
-String _money(double value, {bool signed = false}) {
+String _money(double value, {required String currency, bool signed = false}) {
+  final normalizedCurrency = currency.toUpperCase();
+  final decimals = normalizedCurrency == 'KRW' ? 0 : 2;
+  final formatted = _groupedNumber(value.abs(), decimals: decimals);
+  final symbol = normalizedCurrency == 'KRW' ? '₩' : r'$';
   final prefix = signed
       ? value > 0
           ? '+'
@@ -376,7 +463,26 @@ String _money(double value, {bool signed = false}) {
       : value < 0
           ? '-'
           : '';
-  return '$prefix\$${value.abs().toStringAsFixed(2)}';
+  if (normalizedCurrency == 'KRW') {
+    return '$prefix$symbol$formatted';
+  }
+  return '$prefix$symbol$formatted';
+}
+
+String _groupedNumber(double value, {required int decimals}) {
+  final fixed = value.toStringAsFixed(decimals);
+  final parts = fixed.split('.');
+  final whole = parts.first;
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i += 1) {
+    final remaining = whole.length - i;
+    buffer.write(whole[i]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  if (decimals == 0) return buffer.toString();
+  return '${buffer.toString()}.${parts.last}';
 }
 
 String _percent(double value, {bool signed = false}) {

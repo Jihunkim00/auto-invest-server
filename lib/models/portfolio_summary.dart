@@ -11,8 +11,8 @@ class PortfolioSummary {
     required this.pendingOrders,
   });
 
-  factory PortfolioSummary.empty() => const PortfolioSummary(
-        currency: 'USD',
+  factory PortfolioSummary.empty({String currency = 'USD'}) => PortfolioSummary(
+        currency: currency,
         positionsCount: 0,
         pendingOrdersCount: 0,
         totalCostBasis: 0,
@@ -63,6 +63,7 @@ class PortfolioSummary {
 class PositionSummary {
   const PositionSummary({
     required this.symbol,
+    this.name = '',
     required this.side,
     required this.qty,
     required this.avgEntryPrice,
@@ -76,6 +77,7 @@ class PositionSummary {
   factory PositionSummary.fromJson(Map<String, dynamic> json) {
     return PositionSummary(
       symbol: _readString(json['symbol'], ''),
+      name: _readString(json['name'], ''),
       side: _readString(json['side'], 'long'),
       qty: _readDouble(json['qty']),
       avgEntryPrice: _readDouble(json['avg_entry_price']),
@@ -88,6 +90,7 @@ class PositionSummary {
   }
 
   final String symbol;
+  final String name;
   final String side;
   final double qty;
   final double avgEntryPrice;
@@ -102,26 +105,32 @@ class PendingOrderSummary {
   const PendingOrderSummary({
     required this.id,
     required this.symbol,
+    this.name = '',
     required this.side,
     required this.type,
     required this.status,
     required this.qty,
+    this.unfilledQty,
     required this.notional,
     required this.limitPrice,
+    this.price,
     required this.estimatedAmount,
     required this.submittedAt,
   });
 
   factory PendingOrderSummary.fromJson(Map<String, dynamic> json) {
     return PendingOrderSummary(
-      id: _readString(json['id'], ''),
+      id: _readString(json['id'] ?? json['order_id'], ''),
       symbol: _readString(json['symbol'], ''),
+      name: _readString(json['name'], ''),
       side: _readString(json['side'], ''),
-      type: _readString(json['type'], ''),
+      type: _readString(json['type'] ?? json['order_type'], ''),
       status: _readString(json['status'], ''),
       qty: _readNullableDouble(json['qty']),
+      unfilledQty: _readNullableDouble(json['unfilled_qty']),
       notional: _readNullableDouble(json['notional']),
       limitPrice: _readNullableDouble(json['limit_price']),
+      price: _readNullableDouble(json['price']),
       estimatedAmount: _readNullableDouble(json['estimated_amount']),
       submittedAt: _readNullableString(json['submitted_at']),
     );
@@ -129,12 +138,15 @@ class PendingOrderSummary {
 
   final String id;
   final String symbol;
+  final String name;
   final String side;
   final String type;
   final String status;
   final double? qty;
+  final double? unfilledQty;
   final double? notional;
   final double? limitPrice;
+  final double? price;
   final double? estimatedAmount;
   final String? submittedAt;
 }

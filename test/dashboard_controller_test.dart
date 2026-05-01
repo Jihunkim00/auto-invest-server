@@ -51,13 +51,60 @@ void main() {
 
     controller.dispose();
   });
+
+  test('portfolio market defaults to US and keeps summaries separate', () async {
+    final api = _FakeApiClient(
+      usPortfolio: _portfolio('USD', marketValue: 1200),
+      krPortfolio: _portfolio('KRW', marketValue: 2500000),
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+
+    expect(controller.selectedPortfolioMarket, PortfolioMarket.us);
+    expect(controller.selectedPortfolioSummary.currency, 'USD');
+    expect(controller.selectedPortfolioSummary.totalMarketValue, 1200);
+
+    controller.selectPortfolioMarket(PortfolioMarket.kr);
+
+    expect(controller.selectedPortfolioSummary.currency, 'KRW');
+    expect(controller.selectedPortfolioSummary.totalMarketValue, 2500000);
+    expect(controller.usPortfolioSummary.totalMarketValue, 1200);
+    expect(controller.krPortfolioSummary.totalMarketValue, 2500000);
+
+    controller.dispose();
+  });
+
+  test('KR portfolio unavailable does not crash dashboard state', () async {
+    final api = _FakeApiClient(throwKrPortfolio: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+    controller.selectPortfolioMarket(PortfolioMarket.kr);
+
+    expect(controller.krPortfolioUnavailable, isTrue);
+    expect(controller.selectedPortfolioUnavailable, isTrue);
+    expect(controller.selectedPortfolioSummary.currency, 'KRW');
+    expect(controller.selectedPortfolioSummary.positions, isEmpty);
+
+    controller.dispose();
+  });
 }
 
 class _FakeApiClient extends ApiClient {
-  _FakeApiClient({this.latest, this.throwLatest = false});
+  _FakeApiClient({
+    this.latest,
+    this.throwLatest = false,
+    this.usPortfolio,
+    this.krPortfolio,
+    this.throwKrPortfolio = false,
+  });
 
   final WatchlistRunResult? latest;
   final bool throwLatest;
+  final PortfolioSummary? usPortfolio;
+  final PortfolioSummary? krPortfolio;
+  final bool throwKrPortfolio;
   int mockCalls = 0;
 
   @override
@@ -76,7 +123,15 @@ class _FakeApiClient extends ApiClient {
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>
-      PortfolioSummary.empty();
+      usPortfolio ?? PortfolioSummary.empty();
+
+  @override
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async {
+    if (throwKrPortfolio) {
+      throw const ApiRequestException('KIS unavailable');
+    }
+    return krPortfolio ?? PortfolioSummary.empty(currency: 'KRW');
+  }
 
   @override
   Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async {
@@ -94,6 +149,20 @@ class _FakeApiClient extends ApiClient {
     mockCalls += 1;
     return _resultFor('MOCK');
   }
+}
+
+PortfolioSummary _portfolio(String currency, {required double marketValue}) {
+  return PortfolioSummary(
+    currency: currency,
+    positionsCount: 0,
+    pendingOrdersCount: 0,
+    totalCostBasis: 0,
+    totalMarketValue: marketValue,
+    totalUnrealizedPl: 0,
+    totalUnrealizedPlpc: 0,
+    positions: const [],
+    pendingOrders: const [],
+  );
 }
 
 WatchlistRunResult _resultFor(String symbol) {
