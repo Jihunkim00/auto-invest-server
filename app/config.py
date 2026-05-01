@@ -9,9 +9,23 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     default_symbol: str = "AAPL"
 
+    broker_provider: str = "alpaca"
+
     alpaca_api_key: str
     alpaca_secret_key: str
     alpaca_base_url: str
+
+    kis_enabled: bool = False
+    kis_env: str = "paper"
+    kis_app_key: str | None = None
+    kis_app_secret: str | None = None
+    kis_account_no: str | None = None
+    kis_account_product_code: str = "01"
+    kis_hts_id: str | None = None
+    kis_base_url: str | None = None
+    kis_ws_url: str | None = None
+    kis_access_token: str | None = None
+    kis_approval_key: str | None = None
 
     database_url: str = "sqlite:///./auto_invest.db"
 

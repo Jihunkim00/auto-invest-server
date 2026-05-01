@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db.init_db import init_db
 from app.routes.account import router as account_router
+from app.routes.brokers import router as brokers_router
 from app.routes.health import router as health_router
 from app.routes.history import router as history_router
 from app.routes.logs import router as logs_router
@@ -45,6 +46,7 @@ def on_shutdown():
 
 
 app.include_router(health_router)
+app.include_router(brokers_router)
 app.include_router(account_router)
 app.include_router(positions_router)
 app.include_router(portfolio_router)
