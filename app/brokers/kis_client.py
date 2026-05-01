@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -11,10 +11,13 @@ from app.config import get_settings
 
 # Official sample references:
 # - examples_llm/domestic_stock/inquire_price/inquire_price.py
+# - examples_llm/domestic_stock/inquire_daily_itemchartprice/inquire_daily_itemchartprice.py
 # - examples_llm/domestic_stock/inquire_balance/inquire_balance.py
 # - examples_llm/domestic_stock/inquire_psbl_rvsecncl/inquire_psbl_rvsecncl.py
 KIS_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_PRICE_TR_ID = "FHKST01010100"
+KIS_DAILY_BARS_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+KIS_DAILY_BARS_TR_ID = "FHKST03010100"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_BALANCE_TR_ID_REAL = "TTTC8434R"
 KIS_BALANCE_TR_ID_DEMO = "VTTC8434R"
@@ -118,6 +121,31 @@ class KisClient:
             "raw_status": "ok",
             "raw": _safe_raw(response),
         }
+
+    def get_domestic_daily_bars(self, symbol: str, limit: int = 120) -> list[dict]:
+        """Return normalized read-only KIS daily OHLCV bars, oldest first."""
+        normalized_symbol = symbol.strip()
+        safe_limit = max(1, min(int(limit or 120), 240))
+        end_date = datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=max(safe_limit * 3, 90))
+
+        response = self.request_get(
+            KIS_DAILY_BARS_PATH,
+            tr_id=KIS_DAILY_BARS_TR_ID,
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": normalized_symbol,
+                "FID_INPUT_DATE_1": start_date.strftime("%Y%m%d"),
+                "FID_INPUT_DATE_2": end_date.strftime("%Y%m%d"),
+                "FID_PERIOD_DIV_CODE": "D",
+                "FID_ORG_ADJ_PRC": "0",
+            },
+        )
+        return normalize_domestic_daily_bars(
+            normalized_symbol,
+            _as_list(response.get("output2")),
+            limit=safe_limit,
+        )
 
     def get_account_balance(self) -> dict:
         response = self._request_balance()
@@ -446,6 +474,57 @@ def normalize_percent(value) -> float:
     if abs(numeric) > 1:
         return numeric / 100
     return numeric
+
+
+def normalize_domestic_daily_bars(
+    symbol: str,
+    rows: list,
+    *,
+    limit: int = 120,
+) -> list[dict]:
+    by_timestamp: dict[str, dict] = {}
+    for row in rows or []:
+        item = _as_dict(row)
+        timestamp = _normalize_kis_date(
+            first_present(item, ["stck_bsop_date", "bsop_date", "date", "timestamp"])
+        )
+        if not timestamp:
+            continue
+
+        open_price = first_float(item, ["stck_oprc", "oprc", "open"])
+        high = first_float(item, ["stck_hgpr", "hgpr", "high"])
+        low = first_float(item, ["stck_lwpr", "lwpr", "low"])
+        close = first_float(item, ["stck_clpr", "clpr", "close"])
+        volume = first_float(item, ["acml_vol", "cntg_vol", "volume"])
+
+        if open_price <= 0 or high <= 0 or low <= 0 or close <= 0:
+            continue
+
+        by_timestamp[timestamp] = {
+            "symbol": str(symbol).strip(),
+            "timestamp": timestamp,
+            "open": float(open_price),
+            "high": float(high),
+            "low": float(low),
+            "close": float(close),
+            "volume": float(max(volume, 0.0)),
+        }
+
+    sorted_bars = [by_timestamp[key] for key in sorted(by_timestamp)]
+    safe_limit = max(1, int(limit or 120))
+    return sorted_bars[-safe_limit:]
+
+
+def _normalize_kis_date(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) >= 8:
+        return f"{digits[0:4]}-{digits[4:6]}-{digits[6:8]}"
+    return text
 
 
 def first_present(item: dict, keys: list[str]):

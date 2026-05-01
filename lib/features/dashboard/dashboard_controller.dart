@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
+import '../../models/candidate.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -356,6 +357,18 @@ class DashboardController extends ChangeNotifier {
 
   void setOrderTicketQty(int value) {
     orderTicketQty = value <= 0 ? 1 : value;
+    notifyListeners();
+  }
+
+  void useKrCandidateInOrderTicket(Candidate candidate) {
+    selectedOrderMarket = PortfolioMarket.kr;
+    orderTicketSymbol = candidate.symbol.trim();
+    orderTicketSide = 'buy';
+    if (orderTicketQty <= 0) {
+      orderTicketQty = 1;
+    }
+    orderValidationResult = null;
+    orderValidationError = null;
     notifyListeners();
   }
 

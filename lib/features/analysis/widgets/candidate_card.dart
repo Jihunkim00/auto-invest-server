@@ -3,11 +3,18 @@ import 'package:flutter/material.dart';
 import '../../../models/candidate.dart';
 
 class CandidateCard extends StatelessWidget {
-  const CandidateCard(
-      {super.key, required this.index, required this.candidate});
+  const CandidateCard({
+    super.key,
+    required this.index,
+    required this.candidate,
+    this.onUseInOrderTicket,
+    this.useInOrderTicketLabel = 'Use in Order Ticket',
+  });
 
   final int index;
   final Candidate candidate;
+  final VoidCallback? onUseInOrderTicket;
+  final String useInOrderTicketLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -137,6 +144,9 @@ class CandidateCard extends StatelessWidget {
               candidate.gptReason.isNotEmpty) ...[
             const SizedBox(height: 10),
             const _SubsectionTitle(text: 'GPT advisory context'),
+            const Text('Quant-first \u00B7 GPT advisory only',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const SizedBox(height: 4),
             if (candidate.reason.isNotEmpty)
               Text(candidate.reason,
                   style: const TextStyle(color: Colors.white70, fontSize: 12)),
@@ -171,8 +181,19 @@ class CandidateCard extends StatelessWidget {
             if (candidate.blockReasons.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text('Block reasons: ${candidate.blockReasons.join(', ')}',
-                  style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                style: const TextStyle(color: Colors.white60, fontSize: 12)),
             ],
+          ],
+          if (onUseInOrderTicket != null) ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: onUseInOrderTicket,
+                icon: const Icon(Icons.input, size: 18),
+                label: Text(useInOrderTicketLabel),
+              ),
+            ),
           ],
         ])),
         ConstrainedBox(
@@ -270,6 +291,8 @@ String _indicatorStatusLabel(String value) {
   switch (value) {
     case 'ok':
       return 'OK';
+    case 'partial':
+      return 'PARTIAL';
     case 'price_only':
       return 'PRICE ONLY';
     default:
@@ -281,6 +304,8 @@ Color _indicatorStatusColor(String value) {
   switch (value) {
     case 'ok':
       return Colors.greenAccent;
+    case 'partial':
+      return Colors.lightGreenAccent;
     case 'price_only':
       return Colors.lightBlueAccent;
     default:

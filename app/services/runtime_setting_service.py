@@ -44,7 +44,7 @@ class RuntimeSettingService:
 
     def get_settings(self, db: Session) -> dict[str, Any]:
         row = self.get_or_create(db)
-        return {
+        settings = {
             "bot_enabled": bool(row.bot_enabled),
             "dry_run": bool(row.dry_run),
             "kill_switch": bool(row.kill_switch),
@@ -59,6 +59,62 @@ class RuntimeSettingService:
             "near_close_block_minutes": int(row.near_close_block_minutes),
             "same_direction_cooldown_minutes": int(row.same_direction_cooldown_minutes),
             "updated_at": row.updated_at,
+        }
+        settings["trade_limits"] = self._trade_limits(settings)
+        return settings
+
+    def get_trade_limits_for_market(
+        self,
+        db: Session,
+        *,
+        market: str,
+        broker: str,
+    ) -> dict[str, Any]:
+        settings = self.get_settings(db)
+        normalized_market = str(market or "").strip().upper()
+        limits = settings["trade_limits"].get(normalized_market)
+        if limits is None:
+            return {
+                "market": normalized_market,
+                "broker": str(broker or "").strip().lower(),
+                "global_daily_entry_limit": settings["global_daily_entry_limit"],
+                "per_symbol_daily_entry_limit": settings["per_symbol_daily_entry_limit"],
+                "max_open_positions": settings["max_open_positions"],
+                "same_direction_cooldown_minutes": settings[
+                    "same_direction_cooldown_minutes"
+                ],
+                "source": "global_fallback",
+            }
+        return limits
+
+    def _trade_limits(self, settings: dict[str, Any]) -> dict[str, Any]:
+        base = {
+            "global_daily_entry_limit": settings["global_daily_entry_limit"],
+            "per_symbol_daily_entry_limit": settings["per_symbol_daily_entry_limit"],
+            "max_open_positions": settings["max_open_positions"],
+            "same_direction_cooldown_minutes": settings[
+                "same_direction_cooldown_minutes"
+            ],
+            "source": "global_fallback",
+        }
+        return {
+            "US": {
+                **base,
+                "market": "US",
+                "broker": "alpaca",
+            },
+            "KR": {
+                **base,
+                "market": "KR",
+                "broker": "kis",
+                "manual_order_qty_cap": int(
+                    getattr(self.settings, "kis_max_manual_order_qty", 1) or 1
+                ),
+                "manual_order_amount_cap_krw": int(
+                    getattr(self.settings, "kis_max_manual_order_amount_krw", 100000)
+                    or 100000
+                ),
+            },
         }
 
     def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:

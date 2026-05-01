@@ -398,6 +398,108 @@ def test_submit_manual_rejects_when_daily_trade_limit_reached(
     _assert_rejected(response, "daily_trade_limit")
 
 
+@pytest.mark.parametrize(
+    "status",
+    ["SUBMITTED", "ACCEPTED", "PENDING", "PARTIALLY_FILLED", "FILLED"],
+)
+def test_submit_manual_daily_trade_limit_counts_submitted_kis_statuses(
+    monkeypatch,
+    client,
+    db_session,
+    status,
+):
+    _seed_validation(db_session)
+    db_session.add(
+        OrderLog(
+            broker="kis",
+            symbol="005930",
+            side="buy",
+            order_type="market",
+            qty=1,
+            internal_status=status,
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.RuntimeSettingService.get_settings",
+        lambda self, db: _runtime(max_trades_per_day=1),
+    )
+
+    response = client.post("/kis/orders/submit-manual", json=_payload())
+
+    _assert_rejected(response, "daily_trade_limit")
+
+
+def test_submit_manual_daily_trade_limit_ignores_alpaca_orders(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _seed_validation(db_session)
+    db_session.add(
+        OrderLog(
+            broker="alpaca",
+            symbol="005930",
+            side="buy",
+            order_type="market",
+            qty=1,
+            internal_status="SUBMITTED",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.RuntimeSettingService.get_settings",
+        lambda self, db: _runtime(max_trades_per_day=1),
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        lambda self, **kwargs: {
+            "rt_cd": "0",
+            "output": {"ODNO": "0001234567", "ORD_TMD": "090501"},
+        },
+    )
+
+    response = client.post("/kis/orders/submit-manual", json=_payload())
+
+    assert response.status_code == 200
+    assert response.json()["real_order_submitted"] is True
+
+
+def test_submit_manual_daily_trade_limit_ignores_rejected_safety_gate_logs(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _seed_validation(db_session)
+    db_session.add(
+        OrderLog(
+            broker="kis",
+            symbol="005930",
+            side="buy",
+            order_type="market",
+            qty=1,
+            internal_status="REJECTED_BY_SAFETY_GATE",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.RuntimeSettingService.get_settings",
+        lambda self, db: _runtime(max_trades_per_day=1),
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        lambda self, **kwargs: {
+            "rt_cd": "0",
+            "output": {"ODNO": "0001234567", "ORD_TMD": "090501"},
+        },
+    )
+
+    response = client.post("/kis/orders/submit-manual", json=_payload())
+
+    assert response.status_code == 200
+    assert response.json()["real_order_submitted"] is True
+
+
 def test_submit_manual_success_stores_order_log(monkeypatch, client, db_session):
     _seed_validation(db_session)
     calls = []

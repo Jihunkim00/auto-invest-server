@@ -114,7 +114,10 @@ class _KrPreviewControls extends StatelessWidget {
       ],
       if (controller.krWatchlistPreview != null) ...[
         const SizedBox(height: 10),
-        _PreviewResult(preview: controller.krWatchlistPreview!),
+        _PreviewResult(
+          preview: controller.krWatchlistPreview!,
+          controller: controller,
+        ),
       ],
     ]);
   }
@@ -153,9 +156,10 @@ class _UsRunControls extends StatelessWidget {
 }
 
 class _PreviewResult extends StatelessWidget {
-  const _PreviewResult({required this.preview});
+  const _PreviewResult({required this.preview, required this.controller});
 
   final WatchlistRunResult preview;
+  final DashboardController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -204,18 +208,24 @@ class _PreviewResult extends StatelessWidget {
           const SizedBox(height: 10),
           _CandidateSection(
               title: 'Top Quant Candidates',
-              candidates: preview.topQuantCandidates),
+              candidates: preview.topQuantCandidates,
+              onUseCandidate: (candidate) =>
+                  _useCandidateInOrderTicket(context, controller, candidate)),
         ],
         if (preview.researchedCandidates.isNotEmpty) ...[
           const SizedBox(height: 10),
           _CandidateSection(
               title: 'Researched Candidates',
-              candidates: preview.researchedCandidates),
+              candidates: preview.researchedCandidates,
+              onUseCandidate: (candidate) =>
+                  _useCandidateInOrderTicket(context, controller, candidate)),
         ],
         const SizedBox(height: 10),
         _CandidateSection(
             title: 'Final Ranked Candidates',
             candidates: preview.finalRankedCandidates,
+            onUseCandidate: (candidate) =>
+                _useCandidateInOrderTicket(context, controller, candidate),
             initiallyExpanded: true),
         if (preview.finalRankedCandidates.isEmpty) ...[
           const SizedBox(height: 10),
@@ -230,11 +240,13 @@ class _CandidateSection extends StatelessWidget {
   const _CandidateSection({
     required this.title,
     required this.candidates,
+    this.onUseCandidate,
     this.initiallyExpanded = false,
   });
 
   final String title;
   final List<Candidate> candidates;
+  final void Function(Candidate candidate)? onUseCandidate;
   final bool initiallyExpanded;
 
   @override
@@ -253,13 +265,34 @@ class _CandidateSection extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
             child: Column(children: [
               for (var i = 0; i < candidates.length; i++)
-                CandidateCard(index: i, candidate: candidates[i]),
+                CandidateCard(
+                  index: i,
+                  candidate: candidates[i],
+                  onUseInOrderTicket: onUseCandidate == null
+                      ? null
+                      : () => onUseCandidate!(candidates[i]),
+                  useInOrderTicketLabel: '주문 티켓에 입력',
+                ),
             ]),
           ),
         ],
       ),
     );
   }
+}
+
+void _useCandidateInOrderTicket(
+  BuildContext context,
+  DashboardController controller,
+  Candidate candidate,
+) {
+  controller.useKrCandidateInOrderTicket(candidate);
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content: Text(
+      '${candidate.symbol}이 주문 티켓에 입력되었습니다. dry-run 검증을 실행하세요.',
+    ),
+    backgroundColor: Colors.green,
+  ));
 }
 
 class _DataPair extends StatelessWidget {

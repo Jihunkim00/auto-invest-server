@@ -7,6 +7,8 @@ from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog
 from app.services.order_service import normalize_broker_status, sync_order_status
 
+ALPACA_ORDER_BROKERS = ("alpaca", "alpaca_paper")
+
 
 class OrderSyncService:
     ACTIVE_BROKER_STATUSES = {
@@ -56,11 +58,24 @@ class OrderSyncService:
             db.refresh(local_order)
             return local_order
 
-    def sync_open_orders_for_symbol(self, db: Session, symbol: str) -> list[OrderLog]:
+    @staticmethod
+    def _broker_scoped_query(query, broker: str):
+        normalized = str(broker or "").strip().lower()
+        if normalized == "alpaca":
+            return query.filter(OrderLog.broker.in_(ALPACA_ORDER_BROKERS))
+        return query.filter(OrderLog.broker == normalized)
+
+    def sync_open_orders_for_symbol(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        broker: str = "alpaca",
+    ) -> list[OrderLog]:
         symbol = symbol.upper()
 
         candidates = (
-            db.query(OrderLog)
+            self._broker_scoped_query(db.query(OrderLog), broker)
             .filter(
                 OrderLog.symbol == symbol,
                 OrderLog.broker_order_id.isnot(None),
@@ -78,11 +93,17 @@ class OrderSyncService:
 
         return synced_rows
 
-    def has_conflicting_open_order(self, db: Session, symbol: str) -> bool:
+    def has_conflicting_open_order(
+        self,
+        db: Session,
+        symbol: str,
+        *,
+        broker: str = "alpaca",
+    ) -> bool:
         symbol = symbol.upper()
 
         candidates = (
-            db.query(OrderLog)
+            self._broker_scoped_query(db.query(OrderLog), broker)
             .filter(OrderLog.symbol == symbol)
             .order_by(OrderLog.created_at.desc())
             .limit(20)

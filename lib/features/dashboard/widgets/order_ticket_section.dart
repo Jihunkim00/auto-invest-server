@@ -36,6 +36,7 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    _syncTextControllers(controller);
     final isKr = controller.selectedOrderMarket == PortfolioMarket.kr;
 
     return SectionCard(
@@ -72,6 +73,24 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
           ),
       ]),
     );
+  }
+
+  void _syncTextControllers(DashboardController controller) {
+    final symbol = controller.orderTicketSymbol;
+    if (_symbolController.text != symbol) {
+      _symbolController.value = TextEditingValue(
+        text: symbol,
+        selection: TextSelection.collapsed(offset: symbol.length),
+      );
+    }
+
+    final qty = controller.orderTicketQty.toString();
+    if (_qtyController.text != qty) {
+      _qtyController.value = TextEditingValue(
+        text: qty,
+        selection: TextSelection.collapsed(offset: qty.length),
+      );
+    }
   }
 }
 

@@ -12,6 +12,7 @@ from app.services.order_sync_service import OrderSyncService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 NY_TZ = ZoneInfo("America/New_York")
+ALPACA_ORDER_BROKERS = ("alpaca", "alpaca_paper")
 
 
 class ExecutionGuardService:
@@ -46,8 +47,8 @@ class ExecutionGuardService:
             if self._daily_entry_count(db, symbol=symbol) >= per_symbol_daily_entry_limit:
                 return self._blocked("precheck", "skipped", "per_symbol_daily_entry_limit_reached", settings)
 
-        self.order_sync.sync_open_orders_for_symbol(db, symbol)
-        if self.order_sync.has_conflicting_open_order(db, symbol):
+        self.order_sync.sync_open_orders_for_symbol(db, symbol, broker="alpaca")
+        if self.order_sync.has_conflicting_open_order(db, symbol, broker="alpaca"):
             return self._blocked("precheck", "skipped", "conflicting_open_order_exists", settings)
 
         return {
@@ -120,8 +121,8 @@ class ExecutionGuardService:
             }
 
         symbol = symbol.upper()
-        self.order_sync.sync_open_orders_for_symbol(db, symbol)
-        if self.order_sync.has_conflicting_open_order(db, symbol):
+        self.order_sync.sync_open_orders_for_symbol(db, symbol, broker="alpaca")
+        if self.order_sync.has_conflicting_open_order(db, symbol, broker="alpaca"):
             return self._blocked("precheck", "skipped", "conflicting_open_order_exists", settings)
 
         return {
@@ -137,10 +138,23 @@ class ExecutionGuardService:
             return self.exit_action_check(db, symbol, action)
         return self.entry_action_check(db, symbol, action)
 
-    def _daily_entry_count(self, db: Session, symbol: str | None = None) -> int:
+    def _daily_entry_count(
+        self,
+        db: Session,
+        symbol: str | None = None,
+        *,
+        broker: str = "alpaca",
+    ) -> int:
         start_utc, end_utc = self._day_bounds_utc()
 
-        query = db.query(OrderLog).filter(
+        query = db.query(OrderLog)
+        normalized_broker = str(broker or "").strip().lower()
+        if normalized_broker == "alpaca":
+            query = query.filter(OrderLog.broker.in_(ALPACA_ORDER_BROKERS))
+        else:
+            query = query.filter(OrderLog.broker == normalized_broker)
+
+        query = query.filter(
             OrderLog.side == "buy",
             OrderLog.created_at >= start_utc,
             OrderLog.created_at < end_utc,

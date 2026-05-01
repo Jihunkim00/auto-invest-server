@@ -1,11 +1,14 @@
+from datetime import datetime, timedelta, timezone
+
+from app.db.models import OrderLog
 from app.services.execution_guard_service import ExecutionGuardService
 
 
 class DummyOrderSync:
-    def sync_open_orders_for_symbol(self, db, symbol):
+    def sync_open_orders_for_symbol(self, db, symbol, **kwargs):
         return []
 
-    def has_conflicting_open_order(self, db, symbol):
+    def has_conflicting_open_order(self, db, symbol, **kwargs):
         return False
 
 
@@ -57,3 +60,28 @@ def test_entry_caps_still_apply_for_entry_precheck(monkeypatch, db_session):
 
     assert blocked["allowed"] is False
     assert blocked["reason"] == "global_daily_entry_limit_reached"
+
+
+def test_entry_count_ignores_kis_orders_with_same_symbol(monkeypatch, db_session):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    db_session.add(
+        OrderLog(
+            broker="kis",
+            symbol="AAPL",
+            side="buy",
+            order_type="market",
+            qty=1,
+            internal_status="FILLED",
+            broker_status="filled",
+            created_at=now,
+        )
+    )
+    db_session.commit()
+    svc = ExecutionGuardService()
+    monkeypatch.setattr(
+        svc,
+        "_day_bounds_utc",
+        lambda: (now - timedelta(hours=1), now + timedelta(hours=1)),
+    )
+
+    assert svc._daily_entry_count(db_session, symbol="AAPL") == 0

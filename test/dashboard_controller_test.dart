@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -138,6 +139,37 @@ void main() {
     expect(controller.orderValidationResult?.dryRun, isTrue);
     expect(controller.orderValidationResult?.symbol, '005930');
     expect(api.validationCalls, 1);
+
+    controller.dispose();
+  });
+
+  test('KR preview candidate can fill dry-run order ticket without validation',
+      () {
+    final api = _FakeApiClient(validationResult: _validationResult());
+    final controller = DashboardController(api, autoload: false)
+      ..selectedOrderMarket = PortfolioMarket.us
+      ..orderTicketSymbol = 'AAPL'
+      ..orderTicketSide = 'sell'
+      ..orderTicketQty = 0
+      ..orderValidationResult = _validationResult()
+      ..orderValidationError = 'previous error';
+
+    controller.useKrCandidateInOrderTicket(const Candidate(
+      symbol: '005930',
+      score: 64,
+      note: 'preview',
+      entryReady: false,
+      actionHint: 'watch',
+      blockReason: 'kr_trading_disabled',
+    ));
+
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'buy');
+    expect(controller.orderTicketQty, 1);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.orderValidationError, isNull);
+    expect(api.validationCalls, 0);
 
     controller.dispose();
   });

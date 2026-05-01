@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.brokers.kis_client import normalize_domestic_daily_bars
 from app.db.database import get_db
 from app.db.models import BrokerAuthToken
 from app.main import app
@@ -116,6 +117,100 @@ def test_kis_price_endpoint_returns_normalized_current_price(
     assert body["current_price"] == 72000.0
     assert body["change"] == 500.0
     assert body["change_rate"] == 0.7
+    assert "secret-cached-access-token" not in response.text
+
+
+def test_kis_daily_bar_normalization_parses_and_sorts_rows():
+    bars = normalize_domestic_daily_bars(
+        "005930",
+        [
+            {
+                "stck_bsop_date": "20260502",
+                "stck_oprc": "72,000",
+                "stck_hgpr": "73,000",
+                "stck_lwpr": "71,000",
+                "stck_clpr": "72,500",
+                "acml_vol": "12,345,678",
+            },
+            {
+                "stck_bsop_date": "20260501",
+                "stck_oprc": "70,000",
+                "stck_hgpr": "71,000",
+                "stck_lwpr": "69,000",
+                "stck_clpr": "70,500",
+                "acml_vol": "10,000",
+            },
+            {
+                "stck_bsop_date": "20260502",
+                "stck_oprc": "73,000",
+                "stck_hgpr": "74,000",
+                "stck_lwpr": "72,000",
+                "stck_clpr": "73,500",
+                "acml_vol": "13,000",
+            },
+            {
+                "stck_bsop_date": "20260503",
+                "stck_oprc": "",
+                "stck_hgpr": "0",
+                "stck_lwpr": "0",
+                "stck_clpr": "",
+                "acml_vol": None,
+            },
+        ],
+    )
+
+    assert [bar["timestamp"] for bar in bars] == ["2026-05-01", "2026-05-02"]
+    assert bars[0]["open"] == 70000.0
+    assert bars[0]["volume"] == 10000.0
+    assert bars[1]["close"] == 73500.0
+
+
+def test_kis_bars_endpoint_returns_normalized_daily_bars(
+    monkeypatch, client, db_session
+):
+    _add_access_token(db_session)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+
+    def fake_get(url, params, headers, timeout):
+        assert url.endswith("/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice")
+        assert headers["tr_id"] == "FHKST03010100"
+        assert params["FID_INPUT_ISCD"] == "005930"
+        assert params["FID_PERIOD_DIV_CODE"] == "D"
+        return _FakeResponse(
+            {
+                "rt_cd": "0",
+                "output2": [
+                    {
+                        "stck_bsop_date": "20260502",
+                        "stck_oprc": "72,000",
+                        "stck_hgpr": "73,000",
+                        "stck_lwpr": "71,000",
+                        "stck_clpr": "72,500",
+                        "acml_vol": "12,345",
+                    },
+                    {
+                        "stck_bsop_date": "20260501",
+                        "stck_oprc": "70,000",
+                        "stck_hgpr": "71,000",
+                        "stck_lwpr": "69,000",
+                        "stck_clpr": "70,500",
+                        "acml_vol": "10,000",
+                    },
+                ],
+            }
+        )
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+
+    response = client.get("/kis/market/bars/005930?limit=120")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "kis"
+    assert body["environment"] == "prod"
+    assert body["symbol"] == "005930"
+    assert body["count"] == 2
+    assert [bar["timestamp"] for bar in body["bars"]] == ["2026-05-01", "2026-05-02"]
     assert "secret-cached-access-token" not in response.text
 
 

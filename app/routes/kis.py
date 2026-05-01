@@ -37,6 +37,26 @@ def get_kis_market_price(symbol: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail=str(exc))
 
 
+@router.get("/market/bars/{symbol}")
+def get_kis_market_bars(symbol: str, limit: int = 120, db: Session = Depends(get_db)):
+    client = _client(db)
+    try:
+        bars = client.get_domestic_daily_bars(symbol, limit=limit)
+        return {
+            "provider": "kis",
+            "environment": client.settings.kis_env,
+            "symbol": symbol.strip(),
+            "count": len(bars),
+            "bars": bars,
+        }
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @router.get("/account/balance")
 def get_kis_account_balance(db: Session = Depends(get_db)):
     client = _client(db)

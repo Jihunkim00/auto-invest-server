@@ -16,6 +16,8 @@ from app.core.constants import (
 from app.db.models import OrderLog
 from app.services.runtime_setting_service import RuntimeSettingService
 
+ALPACA_ORDER_BROKERS = ("alpaca", "alpaca_paper")
+
 
 class RiskService:
     def __init__(self):
@@ -40,9 +42,41 @@ class RiskService:
                 return True
         return False
 
-    def _estimated_daily_pnl(self, db: Session, symbol: str, day_start_utc: datetime) -> float:
-        orders = (
+    @staticmethod
+    def _broker_scoped_query(query, broker: str):
+        normalized = str(broker or "").strip().lower()
+        if normalized == "alpaca":
+            return query.filter(OrderLog.broker.in_(ALPACA_ORDER_BROKERS))
+        return query.filter(OrderLog.broker == normalized)
+
+    def _daily_entry_count(
+        self,
+        db: Session,
+        *,
+        broker: str,
+        day_start_utc: datetime,
+        symbol: str | None = None,
+    ) -> int:
+        query = (
             db.query(OrderLog)
+            .filter(OrderLog.side == "buy")
+            .filter(OrderLog.created_at >= day_start_utc)
+        )
+        query = self._broker_scoped_query(query, broker)
+        if symbol:
+            query = query.filter(OrderLog.symbol == symbol.upper())
+        return query.count()
+
+    def _estimated_daily_pnl(
+        self,
+        db: Session,
+        symbol: str,
+        day_start_utc: datetime,
+        *,
+        broker: str,
+    ) -> float:
+        orders = (
+            self._broker_scoped_query(db.query(OrderLog), broker)
             .filter(OrderLog.symbol == symbol)
             .filter(OrderLog.created_at >= day_start_utc)
             .all()
@@ -80,16 +114,16 @@ class RiskService:
         if BLOCK_NEAR_MARKET_CLOSE_DEFAULT and self._is_near_market_close(now):
             flags.append("near_market_close_block")
 
+        broker = "alpaca"
         day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         runtime_settings = self.runtime_settings.get_settings(db)
         global_daily_entry_limit = max(0, int(runtime_settings["global_daily_entry_limit"]))
         per_symbol_daily_entry_limit = max(0, int(runtime_settings["per_symbol_daily_entry_limit"]))
         
-        daily_count = (
-            db.query(OrderLog)
-            .filter(OrderLog.side == "buy")
-            .filter(OrderLog.created_at >= day_start)
-            .count()
+        daily_count = self._daily_entry_count(
+            db,
+            broker=broker,
+            day_start_utc=day_start,
         )
         if daily_count >= global_daily_entry_limit:
             flags.append("global_daily_entry_limit_reached")
@@ -98,19 +132,23 @@ class RiskService:
         if open_position is not None:
             flags.append("open_position_exists")
 
-        same_direction_reentry = (
-            db.query(OrderLog)
-            .filter(OrderLog.symbol == symbol)
-            .filter(OrderLog.side == "buy")
-            .filter(OrderLog.created_at >= day_start)
-            .count()
+        same_direction_reentry = self._daily_entry_count(
+            db,
+            broker=broker,
+            day_start_utc=day_start,
+            symbol=symbol,
         )
         if same_direction_reentry >= per_symbol_daily_entry_limit:
             flags.append("per_symbol_daily_entry_limit_reached")
 
         account = self.broker.get_account()
         equity = float(account.equity)
-        est_daily_pnl = self._estimated_daily_pnl(db, symbol, day_start)
+        est_daily_pnl = self._estimated_daily_pnl(
+            db,
+            symbol,
+            day_start,
+            broker=broker,
+        )
         if est_daily_pnl <= -(equity * MAX_DAILY_LOSS_PCT):
             flags.append("daily_loss_limit_hit")
 
@@ -125,6 +163,8 @@ class RiskService:
             "take_profit_pct": 0.03 if approved else 0.0,
             "daily_trade_count": daily_count,
             "estimated_daily_pnl": round(est_daily_pnl, 2),
+            "broker": broker,
+            "market": "US",
         }
 
     def evaluate_exit(

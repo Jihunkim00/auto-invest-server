@@ -12,6 +12,7 @@ import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 const _samsungName = '\uC0BC\uC131\uC804\uC790';
 const _krLabel = '005930 - $_samsungName - KOSPI';
+const _useTicketLabel = '\uC8FC\uBB38 \uD2F0\uCF13\uC5D0 \uC785\uB825';
 
 void main() {
   testWidgets('KR order ticket is dry-run only and validates preview',
@@ -77,9 +78,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.previewCalls, 1);
-    expect(find.text('Quant-first \u00B7 GPT advisory only'), findsOneWidget);
+    expect(find.text('Quant-first \u00B7 GPT advisory only'), findsWidgets);
     expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('GPT ADVISORY'), findsOneWidget);
+    expect(find.text(_useTicketLabel), findsOneWidget);
     expect(find.text('PRICE ONLY'), findsOneWidget);
     expect(find.text('Not calculated'), findsWidgets);
     expect(
@@ -96,6 +98,55 @@ void main() {
         findsOneWidget);
     expect(
         find.textContaining('submit real', findRichText: true), findsNothing);
+
+    await tester.ensureVisible(find.text(_useTicketLabel));
+    await tester.tap(find.text(_useTicketLabel));
+    await tester.pumpAndSettle();
+
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketQty, 1);
+    expect(controller.orderTicketSide, 'buy');
+    expect(api.validationCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('KR preview displays grounded scores and indicators',
+      (tester) async {
+    final api = _FakeApiClient(scoredPreview: true);
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    controller.selectWatchlistMarket(PortfolioMarket.kr);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Run KR Preview'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('PREVIEW ONLY'), findsWidgets);
+    expect(find.text('TRADING DISABLED'), findsWidgets);
+    expect(find.text('OK'), findsOneWidget);
+    expect(find.text('QUANT BUY'), findsOneWidget);
+    expect(find.text('QUANT SELL'), findsOneWidget);
+    expect(find.text('AI BUY'), findsOneWidget);
+    expect(find.text('FINAL BUY'), findsOneWidget);
+    expect(find.text('CONFIDENCE'), findsOneWidget);
+    expect(find.text('EMA20'), findsOneWidget);
+    expect(find.text('EMA50'), findsOneWidget);
+    expect(find.text('RSI'), findsOneWidget);
+    expect(find.text('VWAP'), findsOneWidget);
+    expect(find.text('ATR'), findsOneWidget);
+    expect(find.text('VOLUME_RATIO'), findsOneWidget);
+    expect(find.text('MOMENTUM'), findsOneWidget);
+    expect(find.text('RECENT_RETURN'), findsOneWidget);
+    expect(find.text('KIS OHLCV indicators not available yet'), findsNothing);
 
     controller.dispose();
   });
@@ -116,6 +167,9 @@ Widget _wrap(DashboardController controller, Widget Function() buildChild) {
 }
 
 class _FakeApiClient extends ApiClient {
+  _FakeApiClient({this.scoredPreview = false});
+
+  final bool scoredPreview;
   int validationCalls = 0;
   int previewCalls = 0;
 
@@ -167,6 +221,7 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<WatchlistRunResult> runKisWatchlistPreview() async {
     previewCalls += 1;
+    if (scoredPreview) return _scoredPreviewResult();
     return const WatchlistRunResult(
       configuredSymbolCount: 1,
       analyzedSymbolCount: 1,
@@ -221,7 +276,83 @@ class _FakeApiClient extends ApiClient {
           blockReason: 'insufficient_indicator_data',
           reason:
               'Only current price is available; technical indicator score was not calculated.',
-          gptReason: 'Advisory context only. No executable trade decision.',
+          gptReason: 'KR preview \uCC38\uACE0\uC6A9',
+          riskFlags: ['kr_trading_disabled', 'preview_only'],
+          gatingNotes: [
+            'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
+          ],
+          blockReasons: ['preview_only', 'kr_trading_disabled'],
+          warnings: ['preview_only', 'kr_trading_disabled'],
+        ),
+      ],
+      result: 'preview_only',
+      reason: 'kr_trading_disabled',
+      triggerSource: 'manual_preview',
+    );
+  }
+
+  WatchlistRunResult _scoredPreviewResult() {
+    return const WatchlistRunResult(
+      configuredSymbolCount: 1,
+      analyzedSymbolCount: 1,
+      quantCandidatesCount: 1,
+      researchedCandidatesCount: 1,
+      finalBestCandidate: '005930',
+      secondFinalCandidate: '',
+      tiedFinalCandidates: [],
+      nearTiedCandidates: [],
+      tieBreakerApplied: false,
+      finalCandidateSelectionReason:
+          'KR preview ranked by grounded KIS OHLCV scores; trading disabled.',
+      bestScore: 64,
+      finalScoreGap: 0,
+      minEntryScore: 65,
+      minScoreGap: 3,
+      shouldTrade: false,
+      triggeredSymbol: null,
+      triggerBlockReason: 'kr_trading_disabled',
+      finalEntryReady: false,
+      finalActionHint: 'watch',
+      action: 'hold',
+      orderId: null,
+      topQuantCandidates: [],
+      researchedCandidates: [],
+      finalRankedCandidates: [
+        Candidate(
+          symbol: '005930',
+          name: _samsungName,
+          market: 'KOSPI',
+          currentPrice: 72000,
+          currency: 'KRW',
+          score: 64,
+          note:
+              'KIS OHLCV indicators available; quant score calculated for preview only.',
+          indicatorStatus: 'ok',
+          indicatorPayload: {
+            'ema20': 70000.0,
+            'ema50': 68000.0,
+            'rsi': 58.5,
+            'vwap': 70500.0,
+            'atr': 1200.0,
+            'volume_ratio': 1.2,
+            'momentum': 0.018,
+            'recent_return': 0.04,
+          },
+          quantBuyScore: 62,
+          quantSellScore: 18,
+          aiBuyScore: 70,
+          aiSellScore: 20,
+          finalBuyScore: 64,
+          finalSellScore: 18.5,
+          confidence: 0.72,
+          action: 'hold',
+          actionHint: 'watch',
+          entryReady: false,
+          tradeAllowed: false,
+          approvedByRisk: false,
+          blockReason: 'kr_trading_disabled',
+          reason: 'KIS OHLCV quant indicators calculated for preview.',
+          gptReason: 'KR \uC815\uB7C9 \uCC38\uACE0\uC6A9',
           riskFlags: ['kr_trading_disabled', 'preview_only'],
           gatingNotes: [
             'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
