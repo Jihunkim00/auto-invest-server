@@ -4,7 +4,6 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
-import '../../models/kis_watchlist_preview.dart';
 import '../../models/log_items.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
@@ -210,9 +209,9 @@ class ApiClient {
     return OrderValidationResult.fromJson(payload);
   }
 
-  Future<KisWatchlistPreview> runKisWatchlistPreview() async {
+  Future<WatchlistRunResult> runKisWatchlistPreview() async {
     final payload = await _postJsonBody('/kis/watchlist/preview', const {});
-    return KisWatchlistPreview.fromJson(payload);
+    return WatchlistRunResult.fromJson(payload);
   }
 
   Future<OpsSettings> getOpsSettings() async {

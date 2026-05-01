@@ -30,6 +30,10 @@ class KisGptPreview:
     action_hint: str
     gpt_reason: str
     warnings: list[str]
+    action: str = "hold"
+    risk_flags: list[str] | None = None
+    gating_notes: list[str] | None = None
+    hard_block_reason: str | None = None
 
 
 class KisWatchlistPreviewService:
@@ -75,6 +79,18 @@ class KisWatchlistPreviewService:
             gpt_used = gpt_used or bool(item.get("gpt_used"))
             items.append(item)
 
+        trade_result = {
+            "action": "hold",
+            "risk_approved": False,
+            "approved_by_risk": False,
+            "order_id": None,
+            "reason": "kr_trading_disabled",
+            "risk_flags": ["kr_trading_disabled", "preview_only"],
+            "gating_notes": [
+                "Shared risk schema applied for preview; KIS trading is disabled."
+            ],
+        }
+
         return {
             "market": "KR",
             "provider": "kis",
@@ -84,10 +100,13 @@ class KisWatchlistPreviewService:
             "preview_only": True,
             "trading_enabled": False,
             "gpt_analysis_included": gpt_used,
+            "watchlist_source": watchlist.get("watchlist_file"),
             "watchlist_file": watchlist.get("watchlist_file"),
             "reference_sites_file": references.get("reference_sites_file"),
             "configured_symbol_count": len(configured_symbols),
             "analyzed_symbol_count": len(items),
+            "max_watchlist_size": self.limit,
+            "watchlist": items,
             "quant_candidates_count": 0,
             "researched_candidates_count": 0,
             "final_best_candidate": None,
@@ -96,21 +115,27 @@ class KisWatchlistPreviewService:
             "near_tied_candidates": [],
             "tie_breaker_applied": False,
             "final_candidate_selection_reason": (
-                "KR preview is price-only until KIS OHLCV indicators are available."
+                "KR preview only; trading disabled."
             ),
             "best_score": None,
             "final_score_gap": None,
+            "min_entry_score": None,
+            "min_score_gap": None,
             "should_trade": False,
             "triggered_symbol": None,
             "trigger_block_reason": "kr_trading_disabled",
+            "final_entry_ready": False,
+            "final_action_hint": "watch",
             "action": "hold",
+            "order_id": None,
             "result": "preview_only",
             "reason": "kr_trading_disabled",
+            "trade_result": trade_result,
             "market_session": self._public_session(market_session),
             "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings),
             "top_quant_candidates": [],
             "researched_candidates": [],
-            "final_ranked_candidates": [],
+            "final_ranked_candidates": items,
             "items": items,
             "count": len(items),
         }
@@ -129,6 +154,12 @@ class KisWatchlistPreviewService:
         listing_market = str(raw.get("market") or "KR")
         warnings = _dedupe(KR_DISABLED_REASONS + session_warnings)
         block_reasons = list(KR_DISABLED_REASONS)
+        risk_flags = ["kr_trading_disabled", "preview_only"]
+        gating_notes = [
+            "Shared signal/risk vocabulary is used for KR preview.",
+            "KR preview uses the shared signal/risk vocabulary but trading is disabled.",
+            "No real KIS order submitted.",
+        ]
         current_price: float | None = None
         price_error: str | None = None
 
@@ -174,11 +205,22 @@ class KisWatchlistPreviewService:
                 reference_sources=reference_sources,
             )
             warnings.extend(gpt.warnings)
+            if "gpt_unavailable" in gpt.warnings:
+                risk_flags.append("gpt_unavailable")
+            if gpt.risk_flags:
+                risk_flags.extend(gpt.risk_flags)
+            if gpt.gating_notes:
+                gating_notes.extend(gpt.gating_notes)
 
         reason = (
             "Only current price is available; technical indicator score was not calculated."
             if indicator_status == "price_only"
             else "Current price and technical indicator data are unavailable."
+        )
+        note = (
+            "Price-only preview; technical indicators not calculated yet."
+            if indicator_status == "price_only"
+            else "Insufficient data; technical indicators not calculated yet."
         )
 
         return {
@@ -187,6 +229,8 @@ class KisWatchlistPreviewService:
             "market": listing_market,
             "currency": "KRW",
             "current_price": current_price,
+            "score": None,
+            "note": note,
             "indicator_status": indicator_status,
             "indicator_payload": dict(EMPTY_INDICATORS),
             "quant_buy_score": None,
@@ -196,9 +240,13 @@ class KisWatchlistPreviewService:
             "final_buy_score": None,
             "final_sell_score": None,
             "confidence": None,
+            "action": "hold",
             "action_hint": self._normalize_action_hint(gpt.action_hint),
             "entry_ready": False,
             "trade_allowed": False,
+            "approved_by_risk": False,
+            "risk_flags": _dedupe(risk_flags),
+            "gating_notes": _dedupe(gating_notes),
             "block_reason": block_reason,
             "reason": reason,
             "gpt_reason": gpt.gpt_reason,
@@ -271,6 +319,9 @@ class KisPreviewGptAdvisor:
                     "GPT advisory unavailable; analysis is limited to KIS current price."
                 ),
                 warnings=["gpt_unavailable"],
+                action="hold",
+                risk_flags=["gpt_unavailable"],
+                gating_notes=["GPT advisory unavailable; price-only preview kept hold/watch."],
             )
 
         try:
@@ -293,6 +344,9 @@ class KisPreviewGptAdvisor:
                     f"{_safe_error(exc)}"
                 ),
                 warnings=["gpt_unavailable"],
+                action="hold",
+                risk_flags=["gpt_unavailable"],
+                gating_notes=["GPT advisory unavailable; price-only preview kept hold/watch."],
             )
 
     def _call_openai(
@@ -310,21 +364,25 @@ class KisPreviewGptAdvisor:
             raise ValueError("OpenAI client is not initialized.")
 
         system_prompt = (
-            "You are a KR/KIS watchlist advisory assistant for a conservative "
-            "personal dashboard. This is read-only preview analysis only.\n"
+            "You are the same conservative, quant-first market advisory layer "
+            "used by the US/Alpaca watchlist flow, with KR/KIS market context. "
+            "This is read-only preview analysis only.\n"
             "Quant indicators are primary. GPT only explains or contextualizes "
             "the available data. Do not produce numeric scores unless real "
             "indicator values are provided in the prompt.\n"
-            "Use Korean market context, KRW, Asia/Seoul session context, KIS "
-            "current price/account data, and official/reference sources as "
-            "secondary context. Do not rely primarily on news sentiment.\n"
+            "Use KR market context, KRW, Asia/Seoul session context, KIS "
+            "current price/account data, KIS Domestic Stock API, KRX, OpenDART, "
+            "and KIND reference sources as secondary context. Do not rely "
+            "primarily on news sentiment.\n"
             "Do not approve real trading, do not produce order payloads, and "
             "do not write buy/sell as executable instructions.\n"
             "If indicators are missing, say analysis is limited. If market is "
             "closed or holiday, mention it. Since KR trading is disabled, "
-            "entry_ready must be false.\n"
-            "Return JSON only with keys: action_hint, gpt_reason. action_hint "
-            "must be one of watch, avoid, candidate."
+            "entry_ready and trade_allowed must be false.\n"
+            "Return JSON only. Use keys: ai_buy_score, ai_sell_score, "
+            "confidence, action, reason, risk_flags, gating_notes, "
+            "hard_block_reason. Optional action_hint is allowed. action must "
+            "be one of buy, sell, hold; default to hold."
         )
         reference_context = [
             {
@@ -354,9 +412,10 @@ class KisPreviewGptAdvisor:
                 "instructions": [
                     "Prefer quant indicators and KIS data.",
                     "If indicators are null, do not create a score.",
-                    "Default action_hint to watch unless there is strong avoid risk.",
+                    "Keep ai_buy_score, ai_sell_score, and confidence null when indicators are missing.",
+                    "Default action to hold and action_hint to watch unless there is strong avoid risk.",
                     "Never output executable buy/sell instructions.",
-                    "entry_ready is false because KR trading is disabled.",
+                    "entry_ready and trade_allowed are false because KR trading is disabled.",
                 ],
             },
             ensure_ascii=False,
@@ -375,17 +434,38 @@ class KisPreviewGptAdvisor:
 
     @staticmethod
     def _normalize_payload(payload: dict[str, Any], *, indicator_status: str) -> KisGptPreview:
-        action_hint = str(payload.get("action_hint") or "watch").strip().lower()
+        action = str(payload.get("action") or "hold").strip().lower()
+        if action not in {"buy", "sell", "hold"}:
+            action = "hold"
+        if indicator_status != "ok":
+            action = "hold"
+
+        action_hint = str(payload.get("action_hint") or "").strip().lower()
+        if not action_hint:
+            action_hint = {
+                "buy": "candidate",
+                "sell": "avoid",
+                "hold": "watch",
+            }.get(action, "watch")
         if action_hint not in {"watch", "avoid", "candidate"}:
             action_hint = "watch"
         if indicator_status != "ok" and action_hint == "candidate":
             action_hint = "watch"
-        reason = str(payload.get("gpt_reason") or "").strip()
+        reason = str(payload.get("reason") or payload.get("gpt_reason") or "").strip()
+        risk_flags = _string_list(payload.get("risk_flags"))
+        gating_notes = _string_list(payload.get("gating_notes"))
+        hard_block_reason = payload.get("hard_block_reason")
+        if hard_block_reason is not None:
+            hard_block_reason = str(hard_block_reason)
         return KisGptPreview(
             gpt_used=True,
             action_hint=action_hint,
             gpt_reason=reason or "GPT advisory context only. No executable trade decision.",
             warnings=[],
+            action=action,
+            risk_flags=risk_flags,
+            gating_notes=gating_notes,
+            hard_block_reason=hard_block_reason,
         )
 
 
@@ -427,3 +507,9 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in result:
             result.append(value)
     return result
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]

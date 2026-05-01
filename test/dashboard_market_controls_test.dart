@@ -5,12 +5,13 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
-import 'package:auto_invest_dashboard/models/kis_watchlist_preview.dart';
+import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
+import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 const _samsungName = '\uC0BC\uC131\uC804\uC790';
-const _krLabel = '005930 \u00B7 $_samsungName \u00B7 KOSPI';
+const _krLabel = '005930 - $_samsungName - KOSPI';
 
 void main() {
   testWidgets('KR order ticket is dry-run only and validates preview',
@@ -74,12 +75,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.previewCalls, 1);
-    expect(
-        find.text('Quant-first | GPT advisory only | No real order submitted'),
-        findsOneWidget);
+    expect(find.text('Quant-first \u00B7 GPT advisory only'), findsOneWidget);
     expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('GPT ADVISORY'), findsOneWidget);
     expect(find.text('PRICE ONLY'), findsOneWidget);
+    expect(find.text('Not calculated'), findsWidgets);
     expect(
         find.text(
             'Technical score not calculated. Reason: insufficient indicator data.'),
@@ -163,36 +163,41 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<KisWatchlistPreview> runKisWatchlistPreview() async {
+  Future<WatchlistRunResult> runKisWatchlistPreview() async {
     previewCalls += 1;
-    return const KisWatchlistPreview(
-      market: 'KR',
-      provider: 'kis',
-      currency: 'KRW',
-      dryRun: true,
-      previewOnly: true,
-      tradingEnabled: false,
-      gptAnalysisIncluded: true,
-      marketSession: {'is_market_open': true},
-      warnings: [],
+    return const WatchlistRunResult(
       configuredSymbolCount: 1,
       analyzedSymbolCount: 1,
       quantCandidatesCount: 0,
       researchedCandidatesCount: 0,
-      finalBestCandidate: null,
+      finalBestCandidate: '',
+      secondFinalCandidate: '',
+      tiedFinalCandidates: [],
+      nearTiedCandidates: [],
+      tieBreakerApplied: false,
+      finalCandidateSelectionReason: 'KR preview only; trading disabled.',
       bestScore: null,
+      finalScoreGap: null,
+      minEntryScore: null,
+      minScoreGap: null,
       shouldTrade: false,
+      triggeredSymbol: null,
+      triggerBlockReason: 'kr_trading_disabled',
+      finalEntryReady: false,
+      finalActionHint: 'watch',
       action: 'hold',
-      result: 'preview_only',
-      reason: 'kr_trading_disabled',
-      count: 1,
-      items: [
-        KisWatchlistPreviewItem(
+      orderId: null,
+      topQuantCandidates: [],
+      researchedCandidates: [],
+      finalRankedCandidates: [
+        Candidate(
           symbol: '005930',
           name: _samsungName,
           market: 'KOSPI',
           currentPrice: 72000,
           currency: 'KRW',
+          score: null,
+          note: 'Price-only preview; technical indicators not calculated yet.',
           indicatorStatus: 'price_only',
           indicatorPayload: {
             'ema20': null,
@@ -206,18 +211,26 @@ class _FakeApiClient extends ApiClient {
           finalBuyScore: null,
           finalSellScore: null,
           confidence: null,
+          action: 'hold',
           actionHint: 'watch',
           entryReady: false,
           tradeAllowed: false,
+          approvedByRisk: false,
           blockReason: 'insufficient_indicator_data',
           reason:
               'Only current price is available; technical indicator score was not calculated.',
           gptReason: 'Advisory context only. No executable trade decision.',
+          riskFlags: ['kr_trading_disabled', 'preview_only'],
+          gatingNotes: [
+            'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
+          ],
           blockReasons: ['preview_only', 'kr_trading_disabled'],
-          warnings: [],
-          error: null,
+          warnings: ['preview_only', 'kr_trading_disabled'],
         ),
       ],
+      result: 'preview_only',
+      reason: 'kr_trading_disabled',
+      triggerSource: 'manual_preview',
     );
   }
 }

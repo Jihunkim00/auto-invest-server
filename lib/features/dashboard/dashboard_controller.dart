@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
-import '../../models/kis_watchlist_preview.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -84,7 +83,7 @@ class DashboardController extends ChangeNotifier {
   bool watchlistLoading = false;
   String? watchlistError;
   bool krWatchlistPreviewLoading = false;
-  KisWatchlistPreview? krWatchlistPreview;
+  WatchlistRunResult? krWatchlistPreview;
   String? krWatchlistPreviewError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';

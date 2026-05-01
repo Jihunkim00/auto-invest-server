@@ -73,7 +73,7 @@ class LastRunSummaryCard extends StatelessWidget {
             ]),
             Row(children: [
               _item('Final Best Candidate', finalBestCandidate),
-              _item('Best Score', '${r.bestScore}')
+              _item('Best Score', _valueOrNotCalculated(r.bestScore))
             ]),
             Row(children: [
               _item('Entry Ready',
@@ -99,4 +99,10 @@ class LastRunSummaryCard extends StatelessWidget {
       ]),
     );
   }
+}
+
+String _valueOrNotCalculated(num? value) {
+  if (value == null) return 'Not calculated';
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(2);
 }

@@ -10,3 +10,5 @@ auto_invest.db
 tmp_pytest*/
 __pycache__/
 .pytest_cache/
+Add-Content .gitignore "test_auto_invest.db"
+Add-Content .gitignore "*test*.db"

@@ -79,19 +79,35 @@ def test_kis_watchlist_preview_returns_items(client):
     assert body["quant_candidates_count"] == 0
     assert body["researched_candidates_count"] == 0
     assert body["final_best_candidate"] is None
+    assert body["second_final_candidate"] is None
     assert body["best_score"] is None
+    assert body["final_score_gap"] is None
+    assert body["min_entry_score"] is None
+    assert body["min_score_gap"] is None
     assert body["should_trade"] is False
+    assert body["final_entry_ready"] is False
+    assert body["final_action_hint"] == "watch"
     assert body["action"] == "hold"
+    assert body["order_id"] is None
     assert body["result"] == "preview_only"
     assert body["reason"] == "kr_trading_disabled"
+    assert body["trigger_block_reason"] == "kr_trading_disabled"
+    assert body["trade_result"]["action"] == "hold"
+    assert body["trade_result"]["risk_approved"] is False
+    assert body["trade_result"]["approved_by_risk"] is False
+    assert body["trade_result"]["order_id"] is None
     assert body["top_quant_candidates"] == []
     assert body["researched_candidates"] == []
-    assert body["final_ranked_candidates"] == []
+    assert len(body["final_ranked_candidates"]) == 8
     assert body["count"] == 8
     item = body["items"][0]
+    ranked = body["final_ranked_candidates"][0]
+    assert ranked["symbol"] == item["symbol"]
     assert item["symbol"] == "005930"
     assert item["current_price"] == 72000.0
     assert item["currency"] == "KRW"
+    assert item["score"] is None
+    assert item["note"] == "Price-only preview; technical indicators not calculated yet."
     assert item["indicator_status"] == "price_only"
     assert item["indicator_payload"]["ema20"] is None
     assert item["quant_buy_score"] is None
@@ -101,9 +117,14 @@ def test_kis_watchlist_preview_returns_items(client):
     assert item["final_buy_score"] is None
     assert item["final_sell_score"] is None
     assert item["confidence"] is None
+    assert item["action"] == "hold"
     assert item["action_hint"] == "watch"
     assert item["entry_ready"] is False
     assert item["trade_allowed"] is False
+    assert item["approved_by_risk"] is False
+    assert "kr_trading_disabled" in item["risk_flags"]
+    assert "preview_only" in item["risk_flags"]
+    assert "KR preview uses the shared signal/risk vocabulary but trading is disabled." in item["gating_notes"]
     assert item["block_reason"] == "insufficient_indicator_data"
     assert "preview_only" in item["block_reasons"]
     assert "kr_trading_disabled" in item["block_reasons"]
@@ -170,6 +191,8 @@ def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
     assert body["items"][0]["indicator_status"] == "insufficient_data"
     assert body["items"][0]["quant_buy_score"] is None
     assert body["items"][0]["error"] is not None
+    assert body["final_ranked_candidates"][0]["symbol"] == "005930"
+    assert body["final_ranked_candidates"][0]["score"] is None
     assert body["items"][1]["current_price"] == 50000.0
 
 
@@ -195,6 +218,7 @@ def test_kis_preview_gpt_failure_falls_back_to_quant(monkeypatch, client):
     assert body["items"][0]["quant_buy_score"] is None
     assert body["items"][0]["final_buy_score"] is None
     assert "gpt_unavailable" in body["items"][0]["warnings"]
+    assert "gpt_unavailable" in body["items"][0]["risk_flags"]
     assert body["items"][0]["entry_ready"] is False
 
 
@@ -206,3 +230,5 @@ def test_kis_preview_kr_trading_remains_disabled(client):
     assert body["trading_enabled"] is False
     assert body["should_trade"] is False
     assert all(item["trade_allowed"] is False for item in body["items"])
+    assert all(item["approved_by_risk"] is False for item in body["items"])
+    assert body["order_id"] is None

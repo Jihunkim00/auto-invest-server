@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
-import '../../../models/kis_watchlist_preview.dart';
+import '../../../models/candidate.dart';
 import '../../../models/market_watchlist.dart';
+import '../../../models/watchlist_run_result.dart';
+import '../../analysis/widgets/candidate_card.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class WatchlistSection extends StatelessWidget {
@@ -65,68 +67,87 @@ class WatchlistSection extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         if (isKr)
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            FilledButton.icon(
-              onPressed: controller.krWatchlistPreviewLoading
-                  ? null
-                  : () async {
-                      final result = await controller.runKrWatchlistPreview();
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(result.message),
-                        backgroundColor:
-                            result.success ? Colors.green : Colors.redAccent,
-                      ));
-                    },
-              icon: controller.krWatchlistPreviewLoading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.preview_outlined),
-              label: Text(controller.krWatchlistPreviewLoading
-                  ? 'Running KR preview...'
-                  : 'Run KR Preview'),
-            ),
-            const SizedBox(height: 10),
-            const _StateLine(
-                text:
-                    'Quant-first | GPT advisory only | No real order submitted'),
-            if (controller.krWatchlistPreviewError != null) ...[
-              const SizedBox(height: 10),
-              _StateLine(
-                  text: controller.krWatchlistPreviewError!,
-                  color: Colors.redAccent),
-            ],
-            if (controller.krWatchlistPreview != null) ...[
-              const SizedBox(height: 10),
-              _PreviewResult(preview: controller.krWatchlistPreview!),
-            ],
-          ])
+          _KrPreviewControls(controller: controller)
         else
-          FilledButton.icon(
-            onPressed: controller.runOnceLoading
-                ? null
-                : () async {
-                    final result = await controller.runOnce();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(result.message),
-                      backgroundColor:
-                          result.success ? Colors.green : Colors.redAccent,
-                    ));
-                  },
-            icon: controller.runOnceLoading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.play_arrow),
-            label: Text(controller.runOnceLoading
-                ? 'Running watchlist...'
-                : 'Run US Watchlist Once'),
-          ),
+          _UsRunControls(controller: controller),
       ]),
+    );
+  }
+}
+
+class _KrPreviewControls extends StatelessWidget {
+  const _KrPreviewControls({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      FilledButton.icon(
+        onPressed: controller.krWatchlistPreviewLoading
+            ? null
+            : () async {
+                final result = await controller.runKrWatchlistPreview();
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(result.message),
+                  backgroundColor:
+                      result.success ? Colors.green : Colors.redAccent,
+                ));
+              },
+        icon: controller.krWatchlistPreviewLoading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.preview_outlined),
+        label: Text(controller.krWatchlistPreviewLoading
+            ? 'Running KR preview...'
+            : 'Run KR Preview'),
+      ),
+      const SizedBox(height: 10),
+      const _StateLine(text: 'Quant-first \u00B7 GPT advisory only'),
+      if (controller.krWatchlistPreviewError != null) ...[
+        const SizedBox(height: 10),
+        _StateLine(
+            text: controller.krWatchlistPreviewError!, color: Colors.redAccent),
+      ],
+      if (controller.krWatchlistPreview != null) ...[
+        const SizedBox(height: 10),
+        _PreviewResult(preview: controller.krWatchlistPreview!),
+      ],
+    ]);
+  }
+}
+
+class _UsRunControls extends StatelessWidget {
+  const _UsRunControls({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: controller.runOnceLoading
+          ? null
+          : () async {
+              final result = await controller.runOnce();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text(result.message),
+                backgroundColor:
+                    result.success ? Colors.green : Colors.redAccent,
+              ));
+            },
+      icon: controller.runOnceLoading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.play_arrow),
+      label: Text(controller.runOnceLoading
+          ? 'Running watchlist...'
+          : 'Run US Watchlist Once'),
     );
   }
 }
@@ -134,10 +155,14 @@ class WatchlistSection extends StatelessWidget {
 class _PreviewResult extends StatelessWidget {
   const _PreviewResult({required this.preview});
 
-  final KisWatchlistPreview preview;
+  final WatchlistRunResult preview;
 
   @override
   Widget build(BuildContext context) {
+    final blockReason = preview.triggerBlockReason.isEmpty
+        ? preview.reason
+        : preview.triggerBlockReason;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -147,143 +172,92 @@ class _PreviewResult extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(spacing: 8, runSpacing: 8, children: [
-          const _SoftBadge(text: 'PREVIEW ONLY', color: Colors.lightBlueAccent),
-          const _SoftBadge(text: 'TRADING DISABLED', color: Colors.amberAccent),
-          const _SoftBadge(
-              text: 'NO REAL ORDER SUBMITTED', color: Colors.orangeAccent),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'PREVIEW ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'TRADING DISABLED', color: Colors.amberAccent),
           _SoftBadge(
-              text: preview.gptAnalysisIncluded
-                  ? 'GPT ADVISORY'
-                  : 'PRICE-ONLY PREVIEW',
-              color: preview.gptAnalysisIncluded
-                  ? Colors.greenAccent
-                  : Colors.white70),
+              text: 'NO REAL ORDER SUBMITTED', color: Colors.orangeAccent),
+          _SoftBadge(text: 'GPT ADVISORY', color: Colors.greenAccent),
         ]),
         const SizedBox(height: 12),
         Wrap(spacing: 14, runSpacing: 8, children: [
-          _DataPair(label: 'Market', value: '${preview.market} / KIS'),
+          const _DataPair(label: 'Market', value: 'KR / KIS'),
           _DataPair(label: 'Result', value: preview.result),
           _DataPair(label: 'Action', value: preview.action.toUpperCase()),
           _DataPair(
-              label: 'Should Trade',
-              value: preview.shouldTrade ? 'YES' : 'NO'),
+              label: 'Should Trade', value: preview.shouldTrade ? 'YES' : 'NO'),
+          _DataPair(
+              label: 'Entry Ready',
+              value: preview.finalEntryReady ? 'YES' : 'NO'),
+          _DataPair(
+              label: 'Best Score',
+              value: _valueOrNotCalculated(preview.bestScore)),
           _DataPair(label: 'Analyzed', value: '${preview.analyzedSymbolCount}'),
         ]),
-        if (preview.warnings.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        _StateLine(text: 'Why no trade: $blockReason'),
+        if (preview.finalCandidateSelectionReason.isNotEmpty) ...[
           const SizedBox(height: 10),
-          _StateLine(text: 'Warnings: ${preview.warnings.join(', ')}'),
+          _StateLine(text: preview.finalCandidateSelectionReason),
+        ],
+        if (preview.topQuantCandidates.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _CandidateSection(
+              title: 'Top Quant Candidates',
+              candidates: preview.topQuantCandidates),
+        ],
+        if (preview.researchedCandidates.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _CandidateSection(
+              title: 'Researched Candidates',
+              candidates: preview.researchedCandidates),
         ],
         const SizedBox(height: 10),
-        for (final item in preview.items) ...[
-          _PreviewItemRow(item: item),
-          if (item != preview.items.last) const SizedBox(height: 8),
+        _CandidateSection(
+            title: 'Final Ranked Candidates',
+            candidates: preview.finalRankedCandidates,
+            initiallyExpanded: true),
+        if (preview.finalRankedCandidates.isEmpty) ...[
+          const SizedBox(height: 10),
+          const _StateLine(text: 'No KR preview candidates returned.'),
         ],
       ]),
     );
   }
 }
 
-class _PreviewItemRow extends StatelessWidget {
-  const _PreviewItemRow({required this.item});
+class _CandidateSection extends StatelessWidget {
+  const _CandidateSection({
+    required this.title,
+    required this.candidates,
+    this.initiallyExpanded = false,
+  });
 
-  final KisWatchlistPreviewItem item;
+  final String title;
+  final List<Candidate> candidates;
+  final bool initiallyExpanded;
 
   @override
   Widget build(BuildContext context) {
-    final title =
-        item.name.isEmpty ? item.symbol : '${item.symbol} · ${item.name}';
-    final subtitle = item.market.isEmpty ? '' : ' · ${item.market}';
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+        color: Colors.white.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-            child: Text('$title$subtitle',
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.w800)),
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        title: Text(title),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            child: Column(children: [
+              for (var i = 0; i < candidates.length; i++)
+                CandidateCard(index: i, candidate: candidates[i]),
+            ]),
           ),
-          _SoftBadge(
-              text: _indicatorStatusLabel(item.indicatorStatus),
-              color: _indicatorStatusColor(item.indicatorStatus)),
-          const SizedBox(width: 8),
-          _SoftBadge(
-              text: item.actionHint.toUpperCase(),
-              color: item.actionHint == 'avoid'
-                  ? Colors.redAccent
-                  : item.actionHint == 'candidate'
-                      ? Colors.greenAccent
-                      : Colors.lightBlueAccent),
-        ]),
-        const SizedBox(height: 8),
-        Wrap(spacing: 14, runSpacing: 8, children: [
-          _DataPair(
-              label: 'Current',
-              value:
-                  item.currentPrice == null ? 'n/a' : _krw(item.currentPrice!)),
-          _DataPair(
-              label: 'Entry Ready', value: item.entryReady ? 'YES' : 'NO'),
-          _DataPair(
-              label: 'Trade Allowed', value: item.tradeAllowed ? 'YES' : 'NO'),
-          _DataPair(
-              label: 'Block Reason',
-              value: item.blockReason.isEmpty ? 'none' : item.blockReason),
-        ]),
-        const SizedBox(height: 10),
-        const _SubsectionTitle(text: 'Score Breakdown'),
-        if (item.hasScores)
-          Wrap(spacing: 14, runSpacing: 8, children: [
-            if (item.quantBuyScore != null)
-              _DataPair(label: 'Quant Buy', value: _score(item.quantBuyScore)),
-            if (item.quantSellScore != null)
-              _DataPair(label: 'Quant Sell', value: _score(item.quantSellScore)),
-            if (item.aiBuyScore != null)
-              _DataPair(label: 'AI Buy', value: _score(item.aiBuyScore)),
-            if (item.aiSellScore != null)
-              _DataPair(label: 'AI Sell', value: _score(item.aiSellScore)),
-            if (item.finalBuyScore != null)
-              _DataPair(label: 'Final Buy', value: _score(item.finalBuyScore)),
-            if (item.finalSellScore != null)
-              _DataPair(label: 'Final Sell', value: _score(item.finalSellScore)),
-            if (item.confidence != null)
-              _DataPair(label: 'Confidence', value: _score(item.confidence)),
-          ])
-        else
-          const _StateLine(
-              text:
-                  'Technical score not calculated. Reason: insufficient indicator data.'),
-        const SizedBox(height: 10),
-        const _SubsectionTitle(text: 'Quant Indicators'),
-        if (item.hasIndicatorValues)
-          _IndicatorPayload(payload: item.indicatorPayload)
-        else
-          const _StateLine(text: 'KIS OHLCV indicators not available yet'),
-        const SizedBox(height: 10),
-        const _SubsectionTitle(text: 'GPT advisory context'),
-        if (item.reason.isNotEmpty) ...[
-          Text(item.reason, style: const TextStyle(color: Colors.white70)),
         ],
-        if (item.gptReason.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(item.gptReason, style: const TextStyle(color: Colors.white60)),
-        ],
-        if (item.blockReasons.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text('Blocks: ${item.blockReasons.join(', ')}',
-              style: const TextStyle(color: Colors.white54, fontSize: 12)),
-        ],
-        if (item.error != null) ...[
-          const SizedBox(height: 6),
-          Text('Error: ${item.error}',
-              style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
-        ],
-      ]),
+      ),
     );
   }
 }
@@ -319,40 +293,6 @@ class _DataPair extends StatelessWidget {
   }
 }
 
-class _SubsectionTitle extends StatelessWidget {
-  const _SubsectionTitle({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text.toUpperCase(),
-          style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 10,
-              fontWeight: FontWeight.w800)),
-    );
-  }
-}
-
-class _IndicatorPayload extends StatelessWidget {
-  const _IndicatorPayload({required this.payload});
-
-  final Map<String, dynamic> payload;
-
-  @override
-  Widget build(BuildContext context) {
-    final entries =
-        payload.entries.where((entry) => entry.value != null).toList();
-    return Wrap(spacing: 14, runSpacing: 8, children: [
-      for (final entry in entries)
-        _DataPair(label: entry.key, value: entry.value.toString()),
-    ]);
-  }
-}
-
 class _WatchlistSymbols extends StatelessWidget {
   const _WatchlistSymbols({required this.watchlist, required this.isKr});
 
@@ -377,7 +317,7 @@ class _SymbolChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = isKr && item.name.isNotEmpty
-        ? '${item.symbol} · ${item.name} · ${item.market}'
+        ? '${item.symbol} - ${item.name} - ${item.market}'
         : item.symbol;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -459,48 +399,8 @@ class _CountPill extends StatelessWidget {
   }
 }
 
-String _score(double? value) {
-  if (value == null) return 'n/a';
+String _valueOrNotCalculated(num? value) {
+  if (value == null) return 'Not calculated';
   if (value == value.roundToDouble()) return value.toStringAsFixed(0);
   return value.toStringAsFixed(2);
-}
-
-String _indicatorStatusLabel(String value) {
-  switch (value) {
-    case 'ok':
-      return 'OK';
-    case 'price_only':
-      return 'PRICE ONLY';
-    default:
-      return 'INSUFFICIENT DATA';
-  }
-}
-
-Color _indicatorStatusColor(String value) {
-  switch (value) {
-    case 'ok':
-      return Colors.greenAccent;
-    case 'price_only':
-      return Colors.lightBlueAccent;
-    default:
-      return Colors.orangeAccent;
-  }
-}
-
-String _krw(double value) {
-  final sign = value < 0 ? '-' : '';
-  return '$sign₩${_groupedNumber(value.abs().round())}';
-}
-
-String _groupedNumber(int value) {
-  final text = value.toString();
-  final buffer = StringBuffer();
-  for (var i = 0; i < text.length; i += 1) {
-    final remaining = text.length - i;
-    buffer.write(text[i]);
-    if (remaining > 1 && remaining % 3 == 1) {
-      buffer.write(',');
-    }
-  }
-  return buffer.toString();
 }

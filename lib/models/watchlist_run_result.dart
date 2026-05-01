@@ -41,10 +41,10 @@ class WatchlistRunResult {
   final List<String> nearTiedCandidates;
   final bool tieBreakerApplied;
   final String finalCandidateSelectionReason;
-  final double bestScore;
-  final double finalScoreGap;
-  final int minEntryScore;
-  final int minScoreGap;
+  final double? bestScore;
+  final double? finalScoreGap;
+  final int? minEntryScore;
+  final int? minScoreGap;
   final bool shouldTrade;
   final String? triggeredSymbol;
   final String triggerBlockReason;
@@ -97,14 +97,25 @@ class WatchlistRunResult {
       return <Candidate>[];
     }
 
-    double parseDouble(Object? raw) {
+    double? parseNullableDouble(Object? raw) {
+      if (raw == null) return null;
       if (raw is num) return raw.toDouble();
-      return double.tryParse(raw?.toString() ?? '') ?? 0.0;
+      final text = raw.toString().trim();
+      if (text.isEmpty) return null;
+      return double.tryParse(text);
     }
 
-    int parseInt(Object? raw) {
+    int parseInt(Object? raw, {int fallback = 0}) {
       if (raw is num) return raw.toInt();
-      return int.tryParse(raw?.toString() ?? '') ?? 0;
+      return int.tryParse(raw?.toString() ?? '') ?? fallback;
+    }
+
+    int? parseNullableInt(Object? raw) {
+      if (raw == null) return null;
+      if (raw is num) return raw.toInt();
+      final text = raw.toString().trim();
+      if (text.isEmpty) return null;
+      return int.tryParse(text);
     }
 
     return WatchlistRunResult(
@@ -122,22 +133,27 @@ class WatchlistRunResult {
       tieBreakerApplied: json['tie_breaker_applied'] == true,
       finalCandidateSelectionReason:
           json['final_candidate_selection_reason']?.toString() ?? '',
-      bestScore: parseDouble(json['best_score']),
-      finalScoreGap: parseDouble(json['final_score_gap']),
-      minEntryScore: parseInt(json['min_entry_score']),
-      minScoreGap: parseInt(json['min_score_gap']),
+      bestScore: parseNullableDouble(json['best_score']),
+      finalScoreGap: parseNullableDouble(json['final_score_gap']),
+      minEntryScore: parseNullableInt(json['min_entry_score']),
+      minScoreGap: parseNullableInt(json['min_score_gap']),
       shouldTrade: json['should_trade'] == true,
       triggeredSymbol: json['triggered_symbol']?.toString(),
       triggerBlockReason: json['trigger_block_reason']?.toString() ?? '',
-      finalEntryReady: (json['final_best_candidate']
-              as Map<String, dynamic>?)?['entry_ready'] ==
-          true,
+      finalEntryReady: json['final_entry_ready'] == true ||
+          (json['final_best_candidate']
+                  as Map<String, dynamic>?)?['entry_ready'] ==
+              true,
       finalActionHint: (json['final_best_candidate']
                   as Map<String, dynamic>?)?['action_hint']
               ?.toString() ??
+          json['final_action_hint']?.toString() ??
           'watch',
-      action: tradeResult?['action']?.toString() ?? '',
-      orderId: tradeResult?['order_id']?.toString(),
+      action: tradeResult?['action']?.toString() ??
+          json['action']?.toString() ??
+          '',
+      orderId:
+          tradeResult?['order_id']?.toString() ?? json['order_id']?.toString(),
       topQuantCandidates: parseCandidates(json['top_quant_candidates'],
           scoreKey: 'quant_score', noteKey: 'quant_reason'),
       researchedCandidates: parseCandidates(json['researched_candidates'],
@@ -146,11 +162,15 @@ class WatchlistRunResult {
           scoreKey: 'final_entry_score', noteKey: 'reason'),
       result: run?['result']?.toString() ??
           tradeResult?['action']?.toString() ??
+          json['result']?.toString() ??
           '',
       reason: run?['reason']?.toString() ??
           tradeResult?['reason']?.toString() ??
+          json['reason']?.toString() ??
           '',
-      triggerSource: run?['trigger_source']?.toString() ?? 'manual',
+      triggerSource: run?['trigger_source']?.toString() ??
+          json['trigger_source']?.toString() ??
+          'manual',
     );
   }
 }

@@ -19,8 +19,9 @@ class AnalysisMetricsSection extends StatelessWidget {
               'Configured/Analyzed: ${r.configuredSymbolCount}/${r.analyzedSymbolCount}'),
           Text(
               'Quant/Researched: ${r.quantCandidatesCount}/${r.researchedCandidatesCount}'),
-          Text('Final score gap: ${r.finalScoreGap} (min ${r.minScoreGap})'),
-          Text('Min entry score: ${r.minEntryScore}'),
+          Text(
+              'Final score gap: ${_valueOrNotCalculated(r.finalScoreGap)} (min ${_valueOrNotCalculated(r.minScoreGap)})'),
+          Text('Min entry score: ${_valueOrNotCalculated(r.minEntryScore)}'),
           Text(
               'Entry ready: ${r.finalEntryReady ? 'Entry-ready' : 'Not entry-ready'}'),
           Text('Action hint: ${r.finalActionHint}'),
@@ -35,4 +36,10 @@ class AnalysisMetricsSection extends StatelessWidget {
       ),
     );
   }
+}
+
+String _valueOrNotCalculated(num? value) {
+  if (value == null) return 'Not calculated';
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(2);
 }
