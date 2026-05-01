@@ -1,0 +1,35 @@
+default_market: "US"
+
+markets:
+  US:
+    timezone: "America/New_York"
+    regular_open: "09:30"
+    regular_close: "16:00"
+    entry_slots:
+      - name: "open_phase"
+        time: "09:35"
+      - name: "midday"
+        time: "12:00"
+      - name: "before_close"
+        time: "15:40"
+    no_new_entry_after: "15:45"
+    avoid_open_minutes: 5
+    avoid_close_minutes: 20
+    enabled_for_scheduler: true
+
+  KR:
+    timezone: "Asia/Seoul"
+    regular_open: "09:00"
+    regular_close: "15:30"
+    entry_slots:
+      - name: "open_phase"
+        time: "09:05"
+      - name: "midday"
+        time: "11:30"
+      - name: "before_close"
+        time: "14:50"
+    no_new_entry_after: "15:00"
+    force_manage_until: "15:20"
+    avoid_open_minutes: 5
+    avoid_close_minutes: 30
+    enabled_for_scheduler: false

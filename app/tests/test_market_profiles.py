@@ -140,11 +140,3 @@ def test_kr_reference_sites_endpoint_returns_official_sources():
     assert body["market"] == "KR"
     assert "KIS Domestic Stock API" in names
     assert "OpenDART" in names
-
-
-def test_kis_order_validation_endpoint_is_not_added_in_market_profile_pr():
-    client = TestClient(app)
-
-    response = client.post("/kis/orders/validate", json={})
-
-    assert response.status_code == 404

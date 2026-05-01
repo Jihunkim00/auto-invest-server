@@ -2,7 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
@@ -52,7 +54,8 @@ void main() {
     controller.dispose();
   });
 
-  test('portfolio market defaults to US and keeps summaries separate', () async {
+  test('portfolio market defaults to US and keeps summaries separate',
+      () async {
     final api = _FakeApiClient(
       usPortfolio: _portfolio('USD', marketValue: 1200),
       krPortfolio: _portfolio('KRW', marketValue: 2500000),
@@ -89,6 +92,54 @@ void main() {
 
     controller.dispose();
   });
+
+  test('watchlist defaults to US and can switch to KR', () async {
+    final api = _FakeApiClient(
+      usWatchlist: _watchlist('US', const ['AAPL', 'MSFT']),
+      krWatchlist: const MarketWatchlist(
+        market: 'KR',
+        currency: 'KRW',
+        timezone: 'Asia/Seoul',
+        watchlistFile: 'config/watchlist_kr.yaml',
+        count: 1,
+        symbols: [
+          WatchlistSymbol(
+              symbol: '005930', name: 'Samsung Electronics', market: 'KOSPI'),
+        ],
+      ),
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+
+    expect(controller.selectedWatchlistMarket, PortfolioMarket.us);
+    expect(controller.usWatchlist.symbols.first.symbol, 'AAPL');
+
+    controller.selectWatchlistMarket(PortfolioMarket.kr);
+
+    expect(controller.krWatchlist.symbols.first.symbol, '005930');
+    expect(controller.krWatchlist.symbols.first.market, 'KOSPI');
+
+    controller.dispose();
+  });
+
+  test('KIS order validation stays dry-run through API method', () async {
+    final api = _FakeApiClient(validationResult: _validationResult());
+    final controller = DashboardController(api, autoload: false)
+      ..selectOrderMarket(PortfolioMarket.kr)
+      ..setOrderTicketSymbol('005930')
+      ..setOrderTicketSide('buy')
+      ..setOrderTicketQty(1);
+
+    final result = await controller.validateKisOrder();
+
+    expect(result.success, isTrue);
+    expect(controller.orderValidationResult?.dryRun, isTrue);
+    expect(controller.orderValidationResult?.symbol, '005930');
+    expect(api.validationCalls, 1);
+
+    controller.dispose();
+  });
 }
 
 class _FakeApiClient extends ApiClient {
@@ -98,6 +149,9 @@ class _FakeApiClient extends ApiClient {
     this.usPortfolio,
     this.krPortfolio,
     this.throwKrPortfolio = false,
+    this.usWatchlist,
+    this.krWatchlist,
+    this.validationResult,
   });
 
   final WatchlistRunResult? latest;
@@ -105,7 +159,11 @@ class _FakeApiClient extends ApiClient {
   final PortfolioSummary? usPortfolio;
   final PortfolioSummary? krPortfolio;
   final bool throwKrPortfolio;
+  final MarketWatchlist? usWatchlist;
+  final MarketWatchlist? krWatchlist;
+  final OrderValidationResult? validationResult;
   int mockCalls = 0;
+  int validationCalls = 0;
 
   @override
   Future<OpsSettings> getOpsSettings() async => const OpsSettings(
@@ -134,6 +192,26 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
+  Future<MarketWatchlist> fetchMarketWatchlist(String market) async {
+    if (market.toUpperCase() == 'KR') {
+      return krWatchlist ?? MarketWatchlist.empty('KR');
+    }
+    return usWatchlist ?? MarketWatchlist.empty('US');
+  }
+
+  @override
+  Future<OrderValidationResult> validateKisOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+  }) async {
+    validationCalls += 1;
+    return validationResult ??
+        _validationResult(symbol: symbol, side: side, qty: qty);
+  }
+
+  @override
   Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async {
     if (throwLatest) {
       throw const ApiRequestException('offline');
@@ -149,6 +227,62 @@ class _FakeApiClient extends ApiClient {
     mockCalls += 1;
     return _resultFor('MOCK');
   }
+}
+
+MarketWatchlist _watchlist(String market, List<String> symbols) {
+  return MarketWatchlist(
+    market: market,
+    currency: market == 'KR' ? 'KRW' : 'USD',
+    timezone: market == 'KR' ? 'Asia/Seoul' : 'America/New_York',
+    watchlistFile: 'config/watchlist_${market.toLowerCase()}.yaml',
+    count: symbols.length,
+    symbols: [
+      for (final symbol in symbols)
+        WatchlistSymbol(symbol: symbol, name: '', market: market),
+    ],
+  );
+}
+
+OrderValidationResult _validationResult({
+  String symbol = '005930',
+  String side = 'buy',
+  int qty = 1,
+}) {
+  return OrderValidationResult(
+    provider: 'kis',
+    market: 'KR',
+    environment: 'prod',
+    dryRun: true,
+    validatedForSubmission: true,
+    canSubmitLater: true,
+    symbol: symbol,
+    side: side,
+    qty: qty,
+    orderType: 'market',
+    currentPrice: 72000,
+    estimatedAmount: 72000,
+    availableCash: 1000000,
+    heldQty: null,
+    warnings: const [],
+    blockReasons: const [],
+    marketSession: const MarketSessionStatus(
+      market: 'KR',
+      timezone: 'Asia/Seoul',
+      isMarketOpen: true,
+      isEntryAllowedNow: true,
+      isNearClose: false,
+    ),
+    orderPreview: const OrderPreview(
+      accountNoMasked: '12****78',
+      productCode: '01',
+      symbol: '005930',
+      side: 'buy',
+      qty: 1,
+      orderType: 'market',
+      kisTrIdPreview: 'TTTC0802U',
+      payloadPreview: {'CANO': '12****78', 'PDNO': '005930'},
+    ),
+  );
 }
 
 PortfolioSummary _portfolio(String currency, {required double marketValue}) {

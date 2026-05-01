@@ -6,6 +6,12 @@ from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.db.database import get_db
+from app.services.kis_order_validation_service import (
+    KisOrderValidationError,
+    KisOrderValidationRequest,
+    KisOrderValidationService,
+)
+from app.services.market_profile_service import MarketProfileError
 
 router = APIRouter(prefix="/kis", tags=["kis"])
 
@@ -72,6 +78,25 @@ def list_kis_open_orders(db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail=str(exc))
     except KisApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post("/orders/validate")
+@router.post("/orders/dry-run")
+def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisOrderValidationService(client)
+    try:
+        return service.validate(payload).to_dict()
+    except KisOrderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def _client(db: Session) -> KisClient:

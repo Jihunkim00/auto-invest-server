@@ -4,9 +4,11 @@ import '../../core/widgets/status_badge.dart';
 import 'dashboard_controller.dart';
 import 'widgets/last_run_summary_card.dart';
 import 'widgets/manual_trading_run_section.dart';
+import 'widgets/order_ticket_section.dart';
 import 'widgets/portfolio_snapshot_section.dart';
 import 'widgets/quick_actions_section.dart';
 import 'widgets/system_status_section.dart';
+import 'widgets/watchlist_section.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key, required this.controller});
@@ -53,6 +55,10 @@ class DashboardScreen extends StatelessWidget {
                         const SizedBox(height: 12),
                         PortfolioSnapshotSection(controller: controller),
                         const SizedBox(height: 12),
+                        OrderTicketSection(controller: controller),
+                        const SizedBox(height: 12),
+                        WatchlistSection(controller: controller),
+                        const SizedBox(height: 12),
                         LastRunSummaryCard(controller: controller),
                         const SizedBox(height: 12),
                         ManualTradingRunSection(controller: controller),
@@ -70,6 +76,10 @@ class DashboardScreen extends StatelessWidget {
                                 const SizedBox(height: 12),
                                 PortfolioSnapshotSection(
                                     controller: controller),
+                                const SizedBox(height: 12),
+                                OrderTicketSection(controller: controller),
+                                const SizedBox(height: 12),
+                                WatchlistSection(controller: controller),
                                 const SizedBox(height: 12),
                                 LastRunSummaryCard(controller: controller),
                                 const SizedBox(height: 12),

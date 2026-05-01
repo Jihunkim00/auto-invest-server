@@ -5,7 +5,9 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/log_items.dart';
+import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
+import '../../models/order_validation_result.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/trading_run.dart';
@@ -68,6 +70,23 @@ class ApiClient {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
     return jsonDecode(r.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> _postJsonBody(
+      String path, Map<String, dynamic> body) async {
+    final r = await _client.post(
+      Uri.parse('${AppConfig.baseUrl}$path'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid backend response.');
+    }
+    return Map<String, dynamic>.from(decoded);
   }
 
   Future<void> _post(String path) async {
@@ -143,13 +162,15 @@ class ApiClient {
             summedMarketValue;
     final totalUnrealizedPl =
         _readNullableDouble(balance['unrealized_pl']) ?? summedUnrealizedPl;
-    final totalUnrealizedPlpc = _readNullableDouble(balance['unrealized_plpc']) ??
-        (totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0);
+    final totalUnrealizedPlpc =
+        _readNullableDouble(balance['unrealized_plpc']) ??
+            (totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0);
 
     return PortfolioSummary(
       currency: 'KRW',
       positionsCount: _readInt(positionsPayload['count'], positions.length),
-      pendingOrdersCount: _readInt(ordersPayload['count'], pendingOrders.length),
+      pendingOrdersCount:
+          _readInt(ordersPayload['count'], pendingOrders.length),
       totalCostBasis: totalCostBasis,
       totalMarketValue: totalMarketValue,
       totalUnrealizedPl: totalUnrealizedPl,
@@ -157,6 +178,35 @@ class ApiClient {
       positions: positions,
       pendingOrders: pendingOrders,
     );
+  }
+
+  Future<MarketWatchlist> fetchMarketWatchlist(String market) async {
+    final normalizedMarket = market.trim().toUpperCase();
+    try {
+      final payload =
+          await _getJsonNoCache('/market-profiles/$normalizedMarket/watchlist');
+      return MarketWatchlist.fromJson(payload);
+    } catch (_) {
+      return MarketWatchlist.empty(normalizedMarket);
+    }
+  }
+
+  Future<OrderValidationResult> validateKisOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+  }) async {
+    final payload = await _postJsonBody('/kis/orders/validate', {
+      'market': 'KR',
+      'symbol': symbol.trim(),
+      'side': side.trim().toLowerCase(),
+      'qty': qty,
+      'order_type': orderType,
+      'dry_run': true,
+      'reason': 'manual Flutter dashboard dry-run',
+    });
+    return OrderValidationResult.fromJson(payload);
   }
 
   Future<OpsSettings> getOpsSettings() async {

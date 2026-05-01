@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
+import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
+import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
@@ -72,8 +74,20 @@ class DashboardController extends ChangeNotifier {
   PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
   PortfolioSummary krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
   PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
+  PortfolioMarket selectedOrderMarket = PortfolioMarket.us;
+  PortfolioMarket selectedWatchlistMarket = PortfolioMarket.us;
   bool krPortfolioUnavailable = false;
   String? krPortfolioError;
+  MarketWatchlist usWatchlist = MarketWatchlist.empty('US');
+  MarketWatchlist krWatchlist = MarketWatchlist.empty('KR');
+  bool watchlistLoading = false;
+  String? watchlistError;
+  String orderTicketSymbol = '005930';
+  String orderTicketSide = 'buy';
+  int orderTicketQty = 1;
+  bool orderValidationLoading = false;
+  OrderValidationResult? orderValidationResult;
+  String? orderValidationError;
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -103,6 +117,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
+      await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
       try {
         final latestRun = await apiClient.fetchLatestWatchlistRunResult();
@@ -307,6 +322,77 @@ class DashboardController extends ChangeNotifier {
     if (selectedPortfolioMarket == market) return;
     selectedPortfolioMarket = market;
     notifyListeners();
+  }
+
+  void selectOrderMarket(PortfolioMarket market) {
+    if (selectedOrderMarket == market) return;
+    selectedOrderMarket = market;
+    orderValidationError = null;
+    notifyListeners();
+  }
+
+  void selectWatchlistMarket(PortfolioMarket market) {
+    if (selectedWatchlistMarket == market) return;
+    selectedWatchlistMarket = market;
+    notifyListeners();
+  }
+
+  void setOrderTicketSymbol(String value) {
+    orderTicketSymbol = value.trim();
+    notifyListeners();
+  }
+
+  void setOrderTicketSide(String value) {
+    orderTicketSide = value.trim().toLowerCase() == 'sell' ? 'sell' : 'buy';
+    notifyListeners();
+  }
+
+  void setOrderTicketQty(int value) {
+    orderTicketQty = value <= 0 ? 1 : value;
+    notifyListeners();
+  }
+
+  Future<void> loadMarketWatchlists() async {
+    watchlistLoading = true;
+    watchlistError = null;
+    notifyListeners();
+    try {
+      usWatchlist = await apiClient.fetchMarketWatchlist('US');
+      krWatchlist = await apiClient.fetchMarketWatchlist('KR');
+    } catch (e) {
+      watchlistError = 'Watchlists unavailable: $e';
+    } finally {
+      watchlistLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> validateKisOrder() async {
+    final symbol = orderTicketSymbol.trim();
+    final side = orderTicketSide;
+    final qty = orderTicketQty;
+    orderValidationLoading = true;
+    orderValidationError = null;
+    orderValidationResult = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.validateKisOrder(
+        symbol: symbol,
+        side: side,
+        qty: qty,
+      );
+      orderValidationResult = result;
+      final status = result.validatedForSubmission
+          ? 'Dry-run validated. No real order submitted.'
+          : 'Blocked by validation. No real order submitted.';
+      return ActionResult(success: true, message: status);
+    } catch (e) {
+      orderValidationError = e.toString();
+      return ActionResult(success: false, message: orderValidationError!);
+    } finally {
+      orderValidationLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> _refreshPortfolioSummaries() async {
