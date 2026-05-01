@@ -1,0 +1,18 @@
+# config/watchlist_kr.yaml
+
+market: KR
+currency: KRW
+timezone: Asia/Seoul
+symbols:
+  - symbol: "005930"
+    name: "삼성전자"
+    market: "KOSPI"
+  - symbol: "000660"
+    name: "SK하이닉스"
+    market: "KOSPI"
+  - symbol: "035420"
+    name: "NAVER"
+    market: "KOSPI"
+  - symbol: "035720"
+    name: "카카오"
+    market: "KOSPI"

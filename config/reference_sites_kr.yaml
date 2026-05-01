@@ -1,0 +1,21 @@
+# config/reference_sites_kr.yaml
+
+market_data:
+  - name: KIS domestic stock price
+    type: api
+    purpose: current_price
+
+exchange_data:
+  - name: KRX listed stock information
+    type: official_data
+    purpose: listed_stock_master
+
+disclosure:
+  - name: OpenDART
+    type: official_disclosure
+    purpose: company_disclosure_financials
+
+exchange_disclosure:
+  - name: KIND
+    type: official_exchange_disclosure
+    purpose: trading_halt_listing_disclosure

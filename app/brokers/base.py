@@ -13,6 +13,10 @@ class KisAuthError(RuntimeError):
     """Raised when an explicit KIS auth request fails safely."""
 
 
+class KisApiError(RuntimeError):
+    """Raised when an explicit read-only KIS API request fails safely."""
+
+
 class BrokerNotEnabledError(RuntimeError):
     """Raised when a broker or broker action is deliberately disabled."""
 

@@ -16,9 +16,7 @@ class KisBroker(Broker):
         return self.client.get_account_balance()
 
     def list_positions(self):
-        raise NotImplementedError(
-            "KIS position listing is not implemented in this safe skeleton."
-        )
+        return self.client.list_positions()
 
     def get_position(self, symbol: str):
         raise NotImplementedError(

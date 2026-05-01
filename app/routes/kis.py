@@ -1,0 +1,101 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
+from app.db.database import get_db
+from app.services.kis_order_validation_service import (
+    KisOrderValidationError,
+    KisOrderValidationRequest,
+    KisOrderValidationService,
+)
+
+router = APIRouter(prefix="/kis", tags=["kis"])
+
+
+@router.get("/market/price/{symbol}")
+def get_kis_market_price(symbol: str, db: Session = Depends(get_db)):
+    client = _client(db)
+    try:
+        return client.get_domestic_stock_price(symbol)
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/account/balance")
+def get_kis_account_balance(db: Session = Depends(get_db)):
+    client = _client(db)
+    try:
+        return client.get_account_balance()
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/account/positions")
+def list_kis_positions(db: Session = Depends(get_db)):
+    client = _client(db)
+    try:
+        positions = client.list_positions()
+        return {
+            "provider": "kis",
+            "environment": client.settings.kis_env,
+            "count": len(positions),
+            "positions": positions,
+        }
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/account/open-orders")
+def list_kis_open_orders(db: Session = Depends(get_db)):
+    client = _client(db)
+    try:
+        orders = client.list_open_orders()
+        return {
+            "provider": "kis",
+            "environment": client.settings.kis_env,
+            "count": len(orders),
+            "orders": orders,
+        }
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.post("/orders/validate")
+@router.post("/orders/dry-run")
+def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisOrderValidationService(client)
+    try:
+        return service.validate(payload).to_dict()
+    except KisOrderValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except KisApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+def _client(db: Session) -> KisClient:
+    settings = get_settings()
+    return KisClient(settings, KisAuthManager(settings, db))
