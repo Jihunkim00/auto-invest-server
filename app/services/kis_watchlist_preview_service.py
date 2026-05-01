@@ -164,7 +164,7 @@ class KisWatchlistPreviewService:
         price_error: str | None = None
 
         try:
-            price = self.client.get_domestic_stock_price(symbol)
+            price = self._get_normalized_price_snapshot(symbol)
             current_price = to_float(price.get("current_price"))
             if not name:
                 name = str(price.get("name") or "")
@@ -255,6 +255,11 @@ class KisWatchlistPreviewService:
             "error": price_error,
             "gpt_used": gpt.gpt_used,
         }
+
+    def _get_normalized_price_snapshot(self, symbol: str) -> dict[str, Any]:
+        # Keep preview current_price aligned with /kis/market/price/{symbol}.
+        # Preview code must not parse raw KIS quote fields directly.
+        return self.client.get_domestic_stock_price(symbol)
 
     @staticmethod
     def _normalize_action_hint(value: str) -> str:

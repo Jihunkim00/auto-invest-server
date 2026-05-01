@@ -67,11 +67,23 @@ def _add_access_token(
     return row
 
 
+def _find_candidate(payload, symbol):
+    for item in payload.get("items") or []:
+        if item.get("symbol") == symbol:
+            return item
+    pytest.fail(f"Expected KIS preview candidate for {symbol}.")
+
+
 def test_kis_price_endpoint_returns_normalized_current_price(
     monkeypatch, client, db_session
 ):
     _add_access_token(db_session)
-    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    settings = _settings(openai_api_key=None)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.get_settings",
+        lambda: settings,
+    )
 
     def fake_get(url, params, headers, timeout):
         assert url.endswith("/uapi/domestic-stock/v1/quotations/inquire-price")
@@ -105,6 +117,130 @@ def test_kis_price_endpoint_returns_normalized_current_price(
     assert body["change"] == 500.0
     assert body["change_rate"] == 0.7
     assert "secret-cached-access-token" not in response.text
+
+
+def test_kis_current_price_matches_across_preview_endpoints(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _add_access_token(db_session)
+    settings = _settings(openai_api_key=None)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.get_settings",
+        lambda: settings,
+    )
+
+    requested_symbols = []
+
+    def fake_get(url, params, headers, timeout):
+        assert url.endswith("/uapi/domestic-stock/v1/quotations/inquire-price")
+        assert headers["tr_id"] == "FHKST01010100"
+        symbol = params["FID_INPUT_ISCD"]
+        requested_symbols.append(symbol)
+        return _FakeResponse(
+            {
+                "rt_cd": "0",
+                "output": {
+                    "hts_kor_isnm": "Samsung Electronics",
+                    "stck_prpr": "220,500",
+                    "stck_hgpr": "1,286,000",
+                    "stck_mxpr": "1,286,000",
+                    "stck_sdpr": "1,286,000",
+                    "hts_avls": "1,286,000",
+                    "prdy_vrss": "0",
+                    "prdy_ctrt": "0",
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+
+    market_response = client.get("/kis/market/price/005930")
+    watchlist_response = client.post("/kis/watchlist/preview")
+    scheduler_response = client.post("/kis/scheduler/run-preview-once")
+
+    assert market_response.status_code == 200
+    assert watchlist_response.status_code == 200
+    assert scheduler_response.status_code == 200
+
+    market_price = market_response.json()["current_price"]
+    watchlist_body = watchlist_response.json()
+    scheduler_body = scheduler_response.json()
+    watchlist_candidate = _find_candidate(watchlist_body, "005930")
+    scheduler_candidate = _find_candidate(scheduler_body, "005930")
+
+    assert market_price == 220500.0
+    assert watchlist_candidate["current_price"] == 220500.0
+    assert scheduler_candidate["current_price"] == 220500.0
+    assert watchlist_candidate["current_price"] != 1286000.0
+    assert scheduler_candidate["current_price"] != 1286000.0
+    assert requested_symbols.count("005930") == 3
+
+    for payload, candidate in (
+        (watchlist_body, watchlist_candidate),
+        (scheduler_body, scheduler_candidate),
+    ):
+        assert payload["preview_only"] is True
+        assert payload["trading_enabled"] is False
+        assert payload["should_trade"] is False
+        assert candidate["action"] == "hold"
+        assert candidate["entry_ready"] is False
+        assert candidate["trade_allowed"] is False
+        assert candidate["approved_by_risk"] is False
+
+    assert scheduler_body["scheduler_preview_only"] is True
+    assert scheduler_body["real_order_submitted"] is False
+
+
+def test_kis_preview_uses_normalized_price_not_raw_quote_fields(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _add_access_token(db_session)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+
+    def fake_price(self, symbol):
+        return {
+            "provider": "kis",
+            "symbol": symbol,
+            "name": "Samsung Electronics",
+            "current_price": 220500.0,
+            "stck_hgpr": 1286000.0,
+            "stck_mxpr": 1286000.0,
+            "stck_sdpr": 1286000.0,
+            "hts_avls": 1286000.0,
+            "raw": {
+                "output": {
+                    "stck_prpr": "220500",
+                    "stck_hgpr": "1286000",
+                    "stck_mxpr": "1286000",
+                    "stck_sdpr": "1286000",
+                    "hts_avls": "1286000",
+                }
+            },
+        }
+
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_stock_price",
+        fake_price,
+    )
+
+    watchlist_response = client.post("/kis/watchlist/preview")
+    scheduler_response = client.post("/kis/scheduler/run-preview-once")
+
+    assert watchlist_response.status_code == 200
+    assert scheduler_response.status_code == 200
+    assert (
+        _find_candidate(watchlist_response.json(), "005930")["current_price"]
+        == 220500.0
+    )
+    assert (
+        _find_candidate(scheduler_response.json(), "005930")["current_price"]
+        == 220500.0
+    )
 
 
 def test_kis_balance_endpoint_returns_normalized_summary(
