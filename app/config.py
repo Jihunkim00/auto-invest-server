@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_env: str = "dev"
     default_symbol: str = "AAPL"
+    dry_run: bool = True
 
     broker_provider: str = "alpaca"
 
@@ -26,6 +27,13 @@ class Settings(BaseSettings):
     kis_ws_url: str | None = None
     kis_access_token: str | None = None
     kis_approval_key: str | None = None
+    kis_real_order_enabled: bool = False
+    kis_max_manual_order_qty: int = 1
+    kis_max_manual_order_amount_krw: int = 100000
+    kis_require_confirmation: bool = True
+    kis_confirmation_phrase: str = "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
+    kr_scheduler_enabled: bool = False
+    kr_scheduler_allow_real_orders: bool = False
 
     database_url: str = "sqlite:///./auto_invest.db"
 

@@ -29,10 +29,10 @@ KIS_MARKET_ORDER_DIVISION = "01"
 
 
 class KisClient:
-    """Safe KIS Open API client for auth and read-only data.
+    """Safe KIS Open API client for auth, reads, and explicit cash orders.
 
-    This class can query read-only market/account endpoints, but still does not
-    submit, modify, or cancel orders.
+    Order submission is exposed only through a dedicated method; callers must
+    enforce the manual safety gates before invoking it.
     """
 
     def __init__(self, settings=None, auth_manager: KisAuthManager | None = None):
@@ -235,6 +235,35 @@ class KisClient:
             "KIS order submission is disabled. This connector is read-only here."
         )
 
+    def submit_domestic_cash_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: int,
+        order_type: str = "market",
+    ) -> dict:
+        if not bool(getattr(self.settings, "kis_enabled", False)):
+            raise BrokerNotEnabledError(
+                "KIS domestic cash order submission requires KIS_ENABLED=true."
+            )
+        if not bool(getattr(self.settings, "kis_real_order_enabled", False)):
+            raise BrokerNotEnabledError(
+                "KIS domestic cash order submission requires "
+                "KIS_REAL_ORDER_ENABLED=true."
+            )
+        payload = self.build_domestic_order_payload(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            order_type=order_type,
+        )
+        return self._request_order(
+            KIS_CASH_ORDER_PATH,
+            tr_id=self.domestic_cash_order_tr_id(side),
+            payload=payload,
+        )
+
     def domestic_cash_order_tr_id(self, side: str) -> str:
         normalized_side = str(side or "").strip().lower()
         if normalized_side not in ("buy", "sell"):
@@ -339,6 +368,46 @@ class KisClient:
         if rt_cd not in ("0", ""):
             code = data.get("msg_cd") or rt_cd
             raise KisApiError(f"KIS read-only API returned error code {code}.")
+
+        return data
+
+    def _request_order(
+        self,
+        path: str,
+        *,
+        tr_id: str,
+        payload: dict | None = None,
+    ) -> dict:
+        url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
+        headers = self.build_headers(tr_id=tr_id, include_auth=True)
+
+        try:
+            response = requests.post(
+                url,
+                data=json.dumps(payload or {}),
+                headers=headers,
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            raise KisApiError(f"KIS order request failed: {type(exc).__name__}.") from exc
+
+        if response.status_code >= 400:
+            raise KisApiError(
+                f"KIS order request failed with HTTP {response.status_code}."
+            )
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise KisApiError("KIS order response was not valid JSON.") from exc
+
+        if not isinstance(data, dict):
+            raise KisApiError("KIS order response had an unexpected shape.")
+
+        rt_cd = str(data.get("rt_cd", "0"))
+        if rt_cd not in ("0", ""):
+            code = data.get("msg_cd") or rt_cd
+            raise KisApiError(f"KIS order API returned error code {code}.")
 
         return data
 

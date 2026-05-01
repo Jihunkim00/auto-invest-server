@@ -56,6 +56,23 @@ class OrderLog(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class KisOrderValidationLog(Base):
+    __tablename__ = "kis_order_validations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    market = Column(String(10), nullable=False, default="KR", index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    side = Column(String(10), nullable=False, index=True)
+    qty = Column(Integer, nullable=False)
+    order_type = Column(String(20), nullable=False, default="market")
+    validated_for_submission = Column(Boolean, nullable=False, default=False, index=True)
+    current_price = Column(Float, nullable=True)
+    estimated_amount = Column(Float, nullable=True)
+    request_payload = Column(Text, nullable=True)
+    response_payload = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class MarketAnalysis(Base):
     __tablename__ = "market_analysis"
 
@@ -143,6 +160,7 @@ class RuntimeSetting(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     bot_enabled = Column(Boolean, nullable=False, default=True)
+    dry_run = Column(Boolean, nullable=False, default=True)
     kill_switch = Column(Boolean, nullable=False, default=False)
     scheduler_enabled = Column(Boolean, nullable=False, default=False)
     default_symbol = Column(String(20), nullable=False, default="AAPL")

@@ -92,6 +92,7 @@ class _KrOrderTicket extends StatelessWidget {
     final validateLabel = controller.orderValidationLoading
         ? 'Validating...'
         : 'Validate ${side == 'sell' ? 'Sell' : 'Buy'}';
+    final realOrdersAllowed = controller.schedulerStatus.kr.realOrdersAllowed;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 8, runSpacing: 8, children: const [
@@ -171,6 +172,21 @@ class _KrOrderTicket extends StatelessWidget {
             : const Icon(Icons.fact_check_outlined),
         label: Text(validateLabel),
       ),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: null,
+        icon: const Icon(Icons.lock_outline),
+        label: const Text('Submit Real KIS Order'),
+      ),
+      const SizedBox(height: 10),
+      _StateLine(
+        text: realOrdersAllowed
+            ? 'Real KIS trading requires manual backend confirmation'
+            : 'Real KIS trading is disabled',
+        color: realOrdersAllowed ? Colors.amberAccent : Colors.redAccent,
+      ),
+      const SizedBox(height: 8),
+      const _StateLine(text: 'Use dry-run validation first'),
       const SizedBox(height: 12),
       if (controller.orderValidationError != null)
         _StateLine(

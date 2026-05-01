@@ -16,6 +16,7 @@ router = APIRouter(prefix="/ops", tags=["ops"])
 
 class RuntimeSettingsUpdateRequest(BaseModel):
     bot_enabled: bool | None = None
+    dry_run: bool | None = None
     kill_switch: bool | None = None
     scheduler_enabled: bool | None = None
     default_symbol: str | None = Field(default=None, min_length=1, max_length=20)

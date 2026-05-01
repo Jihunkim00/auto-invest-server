@@ -80,6 +80,7 @@ def _create_runtime_settings_table_if_missing():
                 CREATE TABLE IF NOT EXISTS runtime_settings (
                     id INTEGER PRIMARY KEY,
                     bot_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    dry_run BOOLEAN NOT NULL DEFAULT 1,
                     kill_switch BOOLEAN NOT NULL DEFAULT 0,
                     scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
@@ -200,6 +201,7 @@ def init_db():
 
     runtime_setting_columns = {
         "bot_enabled": "BOOLEAN DEFAULT 1",
+        "dry_run": "BOOLEAN DEFAULT 1",
         "kill_switch": "BOOLEAN DEFAULT 0",
         "scheduler_enabled": "BOOLEAN DEFAULT 0",        
         "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",

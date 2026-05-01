@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+import json
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.orm import Session
 
 from app.brokers.factory import mask_account_no
 from app.brokers.kis_client import KisClient, to_float
+from app.db.models import KisOrderValidationLog
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 
@@ -259,3 +262,27 @@ def _public_market_session(market_session: dict) -> dict:
         "no_new_entry_after",
     ]
     return {key: market_session.get(key) for key in keys}
+
+
+def record_kis_order_validation(
+    db: Session,
+    *,
+    request: KisOrderValidationRequest,
+    result: KisOrderValidationResult,
+) -> KisOrderValidationLog:
+    row = KisOrderValidationLog(
+        market=result.market,
+        symbol=result.symbol,
+        side=result.side,
+        qty=result.qty,
+        order_type=result.order_type,
+        validated_for_submission=result.validated_for_submission,
+        current_price=result.current_price,
+        estimated_amount=result.estimated_amount,
+        request_payload=json.dumps(request.model_dump(), ensure_ascii=False, default=str),
+        response_payload=json.dumps(result.to_dict(), ensure_ascii=False, default=str),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

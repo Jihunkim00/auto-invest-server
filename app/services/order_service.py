@@ -44,6 +44,7 @@ def map_broker_status_to_internal(broker_status: str | None) -> str:
 def create_order_log(
     db: Session,
     *,
+    broker: str = "alpaca",
     symbol: str,
     side: str,
     order_type: str,
@@ -53,9 +54,10 @@ def create_order_log(
     limit_price: float | None,
     extended_hours: bool,
     request_payload: dict | None,
+    internal_status: str = InternalOrderStatus.REQUESTED.value,
 ):
     order = OrderLog(
-        broker="alpaca",
+        broker=broker,
         symbol=symbol,
         side=side,
         order_type=order_type,
@@ -64,7 +66,7 @@ def create_order_log(
         notional=notional,
         limit_price=limit_price,
         extended_hours=extended_hours,
-        internal_status=InternalOrderStatus.REQUESTED.value,
+        internal_status=internal_status,
         request_payload=json.dumps(request_payload, ensure_ascii=False) if request_payload else None,
     )
     db.add(order)

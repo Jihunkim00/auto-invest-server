@@ -16,6 +16,7 @@ class RuntimeSettingService:
     def _defaults(self) -> dict[str, Any]:
         return {
             "bot_enabled": True,
+            "dry_run": bool(self.settings.dry_run),
             "kill_switch": False,
             "scheduler_enabled": False,
             "default_symbol": self.settings.default_symbol.upper(),
@@ -45,6 +46,7 @@ class RuntimeSettingService:
         row = self.get_or_create(db)
         return {
             "bot_enabled": bool(row.bot_enabled),
+            "dry_run": bool(row.dry_run),
             "kill_switch": bool(row.kill_switch),
             "scheduler_enabled": bool(row.scheduler_enabled),
             "default_symbol": row.default_symbol,
@@ -64,6 +66,7 @@ class RuntimeSettingService:
 
         for key in (
             "bot_enabled",
+            "dry_run",
             "kill_switch",
             "scheduler_enabled",
             "default_symbol",

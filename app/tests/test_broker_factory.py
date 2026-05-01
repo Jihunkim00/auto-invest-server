@@ -24,12 +24,14 @@ def test_default_broker_provider_is_alpaca():
     settings = _settings()
 
     assert settings.broker_provider == "alpaca"
+    assert settings.dry_run is True
 
 
 def test_kis_is_disabled_by_default():
     settings = _settings()
 
     assert settings.kis_enabled is False
+    assert settings.kis_real_order_enabled is False
     assert settings.kis_env == "paper"
 
 
@@ -103,3 +105,15 @@ def test_kis_submit_market_sell_is_disabled():
 
     with pytest.raises(BrokerNotEnabledError):
         broker.submit_market_sell("005930", qty=1)
+
+
+def test_kis_client_domestic_cash_order_is_disabled_by_default():
+    client = KisClient(_settings(kis_enabled=True))
+
+    with pytest.raises(BrokerNotEnabledError):
+        client.submit_domestic_cash_order(
+            symbol="005930",
+            side="buy",
+            qty=1,
+            order_type="market",
+        )

@@ -17,6 +17,7 @@ from app.routes.ops import router as ops_router
 from app.routes.orders import router as orders_router
 from app.routes.positions import router as positions_router
 from app.routes.portfolio import router as portfolio_router
+from app.routes.scheduler import router as scheduler_router
 from app.routes.signals import router as signals_router
 from app.routes.trading import router as trading_router
 from app.services.scheduler_service import scheduler_service
@@ -64,6 +65,7 @@ app.include_router(market_analysis_router)
 app.include_router(signals_router)
 app.include_router(trading_router)
 app.include_router(ops_router)
+app.include_router(scheduler_router)
 
 
 @app.get("/")

@@ -57,3 +57,46 @@ def test_manual_watchlist_run_still_works_when_scheduler_disabled(monkeypatch):
     assert payload["result"] == "ok"
     assert payload["trigger_source"] == "manual"
     assert calls and calls[0]["trigger_source"] == "manual"
+
+
+def test_scheduler_status_keeps_kr_disabled_by_default():
+    with TestClient(app) as client:
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["US"]["enabled_for_scheduler"] is True
+    assert body["US"]["timezone"] == "America/New_York"
+    assert body["US"]["slots"]
+    assert body["KR"]["enabled_for_scheduler"] is False
+    assert body["KR"]["timezone"] == "Asia/Seoul"
+    assert body["KR"]["slots"]
+    assert body["KR"]["preview_only"] is True
+    assert body["KR"]["real_orders_allowed"] is False
+
+
+def test_kis_scheduler_preview_once_is_preview_only(monkeypatch):
+    def fake_preview(self, include_gpt=True):
+        return {
+            "market": "KR",
+            "provider": "kis",
+            "preview_only": True,
+            "dry_run": True,
+            "watchlist": [],
+            "real_order_submitted": False,
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisWatchlistPreviewService.run_preview",
+        fake_preview,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/kis/scheduler/run-preview-once")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview_only"] is True
+    assert body["scheduler_preview_only"] is True
+    assert body["real_order_submitted"] is False
+    assert body["trigger_source"] == "manual_scheduler_preview"

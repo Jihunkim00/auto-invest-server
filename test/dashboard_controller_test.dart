@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
+import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
@@ -178,6 +179,10 @@ class _FakeApiClient extends ApiClient {
         minEntryScore: 65,
         minScoreGap: 3,
       );
+
+  @override
+  Future<SchedulerStatus> fetchSchedulerStatus() async =>
+      SchedulerStatus.safeDefault();
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
@@ -10,6 +11,11 @@ from app.services.kis_order_validation_service import (
     KisOrderValidationError,
     KisOrderValidationRequest,
     KisOrderValidationService,
+    record_kis_order_validation,
+)
+from app.services.kis_manual_order_service import (
+    KisManualOrderService,
+    KisManualOrderSubmitRequest,
 )
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
@@ -88,7 +94,9 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
     client = _client(db)
     service = KisOrderValidationService(client)
     try:
-        return service.validate(payload).to_dict()
+        result = service.validate(payload)
+        record_kis_order_validation(db, request=payload, result=result)
+        return result.to_dict()
     except KisOrderValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketProfileError as exc:
@@ -101,12 +109,39 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.post("/orders/submit-manual")
+def submit_manual_kis_order(
+    payload: KisManualOrderSubmitRequest,
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisManualOrderService(client)
+    status_code, body = service.submit_manual(db, payload)
+    return JSONResponse(status_code=status_code, content=body)
+
+
 @router.post("/watchlist/preview")
 def preview_kis_watchlist(db: Session = Depends(get_db)):
     client = _client(db)
     service = KisWatchlistPreviewService(client)
     try:
         return service.run_preview(include_gpt=True)
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/scheduler/run-preview-once")
+def run_kis_scheduler_preview_once(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisWatchlistPreviewService(client)
+    try:
+        payload = service.run_preview(include_gpt=True)
+        payload["trigger_source"] = "manual_scheduler_preview"
+        payload["scheduler_preview_only"] = True
+        payload["real_order_submitted"] = False
+        return payload
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:

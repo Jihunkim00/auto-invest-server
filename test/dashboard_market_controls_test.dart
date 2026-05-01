@@ -34,7 +34,9 @@ void main() {
 
     expect(find.text('DRY-RUN ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.textContaining('submit', findRichText: true), findsNothing);
+    expect(find.text('Submit Real KIS Order'), findsOneWidget);
+    expect(find.text('Real KIS trading is disabled'), findsOneWidget);
+    expect(find.text('Use dry-run validation first'), findsOneWidget);
 
     await tester.tap(find.text('Validate Buy'));
     await tester.pumpAndSettle();

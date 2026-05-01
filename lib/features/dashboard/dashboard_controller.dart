@@ -6,6 +6,7 @@ import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/scheduler_status.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -69,6 +70,7 @@ class DashboardController extends ChangeNotifier {
     minEntryScore: 65,
     minScoreGap: 3,
   );
+  SchedulerStatus schedulerStatus = SchedulerStatus.safeDefault();
 
   WatchlistRunResult runResult = _emptyRunResult;
   PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
@@ -120,6 +122,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
       try {
@@ -224,6 +227,7 @@ class DashboardController extends ChangeNotifier {
     try {
       v ? await apiClient.schedulerOn() : await apiClient.schedulerOff();
       settings = await apiClient.getOpsSettings();
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
       return ActionResult(
           success: true,
           message: 'Scheduler ${v ? 'enabled' : 'disabled'} successfully.');
