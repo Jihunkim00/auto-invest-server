@@ -108,11 +108,10 @@ class RuntimeSettingService:
                 "market": "KR",
                 "broker": "kis",
                 "manual_order_qty_cap": int(
-                    getattr(self.settings, "kis_max_manual_order_qty", 1) or 1
+                    getattr(self.settings, "kis_max_manual_order_qty", 1)
                 ),
                 "manual_order_amount_cap_krw": int(
                     getattr(self.settings, "kis_max_manual_order_amount_krw", 100000)
-                    or 100000
                 ),
             },
         }

@@ -135,6 +135,27 @@ def test_validate_buy_blocked_with_insufficient_cash(monkeypatch, client):
     assert body["block_reasons"] == ["insufficient_cash"]
 
 
+def test_validate_buy_blocked_with_insufficient_cash_when_manual_caps_disabled(
+    monkeypatch, client,
+):
+    monkeypatch.setattr(
+        "app.routes.kis.get_settings",
+        lambda: _settings(kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=0),
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_account_balance",
+        lambda self: {"currency": "KRW", "cash": 1000.0},
+    )
+
+    response = client.post("/kis/orders/validate", json=_buy_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validated_for_submission"] is False
+    assert body["can_submit_later"] is False
+    assert body["block_reasons"] == ["insufficient_cash"]
+
+
 def test_validate_sell_success_with_enough_holdings(client):
     response = client.post("/kis/orders/validate", json=_sell_payload(qty=2))
 

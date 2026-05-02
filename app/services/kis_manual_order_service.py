@@ -229,12 +229,20 @@ class KisManualOrderService:
             {"max_age_seconds": int(KIS_VALIDATION_MAX_AGE.total_seconds())},
         )
 
-        max_qty = int(getattr(settings, "kis_max_manual_order_qty", 1) or 1)
+        max_qty = int(getattr(settings, "kis_max_manual_order_qty", 1))
+        qty_cap_disabled = max_qty <= 0
+        qty_cap_passed = checks["qty_is_positive_integer"]["passed"] and (
+            qty_cap_disabled or request.qty <= max_qty
+        )
+        qty_cap_detail = {"qty": request.qty, "cap_disabled": qty_cap_disabled}
+        if not qty_cap_disabled:
+            qty_cap_detail["max_qty"] = max_qty
+
         check(
             "max_order_qty_cap",
-            checks["qty_is_positive_integer"]["passed"] and request.qty <= max_qty,
+            qty_cap_passed,
             "qty_exceeds_manual_cap",
-            {"qty": request.qty, "max_qty": max_qty},
+            qty_cap_detail,
         )
 
         estimated_amount = (
@@ -242,12 +250,23 @@ class KisManualOrderService:
             if latest_validation is not None and latest_validation.estimated_amount is not None
             else None
         )
-        max_amount = float(getattr(settings, "kis_max_manual_order_amount_krw", 100000) or 100000)
+        max_amount = float(getattr(settings, "kis_max_manual_order_amount_krw", 100000))
+        cap_disabled = max_amount <= 0
+        amount_cap_passed = cap_disabled or (
+            estimated_amount is not None and estimated_amount <= max_amount
+        )
+        amount_cap_detail = {
+            "estimated_amount": estimated_amount,
+            "cap_disabled": cap_disabled,
+        }
+        if not cap_disabled:
+            amount_cap_detail["max_amount_krw"] = max_amount
+
         check(
             "max_order_amount_cap",
-            estimated_amount is not None and estimated_amount <= max_amount,
+            amount_cap_passed,
             "amount_exceeds_manual_cap" if estimated_amount is not None else "amount_unavailable",
-            {"estimated_amount": estimated_amount, "max_amount_krw": max_amount},
+            amount_cap_detail,
         )
 
         max_daily_trades = max(0, int(runtime.get("max_trades_per_day", 0)))

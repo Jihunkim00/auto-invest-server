@@ -333,6 +333,38 @@ def test_submit_manual_rejects_when_qty_exceeds_cap(
     _assert_rejected(response, "max_order_qty_cap")
 
 
+def test_submit_manual_allows_disabled_qty_cap(monkeypatch, client, db_session):
+    _seed_validation(db_session, qty=5, amount=360000)
+    monkeypatch.setattr(
+        "app.routes.kis.get_settings",
+        lambda: _settings(kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=1000000),
+    )
+
+    def fake_submit(self, *, symbol, side, qty, order_type="market"):
+        return {
+            "rt_cd": "0",
+            "msg_cd": "APBK0013",
+            "output": {"ODNO": "0001234567", "ORD_TMD": "090501"},
+        }
+
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        fake_submit,
+    )
+
+    response = client.post(
+        "/kis/orders/submit-manual",
+        json=_payload(qty=5),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["real_order_submitted"] is True
+    assert body["safety_checks"]["max_order_qty_cap"]["passed"] is True
+    assert body["safety_checks"]["max_order_qty_cap"]["detail"]["cap_disabled"] is True
+    assert body["safety_checks"]["max_order_qty_cap"]["detail"]["qty"] == 5
+
+
 def test_submit_manual_rejects_when_amount_exceeds_cap(
     monkeypatch, client, db_session
 ):
@@ -345,6 +377,54 @@ def test_submit_manual_rejects_when_amount_exceeds_cap(
     response = client.post("/kis/orders/submit-manual", json=_payload())
 
     _assert_rejected(response, "max_order_amount_cap")
+
+
+def test_submit_manual_allows_disabled_amount_cap(monkeypatch, client, db_session):
+    _seed_validation(db_session, amount=72000)
+    monkeypatch.setattr(
+        "app.routes.kis.get_settings",
+        lambda: _settings(kis_max_manual_order_amount_krw=0),
+    )
+
+    def fake_submit(self, *, symbol, side, qty, order_type="market"):
+        return {
+            "rt_cd": "0",
+            "msg_cd": "APBK0013",
+            "output": {"ODNO": "0001234567", "ORD_TMD": "090501"},
+        }
+
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        fake_submit,
+    )
+
+    response = client.post("/kis/orders/submit-manual", json=_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["real_order_submitted"] is True
+    assert body["safety_checks"]["max_order_amount_cap"]["passed"] is True
+    assert body["safety_checks"]["max_order_amount_cap"]["detail"]["cap_disabled"] is True
+    assert body["safety_checks"]["max_order_amount_cap"]["detail"]["estimated_amount"] == 72000.0
+
+
+def test_submit_manual_rejects_when_confirmation_missing_with_caps_disabled(
+    monkeypatch, client, db_session
+):
+    _seed_validation(db_session, amount=72000)
+    monkeypatch.setattr(
+        "app.routes.kis.get_settings",
+        lambda: _settings(kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=0),
+    )
+
+    response = client.post(
+        "/kis/orders/submit-manual",
+        json=_payload(confirmation=None),
+    )
+
+    _assert_rejected(response, "manual_confirmation_matches")
+    assert response.json()["safety_checks"]["max_order_qty_cap"]["passed"] is True
+    assert response.json()["safety_checks"]["max_order_amount_cap"]["passed"] is True
 
 
 def test_submit_manual_rejects_when_confirmation_missing(client, db_session):

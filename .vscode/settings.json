@@ -3,6 +3,10 @@
         "/^d:\\\\auto-invest-server\\\\\\.venv\\\\Scripts\\\\python\\.exe -m pip install pytest$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^python - <<'PY'\nfrom pathlib import Path\npath = Path\\(r'd:\\\\auto-invest-server\\\\app\\\\services\\\\runtime_setting_service\\.py'\\)\ntext = path\\.read_text\\(\\)\nstart = text\\.index\\('\"manual_order_amt'\\) if 'manual_order_amt' in text else -1\nprint\\('found manual_order_amount_cap_krw at', start\\)\nfor i,line in enumerate\\(text\\.splitlines\\(\\),1\\):\n    if 'manual_order_amount_cap_krw' in line or 'manual_order_qty_cap' in line:\n        print\\(i,repr\\(line\\)\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }
