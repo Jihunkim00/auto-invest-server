@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     openai_reasoning_effort: str = "medium"
 
     reference_sites_config_path: str = "config/reference_sites.yaml"
+    event_sources_config_path: str = "config/event_sources.yaml"
     watchlist_config_path: str = "config/watchlist.yaml"
     market_profiles_config_path: str = "config/market_profiles.yaml"
     market_sessions_config_path: str = "config/market_sessions.yaml"

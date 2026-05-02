@@ -1,0 +1,14 @@
+sources:
+  - name: Investing Earnings Calendar KR
+    market: KR
+    type: earnings_calendar
+    url: https://kr.investing.com/earnings-calendar
+    enabled: true
+    priority: 10
+
+  - name: Investing Earnings Calendar US
+    market: US
+    type: earnings_calendar
+    url: https://www.investing.com/earnings-calendar
+    enabled: true
+    priority: 20

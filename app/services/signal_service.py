@@ -14,6 +14,7 @@ from app.core.constants import (
 )
 from app.db.models import SignalLog
 from app.services.ai_signal_service import AISignalService
+from app.services.event_risk_service import EventRiskService
 from app.services.gpt_market_service import GPTMarketService
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
@@ -27,6 +28,7 @@ class SignalService:
         self.gpt_market_service = GPTMarketService()
         self.quant_signal_service = QuantSignalService()
         self.ai_signal_service = AISignalService()
+        self.event_risk_service = EventRiskService()
 
     @staticmethod
     def _resolve_action(
@@ -98,12 +100,26 @@ class SignalService:
     ) -> SignalLog:
         symbol = symbol.upper()
         resolved_gate_level = resolve_gate_level(gate_level)
+        event_context = self.event_risk_service.get_event_risk(
+            db,
+            symbol=symbol,
+            market="US",
+            intent="entry",
+        )
+        if event_context.get("force_gate_level") == 1:
+            resolved_gate_level = 1
         profile = get_gate_profile(resolved_gate_level)
 
         bars = self.market_data_service.get_recent_bars(symbol, limit=DEFAULT_BARS_LIMIT, timeframe=timeframe)
         indicators = self.indicator_service.calculate(bars)
 
-        market_analysis = self.gpt_market_service.run_and_save(db, symbol, indicators, gate_level=resolved_gate_level)
+        market_analysis = self.gpt_market_service.run_and_save(
+            db,
+            symbol,
+            indicators,
+            gate_level=resolved_gate_level,
+            event_context=event_context if event_context.get("has_near_event") else None,
+        )
 
         quant = self.quant_signal_service.score(indicators, gate_level=resolved_gate_level)
         ai = self.ai_signal_service.adjust(
@@ -132,6 +148,12 @@ class SignalService:
         is_hold = action == "hold"
 
         gating_notes = list(quant.get("quant_notes") or []) + action_notes
+        if event_context.get("has_near_event"):
+            gating_notes.append("structured_event_risk_present")
+            if event_context.get("entry_blocked"):
+                gating_notes.append("event_risk_entry_block")
+            if float(event_context.get("position_size_multiplier") or 1.0) < 1.0:
+                gating_notes.append("event_risk_position_size_reduced")
         signal = SignalLog(
             symbol=symbol,
             action=action,

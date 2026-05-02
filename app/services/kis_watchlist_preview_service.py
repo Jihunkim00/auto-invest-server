@@ -9,6 +9,7 @@ from openai import OpenAI
 from app.brokers.kis_client import KisClient, to_float
 from app.config import get_settings
 from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
+from app.services.event_risk_service import EventRiskService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.quant_signal_service import QuantSignalService
@@ -55,17 +56,22 @@ class KisWatchlistPreviewService:
         gpt_advisor: "KisPreviewGptAdvisor | None" = None,
         indicator_service: TechnicalIndicatorService | None = None,
         quant_signal_service: QuantSignalService | None = None,
+        event_risk_service: EventRiskService | None = None,
+        db=None,
         limit: int = KR_PREVIEW_LIMIT,
     ):
         self.client = client
+        self.db = db
         self.profile_service = profile_service or MarketProfileService()
         self.session_service = session_service or MarketSessionService()
         self.gpt_advisor = gpt_advisor or KisPreviewGptAdvisor()
         self.indicator_service = indicator_service or TechnicalIndicatorService()
         self.quant_signal_service = quant_signal_service or QuantSignalService()
+        self.event_risk_service = event_risk_service or EventRiskService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
 
-    def run_preview(self, *, include_gpt: bool = True) -> dict[str, Any]:
+    def run_preview(self, *, include_gpt: bool = True, db=None) -> dict[str, Any]:
+        db = db if db is not None else self.db
         settings = get_settings()
         profile = self.profile_service.get_profile("KR")
         watchlist = self.profile_service.load_watchlist("KR")
@@ -83,6 +89,7 @@ class KisWatchlistPreviewService:
                 session_warnings=session_warnings,
                 reference_sources=references.get("sources") or [],
                 include_gpt=include_gpt,
+                db=db,
             )
             gpt_used = gpt_used or bool(item.get("gpt_used"))
             items.append(item)
@@ -206,6 +213,7 @@ class KisWatchlistPreviewService:
         session_warnings: list[str],
         reference_sources: list[dict[str, Any]],
         include_gpt: bool,
+        db,
     ) -> dict[str, Any]:
         symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
         name = str(raw.get("name") or "")
@@ -284,10 +292,31 @@ class KisWatchlistPreviewService:
         if block_reason not in block_reasons:
             block_reasons.append(block_reason)
 
+        event_risk = self._event_risk_for_symbol(
+            db,
+            symbol=symbol,
+            market_session=market_session,
+        )
+        warnings.extend(_string_list(event_risk.get("warnings")))
+        if event_risk.get("has_near_event"):
+            risk_flags.append("structured_event_risk")
+            gating_notes.append("Structured earnings-event risk is advisory only for KR preview.")
+            if event_risk.get("entry_blocked"):
+                risk_flags.append("event_risk_entry_block")
+                block_reasons.append("near_earnings_event")
+                gating_notes.append("Upcoming earnings event blocks new entries under the event-risk policy.")
+            elif _safe_float(event_risk.get("position_size_multiplier"), 1.0) < 1.0:
+                risk_flags.append("event_risk_position_size_reduced")
+                gating_notes.append("Upcoming earnings event reduces hypothetical entry size.")
+
         gpt = KisGptPreview(
             gpt_used=False,
             action_hint="watch",
-            gpt_reason="GPT 참고 해석 전용입니다. 실행 가능한 매매 결정이 아닙니다.",
+            gpt_reason=(
+                "\u0047\u0050\u0054 \ucc38\uace0 \ud574\uc11d "
+                "\uc804\uc6a9\uc785\ub2c8\ub2e4. \uc2e4\ud589 \uac00\ub2a5\ud55c "
+                "\ub9e4\ub9e4 \uacb0\uc815\uc774 \uc544\ub2d9\ub2c8\ub2e4."
+            ),
             warnings=[],
         )
         if include_gpt:
@@ -299,6 +328,7 @@ class KisWatchlistPreviewService:
                 indicator_payload=indicator_payload if can_score else dict(EMPTY_INDICATORS),
                 market_session=market_session,
                 reference_sources=reference_sources,
+                event_context=event_risk if event_risk.get("has_near_event") else None,
             )
             gpt = self._ensure_korean_gpt_preview(
                 gpt,
@@ -365,6 +395,7 @@ class KisWatchlistPreviewService:
             "block_reason": block_reason,
             "reason": reason,
             "gpt_reason": gpt.gpt_reason,
+            "event_risk": event_risk,
             "warnings": _dedupe(warnings),
             "block_reasons": _dedupe(block_reasons),
             "error": price_error or bar_error,
@@ -375,6 +406,48 @@ class KisWatchlistPreviewService:
         # Keep preview current_price aligned with /kis/market/price/{symbol}.
         # Preview code must not parse raw KIS quote fields directly.
         return self.client.get_domestic_stock_price(symbol)
+
+    def _event_risk_for_symbol(
+        self,
+        db,
+        *,
+        symbol: str,
+        market_session: dict[str, Any],
+    ) -> dict[str, Any]:
+        if db is None:
+            return _empty_event_risk(
+                symbol=symbol,
+                market="KR",
+                warnings=["event_data_unavailable"],
+                reason="event risk unavailable without db session",
+            )
+        try:
+            return self.event_risk_service.get_event_risk(
+                db,
+                symbol=symbol,
+                market="KR",
+                as_of_date=self._session_date(market_session),
+                intent="entry",
+            )
+        except Exception:
+            return _empty_event_risk(
+                symbol=symbol,
+                market="KR",
+                warnings=["event_data_unavailable"],
+                reason="event risk unavailable",
+            )
+
+    @staticmethod
+    def _session_date(market_session: dict[str, Any]):
+        raw_date = market_session.get("date") or market_session.get("current_date")
+        if not raw_date:
+            return None
+        try:
+            from datetime import date
+
+            return date.fromisoformat(str(raw_date)[:10])
+        except Exception:
+            return None
 
     def _rank_final_candidates(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         indexed = list(enumerate(items))
@@ -517,6 +590,7 @@ class KisPreviewGptAdvisor:
         indicator_payload: dict[str, Any],
         market_session: dict[str, Any],
         reference_sources: list[dict[str, Any]],
+        event_context: dict[str, Any] | None = None,
     ) -> KisGptPreview:
         if self.client is None:
             fallback_scope = (
@@ -547,6 +621,7 @@ class KisPreviewGptAdvisor:
                 indicator_payload=indicator_payload,
                 market_session=market_session,
                 reference_sources=reference_sources,
+                event_context=event_context,
             )
             return self._normalize_payload(
                 payload,
@@ -584,6 +659,7 @@ class KisPreviewGptAdvisor:
         indicator_payload: dict[str, Any],
         market_session: dict[str, Any],
         reference_sources: list[dict[str, Any]],
+        event_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.client is None:
             raise ValueError("OpenAI client is not initialized.")
@@ -609,6 +685,11 @@ class KisPreviewGptAdvisor:
             "like EMA20, RSI, VWAP, ATR, KRW, KIS, KRX, OpenDART, and KIND. "
             "Keep machine-readable fields such as risk_flags, gating_notes, "
             "hard_block_reason, action, and action_hint in stable English.\n"
+            "Earnings or earnings-call events are uncertainty risks, not bullish signals. "
+            "Do not increase buy_score, action confidence, or entry confidence because of upcoming earnings. "
+            "If event_context.entry_blocked is true, recommend hold or block_entry. "
+            "If event_context.position_size_multiplier is below 1.0, mention that position size should be reduced. "
+            "Do not treat upcoming earnings as a reason to buy. The risk engine remains the final authority.\n"
             "Return JSON only. Use keys: ai_buy_score, ai_sell_score, "
             "confidence, action, reason, gpt_reason, risk_flags, gating_notes, "
             "hard_block_reason. Optional action_hint is allowed. action must "
@@ -624,8 +705,7 @@ class KisPreviewGptAdvisor:
             for source in reference_sources
             if isinstance(source, dict)
         ]
-        user_prompt = json.dumps(
-            {
+        prompt_payload = {
                 "market": "KR",
                 "provider": "kis",
                 "currency": "KRW",
@@ -649,8 +729,13 @@ class KisPreviewGptAdvisor:
                     "Respond in Korean.",
                     "Return gpt_reason in Korean.",
                     "Keep risk_flags, gating_notes, hard_block_reason, action, and action_hint machine-readable in English.",
+                    "Do not treat upcoming earnings as bullish.",
                 ],
-            },
+        }
+        if event_context:
+            prompt_payload["event_context"] = _prompt_event_context(event_context)
+        user_prompt = json.dumps(
+            prompt_payload,
             ensure_ascii=False,
         )
 
@@ -774,6 +859,50 @@ def _korean_advisory_fallback(
         f"{trend_text} {rsi_text} {volume_text} "
         "이 결과는 정량 지표 우선의 참고용 preview이며 실제 주문은 실행되지 않습니다."
     )
+
+
+def _empty_event_risk(
+    *,
+    symbol: str,
+    market: str,
+    warnings: list[str] | None = None,
+    reason: str = "no structured event risk found",
+) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "market": market,
+        "has_near_event": False,
+        "event_type": None,
+        "event_date": None,
+        "event_time_label": "unknown",
+        "days_to_event": None,
+        "risk_level": "low",
+        "entry_blocked": False,
+        "scale_in_blocked": False,
+        "position_size_multiplier": 1.0,
+        "force_gate_level": None,
+        "reason": reason,
+        "source": None,
+        "warnings": warnings or [],
+    }
+
+
+def _prompt_event_context(event_context: dict[str, Any]) -> dict[str, Any]:
+    multiplier = _safe_float(event_context.get("position_size_multiplier"), 1.0)
+    return {
+        "has_near_event": bool(event_context.get("has_near_event")),
+        "event_type": event_context.get("event_type"),
+        "days_to_event": event_context.get("days_to_event"),
+        "event_time_label": event_context.get("event_time_label"),
+        "entry_blocked": bool(event_context.get("entry_blocked")),
+        "scale_in_blocked": bool(event_context.get("scale_in_blocked")),
+        "position_size_multiplier": multiplier,
+        "risk_policy": (
+            "block_new_entry"
+            if event_context.get("entry_blocked")
+            else ("reduce_position_size" if multiplier < 1.0 else "none")
+        ),
+    }
 
 
 def _parse_json_object(raw_text: str) -> dict[str, Any]:

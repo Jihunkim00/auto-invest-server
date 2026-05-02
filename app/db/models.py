@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -105,6 +105,27 @@ class ReferenceSiteCache(Base):
     fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     source_status = Column(String(20), nullable=False, default="fresh")
+
+
+class CompanyEvent(Base):
+    __tablename__ = "company_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, default="investing", index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    company_name = Column(String(200), nullable=True)
+    event_type = Column(String(40), nullable=False, default="unknown", index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    event_time_label = Column(String(30), nullable=False, default="unknown")
+    source_url = Column(Text, nullable=False)
+    title = Column(Text, nullable=False)
+    eps_forecast = Column(Float, nullable=True)
+    revenue_forecast = Column(Float, nullable=True)
+    risk_level = Column(String(20), nullable=False, default="medium")
+    raw_payload = Column(Text, nullable=True)
+    fetched_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class SignalLog(Base):

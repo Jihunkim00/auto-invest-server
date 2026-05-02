@@ -68,6 +68,7 @@ class GPTMarketService:
         symbol: str,
         indicators: dict[str, Any],
         gate_level: int | None = None,
+        event_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         resolved_gate_level = resolve_gate_level(gate_level)
         profile = get_gate_profile(resolved_gate_level)
@@ -82,6 +83,7 @@ class GPTMarketService:
                 fallback_used=True,
                 fallback_reason="insufficient indicators",
                 gate_level=resolved_gate_level,
+                event_context=event_context,
             )
 
         if not self.client:
@@ -92,6 +94,7 @@ class GPTMarketService:
                 fallback_used=True,
                 fallback_reason="OPENAI_API_KEY missing",
                 gate_level=resolved_gate_level,
+                event_context=event_context,
             )
 
         try:
@@ -101,6 +104,7 @@ class GPTMarketService:
                 context=context,
                 gate_level=resolved_gate_level,
                 gate_profile_name=profile.name,
+                event_context=event_context,
             )
             normalized = self._normalize_candidate(candidate)
             parsed = parse_market_gate_response(normalized)
@@ -117,6 +121,7 @@ class GPTMarketService:
                 gpt_used=True,
                 fallback_used=False,
                 gate_level=resolved_gate_level,
+                event_context=event_context,
             )
         except Exception as e:
             logger.exception("OpenAI market analysis failed: %s", e)
@@ -127,6 +132,7 @@ class GPTMarketService:
                 fallback_used=True,
                 fallback_reason=self._safe_exc_message(e),
                 gate_level=resolved_gate_level,
+                event_context=event_context,
             )
 
     def _load_context_from_cache(self, db: Session, symbol: str) -> MarketGateContext:
@@ -275,12 +281,18 @@ class GPTMarketService:
         context: MarketGateContext,
         gate_level: int,
         gate_profile_name: str,
+        event_context: dict[str, Any] | None = None,
     ) -> tuple[str, str]:
         system_prompt = (
             "You are a market-entry gate assistant for an auto-trading MVP.\n"
             "Quant indicators are primary. Website context is secondary and may be stale or noisy.\n"
             "Score weak factors as penalties; avoid hard-blocking except extreme risk states.\n"
             "Do not approve orders. The risk engine is the final authority.\n"
+            "Earnings or earnings-call events are uncertainty risks, not bullish signals.\n"
+            "Do not increase buy_score, action confidence, or entry confidence because of upcoming earnings.\n"
+            "If event_context.entry_blocked is true, recommend hold or block_entry.\n"
+            "If event_context.position_size_multiplier is below 1.0, mention reduced position sizing.\n"
+            "Do not treat upcoming earnings as a reason to buy.\n"
             "Return JSON only. No markdown fences.\n"
             "Use exactly these keys and allowed values:\n"
             "- market_regime: one of ['unknown', 'range', 'trend']\n"
@@ -305,6 +317,25 @@ class GPTMarketService:
                 "summary_count": len(context.cached_site_summaries),
             },
         }
+        if event_context:
+            prompt_payload["event_context"] = {
+                "has_near_event": bool(event_context.get("has_near_event")),
+                "event_type": event_context.get("event_type"),
+                "days_to_event": event_context.get("days_to_event"),
+                "event_time_label": event_context.get("event_time_label"),
+                "entry_blocked": bool(event_context.get("entry_blocked")),
+                "scale_in_blocked": bool(event_context.get("scale_in_blocked")),
+                "position_size_multiplier": event_context.get("position_size_multiplier", 1.0),
+                "risk_policy": (
+                    "block_new_entry"
+                    if event_context.get("entry_blocked")
+                    else (
+                        "reduce_position_size"
+                        if float(event_context.get("position_size_multiplier") or 1.0) < 1.0
+                        else "none"
+                    )
+                ),
+            }
 
         user_prompt = json.dumps(prompt_payload, ensure_ascii=False)
         return system_prompt, user_prompt
@@ -317,6 +348,7 @@ class GPTMarketService:
         context: MarketGateContext,
         gate_level: int,
         gate_profile_name: str,
+        event_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not self.client:
             raise RuntimeError("OpenAI client is not initialized")
@@ -327,6 +359,7 @@ class GPTMarketService:
             context,
             gate_level,
             gate_profile_name,
+            event_context,
         )
 
         try:
@@ -487,6 +520,7 @@ class GPTMarketService:
         fallback_used: bool,
         gate_level: int,
         fallback_reason: str | None = None,
+        event_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         profile = get_gate_profile(gate_level)
         reason = str(payload.get("reason", "") or "").strip()
@@ -518,6 +552,8 @@ class GPTMarketService:
             "fallback_reason": fallback_reason,
         }
         result["site_summaries"] = context.cached_site_summaries
+        if event_context:
+            result["event_context"] = event_context
         return result
 
     def _safe_exc_message(self, exc: Exception) -> str:
@@ -560,6 +596,16 @@ class GPTMarketService:
         symbol: str,
         indicators: dict[str, Any],
         gate_level: int | None = None,
+        event_context: dict[str, Any] | None = None,
     ) -> MarketAnalysis:
-        payload = self.analyze(db, symbol, indicators, gate_level=gate_level)
+        if event_context:
+            payload = self.analyze(
+                db,
+                symbol,
+                indicators,
+                gate_level=gate_level,
+                event_context=event_context,
+            )
+        else:
+            payload = self.analyze(db, symbol, indicators, gate_level=gate_level)
         return self.save_analysis(db, symbol, payload)

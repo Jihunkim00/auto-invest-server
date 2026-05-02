@@ -72,6 +72,39 @@ def _create_reference_site_cache_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_reference_site_cache_expires_at ON reference_site_cache (expires_at)"))
 
 
+def _create_company_events_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS company_events (
+                    id INTEGER PRIMARY KEY,
+                    market VARCHAR(10) NOT NULL,
+                    provider VARCHAR(20) NOT NULL DEFAULT 'investing',
+                    symbol VARCHAR(20) NOT NULL,
+                    company_name VARCHAR(200),
+                    event_type VARCHAR(40) NOT NULL DEFAULT 'unknown',
+                    event_date DATE NOT NULL,
+                    event_time_label VARCHAR(30) NOT NULL DEFAULT 'unknown',
+                    source_url TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    eps_forecast FLOAT,
+                    revenue_forecast FLOAT,
+                    risk_level VARCHAR(20) NOT NULL DEFAULT 'medium',
+                    raw_payload TEXT,
+                    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_company_events_market ON company_events (market)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_company_events_provider ON company_events (provider)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_company_events_symbol ON company_events (symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_company_events_event_type ON company_events (event_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_company_events_event_date ON company_events (event_date)"))
+
+
 def _create_runtime_settings_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -158,6 +191,7 @@ def _create_trade_run_logs_table_if_missing():
 def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
+    _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()

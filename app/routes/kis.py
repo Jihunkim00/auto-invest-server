@@ -143,7 +143,7 @@ def submit_manual_kis_order(
 @router.post("/watchlist/preview")
 def preview_kis_watchlist(db: Session = Depends(get_db)):
     client = _client(db)
-    service = KisWatchlistPreviewService(client)
+    service = KisWatchlistPreviewService(client, db=db)
     try:
         return service.run_preview(include_gpt=True)
     except MarketProfileError as exc:
@@ -155,7 +155,7 @@ def preview_kis_watchlist(db: Session = Depends(get_db)):
 @router.post("/scheduler/run-preview-once")
 def run_kis_scheduler_preview_once(db: Session = Depends(get_db)):
     client = _client(db)
-    service = KisWatchlistPreviewService(client)
+    service = KisWatchlistPreviewService(client, db=db)
     try:
         payload = service.run_preview(include_gpt=True)
         payload["trigger_source"] = "manual_scheduler_preview"

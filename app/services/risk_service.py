@@ -14,6 +14,7 @@ from app.core.constants import (
     WEAK_SETUP_POSITION_PCT,
 )
 from app.db.models import OrderLog
+from app.services.event_risk_service import EventRiskService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 ALPACA_ORDER_BROKERS = ("alpaca", "alpaca_paper")
@@ -23,6 +24,7 @@ class RiskService:
     def __init__(self):
         self.broker = AlpacaClient()
         self.runtime_settings = RuntimeSettingService()
+        self.event_risk_service = EventRiskService()
 
     @staticmethod
     def _position_size_pct(final_buy_score: float) -> float:
@@ -101,8 +103,14 @@ class RiskService:
         symbol: str,
         action: str,
         final_buy_score: float,
+        market: str = "US",
+        event_risk: dict | None = None,
     ) -> dict:
         flags: list[str] = []
+        non_blocking_flags: list[str] = []
+        warnings: list[str] = []
+        block_reasons: list[str] = []
+        event_position_size_multiplier = 1.0
 
         if action != "buy":
             flags.append("only_buy_execution_supported")
@@ -115,6 +123,7 @@ class RiskService:
             flags.append("near_market_close_block")
 
         broker = "alpaca"
+        normalized_market = str(market or "US").strip().upper()
         day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         runtime_settings = self.runtime_settings.get_settings(db)
         global_daily_entry_limit = max(0, int(runtime_settings["global_daily_entry_limit"]))
@@ -152,19 +161,69 @@ class RiskService:
         if est_daily_pnl <= -(equity * MAX_DAILY_LOSS_PCT):
             flags.append("daily_loss_limit_hit")
 
+        resolved_event_risk = event_risk
+        if resolved_event_risk is None and action == "buy":
+            try:
+                resolved_event_risk = self.event_risk_service.get_event_risk(
+                    db,
+                    symbol=symbol,
+                    market=normalized_market,
+                    intent="entry",
+                )
+            except Exception:
+                resolved_event_risk = {
+                    "symbol": symbol,
+                    "market": normalized_market,
+                    "has_near_event": False,
+                    "entry_blocked": False,
+                    "scale_in_blocked": False,
+                    "position_size_multiplier": 1.0,
+                    "warnings": ["event_data_unavailable"],
+                }
+
+        if action == "buy" and resolved_event_risk:
+            warnings.extend(_string_list(resolved_event_risk.get("warnings")))
+            if resolved_event_risk.get("entry_blocked") is True:
+                flags.append("event_risk_entry_block")
+                block_reasons.append("near_earnings_event")
+            try:
+                event_position_size_multiplier = float(
+                    resolved_event_risk.get("position_size_multiplier", 1.0)
+                )
+            except (TypeError, ValueError):
+                event_position_size_multiplier = 1.0
+            event_position_size_multiplier = max(
+                0.0,
+                min(event_position_size_multiplier, 1.0),
+            )
+            if (
+                resolved_event_risk.get("has_near_event") is True
+                and event_position_size_multiplier < 1.0
+                and resolved_event_risk.get("entry_blocked") is not True
+            ):
+                non_blocking_flags.append("event_risk_position_size_reduced")
+            if resolved_event_risk.get("force_gate_level") == 1:
+                non_blocking_flags.append("event_risk_force_gate_level_1")
+
         approved = len(flags) == 0
         size_pct = min(self._position_size_pct(final_buy_score), MAX_POSITION_EQUITY_PCT) if approved else 0.0
+        if approved:
+            size_pct *= event_position_size_multiplier
 
         return {
             "approved": approved,
-            "risk_flags": flags,
+            "risk_flags": flags + non_blocking_flags,
+            "block_reasons": block_reasons,
+            "reason": block_reasons[0] if block_reasons else ("approved" if approved else "risk_flags_present"),
             "position_size_pct": round(size_pct, 4),
             "stop_loss_pct": 0.015 if approved else 0.0,
             "take_profit_pct": 0.03 if approved else 0.0,
             "daily_trade_count": daily_count,
             "estimated_daily_pnl": round(est_daily_pnl, 2),
             "broker": broker,
-            "market": "US",
+            "market": normalized_market,
+            "event_risk": resolved_event_risk,
+            "warnings": _dedupe(warnings),
         }
 
     def evaluate_exit(
@@ -199,3 +258,17 @@ class RiskService:
             "reasons": reasons,
             "unrealized_plpc": unrealized_plpc,
         }
+
+
+def _string_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
