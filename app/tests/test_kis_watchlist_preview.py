@@ -219,6 +219,86 @@ def test_kis_preview_does_not_call_submit_order(monkeypatch, client):
     assert response.status_code == 200
 
 
+def test_kis_scheduler_preview_includes_portfolio_management_concept(monkeypatch, client):
+    enabled_settings = _settings(kis_enabled=True)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: enabled_settings)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.get_settings",
+        lambda: enabled_settings,
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_order",
+        lambda *args, **kwargs: pytest.fail("KIS preview must not submit orders"),
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.list_positions",
+        lambda self: [
+            {"symbol": "005930", "name": "Samsung", "qty": 2, "current_price": 72000},
+            {"symbol": "000660", "name": "SK Hynix", "qty": 1, "current_price": 150000},
+        ],
+    )
+
+    response = client.post("/kis/scheduler/run-preview-once")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview_only"] is True
+    assert body["trading_enabled"] is False
+    assert body["order_id"] is None
+    assert body["scheduler_preview_only"] is True
+    assert body["managed_symbols"] == ["000660", "005930"]
+    assert body["held_symbols"] == ["000660", "005930"]
+    assert body["held_position_count"] == 2
+    assert body["open_position_count"] == 2
+    assert body["max_open_positions"] == 3
+    assert body["entry_candidate_symbol"] == "035420"
+    assert body["entry_evaluated"] is True
+    assert body["entry_skip_reason"] is None
+    assert [item["symbol"] for item in body["child_runs"]] == ["000660", "005930", "035420"]
+    assert [item["mode"] for item in body["child_runs"]] == [
+        "position_management_preview",
+        "position_management_preview",
+        "entry_scan_preview",
+    ]
+    assert body["child_runs"][0]["allowed_actions"] == ["hold", "sell"]
+    assert body["child_runs"][2]["allowed_actions"] == ["hold", "buy"]
+    assert all(item["preview_only"] is True for item in body["child_runs"])
+    assert all(item["trading_enabled"] is False for item in body["child_runs"])
+    assert all(item["order_id"] is None for item in body["child_runs"])
+
+
+def test_kis_scheduler_preview_positions_unavailable_keeps_preview_safe(monkeypatch, client):
+    enabled_settings = _settings(kis_enabled=True)
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: enabled_settings)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.get_settings",
+        lambda: enabled_settings,
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_order",
+        lambda *args, **kwargs: pytest.fail("KIS preview must not submit orders"),
+    )
+
+    def fail_positions(self):
+        raise RuntimeError("positions unavailable")
+
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.list_positions", fail_positions)
+
+    response = client.post("/kis/scheduler/run-preview-once")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview_only"] is True
+    assert body["trading_enabled"] is False
+    assert body["order_id"] is None
+    assert "kis_positions_unavailable" in body["warnings"]
+    assert body["managed_symbols"] == []
+    assert body["held_position_count"] == 0
+    assert body["entry_evaluated"] is False
+    assert body["entry_skip_reason"] == "kis_positions_unavailable"
+    assert body["watchlist"]
+
+
 def test_kis_preview_market_closed_warns_but_still_previews(monkeypatch, client):
     monkeypatch.setattr(
         "app.services.kis_watchlist_preview_service.MarketSessionService.get_session_status",

@@ -13,6 +13,7 @@ from app.services.event_risk_service import EventRiskService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.quant_signal_service import QuantSignalService
+from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import (
     EMPTY_TECHNICAL_INDICATORS,
     TechnicalIndicatorService,
@@ -68,6 +69,7 @@ class KisWatchlistPreviewService:
         self.indicator_service = indicator_service or TechnicalIndicatorService()
         self.quant_signal_service = quant_signal_service or QuantSignalService()
         self.event_risk_service = event_risk_service or EventRiskService()
+        self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
 
     def run_preview(self, *, include_gpt: bool = True, db=None) -> dict[str, Any]:
@@ -79,6 +81,16 @@ class KisWatchlistPreviewService:
         market_session = self.session_service.get_session_status("KR")
         session_warnings = self._session_warnings(market_session)
         configured_symbols = watchlist["symbols"][: self.limit]
+        runtime_settings = self._runtime_settings(db)
+        max_open_positions = max(1, _safe_int(runtime_settings.get("max_open_positions"), 3))
+        per_slot_new_entry_limit = max(
+            0,
+            _safe_int(runtime_settings.get("per_slot_new_entry_limit"), 1),
+        )
+        held_positions, position_warnings = self._load_held_positions(settings)
+        managed_positions = held_positions[:max_open_positions]
+        held_symbols = [position["symbol"] for position in held_positions]
+        managed_symbols = [position["symbol"] for position in managed_positions]
 
         items = []
         gpt_used = False
@@ -141,6 +153,65 @@ class KisWatchlistPreviewService:
             else []
         )
         tie_breaker_applied = len(tied_final_candidates) > 1 or len(near_tied_candidates) > 1
+        item_by_symbol = {str(item.get("symbol", "")): item for item in items}
+        entry_candidate_item = None
+        entry_candidate_symbol = None
+        entry_evaluated = False
+        entry_skip_reason = None
+        if position_warnings:
+            entry_skip_reason = "kis_positions_unavailable"
+        elif len(held_positions) >= max_open_positions:
+            entry_skip_reason = "max_open_positions_reached"
+        elif per_slot_new_entry_limit <= 0:
+            entry_skip_reason = "per_slot_new_entry_limit_reached"
+        else:
+            held_symbol_set = set(held_symbols)
+            for item in final_ranked_candidates:
+                symbol = str(item.get("symbol") or "")
+                if symbol and symbol not in held_symbol_set:
+                    entry_candidate_item = item
+                    entry_candidate_symbol = symbol
+                    entry_evaluated = True
+                    break
+            if entry_candidate_symbol is None:
+                entry_skip_reason = "no_non_held_entry_candidate"
+
+        portfolio_preview_items = [
+            self._portfolio_preview_item(
+                item_by_symbol.get(position["symbol"]),
+                symbol=position["symbol"],
+                mode="position_management_preview",
+                symbol_role="held_position",
+                allowed_actions=["hold", "sell"],
+                position=position,
+            )
+            for position in managed_positions
+        ]
+        if entry_candidate_item is not None:
+            portfolio_preview_items.append(
+                self._portfolio_preview_item(
+                    entry_candidate_item,
+                    symbol=entry_candidate_symbol,
+                    mode="entry_scan_preview",
+                    symbol_role="watchlist_candidate",
+                    allowed_actions=["hold", "buy"],
+                    position=None,
+                )
+            )
+
+        portfolio_event_risk = (
+            entry_candidate_item.get("event_risk")
+            if entry_candidate_item is not None
+            else (final_best_candidate.get("event_risk") if final_best_candidate is not None else None)
+        )
+        portfolio_risk_flags = _dedupe(
+            ["kr_trading_disabled", "preview_only"]
+            + _string_list(entry_candidate_item.get("risk_flags") if entry_candidate_item else None)
+        )
+        portfolio_gating_notes = _dedupe(
+            ["KIS scheduler portfolio concept is preview-only; no real order submitted."]
+            + _string_list(entry_candidate_item.get("gating_notes") if entry_candidate_item else None)
+        )
 
         trade_result = {
             "action": "hold",
@@ -189,6 +260,22 @@ class KisWatchlistPreviewService:
             "should_trade": False,
             "triggered_symbol": None,
             "trigger_block_reason": "kr_trading_disabled",
+            "managed_symbols": managed_symbols,
+            "held_symbols": held_symbols,
+            "open_symbols": held_symbols,
+            "held_positions": held_positions,
+            "managed_positions": managed_positions,
+            "held_position_count": len(held_positions),
+            "open_position_count": len(held_positions),
+            "max_open_positions": max_open_positions,
+            "entry_candidate_symbol": entry_candidate_symbol,
+            "entry_evaluated": entry_evaluated,
+            "entry_skip_reason": entry_skip_reason,
+            "event_risk": portfolio_event_risk,
+            "risk_flags": portfolio_risk_flags,
+            "gating_notes": portfolio_gating_notes,
+            "child_runs": portfolio_preview_items,
+            "portfolio_preview_items": portfolio_preview_items,
             "final_entry_ready": False,
             "final_action_hint": "watch",
             "action": "hold",
@@ -197,13 +284,97 @@ class KisWatchlistPreviewService:
             "reason": "kr_trading_disabled",
             "trade_result": trade_result,
             "market_session": self._public_session(market_session),
-            "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings),
+            "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings + position_warnings),
             "top_quant_candidates": quant_candidates,
             "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
             "items": items,
             "count": len(items),
         }
+
+    def _runtime_settings(self, db) -> dict[str, Any]:
+        try:
+            if db is not None:
+                return self.runtime_setting_service.get_settings(db)
+        except Exception:
+            pass
+        return self.runtime_setting_service._defaults()
+
+    def _load_held_positions(self, settings) -> tuple[list[dict[str, Any]], list[str]]:
+        if not bool(getattr(settings, "kis_enabled", False)):
+            return [], ["kis_positions_unavailable"]
+        if not getattr(settings, "kis_account_no", None):
+            return [], ["kis_positions_unavailable"]
+        try:
+            raw_positions = self.client.list_positions()
+        except Exception:
+            return [], ["kis_positions_unavailable"]
+
+        positions = []
+        for raw in raw_positions:
+            position = _normalize_kis_position(raw)
+            if position and _safe_float(position.get("qty"), 0.0) > 0:
+                positions.append(position)
+        positions.sort(key=lambda item: str(item.get("symbol") or ""))
+        return positions, []
+
+    def _portfolio_preview_item(
+        self,
+        item: dict[str, Any] | None,
+        *,
+        symbol: str | None,
+        mode: str,
+        symbol_role: str,
+        allowed_actions: list[str],
+        position: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized_symbol = self.profile_service.normalize_symbol(symbol, "KR")
+        payload = dict(item or {})
+        if not payload:
+            payload = {
+                "symbol": normalized_symbol,
+                "name": (position or {}).get("name"),
+                "current_price": (position or {}).get("current_price"),
+                "currency": "KRW",
+                "score": None,
+                "final_entry_score": None,
+                "entry_ready": False,
+                "trade_allowed": False,
+                "approved_by_risk": False,
+                "action": "hold",
+                "action_hint": "watch",
+                "risk_flags": ["kr_trading_disabled", "preview_only"],
+                "gating_notes": [
+                    "KIS held-position management preview only; no real order submitted."
+                ],
+                "block_reason": "kr_trading_disabled",
+                "block_reasons": list(KR_DISABLED_REASONS),
+                "warnings": list(KR_DISABLED_REASONS),
+                "event_risk": _empty_event_risk(symbol=normalized_symbol, market="KR"),
+            }
+
+        payload.update(
+            {
+                "symbol": normalized_symbol,
+                "mode": mode,
+                "symbol_role": symbol_role,
+                "allowed_actions": allowed_actions,
+                "position": position,
+                "preview_only": True,
+                "dry_run": True,
+                "trading_enabled": False,
+                "order_id": None,
+                "real_order_submitted": False,
+            }
+        )
+        payload["risk_flags"] = _dedupe(
+            _string_list(payload.get("risk_flags")) + ["kr_trading_disabled", "preview_only"]
+        )
+        payload["gating_notes"] = _dedupe(
+            _string_list(payload.get("gating_notes"))
+            + ["KIS portfolio management is preview-only; no real order submitted."]
+        )
+        return payload
 
     def _preview_symbol(
         self,
@@ -944,6 +1115,13 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _score_or_none(value: Any) -> float | None:
     try:
         numeric = float(value)
@@ -978,3 +1156,26 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _normalize_kis_position(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    raw_symbol = raw.get("symbol") or raw.get("pdno") or raw.get("code")
+    symbol = str(raw_symbol or "").strip()
+    if not symbol:
+        return None
+    if symbol.isdigit() and len(symbol) < 6:
+        symbol = symbol.zfill(6)
+    return {
+        "symbol": symbol,
+        "name": raw.get("name") or raw.get("prdt_name"),
+        "qty": to_float(raw.get("qty") or raw.get("hldg_qty") or 0),
+        "avg_entry_price": to_float(raw.get("avg_entry_price") or raw.get("pchs_avg_pric") or 0),
+        "current_price": to_float(
+            raw.get("current_price") or raw.get("prpr") or raw.get("stck_prpr") or 0
+        ),
+        "market_value": to_float(raw.get("market_value") or raw.get("evlu_amt") or 0),
+        "unrealized_pl": to_float(raw.get("unrealized_pl") or raw.get("evlu_pfls_amt") or 0),
+        "unrealized_plpc": to_float(raw.get("unrealized_plpc") or raw.get("evlu_pfls_rt") or 0),
+    }

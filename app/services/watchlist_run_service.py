@@ -6,12 +6,15 @@ from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.services.entry_readiness_service import evaluate_entry_readiness
 from app.services.event_risk_service import EventRiskService
-from app.services.position_lifecycle_service import ENTRY_SCAN_MODE
+from app.services.position_lifecycle_service import ENTRY_SCAN_MODE, POSITION_MANAGEMENT_MODE
+from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_research_service import WatchlistResearchService
 from app.services.watchlist_service import WatchlistService
 
 _RISK_LEVEL_ORDER = {"low": 0, "normal": 1, "medium": 2, "high": 3}
+PROVIDER = "alpaca"
+MARKET = "US"
 
 
 
@@ -64,6 +67,55 @@ def _event_risk_unavailable(symbol: str, market: str = "US") -> dict[str, object
     }
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _entry_block_reason(
+    candidate: dict[str, object] | None,
+    *,
+    min_entry_score: float,
+    min_quant_score: float,
+    min_research_score: float,
+    max_sell_score: float,
+) -> str | None:
+    if candidate is None:
+        return "no_entry_candidate"
+
+    sell_score_value = candidate.get("sell_score")
+    if sell_score_value is None:
+        sell_score_value = candidate.get("quant_sell_score", 100)
+
+    if not bool(candidate.get("entry_ready")):
+        return str(candidate.get("block_reason") or "no_entry_ready_candidate")
+    if _safe_float(candidate.get("final_entry_score", 0)) < float(min_entry_score):
+        return "final_score_below_min_entry"
+    if _safe_float(candidate.get("quant_score", 0)) < float(min_quant_score):
+        return "quant_score_too_low"
+    if _safe_float(candidate.get("market_research_score", 0)) < float(min_research_score):
+        return "research_score_too_low"
+    if not bool(candidate.get("has_indicators")):
+        return "missing_indicators"
+    if candidate.get("event_risk") == "high":
+        return "high_event_risk"
+    if candidate.get("gpt_action_hint") == "block_entry":
+        return "gpt_blocked_entry"
+    if sell_score_value is not None and _safe_float(sell_score_value, 100.0) > float(max_sell_score):
+        return "sell_pressure_too_high"
+    return None
+
+
+def _normalize_position(position: dict[str, object]) -> dict[str, object]:
+    return {
+        "symbol": str(position.get("symbol", "") or "").upper(),
+        "qty": str(position.get("qty", "")),
+        "side": str(position.get("side", "")),
+    }
+
+
 class WatchlistRunService:
     def run_once(
         self,
@@ -78,6 +130,28 @@ class WatchlistRunService:
         alpaca_base = str(settings.alpaca_base_url or "").lower()
         if "paper" not in alpaca_base:
             raise ValueError("Live Alpaca endpoint disabled for run-watchlist-once")
+
+        scheduler_run = trigger_source == "scheduler" or scheduler_slot is not None
+        runtime_settings = RuntimeSettingService().get_settings(db)
+        max_open_positions = max(1, _safe_int(runtime_settings.get("max_open_positions"), 3))
+        per_slot_new_entry_limit = max(0, _safe_int(runtime_settings.get("per_slot_new_entry_limit"), 1))
+        svc = TradingOrchestratorService()
+        open_positions: list[dict[str, object]] = []
+        position_warnings: list[str] = []
+        if scheduler_run:
+            try:
+                open_positions = [
+                    _normalize_position(position)
+                    for position in svc.position_lifecycle.list_open_positions()
+                ]
+                open_positions = [position for position in open_positions if position["symbol"]]
+            except Exception:
+                position_warnings.append("alpaca_positions_unavailable")
+                open_positions = []
+        managed_positions = open_positions[:max_open_positions]
+        managed_symbols = [str(position["symbol"]) for position in managed_positions]
+        open_position_symbols = {str(position["symbol"]) for position in open_positions}
+        open_position_count = len(open_positions)
 
         watchlist = WatchlistService()
         research_service = WatchlistResearchService()
@@ -217,6 +291,32 @@ class WatchlistRunService:
             else None
         )
         second_final_candidate = final_candidates[1] if len(final_candidates) > 1 else None
+        scheduler_entry_candidate = None
+        scheduler_entry_candidate_symbol = None
+        scheduler_entry_candidate_block_reason = None
+        if scheduler_run:
+            first_non_open_block_reason = None
+            for candidate in final_candidates:
+                symbol_value = str(candidate.get("symbol", "") or "").upper()
+                if not symbol_value or symbol_value in open_position_symbols:
+                    continue
+                candidate_block_reason = _entry_block_reason(
+                    candidate,
+                    min_entry_score=min_entry_score,
+                    min_quant_score=min_quant_score,
+                    min_research_score=min_research_score,
+                    max_sell_score=max_sell_score,
+                )
+                if first_non_open_block_reason is None:
+                    first_non_open_block_reason = candidate_block_reason
+                if candidate_block_reason is None:
+                    scheduler_entry_candidate = candidate
+                    scheduler_entry_candidate_symbol = symbol_value
+                    break
+            if scheduler_entry_candidate is None:
+                scheduler_entry_candidate_block_reason = (
+                    first_non_open_block_reason or "no_non_open_entry_candidate"
+                )
         final_score_gap = round(
             float(final_best_candidate.get("final_entry_score", 0))
             - float(second_final_candidate.get("final_entry_score", 0))
@@ -239,15 +339,40 @@ class WatchlistRunService:
         ]
         tie_breaker_applied = len(tied_final_candidates) > 1 or len(near_tied_candidates) > 1
 
-        svc = TradingOrchestratorService()
+        if not final_best_candidate:
+            final_candidate_selection_reason = "No final candidate was available after research scoring."
+        elif tie_breaker_applied:
+            final_candidate_selection_reason = (
+                f"{candidate_symbol} selected after tie-breaker ordering; "
+                f"best_score={best_score:.2f}, final_score_gap={final_score_gap:.2f}, "
+                f"min_score_gap={float(min_score_gap):.2f}."
+            )
+        else:
+            final_candidate_selection_reason = (
+                f"{candidate_symbol} selected with highest final_entry_score={best_score:.2f} "
+                "and clear separation from other researched candidates."
+            )
+
         parent_run_key = f"watchlist_{uuid.uuid4().hex[:12]}"
         request_payload = {
             "source_endpoint": source_endpoint,
+            "scheduler_slot": scheduler_slot,
+            "provider": PROVIDER,
+            "market": MARKET,
             "watchlist_analysis": analysis,
             "researched_candidates": researched_candidates,
             "final_best_candidate": final_best_candidate,
             "event_risk": final_event_risk,
             "structured_event_risk": final_event_risk,
+            "managed_symbols": managed_symbols,
+            "open_position_count": open_position_count,
+            "max_open_positions": max_open_positions,
+            "per_slot_new_entry_limit": per_slot_new_entry_limit,
+            "entry_candidate_symbol": (
+                scheduler_entry_candidate_symbol
+                if scheduler_run
+                else (candidate_symbol if final_best_candidate else None)
+            ),
         }
         if scheduler_slot:
             request_payload["scheduler_slot"] = scheduler_slot
@@ -263,6 +388,143 @@ class WatchlistRunService:
             reason="watchlist_run_started",
             request_payload=request_payload,
         )
+
+        if scheduler_run:
+            child_runs: list[dict[str, object]] = []
+            for position in managed_positions:
+                child_runs.append(
+                    svc._run_symbol_child(
+                        db,
+                        trigger_source=trigger_source,
+                        symbol=str(position["symbol"]),
+                        mode=POSITION_MANAGEMENT_MODE,
+                        allowed_actions=["hold", "sell"],
+                        gate_level=gate_level,
+                        parent_run_key=parent_run_key,
+                        symbol_role="open_position",
+                        enforce_entry_limits=False,
+                        request_payload={
+                            "scheduler_slot": scheduler_slot,
+                            "provider": PROVIDER,
+                            "market": MARKET,
+                            "position": position,
+                        },
+                    )
+                )
+
+            entry_evaluated = False
+            entry_skip_reason = None
+            entry_child_result = None
+            if position_warnings:
+                entry_skip_reason = "open_positions_unavailable"
+            elif open_position_count >= max_open_positions:
+                entry_skip_reason = "max_open_positions_reached"
+            elif per_slot_new_entry_limit <= 0:
+                entry_skip_reason = "per_slot_new_entry_limit_reached"
+            elif scheduler_entry_candidate_symbol is None:
+                entry_skip_reason = scheduler_entry_candidate_block_reason or "no_entry_candidate"
+            else:
+                entry_evaluated = True
+                entry_child_result = svc._run_symbol_child(
+                    db,
+                    trigger_source=trigger_source,
+                    symbol=scheduler_entry_candidate_symbol,
+                    mode=ENTRY_SCAN_MODE,
+                    allowed_actions=["hold", "buy"],
+                    gate_level=gate_level,
+                    parent_run_key=parent_run_key,
+                    symbol_role="watchlist_candidate",
+                    enforce_entry_limits=True,
+                    request_payload={
+                        "scheduler_slot": scheduler_slot,
+                        "provider": PROVIDER,
+                        "market": MARKET,
+                        "source": "scheduler_watchlist_candidate",
+                        "final_candidate": scheduler_entry_candidate,
+                        "event_risk": scheduler_entry_candidate.get("structured_event_risk")
+                        if scheduler_entry_candidate
+                        else None,
+                    },
+                )
+                child_runs.append(entry_child_result)
+
+            child_payload = (
+                entry_child_result.get("response_payload") if entry_child_result else None
+            ) or {}
+            risk_data = child_payload.get("risk") or {}
+            trade_result = {
+                "action": child_payload.get("action", "hold") if entry_child_result else "hold",
+                "risk_approved": bool(risk_data.get("approved", False)),
+                "order_id": entry_child_result.get("order_id") if entry_child_result else None,
+                "reason": (
+                    child_payload.get("reason")
+                    or (entry_child_result.get("reason") if entry_child_result else None)
+                    or entry_skip_reason
+                ),
+            }
+            final_result = (
+                "executed"
+                if any(child.get("result") == "executed" for child in child_runs)
+                else "skipped"
+            )
+            response_payload = {
+                **analysis,
+                "scheduler_slot": scheduler_slot,
+                "provider": PROVIDER,
+                "market": MARKET,
+                "triggered_symbol": scheduler_entry_candidate_symbol if entry_evaluated else None,
+                "should_trade": entry_evaluated,
+                "trade_result": trade_result,
+                "trigger_block_reason": entry_skip_reason,
+                "quant_candidates_count": len(quant_candidates),
+                "researched_candidates_count": len(researched_candidates),
+                "top_quant_candidates": top_quant_candidates,
+                "researched_candidates": researched_candidates,
+                "final_ranked_candidates": final_ranked_candidates,
+                "final_best_candidate": final_best_candidate,
+                "event_risk": (
+                    scheduler_entry_candidate.get("structured_event_risk")
+                    if scheduler_entry_candidate
+                    else final_event_risk
+                ),
+                "structured_event_risk": (
+                    scheduler_entry_candidate.get("structured_event_risk")
+                    if scheduler_entry_candidate
+                    else final_event_risk
+                ),
+                "second_final_candidate": second_final_candidate,
+                "tied_final_candidates": tied_final_candidates,
+                "near_tied_candidates": near_tied_candidates,
+                "tie_breaker_applied": tie_breaker_applied,
+                "final_candidate_selection_reason": final_candidate_selection_reason,
+                "final_score_gap": final_score_gap,
+                "best_score": best_score,
+                "min_entry_score": min_entry_score,
+                "strong_entry_score": strong_entry_score,
+                "min_score_gap": min_score_gap,
+                "max_sell_score": max_sell_score,
+                "managed_symbols": managed_symbols,
+                "open_position_count": open_position_count,
+                "max_open_positions": max_open_positions,
+                "entry_candidate_symbol": scheduler_entry_candidate_symbol,
+                "entry_evaluated": entry_evaluated,
+                "entry_skip_reason": entry_skip_reason,
+                "child_runs": child_runs,
+                "warnings": _dedupe(position_warnings),
+            }
+            result = {
+                **response_payload,
+                "result": final_result,
+            }
+            result["run"] = svc._finish(
+                db,
+                parent_run_log,
+                stage="done",
+                result=final_result,
+                reason="scheduler_portfolio_run_completed",
+                response_payload=response_payload,
+            )
+            return result
 
         trigger_block_reason = None
         sell_score_value = None
