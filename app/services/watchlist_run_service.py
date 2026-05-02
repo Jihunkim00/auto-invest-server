@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.services.entry_readiness_service import evaluate_entry_readiness
+from app.services.event_risk_service import EventRiskService
 from app.services.position_lifecycle_service import ENTRY_SCAN_MODE
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_research_service import WatchlistResearchService
@@ -27,6 +28,42 @@ def _risk_rank(value: object) -> int:
     return _RISK_LEVEL_ORDER.get(risk, _RISK_LEVEL_ORDER["medium"])
 
 
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value if str(item)]
+    return [str(value)] if str(value) else []
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _event_risk_unavailable(symbol: str, market: str = "US") -> dict[str, object]:
+    return {
+        "symbol": symbol.upper(),
+        "market": market,
+        "has_near_event": False,
+        "event_type": None,
+        "event_date": None,
+        "event_time_label": "unknown",
+        "days_to_event": None,
+        "risk_level": "low",
+        "entry_blocked": False,
+        "scale_in_blocked": False,
+        "position_size_multiplier": 1.0,
+        "force_gate_level": None,
+        "reason": "structured event risk unavailable",
+        "source": None,
+        "warnings": ["event_data_unavailable"],
+    }
+
+
 class WatchlistRunService:
     def run_once(
         self,
@@ -44,6 +81,7 @@ class WatchlistRunService:
 
         watchlist = WatchlistService()
         research_service = WatchlistResearchService()
+        event_risk_service = EventRiskService()
         analysis = watchlist.analyze(gate_level=gate_level)
         watchlist_rows = analysis.get("watchlist") or []
         top_candidate_count = settings.watchlist_top_candidates_for_research
@@ -116,6 +154,44 @@ class WatchlistRunService:
             )
             researched_candidate.update(readiness)
             researched_candidate["should_trade"] = bool(readiness["entry_ready"])
+
+            try:
+                structured_event_risk = event_risk_service.get_event_risk(
+                    db,
+                    symbol=symbol,
+                    market="US",
+                    intent="entry",
+                )
+            except Exception:
+                structured_event_risk = _event_risk_unavailable(symbol)
+            researched_candidate["structured_event_risk"] = structured_event_risk
+            researched_candidate["event_risk_detail"] = structured_event_risk
+
+            gating_notes = _string_list(researched_candidate.get("gating_notes"))
+            risk_flags = _string_list(researched_candidate.get("risk_flags"))
+            warnings = _string_list(researched_candidate.get("warnings"))
+            warnings.extend(_string_list(structured_event_risk.get("warnings")))
+            if structured_event_risk.get("has_near_event"):
+                risk_flags.append("structured_event_risk")
+                try:
+                    position_size_multiplier = float(
+                        structured_event_risk.get("position_size_multiplier", 1.0)
+                    )
+                except (TypeError, ValueError):
+                    position_size_multiplier = 1.0
+                if structured_event_risk.get("entry_blocked") is True:
+                    risk_flags.append("event_risk_entry_block")
+                    researched_candidate["entry_ready"] = False
+                    researched_candidate["should_trade"] = False
+                    researched_candidate["trade_allowed"] = False
+                    researched_candidate["action_hint"] = "watch"
+                    researched_candidate["block_reason"] = "event_risk_entry_block"
+                elif position_size_multiplier < 1.0:
+                    risk_flags.append("event_risk_position_size_reduced")
+                    gating_notes.append("event_risk_position_size_reduced")
+            researched_candidate["gating_notes"] = _dedupe(gating_notes)
+            researched_candidate["risk_flags"] = _dedupe(risk_flags)
+            researched_candidate["warnings"] = _dedupe(warnings)
             researched_candidates.append(researched_candidate)
 
         def final_candidate_sort_key(row: dict[str, object]):
@@ -135,6 +211,11 @@ class WatchlistRunService:
         final_candidates = sorted(researched_candidates, key=final_candidate_sort_key)
         final_ranked_candidates = final_candidates
         final_best_candidate = final_candidates[0] if final_candidates else None
+        final_event_risk = (
+            final_best_candidate.get("structured_event_risk")
+            if final_best_candidate
+            else None
+        )
         second_final_candidate = final_candidates[1] if len(final_candidates) > 1 else None
         final_score_gap = round(
             float(final_best_candidate.get("final_entry_score", 0))
@@ -165,6 +246,8 @@ class WatchlistRunService:
             "watchlist_analysis": analysis,
             "researched_candidates": researched_candidates,
             "final_best_candidate": final_best_candidate,
+            "event_risk": final_event_risk,
+            "structured_event_risk": final_event_risk,
         }
         if scheduler_slot:
             request_payload["scheduler_slot"] = scheduler_slot
@@ -238,6 +321,8 @@ class WatchlistRunService:
             "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
             "final_best_candidate": final_best_candidate,
+            "event_risk": final_event_risk,
+            "structured_event_risk": final_event_risk,
             "second_final_candidate": second_final_candidate,
             "tied_final_candidates": tied_final_candidates,
             "near_tied_candidates": near_tied_candidates,
@@ -273,6 +358,8 @@ class WatchlistRunService:
                 "researched_candidates": researched_candidates,
                 "final_ranked_candidates": final_ranked_candidates,
                 "final_best_candidate": final_best_candidate,
+                "event_risk": final_event_risk,
+                "structured_event_risk": final_event_risk,
                 "second_final_candidate": second_final_candidate,
                 "tied_final_candidates": tied_final_candidates,
                 "near_tied_candidates": near_tied_candidates,
@@ -319,6 +406,8 @@ class WatchlistRunService:
             enforce_entry_limits=enforce_entry_limits,
             request_payload={
                 "final_best_candidate": final_best_candidate,
+                "event_risk": final_event_risk,
+                "structured_event_risk": final_event_risk,
                 "watchlist_source": analysis["watchlist_source"],
                 "source": "watchlist_trigger",
             },
@@ -345,6 +434,8 @@ class WatchlistRunService:
             "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
             "final_best_candidate": final_best_candidate,
+            "event_risk": final_event_risk,
+            "structured_event_risk": final_event_risk,
             "second_final_candidate": second_final_candidate,
             "tied_final_candidates": tied_final_candidates,
             "near_tied_candidates": near_tied_candidates,
