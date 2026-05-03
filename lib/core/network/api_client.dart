@@ -126,6 +126,11 @@ class ApiClient {
   }
 
   Future<PortfolioSummary> fetchUsPortfolioSummary() => fetchPortfolioSummary();
+  Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
+    return market.trim().toUpperCase() == 'KR'
+        ? fetchKrPortfolioSummary()
+        : fetchUsPortfolioSummary();
+  }
 
   Future<PortfolioSummary> fetchKrPortfolioSummary() async {
     final balance = await _getJsonNoCache('/kis/account/balance');
@@ -210,9 +215,37 @@ class ApiClient {
     return OrderValidationResult.fromJson(payload);
   }
 
-  Future<WatchlistRunResult> runKisWatchlistPreview() async {
-    final payload = await _postJsonBody('/kis/watchlist/preview', const {});
+  Future<WatchlistRunResult> runKisWatchlistPreview({
+    required int gateLevel,
+  }) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/watchlist/preview').replace(
+      queryParameters: {'gate_level': gateLevel.toString()},
+    );
+    final r = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(const {}),
+    );
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid backend response.');
+    }
+    final payload = Map<String, dynamic>.from(decoded);
     return WatchlistRunResult.fromJson(payload);
+  }
+
+  Future<WatchlistRunResult> runWatchlistForProvider({
+    required String provider,
+    required int gateLevel,
+  }) {
+    final normalized = provider.trim().toLowerCase();
+    if (normalized == 'kis') {
+      return runKisWatchlistPreview(gateLevel: gateLevel);
+    }
+    return runWatchlistOnce();
   }
 
   Future<OpsSettings> getOpsSettings() async {

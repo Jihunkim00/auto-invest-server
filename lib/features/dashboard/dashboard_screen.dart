@@ -37,6 +37,22 @@ class DashboardScreen extends StatelessWidget {
                     'Paper trading dashboard. Monitoring 50 watchlist symbols.',
                     style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 10),
+                SegmentedButton<SelectedProvider>(
+                  segments: const [
+                    ButtonSegment(
+                      value: SelectedProvider.alpaca,
+                      label: Text('Alpaca / US'),
+                    ),
+                    ButtonSegment(
+                      value: SelectedProvider.kis,
+                      label: Text('KIS / KR'),
+                    ),
+                  ],
+                  selected: {controller.selectedProvider},
+                  onSelectionChanged: (v) =>
+                      controller.setProvider(v.first),
+                ),
+                const SizedBox(height: 10),
                 Row(children: [
                   StatusBadge(text: 'Paper Mode', active: true),
                   const SizedBox(width: 8),
@@ -55,13 +71,15 @@ class DashboardScreen extends StatelessWidget {
                         const SizedBox(height: 12),
                         PortfolioSnapshotSection(controller: controller),
                         const SizedBox(height: 12),
-                        OrderTicketSection(controller: controller),
+                        if (controller.selectedProvider == SelectedProvider.kis)
+                          OrderTicketSection(controller: controller),
                         const SizedBox(height: 12),
                         WatchlistSection(controller: controller),
                         const SizedBox(height: 12),
                         LastRunSummaryCard(controller: controller),
                         const SizedBox(height: 12),
-                        ManualTradingRunSection(controller: controller),
+                        if (controller.selectedProvider == SelectedProvider.alpaca)
+                          ManualTradingRunSection(controller: controller),
                         const SizedBox(height: 12),
                         QuickActionsSection(controller: controller),
                       ]);
@@ -77,13 +95,18 @@ class DashboardScreen extends StatelessWidget {
                                 PortfolioSnapshotSection(
                                     controller: controller),
                                 const SizedBox(height: 12),
-                                OrderTicketSection(controller: controller),
+                                if (controller.selectedProvider ==
+                                    SelectedProvider.kis)
+                                  OrderTicketSection(controller: controller),
                                 const SizedBox(height: 12),
                                 WatchlistSection(controller: controller),
                                 const SizedBox(height: 12),
                                 LastRunSummaryCard(controller: controller),
                                 const SizedBox(height: 12),
-                                ManualTradingRunSection(controller: controller),
+                                if (controller.selectedProvider ==
+                                    SelectedProvider.alpaca)
+                                  ManualTradingRunSection(
+                                      controller: controller),
                               ])),
                           const SizedBox(width: 12),
                           Expanded(

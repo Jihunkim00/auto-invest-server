@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -6,6 +7,7 @@ from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
+from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
 from app.services.kis_order_validation_service import (
     KisOrderValidationError,
@@ -141,11 +143,14 @@ def submit_manual_kis_order(
 
 
 @router.post("/watchlist/preview")
-def preview_kis_watchlist(db: Session = Depends(get_db)):
+def preview_kis_watchlist(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
     client = _client(db)
     service = KisWatchlistPreviewService(client, db=db)
     try:
-        return service.run_preview(include_gpt=True)
+        return service.run_preview(include_gpt=True, gate_level=gate_level)
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:
@@ -153,11 +158,14 @@ def preview_kis_watchlist(db: Session = Depends(get_db)):
 
 
 @router.post("/scheduler/run-preview-once")
-def run_kis_scheduler_preview_once(db: Session = Depends(get_db)):
+def run_kis_scheduler_preview_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
     client = _client(db)
     service = KisWatchlistPreviewService(client, db=db)
     try:
-        payload = service.run_preview(include_gpt=True)
+        payload = service.run_preview(include_gpt=True, gate_level=gate_level)
         payload["trigger_source"] = "manual_scheduler_preview"
         payload["scheduler_preview_only"] = True
         payload["real_order_submitted"] = False

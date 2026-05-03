@@ -49,6 +49,7 @@ class ActionResult {
 }
 
 enum PortfolioMarket { us, kr }
+enum SelectedProvider { alpaca, kis }
 
 class DashboardController extends ChangeNotifier {
   DashboardController(this.apiClient, {bool autoload = true}) {
@@ -77,6 +78,7 @@ class DashboardController extends ChangeNotifier {
   PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
   PortfolioSummary krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
   PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
+  SelectedProvider selectedProvider = SelectedProvider.alpaca;
   PortfolioMarket selectedOrderMarket = PortfolioMarket.us;
   PortfolioMarket selectedWatchlistMarket = PortfolioMarket.us;
   bool krPortfolioUnavailable = false;
@@ -161,7 +163,10 @@ class DashboardController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final result = await apiClient.runWatchlistOnce();
+      final result = await apiClient.runWatchlistForProvider(
+        provider: selectedProvider == SelectedProvider.kis ? 'kis' : 'alpaca',
+        gateLevel: settings.defaultGateLevel,
+      );
       runResult = result;
       hasLatestRunResult = true;
       showingOfflineFallback = false;
@@ -332,6 +337,17 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setProvider(SelectedProvider provider) {
+    if (selectedProvider == provider) return;
+    selectedProvider = provider;
+    selectedPortfolioMarket =
+        provider == SelectedProvider.kis ? PortfolioMarket.kr : PortfolioMarket.us;
+    runResult = _emptyRunResult;
+    manualRunResult = null;
+    krWatchlistPreview = null;
+    notifyListeners();
+  }
+
   void selectOrderMarket(PortfolioMarket market) {
     if (selectedOrderMarket == market) return;
     selectedOrderMarket = market;
@@ -420,7 +436,9 @@ class DashboardController extends ChangeNotifier {
     krWatchlistPreviewError = null;
     notifyListeners();
     try {
-      final result = await apiClient.runKisWatchlistPreview();
+      final result = await apiClient.runKisWatchlistPreview(
+        gateLevel: settings.defaultGateLevel,
+      );
       krWatchlistPreview = result;
       return const ActionResult(
         success: true,

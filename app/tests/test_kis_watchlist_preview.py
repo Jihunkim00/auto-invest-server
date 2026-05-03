@@ -145,6 +145,7 @@ def test_kis_watchlist_preview_returns_items(client):
     body = response.json()
     assert body["market"] == "KR"
     assert body["provider"] == "kis"
+    assert body["gate_level"] == 2
     assert body["dry_run"] is True
     assert body["preview_only"] is True
     assert body["trading_enabled"] is False
@@ -206,6 +207,22 @@ def test_kis_watchlist_preview_returns_items(client):
     assert "kr_trading_disabled" in item["block_reasons"]
     assert "preview_only" in item["warnings"]
     assert "kr_trading_disabled" in item["warnings"]
+
+
+def test_kis_watchlist_preview_accepts_gate_bounds(client):
+    low = client.post("/kis/watchlist/preview?gate_level=1")
+    high = client.post("/kis/watchlist/preview?gate_level=4")
+    assert low.status_code == 200
+    assert high.status_code == 200
+    assert low.json()["gate_level"] == 1
+    assert high.json()["gate_level"] == 4
+
+
+def test_kis_watchlist_preview_rejects_invalid_gate(client):
+    below = client.post("/kis/watchlist/preview?gate_level=0")
+    above = client.post("/kis/watchlist/preview?gate_level=5")
+    assert below.status_code == 422
+    assert above.status_code == 422
 
 
 def test_kis_preview_does_not_call_submit_order(monkeypatch, client):

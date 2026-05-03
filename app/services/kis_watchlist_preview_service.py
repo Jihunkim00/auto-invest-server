@@ -72,7 +72,13 @@ class KisWatchlistPreviewService:
         self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
 
-    def run_preview(self, *, include_gpt: bool = True, db=None) -> dict[str, Any]:
+    def run_preview(
+        self,
+        *,
+        include_gpt: bool = True,
+        gate_level: int = DEFAULT_GATE_LEVEL,
+        db=None,
+    ) -> dict[str, Any]:
         db = db if db is not None else self.db
         settings = get_settings()
         profile = self.profile_service.get_profile("KR")
@@ -97,6 +103,7 @@ class KisWatchlistPreviewService:
         for raw in configured_symbols:
             item = self._preview_symbol(
                 raw,
+                gate_level=gate_level,
                 market_session=market_session,
                 session_warnings=session_warnings,
                 reference_sources=references.get("sources") or [],
@@ -228,6 +235,7 @@ class KisWatchlistPreviewService:
         return {
             "market": "KR",
             "provider": "kis",
+            "gate_level": gate_level,
             "currency": profile.currency,
             "timezone": profile.timezone,
             "dry_run": True,
@@ -380,6 +388,7 @@ class KisWatchlistPreviewService:
         self,
         raw: dict[str, Any],
         *,
+        gate_level: int,
         market_session: dict[str, Any],
         session_warnings: list[str],
         reference_sources: list[dict[str, Any]],
@@ -448,7 +457,7 @@ class KisWatchlistPreviewService:
         if can_score:
             quant = self.quant_signal_service.score(
                 indicator_payload,
-                gate_level=DEFAULT_GATE_LEVEL,
+                gate_level=gate_level,
             )
             quant_buy_score = _score_or_none(quant.get("quant_buy_score"))
             quant_sell_score = _score_or_none(quant.get("quant_sell_score"))
@@ -571,6 +580,7 @@ class KisWatchlistPreviewService:
             "block_reasons": _dedupe(block_reasons),
             "error": price_error or bar_error,
             "gpt_used": gpt.gpt_used,
+            "gate_level": gate_level,
         }
 
     def _get_normalized_price_snapshot(self, symbol: str) -> dict[str, Any]:
