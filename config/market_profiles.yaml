@@ -19,4 +19,4 @@ markets:
     watchlist_file: "config/watchlist_kr.yaml"
     reference_sites_file: "config/reference_sites_kr.yaml"
     symbol_format: "6_digit_numeric"
-    enabled_for_trading: true
+    enabled_for_trading: false
