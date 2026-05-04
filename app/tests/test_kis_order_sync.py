@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
+from app.brokers.base import KisApiError
 from app.config import Settings
 from app.core.enums import InternalOrderStatus
 from app.db.database import get_db
 from app.db.models import BrokerAuthToken, OrderLog
 from app.main import app
 from app.services.kis_order_mapper import find_kis_order_row, map_kis_order_row
-from app.services.kis_order_sync_service import KisOrderSyncService
+from app.services.kis_order_sync_service import KR_TZ, KisOrderSyncService
 
 
 def _settings(**overrides):
@@ -55,6 +56,7 @@ def _seed_order(
     status=InternalOrderStatus.SUBMITTED.value,
     odno="0001234567",
     qty=3,
+    submitted_at=None,
 ):
     row = OrderLog(
         broker=broker,
@@ -71,6 +73,7 @@ def _seed_order(
         internal_status=status,
         broker_status="submitted",
         broker_order_status="submitted",
+        submitted_at=submitted_at,
     )
     db_session.add(row)
     db_session.commit()
@@ -197,6 +200,228 @@ def test_kis_sync_failure_preserves_previous_status_and_records_error(db_session
     assert synced.last_sync_payload
 
 
+def test_kis_sync_first_attempt_uses_submitted_kst_date_without_weekend_buffer(
+    db_session,
+):
+    order = _seed_order(
+        db_session,
+        symbol="091810",
+        odno="0028641600",
+        submitted_at=datetime(2026, 5, 4, 4, 10, 24, 698131),
+    )
+    calls = []
+
+    class _Client:
+        def inquire_daily_order_executions(self, *, order_no, start_date, end_date):
+            calls.append(
+                {
+                    "order_no": order_no,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
+            return {
+                "orders": [
+                    {
+                        "odno": "0028641600",
+                        "ord_qty": "3",
+                        "tot_ccld_qty": "0",
+                        "rmn_qty": "3",
+                    }
+                ]
+            }
+
+    KisOrderSyncService(
+        _Client(),
+        now_provider=lambda: datetime(2026, 5, 4, 15, 0, tzinfo=KR_TZ),
+    ).sync_order(db_session, order.id)
+
+    assert calls == [
+        {
+            "order_no": "0028641600",
+            "start_date": date(2026, 5, 4),
+            "end_date": date(2026, 5, 4),
+        }
+    ]
+    assert all(call["start_date"] != date(2026, 5, 3) for call in calls)
+
+
+def test_kis_date_error_retries_submitted_date_only_without_weekend_buffer(
+    db_session,
+):
+    msg1 = "\uc870\ud68c\uc77c\uc790\ub97c \ud655\uc778\ud558\uc2ed\uc2dc\uc624"
+    order = _seed_order(
+        db_session,
+        symbol="091810",
+        odno="0028641600",
+        submitted_at=datetime(2026, 5, 4, 4, 10, 24, 698131),
+    )
+    calls = []
+
+    class _Client:
+        def inquire_daily_order_executions(self, *, order_no, start_date, end_date):
+            calls.append(
+                {
+                    "order_no": order_no,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
+            raise KisApiError(
+                "KIS read-only API failed: msg_cd=KIER2570, "
+                f"msg1={msg1}, tr_id=TTTC8001R",
+                details={
+                    "rt_cd": "7",
+                    "msg_cd": "KIER2570",
+                    "msg1": msg1,
+                    "tr_id": "TTTC8001R",
+                    "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+                    "params": {
+                        "ODNO": order_no,
+                        "INQR_STRT_DT": start_date.strftime("%Y%m%d"),
+                        "INQR_END_DT": end_date.strftime("%Y%m%d"),
+                        "CANO": "12345678",
+                        "appsecret": "real-app-secret",
+                        "access_token": "secret-access-token",
+                    },
+                },
+            )
+
+    synced = KisOrderSyncService(
+        _Client(),
+        now_provider=lambda: datetime(2026, 5, 5, 9, 30, tzinfo=KR_TZ),
+    ).sync_order(db_session, order.id)
+
+    assert synced.internal_status == "SUBMITTED"
+    assert "KIER2570" in synced.sync_error
+    assert calls == [
+        {
+            "order_no": "0028641600",
+            "start_date": date(2026, 5, 4),
+            "end_date": date(2026, 5, 5),
+        },
+        {
+            "order_no": "0028641600",
+            "start_date": date(2026, 5, 4),
+            "end_date": date(2026, 5, 4),
+        },
+    ]
+    assert all(call["start_date"] != date(2026, 5, 3) for call in calls)
+
+    payload = json.loads(synced.last_sync_payload)
+    assert payload["first_attempt"]["params"]["INQR_STRT_DT"] == "20260504"
+    assert payload["first_attempt"]["params"]["INQR_END_DT"] == "20260505"
+    assert payload["fallback_attempt"]["params"]["INQR_STRT_DT"] == "20260504"
+    assert payload["fallback_attempt"]["params"]["INQR_END_DT"] == "20260504"
+    assert payload["final_error"]["msg_cd"] == "KIER2570"
+    assert payload["final_error"]["msg1"] == msg1
+    assert payload["final_error"]["rt_cd"] == "7"
+    assert payload["final_error"]["tr_id"] == "TTTC8001R"
+
+    combined = synced.sync_error + synced.last_sync_payload
+    assert "20260503" not in combined
+    assert "12345678" not in combined
+    assert "real-app-secret" not in combined
+    assert "secret-access-token" not in combined
+
+
+def test_kis_sync_success_sanitizes_raw_payload_and_preserves_fill_mapping(
+    db_session,
+):
+    order = _seed_order(
+        db_session,
+        symbol="091810",
+        odno="0028641600",
+        qty=3,
+        submitted_at=datetime(2026, 5, 4, 4, 10, 24, 698131),
+    )
+    row = {
+        "ord_dt": "20260504",
+        "odno": "0028641600",
+        "orgn_odno": "",
+        "ord_dvsn_name": "market",
+        "sll_buy_dvsn_cd": "02",
+        "sll_buy_dvsn_cd_name": "buy",
+        "pdno": "091810",
+        "prdt_name": "TiumBio",
+        "ord_qty": "3",
+        "tot_ccld_qty": "3",
+        "avg_prvs": "914",
+        "tot_ccld_amt": "2742",
+        "rmn_qty": "0",
+        "rjct_qty": "0",
+        "cncl_yn": "N",
+        "excg_id_dvsn_cd": "KRX",
+        "ctac_tlno": "010-1234-5678",
+        "inqr_ip_addr": "203.0.113.24",
+        "CANO": "12345678",
+        "ACNT_PRDT_CD": "01",
+        "appkey": "real-app-key",
+        "authorization": "Bearer secret-access-token",
+        "memo": "contact 010-9999-8888 for account 87654321",
+    }
+
+    class _Client:
+        def inquire_daily_order_executions(self, **kwargs):
+            return {
+                "orders": [row],
+                "raw": {
+                    "output1": [row],
+                    "ctac_tlno": "010-2222-3333",
+                    "inqr_ip_addr": "198.51.100.10",
+                },
+            }
+
+    synced = KisOrderSyncService(
+        _Client(),
+        now_provider=lambda: datetime(2026, 5, 4, 15, 0, tzinfo=KR_TZ),
+    ).sync_order(db_session, order.id)
+
+    assert synced.internal_status == "FILLED"
+    assert synced.filled_qty == 3
+    assert synced.remaining_qty == 0
+    assert synced.avg_fill_price == 914
+
+    payload = json.loads(synced.last_sync_payload)
+    matched = payload["matched_order"]
+    inquiry_order = payload["inquiry"]["orders"][0]
+
+    for item in (matched, inquiry_order):
+        assert item["ctac_tlno"] == "***REDACTED***"
+        assert item["inqr_ip_addr"] == "***REDACTED***"
+        assert item["CANO"] == "12****78"
+        assert item["ACNT_PRDT_CD"] == "***REDACTED***"
+        assert item["appkey"] == "***"
+        assert item["authorization"] == "***"
+        assert item["ord_dt"] == "20260504"
+        assert item["odno"] == "0028641600"
+        assert item["orgn_odno"] == ""
+        assert item["ord_dvsn_name"] == "market"
+        assert item["sll_buy_dvsn_cd"] == "02"
+        assert item["sll_buy_dvsn_cd_name"] == "buy"
+        assert item["pdno"] == "091810"
+        assert item["prdt_name"] == "TiumBio"
+        assert item["ord_qty"] == "3"
+        assert item["tot_ccld_qty"] == "3"
+        assert item["avg_prvs"] == "914"
+        assert item["tot_ccld_amt"] == "2742"
+        assert item["rmn_qty"] == "0"
+        assert item["rjct_qty"] == "0"
+        assert item["cncl_yn"] == "N"
+        assert item["excg_id_dvsn_cd"] == "KRX"
+
+    combined = synced.last_sync_payload
+    assert "010-1234-5678" not in combined
+    assert "010-9999-8888" not in combined
+    assert "010-2222-3333" not in combined
+    assert "203.0.113.24" not in combined
+    assert "198.51.100.10" not in combined
+    assert "12345678" not in combined
+    assert "87654321" not in combined
+    assert "real-app-key" not in combined
+    assert "secret-access-token" not in combined
+
+
 def test_kis_sync_failure_stores_sanitized_kis_api_diagnostics(
     monkeypatch,
     db_session,
@@ -222,7 +447,8 @@ def test_kis_sync_failure_stores_sanitized_kis_api_diagnostics(
                 "msg_cd": "KIER2570",
                 "msg1": (
                     "diagnostic for account 12345678 app real-app-key "
-                    "secret real-app-secret token secret-access-token"
+                    "secret real-app-secret token secret-access-token "
+                    "phone 010-1234-5678 ip 203.0.113.24"
                 ),
             }
         )
@@ -254,6 +480,7 @@ def test_kis_sync_failure_stores_sanitized_kis_api_diagnostics(
     assert payload["kis_error"]["path"].endswith("/inquire-daily-ccld")
     assert payload["kis_error"]["params"]["ODNO"] == "0028641600"
     assert payload["kis_error"]["params"]["CANO"] == "12****78"
+    assert payload["kis_error"]["params"]["ACNT_PRDT_CD"] == "***REDACTED***"
     assert payload["kis_error"]["environment"] == "prod"
     assert payload["kis_error"]["is_virtual"] is False
 
@@ -264,6 +491,8 @@ def test_kis_sync_failure_stores_sanitized_kis_api_diagnostics(
     assert "secret-access-token" not in combined
     assert "secret-cached-access-token" not in combined
     assert "secret-approval-key" not in combined
+    assert "010-1234-5678" not in combined
+    assert "203.0.113.24" not in combined
 
 
 def test_kis_sync_single_order_route_updates_local_status(
@@ -283,6 +512,8 @@ def test_kis_sync_single_order_route_updates_local_status(
                     "tot_ccld_qty": "1",
                     "rmn_qty": "2",
                     "avg_prvs": "71,500",
+                    "ctac_tlno": "010-1234-5678",
+                    "inqr_ip_addr": "203.0.113.24",
                 }
             ]
         }
@@ -305,6 +536,9 @@ def test_kis_sync_single_order_route_updates_local_status(
     assert body["avg_fill_price"] == 71500
     assert body["last_synced_at"] is not None
     assert body["sync_error"] is None
+    assert "last_sync_payload" not in body
+    assert "010-1234-5678" not in response.text
+    assert "203.0.113.24" not in response.text
 
 
 def test_kis_sync_open_route_syncs_only_open_kis_orders(

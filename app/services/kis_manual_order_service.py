@@ -9,11 +9,11 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from app.brokers.factory import mask_account_no
 from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient
 from app.core.enums import InternalOrderStatus
 from app.db.models import KisOrderValidationLog, OrderLog
+from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -637,19 +637,4 @@ def _extract_broker_status(response: dict[str, Any]) -> str:
 
 
 def _sanitize_payload(value: Any) -> Any:
-    if isinstance(value, dict):
-        sanitized = {}
-        for key, item in value.items():
-            normalized_key = str(key).lower()
-            if any(token in normalized_key for token in ("secret", "token", "approval")):
-                sanitized[key] = "***"
-            elif key == "CANO" or "account" in normalized_key:
-                sanitized[key] = mask_account_no(str(item)) if item is not None else None
-            elif key == "authorization":
-                sanitized[key] = "***"
-            else:
-                sanitized[key] = _sanitize_payload(item)
-        return sanitized
-    if isinstance(value, list):
-        return [_sanitize_payload(item) for item in value]
-    return value
+    return sanitize_kis_payload(value)

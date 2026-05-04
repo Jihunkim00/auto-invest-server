@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import UTC, date, datetime, timedelta
 
 import requests
@@ -9,6 +8,11 @@ import requests
 from app.brokers.base import BrokerNotEnabledError, KisApiError
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.config import get_settings
+from app.services.kis_payload_sanitizer import (
+    mask_kis_account_value,
+    sanitize_kis_payload,
+    sanitize_kis_text,
+)
 
 # Official sample references:
 # - examples_llm/domestic_stock/inquire_price/inquire_price.py
@@ -572,25 +576,10 @@ class KisClient:
         )
 
     def _sanitize_diagnostics(self, value):
-        if isinstance(value, dict):
-            sanitized = {}
-            for key, item in value.items():
-                normalized_key = str(key).lower()
-                if any(
-                    token in normalized_key
-                    for token in ("secret", "token", "approval", "authorization", "appkey", "appsecret")
-                ):
-                    sanitized[key] = "***"
-                elif str(key).upper() == "CANO" or "account" in normalized_key:
-                    sanitized[key] = _mask_account_value(item)
-                else:
-                    sanitized[key] = self._sanitize_diagnostics(item)
-            return sanitized
-        if isinstance(value, list):
-            return [self._sanitize_diagnostics(item) for item in value]
-        if isinstance(value, str):
-            return _redact_sensitive_text(value, self.settings)
-        return value
+        return sanitize_kis_payload(
+            value,
+            known_secrets=_known_sensitive_values(self.settings),
+        )
 
     def _balance_tr_id(self) -> str:
         env = str(self.settings.kis_env or "").lower()
@@ -736,32 +725,24 @@ def _format_kis_api_error(prefix: str, details: dict) -> str:
 
 
 def _mask_account_value(value) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return ""
-    if len(text) <= 4:
-        return "*" * len(text)
-    return f"{text[:2]}****{text[-2:]}"
+    return mask_kis_account_value(value)
 
 
 def _redact_sensitive_text(value: str, settings) -> str:
-    text = str(value)
-    replacements = {
-        getattr(settings, "kis_app_key", None): "***",
-        getattr(settings, "kis_app_secret", None): "***",
-        getattr(settings, "kis_access_token", None): "***",
-        getattr(settings, "kis_approval_key", None): "***",
-    }
-    account_no = getattr(settings, "kis_account_no", None)
-    if account_no:
-        replacements[account_no] = _mask_account_value(account_no) or "***"
-    for raw, replacement in replacements.items():
-        if raw:
-            text = text.replace(str(raw), str(replacement))
-    text = re.sub(r"secret-[A-Za-z0-9_.-]+", "***", text)
-    return text
+    return sanitize_kis_text(
+        value,
+        known_secrets=_known_sensitive_values(settings),
+    )
+
+
+def _known_sensitive_values(settings) -> list:
+    return [
+        getattr(settings, "kis_app_key", None),
+        getattr(settings, "kis_app_secret", None),
+        getattr(settings, "kis_access_token", None),
+        getattr(settings, "kis_approval_key", None),
+        getattr(settings, "kis_account_no", None),
+    ]
 
 
 def _normalize_side(value) -> str:

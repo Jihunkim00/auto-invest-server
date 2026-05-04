@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, date, datetime, timedelta
+from collections.abc import Callable
+from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.brokers.factory import mask_account_no
 from app.brokers.kis_client import KisClient
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog
@@ -16,6 +16,7 @@ from app.services.kis_order_mapper import (
     map_kis_order_row,
     stale_kis_order_status,
 )
+from app.services.kis_payload_sanitizer import sanitize_kis_payload, sanitize_kis_text
 
 KR_TZ = ZoneInfo("Asia/Seoul")
 
@@ -35,8 +36,14 @@ class KisOrderSyncError(ValueError):
 
 
 class KisOrderSyncService:
-    def __init__(self, client: KisClient):
+    def __init__(
+        self,
+        client: KisClient,
+        *,
+        now_provider: Callable[[], datetime] | None = None,
+    ):
         self.client = client
+        self.now_provider = now_provider or (lambda: datetime.now(KR_TZ))
 
     def sync_order(self, db: Session, order_id: int) -> OrderLog:
         order = db.get(OrderLog, order_id)
@@ -58,14 +65,40 @@ class KisOrderSyncService:
         now = _now_naive_utc()
         start_date = None
         end_date = None
+        attempts: list[dict[str, Any]] = []
 
         try:
-            start_date, end_date = _sync_date_window(order)
-            inquiry = self.client.inquire_daily_order_executions(
-                order_no=order_no,
-                start_date=start_date,
-                end_date=end_date,
+            submitted_kst_date = _submitted_kst_date(order)
+            start_date, end_date = _sync_date_window(
+                order,
+                now=self.now_provider(),
             )
+            try:
+                inquiry = self._inquire_daily_order_executions(
+                    order_no=order_no,
+                    start_date=start_date,
+                    end_date=end_date,
+                    attempts=attempts,
+                    label="first_attempt",
+                )
+            except Exception as first_exc:
+                if _should_retry_submitted_date_only(
+                    first_exc,
+                    submitted_kst_date=submitted_kst_date,
+                    start_date=start_date,
+                    end_date=end_date,
+                ):
+                    start_date = submitted_kst_date
+                    end_date = submitted_kst_date
+                    inquiry = self._inquire_daily_order_executions(
+                        order_no=order_no,
+                        start_date=start_date,
+                        end_date=end_date,
+                        attempts=attempts,
+                        label="fallback_attempt",
+                    )
+                else:
+                    raise
             rows = _rows_from_inquiry(inquiry)
             matched = find_kis_order_row(rows, order_no)
             if matched is None:
@@ -89,6 +122,7 @@ class KisOrderSyncService:
                     order_no=order_no,
                     start_date=start_date,
                     end_date=end_date,
+                    attempts=attempts,
                 ),
                 ensure_ascii=False,
                 default=str,
@@ -188,6 +222,35 @@ class KisOrderSyncService:
             default=str,
         )
 
+    def _inquire_daily_order_executions(
+        self,
+        *,
+        order_no: str,
+        start_date: date,
+        end_date: date,
+        attempts: list[dict[str, Any]],
+        label: str,
+    ) -> dict[str, Any]:
+        attempt = {
+            "label": label,
+            "params": _inquiry_attempt_params(
+                order_no=order_no,
+                start_date=start_date,
+                end_date=end_date,
+            ),
+        }
+        attempts.append(attempt)
+        try:
+            _validate_inquiry_dates(start_date, end_date)
+            return self.client.inquire_daily_order_executions(
+                order_no=order_no,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception as exc:
+            attempt["error"] = _exception_payload(exc)
+            raise
+
 
 def serialize_kis_order(order: OrderLog) -> dict[str, Any]:
     requested_qty = order.requested_qty
@@ -228,13 +291,88 @@ def _order_no(order: OrderLog) -> str | None:
     return text or None
 
 
-def _sync_date_window(order: OrderLog) -> tuple[date, date]:
+def _submitted_kst_date(order: OrderLog) -> date:
     source = order.submitted_at or order.created_at or _now_naive_utc()
     if source.tzinfo is None:
         source = source.replace(tzinfo=UTC)
-    local_date = source.astimezone(KR_TZ).date()
-    today = datetime.now(KR_TZ).date()
-    return local_date - timedelta(days=1), max(today, local_date)
+    return source.astimezone(KR_TZ).date()
+
+
+def _sync_date_window(order: OrderLog, *, now: datetime | None = None) -> tuple[date, date]:
+    submitted_date = _submitted_kst_date(order)
+    current = now or datetime.now(KR_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=KR_TZ)
+    current_date = current.astimezone(KR_TZ).date()
+
+    if (
+        current_date > submitted_date
+        and _is_valid_order_inquiry_date(submitted_date)
+        and _is_valid_order_inquiry_date(current_date)
+    ):
+        return submitted_date, current_date
+    return submitted_date, submitted_date
+
+
+def _inquiry_attempt_params(
+    *,
+    order_no: str,
+    start_date: date,
+    end_date: date,
+) -> dict[str, str]:
+    return {
+        "ODNO": order_no,
+        "INQR_STRT_DT": start_date.strftime("%Y%m%d"),
+        "INQR_END_DT": end_date.strftime("%Y%m%d"),
+    }
+
+
+def _validate_inquiry_dates(start_date: date, end_date: date) -> None:
+    start_text = start_date.strftime("%Y%m%d")
+    end_text = end_date.strftime("%Y%m%d")
+    parsed_start = datetime.strptime(start_text, "%Y%m%d").date()
+    parsed_end = datetime.strptime(end_text, "%Y%m%d").date()
+
+    if parsed_start != start_date or parsed_end != end_date:
+        raise KisOrderSyncError("invalid_kis_inquiry_date_format")
+    if start_date > end_date:
+        raise KisOrderSyncError("invalid_kis_inquiry_date_range: start_date_after_end_date")
+
+    weekend_dates = [
+        item.strftime("%Y%m%d")
+        for item in (start_date, end_date)
+        if not _is_valid_order_inquiry_date(item)
+    ]
+    if weekend_dates:
+        raise KisOrderSyncError(
+            f"invalid_kis_inquiry_date: weekend_endpoint_date={','.join(weekend_dates)}"
+        )
+
+
+def _is_valid_order_inquiry_date(value: date) -> bool:
+    return value.weekday() < 5
+
+
+def _should_retry_submitted_date_only(
+    exc: Exception,
+    *,
+    submitted_kst_date: date,
+    start_date: date,
+    end_date: date,
+) -> bool:
+    if start_date == submitted_kst_date and end_date == submitted_kst_date:
+        return False
+    return _is_kis_date_error(exc)
+
+
+def _is_kis_date_error(exc: Exception) -> bool:
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        msg_cd = str(details.get("msg_cd") or "").strip()
+        msg1 = str(details.get("msg1") or "")
+        if msg_cd == "KIER2570" or "\uc870\ud68c\uc77c\uc790" in msg1:
+            return True
+    return "\uc870\ud68c\uc77c\uc790" in str(exc)
 
 
 def _rows_from_inquiry(inquiry: dict[str, Any]) -> list[dict[str, Any]]:
@@ -266,7 +404,7 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def _safe_error(exc: Exception) -> str:
-    text = str(exc).strip() or exc.__class__.__name__
+    text = _sanitize_text(str(exc).strip() or exc.__class__.__name__)
     if len(text) > 500:
         text = f"{text[:500]}..."
     return f"kis_order_sync_error: {exc.__class__.__name__}: {text}"
@@ -279,8 +417,13 @@ def _sync_failure_payload(
     order_no: str,
     start_date: date | None,
     end_date: date | None,
+    attempts: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     error_details = getattr(exc, "details", None)
+    safe_attempts = _sanitize_payload(attempts or [])
+    first_attempt = _attempt_by_label(safe_attempts, "first_attempt")
+    fallback_attempt = _attempt_by_label(safe_attempts, "fallback_attempt")
+    final_error = _exception_payload(exc)
     payload = {
         "event": "kis_order_sync_failed",
         "error_type": exc.__class__.__name__,
@@ -294,34 +437,53 @@ def _sync_failure_payload(
             "kis_odno": order_no,
             "internal_status_preserved": order.internal_status,
         },
-        "request": {
-            "ODNO": order_no,
-            "INQR_STRT_DT": start_date.strftime("%Y%m%d") if start_date else None,
-            "INQR_END_DT": end_date.strftime("%Y%m%d") if end_date else None,
-        },
+        "request": (
+            first_attempt.get("params")
+            if first_attempt
+            else {
+                "ODNO": order_no,
+                "INQR_STRT_DT": start_date.strftime("%Y%m%d") if start_date else None,
+                "INQR_END_DT": end_date.strftime("%Y%m%d") if end_date else None,
+            }
+        ),
+        "first_attempt": first_attempt,
+        "fallback_attempt": fallback_attempt,
+        "attempts": safe_attempts,
+        "final_error": final_error,
     }
+    for key in ("rt_cd", "msg_cd", "msg1", "tr_id", "path"):
+        value = final_error.get(key)
+        if value is not None:
+            payload[key] = value
     if isinstance(error_details, dict):
         payload["kis_error"] = error_details
     return _sanitize_payload(payload)
 
 
+def _attempt_by_label(
+    attempts: list[dict[str, Any]],
+    label: str,
+) -> dict[str, Any] | None:
+    for attempt in attempts:
+        if attempt.get("label") == label:
+            return attempt
+    return None
+
+
+def _exception_payload(exc: Exception) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error_type": exc.__class__.__name__,
+        "error_message": _safe_error(exc),
+    }
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        payload.update(details)
+    return _sanitize_payload(payload)
+
+
 def _sanitize_payload(value: Any) -> Any:
-    if isinstance(value, dict):
-        sanitized = {}
-        for key, item in value.items():
-            normalized_key = str(key).lower()
-            if any(
-                token in normalized_key
-                for token in ("secret", "token", "approval", "appkey", "appsecret")
-            ):
-                sanitized[key] = "***"
-            elif str(key).upper() == "CANO" or "account" in normalized_key:
-                sanitized[key] = mask_account_no(str(item)) if item is not None else None
-            elif normalized_key == "authorization":
-                sanitized[key] = "***"
-            else:
-                sanitized[key] = _sanitize_payload(item)
-        return sanitized
-    if isinstance(value, list):
-        return [_sanitize_payload(item) for item in value]
-    return value
+    return sanitize_kis_payload(value)
+
+
+def _sanitize_text(value: str) -> str:
+    return sanitize_kis_text(value)
