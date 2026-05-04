@@ -24,6 +24,9 @@ class DashboardScreen extends StatelessWidget {
             controller.hasLatestRunResult || controller.showingOfflineFallback
                 ? controller.runResult.action
                 : 'No run yet';
+        final modeBadgeText = controller.selectedProvider == SelectedProvider.kis
+            ? 'KIS Preview / Manual Only'
+            : 'Paper Mode';
         return SafeArea(
           child: RefreshIndicator(
             onRefresh: controller.load,
@@ -54,7 +57,7 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Row(children: [
-                  StatusBadge(text: 'Paper Mode', active: true),
+                  StatusBadge(text: modeBadgeText, active: true),
                   const SizedBox(width: 8),
                   StatusBadge(
                       text: runAction.isEmpty ? 'No run yet' : runAction,

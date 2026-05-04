@@ -37,7 +37,6 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     _syncTextControllers(controller);
-    final isKr = controller.selectedOrderMarket == PortfolioMarket.kr;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -50,27 +49,11 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
           ),
         ]),
         const SizedBox(height: 12),
-        SegmentedButton<PortfolioMarket>(
-          segments: const [
-            ButtonSegment(
-                value: PortfolioMarket.us, label: Text('US / Alpaca')),
-            ButtonSegment(value: PortfolioMarket.kr, label: Text('KR / KIS')),
-          ],
-          selected: {controller.selectedOrderMarket},
-          onSelectionChanged: (selection) =>
-              controller.selectOrderMarket(selection.first),
+        _KrOrderTicket(
+          controller: controller,
+          symbolController: _symbolController,
+          qtyController: _qtyController,
         ),
-        const SizedBox(height: 12),
-        if (!isKr)
-          const _StateLine(
-              text:
-                  'US order ticket not available here. Use existing manual trading run.')
-        else
-          _KrOrderTicket(
-            controller: controller,
-            symbolController: _symbolController,
-            qtyController: _qtyController,
-          ),
       ]),
     );
   }
