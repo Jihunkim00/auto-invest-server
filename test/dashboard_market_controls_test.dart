@@ -26,10 +26,10 @@ void main() {
       () => OrderTicketSection(controller: controller),
     ));
 
-    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
-    expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.textContaining('Submit Real KIS Order'), findsOneWidget);
-    expect(find.text('Real KIS trading is disabled'), findsOneWidget);
+    expect(find.text('REAL KIS LIVE'), findsOneWidget);
+    expect(find.text('MANUAL ONLY'), findsOneWidget);
+    expect(find.text('NO AUTO KIS ORDERS'), findsOneWidget);
+    expect(find.text('Submit Live KIS Order'), findsOneWidget);
     expect(find.text('Use dry-run validation first'), findsOneWidget);
 
     await tester.tap(find.text('Validate Buy'));

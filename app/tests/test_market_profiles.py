@@ -41,7 +41,7 @@ def test_kr_profile_points_to_kis_krw_and_kr_configs():
     assert profile.watchlist_file == "config/watchlist_kr.yaml"
     assert profile.reference_sites_file == "config/reference_sites_kr.yaml"
     assert profile.symbol_format == "6_digit_numeric"
-    assert profile.enabled_for_trading is False
+    assert profile.enabled_for_trading is True
 
 
 def test_existing_watchlist_loading_without_market_still_uses_us_default():
@@ -101,7 +101,7 @@ def test_market_profile_endpoint_returns_us_and_kr():
     assert set(markets) >= {"US", "KR"}
     assert markets["US"]["broker_provider"] == "alpaca"
     assert markets["KR"]["broker_provider"] == "kis"
-    assert markets["KR"]["enabled_for_trading"] is False
+    assert markets["KR"]["enabled_for_trading"] is True
 
 
 def test_kr_market_profile_endpoint_returns_kr_config():
@@ -113,7 +113,7 @@ def test_kr_market_profile_endpoint_returns_kr_config():
     body = response.json()
     assert body["market"] == "KR"
     assert body["currency"] == "KRW"
-    assert body["enabled_for_trading"] is False
+    assert body["enabled_for_trading"] is True
 
 
 def test_kr_watchlist_endpoint_returns_six_digit_symbols():

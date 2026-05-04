@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+import re
+from datetime import UTC, date, datetime, timedelta
 
 import requests
 
@@ -23,6 +24,9 @@ KIS_BALANCE_TR_ID_REAL = "TTTC8434R"
 KIS_BALANCE_TR_ID_DEMO = "VTTC8434R"
 KIS_OPEN_ORDERS_PATH = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
 KIS_OPEN_ORDERS_TR_ID = "TTTC0084R"
+KIS_DAILY_ORDER_EXECUTIONS_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+KIS_DAILY_ORDER_EXECUTIONS_TR_ID_REAL = "TTTC8001R"
+KIS_DAILY_ORDER_EXECUTIONS_TR_ID_DEMO = "VTTC8001R"
 KIS_CASH_ORDER_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 KIS_CASH_BUY_TR_ID_REAL = "TTTC0802U"
 KIS_CASH_SELL_TR_ID_REAL = "TTTC0801U"
@@ -258,6 +262,49 @@ class KisClient:
 
         return orders
 
+    def inquire_daily_order_executions(
+        self,
+        *,
+        order_no: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> dict:
+        today = datetime.now(UTC).date()
+        safe_end = end_date or today
+        safe_start = start_date or safe_end
+        response = self.request_get(
+            KIS_DAILY_ORDER_EXECUTIONS_PATH,
+            tr_id=self._daily_order_executions_tr_id(),
+            params={
+                "CANO": self.settings.kis_account_no,
+                "ACNT_PRDT_CD": self.settings.kis_account_product_code,
+                "INQR_STRT_DT": safe_start.strftime("%Y%m%d"),
+                "INQR_END_DT": safe_end.strftime("%Y%m%d"),
+                "SLL_BUY_DVSN_CD": "00",
+                "INQR_DVSN": "00",
+                "PDNO": "",
+                "CCLD_DVSN": "00",
+                "ORD_GNO_BRNO": "",
+                "ODNO": str(order_no or "").strip(),
+                "INQR_DVSN_3": "00",
+                "INQR_DVSN_1": "",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+            },
+        )
+        rows = _as_list(response.get("output1") or response.get("output"))
+        return {
+            "provider": "kis",
+            "environment": self.settings.kis_env,
+            "order_no": str(order_no or "").strip() or None,
+            "start_date": safe_start.isoformat(),
+            "end_date": safe_end.isoformat(),
+            "count": len(rows),
+            "orders": rows,
+            "raw_status": "ok",
+            "raw": _safe_raw(response),
+        }
+
     def submit_order(self, *args, **kwargs):
         raise BrokerNotEnabledError(
             "KIS order submission is disabled. This connector is read-only here."
@@ -358,6 +405,13 @@ class KisClient:
     ) -> dict:
         url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
         headers = self.build_headers(tr_id=tr_id, include_auth=True)
+        context = self._request_diagnostics(
+            method=method,
+            path=path,
+            tr_id=tr_id,
+            params=params,
+            payload=payload,
+        )
 
         try:
             if method == "GET":
@@ -377,25 +431,48 @@ class KisClient:
             else:
                 raise ValueError(f"Unsupported KIS request method: {method}")
         except requests.RequestException as exc:
-            raise KisApiError(f"KIS read-only request failed: {type(exc).__name__}.") from exc
+            details = {**context, "error_type": type(exc).__name__}
+            raise KisApiError(
+                _format_kis_api_error("KIS read-only request failed", details),
+                details=details,
+            ) from exc
 
         if response.status_code >= 400:
+            details = {**context, "http_status": response.status_code}
             raise KisApiError(
-                f"KIS read-only request failed with HTTP {response.status_code}."
+                _format_kis_api_error("KIS read-only HTTP failure", details),
+                details=details,
             )
 
         try:
             data = response.json()
         except ValueError as exc:
-            raise KisApiError("KIS read-only response was not valid JSON.") from exc
+            details = {**context, "error_type": "invalid_json"}
+            raise KisApiError(
+                _format_kis_api_error("KIS read-only response was not valid JSON", details),
+                details=details,
+            ) from exc
 
         if not isinstance(data, dict):
-            raise KisApiError("KIS read-only response had an unexpected shape.")
+            details = {**context, "error_type": "unexpected_shape"}
+            raise KisApiError(
+                _format_kis_api_error("KIS read-only response had an unexpected shape", details),
+                details=details,
+            )
 
         rt_cd = str(data.get("rt_cd", "0"))
         if rt_cd not in ("0", ""):
-            code = data.get("msg_cd") or rt_cd
-            raise KisApiError(f"KIS read-only API returned error code {code}.")
+            details = {
+                **context,
+                "rt_cd": data.get("rt_cd"),
+                "msg_cd": data.get("msg_cd"),
+                "msg1": data.get("msg1"),
+            }
+            details = self._sanitize_diagnostics(details)
+            raise KisApiError(
+                _format_kis_api_error("KIS read-only API failed", details),
+                details=details,
+            )
 
         return data
 
@@ -408,6 +485,13 @@ class KisClient:
     ) -> dict:
         url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
         headers = self.build_headers(tr_id=tr_id, include_auth=True)
+        context = self._request_diagnostics(
+            method="POST",
+            path=path,
+            tr_id=tr_id,
+            payload=payload,
+            request_kind="order",
+        )
 
         try:
             response = requests.post(
@@ -417,33 +501,108 @@ class KisClient:
                 timeout=10,
             )
         except requests.RequestException as exc:
-            raise KisApiError(f"KIS order request failed: {type(exc).__name__}.") from exc
+            details = {**context, "error_type": type(exc).__name__}
+            raise KisApiError(
+                _format_kis_api_error("KIS order request failed", details),
+                details=details,
+            ) from exc
 
         if response.status_code >= 400:
+            details = {**context, "http_status": response.status_code}
             raise KisApiError(
-                f"KIS order request failed with HTTP {response.status_code}."
+                _format_kis_api_error("KIS order HTTP failure", details),
+                details=details,
             )
 
         try:
             data = response.json()
         except ValueError as exc:
-            raise KisApiError("KIS order response was not valid JSON.") from exc
+            details = {**context, "error_type": "invalid_json"}
+            raise KisApiError(
+                _format_kis_api_error("KIS order response was not valid JSON", details),
+                details=details,
+            ) from exc
 
         if not isinstance(data, dict):
-            raise KisApiError("KIS order response had an unexpected shape.")
+            details = {**context, "error_type": "unexpected_shape"}
+            raise KisApiError(
+                _format_kis_api_error("KIS order response had an unexpected shape", details),
+                details=details,
+            )
 
         rt_cd = str(data.get("rt_cd", "0"))
         if rt_cd not in ("0", ""):
-            code = data.get("msg_cd") or rt_cd
-            raise KisApiError(f"KIS order API returned error code {code}.")
+            details = {
+                **context,
+                "rt_cd": data.get("rt_cd"),
+                "msg_cd": data.get("msg_cd"),
+                "msg1": data.get("msg1"),
+            }
+            details = self._sanitize_diagnostics(details)
+            raise KisApiError(
+                _format_kis_api_error("KIS order API failed", details),
+                details=details,
+            )
 
         return data
+
+    def _request_diagnostics(
+        self,
+        *,
+        method: str,
+        path: str,
+        tr_id: str,
+        params: dict | None = None,
+        payload: dict | None = None,
+        request_kind: str = "read_only",
+    ) -> dict:
+        env = str(self.settings.kis_env or "").strip() or "unknown"
+        return self._sanitize_diagnostics(
+            {
+                "provider": "kis",
+                "environment": env,
+                "is_virtual": env.lower() in ("paper", "vps", "demo", "mock"),
+                "request_kind": request_kind,
+                "method": method,
+                "path": path,
+                "tr_id": tr_id,
+                "params": params or {},
+                "payload": payload or {},
+            }
+        )
+
+    def _sanitize_diagnostics(self, value):
+        if isinstance(value, dict):
+            sanitized = {}
+            for key, item in value.items():
+                normalized_key = str(key).lower()
+                if any(
+                    token in normalized_key
+                    for token in ("secret", "token", "approval", "authorization", "appkey", "appsecret")
+                ):
+                    sanitized[key] = "***"
+                elif str(key).upper() == "CANO" or "account" in normalized_key:
+                    sanitized[key] = _mask_account_value(item)
+                else:
+                    sanitized[key] = self._sanitize_diagnostics(item)
+            return sanitized
+        if isinstance(value, list):
+            return [self._sanitize_diagnostics(item) for item in value]
+        if isinstance(value, str):
+            return _redact_sensitive_text(value, self.settings)
+        return value
 
     def _balance_tr_id(self) -> str:
         env = str(self.settings.kis_env or "").lower()
         if env in ("paper", "vps", "demo", "mock"):
             return KIS_BALANCE_TR_ID_DEMO
         return KIS_BALANCE_TR_ID_REAL
+
+    def _daily_order_executions_tr_id(self) -> str:
+        env = str(self.settings.kis_env or "").lower()
+        if env in ("paper", "vps", "demo", "mock"):
+            return KIS_DAILY_ORDER_EXECUTIONS_TR_ID_DEMO
+        return KIS_DAILY_ORDER_EXECUTIONS_TR_ID_REAL
 
     def _timestamp_from_output(self, output: dict) -> str | None:
         raw_time = output.get("stck_cntg_hour") or output.get("aspr_acpt_hour")
@@ -565,6 +724,44 @@ def _safe_raw(response: dict) -> dict:
         "msg_cd": response.get("msg_cd"),
         "has_output": bool(response.get("output")),
     }
+
+
+def _format_kis_api_error(prefix: str, details: dict) -> str:
+    parts = []
+    for key in ("msg_cd", "msg1", "rt_cd", "http_status", "tr_id", "path"):
+        value = details.get(key)
+        if value is not None and str(value).strip():
+            parts.append(f"{key}={value}")
+    return f"{prefix}: {', '.join(parts)}" if parts else prefix
+
+
+def _mask_account_value(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return ""
+    if len(text) <= 4:
+        return "*" * len(text)
+    return f"{text[:2]}****{text[-2:]}"
+
+
+def _redact_sensitive_text(value: str, settings) -> str:
+    text = str(value)
+    replacements = {
+        getattr(settings, "kis_app_key", None): "***",
+        getattr(settings, "kis_app_secret", None): "***",
+        getattr(settings, "kis_access_token", None): "***",
+        getattr(settings, "kis_approval_key", None): "***",
+    }
+    account_no = getattr(settings, "kis_account_no", None)
+    if account_no:
+        replacements[account_no] = _mask_account_value(account_no) or "***"
+    for raw, replacement in replacements.items():
+        if raw:
+            text = text.replace(str(raw), str(replacement))
+    text = re.sub(r"secret-[A-Za-z0-9_.-]+", "***", text)
+    return text
 
 
 def _normalize_side(value) -> str:

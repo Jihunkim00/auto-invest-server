@@ -22,6 +22,7 @@ class OrderLog(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     broker = Column(String(20), nullable=False, default="alpaca")
+    market = Column(String(10), nullable=True, index=True)
     symbol = Column(String(20), nullable=False, index=True)
 
     side = Column(String(10), nullable=False)
@@ -34,16 +35,23 @@ class OrderLog(Base):
 
     client_order_id = Column(String(100), nullable=True, index=True)
     broker_order_id = Column(String(100), nullable=True, unique=True, index=True)
+    kis_odno = Column(String(100), nullable=True, index=True)
+    kis_orgn_odno = Column(String(100), nullable=True, index=True)
 
     internal_status = Column(String(30), nullable=False, default="REQUESTED")
     broker_status = Column(String(50), nullable=True)
+    broker_order_status = Column(String(50), nullable=True)
 
+    requested_qty = Column(Float, nullable=True)
     filled_qty = Column(Float, nullable=True)
+    remaining_qty = Column(Float, nullable=True)
     filled_avg_price = Column(Float, nullable=True)
+    avg_fill_price = Column(Float, nullable=True)
 
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     filled_at = Column(DateTime(timezone=True), nullable=True)
     canceled_at = Column(DateTime(timezone=True), nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
 
     extended_hours = Column(Boolean, nullable=False, default=False)
 
@@ -51,6 +59,7 @@ class OrderLog(Base):
     response_payload = Column(Text, nullable=True)
     last_sync_payload = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
+    sync_error = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.orm import Session
+
+from app.brokers.factory import mask_account_no
+from app.brokers.kis_client import KisClient
+from app.core.enums import InternalOrderStatus
+from app.db.models import OrderLog
+from app.services.kis_order_mapper import (
+    find_kis_order_row,
+    map_kis_order_row,
+    stale_kis_order_status,
+)
+
+KR_TZ = ZoneInfo("Asia/Seoul")
+
+OPEN_KIS_INTERNAL_STATUSES = {
+    InternalOrderStatus.REQUESTED.value,
+    InternalOrderStatus.SUBMITTED.value,
+    InternalOrderStatus.ACCEPTED.value,
+    InternalOrderStatus.PENDING.value,
+    InternalOrderStatus.PARTIALLY_FILLED.value,
+    InternalOrderStatus.UNKNOWN_STALE.value,
+    "PENDING_SUBMIT",
+}
+
+
+class KisOrderSyncError(ValueError):
+    pass
+
+
+class KisOrderSyncService:
+    def __init__(self, client: KisClient):
+        self.client = client
+
+    def sync_order(self, db: Session, order_id: int) -> OrderLog:
+        order = db.get(OrderLog, order_id)
+        if order is None:
+            raise KisOrderSyncError("KIS order not found.")
+        if str(order.broker or "").strip().lower() != "kis":
+            raise KisOrderSyncError("Order is not a KIS order.")
+
+        order_no = _order_no(order)
+        if not order_no:
+            order.sync_error = "kis_odno_missing"
+            order.error_message = order.sync_error
+            order.last_synced_at = _now_naive_utc()
+            db.commit()
+            db.refresh(order)
+            raise KisOrderSyncError("KIS order number is missing.")
+
+        old_status = order.internal_status
+        now = _now_naive_utc()
+        start_date = None
+        end_date = None
+
+        try:
+            start_date, end_date = _sync_date_window(order)
+            inquiry = self.client.inquire_daily_order_executions(
+                order_no=order_no,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            rows = _rows_from_inquiry(inquiry)
+            matched = find_kis_order_row(rows, order_no)
+            if matched is None:
+                mapped = stale_kis_order_status(order_no, _sanitize_payload(inquiry))
+                self._apply_stale_result(order, mapped, inquiry, now=now)
+            else:
+                mapped = map_kis_order_row(
+                    matched,
+                    requested_qty_fallback=order.requested_qty or order.qty,
+                )
+                self._apply_mapped_result(order, mapped, inquiry, now=now)
+        except Exception as exc:
+            order.internal_status = old_status
+            order.sync_error = _safe_error(exc)
+            order.error_message = order.sync_error
+            order.last_synced_at = now
+            order.last_sync_payload = json.dumps(
+                _sync_failure_payload(
+                    exc,
+                    order=order,
+                    order_no=order_no,
+                    start_date=start_date,
+                    end_date=end_date,
+                ),
+                ensure_ascii=False,
+                default=str,
+            )
+            db.commit()
+            db.refresh(order)
+            return order
+
+        db.commit()
+        db.refresh(order)
+        return order
+
+    def sync_open_orders(self, db: Session) -> list[OrderLog]:
+        orders = (
+            db.query(OrderLog)
+            .filter(OrderLog.broker == "kis")
+            .filter(OrderLog.internal_status.in_(sorted(OPEN_KIS_INTERNAL_STATUSES)))
+            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
+            .all()
+        )
+        synced = []
+        for order in orders:
+            try:
+                synced.append(self.sync_order(db, int(order.id)))
+            except KisOrderSyncError:
+                db.refresh(order)
+                synced.append(order)
+        return synced
+
+    @staticmethod
+    def recent_orders(db: Session, *, limit: int = 20) -> list[OrderLog]:
+        safe_limit = max(1, min(int(limit or 20), 100))
+        return (
+            db.query(OrderLog)
+            .filter(OrderLog.broker == "kis")
+            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
+            .limit(safe_limit)
+            .all()
+        )
+
+    def _apply_mapped_result(
+        self,
+        order: OrderLog,
+        mapped,
+        inquiry: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> None:
+        order.market = order.market or "KR"
+        order.kis_odno = mapped.order_no or order.kis_odno or order.broker_order_id
+        order.kis_orgn_odno = mapped.original_order_no or order.kis_orgn_odno
+        order.broker_order_id = order.broker_order_id or order.kis_odno
+        order.requested_qty = mapped.requested_qty or order.requested_qty or order.qty
+        order.filled_qty = mapped.filled_qty
+        order.remaining_qty = mapped.remaining_qty
+        order.avg_fill_price = mapped.avg_fill_price
+        order.filled_avg_price = mapped.avg_fill_price
+        order.broker_order_status = mapped.broker_order_status
+        order.broker_status = mapped.broker_order_status
+        order.internal_status = mapped.internal_status
+        order.last_synced_at = now
+        order.sync_error = None
+        order.error_message = None
+        order.last_sync_payload = json.dumps(
+            {
+                "matched_order": _sanitize_payload(mapped.raw_payload),
+                "inquiry": _sanitize_payload(inquiry),
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        if mapped.internal_status == InternalOrderStatus.FILLED.value and order.filled_at is None:
+            order.filled_at = now
+        if mapped.internal_status == InternalOrderStatus.CANCELED.value and order.canceled_at is None:
+            order.canceled_at = now
+
+    def _apply_stale_result(
+        self,
+        order: OrderLog,
+        mapped,
+        inquiry: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> None:
+        order.market = order.market or "KR"
+        order.internal_status = mapped.internal_status
+        order.broker_order_status = mapped.broker_order_status
+        order.last_synced_at = now
+        order.sync_error = "kis_order_not_found_in_inquiry"
+        order.error_message = order.sync_error
+        order.last_sync_payload = json.dumps(
+            {
+                "order_no": mapped.order_no,
+                "inquiry": _sanitize_payload(inquiry),
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
+
+def serialize_kis_order(order: OrderLog) -> dict[str, Any]:
+    requested_qty = order.requested_qty
+    if requested_qty is None:
+        requested_qty = order.qty
+    filled_qty = float(order.filled_qty or 0)
+    remaining_qty = order.remaining_qty
+    if remaining_qty is None and requested_qty is not None:
+        remaining_qty = max(float(requested_qty) - filled_qty, 0)
+
+    return {
+        "order_id": order.id,
+        "broker": order.broker,
+        "market": order.market or "KR",
+        "symbol": order.symbol,
+        "side": order.side,
+        "order_type": order.order_type,
+        "requested_qty": _nullable_float(requested_qty),
+        "filled_qty": filled_qty,
+        "remaining_qty": _nullable_float(remaining_qty),
+        "avg_fill_price": _nullable_float(order.avg_fill_price or order.filled_avg_price),
+        "internal_status": order.internal_status,
+        "broker_order_status": order.broker_order_status or order.broker_status,
+        "broker_status": order.broker_status,
+        "kis_odno": order.kis_odno or order.broker_order_id,
+        "kis_orgn_odno": order.kis_orgn_odno,
+        "submitted_at": _iso(order.submitted_at),
+        "last_synced_at": _iso(order.last_synced_at),
+        "sync_error": order.sync_error or order.error_message,
+    }
+
+
+def _order_no(order: OrderLog) -> str | None:
+    value = order.kis_odno or order.broker_order_id
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _sync_date_window(order: OrderLog) -> tuple[date, date]:
+    source = order.submitted_at or order.created_at or _now_naive_utc()
+    if source.tzinfo is None:
+        source = source.replace(tzinfo=UTC)
+    local_date = source.astimezone(KR_TZ).date()
+    today = datetime.now(KR_TZ).date()
+    return local_date - timedelta(days=1), max(today, local_date)
+
+
+def _rows_from_inquiry(inquiry: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = inquiry.get("orders") or inquiry.get("output1") or inquiry.get("output") or []
+    if isinstance(rows, dict):
+        return [rows]
+    if isinstance(rows, list):
+        return [row for row in rows if isinstance(row, dict)]
+    return []
+
+
+def _now_naive_utc() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _nullable_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat()
+
+
+def _safe_error(exc: Exception) -> str:
+    text = str(exc).strip() or exc.__class__.__name__
+    if len(text) > 500:
+        text = f"{text[:500]}..."
+    return f"kis_order_sync_error: {exc.__class__.__name__}: {text}"
+
+
+def _sync_failure_payload(
+    exc: Exception,
+    *,
+    order: OrderLog,
+    order_no: str,
+    start_date: date | None,
+    end_date: date | None,
+) -> dict[str, Any]:
+    error_details = getattr(exc, "details", None)
+    payload = {
+        "event": "kis_order_sync_failed",
+        "error_type": exc.__class__.__name__,
+        "error_message": _safe_error(exc),
+        "order": {
+            "order_id": order.id,
+            "broker": order.broker,
+            "market": order.market or "KR",
+            "symbol": order.symbol,
+            "side": order.side,
+            "kis_odno": order_no,
+            "internal_status_preserved": order.internal_status,
+        },
+        "request": {
+            "ODNO": order_no,
+            "INQR_STRT_DT": start_date.strftime("%Y%m%d") if start_date else None,
+            "INQR_END_DT": end_date.strftime("%Y%m%d") if end_date else None,
+        },
+    }
+    if isinstance(error_details, dict):
+        payload["kis_error"] = error_details
+    return _sanitize_payload(payload)
+
+
+def _sanitize_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if any(
+                token in normalized_key
+                for token in ("secret", "token", "approval", "appkey", "appsecret")
+            ):
+                sanitized[key] = "***"
+            elif str(key).upper() == "CANO" or "account" in normalized_key:
+                sanitized[key] = mask_account_no(str(item)) if item is not None else None
+            elif normalized_key == "authorization":
+                sanitized[key] = "***"
+            else:
+                sanitized[key] = _sanitize_payload(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_payload(item) for item in value]
+    return value

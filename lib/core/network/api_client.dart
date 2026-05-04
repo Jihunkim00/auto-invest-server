@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_manual_order_result.dart';
 import '../../models/log_items.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
@@ -27,6 +28,8 @@ class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
 
   final http.Client _client;
+  static const _kisLiveConfirmationPhrase =
+      'I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER';
 
   static int _readInt(Object? value, int fallback) {
     if (value is num) return value.toInt();
@@ -213,6 +216,58 @@ class ApiClient {
       'reason': 'manual Flutter dashboard dry-run',
     });
     return OrderValidationResult.fromJson(payload);
+  }
+
+  Future<KisManualOrderResult> submitKisManualOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+    required bool confirmLive,
+  }) async {
+    final payload = await _postJsonBody('/kis/orders/manual-submit', {
+      'market': 'KR',
+      'symbol': symbol.trim(),
+      'side': side.trim().toLowerCase(),
+      'qty': qty,
+      'order_type': orderType,
+      'dry_run': false,
+      'confirm_live': confirmLive,
+      'confirmation': confirmLive ? _kisLiveConfirmationPhrase : null,
+      'reason': 'manual Flutter dashboard live KIS order',
+    });
+    return KisManualOrderResult.fromJson(payload);
+  }
+
+  Future<KisManualOrderResult> syncKisOrder(int orderId) async {
+    final payload = await _postJsonBody('/kis/orders/$orderId/sync', const {});
+    return KisManualOrderResult.fromJson(payload);
+  }
+
+  Future<List<KisManualOrderResult>> fetchKisOrders({int limit = 20}) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/orders').replace(
+      queryParameters: {
+        'limit': limit.toString(),
+        '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+      },
+    );
+    final r = await _client.get(uri, headers: const {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    });
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid KIS orders response.');
+    }
+    final rawOrders = decoded['orders'] as List<dynamic>? ?? const [];
+    return rawOrders
+        .whereType<Map>()
+        .map((item) =>
+            KisManualOrderResult.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
   }
 
   Future<WatchlistRunResult> runKisWatchlistPreview({

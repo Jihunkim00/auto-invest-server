@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_manual_order_result.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -49,6 +50,7 @@ class ActionResult {
 }
 
 enum PortfolioMarket { us, kr }
+
 enum SelectedProvider { alpaca, kis }
 
 class DashboardController extends ChangeNotifier {
@@ -97,6 +99,13 @@ class DashboardController extends ChangeNotifier {
   bool orderValidationLoading = false;
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
+  bool kisLiveConfirmation = false;
+  bool kisManualSubmitLoading = false;
+  bool kisOrderSyncLoading = false;
+  bool kisOrdersLoading = false;
+  String? kisManualOrderError;
+  KisManualOrderResult? latestKisManualOrder;
+  List<KisManualOrderResult> kisOrders = const [];
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -342,8 +351,9 @@ class DashboardController extends ChangeNotifier {
   void setProvider(SelectedProvider provider) {
     if (selectedProvider == provider) return;
     selectedProvider = provider;
-    final market =
-        provider == SelectedProvider.kis ? PortfolioMarket.kr : PortfolioMarket.us;
+    final market = provider == SelectedProvider.kis
+        ? PortfolioMarket.kr
+        : PortfolioMarket.us;
     selectedPortfolioMarket = market;
     selectedWatchlistMarket = market;
     selectedOrderMarket = market;
@@ -378,6 +388,11 @@ class DashboardController extends ChangeNotifier {
 
   void setOrderTicketQty(int value) {
     orderTicketQty = value <= 0 ? 1 : value;
+    notifyListeners();
+  }
+
+  void setKisLiveConfirmation(bool value) {
+    kisLiveConfirmation = value;
     notifyListeners();
   }
 
@@ -436,6 +451,103 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> submitKisManualOrder() async {
+    if (!kisLiveConfirmation) {
+      return const ActionResult(
+        success: false,
+        message: 'Live confirmation is required before submitting.',
+      );
+    }
+
+    kisManualSubmitLoading = true;
+    kisManualOrderError = null;
+    notifyListeners();
+
+    try {
+      var result = await apiClient.submitKisManualOrder(
+        symbol: orderTicketSymbol,
+        side: orderTicketSide,
+        qty: orderTicketQty,
+        orderType: 'market',
+        confirmLive: kisLiveConfirmation,
+      );
+      latestKisManualOrder = result;
+      _upsertKisOrder(result);
+
+      try {
+        result = await apiClient.syncKisOrder(result.orderId);
+        latestKisManualOrder = result;
+        _upsertKisOrder(result);
+      } catch (e) {
+        kisManualOrderError = 'Submitted; status sync unavailable: $e';
+      }
+
+      await _refreshKisOrdersAfterAction();
+      return ActionResult(
+        success: true,
+        message:
+            'Live KIS order submitted. Status: ${latestKisManualOrder?.internalStatus ?? result.internalStatus}.',
+      );
+    } catch (e) {
+      kisManualOrderError = e.toString();
+      return ActionResult(success: false, message: kisManualOrderError!);
+    } finally {
+      kisManualSubmitLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> syncLatestKisOrder() async {
+    final order =
+        latestKisManualOrder ?? (kisOrders.isEmpty ? null : kisOrders.first);
+    if (order == null) {
+      return const ActionResult(
+        success: false,
+        message: 'No KIS order is available to sync.',
+      );
+    }
+
+    kisOrderSyncLoading = true;
+    kisManualOrderError = null;
+    notifyListeners();
+
+    try {
+      final result = await apiClient.syncKisOrder(order.orderId);
+      latestKisManualOrder = result;
+      _upsertKisOrder(result);
+      await _refreshKisOrdersAfterAction();
+      return ActionResult(
+        success: true,
+        message: 'KIS order status synced: ${result.internalStatus}.',
+      );
+    } catch (e) {
+      kisManualOrderError = e.toString();
+      return ActionResult(success: false, message: kisManualOrderError!);
+    } finally {
+      kisOrderSyncLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisOrders() async {
+    kisOrdersLoading = true;
+    kisManualOrderError = null;
+    notifyListeners();
+    try {
+      kisOrders = await apiClient.fetchKisOrders();
+      latestKisManualOrder =
+          kisOrders.isEmpty ? latestKisManualOrder : kisOrders.first;
+      return const ActionResult(
+          success: true, message: 'KIS orders refreshed.');
+    } catch (e) {
+      kisManualOrderError = e.toString();
+      return ActionResult(success: false, message: kisManualOrderError!);
+    } finally {
+      kisOrdersLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runKrWatchlistPreview() async {
     krWatchlistPreviewLoading = true;
     krWatchlistPreviewError = null;
@@ -489,4 +601,32 @@ class DashboardController extends ChangeNotifier {
   }
 
   int _safeGateLevel(int value) => (value >= 1 && value <= 4) ? value : 2;
+
+  Future<void> _refreshKisOrdersAfterAction() async {
+    try {
+      kisOrders = await apiClient.fetchKisOrders();
+      if (kisOrders.isNotEmpty) {
+        latestKisManualOrder = kisOrders.first;
+      }
+    } catch (_) {
+      // Keep the submitted/synced order visible if list refresh is unavailable.
+    }
+  }
+
+  void _upsertKisOrder(KisManualOrderResult order) {
+    final updated = <KisManualOrderResult>[];
+    var inserted = false;
+    for (final existing in kisOrders) {
+      if (existing.orderId == order.orderId) {
+        updated.add(order);
+        inserted = true;
+      } else {
+        updated.add(existing);
+      }
+    }
+    if (!inserted) {
+      updated.insert(0, order);
+    }
+    kisOrders = updated;
+  }
 }

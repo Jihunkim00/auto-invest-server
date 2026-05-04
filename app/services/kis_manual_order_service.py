@@ -48,6 +48,7 @@ class KisManualOrderSubmitRequest(BaseModel):
     qty: int = Field(examples=[1])
     order_type: str = Field(default="market", examples=["market"])
     dry_run: bool = Field(default=True)
+    confirm_live: bool = Field(default=False)
     confirmation: str | None = Field(default=None, max_length=300)
     reason: str | None = Field(default=None, max_length=500)
 
@@ -149,6 +150,11 @@ class KisManualOrderService:
                 "request_dry_run": request.dry_run,
                 "runtime_dry_run": runtime.get("dry_run", True),
             },
+        )
+        check(
+            "confirm_live_true",
+            request.confirm_live is True,
+            "confirm_live_required",
         )
         check(
             "kill_switch_false",
@@ -324,6 +330,9 @@ class KisManualOrderService:
                 response_payload=response,
             )
             response["order_log_id"] = order.id
+            response["order_id"] = order.id
+            response["kis_odno"] = None
+            response["broker_order_status"] = response.get("broker_status")
             order.response_payload = json.dumps(response, ensure_ascii=False, default=str)
             db.commit()
             return status_code, response
@@ -366,8 +375,12 @@ class KisManualOrderService:
             )
             response["error"] = _safe_error(exc)
             response["order_log_id"] = order.id
+            response["order_id"] = order.id
+            response["kis_odno"] = None
+            response["broker_order_status"] = response.get("broker_status")
             order.internal_status = InternalOrderStatus.FAILED.value
             order.broker_status = "failed"
+            order.broker_order_status = "failed"
             order.error_message = _safe_error(exc)
             order.response_payload = json.dumps(response, ensure_ascii=False, default=str)
             db.commit()
@@ -389,9 +402,24 @@ class KisManualOrderService:
             broker_status=broker_status,
         )
         response["order_log_id"] = order.id
+        response["order_id"] = order.id
+        response["kis_odno"] = broker_order_id
+        response["broker_order_status"] = broker_status
+        response["requested_qty"] = request.qty
+        response["filled_qty"] = 0
+        response["remaining_qty"] = request.qty
+        response["avg_fill_price"] = None
         order.internal_status = InternalOrderStatus.SUBMITTED.value
         order.broker_status = broker_status
+        order.broker_order_status = broker_status
         order.broker_order_id = broker_order_id
+        order.kis_odno = broker_order_id
+        order.market = "KR"
+        order.requested_qty = float(request.qty)
+        order.filled_qty = 0
+        order.remaining_qty = float(request.qty)
+        order.avg_fill_price = None
+        order.sync_error = None
         order.submitted_at = datetime.now(UTC)
         order.response_payload = json.dumps(
             {
@@ -471,11 +499,14 @@ class KisManualOrderService:
 
         row = OrderLog(
             broker="kis",
+            market=str(request.market or "KR").strip().upper() or "KR",
             symbol=symbol or str(request.symbol or ""),
             side=side or str(request.side or ""),
             order_type=order_type or str(request.order_type or ""),
             time_in_force="day",
             qty=float(request.qty) if isinstance(request.qty, int) else None,
+            requested_qty=float(request.qty) if isinstance(request.qty, int) else None,
+            remaining_qty=float(request.qty) if isinstance(request.qty, int) else None,
             notional=notional,
             limit_price=None,
             extended_hours=False,
@@ -488,6 +519,7 @@ class KisManualOrderService:
                     "qty": request.qty,
                     "order_type": request.order_type,
                     "dry_run": request.dry_run,
+                    "confirm_live": request.confirm_live,
                     "reason": request.reason,
                     "confirmation_provided": bool(request.confirmation),
                     "order_payload_preview": order_payload_preview,

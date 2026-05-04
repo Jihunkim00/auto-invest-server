@@ -185,6 +185,7 @@ def _payload(**overrides):
         "qty": 1,
         "order_type": "market",
         "dry_run": False,
+        "confirm_live": True,
         "confirmation": CONFIRMATION,
         "reason": "manual small real-order test",
     }
@@ -427,6 +428,17 @@ def test_submit_manual_rejects_when_confirmation_missing_with_caps_disabled(
     assert response.json()["safety_checks"]["max_order_amount_cap"]["passed"] is True
 
 
+def test_submit_manual_rejects_when_confirm_live_false(client, db_session):
+    _seed_validation(db_session)
+
+    response = client.post(
+        "/kis/orders/submit-manual",
+        json=_payload(confirm_live=False),
+    )
+
+    _assert_rejected(response, "confirm_live_true")
+
+
 def test_submit_manual_rejects_when_confirmation_missing(client, db_session):
     _seed_validation(db_session)
 
@@ -610,6 +622,13 @@ def test_submit_manual_success_stores_order_log(monkeypatch, client, db_session)
     body = response.json()
     assert body["real_order_submitted"] is True
     assert body["broker_order_id"] == "0001234567"
+    assert body["order_id"] == body["order_log_id"]
+    assert body["kis_odno"] == "0001234567"
+    assert body["broker_order_status"] == "submitted"
+    assert body["requested_qty"] == 1
+    assert body["filled_qty"] == 0
+    assert body["remaining_qty"] == 1
+    assert body["avg_fill_price"] is None
     assert body["broker_status"] == "submitted"
     assert body["internal_status"] == "SUBMITTED"
     assert calls == [
@@ -628,6 +647,12 @@ def test_submit_manual_success_stores_order_log(monkeypatch, client, db_session)
     assert order.notional == 72000
     assert order.internal_status == "SUBMITTED"
     assert order.broker_order_id == "0001234567"
+    assert order.kis_odno == "0001234567"
+    assert order.market == "KR"
+    assert order.requested_qty == 1.0
+    assert order.filled_qty == 0.0
+    assert order.remaining_qty == 1.0
+    assert order.broker_order_status == "submitted"
     assert order.broker_status == "submitted"
     assert order.request_payload
     assert order.response_payload

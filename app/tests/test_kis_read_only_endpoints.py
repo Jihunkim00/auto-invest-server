@@ -514,7 +514,11 @@ def test_kis_api_error_returns_safe_message_without_token(
     response = client.get("/kis/market/price/005930")
 
     assert response.status_code == 502
-    assert response.json()["detail"] == "KIS read-only API returned error code EGW00001."
+    detail = response.json()["detail"]
+    assert "KIS read-only API failed" in detail
+    assert "msg_cd=EGW00001" in detail
+    assert "msg1=bad token ***" in detail
+    assert "tr_id=FHKST01010100" in detail
     assert "secret-error-token" not in response.text
 
 

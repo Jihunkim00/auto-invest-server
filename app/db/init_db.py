@@ -44,6 +44,24 @@ def _create_trade_run_logs_optional_indexes_if_possible():
             )
 
 
+def _create_order_optional_indexes_if_possible():
+    inspector = inspect(engine)
+    if "orders" not in inspector.get_table_names():
+        return
+
+    existing = {col["name"] for col in inspector.get_columns("orders")}
+
+    with engine.begin() as conn:
+        if "market" in existing:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_market ON orders (market)"))
+        if "kis_odno" in existing:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_kis_odno ON orders (kis_odno)"))
+        if "kis_orgn_odno" in existing:
+            conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_orders_kis_orgn_odno ON orders (kis_orgn_odno)")
+            )
+
+
 def _create_reference_site_cache_table_if_missing():
     inspector = inspect(engine)
     if "reference_site_cache" in inspector.get_table_names():
@@ -255,6 +273,18 @@ def init_db():
         "symbol_role": "VARCHAR(30)",
     }
 
+    order_columns = {
+        "market": "VARCHAR(10)",
+        "kis_odno": "VARCHAR(100)",
+        "kis_orgn_odno": "VARCHAR(100)",
+        "requested_qty": "FLOAT",
+        "remaining_qty": "FLOAT",
+        "avg_fill_price": "FLOAT",
+        "broker_order_status": "VARCHAR(50)",
+        "last_synced_at": "DATETIME",
+        "sync_error": "TEXT",
+    }
+
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)
 
@@ -267,4 +297,8 @@ def init_db():
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)
 
+    for name, ddl in order_columns.items():
+        _add_column_if_missing("orders", name, ddl)
+
     _create_trade_run_logs_optional_indexes_if_possible()
+    _create_order_optional_indexes_if_possible()

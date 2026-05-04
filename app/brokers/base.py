@@ -14,7 +14,11 @@ class KisAuthError(RuntimeError):
 
 
 class KisApiError(RuntimeError):
-    """Raised when an explicit read-only KIS API request fails safely."""
+    """Raised when an explicit KIS API request fails safely."""
+
+    def __init__(self, message: str, *, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 class BrokerNotEnabledError(RuntimeError):

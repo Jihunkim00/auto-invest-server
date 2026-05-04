@@ -19,6 +19,11 @@ from app.services.kis_manual_order_service import (
     KisManualOrderService,
     KisManualOrderSubmitRequest,
 )
+from app.services.kis_order_sync_service import (
+    KisOrderSyncError,
+    KisOrderSyncService,
+    serialize_kis_order,
+)
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
 from app.services.market_session_service import MarketSessionError
@@ -131,6 +136,7 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@router.post("/orders/manual-submit")
 @router.post("/orders/submit-manual")
 def submit_manual_kis_order(
     payload: KisManualOrderSubmitRequest,
@@ -140,6 +146,46 @@ def submit_manual_kis_order(
     service = KisManualOrderService(client)
     status_code, body = service.submit_manual(db, payload)
     return JSONResponse(status_code=status_code, content=body)
+
+
+@router.get("/orders")
+def list_recent_kis_orders(
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisOrderSyncService(client)
+    rows = service.recent_orders(db, limit=limit)
+    return {
+        "provider": "kis",
+        "count": len(rows),
+        "orders": [serialize_kis_order(row) for row in rows],
+    }
+
+
+@router.post("/orders/sync-open")
+def sync_open_kis_orders(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisOrderSyncService(client)
+    rows = service.sync_open_orders(db)
+    return {
+        "provider": "kis",
+        "count": len(rows),
+        "orders": [serialize_kis_order(row) for row in rows],
+    }
+
+
+@router.post("/orders/{order_id}/sync")
+def sync_kis_order(order_id: int, db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisOrderSyncService(client)
+    try:
+        row = service.sync_order(db, order_id)
+    except KisOrderSyncError as exc:
+        message = str(exc)
+        status_code = 404 if "not found" in message.lower() else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+    return serialize_kis_order(row)
 
 
 @router.post("/watchlist/preview")
