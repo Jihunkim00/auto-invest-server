@@ -197,6 +197,9 @@ class _FakeApiClient extends ApiClient {
   final OrderValidationResult? validationResult;
   int mockCalls = 0;
   int validationCalls = 0;
+  String? lastProvider;
+  int? lastGateLevel;
+  int? lastKisGateLevel;
 
   @override
   Future<OpsSettings> getOpsSettings() async => const OpsSettings(
@@ -219,6 +222,13 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>
       usPortfolio ?? PortfolioSummary.empty();
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
+    return market.trim().toUpperCase() == 'KR'
+        ? fetchKrPortfolioSummary()
+        : fetchUsPortfolioSummary();
+  }
 
   @override
   Future<PortfolioSummary> fetchKrPortfolioSummary() async {
@@ -255,6 +265,33 @@ class _FakeApiClient extends ApiClient {
     }
     return latest;
   }
+
+  @override
+  Future<WatchlistRunResult> runKisWatchlistPreview({
+    int gateLevel = 2,
+  }) async {
+    lastKisGateLevel = gateLevel;
+    return latest ?? _resultFor('KIS');
+  }
+
+  @override
+  Future<WatchlistRunResult> runWatchlistForProvider({
+    required String provider,
+    required int gateLevel,
+  }) async {
+    lastProvider = provider;
+    lastGateLevel = gateLevel;
+
+    if (provider.trim().toLowerCase() == 'kis') {
+      return runKisWatchlistPreview(gateLevel: gateLevel);
+    }
+
+    return runWatchlistOnce();
+  }
+
+  @override
+  Future<WatchlistRunResult> runWatchlistOnce() async =>
+      latest ?? _resultFor('US');
 
   @override
   Future<List<TradingRun>> getRecentTradingRuns() async => const [];

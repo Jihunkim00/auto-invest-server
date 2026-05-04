@@ -76,10 +76,11 @@ def test_scheduler_status_keeps_kr_disabled_by_default():
 
 
 def test_kis_scheduler_preview_once_is_preview_only(monkeypatch):
-    def fake_preview(self, include_gpt=True):
+    def fake_preview(self, include_gpt=True, gate_level=2, **kwargs):
         return {
             "market": "KR",
             "provider": "kis",
+            "gate_level": gate_level,
             "preview_only": True,
             "dry_run": True,
             "watchlist": [],

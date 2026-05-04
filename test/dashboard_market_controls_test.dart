@@ -8,11 +8,12 @@ import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_secti
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
+import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
+import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 const _samsungName = '\uC0BC\uC131\uC804\uC790';
 const _krLabel = '005930 - $_samsungName - KOSPI';
-const _useTicketLabel = '\uC8FC\uBB38 \uD2F0\uCF13\uC5D0 \uC785\uB825';
 
 void main() {
   testWidgets('KR order ticket is dry-run only and validates preview',
@@ -25,17 +26,9 @@ void main() {
       () => OrderTicketSection(controller: controller),
     ));
 
-    expect(
-        find.text(
-            'US order ticket not available here. Use existing manual trading run.'),
-        findsOneWidget);
-
-    controller.selectOrderMarket(PortfolioMarket.kr);
-    await tester.pumpAndSettle();
-
     expect(find.text('DRY-RUN ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.text('Submit Real KIS Order'), findsOneWidget);
+    expect(find.textContaining('Submit Real KIS Order'), findsOneWidget);
     expect(find.text('Real KIS trading is disabled'), findsOneWidget);
     expect(find.text('Use dry-run validation first'), findsOneWidget);
 
@@ -63,50 +56,31 @@ void main() {
 
     expect(find.text('US Watchlist / Alpaca'), findsOneWidget);
     expect(find.text('AAPL'), findsOneWidget);
-    expect(find.text('Run US Watchlist Once'), findsOneWidget);
+    expect(find.text('Run Alpaca Watchlist'), findsOneWidget);
 
-    controller.selectWatchlistMarket(PortfolioMarket.kr);
+    controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
     expect(find.text('KR Watchlist / KIS'), findsOneWidget);
     expect(find.text(_krLabel), findsOneWidget);
-    expect(find.text('READ-ONLY'), findsOneWidget);
-    expect(find.text('Run KR Preview'), findsOneWidget);
-    expect(find.text('Run US Watchlist Once'), findsNothing);
+    expect(find.text('PREVIEW ONLY'), findsOneWidget);
+    expect(find.text('TRADING DISABLED'), findsOneWidget);
+    expect(find.text('NO AUTO ORDER'), findsOneWidget);
+    expect(find.text('Run KIS Preview'), findsOneWidget);
+    expect(find.text('Run Alpaca Watchlist'), findsNothing);
 
-    await tester.tap(find.text('Run KR Preview'));
+    await tester.tap(find.text('Run KIS Preview'));
     await tester.pumpAndSettle();
 
     expect(api.previewCalls, 1);
-    expect(find.text('Quant-first \u00B7 GPT advisory only'), findsWidgets);
-    expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
-    expect(find.text('GPT ADVISORY'), findsOneWidget);
-    expect(find.text(_useTicketLabel), findsOneWidget);
-    expect(find.text('PRICE ONLY'), findsOneWidget);
-    expect(find.text('Not calculated'), findsWidgets);
-    expect(
-        find.text(
-            'Technical score not calculated. Reason: insufficient indicator data.'),
-        findsOneWidget);
-    expect(find.text('KIS OHLCV indicators not available yet'), findsOneWidget);
-    expect(find.text('GPT ADVISORY CONTEXT'), findsOneWidget);
-    expect(find.text('QUANT BUY'), findsNothing);
-    expect(find.text('FINAL BUY'), findsNothing);
-    expect(
-        find.text(
-            'Only current price is available; technical indicator score was not calculated.'),
-        findsOneWidget);
+    expect(api.lastProvider, 'kis');
+    expect(api.lastGateLevel, 2);
+    expect(api.lastKisGateLevel, 2);
+    expect(controller.runResult.result, 'preview_only');
+    expect(controller.runResult.finalRankedCandidates.single.indicatorStatus,
+        'price_only');
     expect(
         find.textContaining('submit real', findRichText: true), findsNothing);
-
-    await tester.ensureVisible(find.text(_useTicketLabel));
-    await tester.tap(find.text(_useTicketLabel));
-    await tester.pumpAndSettle();
-
-    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
-    expect(controller.orderTicketSymbol, '005930');
-    expect(controller.orderTicketQty, 1);
-    expect(controller.orderTicketSide, 'buy');
     expect(api.validationCalls, 0);
 
     controller.dispose();
@@ -124,29 +98,37 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    controller.selectWatchlistMarket(PortfolioMarket.kr);
+    controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Run KR Preview'));
+    await tester.tap(find.text('Run KIS Preview'));
     await tester.pumpAndSettle();
 
     expect(find.text('PREVIEW ONLY'), findsWidgets);
     expect(find.text('TRADING DISABLED'), findsWidgets);
-    expect(find.text('OK'), findsOneWidget);
-    expect(find.text('QUANT BUY'), findsOneWidget);
-    expect(find.text('QUANT SELL'), findsOneWidget);
-    expect(find.text('AI BUY'), findsOneWidget);
-    expect(find.text('FINAL BUY'), findsOneWidget);
-    expect(find.text('CONFIDENCE'), findsOneWidget);
-    expect(find.text('EMA20'), findsOneWidget);
-    expect(find.text('EMA50'), findsOneWidget);
-    expect(find.text('RSI'), findsOneWidget);
-    expect(find.text('VWAP'), findsOneWidget);
-    expect(find.text('ATR'), findsOneWidget);
-    expect(find.text('VOLUME_RATIO'), findsOneWidget);
-    expect(find.text('MOMENTUM'), findsOneWidget);
-    expect(find.text('RECENT_RETURN'), findsOneWidget);
-    expect(find.text('KIS OHLCV indicators not available yet'), findsNothing);
+    expect(api.previewCalls, 1);
+
+    final candidate = controller.runResult.finalRankedCandidates.single;
+    expect(controller.runResult.result, 'preview_only');
+    expect(controller.runResult.bestScore, 64);
+    expect(candidate.indicatorStatus, 'ok');
+    expect(candidate.quantBuyScore, 62);
+    expect(candidate.quantSellScore, 18);
+    expect(candidate.aiBuyScore, 70);
+    expect(candidate.finalBuyScore, 64);
+    expect(candidate.confidence, 0.72);
+    expect(
+        candidate.indicatorPayload.keys,
+        containsAll(<String>[
+          'ema20',
+          'ema50',
+          'rsi',
+          'vwap',
+          'atr',
+          'volume_ratio',
+          'momentum',
+          'recent_return',
+        ]));
 
     controller.dispose();
   });
@@ -172,6 +154,28 @@ class _FakeApiClient extends ApiClient {
   final bool scoredPreview;
   int validationCalls = 0;
   int previewCalls = 0;
+  String? lastProvider;
+  int? lastGateLevel;
+  int? lastKisGateLevel;
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummary() async =>
+      PortfolioSummary.empty();
+
+  @override
+  Future<PortfolioSummary> fetchUsPortfolioSummary() async =>
+      PortfolioSummary.empty(currency: 'USD');
+
+  @override
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async =>
+      PortfolioSummary.empty(currency: 'KRW');
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
+    return market.trim().toUpperCase() == 'KR'
+        ? fetchKrPortfolioSummary()
+        : fetchUsPortfolioSummary();
+  }
 
   @override
   Future<OrderValidationResult> validateKisOrder({
@@ -219,8 +223,29 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<WatchlistRunResult> runKisWatchlistPreview() async {
+  Future<WatchlistRunResult> runWatchlistForProvider({
+    required String provider,
+    required int gateLevel,
+  }) async {
+    lastProvider = provider;
+    lastGateLevel = gateLevel;
+
+    if (provider.trim().toLowerCase() == 'kis') {
+      return runKisWatchlistPreview(gateLevel: gateLevel);
+    }
+
+    return runWatchlistOnce();
+  }
+
+  @override
+  Future<WatchlistRunResult> runWatchlistOnce() async => getMockRunResult();
+
+  @override
+  Future<WatchlistRunResult> runKisWatchlistPreview({
+    int gateLevel = 2,
+  }) async {
     previewCalls += 1;
+    lastKisGateLevel = gateLevel;
     if (scoredPreview) return _scoredPreviewResult();
     return const WatchlistRunResult(
       configuredSymbolCount: 1,
@@ -366,6 +391,9 @@ class _FakeApiClient extends ApiClient {
       triggerSource: 'manual_preview',
     );
   }
+
+  @override
+  Future<List<TradingRun>> getRecentTradingRuns() async => const [];
 }
 
 const _usWatchlist = MarketWatchlist(

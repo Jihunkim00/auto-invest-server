@@ -44,7 +44,23 @@ void main() {
   });
 }
 
-class _NoopApiClient extends ApiClient {}
+class _NoopApiClient extends ApiClient {
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummary() async => _usSummary;
+
+  @override
+  Future<PortfolioSummary> fetchUsPortfolioSummary() async => _usSummary;
+
+  @override
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async => _krSummary;
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
+    return market.trim().toUpperCase() == 'KR'
+        ? fetchKrPortfolioSummary()
+        : fetchUsPortfolioSummary();
+  }
+}
 
 const _usSummary = PortfolioSummary(
   currency: 'USD',
