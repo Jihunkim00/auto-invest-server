@@ -244,10 +244,14 @@ class ApiClient {
     return KisManualOrderResult.fromJson(payload);
   }
 
-  Future<List<KisManualOrderResult>> fetchKisOrders({int limit = 20}) async {
+  Future<List<KisManualOrderResult>> fetchKisOrders({
+    int limit = 20,
+    bool includeRejected = false,
+  }) async {
     final uri = Uri.parse('${AppConfig.baseUrl}/kis/orders').replace(
       queryParameters: {
         'limit': limit.toString(),
+        if (includeRejected) 'include_rejected': 'true',
         '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
       },
     );
@@ -268,6 +272,24 @@ class ApiClient {
         .map((item) =>
             KisManualOrderResult.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+  }
+
+  Future<KisManualOrderResult> fetchKisOrderDetail(
+    int orderId, {
+    bool includeSyncPayload = false,
+  }) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/orders/$orderId').replace(
+      queryParameters: {
+        if (includeSyncPayload) 'include_sync_payload': 'true',
+        '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+      },
+    );
+    final r = await _client.get(uri);
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    return KisManualOrderResult.fromJson(
+        Map<String, dynamic>.from(jsonDecode(r.body) as Map));
   }
 
   Future<WatchlistRunResult> runKisWatchlistPreview({

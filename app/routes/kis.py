@@ -8,6 +8,7 @@ from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
+from app.db.models import OrderLog
 from app.db.database import get_db
 from app.services.kis_order_validation_service import (
     KisOrderValidationError,
@@ -151,16 +152,29 @@ def submit_manual_kis_order(
 @router.get("/orders")
 def list_recent_kis_orders(
     limit: int = Query(default=20, ge=1, le=100),
+    include_rejected: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     client = _client(db)
     service = KisOrderSyncService(client)
-    rows = service.recent_orders(db, limit=limit)
+    rows = service.recent_orders(db, limit=limit, include_rejected=include_rejected)
     return {
         "provider": "kis",
         "count": len(rows),
         "orders": [serialize_kis_order(row) for row in rows],
     }
+
+
+@router.get("/orders/{order_id}")
+def get_kis_order_detail(
+    order_id: int,
+    include_sync_payload: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    row = db.get(OrderLog, order_id)
+    if row is None or str(row.broker or "").lower() != "kis":
+        raise HTTPException(status_code=404, detail="KIS order not found.")
+    return serialize_kis_order(row, include_sync_payload=include_sync_payload)
 
 
 @router.post("/orders/sync-open")

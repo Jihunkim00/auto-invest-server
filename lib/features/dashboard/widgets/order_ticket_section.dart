@@ -276,6 +276,7 @@ class _KrOrderTicket extends StatelessWidget {
       ],
       const SizedBox(height: 12),
       _KisOrderStatusPanel(
+        controller: controller,
         latest: controller.latestKisManualOrder,
         orders: controller.kisOrders,
       ),
@@ -284,8 +285,9 @@ class _KrOrderTicket extends StatelessWidget {
 }
 
 class _KisOrderStatusPanel extends StatelessWidget {
-  const _KisOrderStatusPanel({required this.latest, required this.orders});
+  const _KisOrderStatusPanel({required this.controller, required this.latest, required this.orders});
 
+  final DashboardController controller;
   final KisManualOrderResult? latest;
   final List<KisManualOrderResult> orders;
 
@@ -311,6 +313,12 @@ class _KisOrderStatusPanel extends StatelessWidget {
           ),
           if (latest != null) _StatusPill(order: latest!),
         ]),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          value: controller.kisIncludeRejected,
+          onChanged: (value) => controller.setKisIncludeRejected(value == true),
+          title: const Text('Show rejected attempts'),
+        ),
         const SizedBox(height: 10),
         if (latest == null)
           const _StateLine(text: 'No recent KIS manual live orders')
@@ -349,7 +357,7 @@ class _KisOrderStatusPanel extends StatelessWidget {
           for (final order in visible)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: _RecentKisOrderRow(order: order),
+              child: _RecentKisOrderRow(order: order, controller: controller),
             ),
         ],
       ]),
@@ -358,9 +366,10 @@ class _KisOrderStatusPanel extends StatelessWidget {
 }
 
 class _RecentKisOrderRow extends StatelessWidget {
-  const _RecentKisOrderRow({required this.order});
+  const _RecentKisOrderRow({required this.order, required this.controller});
 
   final KisManualOrderResult order;
+  final DashboardController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -375,6 +384,15 @@ class _RecentKisOrderRow extends StatelessWidget {
       ),
       const SizedBox(width: 8),
       _StatusPill(order: order),
+      const SizedBox(width: 6),
+      if (order.isSyncable)
+        IconButton(
+          onPressed: () async {
+            await controller.selectKisOrder(order.orderId);
+            await controller.syncLatestKisOrder();
+          },
+          icon: const Icon(Icons.sync, size: 18),
+        ),
     ]);
   }
 }
@@ -386,7 +404,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = order.internalStatus.toUpperCase();
+    final status = order.displayStatus;
     final color = order.isFilled
         ? Colors.greenAccent
         : order.isPartial
@@ -395,7 +413,9 @@ class _StatusPill extends StatelessWidget {
                 ? Colors.amberAccent
                 : order.isUnknownStale
                     ? Colors.orangeAccent
-                    : Colors.white54;
+                    : order.internalStatus.toUpperCase() == 'FAILED'
+                        ? Colors.redAccent
+                        : Colors.white54;
     return _SoftBadge(text: status, color: color);
   }
 }

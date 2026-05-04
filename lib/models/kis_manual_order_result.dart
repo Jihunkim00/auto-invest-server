@@ -16,6 +16,9 @@ class KisManualOrderResult {
     required this.submittedAt,
     required this.lastSyncedAt,
     required this.syncError,
+    required this.displayStatus,
+    required this.isSyncable,
+    required this.isTerminal,
   });
 
   final int orderId;
@@ -34,6 +37,9 @@ class KisManualOrderResult {
   final String? submittedAt;
   final String? lastSyncedAt;
   final String? syncError;
+  final String displayStatus;
+  final bool isSyncable;
+  final bool isTerminal;
 
   bool get hasSyncError => syncError != null && syncError!.isNotEmpty;
   bool get isFilled => internalStatus.toUpperCase() == 'FILLED';
@@ -60,6 +66,9 @@ class KisManualOrderResult {
       submittedAt: _readNullableString(json['submitted_at']),
       lastSyncedAt: _readNullableString(json['last_synced_at']),
       syncError: _readNullableString(json['sync_error']),
+      displayStatus: _readString(json['display_status'], _readString(json['internal_status'], 'UNKNOWN')),
+      isSyncable: json['is_syncable'] == true,
+      isTerminal: json['is_terminal'] == true,
     );
   }
 }

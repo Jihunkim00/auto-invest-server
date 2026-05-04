@@ -153,15 +153,19 @@ class KisOrderSyncService:
         return synced
 
     @staticmethod
-    def recent_orders(db: Session, *, limit: int = 20) -> list[OrderLog]:
+    def recent_orders(
+        db: Session,
+        *,
+        limit: int = 20,
+        include_rejected: bool = False,
+    ) -> list[OrderLog]:
         safe_limit = max(1, min(int(limit or 20), 100))
-        return (
-            db.query(OrderLog)
-            .filter(OrderLog.broker == "kis")
-            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
-            .limit(safe_limit)
-            .all()
-        )
+        query = db.query(OrderLog).filter(OrderLog.broker == "kis")
+        if not include_rejected:
+            query = query.filter(
+                OrderLog.internal_status != InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+            )
+        return query.order_by(OrderLog.created_at.desc(), OrderLog.id.desc()).limit(safe_limit).all()
 
     def _apply_mapped_result(
         self,
@@ -252,7 +256,7 @@ class KisOrderSyncService:
             raise
 
 
-def serialize_kis_order(order: OrderLog) -> dict[str, Any]:
+def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) -> dict[str, Any]:
     requested_qty = order.requested_qty
     if requested_qty is None:
         requested_qty = order.qty
@@ -261,7 +265,8 @@ def serialize_kis_order(order: OrderLog) -> dict[str, Any]:
     if remaining_qty is None and requested_qty is not None:
         remaining_qty = max(float(requested_qty) - filled_qty, 0)
 
-    return {
+    internal_status = str(order.internal_status or "").upper()
+    payload = {
         "order_id": order.id,
         "broker": order.broker,
         "market": order.market or "KR",
@@ -280,7 +285,30 @@ def serialize_kis_order(order: OrderLog) -> dict[str, Any]:
         "submitted_at": _iso(order.submitted_at),
         "last_synced_at": _iso(order.last_synced_at),
         "sync_error": order.sync_error or order.error_message,
+        "is_live_order": bool(str(order.broker or "").lower() == "kis" and (order.kis_odno or order.broker_order_id)),
+        "is_terminal": internal_status in {"FILLED", "CANCELLED", "CANCELED", "REJECTED", "FAILED"},
+        "is_syncable": internal_status in {"SUBMITTED", "ACCEPTED", "PARTIALLY_FILLED", "UNKNOWN_STALE", "SYNC_FAILED"},
+        "display_status": _display_status(internal_status),
     }
+    if include_sync_payload and order.last_sync_payload:
+        try:
+            payload["last_sync_payload"] = _sanitize_payload(json.loads(order.last_sync_payload))
+        except Exception:
+            payload["last_sync_payload"] = _sanitize_payload(order.last_sync_payload)
+    return payload
+
+
+def _display_status(internal_status: str) -> str:
+    mapping = {
+        "FILLED": "Filled",
+        "PARTIALLY_FILLED": "Partially filled",
+        "SUBMITTED": "Submitted",
+        "ACCEPTED": "Submitted",
+        "UNKNOWN_STALE": "Sync uncertain",
+        "FAILED": "Failed",
+        "REJECTED_BY_SAFETY_GATE": "Rejected by safety gate",
+    }
+    return mapping.get(internal_status, internal_status.title().replace("_", " "))
 
 
 def _order_no(order: OrderLog) -> str | None:

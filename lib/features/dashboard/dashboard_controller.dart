@@ -106,6 +106,8 @@ class DashboardController extends ChangeNotifier {
   String? kisManualOrderError;
   KisManualOrderResult? latestKisManualOrder;
   List<KisManualOrderResult> kisOrders = const [];
+  bool kisIncludeRejected = false;
+  KisManualOrderResult? selectedKisOrder;
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -534,9 +536,10 @@ class DashboardController extends ChangeNotifier {
     kisManualOrderError = null;
     notifyListeners();
     try {
-      kisOrders = await apiClient.fetchKisOrders();
+      kisOrders = await apiClient.fetchKisOrders(includeRejected: kisIncludeRejected);
       latestKisManualOrder =
           kisOrders.isEmpty ? latestKisManualOrder : kisOrders.first;
+      selectedKisOrder ??= latestKisManualOrder;
       return const ActionResult(
           success: true, message: 'KIS orders refreshed.');
     } catch (e) {
@@ -604,9 +607,10 @@ class DashboardController extends ChangeNotifier {
 
   Future<void> _refreshKisOrdersAfterAction() async {
     try {
-      kisOrders = await apiClient.fetchKisOrders();
+      kisOrders = await apiClient.fetchKisOrders(includeRejected: kisIncludeRejected);
       if (kisOrders.isNotEmpty) {
         latestKisManualOrder = kisOrders.first;
+        selectedKisOrder = latestKisManualOrder;
       }
     } catch (_) {
       // Keep the submitted/synced order visible if list refresh is unavailable.
@@ -628,5 +632,18 @@ class DashboardController extends ChangeNotifier {
       updated.insert(0, order);
     }
     kisOrders = updated;
+    selectedKisOrder = order;
+  }
+
+  Future<void> setKisIncludeRejected(bool value) async {
+    kisIncludeRejected = value;
+    await refreshKisOrders();
+  }
+
+  Future<void> selectKisOrder(int orderId) async {
+    try {
+      selectedKisOrder = await apiClient.fetchKisOrderDetail(orderId);
+      notifyListeners();
+    } catch (_) {}
   }
 }

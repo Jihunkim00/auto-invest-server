@@ -598,3 +598,54 @@ def test_kis_orders_route_returns_recent_kis_orders_only(monkeypatch, db_session
     assert body["count"] == 1
     assert body["orders"][0]["order_id"] == kis_order.id
     assert body["orders"][0]["broker"] == "kis"
+
+
+def test_kis_orders_route_excludes_safety_rejected_by_default(monkeypatch, db_session):
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    _seed_order(db_session, odno="0000000001", status=InternalOrderStatus.SUBMITTED.value)
+    _seed_order(db_session, odno="0000000002", status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value)
+
+    with _client(db_session) as client:
+        response = client.get("/kis/orders")
+    assert response.status_code == 200
+    statuses = [row["internal_status"] for row in response.json()["orders"]]
+    assert "REJECTED_BY_SAFETY_GATE" not in statuses
+
+
+def test_kis_orders_route_can_include_safety_rejected(monkeypatch, db_session):
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    _seed_order(db_session, odno="0000000001", status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value)
+
+    with _client(db_session) as client:
+        response = client.get("/kis/orders?include_rejected=true")
+    assert response.status_code == 200
+    statuses = [row["internal_status"] for row in response.json()["orders"]]
+    assert "REJECTED_BY_SAFETY_GATE" in statuses
+
+
+def test_kis_order_detail_hides_payload_by_default(monkeypatch, db_session):
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    order = _seed_order(db_session, odno="0000000001")
+    order.last_sync_payload = json.dumps({"ctac_tlno": "010-1234-5678"})
+    db_session.commit()
+    with _client(db_session) as client:
+        response = client.get(f"/kis/orders/{order.id}")
+    assert response.status_code == 200
+    assert "last_sync_payload" not in response.json()
+
+
+def test_kis_order_detail_includes_sanitized_payload(monkeypatch, db_session):
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    order = _seed_order(db_session, odno="0000000001")
+    order.last_sync_payload = json.dumps(
+        {"ctac_tlno": "010-1234-5678", "inqr_ip_addr": "203.0.113.24", "CANO": "12345678"}
+    )
+    db_session.commit()
+    with _client(db_session) as client:
+        response = client.get(f"/kis/orders/{order.id}?include_sync_payload=true")
+    assert response.status_code == 200
+    body = response.json()
+    payload = body["last_sync_payload"]
+    assert payload["ctac_tlno"] == "***REDACTED***"
+    assert payload["inqr_ip_addr"] == "***REDACTED***"
+    assert payload["CANO"] != "12345678"
