@@ -225,7 +225,7 @@ class _KrOrderTicket extends StatelessWidget {
         ),
         OutlinedButton.icon(
           onPressed: controller.kisOrderSyncLoading ||
-                  controller.latestKisManualOrder == null
+                  controller.latestKisManualOrder?.isSyncable != true
               ? null
               : () async {
                   final result = await controller.syncLatestKisOrder();
@@ -278,6 +278,7 @@ class _KrOrderTicket extends StatelessWidget {
       _KisOrderStatusPanel(
         controller: controller,
         latest: controller.latestKisManualOrder,
+        selected: controller.selectedKisOrder,
         orders: controller.kisOrders,
       ),
     ]);
@@ -285,15 +286,22 @@ class _KrOrderTicket extends StatelessWidget {
 }
 
 class _KisOrderStatusPanel extends StatelessWidget {
-  const _KisOrderStatusPanel({required this.controller, required this.latest, required this.orders});
+  const _KisOrderStatusPanel({
+    required this.controller,
+    required this.latest,
+    required this.selected,
+    required this.orders,
+  });
 
   final DashboardController controller;
   final KisManualOrderResult? latest;
+  final KisManualOrderResult? selected;
   final List<KisManualOrderResult> orders;
 
   @override
   Widget build(BuildContext context) {
     final visible = orders.take(3).toList();
+    final detail = selected ?? latest;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -311,7 +319,7 @@ class _KisOrderStatusPanel extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800)),
           ),
-          if (latest != null) _StatusPill(order: latest!),
+          if (detail != null) _StatusPill(order: detail),
         ]),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
@@ -320,36 +328,36 @@ class _KisOrderStatusPanel extends StatelessWidget {
           title: const Text('Show rejected attempts'),
         ),
         const SizedBox(height: 10),
-        if (latest == null)
+        if (detail == null)
           const _StateLine(text: 'No recent KIS manual live orders')
         else ...[
           Wrap(spacing: 14, runSpacing: 8, children: [
-            _DataPair(label: 'Order ID', value: latest!.orderId.toString()),
-            _DataPair(label: 'ODNO', value: latest!.kisOdno ?? 'n/a'),
-            _DataPair(label: 'Symbol', value: latest!.symbol),
-            _DataPair(label: 'Side', value: latest!.side.toUpperCase()),
+            _DataPair(label: 'Order ID', value: detail.orderId.toString()),
+            _DataPair(label: 'ODNO', value: detail.kisOdno ?? 'n/a'),
+            _DataPair(label: 'Symbol', value: detail.symbol),
+            _DataPair(label: 'Side', value: detail.side.toUpperCase()),
             _DataPair(
                 label: 'Requested',
-                value: _nullableQuantity(latest!.requestedQty)),
-            _DataPair(label: 'Filled', value: _quantity(latest!.filledQty)),
+                value: _nullableQuantity(detail.requestedQty)),
+            _DataPair(label: 'Filled', value: _quantity(detail.filledQty)),
             _DataPair(
                 label: 'Remaining',
-                value: _nullableQuantity(latest!.remainingQty)),
+                value: _nullableQuantity(detail.remainingQty)),
             _DataPair(
                 label: 'Avg Fill',
-                value: latest!.avgFillPrice == null
+                value: detail.avgFillPrice == null
                     ? 'n/a'
-                    : _krw(latest!.avgFillPrice!)),
-            if (latest!.lastSyncedAt != null)
-              _DataPair(label: 'Last Sync', value: latest!.lastSyncedAt!),
+                    : _krw(detail.avgFillPrice!)),
+            if (detail.lastSyncedAt != null)
+              _DataPair(label: 'Last Sync', value: detail.lastSyncedAt!),
           ]),
-          if (latest!.brokerOrderStatus != null) ...[
+          if (detail.brokerOrderStatus != null) ...[
             const SizedBox(height: 10),
-            _StateLine(text: 'Broker status: ${latest!.brokerOrderStatus}'),
+            _StateLine(text: 'Broker status: ${detail.brokerOrderStatus}'),
           ],
-          if (latest!.hasSyncError) ...[
+          if (detail.hasSyncError) ...[
             const SizedBox(height: 10),
-            _StateLine(text: latest!.syncError!, color: Colors.amberAccent),
+            _StateLine(text: detail.syncError!, color: Colors.amberAccent),
           ],
         ],
         if (visible.length > 1) ...[
@@ -373,27 +381,30 @@ class _RecentKisOrderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(children: [
-      Expanded(
-        child: Text(
-          '${order.symbol} ${order.side.toUpperCase()} ${_nullableQuantity(order.requestedQty)}',
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-              color: Colors.white70, fontWeight: FontWeight.w700),
+    return InkWell(
+      onTap: () => controller.selectKisOrder(order.orderId),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            '${order.symbol} ${order.side.toUpperCase()} ${_nullableQuantity(order.requestedQty)}',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white70, fontWeight: FontWeight.w700),
+          ),
         ),
-      ),
-      const SizedBox(width: 8),
-      _StatusPill(order: order),
-      const SizedBox(width: 6),
-      if (order.isSyncable)
-        IconButton(
-          onPressed: () async {
-            await controller.selectKisOrder(order.orderId);
-            await controller.syncLatestKisOrder();
-          },
-          icon: const Icon(Icons.sync, size: 18),
-        ),
-    ]);
+        const SizedBox(width: 8),
+        _StatusPill(order: order),
+        const SizedBox(width: 6),
+        if (order.isSyncable)
+          IconButton(
+            onPressed: () async {
+              await controller.selectKisOrder(order.orderId);
+              await controller.syncKisOrderById(order.orderId);
+            },
+            icon: const Icon(Icons.sync, size: 18),
+          ),
+      ]),
+    );
   }
 }
 

@@ -531,6 +531,30 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> syncKisOrderById(int orderId) async {
+    kisOrderSyncLoading = true;
+    kisManualOrderError = null;
+    notifyListeners();
+
+    try {
+      final result = await apiClient.syncKisOrder(orderId);
+      latestKisManualOrder = result;
+      selectedKisOrder = result;
+      _upsertKisOrder(result);
+      await _refreshKisOrdersAfterAction();
+      return ActionResult(
+        success: true,
+        message: 'KIS order status synced: ${result.internalStatus}.',
+      );
+    } catch (e) {
+      kisManualOrderError = e.toString();
+      return ActionResult(success: false, message: kisManualOrderError!);
+    } finally {
+      kisOrderSyncLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshKisOrders() async {
     kisOrdersLoading = true;
     kisManualOrderError = null;
@@ -610,7 +634,7 @@ class DashboardController extends ChangeNotifier {
       kisOrders = await apiClient.fetchKisOrders(includeRejected: kisIncludeRejected);
       if (kisOrders.isNotEmpty) {
         latestKisManualOrder = kisOrders.first;
-        selectedKisOrder = latestKisManualOrder;
+        selectedKisOrder ??= latestKisManualOrder;
       }
     } catch (_) {
       // Keep the submitted/synced order visible if list refresh is unavailable.
