@@ -32,8 +32,6 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   ];
 
   late final TextEditingController _symbolController;
-  int _gateLevel = 2;
-  bool _gateTouched = false;
 
   @override
   void initState() {
@@ -50,10 +48,6 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    if (!_gateTouched) {
-      _gateLevel = _safeGateLevel(controller.settings.defaultGateLevel);
-    }
-
     final symbol = _normalizedSymbol;
     final dropdownValue = _symbols.contains(symbol) ? symbol : null;
 
@@ -109,34 +103,20 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
           ]);
         }),
         const SizedBox(height: 12),
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 1, label: Text('Gate 1')),
-            ButtonSegment(value: 2, label: Text('Gate 2')),
-            ButtonSegment(value: 3, label: Text('Gate 3')),
-            ButtonSegment(value: 4, label: Text('Gate 4')),
-          ],
-          selected: {_gateLevel},
-          onSelectionChanged: controller.manualRunLoading
-              ? null
-              : (selection) {
-                  setState(() {
-                    _gateTouched = true;
-                    _gateLevel = selection.first;
-                  });
-                },
-        ),
+        Text('Using Gate ${controller.selectedGateLevel}',
+            style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 12),
         FilledButton.icon(
           onPressed: controller.manualRunLoading || symbol.isEmpty
               ? null
               : () async {
                   final confirmed =
-                      await _showConfirmDialog(context, symbol, _gateLevel);
+                      await _showConfirmDialog(
+                          context, symbol, controller.selectedGateLevel);
                   if (!confirmed || !context.mounted) return;
 
                   final result = await controller.runTradingOnce(
-                      symbol: symbol, gateLevel: _gateLevel);
+                      symbol: symbol, gateLevel: controller.selectedGateLevel);
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(result.message),
@@ -176,11 +156,6 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   }
 
   String get _normalizedSymbol => _symbolController.text.trim().toUpperCase();
-
-  int _safeGateLevel(int value) {
-    if (value >= 1 && value <= 4) return value;
-    return 2;
-  }
 
   Future<bool> _showConfirmDialog(
       BuildContext context, String symbol, int gateLevel) async {

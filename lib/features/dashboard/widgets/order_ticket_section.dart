@@ -195,7 +195,7 @@ class _KrOrderTicket extends StatelessWidget {
       OutlinedButton.icon(
         onPressed: null,
         icon: const Icon(Icons.lock_outline),
-        label: const Text('Submit Real KIS Order'),
+        label: const Text('Submit Real KIS Order — coming after validation UI wiring'),
       ),
       const SizedBox(height: 10),
       _StateLine(

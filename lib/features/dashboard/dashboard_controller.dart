@@ -79,6 +79,7 @@ class DashboardController extends ChangeNotifier {
   PortfolioSummary krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
   PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
   SelectedProvider selectedProvider = SelectedProvider.alpaca;
+  int selectedGateLevel = 2;
   PortfolioMarket selectedOrderMarket = PortfolioMarket.us;
   PortfolioMarket selectedWatchlistMarket = PortfolioMarket.us;
   bool krPortfolioUnavailable = false;
@@ -125,6 +126,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
+      selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       schedulerStatus = await apiClient.fetchSchedulerStatus();
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
@@ -165,7 +167,7 @@ class DashboardController extends ChangeNotifier {
     try {
       final result = await apiClient.runWatchlistForProvider(
         provider: selectedProvider == SelectedProvider.kis ? 'kis' : 'alpaca',
-        gateLevel: settings.defaultGateLevel,
+        gateLevel: selectedGateLevel,
       );
       runResult = result;
       hasLatestRunResult = true;
@@ -340,8 +342,11 @@ class DashboardController extends ChangeNotifier {
   void setProvider(SelectedProvider provider) {
     if (selectedProvider == provider) return;
     selectedProvider = provider;
-    selectedPortfolioMarket =
+    final market =
         provider == SelectedProvider.kis ? PortfolioMarket.kr : PortfolioMarket.us;
+    selectedPortfolioMarket = market;
+    selectedWatchlistMarket = market;
+    selectedOrderMarket = market;
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
@@ -437,7 +442,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       final result = await apiClient.runKisWatchlistPreview(
-        gateLevel: settings.defaultGateLevel,
+        gateLevel: selectedGateLevel,
       );
       krWatchlistPreview = result;
       return const ActionResult(
@@ -477,4 +482,11 @@ class DashboardController extends ChangeNotifier {
       krPortfolioError = 'KIS account data unavailable';
     }
   }
+
+  void setSelectedGateLevel(int gateLevel) {
+    selectedGateLevel = _safeGateLevel(gateLevel);
+    notifyListeners();
+  }
+
+  int _safeGateLevel(int value) => (value >= 1 && value <= 4) ? value : 2;
 }
