@@ -28,7 +28,7 @@ void main() {
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
     expect(find.text(r'$1,000.00'), findsOneWidget);
-    expect(find.text('Cash'), findsOneWidget);
+    expect(find.text('CASH'), findsOneWidget);
     expect(find.text(r'$123.45'), findsOneWidget);
     expect(find.text('₩1,200,000'), findsNothing);
 
@@ -38,7 +38,7 @@ void main() {
     expect(find.text('KR Portfolio / KIS Read-only'), findsOneWidget);
     expect(find.text('READ-ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.text('Available Cash'), findsOneWidget);
+    expect(find.text('AVAILABLE CASH'), findsOneWidget);
     expect(find.text('₩30,000'), findsOneWidget);
     expect(find.text('삼성전자'), findsWidgets);
     expect(find.text('₩1,200,000'), findsWidgets);
