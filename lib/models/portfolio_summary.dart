@@ -7,6 +7,7 @@ class PortfolioSummary {
     required this.totalMarketValue,
     required this.totalUnrealizedPl,
     required this.totalUnrealizedPlpc,
+    required this.cash,
     required this.positions,
     required this.pendingOrders,
   });
@@ -19,6 +20,7 @@ class PortfolioSummary {
         totalMarketValue: 0,
         totalUnrealizedPl: 0,
         totalUnrealizedPlpc: 0,
+        cash: 0,
         positions: [],
         pendingOrders: [],
       );
@@ -36,6 +38,7 @@ class PortfolioSummary {
       totalMarketValue: _readDouble(json['total_market_value']),
       totalUnrealizedPl: _readDouble(json['total_unrealized_pl']),
       totalUnrealizedPlpc: _readDouble(json['total_unrealized_plpc']),
+      cash: _readDouble(json['cash']),
       positions: rawPositions
           .whereType<Map>()
           .map((item) => PositionSummary.fromJson(
@@ -56,6 +59,7 @@ class PortfolioSummary {
   final double totalMarketValue;
   final double totalUnrealizedPl;
   final double totalUnrealizedPlpc;
+  final double cash;
   final List<PositionSummary> positions;
   final List<PendingOrderSummary> pendingOrders;
 }

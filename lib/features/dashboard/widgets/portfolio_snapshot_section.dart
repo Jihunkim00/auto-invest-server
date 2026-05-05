@@ -95,6 +95,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
                 label: 'Profit %',
                 value: _percent(summary.totalUnrealizedPlpc, signed: true),
                 color: plColor),
+            _MetricTile(
+                width: tileWidth,
+                label: isKr ? 'Available Cash' : 'Cash',
+                value: _money(summary.cash, currency: summary.currency),
+                color: Colors.white70),
           ]);
         }),
         const SizedBox(height: 16),
@@ -129,7 +134,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
   double _metricTileWidth(double maxWidth) {
     if (maxWidth < 420) return maxWidth;
     if (maxWidth < 760) return math.max(0, (maxWidth - 8) / 2);
-    return math.max(0, (maxWidth - 24) / 4);
+    return math.max(0, (maxWidth - 32) / 5);
   }
 }
 

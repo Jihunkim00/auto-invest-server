@@ -174,6 +174,9 @@ class ApiClient {
     final totalUnrealizedPlpc =
         _readNullableDouble(balance['unrealized_plpc']) ??
             (totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0);
+    final cash = _readNullableDouble(balance['cash']) ??
+        _readNullableDouble(balance['dnca_tot_amt']) ??
+        0;
 
     return PortfolioSummary(
       currency: 'KRW',
@@ -184,6 +187,7 @@ class ApiClient {
       totalMarketValue: totalMarketValue,
       totalUnrealizedPl: totalUnrealizedPl,
       totalUnrealizedPlpc: totalUnrealizedPlpc,
+      cash: cash,
       positions: positions,
       pendingOrders: pendingOrders,
     );

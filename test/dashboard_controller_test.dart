@@ -368,6 +368,7 @@ PortfolioSummary _portfolio(String currency, {required double marketValue}) {
     totalMarketValue: marketValue,
     totalUnrealizedPl: 0,
     totalUnrealizedPlpc: 0,
+    cash: 0,
     positions: const [],
     pendingOrders: const [],
   );
