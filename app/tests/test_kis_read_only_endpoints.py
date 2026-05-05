@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.brokers.base import KisApiError
 from app.brokers.kis_auth_manager import KisAuthManager
-from app.brokers.kis_client import KisClient, KIS_PRICE_PATH, KIS_PRICE_TR_ID, normalize_domestic_daily_bars
+from app.brokers.kis_client import (
+    KIS_PRICE_PATH,
+    KIS_PRICE_TR_ID,
+    KisClient,
+    normalize_domestic_daily_bars,
+)
 from app.db.database import get_db
 from app.db.models import BrokerAuthToken
 from app.main import app
@@ -159,6 +164,10 @@ def test_kis_request_retries_after_token_expired_and_succeeds(
 
     assert response["output"] == {"foo": "bar"}
     assert len(call_headers) == 2
+    assert call_headers[0]["authorization"] == "Bearer old-token"
+    assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert "old-token" not in str(exc_info.value)
+    assert "fresh-token" not in str(exc_info.value)
     assert call_headers[0]["authorization"] == "Bearer stale-token"
     assert call_headers[1]["authorization"] == "Bearer fresh-token"
     assert "stale-token" not in str(response)
@@ -771,7 +780,7 @@ def test_kis_request_token_expired_retries_at_most_once(
     monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
     monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
 
-    with pytest.raises(KisApiError):
+    with pytest.raises(KisApiError) as exc_info:
         kis_client.request_get(
             KIS_PRICE_PATH,
             tr_id=KIS_PRICE_TR_ID,
