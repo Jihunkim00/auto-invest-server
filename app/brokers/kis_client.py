@@ -37,6 +37,7 @@ KIS_CASH_SELL_TR_ID_REAL = "TTTC0801U"
 KIS_CASH_BUY_TR_ID_DEMO = "VTTC0802U"
 KIS_CASH_SELL_TR_ID_DEMO = "VTTC0801U"
 KIS_MARKET_ORDER_DIVISION = "01"
+KIS_TOKEN_REFRESH_GUARD_DEFAULT = timedelta(hours=23)
 
 
 class KisClient:
@@ -527,6 +528,25 @@ class KisClient:
 
         response_data = send_request()
         if self._is_token_expired_response(response_data):
+            allowed, diagnostics = self._token_refresh_guard_diagnostics()
+            if not allowed:
+                details = self._sanitize_diagnostics(
+                    {
+                        **context,
+                        "rt_cd": response_data.get("rt_cd"),
+                        "msg_cd": response_data.get("msg_cd"),
+                        "msg1": response_data.get("msg1"),
+                        **diagnostics,
+                    }
+                )
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS token expired, but refresh is blocked by daily token issuance guard.",
+                        details,
+                    ),
+                    details=details,
+                )
+
             refreshed_token = self.get_access_token(force_refresh=True)
             response_data = send_request(access_token=refreshed_token.token)
 
@@ -549,6 +569,28 @@ class KisClient:
 
         return response_data
 
+
+    def _token_refresh_guard_diagnostics(self) -> tuple[bool, dict]:
+        last_issued_at = self.auth_manager.get_latest_access_token_issue_time()
+        min_interval = KIS_TOKEN_REFRESH_GUARD_DEFAULT
+        now = datetime.now(UTC)
+
+        if last_issued_at is None:
+            return False, {
+                "last_token_issued_at": None,
+                "next_refresh_allowed_at": None,
+                "refresh_guard_min_interval_seconds": int(min_interval.total_seconds()),
+                "refresh_guard_reason": "missing_issue_timestamp",
+            }
+
+        next_allowed = last_issued_at + min_interval
+        allowed = now >= next_allowed
+        return allowed, {
+            "last_token_issued_at": last_issued_at.isoformat(),
+            "next_refresh_allowed_at": next_allowed.isoformat(),
+            "refresh_guard_min_interval_seconds": int(min_interval.total_seconds()),
+            "refresh_guard_reason": "allowed" if allowed else "too_recent",
+        }
     def _is_token_expired_response(self, data: dict) -> bool:
         if not isinstance(data, dict):
             return False

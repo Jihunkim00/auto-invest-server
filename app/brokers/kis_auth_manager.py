@@ -154,6 +154,18 @@ class KisAuthManager:
             commit=True,
         )
 
+
+    def get_latest_access_token_issue_time(self) -> datetime | None:
+        row = self._get_latest_token("access_token")
+        if row is None:
+            return None
+
+        for attr in ("issued_at", "updated_at", "created_at"):
+            value = self._as_utc(getattr(row, attr, None))
+            if value is not None:
+                return value
+        return None
+
     def get_auth_status(self) -> dict:
         access = self._get_latest_token("access_token")
         approval = self._get_latest_token("approval_key")

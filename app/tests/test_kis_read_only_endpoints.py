@@ -55,13 +55,14 @@ def _add_access_token(
     value="secret-cached-access-token",
     environment="prod",
     expires_at=None,
+    issued_at=None,
 ):
     row = BrokerAuthToken(
         provider="kis",
         token_type="access_token",
         token_value=value,
         expires_at=expires_at or datetime.now(UTC) + timedelta(hours=1),
-        issued_at=datetime.now(UTC),
+        issued_at=issued_at or datetime.now(UTC),
         environment=environment,
     )
     db_session.add(row)
@@ -704,3 +705,77 @@ def test_brokers_status_still_does_not_expose_secrets(monkeypatch, client, db_se
     assert "real-app-key" not in response.text
     assert "real-app-secret" not in response.text
     assert "secret-status-token" not in response.text
+
+
+def test_kis_request_token_expired_refresh_guard_blocks_recent_issue(
+    monkeypatch, db_session
+):
+    _add_access_token(
+        db_session,
+        value="recent-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    call_headers = []
+
+    def fake_get(url, params, headers, timeout):
+        call_headers.append(headers)
+        return _FakeResponse({"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "기간이 만료된 token 입니다."})
+
+    auth_calls = []
+
+    def fake_auth_post(url, data, headers, timeout):
+        auth_calls.append(url)
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    with pytest.raises(KisApiError) as exc_info:
+        kis_client.request_get(
+            KIS_PRICE_PATH,
+            tr_id=KIS_PRICE_TR_ID,
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+        )
+
+    assert len(call_headers) == 1
+    assert auth_calls == []
+    assert exc_info.value.details["msg_cd"] == "EGW00123"
+    assert "last_token_issued_at" in exc_info.value.details
+    assert "next_refresh_allowed_at" in exc_info.value.details
+    assert "recent-token" not in str(exc_info.value)
+
+
+def test_kis_request_token_expired_retries_at_most_once(
+    monkeypatch, db_session
+):
+    _add_access_token(
+        db_session,
+        value="old-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=25),
+    )
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    call_headers = []
+
+    def fake_get(url, params, headers, timeout):
+        call_headers.append(headers)
+        return _FakeResponse({"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "기간이 만료된 token 입니다."})
+
+    def fake_auth_post(url, data, headers, timeout):
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    with pytest.raises(KisApiError):
+        kis_client.request_get(
+            KIS_PRICE_PATH,
+            tr_id=KIS_PRICE_TR_ID,
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+        )
+
+    assert len(call_headers) == 2
