@@ -164,10 +164,6 @@ def test_kis_request_retries_after_token_expired_and_succeeds(
 
     assert response["output"] == {"foo": "bar"}
     assert len(call_headers) == 2
-    assert call_headers[0]["authorization"] == "Bearer old-token"
-    assert call_headers[1]["authorization"] == "Bearer fresh-token"
-    assert "old-token" not in str(exc_info.value)
-    assert "fresh-token" not in str(exc_info.value)
     assert call_headers[0]["authorization"] == "Bearer stale-token"
     assert call_headers[1]["authorization"] == "Bearer fresh-token"
     assert "stale-token" not in str(response)
@@ -788,3 +784,7 @@ def test_kis_request_token_expired_retries_at_most_once(
         )
 
     assert len(call_headers) == 2
+    assert call_headers[0]["authorization"] == "Bearer old-token"
+    assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert "old-token" not in str(exc_info.value)
+    assert "fresh-token" not in str(exc_info.value)
