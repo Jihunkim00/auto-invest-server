@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,6 +18,8 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
+
+logger = logging.getLogger(__name__)
 
 KIS_MANUAL_CONFIRMATION_PHRASE = "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
 KIS_VALIDATION_MAX_AGE = timedelta(minutes=5)
@@ -305,6 +308,15 @@ class KisManualOrderService:
             name for name, item in checks.items() if item.get("passed") is not True
         ]
         if failed_checks:
+            logger.warning(
+                "KIS manual submit blocked by safety checks: market=%s symbol=%s side=%s qty=%s failed_checks=%s safety_checks=%s",
+                request.market,
+                normalized_symbol,
+                normalized_side,
+                request.qty,
+                failed_checks,
+                json.dumps(checks, ensure_ascii=False, default=str),
+            )
             status_code = 400 if STRUCTURAL_CHECKS.intersection(failed_checks) else 409
             response = self._base_response(
                 request=request,

@@ -1,10 +1,12 @@
 from datetime import UTC, datetime, timedelta
-
+import json
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.brokers.kis_client import normalize_domestic_daily_bars
+from app.brokers.base import KisApiError
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient, KIS_PRICE_PATH, KIS_PRICE_TR_ID, normalize_domestic_daily_bars
 from app.db.database import get_db
 from app.db.models import BrokerAuthToken
 from app.main import app
@@ -118,6 +120,86 @@ def test_kis_price_endpoint_returns_normalized_current_price(
     assert body["change"] == 500.0
     assert body["change_rate"] == 0.7
     assert "secret-cached-access-token" not in response.text
+
+
+def test_kis_request_retries_after_token_expired_and_succeeds(
+    monkeypatch, db_session
+):
+    _add_access_token(db_session, value="stale-token")
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    call_headers = []
+
+    def fake_get(url, params, headers, timeout):
+        call_headers.append(headers)
+        if len(call_headers) == 1:
+            return _FakeResponse(
+                {
+                    "rt_cd": "1",
+                    "msg_cd": "EGW00123",
+                    "msg1": "기간이 만료된 token 입니다.",
+                }
+            )
+        return _FakeResponse({"rt_cd": "0", "output": {"foo": "bar"}})
+
+    def fake_auth_post(url, data, headers, timeout):
+        assert url.endswith("/oauth2/tokenP")
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    response = kis_client.request_get(
+        KIS_PRICE_PATH,
+        tr_id=KIS_PRICE_TR_ID,
+        params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+    )
+
+    assert response["output"] == {"foo": "bar"}
+    assert len(call_headers) == 2
+    assert call_headers[0]["authorization"] == "Bearer stale-token"
+    assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert "stale-token" not in str(response)
+    assert "fresh-token" not in str(response)
+
+
+def test_kis_request_retry_raises_safe_error_if_second_attempt_fails(
+    monkeypatch, db_session
+):
+    _add_access_token(db_session, value="stale-token")
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    call_headers = []
+
+    def fake_get(url, params, headers, timeout):
+        call_headers.append(headers)
+        return _FakeResponse(
+            {
+                "rt_cd": "1",
+                "msg_cd": "EGW00123",
+                "msg1": "기간이 만료된 token 입니다.",
+            }
+        )
+
+    def fake_auth_post(url, data, headers, timeout):
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    with pytest.raises(KisApiError) as exc_info:
+        kis_client.request_get(
+            KIS_PRICE_PATH,
+            tr_id=KIS_PRICE_TR_ID,
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+        )
+
+    assert len(call_headers) == 2
+    assert exc_info.value.details["msg_cd"] == "EGW00123"
+    assert "stale-token" not in str(exc_info.value)
+    assert "fresh-token" not in str(exc_info.value)
 
 
 def test_kis_daily_bar_normalization_parses_and_sorts_rows():
@@ -515,10 +597,22 @@ def test_kis_api_error_returns_safe_message_without_token(
 
     assert response.status_code == 502
     detail = response.json()["detail"]
-    assert "KIS read-only API failed" in detail
-    assert "msg_cd=EGW00001" in detail
-    assert "msg1=bad token ***" in detail
-    assert "tr_id=FHKST01010100" in detail
+
+    assert isinstance(detail, dict)
+    assert "KIS read-only API failed" in detail["message"]
+
+    message = detail["message"]
+    assert "msg_cd=EGW00001" in message
+    assert "msg1=bad token ***" in message
+    assert "tr_id=FHKST01010100" in message
+
+    details = detail["details"]
+    assert details["msg_cd"] == "EGW00001"
+    assert details["msg1"] == "bad token ***"
+    assert details["tr_id"] == "FHKST01010100"
+
+    combined = json.dumps(detail, ensure_ascii=False)
+    assert "secret-error-token" not in combined
     assert "secret-error-token" not in response.text
 
 

@@ -40,9 +40,9 @@ def get_kis_market_price(symbol: str, db: Session = Depends(get_db)):
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
 
 
 @router.get("/market/bars/{symbol}")
@@ -60,9 +60,9 @@ def get_kis_market_bars(symbol: str, limit: int = 120, db: Session = Depends(get
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
 
 
 @router.get("/account/balance")
@@ -73,9 +73,9 @@ def get_kis_account_balance(db: Session = Depends(get_db)):
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
 
 
 @router.get("/account/positions")
@@ -92,9 +92,9 @@ def list_kis_positions(db: Session = Depends(get_db)):
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
 
 
 @router.get("/account/open-orders")
@@ -111,9 +111,9 @@ def list_kis_open_orders(db: Session = Depends(get_db)):
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
 
 
 @router.post("/orders/validate")
@@ -132,9 +132,9 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
     except KisConfigurationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KisAuthError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details}) from exc
 
 
 @router.post("/orders/manual-submit")

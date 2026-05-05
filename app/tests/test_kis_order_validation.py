@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.db.database import get_db
+from app.brokers.base import KisApiError
 from app.db.models import BrokerAuthToken
 from app.main import app
 
@@ -133,6 +134,22 @@ def test_validate_buy_blocked_with_insufficient_cash(monkeypatch, client):
     assert body["validated_for_submission"] is False
     assert body["can_submit_later"] is False
     assert body["block_reasons"] == ["insufficient_cash"]
+
+
+def test_validate_buy_returns_blocked_when_kis_balance_api_fails(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_account_balance",
+        lambda self: (_ for _ in ()).throw(KisApiError("KIS balance request failed", details={"http_status": 500, "tr_id": "TTTC8434R"})),
+    )
+
+    response = client.post("/kis/orders/validate", json=_buy_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validated_for_submission"] is False
+    assert body["can_submit_later"] is False
+    assert "available_cash_unavailable" in body["block_reasons"]
+    assert "available_cash_unavailable" in body["warnings"]
 
 
 def test_validate_buy_blocked_with_insufficient_cash_when_manual_caps_disabled(

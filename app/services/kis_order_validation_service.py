@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.brokers.factory import mask_account_no
-from app.brokers.kis_client import KisClient, to_float
+from app.brokers.kis_client import KisApiError, KisClient, to_float
 from app.db.models import KisOrderValidationLog
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
@@ -136,9 +136,14 @@ class KisOrderValidationService:
         if market_session["is_near_close"]:
             warnings.append("near_close")
 
-        price_info = self.client.get_domestic_stock_price(symbol)
-        current_price = _optional_float(price_info.get("current_price"))
-        if current_price is None or current_price <= 0:
+        try:
+            price_info = self.client.get_domestic_stock_price(symbol)
+            current_price = _optional_float(price_info.get("current_price"))
+            if current_price is None or current_price <= 0:
+                current_price = None
+                warnings.append("current_price_unavailable")
+                block_reasons.append("current_price_unavailable")
+        except KisApiError:
             current_price = None
             warnings.append("current_price_unavailable")
             block_reasons.append("current_price_unavailable")
@@ -148,24 +153,34 @@ class KisOrderValidationService:
         )
 
         if request.side == "buy":
-            balance = self.client.get_account_balance()
-            available_cash = _optional_float(balance.get("cash"))
-            if available_cash is None:
+            try:
+                balance = self.client.get_account_balance()
+                available_cash = _optional_float(balance.get("cash"))
+                if available_cash is None:
+                    warnings.append("available_cash_unavailable")
+                    block_reasons.append("available_cash_unavailable")
+                elif estimated_amount is not None and available_cash < estimated_amount:
+                    block_reasons.append("insufficient_cash")
+            except KisApiError:
+                available_cash = None
                 warnings.append("available_cash_unavailable")
                 block_reasons.append("available_cash_unavailable")
-            elif estimated_amount is not None and available_cash < estimated_amount:
-                block_reasons.append("insufficient_cash")
 
         if request.side == "sell":
-            positions = self.client.list_positions()
-            match = _find_position(positions, symbol)
-            if match is None:
+            try:
+                positions = self.client.list_positions()
+            except KisApiError:
                 held_qty = 0.0
-                block_reasons.append("no_position_for_symbol")
+                block_reasons.append("position_data_unavailable")
             else:
-                held_qty = to_float(match.get("qty"))
-                if held_qty < request.qty:
-                    block_reasons.append("insufficient_holdings")
+                match = _find_position(positions, symbol)
+                if match is None:
+                    held_qty = 0.0
+                    block_reasons.append("no_position_for_symbol")
+                else:
+                    held_qty = to_float(match.get("qty"))
+                    if held_qty < request.qty:
+                        block_reasons.append("insufficient_holdings")
 
         preview = self._build_preview(
             symbol=symbol,

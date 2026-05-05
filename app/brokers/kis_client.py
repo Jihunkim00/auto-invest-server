@@ -64,6 +64,7 @@ class KisClient:
         tr_id: str | None = None,
         *,
         include_auth: bool = True,
+        access_token: str | None = None,
     ) -> dict[str, str]:
         self.auth_manager.require_configured()
 
@@ -76,8 +77,10 @@ class KisClient:
             "custtype": "P",
         }
         if include_auth:
-            token = self.get_access_token()
-            headers["authorization"] = f"Bearer {token.token}"
+            if access_token is None:
+                token = self.get_access_token()
+                access_token = token.token
+            headers["authorization"] = f"Bearer {access_token}"
         if tr_id:
             headers["tr_id"] = tr_id
         return headers
@@ -407,78 +410,14 @@ class KisClient:
         params: dict | None = None,
         payload: dict | None = None,
     ) -> dict:
-        url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
-        headers = self.build_headers(tr_id=tr_id, include_auth=True)
-        context = self._request_diagnostics(
+        return self._request_with_token_retry(
             method=method,
             path=path,
             tr_id=tr_id,
             params=params,
             payload=payload,
+            request_kind="read_only",
         )
-
-        try:
-            if method == "GET":
-                response = requests.get(
-                    url,
-                    params=params or {},
-                    headers=headers,
-                    timeout=10,
-                )
-            elif method == "POST":
-                response = requests.post(
-                    url,
-                    data=json.dumps(payload or {}),
-                    headers=headers,
-                    timeout=10,
-                )
-            else:
-                raise ValueError(f"Unsupported KIS request method: {method}")
-        except requests.RequestException as exc:
-            details = {**context, "error_type": type(exc).__name__}
-            raise KisApiError(
-                _format_kis_api_error("KIS read-only request failed", details),
-                details=details,
-            ) from exc
-
-        if response.status_code >= 400:
-            details = {**context, "http_status": response.status_code}
-            raise KisApiError(
-                _format_kis_api_error("KIS read-only HTTP failure", details),
-                details=details,
-            )
-
-        try:
-            data = response.json()
-        except ValueError as exc:
-            details = {**context, "error_type": "invalid_json"}
-            raise KisApiError(
-                _format_kis_api_error("KIS read-only response was not valid JSON", details),
-                details=details,
-            ) from exc
-
-        if not isinstance(data, dict):
-            details = {**context, "error_type": "unexpected_shape"}
-            raise KisApiError(
-                _format_kis_api_error("KIS read-only response had an unexpected shape", details),
-                details=details,
-            )
-
-        rt_cd = str(data.get("rt_cd", "0"))
-        if rt_cd not in ("0", ""):
-            details = {
-                **context,
-                "rt_cd": data.get("rt_cd"),
-                "msg_cd": data.get("msg_cd"),
-                "msg1": data.get("msg1"),
-            }
-            details = self._sanitize_diagnostics(details)
-            raise KisApiError(
-                _format_kis_api_error("KIS read-only API failed", details),
-                details=details,
-            )
-
-        return data
 
     def _request_order(
         self,
@@ -487,9 +426,7 @@ class KisClient:
         tr_id: str,
         payload: dict | None = None,
     ) -> dict:
-        url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
-        headers = self.build_headers(tr_id=tr_id, include_auth=True)
-        context = self._request_diagnostics(
+        return self._request_with_token_retry(
             method="POST",
             path=path,
             tr_id=tr_id,
@@ -497,58 +434,137 @@ class KisClient:
             request_kind="order",
         )
 
-        try:
-            response = requests.post(
-                url,
-                data=json.dumps(payload or {}),
-                headers=headers,
-                timeout=10,
+    def _request_with_token_retry(
+        self,
+        method: str,
+        path: str,
+        *,
+        tr_id: str,
+        params: dict | None = None,
+        payload: dict | None = None,
+        request_kind: str = "read_only",
+    ) -> dict:
+        url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
+        context = self._request_diagnostics(
+            method=method,
+            path=path,
+            tr_id=tr_id,
+            params=params,
+            payload=payload,
+            request_kind=request_kind,
+        )
+
+        def send_request(access_token: str | None = None) -> dict:
+            headers = self.build_headers(
+                tr_id=tr_id,
+                include_auth=True,
+                access_token=access_token,
             )
-        except requests.RequestException as exc:
-            details = {**context, "error_type": type(exc).__name__}
-            raise KisApiError(
-                _format_kis_api_error("KIS order request failed", details),
-                details=details,
-            ) from exc
+            try:
+                if method == "GET":
+                    response = requests.get(
+                        url,
+                        params=params or {},
+                        headers=headers,
+                        timeout=10,
+                    )
+                elif method == "POST":
+                    response = requests.post(
+                        url,
+                        data=json.dumps(payload or {}),
+                        headers=headers,
+                        timeout=10,
+                    )
+                else:
+                    raise ValueError(f"Unsupported KIS request method: {method}")
+            except requests.RequestException as exc:
+                details = {**context, "error_type": type(exc).__name__}
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS read-only request failed" if request_kind == "read_only" else "KIS order request failed",
+                        details,
+                    ),
+                    details=details,
+                ) from exc
 
-        if response.status_code >= 400:
-            details = {**context, "http_status": response.status_code}
-            raise KisApiError(
-                _format_kis_api_error("KIS order HTTP failure", details),
-                details=details,
-            )
+            if response.status_code >= 400:
+                details = {
+                    **context,
+                    "http_status": response.status_code,
+                    "response_text": response.text,
+                }
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS read-only HTTP failure" if request_kind == "read_only" else "KIS order HTTP failure",
+                        details,
+                    ),
+                    details=details,
+                )
 
-        try:
-            data = response.json()
-        except ValueError as exc:
-            details = {**context, "error_type": "invalid_json"}
-            raise KisApiError(
-                _format_kis_api_error("KIS order response was not valid JSON", details),
-                details=details,
-            ) from exc
+            try:
+                data = response.json()
+            except ValueError as exc:
+                details = {**context, "error_type": "invalid_json"}
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS read-only response was not valid JSON" if request_kind == "read_only" else "KIS order response was not valid JSON",
+                        details,
+                    ),
+                    details=details,
+                ) from exc
 
-        if not isinstance(data, dict):
-            details = {**context, "error_type": "unexpected_shape"}
-            raise KisApiError(
-                _format_kis_api_error("KIS order response had an unexpected shape", details),
-                details=details,
-            )
+            if not isinstance(data, dict):
+                details = {**context, "error_type": "unexpected_shape"}
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS read-only response had an unexpected shape" if request_kind == "read_only" else "KIS order response had an unexpected shape",
+                        details,
+                    ),
+                    details=details,
+                )
 
-        rt_cd = str(data.get("rt_cd", "0"))
+            return data
+
+        response_data = send_request()
+        if self._is_token_expired_response(response_data):
+            refreshed_token = self.get_access_token(force_refresh=True)
+            response_data = send_request(access_token=refreshed_token.token)
+
+        rt_cd = str(response_data.get("rt_cd", "0"))
         if rt_cd not in ("0", ""):
             details = {
                 **context,
-                "rt_cd": data.get("rt_cd"),
-                "msg_cd": data.get("msg_cd"),
-                "msg1": data.get("msg1"),
+                "rt_cd": response_data.get("rt_cd"),
+                "msg_cd": response_data.get("msg_cd"),
+                "msg1": response_data.get("msg1"),
             }
             details = self._sanitize_diagnostics(details)
             raise KisApiError(
-                _format_kis_api_error("KIS order API failed", details),
+                _format_kis_api_error(
+                    "KIS read-only API failed" if request_kind == "read_only" else "KIS order API failed",
+                    details,
+                ),
                 details=details,
             )
 
-        return data
+        return response_data
+
+    def _is_token_expired_response(self, data: dict) -> bool:
+        if not isinstance(data, dict):
+            return False
+        msg_cd = str(data.get("msg_cd") or "").strip()
+        msg1 = str(data.get("msg1") or "").strip().lower()
+        if msg_cd == "EGW00123":
+            return True
+
+        token_expired_signatures = [
+            "기간이 만료된 token",
+            "만료된 token",
+            "token expired",
+            "expired token",
+            "토큰이 만료",
+        ]
+        return any(signature in msg1 for signature in token_expired_signatures)
 
     def _request_diagnostics(
         self,
