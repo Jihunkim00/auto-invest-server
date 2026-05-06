@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/market_watchlist.dart';
@@ -445,7 +446,7 @@ class DashboardController extends ChangeNotifier {
           : 'Blocked by validation. No real order submitted.';
       return ActionResult(success: true, message: status);
     } catch (e) {
-      orderValidationError = e.toString();
+      orderValidationError = ApiErrorFormatter.format(e.toString());
       return ActionResult(success: false, message: orderValidationError!);
     } finally {
       orderValidationLoading = false;
@@ -481,7 +482,7 @@ class DashboardController extends ChangeNotifier {
         latestKisManualOrder = result;
         _upsertKisOrder(result);
       } catch (e) {
-        kisManualOrderError = 'Submitted; status sync unavailable: $e';
+        kisManualOrderError = 'Submitted; status sync unavailable: ${ApiErrorFormatter.format(e.toString())}';
       }
 
       await _refreshKisOrdersAfterAction();
@@ -491,7 +492,7 @@ class DashboardController extends ChangeNotifier {
             'Live KIS order submitted. Status: ${latestKisManualOrder?.internalStatus ?? result.internalStatus}.',
       );
     } catch (e) {
-      kisManualOrderError = e.toString();
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
       return ActionResult(success: false, message: kisManualOrderError!);
     } finally {
       kisManualSubmitLoading = false;
@@ -523,7 +524,7 @@ class DashboardController extends ChangeNotifier {
         message: 'KIS order status synced: ${result.internalStatus}.',
       );
     } catch (e) {
-      kisManualOrderError = e.toString();
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
       return ActionResult(success: false, message: kisManualOrderError!);
     } finally {
       kisOrderSyncLoading = false;
@@ -547,7 +548,7 @@ class DashboardController extends ChangeNotifier {
         message: 'KIS order status synced: ${result.internalStatus}.',
       );
     } catch (e) {
-      kisManualOrderError = e.toString();
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
       return ActionResult(success: false, message: kisManualOrderError!);
     } finally {
       kisOrderSyncLoading = false;
@@ -567,7 +568,7 @@ class DashboardController extends ChangeNotifier {
       return const ActionResult(
           success: true, message: 'KIS orders refreshed.');
     } catch (e) {
-      kisManualOrderError = e.toString();
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
       return ActionResult(success: false, message: kisManualOrderError!);
     } finally {
       kisOrdersLoading = false;

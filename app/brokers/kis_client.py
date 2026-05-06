@@ -455,7 +455,7 @@ class KisClient:
             request_kind=request_kind,
         )
 
-        def send_request(access_token: str | None = None) -> dict:
+        def send_request(access_token: str | None = None) -> tuple[dict, int]:
             headers = self.build_headers(
                 tr_id=tr_id,
                 include_auth=True,
@@ -488,11 +488,110 @@ class KisClient:
                     details=details,
                 ) from exc
 
-            if response.status_code >= 400:
+            try:
+                data = response.json()
+            except ValueError as exc:
+                if response.status_code < 400:
+                    details = {**context, "error_type": "invalid_json"}
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS read-only response was not valid JSON" if request_kind == "read_only" else "KIS order response was not valid JSON",
+                            details,
+                        ),
+                        details=details,
+                    ) from exc
+                else:
+                    # For HTTP errors, if can't parse JSON, raise with response_text
+                    details = {
+                        **context,
+                        "http_status": response.status_code,
+                        "response_text": response.text,
+                        "error_type": "invalid_json_on_error",
+                    }
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS read-only HTTP failure" if request_kind == "read_only" else "KIS order HTTP failure",
+                            details,
+                        ),
+                        details=details,
+                    )
+
+            if not isinstance(data, dict):
+                if response.status_code < 400:
+                    details = {**context, "error_type": "unexpected_shape"}
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS read-only response had an unexpected shape" if request_kind == "read_only" else "KIS order response had an unexpected shape",
+                            details,
+                        ),
+                        details=details,
+                    )
+                else:
+                    # For HTTP errors, unexpected shape
+                    details = {
+                        **context,
+                        "http_status": response.status_code,
+                        "response_text": json.dumps(data),
+                        "error_type": "unexpected_shape_on_error",
+                    }
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS read-only HTTP failure" if request_kind == "read_only" else "KIS order HTTP failure",
+                            details,
+                        ),
+                        details=details,
+                    )
+
+            return data, response.status_code
+
+        response_data, status = send_request()
+        if status >= 400:
+            if self._is_token_expired_response(response_data):
+                allowed, diagnostics = self._token_refresh_guard_diagnostics()
+                if not allowed:
+                    details = self._sanitize_diagnostics(
+                        {
+                            **context,
+                            "http_status": status,
+                            "rt_cd": response_data.get("rt_cd"),
+                            "msg_cd": response_data.get("msg_cd"),
+                            "msg1": response_data.get("msg1"),
+                            **diagnostics,
+                        }
+                    )
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS token expired, but refresh is blocked by daily token issuance guard.",
+                            details,
+                        ),
+                        details=details,
+                    )
+
+                refreshed_token = self.get_access_token(force_refresh=True)
+                response_data, status = send_request(access_token=refreshed_token.token)
+                if status >= 400 or self._is_token_expired_response(response_data):
+                    details = self._sanitize_diagnostics(
+                        {
+                            **context,
+                            "http_status": status,
+                            "rt_cd": response_data.get("rt_cd"),
+                            "msg_cd": response_data.get("msg_cd"),
+                            "msg1": response_data.get("msg1"),
+                            **diagnostics,
+                        }
+                    )
+                    raise KisApiError(
+                        _format_kis_api_error(
+                            "KIS token refresh failed.",
+                            details,
+                        ),
+                        details=details,
+                    )
+            else:
                 details = {
                     **context,
-                    "http_status": response.status_code,
-                    "response_text": response.text,
+                    "http_status": status,
+                    "response_text": json.dumps(response_data),
                 }
                 raise KisApiError(
                     _format_kis_api_error(
@@ -502,31 +601,6 @@ class KisClient:
                     details=details,
                 )
 
-            try:
-                data = response.json()
-            except ValueError as exc:
-                details = {**context, "error_type": "invalid_json"}
-                raise KisApiError(
-                    _format_kis_api_error(
-                        "KIS read-only response was not valid JSON" if request_kind == "read_only" else "KIS order response was not valid JSON",
-                        details,
-                    ),
-                    details=details,
-                ) from exc
-
-            if not isinstance(data, dict):
-                details = {**context, "error_type": "unexpected_shape"}
-                raise KisApiError(
-                    _format_kis_api_error(
-                        "KIS read-only response had an unexpected shape" if request_kind == "read_only" else "KIS order response had an unexpected shape",
-                        details,
-                    ),
-                    details=details,
-                )
-
-            return data
-
-        response_data = send_request()
         if self._is_token_expired_response(response_data):
             allowed, diagnostics = self._token_refresh_guard_diagnostics()
             if not allowed:
@@ -548,7 +622,25 @@ class KisClient:
                 )
 
             refreshed_token = self.get_access_token(force_refresh=True)
-            response_data = send_request(access_token=refreshed_token.token)
+            response_data, status = send_request(access_token=refreshed_token.token)
+            if status >= 400 or self._is_token_expired_response(response_data):
+                details = self._sanitize_diagnostics(
+                    {
+                        **context,
+                        "http_status": status,
+                        "rt_cd": response_data.get("rt_cd"),
+                        "msg_cd": response_data.get("msg_cd"),
+                        "msg1": response_data.get("msg1"),
+                        **diagnostics,
+                    }
+                )
+                raise KisApiError(
+                    _format_kis_api_error(
+                        "KIS token refresh failed.",
+                        details,
+                    ),
+                    details=details,
+                )
 
         rt_cd = str(response_data.get("rt_cd", "0"))
         if rt_cd not in ("0", ""):
