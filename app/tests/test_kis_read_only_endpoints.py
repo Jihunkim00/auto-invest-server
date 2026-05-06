@@ -131,7 +131,11 @@ def test_kis_price_endpoint_returns_normalized_current_price(
 def test_kis_request_retries_after_token_expired_and_succeeds(
     monkeypatch, db_session
 ):
-    _add_access_token(db_session, value="stale-token")
+    _add_access_token(
+        db_session,
+        value="stale-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=25),
+    )
     settings = _settings()
     kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
 
@@ -173,7 +177,11 @@ def test_kis_request_retries_after_token_expired_and_succeeds(
 def test_kis_request_retry_raises_safe_error_if_second_attempt_fails(
     monkeypatch, db_session
 ):
-    _add_access_token(db_session, value="stale-token")
+    _add_access_token(
+        db_session,
+        value="stale-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=25),
+   )
     settings = _settings()
     kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
 
