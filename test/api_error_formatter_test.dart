@@ -41,7 +41,7 @@ void main() {
 
       final formatted = ApiErrorFormatter.format(errorMessage);
 
-      expect(formatted, 'KIS account check failed. Balance inquiry failed. TR ID: FHKST01010100. Code: EGW00123 System error Additional details');
+      expect(formatted, 'Balance inquiry failed');
     });
 
     test('formats generic KIS read-only HTTP 502 error', () {
@@ -50,7 +50,26 @@ void main() {
 
       final formatted = ApiErrorFormatter.format(errorMessage);
 
-      expect(formatted, 'KIS read-only error. Some error occurred');
+      expect(formatted, 'Some error occurred');
+    });
+
+
+    test('prefers concise backend error message fields', () {
+      const errorJson = '{"message":"Kill switch is ON.","primary_message":"Fallback primary","detail":{"message":"Fallback detail"}}';
+      const errorMessage = 'HTTP 409: $errorJson';
+
+      final formatted = ApiErrorFormatter.format(errorMessage);
+
+      expect(formatted, 'Kill switch is ON.');
+    });
+
+    test('falls back to detail message field', () {
+      const errorJson = '{"detail":{"message":"Backend dry-run is ON, so live KIS orders are blocked."}}';
+      const errorMessage = 'HTTP 400: $errorJson';
+
+      final formatted = ApiErrorFormatter.format(errorMessage);
+
+      expect(formatted, 'Backend dry-run is ON, so live KIS orders are blocked.');
     });
 
     test('falls back to original message for non-JSON errors', () {

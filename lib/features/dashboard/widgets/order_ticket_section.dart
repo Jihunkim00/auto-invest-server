@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
@@ -521,43 +523,42 @@ class _ValidationResultCard extends StatelessWidget {
           const SizedBox(height: 10),
           _StateLine(text: 'Market closed: $closureLabel'),
         ],
-        if (result.warnings.isNotEmpty) ...[
+        if (blocked && result.message?.isNotEmpty == true) ...[
           const SizedBox(height: 12),
-          _ReasonList(title: 'Warnings', items: result.warnings),
-        ],
-        if (result.blockReasons.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _ReasonList(title: 'Block Reasons', items: result.blockReasons),
+          _StateLine(text: result.message!, color: Colors.redAccent),
         ],
         const SizedBox(height: 12),
-        _StateLine(
-            text:
-                'Payload preview: ${result.orderPreview.payloadPreview.toString()}'),
+        _ValidationDetailSection(result: result),
       ]),
     );
   }
 }
 
-class _ReasonList extends StatelessWidget {
-  const _ReasonList({required this.title, required this.items});
+class _ValidationDetailSection extends StatelessWidget {
+  const _ValidationDetailSection({required this.result});
 
-  final String title;
-  final List<String> items;
+  final OrderValidationResult result;
 
   @override
   Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title.toUpperCase(),
-          style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 10,
-              fontWeight: FontWeight.w800)),
-      const SizedBox(height: 4),
-      for (final item in items)
-        Text(item,
-            style: const TextStyle(
-                color: Colors.white70, fontWeight: FontWeight.w700)),
-    ]);
+    final lines = <String>[
+      if (result.primaryBlockReason?.isNotEmpty == true)
+        'Primary: ${result.primaryBlockReason}',
+      if (result.warnings.isNotEmpty) 'Warnings: ${result.warnings.join(', ')}',
+      if (result.blockReasons.isNotEmpty)
+        'Block reasons: ${result.blockReasons.join(', ')}',
+      if (result.detail.isNotEmpty) 'Detail: ${jsonEncode(result.detail)}',
+      'Payload preview: ${jsonEncode(result.orderPreview.payloadPreview)}',
+    ];
+
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: const Text('Raw validation details'),
+      children: [
+        _StateLine(text: lines.join('\n')),
+      ],
+    );
   }
 }
 

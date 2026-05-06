@@ -243,7 +243,9 @@ def test_submit_manual_rejects_when_dry_run_true(client, db_session):
         json=_payload(dry_run=True),
     )
 
-    _assert_rejected(response, "dry_run_false")
+    body = _assert_rejected(response, "dry_run_false")
+    assert body["primary_block_reason"] == "dry_run_must_be_false"
+    assert body["message"] == "Backend dry-run is ON, so live KIS orders are blocked."
 
 
 def test_submit_manual_rejects_when_runtime_dry_run_enabled(
@@ -257,7 +259,9 @@ def test_submit_manual_rejects_when_runtime_dry_run_enabled(
 
     response = client.post("/kis/orders/submit-manual", json=_payload())
 
-    _assert_rejected(response, "dry_run_false")
+    body = _assert_rejected(response, "dry_run_false")
+    assert body["primary_block_reason"] == "dry_run_must_be_false"
+    assert body["message"] == "Backend dry-run is ON, so live KIS orders are blocked."
 
 
 def test_submit_manual_rejects_when_kill_switch_true(monkeypatch, client, db_session):
@@ -269,7 +273,9 @@ def test_submit_manual_rejects_when_kill_switch_true(monkeypatch, client, db_ses
 
     response = client.post("/kis/orders/submit-manual", json=_payload())
 
-    _assert_rejected(response, "kill_switch_false")
+    body = _assert_rejected(response, "kill_switch_false")
+    assert body["primary_block_reason"] == "kill_switch_enabled"
+    assert body["message"] == "Kill switch is ON."
 
 
 def test_submit_manual_rejects_when_kr_profile_disabled(
@@ -314,7 +320,9 @@ def test_submit_manual_rejects_when_holiday(monkeypatch, client, db_session):
 def test_submit_manual_rejects_when_no_recent_dry_run_validation(client):
     response = client.post("/kis/orders/submit-manual", json=_payload())
 
-    _assert_rejected(response, "recent_dry_run_validation_passed")
+    body = _assert_rejected(response, "recent_dry_run_validation_passed")
+    assert body["primary_block_reason"] == "recent_dry_run_validation_missing"
+    assert body["message"] == "A successful validation within the last 5 minutes is required."
 
 
 def test_submit_manual_rejects_when_qty_exceeds_cap(

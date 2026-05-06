@@ -15,6 +15,7 @@ from app.brokers.kis_client import KisClient
 from app.core.enums import InternalOrderStatus
 from app.db.models import KisOrderValidationLog, OrderLog
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.kis_order_messages import concise_order_block
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -565,7 +566,22 @@ class KisManualOrderService:
         broker_order_id: str | None,
         broker_status: str | None,
     ) -> dict[str, Any]:
-        return {
+        block_reasons = [
+            str(safety_checks[name].get("reason"))
+            for name in failed_checks
+            if safety_checks[name].get("reason")
+        ]
+        detail_source: dict[str, Any] = {}
+        for name in failed_checks:
+            detail = safety_checks[name].get("detail")
+            if isinstance(detail, dict):
+                detail_source.update(detail)
+        concise = (
+            concise_order_block(block_reasons, detail_source=detail_source)
+            if block_reasons
+            else {}
+        )
+        response = {
             "provider": "kis",
             "market": normalized_market,
             "real_order_submitted": real_order_submitted,
@@ -578,12 +594,10 @@ class KisManualOrderService:
             "internal_status": internal_status,
             "safety_checks": safety_checks,
             "failed_checks": failed_checks,
-            "block_reasons": [
-                str(safety_checks[name].get("reason"))
-                for name in failed_checks
-                if safety_checks[name].get("reason")
-            ],
+            "block_reasons": block_reasons,
         }
+        response.update({key: value for key, value in concise.items() if value is not None})
+        return response
 
 
 def _public_market_session(market_session: dict[str, Any]) -> dict[str, Any]:
