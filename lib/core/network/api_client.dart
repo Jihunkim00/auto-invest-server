@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_manual_order_result.dart';
+import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
@@ -220,6 +221,11 @@ class ApiClient {
     } catch (_) {
       return MarketWatchlist.empty(normalizedMarket);
     }
+  }
+
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
+    final payload = await _getJsonNoCache('/kis/manual-order/status');
+    return KisManualOrderSafetyStatus.fromJson(payload);
   }
 
   Future<OrderValidationResult> validateKisOrder({

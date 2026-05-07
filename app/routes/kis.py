@@ -27,9 +27,39 @@ from app.services.kis_order_sync_service import (
 )
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
-from app.services.market_session_service import MarketSessionError
+from app.services.market_session_service import MarketSessionError, MarketSessionService
+from app.services.runtime_setting_service import RuntimeSettingService
 
 router = APIRouter(prefix="/kis", tags=["kis"])
+
+
+@router.get("/manual-order/status")
+def get_kis_manual_order_status(db: Session = Depends(get_db)):
+    settings = get_settings()
+    runtime = RuntimeSettingService().get_settings(db)
+    market_session = MarketSessionService().get_session_status("KR")
+    return {
+        "provider": "kis",
+        "market": "KR",
+        "runtime_dry_run": bool(runtime.get("dry_run", True)),
+        "kill_switch": bool(runtime.get("kill_switch", False)),
+        "kis_enabled": bool(getattr(settings, "kis_enabled", False)),
+        "kis_real_order_enabled": bool(
+            getattr(settings, "kis_real_order_enabled", False)
+        ),
+        "market_open": market_session.get("is_market_open") is True,
+        "entry_allowed_now": market_session.get("is_entry_allowed_now") is True,
+        "no_new_entry_after": market_session.get("no_new_entry_after", "15:00"),
+        "market_session": {
+            "market": market_session.get("market"),
+            "timezone": market_session.get("timezone"),
+            "is_market_open": market_session.get("is_market_open") is True,
+            "is_entry_allowed_now": market_session.get("is_entry_allowed_now") is True,
+            "is_near_close": market_session.get("is_near_close") is True,
+            "effective_close": market_session.get("effective_close"),
+            "no_new_entry_after": market_session.get("no_new_entry_after", "15:00"),
+        },
+    }
 
 
 @router.get("/market/price/{symbol}")
@@ -42,7 +72,9 @@ def get_kis_market_price(symbol: str, db: Session = Depends(get_db)):
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        )
 
 
 @router.get("/market/bars/{symbol}")
@@ -62,7 +94,9 @@ def get_kis_market_bars(symbol: str, limit: int = 120, db: Session = Depends(get
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        )
 
 
 @router.get("/account/balance")
@@ -75,7 +109,9 @@ def get_kis_account_balance(db: Session = Depends(get_db)):
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        )
 
 
 @router.get("/account/positions")
@@ -94,7 +130,9 @@ def list_kis_positions(db: Session = Depends(get_db)):
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        )
 
 
 @router.get("/account/open-orders")
@@ -113,12 +151,16 @@ def list_kis_open_orders(db: Session = Depends(get_db)):
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)})
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details})
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        )
 
 
 @router.post("/orders/validate")
 @router.post("/orders/dry-run")
-def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends(get_db)):
+def validate_kis_order(
+    payload: KisOrderValidationRequest, db: Session = Depends(get_db)
+):
     client = _client(db)
     service = KisOrderValidationService(client)
     try:
@@ -134,7 +176,9 @@ def validate_kis_order(payload: KisOrderValidationRequest, db: Session = Depends
     except KisAuthError as exc:
         raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
     except KisApiError as exc:
-        raise HTTPException(status_code=502, detail={"message": str(exc), "details": exc.details}) from exc
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
 
 
 @router.post("/orders/manual-submit")

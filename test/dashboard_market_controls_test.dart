@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
@@ -157,6 +158,18 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
+      const KisManualOrderSafetyStatus(
+        runtimeDryRun: false,
+        killSwitch: false,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      );
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>

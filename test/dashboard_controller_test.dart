@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -240,6 +241,20 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
+      KisManualOrderSafetyStatus(
+        runtimeDryRun: getOpsSettingsCalls > 1
+            ? (refreshedDryRun ?? settingsDryRun)
+            : settingsDryRun,
+        killSwitch: false,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      );
 
   @override
   Future<OpsSettings> getOpsSettings() async {

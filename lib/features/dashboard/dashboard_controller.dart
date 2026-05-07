@@ -4,6 +4,7 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_manual_order_result.dart';
+import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -104,11 +105,28 @@ class DashboardController extends ChangeNotifier {
   bool kisManualSubmitLoading = false;
   bool kisOrderSyncLoading = false;
   bool kisOrdersLoading = false;
+  bool kisSafetyStatusLoading = false;
+  KisManualOrderSafetyStatus kisSafetyStatus =
+      KisManualOrderSafetyStatus.safeDefault;
   String? kisManualOrderError;
   KisManualOrderResult? latestKisManualOrder;
   List<KisManualOrderResult> kisOrders = const [];
   bool kisIncludeRejected = false;
   KisManualOrderResult? selectedKisOrder;
+
+  bool get hasValidKisValidation =>
+      orderValidationResult?.validatedForSubmission == true;
+
+  bool get isOrderTicketInputValid =>
+      orderTicketSymbol.trim().isNotEmpty && orderTicketQty > 0;
+
+  bool get canSubmitLiveKisOrder =>
+      !kisManualSubmitLoading &&
+      orderValidationResult != null &&
+      orderValidationResult!.validatedForSubmission &&
+      kisLiveConfirmation &&
+      !kisSafetyStatus.runtimeDryRun &&
+      !kisSafetyStatus.killSwitch;
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -139,6 +157,8 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
     try {
       settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      await refreshKisSafetyStatus(silent: true);
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       schedulerStatus = await apiClient.fetchSchedulerStatus();
       await loadMarketWatchlists();
@@ -317,6 +337,8 @@ class DashboardController extends ChangeNotifier {
     try {
       v ? await apiClient.killSwitchOn() : await apiClient.killSwitchOff();
       settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      await refreshKisSafetyStatus(silent: true);
       return ActionResult(
           success: true,
           message: 'Kill switch ${v ? 'enabled' : 'disabled'} successfully.');
@@ -340,6 +362,8 @@ class DashboardController extends ChangeNotifier {
     try {
       await apiClient.updateOpsSettings({'dry_run': v});
       settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      await refreshKisSafetyStatus(silent: true);
       return ActionResult(
           success: true,
           message: 'Dry run ${settings.dryRun ? 'enabled' : 'disabled'} successfully.');
@@ -434,6 +458,43 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  KisManualOrderSafetyStatus kisSafetyStatusFromSettings() {
+    return KisManualOrderSafetyStatus(
+      runtimeDryRun: settings.dryRun,
+      killSwitch: settings.killSwitch,
+      kisEnabled: kisSafetyStatus.kisEnabled,
+      kisRealOrderEnabled: kisSafetyStatus.kisRealOrderEnabled,
+      marketOpen: kisSafetyStatus.marketOpen,
+      entryAllowedNow: kisSafetyStatus.entryAllowedNow,
+      noNewEntryAfter: kisSafetyStatus.noNewEntryAfter,
+    );
+  }
+
+  Future<ActionResult> refreshKisSafetyStatus({bool silent = false}) async {
+    kisSafetyStatusLoading = true;
+    if (!silent) notifyListeners();
+    try {
+      kisSafetyStatus = await apiClient.fetchKisManualOrderSafetyStatus();
+      settings = settings.copyWith(
+        dryRun: kisSafetyStatus.runtimeDryRun,
+        killSwitch: kisSafetyStatus.killSwitch,
+      );
+      return const ActionResult(
+        success: true,
+        message: 'KIS safety status refreshed.',
+      );
+    } catch (e) {
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(ApiErrorFormatter.format(e.toString())),
+      );
+    } finally {
+      kisSafetyStatusLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> validateKisOrder() async {
     final symbol = orderTicketSymbol.trim();
     final side = orderTicketSide;
@@ -443,6 +504,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     notifyListeners();
     try {
+      await refreshKisSafetyStatus(silent: true);
       final result = await apiClient.validateKisOrder(
         symbol: symbol,
         side: side,
@@ -455,7 +517,8 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: true, message: status);
     } catch (e) {
       orderValidationError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: orderValidationError!);
+      return ActionResult(
+          success: false, message: _primaryMessage(orderValidationError!));
     } finally {
       orderValidationLoading = false;
       notifyListeners();
@@ -463,6 +526,15 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<ActionResult> submitKisManualOrder() async {
+    await refreshKisSafetyStatus(silent: true);
+
+    if (!canSubmitLiveKisOrder) {
+      return ActionResult(
+        success: false,
+        message: _kisSubmitBlockedMessage(),
+      );
+    }
+
     if (!kisLiveConfirmation) {
       return const ActionResult(
         success: false,
@@ -496,12 +568,12 @@ class DashboardController extends ChangeNotifier {
       await _refreshKisOrdersAfterAction();
       return ActionResult(
         success: true,
-        message:
-            'Live KIS order submitted. Status: ${latestKisManualOrder?.internalStatus ?? result.internalStatus}.',
+        message: _submittedMessage(latestKisManualOrder ?? result),
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: kisManualOrderError!);
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
       kisManualSubmitLoading = false;
       notifyListeners();
@@ -533,7 +605,8 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: kisManualOrderError!);
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
       kisOrderSyncLoading = false;
       notifyListeners();
@@ -557,7 +630,8 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: kisManualOrderError!);
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
       kisOrderSyncLoading = false;
       notifyListeners();
@@ -577,7 +651,8 @@ class DashboardController extends ChangeNotifier {
           success: true, message: 'KIS orders refreshed.');
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: kisManualOrderError!);
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
       kisOrdersLoading = false;
       notifyListeners();
@@ -679,4 +754,31 @@ class DashboardController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {}
   }
+}
+
+String _primaryMessage(String value) {
+  final lines = value
+      .split(RegExp(r'[\r\n]+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty);
+  return lines.isEmpty ? value.trim() : lines.first;
+}
+
+String _submittedMessage(KisManualOrderResult order) {
+  final status = _kisTerminalLabel(order);
+  final odno = order.kisOdno == null ? '' : ' / ODNO ${order.kisOdno}';
+  return 'Live KIS order ${order.orderId}$odno: $status.';
+}
+
+String _kisTerminalLabel(KisManualOrderResult order) {
+  final status = order.internalStatus.toUpperCase();
+  if (status == 'FILLED') return 'FILLED';
+  if (status == 'FAILED' || status == 'REJECTED' || status == 'CANCELED') {
+    return 'REJECTED';
+  }
+  return 'SUBMITTED';
+}
+
+String _kisSubmitBlockedMessage() {
+  return 'Live KIS submit is blocked by the checklist.';
 }

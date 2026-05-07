@@ -105,6 +105,8 @@ class _KrOrderTicket extends StatelessWidget {
         _SoftBadge(text: 'NO AUTO KIS ORDERS', color: Colors.amberAccent),
       ]),
       const SizedBox(height: 12),
+      _RuntimeSafetyStatusCard(controller: controller),
+      const SizedBox(height: 12),
       LayoutBuilder(builder: (context, constraints) {
         final vertical = constraints.maxWidth < 620;
         final symbolInput = TextField(
@@ -181,9 +183,10 @@ class _KrOrderTicket extends StatelessWidget {
       const _StateLine(text: 'Use dry-run validation first'),
       const SizedBox(height: 12),
       if (controller.orderValidationError != null)
-        _StateLine(
-          text: controller.orderValidationError!,
-          color: Colors.redAccent,
+        _RawErrorSection(
+          title: 'Validation error details',
+          primary: _primaryLine(controller.orderValidationError!),
+          raw: controller.orderValidationError!,
         ),
       if (controller.orderValidationResult != null)
         _ValidationResultCard(result: controller.orderValidationResult!),
@@ -201,10 +204,11 @@ class _KrOrderTicket extends StatelessWidget {
         ),
       ),
       const SizedBox(height: 8),
+      _PreSubmitChecklist(controller: controller),
+      const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         FilledButton.icon(
-          onPressed: controller.kisManualSubmitLoading ||
-                  !controller.kisLiveConfirmation
+          onPressed: !controller.canSubmitLiveKisOrder
               ? null
               : () async {
                   final result = await controller.submitKisManualOrder();
@@ -271,9 +275,10 @@ class _KrOrderTicket extends StatelessWidget {
       ]),
       if (controller.kisManualOrderError != null) ...[
         const SizedBox(height: 12),
-        _StateLine(
-          text: controller.kisManualOrderError!,
-          color: Colors.redAccent,
+        _RawErrorSection(
+          title: 'Order error details',
+          primary: _primaryLine(controller.kisManualOrderError!),
+          raw: controller.kisManualOrderError!,
         ),
       ],
       const SizedBox(height: 12),
@@ -282,6 +287,156 @@ class _KrOrderTicket extends StatelessWidget {
         latest: controller.latestKisManualOrder,
         selected: controller.selectedKisOrder,
         orders: controller.kisOrders,
+      ),
+    ]);
+  }
+}
+
+class _RuntimeSafetyStatusCard extends StatelessWidget {
+  const _RuntimeSafetyStatusCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = controller.kisSafetyStatus;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Expanded(
+            child: Text('RUNTIME SAFETY STATUS',
+                style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800)),
+          ),
+          IconButton(
+            tooltip: 'Refresh KIS safety status',
+            onPressed: controller.kisSafetyStatusLoading
+                ? null
+                : () => controller.refreshKisSafetyStatus(),
+            icon: controller.kisSafetyStatusLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh, size: 18),
+          ),
+        ]),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _DataPair(
+              label: 'Runtime dry-run',
+              value: status.runtimeDryRun ? 'ON' : 'OFF'),
+          _DataPair(
+              label: 'Kill switch', value: status.killSwitch ? 'ON' : 'OFF'),
+          _DataPair(label: 'KIS enabled', value: status.kisEnabled.toString()),
+          _DataPair(
+              label: 'KIS real order enabled',
+              value: status.kisRealOrderEnabled.toString()),
+          _DataPair(
+              label: 'Market open', value: status.marketOpen ? 'Yes' : 'No'),
+          _DataPair(
+              label: 'Entry allowed now',
+              value: status.entryAllowedNow ? 'Yes' : 'No'),
+          _DataPair(label: 'No new entry after', value: status.noNewEntryAfter),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _PreSubmitChecklist extends StatelessWidget {
+  const _PreSubmitChecklist({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final validation = controller.orderValidationResult;
+    final status = controller.kisSafetyStatus;
+    final symbolMatches =
+        validation?.symbol == controller.orderTicketSymbol.trim();
+    final qtyMatches = validation?.qty == controller.orderTicketQty;
+    final inputValid = controller.isOrderTicketInputValid &&
+        (validation == null || (symbolMatches && qtyMatches));
+    final items = [
+      _ChecklistItem(
+          label: 'recent validation passed',
+          passed: validation?.validatedForSubmission == true),
+      _ChecklistItem(
+          label: 'confirm_live checked',
+          passed: controller.kisLiveConfirmation),
+      _ChecklistItem(
+          label: 'runtime dry_run is OFF', passed: !status.runtimeDryRun),
+      _ChecklistItem(label: 'kill_switch is OFF', passed: !status.killSwitch),
+      _ChecklistItem(
+          label: 'market entry allowed', passed: status.entryAllowedNow),
+      _ChecklistItem(label: 'qty and symbol valid', passed: inputValid),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('PRE-SUBMIT CHECKLIST',
+            style: TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: items),
+      ]),
+    );
+  }
+}
+
+class _ChecklistItem extends StatelessWidget {
+  const _ChecklistItem({required this.label, required this.passed});
+
+  final String label;
+  final bool passed;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SoftBadge(
+      text: '${passed ? '✓' : '×'} $label',
+      color: passed ? Colors.greenAccent : Colors.redAccent,
+    );
+  }
+}
+
+class _RawErrorSection extends StatelessWidget {
+  const _RawErrorSection({
+    required this.title,
+    required this.primary,
+    required this.raw,
+  });
+
+  final String title;
+  final String primary;
+  final String raw;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _StateLine(text: primary, color: Colors.redAccent),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: Text(title),
+        children: [_StateLine(text: raw)],
       ),
     ]);
   }
@@ -353,6 +508,31 @@ class _KisOrderStatusPanel extends StatelessWidget {
             if (detail.lastSyncedAt != null)
               _DataPair(label: 'Last Sync', value: detail.lastSyncedAt!),
           ]),
+          const SizedBox(height: 10),
+          _StateLine(text: 'Clear status: ${_clearStatus(detail)}'),
+          if (!detail.isTerminal && detail.isSyncable) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: controller.kisOrderSyncLoading
+                    ? null
+                    : () async {
+                        final result =
+                            await controller.syncKisOrderById(detail.orderId);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(result.message),
+                          backgroundColor: result.success
+                              ? Colors.green
+                              : Colors.redAccent,
+                        ));
+                      },
+                icon: const Icon(Icons.sync),
+                label: const Text('Sync Status'),
+              ),
+            ),
+          ],
           if (detail.brokerOrderStatus != null) ...[
             const SizedBox(height: 10),
             _StateLine(text: 'Broker status: ${detail.brokerOrderStatus}'),
@@ -665,4 +845,21 @@ String _quantity(double value) {
 String _nullableQuantity(double? value) {
   if (value == null) return 'n/a';
   return _quantity(value);
+}
+
+String _primaryLine(String value) {
+  final lines = value
+      .split(RegExp(r'[\r\n]+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty);
+  return lines.isEmpty ? value.trim() : lines.first;
+}
+
+String _clearStatus(KisManualOrderResult order) {
+  final status = order.internalStatus.toUpperCase();
+  if (status == 'FILLED') return 'FILLED';
+  if (status == 'FAILED' || status == 'REJECTED' || status == 'CANCELED') {
+    return 'REJECTED';
+  }
+  return 'SUBMITTED';
 }
