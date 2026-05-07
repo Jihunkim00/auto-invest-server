@@ -15,6 +15,9 @@ class ApiErrorFormatter {
       try {
         final json = jsonDecode(body) as Map<String, dynamic>;
 
+        final concise = _extractConciseMessage(json);
+        if (concise != null) return concise;
+
         if (statusCode == 409) {
           return _formatSafetyGateError(json);
         } else if (statusCode == 502) {
@@ -27,6 +30,24 @@ class ApiErrorFormatter {
 
     // Fallback: return original message
     return errorMessage;
+  }
+
+  static String? _extractConciseMessage(Map<String, dynamic> json) {
+    for (final key in ['message', 'primary_message']) {
+      final value = json[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+
+    final detail = json['detail'];
+    if (detail is Map) {
+      final value = detail['message'];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
   }
 
   static String _formatSafetyGateError(Map<String, dynamic> json) {

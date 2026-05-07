@@ -134,6 +134,8 @@ def test_validate_buy_blocked_with_insufficient_cash(monkeypatch, client):
     assert body["validated_for_submission"] is False
     assert body["can_submit_later"] is False
     assert body["block_reasons"] == ["insufficient_cash"]
+    assert body["primary_block_reason"] == "insufficient_cash"
+    assert body["message"] == "Insufficient available cash."
 
 
 def test_validate_buy_returns_blocked_when_kis_balance_api_fails(monkeypatch, client):
@@ -290,6 +292,9 @@ def test_after_kr_no_new_entry_time_blocks_buy(monkeypatch, client):
     assert "after_no_new_entry_time" in body["warnings"]
     assert "after_no_new_entry_time" in body["block_reasons"]
     assert "near_close" in body["warnings"]
+    assert body["primary_block_reason"] == "buy_entry_not_allowed_now"
+    assert body["message"] == "New buy entries are blocked after 15:00."
+    assert body["detail"]["near_close"] is True
 
 
 def test_holiday_closure_reason_is_returned(monkeypatch, client):

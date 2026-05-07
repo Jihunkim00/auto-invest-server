@@ -143,6 +143,37 @@ void main() {
     controller.dispose();
   });
 
+  test('successful dry-run update calls backend and refreshes state', () async {
+    final api = _FakeApiClient(settingsDryRun: true, refreshedDryRun: false);
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+    final result = await controller.setDryRun(false);
+
+    expect(result.success, isTrue);
+    expect(api.updateOpsSettingsCalls, 1);
+    expect(api.lastSettingsUpdate, {'dry_run': false});
+    expect(api.getOpsSettingsCalls, 2);
+    expect(controller.settings.dryRun, isFalse);
+
+    controller.dispose();
+  });
+
+  test('failed dry-run update rolls back state', () async {
+    final api = _FakeApiClient(settingsDryRun: true, throwUpdateOpsSettings: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+    final result = await controller.setDryRun(false);
+
+    expect(result.success, isFalse);
+    expect(api.updateOpsSettingsCalls, 1);
+    expect(controller.settings.dryRun, isTrue);
+    expect(controller.dryRunLoading, isFalse);
+
+    controller.dispose();
+  });
+
   test('KR preview candidate can fill dry-run order ticket without validation',
       () {
     final api = _FakeApiClient(validationResult: _validationResult());
@@ -185,6 +216,9 @@ class _FakeApiClient extends ApiClient {
     this.usWatchlist,
     this.krWatchlist,
     this.validationResult,
+    this.settingsDryRun = true,
+    this.refreshedDryRun,
+    this.throwUpdateOpsSettings = false,
   });
 
   final WatchlistRunResult? latest;
@@ -195,25 +229,45 @@ class _FakeApiClient extends ApiClient {
   final MarketWatchlist? usWatchlist;
   final MarketWatchlist? krWatchlist;
   final OrderValidationResult? validationResult;
+  final bool settingsDryRun;
+  final bool? refreshedDryRun;
+  final bool throwUpdateOpsSettings;
   int mockCalls = 0;
+  int getOpsSettingsCalls = 0;
+  int updateOpsSettingsCalls = 0;
+  Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
 
   @override
-  Future<OpsSettings> getOpsSettings() async => const OpsSettings(
-        schedulerEnabled: false,
-        botEnabled: false,
-        dryRun: true,
-        killSwitch: false,
-        brokerMode: 'Paper',
-        defaultGateLevel: 2,
-        maxDailyTrades: 5,
-        maxDailyEntries: 2,
-        minEntryScore: 65,
-        minScoreGap: 3,
-      );
+  Future<OpsSettings> getOpsSettings() async {
+    getOpsSettingsCalls += 1;
+    return OpsSettings(
+      schedulerEnabled: false,
+      botEnabled: false,
+      dryRun: getOpsSettingsCalls > 1
+          ? (refreshedDryRun ?? settingsDryRun)
+          : settingsDryRun,
+      killSwitch: false,
+      brokerMode: 'Paper',
+      defaultGateLevel: 2,
+      maxDailyTrades: 5,
+      maxDailyEntries: 2,
+      minEntryScore: 65,
+      minScoreGap: 3,
+    );
+  }
+
+  @override
+  Future<void> updateOpsSettings(Map<String, dynamic> values) async {
+    updateOpsSettingsCalls += 1;
+    lastSettingsUpdate = values;
+    if (throwUpdateOpsSettings) {
+      throw const ApiRequestException('HTTP 500: {"message":"settings failed"}');
+    }
+  }
 
   @override
   Future<SchedulerStatus> fetchSchedulerStatus() async =>

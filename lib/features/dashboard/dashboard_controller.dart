@@ -128,6 +128,7 @@ class DashboardController extends ChangeNotifier {
   bool schedulerLoading = false;
   bool botLoading = false;
   bool killSwitchLoading = false;
+  bool dryRunLoading = false;
   bool runOnceLoading = false;
   bool manualRunLoading = false;
   String? manualRunSymbol;
@@ -329,20 +330,27 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
-  void setDryRun(bool v) {
-    settings = OpsSettings(
-      schedulerEnabled: settings.schedulerEnabled,
-      botEnabled: settings.botEnabled,
-      dryRun: v,
-      killSwitch: settings.killSwitch,
-      brokerMode: settings.brokerMode,
-      defaultGateLevel: settings.defaultGateLevel,
-      maxDailyTrades: settings.maxDailyTrades,
-      maxDailyEntries: settings.maxDailyEntries,
-      minEntryScore: settings.minEntryScore,
-      minScoreGap: settings.minScoreGap,
-    );
+  Future<ActionResult> setDryRun(bool v) async {
+    final previousSettings = settings;
+    settings = settings.copyWith(dryRun: v);
+    dryRunLoading = true;
+    error = null;
     notifyListeners();
+
+    try {
+      await apiClient.updateOpsSettings({'dry_run': v});
+      settings = await apiClient.getOpsSettings();
+      return ActionResult(
+          success: true,
+          message: 'Dry run ${settings.dryRun ? 'enabled' : 'disabled'} successfully.');
+    } catch (e) {
+      settings = previousSettings;
+      error = 'Dry run update failed: ${ApiErrorFormatter.format(e.toString())}';
+      return ActionResult(success: false, message: error!);
+    } finally {
+      dryRunLoading = false;
+      notifyListeners();
+    }
   }
 
   void selectPortfolioMarket(PortfolioMarket market) {
@@ -443,7 +451,7 @@ class DashboardController extends ChangeNotifier {
       orderValidationResult = result;
       final status = result.validatedForSubmission
           ? 'Dry-run validated. No real order submitted.'
-          : 'Blocked by validation. No real order submitted.';
+          : result.message ?? 'Blocked by validation. No real order submitted.';
       return ActionResult(success: true, message: status);
     } catch (e) {
       orderValidationError = ApiErrorFormatter.format(e.toString());

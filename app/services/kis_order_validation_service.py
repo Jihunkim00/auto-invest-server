@@ -12,6 +12,7 @@ from app.brokers.kis_client import KisApiError, KisClient, to_float
 from app.db.models import KisOrderValidationLog
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
+from app.services.kis_order_messages import concise_order_block
 
 
 class KisOrderValidationError(ValueError):
@@ -83,6 +84,9 @@ class KisOrderValidationResult:
     block_reasons: list[str]
     market_session: dict
     order_preview: KisOrderPreview
+    primary_block_reason: str | None = None
+    message: str | None = None
+    detail: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -135,6 +139,7 @@ class KisOrderValidationService:
             block_reasons.append("after_no_new_entry_time")
         if market_session["is_near_close"]:
             warnings.append("near_close")
+            block_reasons.append("near_close")
 
         try:
             price_info = self.client.get_domestic_stock_price(symbol)
@@ -188,7 +193,15 @@ class KisOrderValidationService:
             qty=request.qty,
             order_type=request.order_type,
         )
+        block_reasons = _dedupe(block_reasons)
+        warnings = _dedupe(warnings)
         validated = len(block_reasons) == 0
+        public_session = _public_market_session(market_session)
+        concise = (
+            {}
+            if validated
+            else concise_order_block(block_reasons, detail_source=public_session)
+        )
 
         return KisOrderValidationResult(
             provider="kis",
@@ -205,10 +218,13 @@ class KisOrderValidationService:
             estimated_amount=estimated_amount,
             available_cash=available_cash,
             held_qty=held_qty,
-            warnings=_dedupe(warnings),
-            block_reasons=_dedupe(block_reasons),
-            market_session=_public_market_session(market_session),
+            warnings=warnings,
+            block_reasons=block_reasons,
+            market_session=public_session,
             order_preview=preview,
+            primary_block_reason=concise.get("primary_block_reason"),
+            message=concise.get("message"),
+            detail=concise.get("detail"),
         )
 
     def _build_preview(

@@ -18,6 +18,9 @@ class OrderValidationResult {
     required this.blockReasons,
     required this.marketSession,
     required this.orderPreview,
+    this.primaryBlockReason,
+    this.message,
+    this.detail = const {},
   });
 
   factory OrderValidationResult.fromJson(Map<String, dynamic> json) {
@@ -42,6 +45,9 @@ class OrderValidationResult {
           Map<String, dynamic>.from((json['market_session'] as Map?) ?? {})),
       orderPreview: OrderPreview.fromJson(
           Map<String, dynamic>.from((json['order_preview'] as Map?) ?? {})),
+      primaryBlockReason: _readNullableString(json['primary_block_reason']),
+      message: _readNullableString(json['message']),
+      detail: Map<String, dynamic>.from((json['detail'] as Map?) ?? {}),
     );
   }
 
@@ -63,6 +69,9 @@ class OrderValidationResult {
   final List<String> blockReasons;
   final MarketSessionStatus marketSession;
   final OrderPreview orderPreview;
+  final String? primaryBlockReason;
+  final String? message;
+  final Map<String, dynamic> detail;
 }
 
 class MarketSessionStatus {

@@ -56,12 +56,17 @@ class SettingsScreen extends StatelessWidget {
                 title: 'Dry Run',
                 subtitle: 'Safety mode. Keep enabled for paper-only validation.',
                 value: s.dryRun,
+                loading: controller.dryRunLoading,
                 onChanged: (v) async {
                   if (!v) {
                     final ok = await showConfirmActionDialog(context, title: 'Turn Dry Run OFF?', description: 'This reduces safety. Confirm only if backend policy allows it.');
                     if (!ok) return;
                   }
-                  controller.setDryRun(v);
+                  final result = await controller.setDryRun(v);
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(result.message),
+                    backgroundColor: result.success ? Colors.green : Colors.redAccent,
+                  ));
                 },
               ),
               OperationToggleCard(

@@ -93,6 +93,24 @@ class ApiClient {
     return Map<String, dynamic>.from(decoded);
   }
 
+
+  Future<Map<String, dynamic>> _putJsonBody(
+      String path, Map<String, dynamic> body) async {
+    final r = await _client.put(
+      Uri.parse('${AppConfig.baseUrl}$path'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid backend response.');
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
   Future<void> _post(String path) async {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
@@ -360,6 +378,10 @@ class ApiClient {
         minScoreGap: 3,
       );
     }
+  }
+
+  Future<void> updateOpsSettings(Map<String, dynamic> values) async {
+    await _putJsonBody('/ops/settings', values);
   }
 
   Future<SchedulerStatus> fetchSchedulerStatus() async {
