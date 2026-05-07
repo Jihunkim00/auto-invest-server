@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
@@ -353,6 +354,27 @@ class ApiClient {
     }
     final payload = Map<String, dynamic>.from(decoded);
     return WatchlistRunResult.fromJson(payload);
+  }
+
+  Future<KisAutoSimulatorResult> runKisDryRunAuto({
+    required int gateLevel,
+  }) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/auto/dry-run-once').replace(
+      queryParameters: {'gate_level': gateLevel.toString()},
+    );
+    final r = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(const {}),
+    );
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid backend response.');
+    }
+    return KisAutoSimulatorResult.fromJson(Map<String, dynamic>.from(decoded));
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({

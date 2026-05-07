@@ -20,6 +20,11 @@ from app.services.kis_manual_order_service import (
     KisManualOrderService,
     KisManualOrderSubmitRequest,
 )
+from app.services.kis_dry_run_auto_service import (
+    MANUAL_TRIGGER_SOURCE,
+    SCHEDULER_TRIGGER_SOURCE,
+    KisDryRunAutoService,
+)
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -289,6 +294,44 @@ def run_kis_scheduler_preview_once(
         payload["scheduler_preview_only"] = True
         payload["real_order_submitted"] = False
         return payload
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/auto/dry-run-once")
+def run_kis_auto_dry_run_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisDryRunAutoService(client, db=db)
+    try:
+        return service.run_once(
+            db,
+            gate_level=gate_level,
+            trigger_source=MANUAL_TRIGGER_SOURCE,
+        )
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/scheduler/run-dry-run-once")
+def run_kis_scheduler_dry_run_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisDryRunAutoService(client, db=db)
+    try:
+        return service.run_once(
+            db,
+            gate_level=gate_level,
+            trigger_source=SCHEDULER_TRIGGER_SOURCE,
+        )
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:

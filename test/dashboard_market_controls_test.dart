@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_auto_simulator_result.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -148,6 +149,47 @@ void main() {
           'momentum',
           'recent_return',
         ]));
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Auto Simulator runs dry-run auto and shows last result',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    controller.setProvider(SelectedProvider.kis);
+    await tester.pumpAndSettle();
+
+    expect(find.text('KIS Auto Simulator'), findsOneWidget);
+    expect(find.text('Dry-run only'), findsOneWidget);
+    expect(find.text('Run KIS Dry-Run Auto'), findsOneWidget);
+
+    await tester.tap(find.text('Run KIS Dry-Run Auto'));
+    await tester.pumpAndSettle();
+
+    expect(api.dryRunAutoCalls, 1);
+    expect(api.lastDryRunGateLevel, 2);
+    expect(controller.kisAutoSimulatorResult?.realOrderSubmitted, isFalse);
+    expect(find.text('real_order_submitted=false'), findsOneWidget);
+    expect(find.text('simulated_order_created'), findsWidgets);
+    expect(find.text('005930'), findsWidgets);
+    expect(find.text('123'), findsOneWidget);
+    expect(find.text('456'), findsOneWidget);
+    expect(find.text('74'), findsOneWidget);
+    expect(find.text('82'), findsOneWidget);
+    expect(find.text('76'), findsOneWidget);
+    expect(
+      find.text('KIS dry-run auto completed: simulated_order_created.'),
+      findsOneWidget,
+    );
 
     controller.dispose();
   });
@@ -491,6 +533,26 @@ void main() {
 
     controller.dispose();
   });
+
+  test('duplicate KIS dry-run auto requests are ignored while in progress',
+      () async {
+    final api = _FakeApiClient(
+      dryRunAutoDelay: const Duration(milliseconds: 20),
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    final first = controller.runKisDryRunAuto();
+    final second = await controller.runKisDryRunAuto();
+    final firstResult = await first;
+
+    expect(api.dryRunAutoCalls, 1);
+    expect(second.success, isFalse);
+    expect(second.message, 'KIS dry-run auto already in progress.');
+    expect(firstResult.success, isTrue);
+    expect(controller.kisAutoSimulatorResult?.realOrderSubmitted, isFalse);
+
+    controller.dispose();
+  });
 }
 
 Widget _wrap(DashboardController controller, Widget Function() buildChild) {
@@ -519,6 +581,7 @@ class _FakeApiClient extends ApiClient {
     this.cancelDelay = Duration.zero,
     this.summary = KisOrderSummary.empty,
     this.throwCancel = false,
+    this.dryRunAutoDelay = Duration.zero,
   });
 
   final bool scoredPreview;
@@ -531,8 +594,10 @@ class _FakeApiClient extends ApiClient {
   final Duration cancelDelay;
   final KisOrderSummary summary;
   final bool throwCancel;
+  final Duration dryRunAutoDelay;
   int validationCalls = 0;
   int previewCalls = 0;
+  int dryRunAutoCalls = 0;
   int syncOpenCalls = 0;
   int syncOrderCalls = 0;
   int fetchKisOrdersCalls = 0;
@@ -543,6 +608,7 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+  int? lastDryRunGateLevel;
 
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
@@ -864,6 +930,43 @@ class _FakeApiClient extends ApiClient {
       result: 'preview_only',
       reason: 'kr_trading_disabled',
       triggerSource: 'manual_preview',
+    );
+  }
+
+  @override
+  Future<KisAutoSimulatorResult> runKisDryRunAuto({
+    required int gateLevel,
+  }) async {
+    dryRunAutoCalls += 1;
+    lastDryRunGateLevel = gateLevel;
+    if (dryRunAutoDelay > Duration.zero) {
+      await Future<void>.delayed(dryRunAutoDelay);
+    }
+    return const KisAutoSimulatorResult(
+      provider: 'kis',
+      market: 'KR',
+      mode: 'kis_dry_run_auto',
+      dryRun: true,
+      simulated: true,
+      realOrderSubmitted: false,
+      brokerSubmitCalled: false,
+      manualSubmitCalled: false,
+      triggerSource: 'manual_kis_dry_run_auto',
+      result: 'simulated_order_created',
+      action: 'buy',
+      triggeredSymbol: '005930',
+      signalId: 123,
+      orderId: 456,
+      reason: 'dry_run_risk_approved',
+      quantBuyScore: 74,
+      quantSellScore: 12,
+      aiBuyScore: 82,
+      aiSellScore: 14,
+      confidence: 0.74,
+      finalEntryScore: 76,
+      finalScoreGap: 5,
+      riskFlags: ['simulated_only'],
+      gatingNotes: ['Dry-run risk approved a simulated buy.'],
     );
   }
 

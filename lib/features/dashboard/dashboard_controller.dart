@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/market_watchlist.dart';
@@ -99,6 +100,9 @@ class DashboardController extends ChangeNotifier {
   bool krWatchlistPreviewLoading = false;
   WatchlistRunResult? krWatchlistPreview;
   String? krWatchlistPreviewError;
+  bool kisAutoSimulatorLoading = false;
+  KisAutoSimulatorResult? kisAutoSimulatorResult;
+  String? kisAutoSimulatorError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
@@ -825,6 +829,39 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: false, message: krWatchlistPreviewError!);
     } finally {
       krWatchlistPreviewLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisDryRunAuto() async {
+    if (kisAutoSimulatorLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS dry-run auto already in progress.',
+      );
+    }
+
+    kisAutoSimulatorLoading = true;
+    kisAutoSimulatorError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisDryRunAuto(
+        gateLevel: selectedGateLevel,
+      );
+      kisAutoSimulatorResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS dry-run auto completed: ${result.result}.',
+      );
+    } catch (e) {
+      kisAutoSimulatorError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisAutoSimulatorError!),
+      );
+    } finally {
+      kisAutoSimulatorLoading = false;
       notifyListeners();
     }
   }
