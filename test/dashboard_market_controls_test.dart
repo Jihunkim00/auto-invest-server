@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -17,7 +18,7 @@ const _samsungName = '\uC0BC\uC131\uC804\uC790';
 const _krLabel = '005930 - $_samsungName - KOSPI';
 
 void main() {
-    testWidgets('KR order ticket is dry-run only and validates preview',
+  testWidgets('KR order ticket is dry-run only and validates preview',
       (tester) async {
     final api = _FakeApiClient();
     final controller = DashboardController(api, autoload: false);
@@ -150,6 +151,346 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('Sync Open KIS Orders calls API and refreshes recent orders',
+      (tester) async {
+    final api = _FakeApiClient(
+      syncOpenCount: 2,
+      orders: [_kisOrder(orderId: 1, status: 'SUBMITTED')],
+      refreshedOrders: [_kisOrder(orderId: 2, status: 'ACCEPTED')],
+      summary: const KisOrderSummary(
+        openOrders: 1,
+        filledToday: 2,
+        canceledToday: 1,
+        rejectedToday: 0,
+        lastOrderAt: '2026-05-08T00:04:00',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = _kisOrder(orderId: 1, status: 'SUBMITTED')
+      ..selectedKisOrder = _kisOrder(orderId: 1, status: 'SUBMITTED')
+      ..kisOrders = [_kisOrder(orderId: 1, status: 'SUBMITTED')];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Sync Open KIS Orders'));
+    await tester.tap(find.text('Sync Open KIS Orders'));
+    await tester.pumpAndSettle();
+
+    expect(api.syncOpenCalls, 1);
+    expect(api.fetchKisOrdersCalls, 1);
+    expect(controller.kisOrders.first.orderId, 2);
+    expect(find.text('Open KIS orders synced: 2 updated.'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS order actions are visible only for syncable open orders',
+      (tester) async {
+    final api = _FakeApiClient();
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = openOrder
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    expect(find.text('Sync Status'), findsWidgets);
+    expect(find.text('Cancel Order'), findsOneWidget);
+    expect(find.text('INTERNAL STATUS'), findsOneWidget);
+    expect(find.text('BROKER STATUS'), findsOneWidget);
+    expect(find.text('CREATED'), findsOneWidget);
+    expect(find.text('LAST SYNC'), findsOneWidget);
+    expect(find.text('STATE'), findsOneWidget);
+
+    final terminalOrder = _kisOrder(orderId: 2, status: 'FILLED');
+    controller
+      ..latestKisManualOrder = terminalOrder
+      ..selectedKisOrder = terminalOrder
+      ..kisOrders = [terminalOrder]
+      ..notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sync Status'), findsNothing);
+    expect(find.text('Cancel Order'), findsNothing);
+    expect(find.text('FILLED'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS cancel hides for rejected and missing ODNO orders',
+      (tester) async {
+    final api = _FakeApiClient();
+    final rejectedOrder =
+        _kisOrder(orderId: 1, status: 'REJECTED_BY_SAFETY_GATE');
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = rejectedOrder
+      ..selectedKisOrder = rejectedOrder
+      ..kisOrders = [rejectedOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    expect(find.text('Cancel Order'), findsNothing);
+    expect(find.text('REJECTED'), findsWidgets);
+
+    final noOdnoOrder =
+        _kisOrder(orderId: 2, status: 'SUBMITTED', kisOdno: null);
+    controller
+      ..latestKisManualOrder = noOdnoOrder
+      ..selectedKisOrder = noOdnoOrder
+      ..kisOrders = [noOdnoOrder]
+      ..notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sync Status'), findsWidgets);
+    expect(find.text('Cancel Order'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS cancel requires confirmation and refreshes orders',
+      (tester) async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final canceledOrder = _kisOrder(orderId: 1, status: 'CANCELED');
+    final api = _FakeApiClient(
+      orders: [openOrder],
+      cancelDetail: canceledOrder,
+      refreshedOrders: [canceledOrder],
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = openOrder
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Cancel Order').first);
+    await tester.tap(find.text('Cancel Order').first);
+    await tester.pumpAndSettle();
+
+    expect(api.cancelCalls, 0);
+    expect(
+      find.text(
+        'Cancel this KIS order? This only cancels the existing open order and will not create a new order.',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Cancel Order'));
+    await tester.pumpAndSettle();
+
+    expect(api.cancelCalls, 1);
+    expect(api.fetchKisOrderDetailCalls, 1);
+    expect(api.fetchKisOrdersCalls, 1);
+    expect(controller.selectedKisOrder?.clearStatusLabel, 'CANCELED');
+    expect(find.text('KIS order canceled.'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS cancel error snackbar uses concise message', (tester) async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final api = _FakeApiClient(orders: [openOrder], throwCancel: true);
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = openOrder
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Cancel Order').first);
+    await tester.tap(find.text('Cancel Order').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Cancel Order'));
+    await tester.pumpAndSettle();
+
+    expect(api.cancelCalls, 1);
+    expect(
+      find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.text('Terminal orders cannot be canceled.'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Order error details'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS order polling stops on terminal state', (tester) async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final filledOrder = _kisOrder(orderId: 1, status: 'FILLED');
+    final api = _FakeApiClient(
+      orders: [openOrder],
+      refreshedOrders: [filledOrder],
+      syncResults: [filledOrder],
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = openOrder
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pumpAndSettle();
+
+    expect(api.syncOrderCalls, 1);
+    expect(controller.selectedKisOrder?.clearStatusLabel, 'FILLED');
+
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pump();
+
+    expect(api.syncOrderCalls, 1);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS order polling stops on dispose', (tester) async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final api = _FakeApiClient(
+      orders: [openOrder],
+      refreshedOrders: [openOrder],
+      syncResults: [openOrder, openOrder],
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = openOrder
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pump();
+    expect(api.syncOrderCalls, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pump();
+
+    expect(api.syncOrderCalls, 1);
+
+    controller.dispose();
+  });
+
+  test('KIS order filter and sort behavior', () {
+    final controller = DashboardController(_FakeApiClient(), autoload: false)
+      ..kisOrders = [
+        _kisOrder(
+          orderId: 1,
+          status: 'SUBMITTED',
+          createdAt: '2026-05-08T00:01:00',
+        ),
+        _kisOrder(
+          orderId: 2,
+          status: 'FILLED',
+          createdAt: '2026-05-08T00:02:00',
+        ),
+        _kisOrder(
+          orderId: 3,
+          status: 'CANCELED',
+          createdAt: '2026-05-08T00:03:00',
+        ),
+        _kisOrder(
+          orderId: 4,
+          status: 'REJECTED_BY_SAFETY_GATE',
+          createdAt: '2026-05-08T00:04:00',
+        ),
+      ];
+
+    expect(controller.visibleKisOrders.map((order) => order.orderId),
+        [4, 3, 2, 1]);
+
+    controller.setKisOrderFilter(KisOrderHistoryFilter.open);
+    expect(controller.visibleKisOrders.map((order) => order.orderId), [1]);
+
+    controller.setKisOrderFilter(KisOrderHistoryFilter.filled);
+    expect(controller.visibleKisOrders.map((order) => order.orderId), [2]);
+
+    controller.setKisOrderFilter(KisOrderHistoryFilter.canceled);
+    expect(controller.visibleKisOrders.map((order) => order.orderId), [3]);
+
+    controller.setKisOrderFilter(KisOrderHistoryFilter.rejected);
+    expect(controller.visibleKisOrders.map((order) => order.orderId), [4]);
+
+    controller.setKisOrderFilter(KisOrderHistoryFilter.all);
+    controller.setKisOrderSort(KisOrderHistorySort.oldestFirst);
+    expect(controller.visibleKisOrders.map((order) => order.orderId),
+        [1, 2, 3, 4]);
+
+    controller.dispose();
+  });
+
+  test('duplicate KIS cancel requests are ignored while in progress', () async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final canceledOrder = _kisOrder(orderId: 1, status: 'CANCELED');
+    final api = _FakeApiClient(
+      orders: [openOrder],
+      refreshedOrders: [canceledOrder],
+      cancelDetail: canceledOrder,
+      cancelDelay: const Duration(milliseconds: 20),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    final first = controller.cancelKisOrderById(1);
+    final second = await controller.cancelKisOrderById(1);
+    final firstResult = await first;
+
+    expect(api.cancelCalls, 1);
+    expect(second.success, isFalse);
+    expect(second.message, 'KIS cancel already in progress.');
+    expect(firstResult.success, isTrue);
+
+    controller.dispose();
+  });
+
+  test('duplicate KIS sync requests are ignored while in progress', () async {
+    final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
+    final api = _FakeApiClient(
+      orders: [openOrder],
+      refreshedOrders: [openOrder],
+      syncResults: [openOrder],
+      syncDelay: const Duration(milliseconds: 20),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedKisOrder = openOrder
+      ..kisOrders = [openOrder];
+
+    final first = controller.syncKisOrderById(1);
+    final second = await controller.syncKisOrderById(1);
+    final firstResult = await first;
+
+    expect(api.syncOrderCalls, 1);
+    expect(second.success, isFalse);
+    expect(second.message, 'KIS sync already in progress.');
+    expect(firstResult.success, isTrue);
+
+    controller.dispose();
+  });
 }
 
 Widget _wrap(DashboardController controller, Widget Function() buildChild) {
@@ -167,11 +508,38 @@ Widget _wrap(DashboardController controller, Widget Function() buildChild) {
 }
 
 class _FakeApiClient extends ApiClient {
-  _FakeApiClient({this.scoredPreview = false});
+  _FakeApiClient({
+    this.scoredPreview = false,
+    this.syncOpenCount,
+    this.orders = const [],
+    this.refreshedOrders,
+    this.syncResults = const [],
+    this.syncDelay = Duration.zero,
+    this.cancelDetail,
+    this.cancelDelay = Duration.zero,
+    this.summary = KisOrderSummary.empty,
+    this.throwCancel = false,
+  });
 
   final bool scoredPreview;
+  final int? syncOpenCount;
+  final List<KisManualOrderResult> orders;
+  final List<KisManualOrderResult>? refreshedOrders;
+  final List<KisManualOrderResult> syncResults;
+  final Duration syncDelay;
+  final KisManualOrderResult? cancelDetail;
+  final Duration cancelDelay;
+  final KisOrderSummary summary;
+  final bool throwCancel;
   int validationCalls = 0;
   int previewCalls = 0;
+  int syncOpenCalls = 0;
+  int syncOrderCalls = 0;
+  int fetchKisOrdersCalls = 0;
+  int fetchKisOrderSummaryCalls = 0;
+  int cancelCalls = 0;
+  int fetchKisOrderDetailCalls = 0;
+  int _syncResultIndex = 0;
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
@@ -187,6 +555,83 @@ class _FakeApiClient extends ApiClient {
         entryAllowedNow: true,
         noNewEntryAfter: '15:00',
       );
+
+  @override
+  Future<KisOpenOrderSyncResult> syncOpenKisOrders() async {
+    syncOpenCalls += 1;
+    return KisOpenOrderSyncResult(
+      count: syncOpenCount,
+      orders: orders,
+    );
+  }
+
+  @override
+  Future<KisManualOrderResult> syncKisOrder(int orderId) async {
+    syncOrderCalls += 1;
+    if (syncDelay > Duration.zero) {
+      await Future<void>.delayed(syncDelay);
+    }
+    if (syncResults.isNotEmpty) {
+      final index = _syncResultIndex >= syncResults.length
+          ? syncResults.length - 1
+          : _syncResultIndex;
+      _syncResultIndex += 1;
+      return syncResults[index];
+    }
+    return (refreshedOrders ?? orders).firstWhere(
+      (order) => order.orderId == orderId,
+      orElse: () => _kisOrder(orderId: orderId, status: 'SUBMITTED'),
+    );
+  }
+
+  @override
+  Future<List<KisManualOrderResult>> fetchKisOrders({
+    int limit = 20,
+    bool includeRejected = false,
+  }) async {
+    fetchKisOrdersCalls += 1;
+    return refreshedOrders ?? orders;
+  }
+
+  @override
+  Future<KisOrderSummary> fetchKisOrderSummary() async {
+    fetchKisOrderSummaryCalls += 1;
+    return summary;
+  }
+
+  @override
+  Future<KisManualOrderResult> fetchKisOrderDetail(
+    int orderId, {
+    bool includeSyncPayload = false,
+  }) async {
+    fetchKisOrderDetailCalls += 1;
+    if (cancelDetail != null) return cancelDetail!;
+    return (refreshedOrders ?? orders).firstWhere(
+      (order) => order.orderId == orderId,
+      orElse: () => _kisOrder(orderId: orderId, status: 'UNKNOWN'),
+    );
+  }
+
+  @override
+  Future<Map<String, dynamic>> cancelKisOrder(int orderId) async {
+    cancelCalls += 1;
+    if (cancelDelay > Duration.zero) {
+      await Future<void>.delayed(cancelDelay);
+    }
+    if (throwCancel) {
+      throw const ApiRequestException(
+        'HTTP 409: {"canceled":false,"message":"Terminal orders cannot be canceled.","raw_payload":{"CANO":"12****78"}}',
+      );
+    }
+    return {
+      'canceled': true,
+      'order_id': orderId,
+      'kis_odno': '0001234567',
+      'internal_status': 'CANCELED',
+      'broker_status': 'CANCELED',
+      'message': 'KIS order canceled.',
+    };
+  }
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>
@@ -448,3 +893,51 @@ const _krWatchlist = MarketWatchlist(
     WatchlistSymbol(symbol: '005930', name: _samsungName, market: 'KOSPI'),
   ],
 );
+
+KisManualOrderResult _kisOrder({
+  required int orderId,
+  required String status,
+  String? kisOdno = '0001234567',
+  String createdAt = '2026-05-08T00:00:00',
+}) {
+  final internalStatus = status.toUpperCase();
+  return KisManualOrderResult.fromJson({
+    'order_id': orderId,
+    'broker': 'kis',
+    'market': 'KR',
+    'symbol': '005930',
+    'side': 'buy',
+    'order_type': 'market',
+    'requested_qty': 3,
+    'filled_qty': internalStatus == 'FILLED' ? 3 : 0,
+    'remaining_qty': internalStatus == 'FILLED' ? 0 : 3,
+    'avg_fill_price': internalStatus == 'FILLED' ? 72000 : null,
+    'kis_odno': kisOdno,
+    'internal_status': internalStatus,
+    'broker_order_status': internalStatus == 'CANCELED'
+        ? 'CANCELED'
+        : internalStatus == 'FILLED'
+            ? 'filled'
+            : 'submitted',
+    'created_at': createdAt,
+    'submitted_at': '2026-05-08T00:01:00',
+    'filled_at': internalStatus == 'FILLED' ? '2026-05-08T00:03:00' : null,
+    'canceled_at': internalStatus == 'CANCELED' ? '2026-05-08T00:03:00' : null,
+    'last_synced_at': '2026-05-08T00:02:00',
+    'sync_error': null,
+    'is_syncable': const {
+      'SUBMITTED',
+      'ACCEPTED',
+      'PARTIALLY_FILLED',
+      'UNKNOWN_STALE',
+      'SYNC_FAILED',
+    }.contains(internalStatus),
+    'is_terminal': const {
+      'FILLED',
+      'REJECTED',
+      'REJECTED_BY_SAFETY_GATE',
+      'CANCELED',
+      'FAILED',
+    }.contains(internalStatus),
+  });
+}

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.brokers.kis_client import KisClient
@@ -27,6 +28,7 @@ OPEN_KIS_INTERNAL_STATUSES = {
     InternalOrderStatus.PENDING.value,
     InternalOrderStatus.PARTIALLY_FILLED.value,
     InternalOrderStatus.UNKNOWN_STALE.value,
+    InternalOrderStatus.SYNC_FAILED.value,
     "PENDING_SUBMIT",
 }
 
@@ -256,6 +258,64 @@ class KisOrderSyncService:
             raise
 
 
+def summarize_kis_orders(
+    db: Session,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    start_utc, end_utc = _today_window_utc(now)
+    open_orders = (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == "kis")
+        .filter(OrderLog.internal_status.in_(sorted(OPEN_KIS_INTERNAL_STATUSES)))
+        .count()
+    )
+    filled_today = _count_status_today(
+        db,
+        statuses={InternalOrderStatus.FILLED.value},
+        timestamp_column=OrderLog.filled_at,
+        start_utc=start_utc,
+        end_utc=end_utc,
+    )
+    canceled_today = _count_status_today(
+        db,
+        statuses={InternalOrderStatus.CANCELED.value, "CANCELLED"},
+        timestamp_column=OrderLog.canceled_at,
+        start_utc=start_utc,
+        end_utc=end_utc,
+    )
+    rejected_today = (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == "kis")
+        .filter(
+            OrderLog.internal_status.in_(
+                [
+                    InternalOrderStatus.REJECTED.value,
+                    InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+                    InternalOrderStatus.FAILED.value,
+                ]
+            )
+        )
+        .filter(OrderLog.created_at >= start_utc)
+        .filter(OrderLog.created_at < end_utc)
+        .count()
+    )
+    last_order_at = (
+        db.query(func.max(OrderLog.created_at))
+        .filter(OrderLog.broker == "kis")
+        .scalar()
+    )
+    return {
+        "provider": "kis",
+        "market": "KR",
+        "open_orders": int(open_orders or 0),
+        "filled_today": int(filled_today or 0),
+        "canceled_today": int(canceled_today or 0),
+        "rejected_today": int(rejected_today or 0),
+        "last_order_at": _iso(last_order_at),
+    }
+
+
 def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) -> dict[str, Any]:
     requested_qty = order.requested_qty
     if requested_qty is None:
@@ -266,6 +326,8 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         remaining_qty = max(float(requested_qty) - filled_qty, 0)
 
     internal_status = str(order.internal_status or "").upper()
+    is_terminal = _is_terminal_status(internal_status)
+    is_syncable = _is_syncable_status(internal_status)
     payload = {
         "order_id": order.id,
         "broker": order.broker,
@@ -282,12 +344,16 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "broker_status": order.broker_status,
         "kis_odno": order.kis_odno or order.broker_order_id,
         "kis_orgn_odno": order.kis_orgn_odno,
+        "created_at": _iso(order.created_at),
         "submitted_at": _iso(order.submitted_at),
+        "filled_at": _iso(order.filled_at),
+        "canceled_at": _iso(order.canceled_at),
         "last_synced_at": _iso(order.last_synced_at),
         "sync_error": order.sync_error or order.error_message,
         "is_live_order": bool(str(order.broker or "").lower() == "kis" and (order.kis_odno or order.broker_order_id)),
-        "is_terminal": internal_status in {"FILLED", "CANCELLED", "CANCELED", "REJECTED", "FAILED"},
-        "is_syncable": internal_status in {"SUBMITTED", "ACCEPTED", "PARTIALLY_FILLED", "UNKNOWN_STALE", "SYNC_FAILED"},
+        "is_terminal": is_terminal,
+        "is_syncable": is_syncable,
+        "clear_status": _clear_status_label(internal_status),
         "display_status": _display_status(internal_status),
     }
     if include_sync_payload and order.last_sync_payload:
@@ -307,8 +373,47 @@ def _display_status(internal_status: str) -> str:
         "UNKNOWN_STALE": "Sync uncertain",
         "FAILED": "Failed",
         "REJECTED_BY_SAFETY_GATE": "Rejected by safety gate",
+        "CANCELED": "Canceled",
+        "CANCELLED": "Canceled",
     }
     return mapping.get(internal_status, internal_status.title().replace("_", " "))
+
+
+def _is_terminal_status(internal_status: str) -> bool:
+    return internal_status in {
+        "FILLED",
+        "CANCELLED",
+        "CANCELED",
+        "REJECTED",
+        "REJECTED_BY_SAFETY_GATE",
+        "FAILED",
+    }
+
+
+def _is_syncable_status(internal_status: str) -> bool:
+    return internal_status in {
+        "SUBMITTED",
+        "ACCEPTED",
+        "PARTIALLY_FILLED",
+        "UNKNOWN_STALE",
+        "SYNC_FAILED",
+    }
+
+
+def _clear_status_label(internal_status: str) -> str:
+    if internal_status == "FILLED":
+        return "FILLED"
+    if internal_status in {"CANCELED", "CANCELLED"}:
+        return "CANCELED"
+    if internal_status in {"FAILED", "REJECTED", "REJECTED_BY_SAFETY_GATE"}:
+        return "REJECTED"
+    if _is_syncable_status(internal_status) or internal_status in {
+        "REQUESTED",
+        "PENDING",
+        "PENDING_SUBMIT",
+    }:
+        return "SUBMITTED"
+    return "UNKNOWN"
 
 
 def _order_no(order: OrderLog) -> str | None:
@@ -414,6 +519,45 @@ def _rows_from_inquiry(inquiry: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _now_naive_utc() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _today_window_utc(now: datetime | None = None) -> tuple[datetime, datetime]:
+    current = now or datetime.now(KR_TZ)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=UTC)
+    local_now = current.astimezone(KR_TZ)
+    start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local.replace(day=start_local.day) + timedelta(days=1)
+    return (
+        start_local.astimezone(UTC).replace(tzinfo=None),
+        end_local.astimezone(UTC).replace(tzinfo=None),
+    )
+
+
+def _count_status_today(
+    db: Session,
+    *,
+    statuses: set[str],
+    timestamp_column,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> int:
+    return (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == "kis")
+        .filter(OrderLog.internal_status.in_(sorted(statuses)))
+        .filter(
+            or_(
+                and_(timestamp_column >= start_utc, timestamp_column < end_utc),
+                and_(
+                    timestamp_column.is_(None),
+                    OrderLog.created_at >= start_utc,
+                    OrderLog.created_at < end_utc,
+                ),
+            )
+        )
+        .count()
+    )
 
 
 def _nullable_float(value: Any) -> float | None:

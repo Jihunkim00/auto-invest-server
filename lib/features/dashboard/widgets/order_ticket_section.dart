@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -17,8 +18,11 @@ class OrderTicketSection extends StatefulWidget {
 }
 
 class _OrderTicketSectionState extends State<OrderTicketSection> {
+  static const _pollInterval = Duration(seconds: 20);
+
   late final TextEditingController _symbolController;
   late final TextEditingController _qtyController;
+  Timer? _pollTimer;
 
   @override
   void initState() {
@@ -27,13 +31,26 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
         TextEditingController(text: widget.controller.orderTicketSymbol);
     _qtyController = TextEditingController(
         text: widget.controller.orderTicketQty.toString());
+    widget.controller.addListener(_handleControllerChanged);
+    _updatePolling();
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_handleControllerChanged);
+    _stopPolling();
     _symbolController.dispose();
     _qtyController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant OrderTicketSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.removeListener(_handleControllerChanged);
+    widget.controller.addListener(_handleControllerChanged);
+    _updatePolling();
   }
 
   @override
@@ -77,6 +94,43 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
         selection: TextSelection.collapsed(offset: qty.length),
       );
     }
+  }
+
+  void _handleControllerChanged() {
+    _updatePolling();
+  }
+
+  void _updatePolling() {
+    if (!mounted) return;
+    if (widget.controller.selectedKisOrderIsPollable) {
+      _startPolling();
+    } else {
+      _stopPolling();
+    }
+  }
+
+  void _startPolling() {
+    if (_pollTimer?.isActive == true) return;
+    _pollTimer = Timer.periodic(_pollInterval, (_) async {
+      if (!mounted) {
+        _stopPolling();
+        return;
+      }
+      final controller = widget.controller;
+      if (!controller.selectedKisOrderIsPollable) {
+        _stopPolling();
+        return;
+      }
+      await controller.pollSelectedKisOrder();
+      if (!mounted || !controller.selectedKisOrderIsPollable) {
+        _stopPolling();
+      }
+    });
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 }
 
@@ -229,12 +283,34 @@ class _KrOrderTicket extends StatelessWidget {
               ? 'Submitting...'
               : 'Submit Live KIS Order'),
         ),
+        if (controller.latestKisManualOrder?.isSyncable == true &&
+            controller.latestKisManualOrder?.isTerminal != true)
+          OutlinedButton.icon(
+            onPressed: controller.kisOrderSyncLoading
+                ? null
+                : () async {
+                    final result = await controller.syncLatestKisOrder();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result.message),
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisOrderSyncLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.sync),
+            label: Text(
+                controller.kisOrderSyncLoading ? 'Syncing...' : 'Sync Status'),
+          ),
         OutlinedButton.icon(
-          onPressed: controller.kisOrderSyncLoading ||
-                  controller.latestKisManualOrder?.isSyncable != true
+          onPressed: controller.kisOrderSyncLoading
               ? null
               : () async {
-                  final result = await controller.syncLatestKisOrder();
+                  final result = await controller.syncOpenKisOrders();
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(result.message),
@@ -247,9 +323,10 @@ class _KrOrderTicket extends StatelessWidget {
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.sync),
-          label: Text(
-              controller.kisOrderSyncLoading ? 'Syncing...' : 'Sync Status'),
+              : const Icon(Icons.cloud_sync_outlined),
+          label: Text(controller.kisOrderSyncLoading
+              ? 'Syncing...'
+              : 'Sync Open KIS Orders'),
         ),
         OutlinedButton.icon(
           onPressed: controller.kisOrdersLoading
@@ -278,7 +355,8 @@ class _KrOrderTicket extends StatelessWidget {
         _RawErrorSection(
           title: 'Order error details',
           primary: _primaryLine(controller.kisManualOrderError!),
-          raw: controller.kisManualOrderError!,
+          raw: controller.kisManualOrderErrorRaw ??
+              controller.kisManualOrderError!,
         ),
       ],
       const SizedBox(height: 12),
@@ -383,8 +461,7 @@ class _PreSubmitChecklist extends StatelessWidget {
       _ChecklistItem(label: 'kill_switch is OFF', passed: !status.killSwitch),
       _ChecklistItem(label: 'KIS enabled', passed: status.kisEnabled),
       _ChecklistItem(
-          label: 'KIS real order enabled',
-          passed: status.kisRealOrderEnabled),
+          label: 'KIS real order enabled', passed: status.kisRealOrderEnabled),
       _ChecklistItem(label: 'market open', passed: status.marketOpen),
       _ChecklistItem(
           label: 'market entry allowed', passed: status.entryAllowedNow),
@@ -467,8 +544,10 @@ class _KisOrderStatusPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = orders.take(3).toList();
     final detail = selected ?? latest;
+    final history = controller.visibleKisOrders
+        .where((order) => order.orderId != detail?.orderId)
+        .toList();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -486,14 +565,12 @@ class _KisOrderStatusPanel extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800)),
           ),
-          if (detail != null) _StatusPill(order: detail),
+          if (detail != null) _ClearStatusPill(order: detail),
         ]),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: controller.kisIncludeRejected,
-          onChanged: (value) => controller.setKisIncludeRejected(value == true),
-          title: const Text('Show rejected attempts'),
-        ),
+        const SizedBox(height: 10),
+        _KisTodaySummaryCard(summary: controller.kisOrderSummary),
+        const SizedBox(height: 10),
+        _KisOrderHistoryControls(controller: controller),
         const SizedBox(height: 10),
         if (detail == null)
           const _StateLine(text: 'No recent KIS manual live orders')
@@ -515,16 +592,25 @@ class _KisOrderStatusPanel extends StatelessWidget {
                 value: detail.avgFillPrice == null
                     ? 'n/a'
                     : _krw(detail.avgFillPrice!)),
-            if (detail.lastSyncedAt != null)
-              _DataPair(label: 'Last Sync', value: detail.lastSyncedAt!),
+            _DataPair(label: 'Internal Status', value: detail.internalStatus),
+            _DataPair(
+                label: 'Broker Status',
+                value: detail.brokerOrderStatus ?? 'n/a'),
+            _DataPair(label: 'Created', value: detail.createdAt ?? 'n/a'),
+            _DataPair(label: 'Last Sync', value: detail.lastSyncedAt ?? 'n/a'),
+            _DataPair(label: 'State', value: _syncState(detail)),
           ]),
           const SizedBox(height: 10),
-          _StateLine(text: 'Clear status: ${_clearStatus(detail)}'),
+          _OrderTimeline(order: detail),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _ClearStatusPill(order: detail),
+          ),
           if (!detail.isTerminal && detail.isSyncable) ...[
             const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: OutlinedButton.icon(
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              OutlinedButton.icon(
                 onPressed: controller.kisOrderSyncLoading
                     ? null
                     : () async {
@@ -533,15 +619,40 @@ class _KisOrderStatusPanel extends StatelessWidget {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(result.message),
-                          backgroundColor: result.success
-                              ? Colors.green
-                              : Colors.redAccent,
+                          backgroundColor:
+                              result.success ? Colors.green : Colors.redAccent,
                         ));
                       },
                 icon: const Icon(Icons.sync),
                 label: const Text('Sync Status'),
               ),
-            ),
+              if (detail.canCancel)
+                OutlinedButton.icon(
+                  onPressed: controller.kisOrderCancelLoading
+                      ? null
+                      : () async {
+                          final confirmed =
+                              await _confirmCancelKisOrder(context);
+                          if (!confirmed || !context.mounted) return;
+                          final result = await controller
+                              .cancelKisOrderById(detail.orderId);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(result.message),
+                            backgroundColor: result.success
+                                ? Colors.green
+                                : Colors.redAccent,
+                          ));
+                        },
+                  icon: controller.kisOrderCancelLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.cancel_outlined),
+                  label: const Text('Cancel Order'),
+                ),
+            ]),
           ],
           if (detail.brokerOrderStatus != null) ...[
             const SizedBox(height: 10),
@@ -552,9 +663,15 @@ class _KisOrderStatusPanel extends StatelessWidget {
             _StateLine(text: detail.syncError!, color: Colors.amberAccent),
           ],
         ],
-        if (visible.length > 1) ...[
+        if (history.isNotEmpty) ...[
           const SizedBox(height: 14),
-          for (final order in visible)
+          const Text('ORDER HISTORY',
+              style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          for (final order in history)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _RecentKisOrderRow(order: order, controller: controller),
@@ -562,6 +679,75 @@ class _KisOrderStatusPanel extends StatelessWidget {
         ],
       ]),
     );
+  }
+}
+
+class _KisTodaySummaryCard extends StatelessWidget {
+  const _KisTodaySummaryCard({required this.summary});
+
+  final KisOrderSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('KIS TODAY',
+            style: TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _DataPair(label: 'Open Orders', value: summary.openOrders.toString()),
+          _DataPair(label: 'Filled', value: summary.filledToday.toString()),
+          _DataPair(label: 'Canceled', value: summary.canceledToday.toString()),
+          _DataPair(label: 'Rejected', value: summary.rejectedToday.toString()),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _KisOrderHistoryControls extends StatelessWidget {
+  const _KisOrderHistoryControls({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        for (final filter in KisOrderHistoryFilter.values)
+          ChoiceChip(
+            label: Text(_filterLabel(filter)),
+            selected: controller.kisOrderFilter == filter,
+            onSelected: (_) => controller.setKisOrderFilter(filter),
+          ),
+      ]),
+      const SizedBox(height: 8),
+      SegmentedButton<KisOrderHistorySort>(
+        segments: const [
+          ButtonSegment(
+            value: KisOrderHistorySort.newestFirst,
+            label: Text('Newest first'),
+          ),
+          ButtonSegment(
+            value: KisOrderHistorySort.oldestFirst,
+            label: Text('Oldest first'),
+          ),
+        ],
+        selected: {controller.kisOrderSort},
+        onSelectionChanged: (selection) =>
+            controller.setKisOrderSort(selection.first),
+      ),
+    ]);
   }
 }
 
@@ -575,52 +761,156 @@ class _RecentKisOrderRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: () => controller.selectKisOrder(order.orderId),
-      child: Row(children: [
-        Expanded(
-          child: Text(
-            '${order.symbol} ${order.side.toUpperCase()} ${_nullableQuantity(order.requestedQty)}',
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                color: Colors.white70, fontWeight: FontWeight.w700),
-          ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
-        const SizedBox(width: 8),
-        _StatusPill(order: order),
-        const SizedBox(width: 6),
-        if (order.isSyncable)
-          IconButton(
-            onPressed: () async {
-              await controller.selectKisOrder(order.orderId);
-              await controller.syncKisOrderById(order.orderId);
-            },
-            icon: const Icon(Icons.sync, size: 18),
-          ),
-      ]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Expanded(
+              child: Text(
+                '${order.symbol} ${order.side.toUpperCase()} ${_nullableQuantity(order.requestedQty)}',
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Colors.white70, fontWeight: FontWeight.w700),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _ClearStatusPill(order: order),
+          ]),
+          const SizedBox(height: 8),
+          Wrap(spacing: 12, runSpacing: 8, children: [
+            _DataPair(label: 'Order ID', value: order.orderId.toString()),
+            _DataPair(label: 'KIS ODNO', value: order.kisOdno ?? 'n/a'),
+            _DataPair(label: 'Symbol', value: order.symbol),
+            _DataPair(label: 'Side', value: order.side.toUpperCase()),
+            _DataPair(
+                label: 'Qty', value: _nullableQuantity(order.requestedQty)),
+            _DataPair(label: 'internal_status', value: order.internalStatus),
+            _DataPair(
+                label: 'broker_status',
+                value: order.brokerOrderStatus ?? 'n/a'),
+            _DataPair(label: 'created_at', value: order.createdAt ?? 'n/a'),
+            _DataPair(
+                label: 'last_synced_at', value: order.lastSyncedAt ?? 'n/a'),
+            _DataPair(label: 'State', value: _syncState(order)),
+          ]),
+          const SizedBox(height: 8),
+          _OrderTimeline(order: order),
+          if (!order.isTerminal && order.isSyncable) ...[
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              IconButton(
+                tooltip: 'Sync KIS order status',
+                onPressed: controller.kisOrderSyncLoading
+                    ? null
+                    : () async {
+                        await controller.selectKisOrder(order.orderId);
+                        await controller.syncKisOrderById(order.orderId);
+                      },
+                icon: const Icon(Icons.sync, size: 18),
+              ),
+              if (order.canCancel)
+                IconButton(
+                  tooltip: 'Cancel KIS order',
+                  onPressed: controller.kisOrderCancelLoading
+                      ? null
+                      : () async {
+                          final confirmed =
+                              await _confirmCancelKisOrder(context);
+                          if (!confirmed || !context.mounted) return;
+                          final result = await controller
+                              .cancelKisOrderById(order.orderId);
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(result.message),
+                            backgroundColor: result.success
+                                ? Colors.green
+                                : Colors.redAccent,
+                          ));
+                        },
+                  icon: const Icon(Icons.cancel_outlined, size: 18),
+                ),
+            ]),
+          ],
+        ]),
+      ),
     );
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.order});
+class _ClearStatusPill extends StatelessWidget {
+  const _ClearStatusPill({required this.order});
 
   final KisManualOrderResult order;
 
   @override
   Widget build(BuildContext context) {
-    final status = order.displayStatus;
-    final color = order.isFilled
-        ? Colors.greenAccent
-        : order.isPartial
-            ? Colors.lightBlueAccent
-            : order.isAccepted
-                ? Colors.amberAccent
-                : order.isUnknownStale
-                    ? Colors.orangeAccent
-                    : order.internalStatus.toUpperCase() == 'FAILED'
-                        ? Colors.redAccent
-                        : Colors.white54;
+    final status = order.clearStatusLabel;
+    final color = switch (status) {
+      'FILLED' => Colors.greenAccent,
+      'CANCELED' => Colors.lightBlueAccent,
+      'REJECTED' => Colors.redAccent,
+      'SUBMITTED' => Colors.amberAccent,
+      _ => Colors.white54,
+    };
     return _SoftBadge(text: status, color: color);
   }
+}
+
+class _OrderTimeline extends StatelessWidget {
+  const _OrderTimeline({required this.order});
+
+  final KisManualOrderResult order;
+
+  @override
+  Widget build(BuildContext context) {
+    final stages = [
+      _TimelineStage('VALIDATED', order.validatedAt),
+      _TimelineStage('SUBMITTED', order.submittedAt),
+      _TimelineStage('SYNCED', order.lastSyncedAt),
+      _TimelineStage('FILLED', order.filledAt),
+      _TimelineStage('CANCELED', order.canceledAt),
+      _TimelineStage('REJECTED', order.rejectedAt),
+    ];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('LIFECYCLE TIMELINE',
+            style: TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final stage in stages)
+            _SoftBadge(
+              text: '${stage.label}: ${stage.timestamp ?? 'n/a'}',
+              color: stage.timestamp == null
+                  ? Colors.white38
+                  : Colors.lightBlueAccent,
+            ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _TimelineStage {
+  const _TimelineStage(this.label, this.timestamp);
+
+  final String label;
+  final String? timestamp;
 }
 
 class _ValidationResultCard extends StatelessWidget {
@@ -865,11 +1155,41 @@ String _primaryLine(String value) {
   return lines.isEmpty ? value.trim() : lines.first;
 }
 
-String _clearStatus(KisManualOrderResult order) {
-  final status = order.internalStatus.toUpperCase();
-  if (status == 'FILLED') return 'FILLED';
-  if (status == 'FAILED' || status == 'REJECTED' || status == 'CANCELED') {
-    return 'REJECTED';
-  }
-  return 'SUBMITTED';
+String _syncState(KisManualOrderResult order) {
+  if (order.isTerminal) return 'terminal';
+  if (order.isSyncable) return 'syncable';
+  return 'non-syncable';
+}
+
+String _filterLabel(KisOrderHistoryFilter filter) {
+  return switch (filter) {
+    KisOrderHistoryFilter.open => 'OPEN',
+    KisOrderHistoryFilter.filled => 'FILLED',
+    KisOrderHistoryFilter.canceled => 'CANCELED',
+    KisOrderHistoryFilter.rejected => 'REJECTED',
+    KisOrderHistoryFilter.all => 'ALL',
+  };
+}
+
+Future<bool> _confirmCancelKisOrder(BuildContext context) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Cancel Order'),
+      content: const Text(
+        'Cancel this KIS order? This only cancels the existing open order and will not create a new order.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Keep Order'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Cancel Order'),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
 }

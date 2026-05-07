@@ -649,3 +649,76 @@ def test_kis_order_detail_includes_sanitized_payload(monkeypatch, db_session):
     assert payload["ctac_tlno"] == "***REDACTED***"
     assert payload["inqr_ip_addr"] == "***REDACTED***"
     assert payload["CANO"] != "12345678"
+
+
+def test_kis_order_summary_route_returns_zero_counts(db_session):
+    with _client(db_session) as client:
+        response = client.get("/kis/orders/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "kis"
+    assert body["open_orders"] == 0
+    assert body["filled_today"] == 0
+    assert body["canceled_today"] == 0
+    assert body["rejected_today"] == 0
+    assert body["last_order_at"] is None
+
+
+def test_kis_order_summary_route_counts_today_and_ignores_alpaca(db_session):
+    now = datetime.now(UTC).replace(tzinfo=None)
+    older = now - timedelta(days=1)
+
+    open_order = _seed_order(
+        db_session,
+        status=InternalOrderStatus.SUBMITTED.value,
+        odno="0000000101",
+    )
+    filled = _seed_order(
+        db_session,
+        status=InternalOrderStatus.FILLED.value,
+        odno="0000000102",
+    )
+    canceled = _seed_order(
+        db_session,
+        status=InternalOrderStatus.CANCELED.value,
+        odno="0000000103",
+    )
+    rejected = _seed_order(
+        db_session,
+        status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+        odno="0000000104",
+    )
+    old_filled = _seed_order(
+        db_session,
+        status=InternalOrderStatus.FILLED.value,
+        odno="0000000105",
+    )
+    _seed_order(
+        db_session,
+        broker="alpaca",
+        symbol="AAPL",
+        status=InternalOrderStatus.FILLED.value,
+        odno="alpaca-summary-1",
+    )
+
+    open_order.created_at = now
+    filled.created_at = now - timedelta(minutes=4)
+    filled.filled_at = now - timedelta(minutes=3)
+    canceled.created_at = now - timedelta(minutes=2)
+    canceled.canceled_at = now - timedelta(minutes=2)
+    rejected.created_at = now - timedelta(minutes=1)
+    old_filled.created_at = older
+    old_filled.filled_at = older
+    db_session.commit()
+
+    with _client(db_session) as client:
+        response = client.get("/kis/orders/summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["open_orders"] == 1
+    assert body["filled_today"] == 1
+    assert body["canceled_today"] == 1
+    assert body["rejected_today"] == 1
+    assert body["last_order_at"] == now.isoformat()

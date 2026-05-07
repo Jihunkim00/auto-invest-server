@@ -20,10 +20,12 @@ from app.services.kis_manual_order_service import (
     KisManualOrderService,
     KisManualOrderSubmitRequest,
 )
+from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
     KisOrderSyncService,
     serialize_kis_order,
+    summarize_kis_orders,
 )
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
@@ -209,6 +211,11 @@ def list_recent_kis_orders(
     }
 
 
+@router.get("/orders/summary")
+def get_kis_order_summary(db: Session = Depends(get_db)):
+    return summarize_kis_orders(db)
+
+
 @router.get("/orders/{order_id}")
 def get_kis_order_detail(
     order_id: int,
@@ -244,6 +251,14 @@ def sync_kis_order(order_id: int, db: Session = Depends(get_db)):
         status_code = 404 if "not found" in message.lower() else 400
         raise HTTPException(status_code=status_code, detail=message) from exc
     return serialize_kis_order(row)
+
+
+@router.post("/orders/{order_id}/cancel")
+def cancel_kis_order(order_id: int, db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisManualCancelService(client)
+    status_code, body = service.cancel_order(db, order_id)
+    return JSONResponse(status_code=status_code, content=body)
 
 
 @router.post("/watchlist/preview")

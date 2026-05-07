@@ -94,9 +94,6 @@ class ApiClient {
     return Map<String, dynamic>.from(decoded);
   }
 
-  
-
-
   Future<Map<String, dynamic>> _putJsonBody(
       String path, Map<String, dynamic> body) async {
     final r = await _client.put(
@@ -272,6 +269,20 @@ class ApiClient {
   Future<KisManualOrderResult> syncKisOrder(int orderId) async {
     final payload = await _postJsonBody('/kis/orders/$orderId/sync', const {});
     return KisManualOrderResult.fromJson(payload);
+  }
+
+  Future<KisOpenOrderSyncResult> syncOpenKisOrders() async {
+    final payload = await _postJsonBody('/kis/orders/sync-open', const {});
+    return KisOpenOrderSyncResult.fromJson(payload);
+  }
+
+  Future<Map<String, dynamic>> cancelKisOrder(int orderId) async {
+    return _postJsonBody('/kis/orders/$orderId/cancel', const {});
+  }
+
+  Future<KisOrderSummary> fetchKisOrderSummary() async {
+    final payload = await _getJsonNoCache('/kis/orders/summary');
+    return KisOrderSummary.fromJson(payload);
   }
 
   Future<List<KisManualOrderResult>> fetchKisOrders({
@@ -560,7 +571,6 @@ class ApiClient {
       return mockLogsSummary;
     }
   }
-  
 
   WatchlistRunResult getMockRunResult() {
     return const WatchlistRunResult(

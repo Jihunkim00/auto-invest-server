@@ -13,10 +13,14 @@ class KisManualOrderResult {
     required this.kisOdno,
     required this.internalStatus,
     required this.brokerOrderStatus,
+    required this.createdAt,
     required this.submittedAt,
+    required this.filledAt,
+    required this.canceledAt,
     required this.lastSyncedAt,
     required this.syncError,
     required this.displayStatus,
+    required this.clearStatusLabel,
     required this.isSyncable,
     required this.isTerminal,
   });
@@ -34,20 +38,35 @@ class KisManualOrderResult {
   final String? kisOdno;
   final String internalStatus;
   final String? brokerOrderStatus;
+  final String? createdAt;
   final String? submittedAt;
+  final String? filledAt;
+  final String? canceledAt;
   final String? lastSyncedAt;
   final String? syncError;
   final String displayStatus;
+  final String clearStatusLabel;
   final bool isSyncable;
   final bool isTerminal;
 
   bool get hasSyncError => syncError != null && syncError!.isNotEmpty;
+  bool get hasKisOdno => kisOdno != null && kisOdno!.trim().isNotEmpty;
+  bool get canCancel => hasKisOdno && isSyncable && !isTerminal;
   bool get isFilled => internalStatus.toUpperCase() == 'FILLED';
   bool get isPartial => internalStatus.toUpperCase() == 'PARTIALLY_FILLED';
   bool get isAccepted => internalStatus.toUpperCase() == 'ACCEPTED';
   bool get isUnknownStale => internalStatus.toUpperCase() == 'UNKNOWN_STALE';
+  bool get isCanceled {
+    final status = internalStatus.toUpperCase();
+    return status == 'CANCELED' || status == 'CANCELLED';
+  }
+
+  bool get isRejected => clearStatusLabel == 'REJECTED';
+  String? get validatedAt => isRejected ? null : createdAt;
+  String? get rejectedAt => isRejected ? createdAt : null;
 
   factory KisManualOrderResult.fromJson(Map<String, dynamic> json) {
+    final internalStatus = _readString(json['internal_status'], 'UNKNOWN');
     return KisManualOrderResult(
       orderId: _readInt(json['order_id'], 0),
       broker: _readString(json['broker'], 'kis'),
@@ -60,17 +79,121 @@ class KisManualOrderResult {
       remainingQty: _readNullableDouble(json['remaining_qty']),
       avgFillPrice: _readNullableDouble(json['avg_fill_price']),
       kisOdno: _readNullableString(json['kis_odno'] ?? json['broker_order_id']),
-      internalStatus: _readString(json['internal_status'], 'UNKNOWN'),
+      internalStatus: internalStatus,
       brokerOrderStatus: _readNullableString(
           json['broker_order_status'] ?? json['broker_status']),
+      createdAt: _readNullableString(json['created_at']),
       submittedAt: _readNullableString(json['submitted_at']),
+      filledAt: _readNullableString(json['filled_at']),
+      canceledAt: _readNullableString(json['canceled_at']),
       lastSyncedAt: _readNullableString(json['last_synced_at']),
       syncError: _readNullableString(json['sync_error']),
-      displayStatus: _readString(json['display_status'], _readString(json['internal_status'], 'UNKNOWN')),
-      isSyncable: json['is_syncable'] == true,
-      isTerminal: json['is_terminal'] == true,
+      displayStatus: _readString(
+          json['display_status'], clearKisStatusLabel(internalStatus)),
+      clearStatusLabel: _readString(
+          json['clear_status'], clearKisStatusLabel(internalStatus)),
+      isSyncable:
+          json['is_syncable'] == true || isSyncableKisStatus(internalStatus),
+      isTerminal:
+          json['is_terminal'] == true || isTerminalKisStatus(internalStatus),
     );
   }
+}
+
+class KisOrderSummary {
+  const KisOrderSummary({
+    required this.openOrders,
+    required this.filledToday,
+    required this.canceledToday,
+    required this.rejectedToday,
+    required this.lastOrderAt,
+  });
+
+  final int openOrders;
+  final int filledToday;
+  final int canceledToday;
+  final int rejectedToday;
+  final String? lastOrderAt;
+
+  static const empty = KisOrderSummary(
+    openOrders: 0,
+    filledToday: 0,
+    canceledToday: 0,
+    rejectedToday: 0,
+    lastOrderAt: null,
+  );
+
+  factory KisOrderSummary.fromJson(Map<String, dynamic> json) {
+    return KisOrderSummary(
+      openOrders: _readInt(json['open_orders'], 0),
+      filledToday: _readInt(json['filled_today'], 0),
+      canceledToday: _readInt(json['canceled_today'], 0),
+      rejectedToday: _readInt(json['rejected_today'], 0),
+      lastOrderAt: _readNullableString(json['last_order_at']),
+    );
+  }
+}
+
+class KisOpenOrderSyncResult {
+  const KisOpenOrderSyncResult({required this.count, required this.orders});
+
+  final int? count;
+  final List<KisManualOrderResult> orders;
+
+  factory KisOpenOrderSyncResult.fromJson(Map<String, dynamic> json) {
+    final rawOrders = json['orders'] as List<dynamic>? ?? const [];
+    return KisOpenOrderSyncResult(
+      count: json.containsKey('count') ? _readInt(json['count'], 0) : null,
+      orders: rawOrders
+          .whereType<Map>()
+          .map((item) =>
+              KisManualOrderResult.fromJson(Map<String, dynamic>.from(item)))
+          .toList(),
+    );
+  }
+}
+
+bool isTerminalKisStatus(String status) {
+  switch (status.trim().toUpperCase()) {
+    case 'FILLED':
+    case 'REJECTED':
+    case 'REJECTED_BY_SAFETY_GATE':
+    case 'CANCELED':
+    case 'CANCELLED':
+    case 'FAILED':
+      return true;
+  }
+  return false;
+}
+
+bool isSyncableKisStatus(String status) {
+  switch (status.trim().toUpperCase()) {
+    case 'SUBMITTED':
+    case 'ACCEPTED':
+    case 'PARTIALLY_FILLED':
+    case 'UNKNOWN_STALE':
+    case 'SYNC_FAILED':
+      return true;
+  }
+  return false;
+}
+
+String clearKisStatusLabel(String status) {
+  final normalized = status.trim().toUpperCase();
+  if (normalized == 'FILLED') return 'FILLED';
+  if (normalized == 'CANCELED' || normalized == 'CANCELLED') return 'CANCELED';
+  if (normalized == 'FAILED' ||
+      normalized == 'REJECTED' ||
+      normalized == 'REJECTED_BY_SAFETY_GATE') {
+    return 'REJECTED';
+  }
+  if (isSyncableKisStatus(normalized) ||
+      normalized == 'REQUESTED' ||
+      normalized == 'PENDING' ||
+      normalized == 'PENDING_SUBMIT') {
+    return 'SUBMITTED';
+  }
+  return 'UNKNOWN';
 }
 
 int _readInt(Object? value, int fallback) {

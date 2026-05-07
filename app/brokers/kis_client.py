@@ -36,6 +36,9 @@ KIS_CASH_BUY_TR_ID_REAL = "TTTC0802U"
 KIS_CASH_SELL_TR_ID_REAL = "TTTC0801U"
 KIS_CASH_BUY_TR_ID_DEMO = "VTTC0802U"
 KIS_CASH_SELL_TR_ID_DEMO = "VTTC0801U"
+KIS_ORDER_CANCEL_PATH = "/uapi/domestic-stock/v1/trading/order-rvsecncl"
+KIS_ORDER_CANCEL_TR_ID_REAL = "TTTC0803U"
+KIS_ORDER_CANCEL_TR_ID_DEMO = "VTTC0803U"
 KIS_MARKET_ORDER_DIVISION = "01"
 KIS_TOKEN_REFRESH_GUARD_DEFAULT = timedelta(hours=23)
 
@@ -347,6 +350,23 @@ class KisClient:
             payload=payload,
         )
 
+    def cancel_domestic_cash_order(
+        self,
+        *,
+        order_no: str,
+        qty: int | None = None,
+    ) -> dict:
+        if not bool(getattr(self.settings, "kis_enabled", False)):
+            raise BrokerNotEnabledError(
+                "KIS domestic cash order cancel requires KIS_ENABLED=true."
+            )
+        payload = self.build_domestic_cancel_payload(order_no=order_no, qty=qty)
+        return self._request_order(
+            KIS_ORDER_CANCEL_PATH,
+            tr_id=self.domestic_cancel_order_tr_id(),
+            payload=payload,
+        )
+
     def domestic_cash_order_tr_id(self, side: str) -> str:
         normalized_side = str(side or "").strip().lower()
         if normalized_side not in ("buy", "sell"):
@@ -357,6 +377,12 @@ class KisClient:
         if normalized_side == "buy":
             return KIS_CASH_BUY_TR_ID_DEMO if is_demo else KIS_CASH_BUY_TR_ID_REAL
         return KIS_CASH_SELL_TR_ID_DEMO if is_demo else KIS_CASH_SELL_TR_ID_REAL
+
+    def domestic_cancel_order_tr_id(self) -> str:
+        env = str(self.settings.kis_env or "").lower()
+        if env in ("paper", "vps", "demo", "mock"):
+            return KIS_ORDER_CANCEL_TR_ID_DEMO
+        return KIS_ORDER_CANCEL_TR_ID_REAL
 
     def build_domestic_order_payload(
         self,
@@ -381,6 +407,32 @@ class KisClient:
             "ORD_DVSN": KIS_MARKET_ORDER_DIVISION,
             "ORD_QTY": str(int(qty)),
             "ORD_UNPR": "0",
+        }
+
+    def build_domestic_cancel_payload(
+        self,
+        *,
+        order_no: str,
+        qty: int | None = None,
+    ) -> dict[str, str]:
+        """Build a KIS domestic cash order cancel payload without submitting it."""
+        self.auth_manager.require_configured()
+
+        normalized_order_no = str(order_no or "").strip()
+        if not normalized_order_no:
+            raise ValueError("KIS order number is required for cancel.")
+
+        safe_qty = int(qty) if qty is not None and int(qty) > 0 else 0
+        return {
+            "CANO": str(self.settings.kis_account_no),
+            "ACNT_PRDT_CD": str(self.settings.kis_account_product_code),
+            "KRX_FWDG_ORD_ORGNO": "",
+            "ORGN_ODNO": normalized_order_no,
+            "ORD_DVSN": KIS_MARKET_ORDER_DIVISION,
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": str(safe_qty),
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y",
         }
 
     def _request_balance(self) -> dict:

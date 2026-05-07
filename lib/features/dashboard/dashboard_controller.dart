@@ -55,6 +55,10 @@ enum PortfolioMarket { us, kr }
 
 enum SelectedProvider { alpaca, kis }
 
+enum KisOrderHistoryFilter { open, filled, canceled, rejected, all }
+
+enum KisOrderHistorySort { newestFirst, oldestFirst }
+
 class DashboardController extends ChangeNotifier {
   DashboardController(this.apiClient, {bool autoload = true}) {
     if (autoload) {
@@ -104,14 +108,19 @@ class DashboardController extends ChangeNotifier {
   bool kisLiveConfirmation = false;
   bool kisManualSubmitLoading = false;
   bool kisOrderSyncLoading = false;
+  bool kisOrderCancelLoading = false;
   bool kisOrdersLoading = false;
   bool kisSafetyStatusLoading = false;
   KisManualOrderSafetyStatus kisSafetyStatus =
       KisManualOrderSafetyStatus.safeDefault;
   String? kisManualOrderError;
+  String? kisManualOrderErrorRaw;
   KisManualOrderResult? latestKisManualOrder;
   List<KisManualOrderResult> kisOrders = const [];
+  KisOrderSummary kisOrderSummary = KisOrderSummary.empty;
   bool kisIncludeRejected = false;
+  KisOrderHistoryFilter kisOrderFilter = KisOrderHistoryFilter.all;
+  KisOrderHistorySort kisOrderSort = KisOrderHistorySort.newestFirst;
   KisManualOrderResult? selectedKisOrder;
 
   bool get hasValidKisValidation =>
@@ -152,6 +161,25 @@ class DashboardController extends ChangeNotifier {
 
   bool get selectedPortfolioUnavailable =>
       selectedPortfolioMarket == PortfolioMarket.kr && krPortfolioUnavailable;
+  List<KisManualOrderResult> get visibleKisOrders {
+    final filtered = kisOrders.where(_matchesKisOrderFilter).toList();
+    filtered.sort((a, b) {
+      final aTime = _createdAtForSort(a);
+      final bTime = _createdAtForSort(b);
+      final compare = aTime.compareTo(bTime);
+      if (compare != 0) {
+        return kisOrderSort == KisOrderHistorySort.newestFirst
+            ? -compare
+            : compare;
+      }
+      return kisOrderSort == KisOrderHistorySort.newestFirst
+          ? b.orderId.compareTo(a.orderId)
+          : a.orderId.compareTo(b.orderId);
+    });
+    return filtered;
+  }
+
+  bool get selectedKisOrderIsPollable => _isPollableKisOrder(selectedKisOrder);
 
   List<TradingRun> recentRuns = const [];
   String? error;
@@ -381,10 +409,12 @@ class DashboardController extends ChangeNotifier {
       await refreshKisSafetyStatus(silent: true);
       return ActionResult(
           success: true,
-          message: 'Dry run ${settings.dryRun ? 'enabled' : 'disabled'} successfully.');
+          message:
+              'Dry run ${settings.dryRun ? 'enabled' : 'disabled'} successfully.');
     } catch (e) {
       settings = previousSettings;
-      error = 'Dry run update failed: ${ApiErrorFormatter.format(e.toString())}';
+      error =
+          'Dry run update failed: ${ApiErrorFormatter.format(e.toString())}';
       return ActionResult(success: false, message: error!);
     } finally {
       dryRunLoading = false;
@@ -410,6 +440,9 @@ class DashboardController extends ChangeNotifier {
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
+    if (provider == SelectedProvider.kis) {
+      refreshKisOrderMonitoring(silent: true);
+    }
     notifyListeners();
   }
 
@@ -559,6 +592,7 @@ class DashboardController extends ChangeNotifier {
 
     kisManualSubmitLoading = true;
     kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
     notifyListeners();
 
     try {
@@ -577,7 +611,9 @@ class DashboardController extends ChangeNotifier {
         latestKisManualOrder = result;
         _upsertKisOrder(result);
       } catch (e) {
-        kisManualOrderError = 'Submitted; status sync unavailable: ${ApiErrorFormatter.format(e.toString())}';
+        kisManualOrderError =
+            'Submitted; status sync unavailable: ${ApiErrorFormatter.format(e.toString())}';
+        kisManualOrderErrorRaw = e.toString();
       }
 
       await _refreshKisOrdersAfterAction();
@@ -587,6 +623,7 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
       return ActionResult(
           success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
@@ -596,6 +633,12 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<ActionResult> syncLatestKisOrder() async {
+    if (kisOrderSyncLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS sync already in progress.',
+      );
+    }
     final order =
         latestKisManualOrder ?? (kisOrders.isEmpty ? null : kisOrders.first);
     if (order == null) {
@@ -607,6 +650,7 @@ class DashboardController extends ChangeNotifier {
 
     kisOrderSyncLoading = true;
     kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
     notifyListeners();
 
     try {
@@ -620,6 +664,7 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
       return ActionResult(
           success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
@@ -629,8 +674,16 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<ActionResult> syncKisOrderById(int orderId) async {
+    if (kisOrderSyncLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS sync already in progress.',
+      );
+    }
+
     kisOrderSyncLoading = true;
     kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
     notifyListeners();
 
     try {
@@ -638,13 +691,14 @@ class DashboardController extends ChangeNotifier {
       latestKisManualOrder = result;
       selectedKisOrder = result;
       _upsertKisOrder(result);
-      await _refreshKisOrdersAfterAction();
+      await _refreshKisOrdersAfterAction(preferredOrderId: result.orderId);
       return ActionResult(
         success: true,
         message: 'KIS order status synced: ${result.internalStatus}.',
       );
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
       return ActionResult(
           success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
@@ -656,20 +710,99 @@ class DashboardController extends ChangeNotifier {
   Future<ActionResult> refreshKisOrders() async {
     kisOrdersLoading = true;
     kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
     notifyListeners();
     try {
-      kisOrders = await apiClient.fetchKisOrders(includeRejected: kisIncludeRejected);
+      kisOrders = await apiClient.fetchKisOrders(includeRejected: true);
       latestKisManualOrder =
           kisOrders.isEmpty ? latestKisManualOrder : kisOrders.first;
-      selectedKisOrder ??= latestKisManualOrder;
+      selectedKisOrder = _selectedOrderFromList(selectedKisOrder?.orderId);
+      _alignSelectedKisOrderWithVisible();
+      await _refreshKisOrderSummary();
       return const ActionResult(
           success: true, message: 'KIS orders refreshed.');
     } catch (e) {
       kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
       return ActionResult(
           success: false, message: _primaryMessage(kisManualOrderError!));
     } finally {
       kisOrdersLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> syncOpenKisOrders() async {
+    if (kisOrderSyncLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS sync already in progress.',
+      );
+    }
+
+    kisOrderSyncLoading = true;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    notifyListeners();
+
+    try {
+      final result = await apiClient.syncOpenKisOrders();
+      await _refreshKisOrdersAfterAction();
+      final count = result.count;
+      return ActionResult(
+        success: true,
+        message: count == null
+            ? 'Open KIS orders synced.'
+            : 'Open KIS orders synced: $count updated.',
+      );
+    } catch (e) {
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
+    } finally {
+      kisOrderSyncLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> cancelKisOrderById(int orderId) async {
+    if (kisOrderCancelLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS cancel already in progress.',
+      );
+    }
+
+    kisOrderCancelLoading = true;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    notifyListeners();
+
+    try {
+      final payload = await apiClient.cancelKisOrder(orderId);
+      final canceled = payload['canceled'] == true;
+      final message = _payloadMessage(
+        payload,
+        canceled ? 'KIS order canceled.' : 'KIS order was not canceled.',
+      );
+      try {
+        final detail = await apiClient.fetchKisOrderDetail(orderId);
+        latestKisManualOrder = detail;
+        selectedKisOrder = detail;
+        _upsertKisOrder(detail);
+      } catch (_) {
+        // The recent-orders refresh below still keeps the list current.
+      }
+      await _refreshKisOrdersAfterAction(preferredOrderId: orderId);
+      return ActionResult(success: canceled, message: message);
+    } catch (e) {
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
+      return ActionResult(
+          success: false, message: _primaryMessage(kisManualOrderError!));
+    } finally {
+      kisOrderCancelLoading = false;
       notifyListeners();
     }
   }
@@ -728,16 +861,81 @@ class DashboardController extends ChangeNotifier {
 
   int _safeGateLevel(int value) => (value >= 1 && value <= 4) ? value : 2;
 
-  Future<void> _refreshKisOrdersAfterAction() async {
+  Future<void> refreshKisOrderMonitoring({bool silent = false}) async {
+    if (kisOrdersLoading) return;
+    kisOrdersLoading = true;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    if (!silent) notifyListeners();
     try {
-      kisOrders = await apiClient.fetchKisOrders(includeRejected: kisIncludeRejected);
+      kisOrders = await apiClient.fetchKisOrders(includeRejected: true);
+      latestKisManualOrder =
+          kisOrders.isEmpty ? latestKisManualOrder : kisOrders.first;
+      selectedKisOrder = _selectedOrderFromList(selectedKisOrder?.orderId);
+      _alignSelectedKisOrderWithVisible();
+      await _refreshKisOrderSummary();
+    } catch (e) {
+      kisManualOrderError = ApiErrorFormatter.format(e.toString());
+      kisManualOrderErrorRaw = e.toString();
+    } finally {
+      kisOrdersLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> pollSelectedKisOrder() async {
+    final order = selectedKisOrder;
+    if (!_isPollableKisOrder(order) || kisOrderSyncLoading) return;
+    await syncKisOrderById(order!.orderId);
+  }
+
+  Future<void> _refreshKisOrdersAfterAction({int? preferredOrderId}) async {
+    try {
+      kisOrders = await apiClient.fetchKisOrders(includeRejected: true);
       if (kisOrders.isNotEmpty) {
         latestKisManualOrder = kisOrders.first;
-        selectedKisOrder ??= latestKisManualOrder;
+        selectedKisOrder = _selectedOrderFromList(
+            preferredOrderId ?? selectedKisOrder?.orderId);
+        _alignSelectedKisOrderWithVisible();
       }
+      await _refreshKisOrderSummary();
     } catch (_) {
       // Keep the submitted/synced order visible if list refresh is unavailable.
     }
+  }
+
+  Future<void> _refreshKisOrderSummary() async {
+    try {
+      kisOrderSummary = await apiClient.fetchKisOrderSummary();
+    } catch (_) {
+      // Keep the last summary visible if this lightweight endpoint is unavailable.
+    }
+  }
+
+  KisManualOrderResult? _selectedOrderFromList(int? preferredOrderId) {
+    if (kisOrders.isEmpty) return latestKisManualOrder;
+    if (preferredOrderId != null) {
+      for (final order in kisOrders) {
+        if (order.orderId == preferredOrderId) {
+          return order;
+        }
+      }
+    }
+    return selectedKisOrder ?? latestKisManualOrder ?? kisOrders.first;
+  }
+
+  void _alignSelectedKisOrderWithVisible() {
+    final visible = visibleKisOrders;
+    if (visible.isEmpty) {
+      selectedKisOrder = null;
+      return;
+    }
+    final selectedId = selectedKisOrder?.orderId;
+    if (selectedId != null &&
+        visible.any((order) => order.orderId == selectedId)) {
+      return;
+    }
+    selectedKisOrder = visible.first;
   }
 
   void _upsertKisOrder(KisManualOrderResult order) {
@@ -763,6 +961,19 @@ class DashboardController extends ChangeNotifier {
     await refreshKisOrders();
   }
 
+  void setKisOrderFilter(KisOrderHistoryFilter filter) {
+    if (kisOrderFilter == filter) return;
+    kisOrderFilter = filter;
+    _alignSelectedKisOrderWithVisible();
+    notifyListeners();
+  }
+
+  void setKisOrderSort(KisOrderHistorySort sort) {
+    if (kisOrderSort == sort) return;
+    kisOrderSort = sort;
+    _alignSelectedKisOrderWithVisible();
+    notifyListeners();
+  }
 
   String kisSubmitBlockedMessage() {
     final validation = orderValidationResult;
@@ -798,6 +1009,21 @@ class DashboardController extends ChangeNotifier {
       notifyListeners();
     } catch (_) {}
   }
+
+  bool _matchesKisOrderFilter(KisManualOrderResult order) {
+    switch (kisOrderFilter) {
+      case KisOrderHistoryFilter.open:
+        return order.isSyncable && !order.isTerminal;
+      case KisOrderHistoryFilter.filled:
+        return order.clearStatusLabel == 'FILLED';
+      case KisOrderHistoryFilter.canceled:
+        return order.clearStatusLabel == 'CANCELED';
+      case KisOrderHistoryFilter.rejected:
+        return order.clearStatusLabel == 'REJECTED';
+      case KisOrderHistoryFilter.all:
+        return true;
+    }
+  }
 }
 
 String _primaryMessage(String value) {
@@ -808,6 +1034,14 @@ String _primaryMessage(String value) {
   return lines.isEmpty ? value.trim() : lines.first;
 }
 
+String _payloadMessage(Map<String, dynamic> payload, String fallback) {
+  final value = payload['message'];
+  if (value is String && value.trim().isNotEmpty) {
+    return value.trim();
+  }
+  return fallback;
+}
+
 String _submittedMessage(KisManualOrderResult order) {
   final status = _kisTerminalLabel(order);
   final odno = order.kisOdno == null ? '' : ' / ODNO ${order.kisOdno}';
@@ -815,10 +1049,14 @@ String _submittedMessage(KisManualOrderResult order) {
 }
 
 String _kisTerminalLabel(KisManualOrderResult order) {
-  final status = order.internalStatus.toUpperCase();
-  if (status == 'FILLED') return 'FILLED';
-  if (status == 'FAILED' || status == 'REJECTED' || status == 'CANCELED') {
-    return 'REJECTED';
-  }
-  return 'SUBMITTED';
+  return order.clearStatusLabel;
+}
+
+DateTime _createdAtForSort(KisManualOrderResult order) {
+  final parsed = DateTime.tryParse(order.createdAt ?? '');
+  return parsed ?? DateTime.fromMillisecondsSinceEpoch(0);
+}
+
+bool _isPollableKisOrder(KisManualOrderResult? order) {
+  return order != null && order.isSyncable && !order.isTerminal;
 }
