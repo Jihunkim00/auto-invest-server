@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
@@ -16,7 +17,7 @@ const _samsungName = '\uC0BC\uC131\uC804\uC790';
 const _krLabel = '005930 - $_samsungName - KOSPI';
 
 void main() {
-  testWidgets('KR order ticket is dry-run only and validates preview',
+    testWidgets('KR order ticket is dry-run only and validates preview',
       (tester) async {
     final api = _FakeApiClient();
     final controller = DashboardController(api, autoload: false);
@@ -31,6 +32,17 @@ void main() {
     expect(find.text('NO AUTO KIS ORDERS'), findsOneWidget);
     expect(find.text('Submit Live KIS Order'), findsOneWidget);
     expect(find.text('Use dry-run validation first'), findsOneWidget);
+    expect(find.text('RUNTIME SAFETY STATUS'), findsOneWidget);
+    expect(find.text('PRE-SUBMIT CHECKLIST'), findsOneWidget);
+
+    expect(find.textContaining('recent validation passed'), findsOneWidget);
+    expect(
+      find.textContaining('validation matches current symbol / qty / side'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('runtime dry_run is OFF'), findsOneWidget);
+    expect(find.textContaining('KIS enabled'), findsOneWidget);
+    expect(find.textContaining('KIS real order enabled'), findsOneWidget);
 
     await tester.tap(find.text('Validate Buy'));
     await tester.pumpAndSettle();
@@ -38,6 +50,12 @@ void main() {
     expect(api.validationCalls, 1);
     expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('DRY-RUN VALIDATED'), findsOneWidget);
+
+    expect(find.textContaining('recent validation passed'), findsOneWidget);
+    expect(
+      find.textContaining('validation matches current symbol / qty / side'),
+      findsOneWidget,
+    );
 
     controller.dispose();
   });
@@ -157,6 +175,18 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
+      const KisManualOrderSafetyStatus(
+        runtimeDryRun: false,
+        killSwitch: false,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      );
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>

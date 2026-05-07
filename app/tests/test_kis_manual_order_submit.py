@@ -322,12 +322,13 @@ def test_submit_manual_rejects_when_no_recent_dry_run_validation(client):
 
     body = _assert_rejected(response, "recent_dry_run_validation_passed")
     assert body["primary_block_reason"] == "recent_dry_run_validation_missing"
-    assert body["message"] == "A successful validation within the last 5 minutes is required."
+    assert (
+        body["message"]
+        == "A successful validation within the last 5 minutes is required."
+    )
 
 
-def test_submit_manual_rejects_when_qty_exceeds_cap(
-    monkeypatch, client, db_session
-):
+def test_submit_manual_rejects_when_qty_exceeds_cap(monkeypatch, client, db_session):
     _seed_validation(db_session, qty=2, amount=144000)
     monkeypatch.setattr(
         "app.routes.kis.get_settings",
@@ -346,7 +347,9 @@ def test_submit_manual_allows_disabled_qty_cap(monkeypatch, client, db_session):
     _seed_validation(db_session, qty=5, amount=360000)
     monkeypatch.setattr(
         "app.routes.kis.get_settings",
-        lambda: _settings(kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=1000000),
+        lambda: _settings(
+            kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=1000000
+        ),
     )
 
     def fake_submit(self, *, symbol, side, qty, order_type="market"):
@@ -374,9 +377,7 @@ def test_submit_manual_allows_disabled_qty_cap(monkeypatch, client, db_session):
     assert body["safety_checks"]["max_order_qty_cap"]["detail"]["qty"] == 5
 
 
-def test_submit_manual_rejects_when_amount_exceeds_cap(
-    monkeypatch, client, db_session
-):
+def test_submit_manual_rejects_when_amount_exceeds_cap(monkeypatch, client, db_session):
     _seed_validation(db_session, amount=72000)
     monkeypatch.setattr(
         "app.routes.kis.get_settings",
@@ -413,8 +414,13 @@ def test_submit_manual_allows_disabled_amount_cap(monkeypatch, client, db_sessio
     body = response.json()
     assert body["real_order_submitted"] is True
     assert body["safety_checks"]["max_order_amount_cap"]["passed"] is True
-    assert body["safety_checks"]["max_order_amount_cap"]["detail"]["cap_disabled"] is True
-    assert body["safety_checks"]["max_order_amount_cap"]["detail"]["estimated_amount"] == 72000.0
+    assert (
+        body["safety_checks"]["max_order_amount_cap"]["detail"]["cap_disabled"] is True
+    )
+    assert (
+        body["safety_checks"]["max_order_amount_cap"]["detail"]["estimated_amount"]
+        == 72000.0
+    )
 
 
 def test_submit_manual_rejects_when_confirmation_missing_with_caps_disabled(
@@ -423,7 +429,9 @@ def test_submit_manual_rejects_when_confirmation_missing_with_caps_disabled(
     _seed_validation(db_session, amount=72000)
     monkeypatch.setattr(
         "app.routes.kis.get_settings",
-        lambda: _settings(kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=0),
+        lambda: _settings(
+            kis_max_manual_order_qty=0, kis_max_manual_order_amount_krw=0
+        ),
     )
 
     response = client.post(
@@ -686,8 +694,44 @@ def test_submit_manual_response_and_logs_do_not_expose_secrets(
 
     assert response.status_code == 200
     order = db_session.query(OrderLog).filter(OrderLog.broker == "kis").one()
-    combined = response.text + (order.request_payload or "") + (order.response_payload or "")
+    combined = (
+        response.text + (order.request_payload or "") + (order.response_payload or "")
+    )
     assert "12345678" not in combined
     assert "real-app-secret" not in combined
     assert "secret-access-token" not in combined
     assert "secret-approval-key" not in combined
+
+
+def test_manual_order_status_exposes_runtime_and_market_safety(
+    monkeypatch, client, db_session
+):
+    monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
+    monkeypatch.setattr(
+        "app.routes.kis.RuntimeSettingService.get_settings",
+        lambda self, db: _runtime(dry_run=False, kill_switch=False),
+    )
+    monkeypatch.setattr(
+        "app.routes.kis.MarketSessionService.get_session_status",
+        lambda self, market: {
+            "market": market,
+            "timezone": "Asia/Seoul",
+            "is_market_open": True,
+            "is_entry_allowed_now": True,
+            "is_near_close": False,
+            "effective_close": "15:30",
+            "no_new_entry_after": "15:00",
+        },
+    )
+
+    response = client.get("/kis/manual-order/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime_dry_run"] is False
+    assert body["kill_switch"] is False
+    assert body["kis_enabled"] is True
+    assert body["kis_real_order_enabled"] is True
+    assert body["market_open"] is True
+    assert body["entry_allowed_now"] is True
+    assert body["no_new_entry_after"] == "15:00"

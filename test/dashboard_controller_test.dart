@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -174,6 +175,116 @@ void main() {
     controller.dispose();
   });
 
+
+  test('KIS live submit is disabled when validation is missing', () {
+    final controller = _readyKisController();
+
+    controller.orderValidationResult = null;
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(), 'Run a successful validation first.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when symbol changes after validation', () {
+    final controller = _readyKisController()
+      ..setOrderTicketSymbol('000660');
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'Current order input changed after validation. Validate again.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when qty changes after validation', () {
+    final controller = _readyKisController()
+      ..setOrderTicketQty(2);
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'Current order input changed after validation. Validate again.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when side changes after validation', () {
+    final controller = _readyKisController()
+      ..setOrderTicketSide('sell');
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'Current order input changed after validation. Validate again.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when runtime dry-run is ON', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(runtimeDryRun: true),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(), 'Backend dry-run is ON.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when kill switch is ON', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(killSwitch: true),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(), 'Kill switch is ON.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when KIS is disabled', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(kisEnabled: false),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(), 'KIS trading is disabled.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when real orders are disabled', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(kisRealOrderEnabled: false),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'KIS real-order submission is disabled.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when market is closed', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(marketOpen: false),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(), 'Market is closed.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is disabled when entry is not allowed now', () {
+    final controller = _readyKisController(
+      safetyStatus: _safetyStatus(entryAllowedNow: false),
+    );
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'Market entry is not allowed now.');
+    controller.dispose();
+  });
+
+  test('KIS live submit is enabled only when all checklist items pass', () {
+    final controller = _readyKisController();
+
+    expect(controller.canSubmitLiveKisOrder, isTrue);
+    controller.dispose();
+  });
+
   test('KR preview candidate can fill dry-run order ticket without validation',
       () {
     final api = _FakeApiClient(validationResult: _validationResult());
@@ -206,6 +317,43 @@ void main() {
   });
 }
 
+
+DashboardController _readyKisController({
+  KisManualOrderSafetyStatus? safetyStatus,
+}) {
+  final validation = _validationResult();
+  return DashboardController(
+    _FakeApiClient(safetyStatus: safetyStatus ?? _safetyStatus()),
+    autoload: false,
+  )
+    ..selectOrderMarket(PortfolioMarket.kr)
+    ..setOrderTicketSymbol(validation.symbol)
+    ..setOrderTicketSide(validation.side)
+    ..setOrderTicketQty(validation.qty)
+    ..orderValidationResult = validation
+    ..kisLiveConfirmation = true
+    ..kisSafetyStatus = safetyStatus ?? _safetyStatus();
+}
+
+KisManualOrderSafetyStatus _safetyStatus({
+  bool runtimeDryRun = false,
+  bool killSwitch = false,
+  bool kisEnabled = true,
+  bool kisRealOrderEnabled = true,
+  bool marketOpen = true,
+  bool entryAllowedNow = true,
+}) {
+  return KisManualOrderSafetyStatus(
+    runtimeDryRun: runtimeDryRun,
+    killSwitch: killSwitch,
+    kisEnabled: kisEnabled,
+    kisRealOrderEnabled: kisRealOrderEnabled,
+    marketOpen: marketOpen,
+    entryAllowedNow: entryAllowedNow,
+    noNewEntryAfter: '15:00',
+  );
+}
+
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.latest,
@@ -216,6 +364,7 @@ class _FakeApiClient extends ApiClient {
     this.usWatchlist,
     this.krWatchlist,
     this.validationResult,
+    this.safetyStatus,
     this.settingsDryRun = true,
     this.refreshedDryRun,
     this.throwUpdateOpsSettings = false,
@@ -229,6 +378,7 @@ class _FakeApiClient extends ApiClient {
   final MarketWatchlist? usWatchlist;
   final MarketWatchlist? krWatchlist;
   final OrderValidationResult? validationResult;
+  final KisManualOrderSafetyStatus? safetyStatus;
   final bool settingsDryRun;
   final bool? refreshedDryRun;
   final bool throwUpdateOpsSettings;
@@ -240,6 +390,24 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
+    final override = safetyStatus;
+    final runtimeDryRun = override?.runtimeDryRun ??
+        (getOpsSettingsCalls > 1
+            ? (refreshedDryRun ?? settingsDryRun)
+            : settingsDryRun);
+    return KisManualOrderSafetyStatus(
+      runtimeDryRun: runtimeDryRun,
+      killSwitch: override?.killSwitch ?? false,
+      kisEnabled: override?.kisEnabled ?? true,
+      kisRealOrderEnabled: override?.kisRealOrderEnabled ?? true,
+      marketOpen: override?.marketOpen ?? true,
+      entryAllowedNow: override?.entryAllowedNow ?? true,
+      noNewEntryAfter: override?.noNewEntryAfter ?? '15:00',
+    );
+  }
 
   @override
   Future<OpsSettings> getOpsSettings() async {
