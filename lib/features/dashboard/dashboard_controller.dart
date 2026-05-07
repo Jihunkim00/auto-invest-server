@@ -120,13 +120,28 @@ class DashboardController extends ChangeNotifier {
   bool get isOrderTicketInputValid =>
       orderTicketSymbol.trim().isNotEmpty && orderTicketQty > 0;
 
-  bool get canSubmitLiveKisOrder =>
-      !kisManualSubmitLoading &&
-      orderValidationResult != null &&
-      orderValidationResult!.validatedForSubmission &&
-      kisLiveConfirmation &&
-      !kisSafetyStatus.runtimeDryRun &&
-      !kisSafetyStatus.killSwitch;
+  bool get canSubmitLiveKisOrder {
+    final validation = orderValidationResult;
+    if (validation == null) return false;
+
+    final symbolMatches = validation.symbol == orderTicketSymbol.trim();
+    final qtyMatches = validation.qty == orderTicketQty;
+    final sideMatches = validation.side == orderTicketSide;
+
+    return !kisManualSubmitLoading &&
+        validation.validatedForSubmission &&
+        isOrderTicketInputValid &&
+        symbolMatches &&
+        qtyMatches &&
+        sideMatches &&
+        kisLiveConfirmation &&
+        !kisSafetyStatus.runtimeDryRun &&
+        !kisSafetyStatus.killSwitch &&
+        kisSafetyStatus.kisEnabled &&
+        kisSafetyStatus.kisRealOrderEnabled &&
+        kisSafetyStatus.marketOpen &&
+        kisSafetyStatus.entryAllowedNow;
+  }
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -531,7 +546,7 @@ class DashboardController extends ChangeNotifier {
     if (!canSubmitLiveKisOrder) {
       return ActionResult(
         success: false,
-        message: _kisSubmitBlockedMessage(),
+        message: kisSubmitBlockedMessage(),
       );
     }
 
@@ -748,6 +763,35 @@ class DashboardController extends ChangeNotifier {
     await refreshKisOrders();
   }
 
+
+  String kisSubmitBlockedMessage() {
+    final validation = orderValidationResult;
+    if (validation == null || !validation.validatedForSubmission) {
+      return 'Run a successful validation first.';
+    }
+
+    final symbolMatches = validation.symbol == orderTicketSymbol.trim();
+    final qtyMatches = validation.qty == orderTicketQty;
+    final sideMatches = validation.side == orderTicketSide;
+    if (!symbolMatches || !qtyMatches || !sideMatches) {
+      return 'Current order input changed after validation. Validate again.';
+    }
+
+    if (!kisLiveConfirmation) return 'Confirm live KIS order first.';
+    if (kisSafetyStatus.runtimeDryRun) return 'Backend dry-run is ON.';
+    if (kisSafetyStatus.killSwitch) return 'Kill switch is ON.';
+    if (!kisSafetyStatus.kisEnabled) return 'KIS trading is disabled.';
+    if (!kisSafetyStatus.kisRealOrderEnabled) {
+      return 'KIS real-order submission is disabled.';
+    }
+    if (!kisSafetyStatus.marketOpen) return 'Market is closed.';
+    if (!kisSafetyStatus.entryAllowedNow) {
+      return 'Market entry is not allowed now.';
+    }
+    if (!isOrderTicketInputValid) return 'Enter a valid symbol and quantity.';
+    return 'Live KIS submit is blocked by the checklist.';
+  }
+
   Future<void> selectKisOrder(int orderId) async {
     try {
       selectedKisOrder = await apiClient.fetchKisOrderDetail(orderId);
@@ -777,8 +821,4 @@ String _kisTerminalLabel(KisManualOrderResult order) {
     return 'REJECTED';
   }
   return 'SUBMITTED';
-}
-
-String _kisSubmitBlockedMessage() {
-  return 'Live KIS submit is blocked by the checklist.';
 }

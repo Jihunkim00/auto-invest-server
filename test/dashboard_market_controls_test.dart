@@ -32,6 +32,14 @@ void main() {
     expect(find.text('NO AUTO KIS ORDERS'), findsOneWidget);
     expect(find.text('Submit Live KIS Order'), findsOneWidget);
     expect(find.text('Use dry-run validation first'), findsOneWidget);
+    expect(find.text('RUNTIME SAFETY STATUS'), findsOneWidget);
+    expect(find.text('PRE-SUBMIT CHECKLIST'), findsOneWidget);
+    expect(find.text('× recent validation passed'), findsOneWidget);
+    expect(find.text('× validation matches current symbol / qty / side'),
+        findsOneWidget);
+    expect(find.text('✓ runtime dry_run is OFF'), findsOneWidget);
+    expect(find.text('✓ KIS enabled'), findsOneWidget);
+    expect(find.text('✓ KIS real order enabled'), findsOneWidget);
 
     await tester.tap(find.text('Validate Buy'));
     await tester.pumpAndSettle();
@@ -39,6 +47,9 @@ void main() {
     expect(api.validationCalls, 1);
     expect(find.text('NO REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('DRY-RUN VALIDATED'), findsOneWidget);
+    expect(find.text('✓ recent validation passed'), findsOneWidget);
+    expect(find.text('✓ validation matches current symbol / qty / side'),
+        findsOneWidget);
 
     controller.dispose();
   });

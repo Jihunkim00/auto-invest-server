@@ -364,18 +364,28 @@ class _PreSubmitChecklist extends StatelessWidget {
     final symbolMatches =
         validation?.symbol == controller.orderTicketSymbol.trim();
     final qtyMatches = validation?.qty == controller.orderTicketQty;
-    final inputValid = controller.isOrderTicketInputValid &&
-        (validation == null || (symbolMatches && qtyMatches));
+    final sideMatches = validation?.side == controller.orderTicketSide;
+    final validationMatchesCurrent =
+        validation != null && symbolMatches && qtyMatches && sideMatches;
+    final inputValid = controller.isOrderTicketInputValid;
     final items = [
       _ChecklistItem(
           label: 'recent validation passed',
           passed: validation?.validatedForSubmission == true),
+      _ChecklistItem(
+          label: 'validation matches current symbol / qty / side',
+          passed: validationMatchesCurrent),
       _ChecklistItem(
           label: 'confirm_live checked',
           passed: controller.kisLiveConfirmation),
       _ChecklistItem(
           label: 'runtime dry_run is OFF', passed: !status.runtimeDryRun),
       _ChecklistItem(label: 'kill_switch is OFF', passed: !status.killSwitch),
+      _ChecklistItem(label: 'KIS enabled', passed: status.kisEnabled),
+      _ChecklistItem(
+          label: 'KIS real order enabled',
+          passed: status.kisRealOrderEnabled),
+      _ChecklistItem(label: 'market open', passed: status.marketOpen),
       _ChecklistItem(
           label: 'market entry allowed', passed: status.entryAllowedNow),
       _ChecklistItem(label: 'qty and symbol valid', passed: inputValid),
