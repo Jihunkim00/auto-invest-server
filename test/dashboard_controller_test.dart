@@ -161,7 +161,8 @@ void main() {
   });
 
   test('failed dry-run update rolls back state', () async {
-    final api = _FakeApiClient(settingsDryRun: true, throwUpdateOpsSettings: true);
+    final api =
+        _FakeApiClient(settingsDryRun: true, throwUpdateOpsSettings: true);
     final controller = DashboardController(api, autoload: false);
 
     await controller.load();
@@ -169,12 +170,12 @@ void main() {
 
     expect(result.success, isFalse);
     expect(api.updateOpsSettingsCalls, 1);
+    expect(api.getOpsSettingsCalls, 2);
     expect(controller.settings.dryRun, isTrue);
     expect(controller.dryRunLoading, isFalse);
 
     controller.dispose();
   });
-
 
   test('KIS live submit is disabled when validation is missing', () {
     final controller = _readyKisController();
@@ -182,13 +183,13 @@ void main() {
     controller.orderValidationResult = null;
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(), 'Run a successful validation first.');
+    expect(controller.kisSubmitBlockedMessage(),
+        'Run a successful validation first.');
     controller.dispose();
   });
 
   test('KIS live submit is disabled when symbol changes after validation', () {
-    final controller = _readyKisController()
-      ..setOrderTicketSymbol('000660');
+    final controller = _readyKisController()..setOrderTicketSymbol('000660');
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
@@ -197,8 +198,7 @@ void main() {
   });
 
   test('KIS live submit is disabled when qty changes after validation', () {
-    final controller = _readyKisController()
-      ..setOrderTicketQty(2);
+    final controller = _readyKisController()..setOrderTicketQty(2);
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
@@ -207,8 +207,7 @@ void main() {
   });
 
   test('KIS live submit is disabled when side changes after validation', () {
-    final controller = _readyKisController()
-      ..setOrderTicketSide('sell');
+    final controller = _readyKisController()..setOrderTicketSide('sell');
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
@@ -222,7 +221,8 @@ void main() {
     );
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(), 'Backend dry-run is ON.');
+    expect(controller.kisSubmitBlockedMessage(),
+        'Live submit blocked: dry-run is ON');
     controller.dispose();
   });
 
@@ -232,7 +232,8 @@ void main() {
     );
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(), 'Kill switch is ON.');
+    expect(controller.kisSubmitBlockedMessage(),
+        'Live submit blocked: kill switch is ON');
     controller.dispose();
   });
 
@@ -242,7 +243,8 @@ void main() {
     );
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(), 'KIS trading is disabled.');
+    expect(controller.kisSubmitBlockedMessage(),
+        'Live submit blocked: KIS trading disabled');
     controller.dispose();
   });
 
@@ -253,7 +255,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'KIS real-order submission is disabled.');
+        'Live submit blocked: KIS real orders disabled');
     controller.dispose();
   });
 
@@ -263,7 +265,8 @@ void main() {
     );
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(), 'Market is closed.');
+    expect(controller.kisSubmitBlockedMessage(),
+        'Live submit blocked: market is closed');
     controller.dispose();
   });
 
@@ -274,7 +277,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Market entry is not allowed now.');
+        'Live submit blocked: entry not allowed now (no_new_entry_after 15:00)');
     controller.dispose();
   });
 
@@ -316,7 +319,6 @@ void main() {
     controller.dispose();
   });
 }
-
 
 DashboardController _readyKisController({
   KisManualOrderSafetyStatus? safetyStatus,
@@ -433,7 +435,8 @@ class _FakeApiClient extends ApiClient {
     updateOpsSettingsCalls += 1;
     lastSettingsUpdate = values;
     if (throwUpdateOpsSettings) {
-      throw const ApiRequestException('HTTP 500: {"message":"settings failed"}');
+      throw const ApiRequestException(
+          'HTTP 500: {"message":"settings failed"}');
     }
   }
 

@@ -156,6 +156,15 @@ class DashboardController extends ChangeNotifier {
         kisSafetyStatus.entryAllowedNow;
   }
 
+  bool get kisRuntimeLiveSubmitGatesOpen {
+    return !kisSafetyStatus.runtimeDryRun &&
+        !kisSafetyStatus.killSwitch &&
+        kisSafetyStatus.kisEnabled &&
+        kisSafetyStatus.kisRealOrderEnabled &&
+        kisSafetyStatus.marketOpen &&
+        kisSafetyStatus.entryAllowedNow;
+  }
+
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
   PortfolioSummary get selectedPortfolioSummary =>
@@ -417,8 +426,17 @@ class DashboardController extends ChangeNotifier {
               'Dry run ${settings.dryRun ? 'enabled' : 'disabled'} successfully.');
     } catch (e) {
       settings = previousSettings;
-      error =
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      final message =
           'Dry run update failed: ${ApiErrorFormatter.format(e.toString())}';
+      try {
+        settings = await apiClient.getOpsSettings();
+        kisSafetyStatus = kisSafetyStatusFromSettings();
+        await refreshKisSafetyStatus(silent: true);
+      } catch (_) {
+        // Keep the rollback state when the backend refresh is unavailable.
+      }
+      error = message;
       return ActionResult(success: false, message: error!);
     } finally {
       dryRunLoading = false;
@@ -519,6 +537,9 @@ class DashboardController extends ChangeNotifier {
       marketOpen: kisSafetyStatus.marketOpen,
       entryAllowedNow: kisSafetyStatus.entryAllowedNow,
       noNewEntryAfter: kisSafetyStatus.noNewEntryAfter,
+      marketClosureReason: kisSafetyStatus.marketClosureReason,
+      marketClosureName: kisSafetyStatus.marketClosureName,
+      effectiveClose: kisSafetyStatus.effectiveClose,
     );
   }
 
@@ -1026,18 +1047,70 @@ class DashboardController extends ChangeNotifier {
     }
 
     if (!kisLiveConfirmation) return 'Confirm live KIS order first.';
-    if (kisSafetyStatus.runtimeDryRun) return 'Backend dry-run is ON.';
-    if (kisSafetyStatus.killSwitch) return 'Kill switch is ON.';
-    if (!kisSafetyStatus.kisEnabled) return 'KIS trading is disabled.';
-    if (!kisSafetyStatus.kisRealOrderEnabled) {
-      return 'KIS real-order submission is disabled.';
+    if (kisSafetyStatus.runtimeDryRun) {
+      return 'Live submit blocked: dry-run is ON';
     }
-    if (!kisSafetyStatus.marketOpen) return 'Market is closed.';
+    if (kisSafetyStatus.killSwitch) {
+      return 'Live submit blocked: kill switch is ON';
+    }
+    if (!kisSafetyStatus.kisEnabled) {
+      return 'Live submit blocked: KIS trading disabled';
+    }
+    if (!kisSafetyStatus.kisRealOrderEnabled) {
+      return 'Live submit blocked: KIS real orders disabled';
+    }
+    if (!kisSafetyStatus.marketOpen) return _marketClosedMessage();
     if (!kisSafetyStatus.entryAllowedNow) {
-      return 'Market entry is not allowed now.';
+      return _entryBlockedMessage();
     }
     if (!isOrderTicketInputValid) return 'Enter a valid symbol and quantity.';
     return 'Live KIS submit is blocked by the checklist.';
+  }
+
+  String kisRuntimeLiveSubmitMessage() {
+    if (kisRuntimeLiveSubmitGatesOpen) {
+      return 'Live submit available after validation + confirmation';
+    }
+    return kisSubmitBlockedMessageForRuntimeStatus();
+  }
+
+  String kisSubmitBlockedMessageForRuntimeStatus() {
+    if (kisSafetyStatus.runtimeDryRun) {
+      return 'Live submit blocked: dry-run is ON';
+    }
+    if (kisSafetyStatus.killSwitch) {
+      return 'Live submit blocked: kill switch is ON';
+    }
+    if (!kisSafetyStatus.kisEnabled) {
+      return 'Live submit blocked: KIS trading disabled';
+    }
+    if (!kisSafetyStatus.kisRealOrderEnabled) {
+      return 'Live submit blocked: KIS real orders disabled';
+    }
+    if (!kisSafetyStatus.marketOpen) return _marketClosedMessage();
+    if (!kisSafetyStatus.entryAllowedNow) return _entryBlockedMessage();
+    return 'Live submit blocked: runtime safety status unavailable';
+  }
+
+  String _marketClosedMessage() {
+    final reason = kisSafetyStatus.marketClosureName ??
+        kisSafetyStatus.marketClosureReason;
+    if (reason != null && reason.isNotEmpty) {
+      return 'Live submit blocked: market is closed ($reason)';
+    }
+    final close = kisSafetyStatus.effectiveClose;
+    if (close != null && close.isNotEmpty) {
+      return 'Live submit blocked: market is closed (effective_close $close)';
+    }
+    return 'Live submit blocked: market is closed';
+  }
+
+  String _entryBlockedMessage() {
+    final cutoff = kisSafetyStatus.noNewEntryAfter;
+    if (cutoff.isNotEmpty) {
+      return 'Live submit blocked: entry not allowed now (no_new_entry_after $cutoff)';
+    }
+    return 'Live submit blocked: entry not allowed now';
   }
 
   Future<void> selectKisOrder(int orderId) async {

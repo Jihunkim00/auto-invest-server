@@ -22,7 +22,8 @@ void main() {
   testWidgets('KR order ticket is dry-run only and validates preview',
       (tester) async {
     final api = _FakeApiClient();
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
 
     await tester.pumpWidget(_wrap(
       controller,
@@ -36,6 +37,17 @@ void main() {
     expect(find.text('Use dry-run validation first'), findsOneWidget);
     expect(find.text('RUNTIME SAFETY STATUS'), findsOneWidget);
     expect(find.text('PRE-SUBMIT CHECKLIST'), findsOneWidget);
+    expect(find.text('DRY_RUN'), findsOneWidget);
+    expect(find.text('KILL_SWITCH'), findsOneWidget);
+    expect(find.text('KIS_ENABLED'), findsOneWidget);
+    expect(find.text('KIS_REAL_ORDER_ENABLED'), findsOneWidget);
+    expect(find.text('MARKET_OPEN'), findsOneWidget);
+    expect(find.text('ENTRY_ALLOWED_NOW'), findsOneWidget);
+    expect(find.text('NO_NEW_ENTRY_AFTER'), findsOneWidget);
+    expect(
+      find.text('Live submit available after validation + confirmation'),
+      findsOneWidget,
+    );
 
     expect(find.textContaining('recent validation passed'), findsOneWidget);
     expect(
@@ -57,6 +69,72 @@ void main() {
     expect(
       find.textContaining('validation matches current symbol / qty / side'),
       findsOneWidget,
+    );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual order card shows runtime safety blocks',
+      (tester) async {
+    final api = _FakeApiClient(
+      safetyStatus: const KisManualOrderSafetyStatus(
+        runtimeDryRun: true,
+        killSwitch: true,
+        kisEnabled: true,
+        kisRealOrderEnabled: false,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    expect(find.text('DRY_RUN'), findsOneWidget);
+    expect(find.text('KILL_SWITCH'), findsOneWidget);
+    expect(find.text('KIS_REAL_ORDER_ENABLED'), findsOneWidget);
+    expect(find.text('Live submit blocked: dry-run is ON'), findsOneWidget);
+    expect(
+      find.text('Live submit available after validation + confirmation'),
+      findsNothing,
+    );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual order card shows first non-dry-run block',
+      (tester) async {
+    final api = _FakeApiClient(
+      safetyStatus: const KisManualOrderSafetyStatus(
+        runtimeDryRun: false,
+        killSwitch: true,
+        kisEnabled: true,
+        kisRealOrderEnabled: false,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    expect(
+      find.text('Live submit blocked: kill switch is ON'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Live submit available after validation + confirmation'),
+      findsNothing,
     );
 
     controller.dispose();
@@ -582,6 +660,15 @@ class _FakeApiClient extends ApiClient {
     this.summary = KisOrderSummary.empty,
     this.throwCancel = false,
     this.dryRunAutoDelay = Duration.zero,
+    this.safetyStatus = const KisManualOrderSafetyStatus(
+      runtimeDryRun: false,
+      killSwitch: false,
+      kisEnabled: true,
+      kisRealOrderEnabled: true,
+      marketOpen: true,
+      entryAllowedNow: true,
+      noNewEntryAfter: '15:00',
+    ),
   });
 
   final bool scoredPreview;
@@ -595,6 +682,7 @@ class _FakeApiClient extends ApiClient {
   final KisOrderSummary summary;
   final bool throwCancel;
   final Duration dryRunAutoDelay;
+  final KisManualOrderSafetyStatus safetyStatus;
   int validationCalls = 0;
   int previewCalls = 0;
   int dryRunAutoCalls = 0;
@@ -612,15 +700,7 @@ class _FakeApiClient extends ApiClient {
 
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
-      const KisManualOrderSafetyStatus(
-        runtimeDryRun: false,
-        killSwitch: false,
-        kisEnabled: true,
-        kisRealOrderEnabled: true,
-        marketOpen: true,
-        entryAllowedNow: true,
-        noNewEntryAfter: '15:00',
-      );
+      safetyStatus;
 
   @override
   Future<KisOpenOrderSyncResult> syncOpenKisOrders() async {

@@ -410,21 +410,26 @@ class _RuntimeSafetyStatusCard extends StatelessWidget {
         ]),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _DataPair(
-              label: 'Runtime dry-run',
-              value: status.runtimeDryRun ? 'ON' : 'OFF'),
+              label: 'dry_run', value: status.runtimeDryRun ? 'ON' : 'OFF'),
           _DataPair(
-              label: 'Kill switch', value: status.killSwitch ? 'ON' : 'OFF'),
-          _DataPair(label: 'KIS enabled', value: status.kisEnabled.toString()),
+              label: 'kill_switch', value: status.killSwitch ? 'ON' : 'OFF'),
+          _DataPair(label: 'kis_enabled', value: status.kisEnabled.toString()),
           _DataPair(
-              label: 'KIS real order enabled',
+              label: 'kis_real_order_enabled',
               value: status.kisRealOrderEnabled.toString()),
+          _DataPair(label: 'market_open', value: status.marketOpen.toString()),
           _DataPair(
-              label: 'Market open', value: status.marketOpen ? 'Yes' : 'No'),
-          _DataPair(
-              label: 'Entry allowed now',
-              value: status.entryAllowedNow ? 'Yes' : 'No'),
-          _DataPair(label: 'No new entry after', value: status.noNewEntryAfter),
+              label: 'entry_allowed_now',
+              value: status.entryAllowedNow.toString()),
+          _DataPair(label: 'no_new_entry_after', value: status.noNewEntryAfter),
         ]),
+        const SizedBox(height: 10),
+        _StateLine(
+          text: controller.kisRuntimeLiveSubmitMessage(),
+          color: controller.kisRuntimeLiveSubmitGatesOpen
+              ? Colors.greenAccent
+              : Colors.redAccent,
+        ),
       ]),
     );
   }

@@ -7,6 +7,9 @@ class KisManualOrderSafetyStatus {
     required this.marketOpen,
     required this.entryAllowedNow,
     required this.noNewEntryAfter,
+    this.marketClosureReason,
+    this.marketClosureName,
+    this.effectiveClose,
   });
 
   factory KisManualOrderSafetyStatus.fromJson(Map<String, dynamic> json) {
@@ -24,6 +27,9 @@ class KisManualOrderSafetyStatus {
       noNewEntryAfter: _readString(
           json['no_new_entry_after'] ?? marketSession['no_new_entry_after'],
           '15:00'),
+      marketClosureReason: _readNullableString(marketSession['closure_reason']),
+      marketClosureName: _readNullableString(marketSession['closure_name']),
+      effectiveClose: _readNullableString(marketSession['effective_close']),
     );
   }
 
@@ -34,6 +40,9 @@ class KisManualOrderSafetyStatus {
   final bool marketOpen;
   final bool entryAllowedNow;
   final String noNewEntryAfter;
+  final String? marketClosureReason;
+  final String? marketClosureName;
+  final String? effectiveClose;
 
   static const safeDefault = KisManualOrderSafetyStatus(
     runtimeDryRun: true,
@@ -49,5 +58,11 @@ class KisManualOrderSafetyStatus {
 String _readString(Object? value, String fallback) {
   final text = value?.toString().trim();
   if (text == null || text.isEmpty) return fallback;
+  return text;
+}
+
+String? _readNullableString(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty) return null;
   return text;
 }
