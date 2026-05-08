@@ -6,6 +6,7 @@ import '../../models/candidate.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
+import '../../models/kis_scheduler_simulation.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -103,6 +104,14 @@ class DashboardController extends ChangeNotifier {
   bool kisAutoSimulatorLoading = false;
   KisAutoSimulatorResult? kisAutoSimulatorResult;
   String? kisAutoSimulatorError;
+  bool kisSchedulerStatusLoading = false;
+  bool kisSchedulerStatusLoaded = false;
+  KisSchedulerSimulationStatus kisSchedulerStatus =
+      KisSchedulerSimulationStatus.safeDefault();
+  String? kisSchedulerStatusError;
+  bool kisSchedulerRunLoading = false;
+  KisSchedulerRunResult? kisSchedulerRunResult;
+  String? kisSchedulerRunError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
@@ -217,6 +226,7 @@ class DashboardController extends ChangeNotifier {
       await refreshKisSafetyStatus(silent: true);
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await refreshKisSchedulerStatus(silent: true);
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
       try {
@@ -883,6 +893,62 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisAutoSimulatorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerStatus({bool silent = false}) async {
+    kisSchedulerStatusLoading = true;
+    kisSchedulerStatusError = null;
+    if (!silent) notifyListeners();
+    try {
+      kisSchedulerStatus = await apiClient.fetchKisSchedulerStatus();
+      kisSchedulerStatusLoaded = true;
+      return const ActionResult(
+        success: true,
+        message: 'KIS scheduler simulation status refreshed.',
+      );
+    } catch (e) {
+      kisSchedulerStatusError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerStatusError!),
+      );
+    } finally {
+      kisSchedulerStatusLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisSchedulerDryRunOnce() async {
+    if (kisSchedulerRunLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler dry-run already in progress.',
+      );
+    }
+
+    kisSchedulerRunLoading = true;
+    kisSchedulerRunError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisSchedulerDryRunOnce();
+      kisSchedulerRunResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshKisOrdersAfterAction(preferredOrderId: result.orderId);
+      await refreshKisSchedulerStatus(silent: true);
+      return ActionResult(
+        success: true,
+        message: 'KIS scheduler dry-run completed: ${result.result}.',
+      );
+    } catch (e) {
+      kisSchedulerRunError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerRunError!),
+      );
+    } finally {
+      kisSchedulerRunLoading = false;
       notifyListeners();
     }
   }

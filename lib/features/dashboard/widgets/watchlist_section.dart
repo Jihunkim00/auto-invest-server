@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
 import '../../../models/kis_auto_simulator_result.dart';
+import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/market_watchlist.dart';
 import '../../dashboard/dashboard_controller.dart';
 
@@ -94,8 +95,260 @@ class WatchlistSection extends StatelessWidget {
         if (isKr) ...[
           const SizedBox(height: 12),
           _KisAutoSimulatorPanel(controller: controller),
+          const SizedBox(height: 12),
+          _KisSchedulerSimulationPanel(controller: controller),
         ],
       ]),
+    );
+  }
+}
+
+class _KisSchedulerSimulationPanel extends StatelessWidget {
+  const _KisSchedulerSimulationPanel({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = controller.kisSchedulerStatus;
+    final result = controller.kisSchedulerRunResult;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.schedule_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Simulation',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          IconButton(
+            tooltip: 'Refresh KIS scheduler status',
+            onPressed: controller.kisSchedulerStatusLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.refreshKisSchedulerStatus();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisSchedulerStatusLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'DISABLED BY DEFAULT', color: Colors.amberAccent),
+          const _SoftBadge(text: 'DRY-RUN ONLY', color: Colors.greenAccent),
+          const _SoftBadge(
+              text: 'REAL ORDER SCHEDULER DISABLED',
+              color: Colors.orangeAccent),
+          _SoftBadge(
+              text:
+                  'real_orders_allowed=${_boolText(status.realOrdersAllowed)}',
+              color: Colors.lightBlueAccent),
+        ]),
+        const SizedBox(height: 10),
+        _KisSchedulerStatusGrid(status: status),
+        if (!controller.kisSchedulerStatusLoaded &&
+            controller.kisSchedulerStatusError == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(text: 'Status not loaded yet.'),
+        ],
+        if (controller.kisSchedulerStatusError != null) ...[
+          const SizedBox(height: 10),
+          _RetryLine(
+            text: _primaryLine(controller.kisSchedulerStatusError!),
+            onRetry: controller.kisSchedulerStatusLoading
+                ? null
+                : controller.refreshKisSchedulerStatus,
+          ),
+        ],
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisSchedulerRunLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.runKisSchedulerDryRunOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisSchedulerRunLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.play_circle_outline),
+          label: Text(controller.kisSchedulerRunLoading
+              ? 'Running scheduler dry-run...'
+              : 'Run KIS Scheduler Dry-Run Once'),
+        ),
+        if (controller.kisSchedulerRunError != null) ...[
+          const SizedBox(height: 10),
+          _RetryLine(
+            text: _primaryLine(controller.kisSchedulerRunError!),
+            onRetry: controller.kisSchedulerRunLoading
+                ? null
+                : controller.runKisSchedulerDryRunOnce,
+          ),
+        ],
+        if (result != null) ...[
+          const SizedBox(height: 10),
+          _KisSchedulerResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerStatusGrid extends StatelessWidget {
+  const _KisSchedulerStatusGrid({required this.status});
+
+  final KisSchedulerSimulationStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(label: 'enabled', value: _boolText(status.enabled)),
+      _ResultPair(label: 'dry_run', value: _boolText(status.dryRun)),
+      _ResultPair(
+          label: 'allow_real_orders', value: _boolText(status.allowRealOrders)),
+      _ResultPair(
+          label: 'real_orders_allowed',
+          value: _boolText(status.realOrdersAllowed)),
+      _ResultPair(
+        label: 'real_order_scheduler_enabled',
+        value: _boolText(status.realOrderSchedulerEnabled),
+      ),
+      _ResultPair(
+        label: 'runtime_scheduler_enabled',
+        value: _nullableBoolText(status.runtimeSchedulerEnabled),
+      ),
+      _ResultPair(
+        label: 'runtime_dry_run',
+        value: _nullableBoolText(status.runtimeDryRun),
+      ),
+      _ResultPair(
+        label: 'kill_switch',
+        value: _nullableBoolText(status.killSwitch),
+      ),
+    ]);
+  }
+}
+
+class _KisSchedulerResultPanel extends StatelessWidget {
+  const _KisSchedulerResultPanel({required this.result});
+
+  final KisSchedulerRunResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final reason = result.reason.isNotEmpty
+        ? result.reason
+        : result.triggerBlockReason ?? '';
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'real_order_submitted=${_boolText(result.realOrderSubmitted)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'broker_submit_called=${_boolText(result.brokerSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'manual_submit_called=${_boolText(result.manualSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(
+            label: 'triggered symbol', value: result.triggeredSymbol ?? 'n/a'),
+        _ResultPair(
+            label: 'signal_id', value: result.signalId?.toString() ?? 'n/a'),
+        _ResultPair(
+            label: 'order_id', value: result.orderId?.toString() ?? 'n/a'),
+        _ResultPair(label: 'reason', value: reason.isEmpty ? 'n/a' : reason),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'dry_run', value: _boolText(result.dryRun)),
+        _ResultPair(label: 'simulated', value: _boolText(result.simulated)),
+        _ResultPair(
+            label: 'scheduler_dry_run',
+            value: _boolText(result.schedulerDryRun)),
+        _ResultPair(
+          label: 'scheduler_allow_real_orders',
+          value: _boolText(result.schedulerAllowRealOrders),
+        ),
+      ]),
+    ]);
+  }
+}
+
+class _RetryLine extends StatelessWidget {
+  const _RetryLine({required this.text, required this.onRetry});
+
+  final String text;
+  final Future<ActionResult> Function()? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.redAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.20)),
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(text, style: const TextStyle(color: Colors.redAccent)),
+          TextButton.icon(
+            onPressed: onRetry == null
+                ? null
+                : () async {
+                    final result = await onRetry!();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result.message),
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
+                    ));
+                  },
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -333,6 +586,13 @@ class _CountPill extends StatelessWidget {
 String _score(double? value) {
   if (value == null) return 'n/a';
   return value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 1);
+}
+
+String _boolText(bool value) => value ? 'true' : 'false';
+
+String _nullableBoolText(bool? value) {
+  if (value == null) return 'n/a';
+  return _boolText(value);
 }
 
 String _gptScore(KisAutoSimulatorResult result) {

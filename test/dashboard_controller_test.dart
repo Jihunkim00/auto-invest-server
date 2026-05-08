@@ -4,6 +4,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -443,6 +444,10 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<SchedulerStatus> fetchSchedulerStatus() async =>
       SchedulerStatus.safeDefault();
+
+  @override
+  Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async =>
+      KisSchedulerSimulationStatus.safeDefault();
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>

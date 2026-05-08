@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
@@ -375,6 +376,17 @@ class ApiClient {
       throw const ApiRequestException('Invalid backend response.');
     }
     return KisAutoSimulatorResult.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
+  Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
+    final payload = await _getJsonNoCache('/kis/scheduler/status');
+    return KisSchedulerSimulationStatus.fromJson(payload);
+  }
+
+  Future<KisSchedulerRunResult> runKisSchedulerDryRunOnce() async {
+    final payload =
+        await _postJsonBody('/kis/scheduler/run-dry-run-auto-once', const {});
+    return KisSchedulerRunResult.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({
