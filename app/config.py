@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     kis_max_manual_order_amount_krw: int = 100000
     kis_require_confirmation: bool = True
     kis_confirmation_phrase: str = "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
+    kis_scheduler_enabled: bool = False
+    kis_scheduler_dry_run: bool = True
+    kis_scheduler_allow_real_orders: bool = False
     kr_scheduler_enabled: bool = False
     kr_scheduler_allow_real_orders: bool = False
 

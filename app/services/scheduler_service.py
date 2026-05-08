@@ -5,8 +5,12 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
+from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_run_service import WatchlistRunService
@@ -88,6 +92,14 @@ class SchedulerService:
                 gate_level=DEFAULT_GATE_LEVEL,
                 source_endpoint="scheduler_service",
                 scheduler_slot=slot_name,
+            )
+            settings_obj = get_settings()
+            kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+            KisSchedulerSimulationService(kis_client).run_once(
+                db,
+                gate_level=DEFAULT_GATE_LEVEL,
+                scheduler_slot=slot_name,
+                require_enabled=True,
             )
         finally:
             db.close()

@@ -26,6 +26,7 @@ SIMULATED_ORDER_STATUS = "DRY_RUN_SIMULATED"
 SIMULATED_BROKER_STATUS = "SIMULATED"
 MANUAL_TRIGGER_SOURCE = "manual_kis_dry_run_auto"
 SCHEDULER_TRIGGER_SOURCE = "scheduler_kis_dry_run_auto"
+SCHEDULER_PORTFOLIO_TRIGGER_SOURCE = "scheduler_kis_portfolio_simulation"
 
 _SENSITIVE_KEYS = {
     "appkey",
@@ -65,12 +66,21 @@ class KisDryRunAutoService:
         *,
         gate_level: int = DEFAULT_GATE_LEVEL,
         trigger_source: str = MANUAL_TRIGGER_SOURCE,
+        preview_override: dict[str, Any] | None = None,
+        account_state: dict[str, Any] | None = None,
+        child_trigger_source: str | None = None,
     ) -> dict[str, Any]:
-        preview = self.preview_service.run_preview(
-            include_gpt=True,
-            gate_level=gate_level,
-            db=db,
+        preview = (
+            dict(preview_override)
+            if preview_override is not None
+            else self.preview_service.run_preview(
+                include_gpt=True,
+                gate_level=gate_level,
+                db=db,
+            )
         )
+        if account_state is not None:
+            preview["account_state"] = account_state
         preview = _sanitize_payload(preview)
         decision = self.risk_service.evaluate(db, preview=preview, gate_level=gate_level)
 
@@ -87,6 +97,7 @@ class KisDryRunAutoService:
             parent_run=parent_run,
             gate_level=gate_level,
             trigger_source=trigger_source,
+            child_trigger_source=child_trigger_source,
         )
 
         order: OrderLog | None = None
@@ -155,6 +166,7 @@ class KisDryRunAutoService:
                     "final_ranked_candidates": preview.get("final_ranked_candidates"),
                     "entry_candidate_symbol": preview.get("entry_candidate_symbol"),
                     "held_positions": preview.get("held_positions"),
+                    "account_state": preview.get("account_state"),
                     "market_session": preview.get("market_session"),
                     "risk_decision": decision.to_dict(),
                 }
@@ -173,6 +185,7 @@ class KisDryRunAutoService:
         parent_run: TradeRunLog,
         gate_level: int,
         trigger_source: str,
+        child_trigger_source: str | None = None,
     ) -> list[dict[str, Any]]:
         raw_items = preview.get("portfolio_preview_items") or preview.get("child_runs") or []
         if not isinstance(raw_items, list):
@@ -183,10 +196,15 @@ class KisDryRunAutoService:
             if not isinstance(item, dict):
                 continue
             symbol = _candidate_symbol(item) or f"KR{index + 1}"
+            resolved_trigger_source = child_trigger_source or (
+                SCHEDULER_PORTFOLIO_TRIGGER_SOURCE
+                if trigger_source == SCHEDULER_TRIGGER_SOURCE
+                else trigger_source
+            )
             child = TradeRunLog(
                 run_key=f"{parent_run.run_key}_child_{index + 1}",
                 parent_run_key=parent_run.run_key,
-                trigger_source=trigger_source,
+                trigger_source=resolved_trigger_source,
                 symbol=symbol,
                 mode=str(item.get("mode") or "kis_dry_run_preview")[:30],
                 symbol_role=str(item.get("symbol_role") or "")[:30] or None,

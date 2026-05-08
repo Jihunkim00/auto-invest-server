@@ -61,6 +61,15 @@ class RuntimeSettingService:
             "updated_at": row.updated_at,
         }
         settings["trade_limits"] = self._trade_limits(settings)
+        settings["kis_scheduler_enabled"] = bool(
+            getattr(self.settings, "kis_scheduler_enabled", False)
+        )
+        settings["kis_scheduler_dry_run"] = bool(
+            getattr(self.settings, "kis_scheduler_dry_run", True)
+        )
+        settings["kis_scheduler_allow_real_orders"] = bool(
+            getattr(self.settings, "kis_scheduler_allow_real_orders", False)
+        )
         return settings
 
     def get_trade_limits_for_market(

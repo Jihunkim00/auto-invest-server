@@ -25,6 +25,7 @@ from app.services.kis_dry_run_auto_service import (
     SCHEDULER_TRIGGER_SOURCE,
     KisDryRunAutoService,
 )
+from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -216,6 +217,13 @@ def list_recent_kis_orders(
     }
 
 
+@router.get("/scheduler/status")
+def get_kis_scheduler_status(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisSchedulerSimulationService(client)
+    return service.status(db)
+
+
 @router.get("/orders/summary")
 def get_kis_order_summary(db: Session = Depends(get_db)):
     return summarize_kis_orders(db)
@@ -341,6 +349,24 @@ def run_kis_scheduler_dry_run_once(
             db,
             gate_level=gate_level,
             trigger_source=SCHEDULER_TRIGGER_SOURCE,
+        )
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/scheduler/run-dry-run-auto-once")
+def run_kis_scheduler_dry_run_auto_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisSchedulerSimulationService(client)
+    try:
+        return service.run_once(
+            db,
+            gate_level=gate_level,
+            scheduler_slot="manual_dry_run_auto_once",
+            require_enabled=False,
         )
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

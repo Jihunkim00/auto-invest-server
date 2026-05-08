@@ -25,10 +25,18 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us = sessions.get("US", {})
     kr = sessions.get("KR", {})
     kr_profile = profiles.get("KR", {})
-    kr_scheduler_enabled = bool(getattr(settings, "kr_scheduler_enabled", False))
-    kr_real_orders_allowed = all(
+    kr_scheduler_enabled = bool(
+        getattr(settings, "kis_scheduler_enabled", False)
+        or getattr(settings, "kr_scheduler_enabled", False)
+    )
+    kr_scheduler_dry_run = bool(getattr(settings, "kis_scheduler_dry_run", True))
+    kr_scheduler_allow_real_orders = bool(
+        getattr(settings, "kis_scheduler_allow_real_orders", False)
+        or getattr(settings, "kr_scheduler_allow_real_orders", False)
+    )
+    kr_live_order_prereqs_met = all(
         [
-            bool(getattr(settings, "kr_scheduler_allow_real_orders", False)),
+            kr_scheduler_allow_real_orders,
             bool(getattr(settings, "kis_real_order_enabled", False)),
             bool(getattr(settings, "kis_enabled", False)),
             bool(runtime.get("dry_run", True)) is False,
@@ -52,8 +60,13 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "timezone": kr.get("timezone", "Asia/Seoul"),
             "slots": kr.get("entry_slots", []),
             "preview_only": True,
+            "simulation_first": True,
+            "kis_scheduler_enabled": kr_scheduler_enabled,
+            "kis_scheduler_dry_run": kr_scheduler_dry_run,
+            "kis_scheduler_allow_real_orders": kr_scheduler_allow_real_orders,
+            "configured_live_order_prereqs_met": kr_live_order_prereqs_met,
             "dry_run_validation_scheduler_enabled": False,
-            "real_orders_allowed": kr_real_orders_allowed,
+            "real_orders_allowed": False,
             "real_order_scheduler_enabled": False,
         },
     }
