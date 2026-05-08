@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,9 +10,11 @@ from openai import OpenAI
 from app.brokers.kis_client import KisClient, to_float
 from app.config import get_settings
 from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
+from app.db.models import TradeRunLog
 from app.services.event_risk_service import EventRiskService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
+from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.quant_signal_service import QuantSignalService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import (
@@ -78,6 +81,8 @@ class KisWatchlistPreviewService:
         include_gpt: bool = True,
         gate_level: int = DEFAULT_GATE_LEVEL,
         db=None,
+        record_run: bool = False,
+        trigger_source: str = "manual_kis_preview",
     ) -> dict[str, Any]:
         db = db if db is not None else self.db
         settings = get_settings()
@@ -232,7 +237,7 @@ class KisWatchlistPreviewService:
             ],
         }
 
-        return {
+        payload = {
             "market": "KR",
             "provider": "kis",
             "gate_level": gate_level,
@@ -299,6 +304,15 @@ class KisWatchlistPreviewService:
             "items": items,
             "count": len(items),
         }
+        if record_run and db is not None:
+            run = _record_preview_run(
+                db,
+                payload=payload,
+                gate_level=gate_level,
+                trigger_source=trigger_source,
+            )
+            payload["run"] = _serialize_preview_run(run)
+        return payload
 
     def _runtime_settings(self, db) -> dict[str, Any]:
         try:
@@ -746,6 +760,129 @@ class KisWatchlistPreviewService:
             ai_sell_score=gpt.ai_sell_score,
             confidence=gpt.confidence,
         )
+
+
+def _record_preview_run(
+    db,
+    *,
+    payload: dict[str, Any],
+    gate_level: int,
+    trigger_source: str,
+) -> TradeRunLog:
+    symbol = (
+        _candidate_symbol(payload.get("entry_candidate_symbol"))
+        or _candidate_symbol(payload.get("final_best_candidate"))
+        or "WATCHLIST"
+    )
+    response_payload = _preview_log_payload(payload, gate_level=gate_level, trigger_source=trigger_source)
+    run = TradeRunLog(
+        run_key=f"kis_preview_{uuid.uuid4().hex[:12]}",
+        trigger_source=trigger_source,
+        symbol=symbol,
+        mode="kis_watchlist_preview",
+        gate_level=gate_level,
+        stage="done",
+        result=str(payload.get("result") or "preview_only"),
+        reason=str(payload.get("reason") or payload.get("trigger_block_reason") or "kr_trading_disabled"),
+        signal_id=None,
+        order_id=None,
+        request_payload=json.dumps(
+            {
+                "provider": "kis",
+                "market": "KR",
+                "mode": "kis_watchlist_preview",
+                "dry_run": True,
+                "preview_only": True,
+                "simulated": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+                "gate_level": gate_level,
+                "trigger_source": trigger_source,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        response_payload=json.dumps(response_payload, ensure_ascii=False, default=str),
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def _preview_log_payload(
+    payload: dict[str, Any],
+    *,
+    gate_level: int,
+    trigger_source: str,
+) -> dict[str, Any]:
+    final_best = payload.get("final_best_candidate")
+    ranked = payload.get("final_ranked_candidates")
+    return sanitize_kis_payload(
+        {
+            "provider": "kis",
+            "market": "KR",
+            "mode": "kis_watchlist_preview",
+            "dry_run": True,
+            "preview_only": True,
+            "simulated": False,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
+            "trigger_source": trigger_source,
+            "gate_level": gate_level,
+            "result": payload.get("result") or "preview_only",
+            "action": payload.get("action") or "hold",
+            "reason": payload.get("reason") or payload.get("trigger_block_reason"),
+            "trigger_block_reason": payload.get("trigger_block_reason"),
+            "order_id": None,
+            "signal_id": None,
+            "configured_symbol_count": payload.get("configured_symbol_count"),
+            "analyzed_symbol_count": payload.get("analyzed_symbol_count"),
+            "quant_candidates_count": payload.get("quant_candidates_count"),
+            "researched_candidates_count": payload.get("researched_candidates_count"),
+            "final_best_candidate": final_best,
+            "final_ranked_symbols": _candidate_symbols(ranked),
+            "risk_flags": _string_list(payload.get("risk_flags")),
+            "gating_notes": _string_list(payload.get("gating_notes")),
+        }
+    )
+
+
+def _serialize_preview_run(row: TradeRunLog) -> dict[str, Any]:
+    return {
+        "run_id": row.id,
+        "run_key": row.run_key,
+        "trigger_source": row.trigger_source,
+        "symbol": row.symbol,
+        "mode": row.mode,
+        "gate_level": row.gate_level,
+        "stage": row.stage,
+        "result": row.result,
+        "reason": row.reason,
+        "signal_id": row.signal_id,
+        "order_id": row.order_id,
+        "created_at": row.created_at,
+    }
+
+
+def _candidate_symbol(value: Any) -> str | None:
+    if isinstance(value, dict):
+        value = value.get("symbol")
+    text = str(value or "").strip().upper()
+    return text or None
+
+
+def _candidate_symbols(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    symbols = []
+    for item in value:
+        symbol = _candidate_symbol(item)
+        if symbol:
+            symbols.append(symbol)
+    return symbols
 
 
 class KisPreviewGptAdvisor:

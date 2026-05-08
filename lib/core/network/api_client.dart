@@ -551,11 +551,14 @@ class ApiClient {
       final j = await _getJson('/runs/recent?limit=$limit');
       final items = j['items'] as List<dynamic>? ?? [];
       return items
-          .whereType<Map<String, dynamic>>()
-          .map(TradingLogItem.fromJson)
+          .whereType<Map>()
+          .map((item) =>
+              TradingLogItem.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-    } catch (_) {
+    } on http.ClientException {
       return mockTradingLogs;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend logs response: $e');
     }
   }
 
@@ -564,11 +567,13 @@ class ApiClient {
       final j = await _getJson('/orders/recent?limit=$limit');
       final items = j['items'] as List<dynamic>? ?? [];
       return items
-          .whereType<Map<String, dynamic>>()
-          .map(OrderLogItem.fromJson)
+          .whereType<Map>()
+          .map((item) => OrderLogItem.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-    } catch (_) {
+    } on http.ClientException {
       return mockOrderLogs;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend orders response: $e');
     }
   }
 
@@ -577,11 +582,14 @@ class ApiClient {
       final j = await _getJson('/signals/recent?limit=$limit');
       final items = j['items'] as List<dynamic>? ?? [];
       return items
-          .whereType<Map<String, dynamic>>()
-          .map(SignalLogItem.fromJson)
+          .whereType<Map>()
+          .map(
+              (item) => SignalLogItem.fromJson(Map<String, dynamic>.from(item)))
           .toList();
-    } catch (_) {
+    } on http.ClientException {
       return mockSignalLogs;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend signals response: $e');
     }
   }
 
@@ -589,8 +597,10 @@ class ApiClient {
     try {
       final j = await _getJson('/logs/summary');
       return LogsSummary.fromJson(j);
-    } catch (_) {
+    } on http.ClientException {
       return mockLogsSummary;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend logs summary: $e');
     }
   }
 

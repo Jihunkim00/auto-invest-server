@@ -74,6 +74,8 @@ def test_recent_runs_serializes_hold_skipped_without_order(client, db_session):
     assert item["reason"] == "hold_signal"
     assert item["related_order_id"] is None
     assert item["order_id"] is None
+    assert item["provider"] == "alpaca"
+    assert item["market"] == "US"
 
 
 def test_recent_orders_returns_items_array(client, db_session):
@@ -100,6 +102,8 @@ def test_recent_orders_returns_items_array(client, db_session):
     assert item["broker_order_id"] == "broker-123"
     assert item["broker_status"] == "filled"
     assert item["internal_status"] == "FILLED"
+    assert item["provider"] == "alpaca"
+    assert item["market"] == "US"
 
 
 def test_recent_signals_returns_items_array(client, db_session):
@@ -130,6 +134,97 @@ def test_recent_signals_returns_items_array(client, db_session):
     assert item["confidence"] == 0.61
     assert item["reason"] == "score_threshold_not_met"
     assert item["related_order_id"] is None
+    assert item["provider"] == "alpaca"
+    assert item["market"] == "US"
+
+
+def test_recent_runs_preserves_kis_dry_run_safety_fields(client, db_session):
+    db_session.add(
+        TradeRunLog(
+            run_key="kis-dry-run",
+            trigger_source="manual_kis_dry_run_auto",
+            symbol="005930",
+            mode="kis_dry_run_auto",
+            gate_level=2,
+            stage="done",
+            result="simulated_order_created",
+            reason="dry_run_risk_approved",
+            signal_id=7,
+            order_id=9,
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "mode": "kis_dry_run_auto",
+                    "dry_run": True,
+                    "simulated": True,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "action": "buy",
+                    "risk_flags": ["simulated_only"],
+                    "gating_notes": ["Dry-run only."],
+                }
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/runs/recent")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["provider"] == "kis"
+    assert item["market"] == "KR"
+    assert item["mode"] == "kis_dry_run_auto"
+    assert item["dry_run"] is True
+    assert item["simulated"] is True
+    assert item["real_order_submitted"] is False
+    assert item["broker_submit_called"] is False
+    assert item["manual_submit_called"] is False
+    assert item["risk_flags"] == ["simulated_only"]
+    assert item["gating_notes"] == ["Dry-run only."]
+
+
+def test_recent_orders_preserves_kis_manual_live_safety_fields(client, db_session):
+    db_session.add(
+        OrderLog(
+            broker="kis",
+            market="KR",
+            symbol="005930",
+            side="buy",
+            order_type="market",
+            qty=1,
+            broker_order_id="0001234567",
+            kis_odno="0001234567",
+            broker_status="submitted",
+            broker_order_status="submitted",
+            internal_status="SUBMITTED",
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "real_order_submitted": True,
+                    "broker_status": "submitted",
+                    "internal_status": "SUBMITTED",
+                    "message": "Live KIS order submitted.",
+                }
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/orders/recent")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["provider"] == "kis"
+    assert item["market"] == "KR"
+    assert item["real_order_submitted"] is True
+    assert item["broker_submit_called"] is True
+    assert item["manual_submit_called"] is True
+    assert item["kis_odno"] == "0001234567"
+    assert item["broker_order_status"] == "submitted"
 
 
 def test_logs_summary_returns_latest_items_and_counts(client, db_session):

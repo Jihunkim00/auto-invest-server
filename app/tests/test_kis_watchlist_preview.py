@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.db.database import get_db
+from app.db.models import TradeRunLog
 from app.main import app
 from app.services.kis_watchlist_preview_service import (
     KisGptPreview,
@@ -138,7 +139,7 @@ def _safe_preview(monkeypatch):
     )
 
 
-def test_kis_watchlist_preview_returns_items(client):
+def test_kis_watchlist_preview_returns_items(client, db_session):
     response = client.post("/kis/watchlist/preview")
 
     assert response.status_code == 200
@@ -207,6 +208,15 @@ def test_kis_watchlist_preview_returns_items(client):
     assert "kr_trading_disabled" in item["block_reasons"]
     assert "preview_only" in item["warnings"]
     assert "kr_trading_disabled" in item["warnings"]
+    run = db_session.query(TradeRunLog).one()
+    assert run.mode == "kis_watchlist_preview"
+    assert run.trigger_source == "manual_kis_preview"
+    assert run.order_id is None
+    payload = json.loads(run.response_payload)
+    assert payload["preview_only"] is True
+    assert payload["real_order_submitted"] is False
+    assert payload["broker_submit_called"] is False
+    assert payload["manual_submit_called"] is False
 
 
 def test_kis_watchlist_preview_accepts_gate_bounds(client):

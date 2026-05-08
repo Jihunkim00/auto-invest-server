@@ -274,7 +274,12 @@ def preview_kis_watchlist(
     client = _client(db)
     service = KisWatchlistPreviewService(client, db=db)
     try:
-        return service.run_preview(include_gpt=True, gate_level=gate_level)
+        return service.run_preview(
+            include_gpt=True,
+            gate_level=gate_level,
+            record_run=True,
+            trigger_source="manual_kis_preview",
+        )
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:
@@ -289,7 +294,12 @@ def run_kis_scheduler_preview_once(
     client = _client(db)
     service = KisWatchlistPreviewService(client, db=db)
     try:
-        payload = service.run_preview(include_gpt=True, gate_level=gate_level)
+        payload = service.run_preview(
+            include_gpt=True,
+            gate_level=gate_level,
+            record_run=True,
+            trigger_source="manual_scheduler_preview",
+        )
         payload["trigger_source"] = "manual_scheduler_preview"
         payload["scheduler_preview_only"] = True
         payload["real_order_submitted"] = False

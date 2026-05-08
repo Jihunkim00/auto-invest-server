@@ -105,6 +105,8 @@ class _LogsScreenState extends State<LogsScreen> {
                 icon: Icons.cloud_off_outlined,
                 title: 'Unable to load live logs',
                 body: _error!,
+                actionLabel: 'Retry',
+                onAction: _loadLogs,
               ),
             if (!_loading && _error == null) ..._sectionWidgets(),
           ],
@@ -208,6 +210,62 @@ class _CountTile extends StatelessWidget {
   }
 }
 
+class _BadgeWrap extends StatelessWidget {
+  const _BadgeWrap({required this.labels});
+
+  final List<String> labels;
+
+  @override
+  Widget build(BuildContext context) {
+    final unique = <String>[];
+    for (final label in labels) {
+      final text = label.trim();
+      if (text.isNotEmpty && !unique.contains(text)) unique.add(text);
+    }
+    if (unique.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final label in unique) _SafetyChip(label: label),
+      ],
+    );
+  }
+}
+
+class _SafetyChip extends StatelessWidget {
+  const _SafetyChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final alert = label == 'REAL ORDER SUBMITTED';
+    final color = alert
+        ? Colors.redAccent
+        : label == 'ALPACA PAPER'
+            ? Colors.lightBlueAccent
+            : Colors.greenAccent;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0,
+        ),
+      ),
+    );
+  }
+}
+
 class _RunHistoryCard extends StatelessWidget {
   const _RunHistoryCard({required this.run});
 
@@ -225,17 +283,36 @@ class _RunHistoryCard extends StatelessWidget {
             _HistoryHeader(
               title: '${run.symbol} - ${run.statusLine}',
               subtitle:
-                  '${run.triggerSource} / ${run.mode} / ${_formatGate(run.gateLevel)}',
+                  '${run.provider.toUpperCase()} / ${run.market.toUpperCase()} / ${run.triggerSource} / ${run.mode}',
               badge: StatusBadge(
                 text: run.result,
                 active: run.result.toLowerCase() == 'executed',
                 alert: false,
               ),
             ),
+            const SizedBox(height: 8),
+            _BadgeWrap(labels: [run.sourceLabel, ...run.safetyBadges]),
             const SizedBox(height: 10),
+            _DetailRow(label: 'Time', value: _fallback(run.createdAt, '-')),
+            _DetailRow(label: 'Gate', value: _formatGate(run.gateLevel)),
+            _DetailRow(label: 'Action', value: _fallback(run.action, 'hold')),
+            _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
             _DetailRow(label: 'Reason', value: _fallback(run.reason, 'none')),
-            _DetailRow(label: 'Order', value: run.orderLabel),
-            _DetailRow(label: 'Created', value: _fallback(run.createdAt, '-')),
+            _DetailRow(label: 'Order ID', value: run.orderLabel),
+            if (run.signalId != null)
+              _DetailRow(label: 'Signal ID', value: run.signalId!),
+            ..._safetyFlagRows(
+              previewOnly: run.isKisPreview ? run.previewOnly : null,
+              realOrderSubmitted: run.realOrderSubmitted,
+              brokerSubmitCalled: run.brokerSubmitCalled,
+              manualSubmitCalled: run.manualSubmitCalled,
+              forceDryRunAutoFlags: run.isKisDryRunAuto,
+              forcePreviewFlags: run.isKisPreview,
+            ),
+            if (run.riskFlags.isNotEmpty)
+              _DetailRow(label: 'Risk flags', value: run.riskFlags.join(', ')),
+            if (run.gatingNotes.isNotEmpty)
+              _DetailRow(label: 'Gates', value: _compactText(run.gatingNotes)),
             if (blocked)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
@@ -267,20 +344,50 @@ class _OrderHistoryCard extends StatelessWidget {
           children: [
             _HistoryHeader(
               title: '${order.symbol} - ${order.side.toUpperCase()}',
-              subtitle: order.orderLabel,
+              subtitle:
+                  '${order.provider.toUpperCase()} / ${order.market.toUpperCase()} / ${order.mode}',
               badge: StatusBadge(
                 text: order.statusLabel,
                 active: filled,
                 alert: !filled && order.statusLabel.toLowerCase() == 'failed',
               ),
             ),
+            const SizedBox(height: 8),
+            _BadgeWrap(labels: [order.sourceLabel, ...order.safetyBadges]),
             const SizedBox(height: 10),
+            _DetailRow(label: 'Time', value: _fallback(order.createdAt, '-')),
+            _DetailRow(
+                label: 'Action', value: _fallback(order.action, order.side)),
+            _DetailRow(
+                label: 'Result',
+                value: _fallback(order.result, order.internalStatus)),
+            _DetailRow(label: 'Reason', value: _fallback(order.reason, 'none')),
             _DetailRow(label: 'Qty', value: _numberLabel(order.qty)),
             _DetailRow(label: 'Notional', value: _moneyLabel(order.notional)),
             _DetailRow(
-                label: 'Created', value: _fallback(order.createdAt, '-')),
+                label: 'Order ID', value: '${order.orderId ?? order.id}'),
+            _DetailRow(label: 'Broker ID', value: order.orderLabel),
+            if (order.signalId != null)
+              _DetailRow(label: 'Signal ID', value: order.signalId!),
+            if (order.brokerOrderStatus != null)
+              _DetailRow(label: 'Broker', value: order.brokerOrderStatus!),
+            _DetailRow(label: 'Internal', value: order.internalStatus),
             _DetailRow(
                 label: 'Updated', value: _fallback(order.updatedAt, '-')),
+            ..._safetyFlagRows(
+              previewOnly: order.isKisPreview ? order.previewOnly : null,
+              realOrderSubmitted: order.realOrderSubmitted,
+              brokerSubmitCalled: order.brokerSubmitCalled,
+              manualSubmitCalled: order.manualSubmitCalled,
+              forceDryRunAutoFlags: order.isKisDryRunAuto,
+              forcePreviewFlags: order.isKisPreview,
+            ),
+            if (order.riskFlags.isNotEmpty)
+              _DetailRow(
+                  label: 'Risk flags', value: order.riskFlags.join(', ')),
+            if (order.gatingNotes.isNotEmpty)
+              _DetailRow(
+                  label: 'Gates', value: _compactText(order.gatingNotes)),
           ],
         ),
       ),
@@ -303,14 +410,23 @@ class _SignalHistoryCard extends StatelessWidget {
           children: [
             _HistoryHeader(
               title: '${signal.symbol} - ${signal.statusLine}',
-              subtitle: signal.orderLabel,
+              subtitle:
+                  '${signal.provider.toUpperCase()} / ${signal.market.toUpperCase()} / ${signal.triggerSource}',
               badge: StatusBadge(
                 text: signal.signalStatus,
                 active: signal.signalStatus.toLowerCase() == 'executed',
                 alert: false,
               ),
             ),
+            const SizedBox(height: 8),
+            _BadgeWrap(labels: [signal.sourceLabel, ...signal.safetyBadges]),
             const SizedBox(height: 10),
+            _DetailRow(label: 'Time', value: _fallback(signal.createdAt, '-')),
+            _DetailRow(
+                label: 'Action', value: _fallback(signal.action, 'hold')),
+            _DetailRow(
+                label: 'Result',
+                value: _fallback(signal.result, signal.signalStatus)),
             _DetailRow(
                 label: 'Reason', value: _fallback(signal.reason, 'none')),
             _DetailRow(
@@ -319,8 +435,21 @@ class _SignalHistoryCard extends StatelessWidget {
                 label: 'Sell score', value: _numberLabel(signal.sellScore)),
             _DetailRow(
                 label: 'Confidence', value: _numberLabel(signal.confidence)),
-            _DetailRow(
-                label: 'Created', value: _fallback(signal.createdAt, '-')),
+            _DetailRow(label: 'Order ID', value: signal.orderLabel),
+            ..._safetyFlagRows(
+              previewOnly: signal.isKisPreview ? signal.previewOnly : null,
+              realOrderSubmitted: signal.realOrderSubmitted,
+              brokerSubmitCalled: signal.brokerSubmitCalled,
+              manualSubmitCalled: signal.manualSubmitCalled,
+              forceDryRunAutoFlags: signal.isKisDryRunAuto,
+              forcePreviewFlags: signal.isKisPreview,
+            ),
+            if (signal.riskFlags.isNotEmpty)
+              _DetailRow(
+                  label: 'Risk flags', value: signal.riskFlags.join(', ')),
+            if (signal.gatingNotes.isNotEmpty)
+              _DetailRow(
+                  label: 'Gates', value: _compactText(signal.gatingNotes)),
           ],
         ),
       ),
@@ -404,11 +533,15 @@ class _StatePanel extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.body,
+    this.actionLabel,
+    this.onAction,
   });
 
   final IconData icon;
   final String title;
   final String body;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -426,6 +559,14 @@ class _StatePanel extends StatelessWidget {
             Text(body,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70)),
+            if (actionLabel != null && onAction != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onAction,
+                icon: const Icon(Icons.refresh),
+                label: Text(actionLabel!),
+              ),
+            ],
           ],
         ),
       ),
@@ -450,4 +591,48 @@ String _numberLabel(num? value) {
 String _moneyLabel(num? value) {
   if (value == null) return '-';
   return '\$${value.toStringAsFixed(2)}';
+}
+
+List<Widget> _safetyFlagRows({
+  bool? previewOnly,
+  bool? realOrderSubmitted,
+  bool? brokerSubmitCalled,
+  bool? manualSubmitCalled,
+  bool forceDryRunAutoFlags = false,
+  bool forcePreviewFlags = false,
+}) {
+  final rows = <Widget>[];
+  if (forcePreviewFlags || previewOnly != null) {
+    rows.add(_DetailRow(
+      label: 'Safety',
+      value: 'preview_only=${_boolLabel(previewOnly ?? true)}',
+    ));
+  }
+  if (forceDryRunAutoFlags || forcePreviewFlags || realOrderSubmitted != null) {
+    rows.add(_DetailRow(
+      label: 'Safety',
+      value: 'real_order_submitted=${_boolLabel(realOrderSubmitted ?? false)}',
+    ));
+  }
+  if (forceDryRunAutoFlags || brokerSubmitCalled != null) {
+    rows.add(_DetailRow(
+      label: 'Safety',
+      value: 'broker_submit_called=${_boolLabel(brokerSubmitCalled ?? false)}',
+    ));
+  }
+  if (forceDryRunAutoFlags || manualSubmitCalled != null) {
+    rows.add(_DetailRow(
+      label: 'Safety',
+      value: 'manual_submit_called=${_boolLabel(manualSubmitCalled ?? false)}',
+    ));
+  }
+  return rows;
+}
+
+String _boolLabel(bool value) => value ? 'true' : 'false';
+
+String _compactText(List<String> values) {
+  final text = values.join(' | ');
+  if (text.length <= 180) return text;
+  return '${text.substring(0, 177)}...';
 }
