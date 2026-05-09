@@ -115,6 +115,7 @@ class KisSchedulerRunResult {
     this.triggeredSymbol,
     this.signalId,
     this.orderId,
+    this.createdAt,
     this.triggerBlockReason,
     this.quantBuyScore,
     this.quantSellScore,
@@ -129,6 +130,7 @@ class KisSchedulerRunResult {
   });
 
   factory KisSchedulerRunResult.fromJson(Map<String, dynamic> json) {
+    final run = _optionalMap(json['run']);
     return KisSchedulerRunResult(
       provider: _stringValue(json['provider'], fallback: 'kis'),
       market: _stringValue(json['market'], fallback: 'KR'),
@@ -154,6 +156,7 @@ class KisSchedulerRunResult {
       triggeredSymbol: _nullableString(json['triggered_symbol']),
       signalId: _nullableInt(json['signal_id']),
       orderId: _nullableInt(json['order_id']),
+      createdAt: _nullableString(json['created_at'] ?? run?['created_at']),
       reason: _stringValue(json['reason'], fallback: ''),
       triggerBlockReason: _nullableString(json['trigger_block_reason']),
       quantBuyScore: _nullableDouble(json['quant_buy_score']),
@@ -188,6 +191,7 @@ class KisSchedulerRunResult {
   final String? triggeredSymbol;
   final int? signalId;
   final int? orderId;
+  final String? createdAt;
   final String reason;
   final String? triggerBlockReason;
   final double? quantBuyScore;

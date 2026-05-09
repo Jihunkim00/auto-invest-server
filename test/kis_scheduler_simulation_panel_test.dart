@@ -95,6 +95,7 @@ void main() {
     expect(find.text('dry_run_risk_approved'), findsWidgets);
     expect(find.text('123'), findsOneWidget);
     expect(find.text('456'), findsOneWidget);
+    expect(find.text('05-08 00:00 (KST 09:00)'), findsOneWidget);
 
     controller.dispose();
   });
@@ -318,6 +319,9 @@ Map<String, dynamic> _runJson() {
     'triggered_symbol': '005930',
     'signal_id': 123,
     'order_id': 456,
+    'run': {
+      'created_at': '2026-05-08T00:00:00',
+    },
     'reason': 'dry_run_risk_approved',
     'quant_buy_score': 74,
     'ai_buy_score': 82,

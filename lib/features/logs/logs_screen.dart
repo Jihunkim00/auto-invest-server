@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
@@ -293,7 +294,10 @@ class _RunHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [run.sourceLabel, ...run.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(label: 'Time', value: _fallback(run.createdAt, '-')),
+            _DetailRow(
+              label: 'Time',
+              value: formatTimestampWithKst(run.createdAt),
+            ),
             _DetailRow(label: 'Gate', value: _formatGate(run.gateLevel)),
             _DetailRow(label: 'Action', value: _fallback(run.action, 'hold')),
             _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
@@ -355,7 +359,8 @@ class _OrderHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [order.sourceLabel, ...order.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(label: 'Time', value: _fallback(order.createdAt, '-')),
+            _DetailRow(
+                label: 'Time', value: formatTimestampWithKst(order.createdAt)),
             _DetailRow(
                 label: 'Action', value: _fallback(order.action, order.side)),
             _DetailRow(
@@ -373,7 +378,8 @@ class _OrderHistoryCard extends StatelessWidget {
               _DetailRow(label: 'Broker', value: order.brokerOrderStatus!),
             _DetailRow(label: 'Internal', value: order.internalStatus),
             _DetailRow(
-                label: 'Updated', value: _fallback(order.updatedAt, '-')),
+                label: 'Updated',
+                value: formatTimestampWithKst(order.updatedAt)),
             ..._safetyFlagRows(
               previewOnly: order.isKisPreview ? order.previewOnly : null,
               realOrderSubmitted: order.realOrderSubmitted,
@@ -421,7 +427,8 @@ class _SignalHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [signal.sourceLabel, ...signal.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(label: 'Time', value: _fallback(signal.createdAt, '-')),
+            _DetailRow(
+                label: 'Time', value: formatTimestampWithKst(signal.createdAt)),
             _DetailRow(
                 label: 'Action', value: _fallback(signal.action, 'hold')),
             _DetailRow(

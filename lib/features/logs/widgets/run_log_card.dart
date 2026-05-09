@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/status_badge.dart';
 import '../../../models/trading_run.dart';
 
@@ -16,7 +17,7 @@ class RunLogCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Expanded(child: Text(run.timestamp)),
+            Expanded(child: Text(formatTimestampWithKst(run.timestamp))),
             StatusBadge(
               text: run.result,
               active: run.result == 'executed',

@@ -33,6 +33,7 @@ void main() {
     expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('broker_submit_called=false'), findsWidgets);
     expect(find.text('manual_submit_called=false'), findsOneWidget);
+    expect(find.text('05-08 00:00 (KST 09:00)'), findsOneWidget);
 
     await tester.tap(find.text('Orders').last);
     await tester.pumpAndSettle();
@@ -43,6 +44,13 @@ void main() {
     expect(find.text('real_order_submitted=true'), findsOneWidget);
     expect(find.text('broker_submit_called=true'), findsOneWidget);
     expect(find.text('manual_submit_called=true'), findsOneWidget);
+    expect(find.text('05-08 00:03 (KST 09:03)'), findsOneWidget);
+    expect(find.text('05-08 00:04 (KST 09:04)'), findsOneWidget);
+
+    await tester.tap(find.text('Signals').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('05-08 00:05 (KST 09:05)'), findsOneWidget);
 
     controller.dispose();
   });
@@ -139,7 +147,28 @@ class _FakeLogsApiClient extends ApiClient {
 
   @override
   Future<List<SignalLogItem>> fetchRecentSignals({int limit = 20}) async {
-    return const [];
+    return [
+      SignalLogItem.fromJson({
+        'id': 9,
+        'provider': 'kis',
+        'market': 'KR',
+        'symbol': '005930',
+        'action': 'buy',
+        'result': 'simulated',
+        'signal_status': 'simulated',
+        'buy_score': 72,
+        'sell_score': 12,
+        'confidence': 0.88,
+        'reason': 'dry_run_signal',
+        'trigger_source': 'manual_kis_dry_run_auto',
+        'created_at': '2026-05-08T00:05:00',
+        'dry_run': true,
+        'simulated': true,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      }),
+    ];
   }
 
   @override
@@ -148,7 +177,7 @@ class _FakeLogsApiClient extends ApiClient {
       latestRun: null,
       latestOrder: null,
       latestSignal: null,
-      counts: {'runs': 3, 'orders': 1, 'signals': 0},
+      counts: {'runs': 3, 'orders': 1, 'signals': 1},
     );
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_scheduler_simulation.dart';
@@ -292,6 +293,10 @@ class _KisSchedulerResultPanel extends StatelessWidget {
             label: 'signal_id', value: result.signalId?.toString() ?? 'n/a'),
         _ResultPair(
             label: 'order_id', value: result.orderId?.toString() ?? 'n/a'),
+        if (result.createdAt?.isNotEmpty == true)
+          _ResultPair(
+              label: 'created_at',
+              value: formatTimestampWithKst(result.createdAt)),
         _ResultPair(label: 'reason', value: reason.isEmpty ? 'n/a' : reason),
       ]),
       const SizedBox(height: 10),
