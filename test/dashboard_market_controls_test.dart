@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
@@ -70,6 +71,125 @@ void main() {
       find.textContaining('validation matches current symbol / qty / side'),
       findsOneWidget,
     );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual qty can be cleared without restoring default',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    final qtyField = _qtyField();
+    expect(_fieldText(tester, qtyField), '1');
+
+    await tester.enterText(qtyField, '');
+    await tester.pumpAndSettle();
+
+    expect(_fieldText(tester, qtyField), '');
+    expect(controller.orderTicketQtyInput, '');
+    expect(controller.orderTicketQty, 1);
+    expect(find.text('Enter quantity 1 or higher.'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Validate Buy'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Submit Live KIS Order'), isFalse);
+
+    controller.setOrderTicketSide('sell');
+    await tester.pumpAndSettle();
+
+    expect(_filledButtonEnabled(tester, 'Validate Sell'), isFalse);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual qty zero disables validation and live submit',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    final qtyField = _qtyField();
+    await tester.enterText(qtyField, '0');
+    await tester.pumpAndSettle();
+
+    expect(_fieldText(tester, qtyField), '0');
+    expect(controller.parsedOrderTicketQty, isNull);
+    expect(find.text('Enter quantity 1 or higher.'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Validate Buy'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Submit Live KIS Order'), isFalse);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual qty accepts normal replacement and validates qty 2',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    final qtyField = _qtyField();
+    await tester.enterText(qtyField, '');
+    await tester.pumpAndSettle();
+    await tester.enterText(qtyField, '2');
+    await tester.pumpAndSettle();
+
+    expect(_fieldText(tester, qtyField), '2');
+    expect(controller.parsedOrderTicketQty, 2);
+    expect(controller.orderTicketQty, 2);
+    expect(_filledButtonEnabled(tester, 'Validate Buy'), isTrue);
+
+    await tester.tap(find.text('Validate Buy'));
+    await tester.pumpAndSettle();
+
+    expect(api.validationCalls, 1);
+    expect(api.lastValidationQty, 2);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual qty accepts 10 and keeps Ctrl+A replacement working',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    final qtyField = _qtyField();
+    await tester.enterText(qtyField, '10');
+    await tester.pumpAndSettle();
+
+    expect(_fieldText(tester, qtyField), '10');
+    expect(controller.parsedOrderTicketQty, 10);
+
+    await tester.tap(qtyField);
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.enterText(qtyField, '2');
+    await tester.pumpAndSettle();
+
+    expect(_fieldText(tester, qtyField), '2');
+    expect(controller.parsedOrderTicketQty, 2);
 
     controller.dispose();
   });
@@ -647,6 +767,27 @@ Widget _wrap(DashboardController controller, Widget Function() buildChild) {
   );
 }
 
+Finder _qtyField() {
+  return find.byWidgetPredicate(
+    (widget) => widget is TextField && widget.decoration?.labelText == 'Qty',
+  );
+}
+
+String _fieldText(WidgetTester tester, Finder finder) {
+  return tester.widget<TextField>(finder).controller?.text ?? '';
+}
+
+bool _filledButtonEnabled(WidgetTester tester, String label) {
+  final buttonFinder = find.ancestor(
+    of: find.text(label),
+    matching: find.byWidgetPredicate((widget) => widget is FilledButton),
+  );
+  final button = tester.widget<FilledButton>(
+    buttonFinder.first,
+  );
+  return button.onPressed != null;
+}
+
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.scoredPreview = false,
@@ -684,6 +825,9 @@ class _FakeApiClient extends ApiClient {
   final Duration dryRunAutoDelay;
   final KisManualOrderSafetyStatus safetyStatus;
   int validationCalls = 0;
+  int submitCalls = 0;
+  int? lastValidationQty;
+  int? lastSubmitQty;
   int previewCalls = 0;
   int dryRunAutoCalls = 0;
   int syncOpenCalls = 0;
@@ -806,6 +950,7 @@ class _FakeApiClient extends ApiClient {
     String orderType = 'market',
   }) async {
     validationCalls += 1;
+    lastValidationQty = qty;
     return OrderValidationResult(
       provider: 'kis',
       market: 'KR',
@@ -841,6 +986,19 @@ class _FakeApiClient extends ApiClient {
         payloadPreview: {'CANO': '12****78', 'PDNO': '005930'},
       ),
     );
+  }
+
+  @override
+  Future<KisManualOrderResult> submitKisManualOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+    required bool confirmLive,
+  }) async {
+    submitCalls += 1;
+    lastSubmitQty = qty;
+    return _kisOrder(orderId: 999, status: 'SUBMITTED');
   }
 
   @override

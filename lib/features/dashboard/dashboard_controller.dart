@@ -115,6 +115,7 @@ class DashboardController extends ChangeNotifier {
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
+  String orderTicketQtyInput = '1';
   bool orderValidationLoading = false;
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
@@ -139,15 +140,20 @@ class DashboardController extends ChangeNotifier {
   bool get hasValidKisValidation =>
       orderValidationResult?.validatedForSubmission == true;
 
+  int? get parsedOrderTicketQty => _parseOrderTicketQty(orderTicketQtyInput);
+
+  bool get isOrderTicketQtyValid => parsedOrderTicketQty != null;
+
   bool get isOrderTicketInputValid =>
-      orderTicketSymbol.trim().isNotEmpty && orderTicketQty > 0;
+      orderTicketSymbol.trim().isNotEmpty && isOrderTicketQtyValid;
 
   bool get canSubmitLiveKisOrder {
     final validation = orderValidationResult;
     if (validation == null) return false;
 
     final symbolMatches = validation.symbol == orderTicketSymbol.trim();
-    final qtyMatches = validation.qty == orderTicketQty;
+    final currentQty = parsedOrderTicketQty;
+    final qtyMatches = currentQty != null && validation.qty == currentQty;
     final sideMatches = validation.side == orderTicketSide;
 
     return !kisManualSubmitLoading &&
@@ -502,7 +508,15 @@ class DashboardController extends ChangeNotifier {
   }
 
   void setOrderTicketQty(int value) {
-    orderTicketQty = value <= 0 ? 1 : value;
+    setOrderTicketQtyInput(value.toString());
+  }
+
+  void setOrderTicketQtyInput(String value) {
+    orderTicketQtyInput = value;
+    final parsed = _parseOrderTicketQty(value);
+    if (parsed != null) {
+      orderTicketQty = parsed;
+    }
     notifyListeners();
   }
 
@@ -515,8 +529,9 @@ class DashboardController extends ChangeNotifier {
     selectedOrderMarket = PortfolioMarket.kr;
     orderTicketSymbol = candidate.symbol.trim();
     orderTicketSide = 'buy';
-    if (orderTicketQty <= 0) {
+    if (orderTicketQty <= 0 || parsedOrderTicketQty == null) {
       orderTicketQty = 1;
+      orderTicketQtyInput = '1';
     }
     orderValidationResult = null;
     orderValidationError = null;
@@ -581,7 +596,16 @@ class DashboardController extends ChangeNotifier {
   Future<ActionResult> validateKisOrder() async {
     final symbol = orderTicketSymbol.trim();
     final side = orderTicketSide;
-    final qty = orderTicketQty;
+    final qty = parsedOrderTicketQty;
+    if (symbol.isEmpty || qty == null) {
+      orderValidationResult = null;
+      orderValidationError = null;
+      notifyListeners();
+      return const ActionResult(
+        success: false,
+        message: 'Enter quantity 1 or higher.',
+      );
+    }
     orderValidationLoading = true;
     orderValidationError = null;
     orderValidationResult = null;
@@ -634,7 +658,7 @@ class DashboardController extends ChangeNotifier {
       var result = await apiClient.submitKisManualOrder(
         symbol: orderTicketSymbol,
         side: orderTicketSide,
-        qty: orderTicketQty,
+        qty: parsedOrderTicketQty!,
         orderType: 'market',
         confirmLive: kisLiveConfirmation,
       );
@@ -1106,7 +1130,8 @@ class DashboardController extends ChangeNotifier {
     }
 
     final symbolMatches = validation.symbol == orderTicketSymbol.trim();
-    final qtyMatches = validation.qty == orderTicketQty;
+    final currentQty = parsedOrderTicketQty;
+    final qtyMatches = currentQty != null && validation.qty == currentQty;
     final sideMatches = validation.side == orderTicketSide;
     if (!symbolMatches || !qtyMatches || !sideMatches) {
       return 'Current order input changed after validation. Validate again.';
@@ -1200,6 +1225,14 @@ class DashboardController extends ChangeNotifier {
         return true;
     }
   }
+}
+
+int? _parseOrderTicketQty(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty || !RegExp(r'^\d+$').hasMatch(trimmed)) return null;
+  final parsed = int.tryParse(trimmed);
+  if (parsed == null || parsed < 1) return null;
+  return parsed;
 }
 
 String _primaryMessage(String value) {

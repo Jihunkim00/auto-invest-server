@@ -85,5 +85,26 @@ void main() {
         containsAll(['REAL ORDER SUBMITTED', 'MANUAL ONLY']));
     expect(item.realOrderSubmitted, isTrue);
     expect(item.orderLabel, '0001234567');
+    expect(item.currency, 'KRW');
+  });
+
+  test('OrderLogItem keeps explicit KRW currency for display', () {
+    final item = OrderLogItem.fromJson({
+      'id': 31,
+      'order_id': 31,
+      'provider': 'alpaca',
+      'broker': 'alpaca',
+      'market': 'US',
+      'currency': 'KRW',
+      'symbol': '005930',
+      'side': 'buy',
+      'qty': 1,
+      'notional': 9801,
+      'internal_status': 'submitted',
+      'created_at': '2026-05-08T00:04:00',
+      'updated_at': '2026-05-08T00:05:00',
+    });
+
+    expect(item.currency, 'KRW');
   });
 }

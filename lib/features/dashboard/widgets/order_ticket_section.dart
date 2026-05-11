@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/widgets/section_card.dart';
 import '../../../models/kis_manual_order_result.dart';
@@ -29,8 +30,8 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
     super.initState();
     _symbolController =
         TextEditingController(text: widget.controller.orderTicketSymbol);
-    _qtyController = TextEditingController(
-        text: widget.controller.orderTicketQty.toString());
+    _qtyController =
+        TextEditingController(text: widget.controller.orderTicketQtyInput);
     widget.controller.addListener(_handleControllerChanged);
     _updatePolling();
   }
@@ -87,7 +88,7 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
       );
     }
 
-    final qty = controller.orderTicketQty.toString();
+    final qty = controller.orderTicketQtyInput;
     if (_qtyController.text != qty) {
       _qtyController.value = TextEditingValue(
         text: qty,
@@ -175,13 +176,16 @@ class _KrOrderTicket extends StatelessWidget {
         );
         final qtyInput = TextField(
           controller: qtyController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Qty',
             border: OutlineInputBorder(),
+            errorText: controller.isOrderTicketQtyValid
+                ? null
+                : 'Enter quantity 1 or higher.',
           ),
           keyboardType: TextInputType.number,
-          onChanged: (value) =>
-              controller.setOrderTicketQty(int.tryParse(value) ?? 1),
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onChanged: controller.setOrderTicketQtyInput,
         );
         final sidePicker = SegmentedButton<String>(
           segments: const [
@@ -214,7 +218,8 @@ class _KrOrderTicket extends StatelessWidget {
       const _StateLine(text: 'Order type: MARKET'),
       const SizedBox(height: 12),
       FilledButton.icon(
-        onPressed: controller.orderValidationLoading
+        onPressed: controller.orderValidationLoading ||
+                !controller.isOrderTicketInputValid
             ? null
             : () async {
                 final result = await controller.validateKisOrder();
@@ -446,7 +451,8 @@ class _PreSubmitChecklist extends StatelessWidget {
     final status = controller.kisSafetyStatus;
     final symbolMatches =
         validation?.symbol == controller.orderTicketSymbol.trim();
-    final qtyMatches = validation?.qty == controller.orderTicketQty;
+    final currentQty = controller.parsedOrderTicketQty;
+    final qtyMatches = currentQty != null && validation?.qty == currentQty;
     final sideMatches = validation?.side == controller.orderTicketSide;
     final validationMatchesCurrent =
         validation != null && symbolMatches && qtyMatches && sideMatches;

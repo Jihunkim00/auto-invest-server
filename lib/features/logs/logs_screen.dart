@@ -368,7 +368,15 @@ class _OrderHistoryCard extends StatelessWidget {
                 value: _fallback(order.result, order.internalStatus)),
             _DetailRow(label: 'Reason', value: _fallback(order.reason, 'none')),
             _DetailRow(label: 'Qty', value: _numberLabel(order.qty)),
-            _DetailRow(label: 'Notional', value: _moneyLabel(order.notional)),
+            _DetailRow(
+              label: 'Notional',
+              value: _moneyLabel(
+                order.notional,
+                provider: order.provider,
+                market: order.market,
+                currency: order.currency,
+              ),
+            ),
             _DetailRow(
                 label: 'Order ID', value: '${order.orderId ?? order.id}'),
             _DetailRow(label: 'Broker ID', value: order.orderLabel),
@@ -595,9 +603,52 @@ String _numberLabel(num? value) {
   return value.toStringAsFixed(value % 1 == 0 ? 0 : 2);
 }
 
-String _moneyLabel(num? value) {
+String _moneyLabel(
+  num? value, {
+  required String provider,
+  required String market,
+  required String currency,
+}) {
   if (value == null) return '-';
-  return '\$${value.toStringAsFixed(2)}';
+  final displayCurrency = _displayCurrency(
+    provider: provider,
+    market: market,
+    currency: currency,
+  );
+  final decimals = displayCurrency == 'KRW' ? 0 : 2;
+  final formatted = _groupedNumber(value.abs(), decimals: decimals);
+  final sign = value < 0 ? '-' : '';
+  final symbol = displayCurrency == 'KRW' ? '\u20A9' : r'$';
+  return '$sign$symbol$formatted';
+}
+
+String _displayCurrency({
+  required String provider,
+  required String market,
+  required String currency,
+}) {
+  if (currency.trim().toUpperCase() == 'KRW' ||
+      provider.trim().toLowerCase() == 'kis' ||
+      market.trim().toUpperCase() == 'KR') {
+    return 'KRW';
+  }
+  return 'USD';
+}
+
+String _groupedNumber(num value, {required int decimals}) {
+  final fixed = value.toStringAsFixed(decimals);
+  final parts = fixed.split('.');
+  final whole = parts.first;
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i += 1) {
+    final remaining = whole.length - i;
+    buffer.write(whole[i]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  if (decimals == 0) return buffer.toString();
+  return '${buffer.toString()}.${parts.last}';
 }
 
 List<Widget> _safetyFlagRows({

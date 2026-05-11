@@ -145,6 +145,7 @@ class OrderLogItem {
     this.provider = 'alpaca',
     this.broker = 'alpaca',
     this.market = 'US',
+    this.currency = 'USD',
     this.mode = 'manual_order',
     this.triggerSource = 'manual',
     this.action = '',
@@ -171,6 +172,7 @@ class OrderLogItem {
   final String provider;
   final String broker;
   final String market;
+  final String currency;
   final String mode;
   final String triggerSource;
   final String symbol;
@@ -242,6 +244,8 @@ class OrderLogItem {
       json['provider'] ?? json['broker'],
       fallback: _inferProviderFromJson(json),
     );
+    final market =
+        _stringValue(json['market'], fallback: _inferMarketFromJson(json));
     final internalStatus =
         _stringValue(json['internal_status'], fallback: 'UNKNOWN');
     return OrderLogItem(
@@ -249,8 +253,11 @@ class OrderLogItem {
       orderId: _nullableInt(json['order_id']),
       provider: provider,
       broker: _stringValue(json['broker'], fallback: provider),
-      market:
-          _stringValue(json['market'], fallback: _inferMarketFromJson(json)),
+      market: market,
+      currency: _stringValue(
+        json['currency'],
+        fallback: _inferCurrency(provider: provider, market: market),
+      ),
       mode: _stringValue(json['mode'], fallback: 'manual_order'),
       triggerSource: _stringValue(json['trigger_source'], fallback: 'manual'),
       symbol: _stringValue(json['symbol'], fallback: 'UNKNOWN'),
@@ -517,6 +524,14 @@ String _inferMarketFromJson(Map<String, dynamic> json) {
   final market = json['market']?.toString().trim().toUpperCase();
   if (market != null && market.isNotEmpty && market != 'NULL') return market;
   return _inferProviderFromJson(json) == 'kis' ? 'KR' : 'US';
+}
+
+String _inferCurrency({required String provider, required String market}) {
+  if (provider.trim().toLowerCase() == 'kis' ||
+      market.trim().toUpperCase() == 'KR') {
+    return 'KRW';
+  }
+  return 'USD';
 }
 
 bool _isKis(String provider, String market, String mode, String triggerSource) {

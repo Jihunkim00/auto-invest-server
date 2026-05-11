@@ -38,9 +38,17 @@ void main() {
     await tester.tap(find.text('Orders').last);
     await tester.pumpAndSettle();
 
+    expect(find.text('\u20A99,801'), findsOneWidget);
+    expect(find.text('\u20A972,000'), findsOneWidget);
+    expect(find.text(r'$123.45'), findsOneWidget);
+    expect(find.text(r'$9,801.00'), findsNothing);
+    expect(find.text(r'$72,000.00'), findsNothing);
     expect(find.text('KIS MANUAL LIVE'), findsOneWidget);
+    expect(find.text('KIS DRY-RUN AUTO'), findsOneWidget);
     expect(find.text('REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('MANUAL ONLY'), findsOneWidget);
+    expect(find.text('SIMULATED'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
     expect(find.text('real_order_submitted=true'), findsOneWidget);
     expect(find.text('broker_submit_called=true'), findsOneWidget);
     expect(find.text('manual_submit_called=true'), findsOneWidget);
@@ -133,6 +141,7 @@ class _FakeLogsApiClient extends ApiClient {
         'result': 'SUBMITTED',
         'reason': 'Live KIS order submitted.',
         'qty': 1,
+        'notional': 72000,
         'internal_status': 'SUBMITTED',
         'broker_order_status': 'submitted',
         'kis_odno': '0001234567',
@@ -141,6 +150,69 @@ class _FakeLogsApiClient extends ApiClient {
         'real_order_submitted': true,
         'broker_submit_called': true,
         'manual_submit_called': true,
+      }),
+      OrderLogItem.fromJson({
+        'id': 9,
+        'order_id': 9,
+        'provider': 'kis',
+        'broker': 'kis',
+        'market': 'KR',
+        'mode': 'kis_dry_run_auto',
+        'trigger_source': 'manual_kis_dry_run_auto',
+        'symbol': '005930',
+        'side': 'buy',
+        'action': 'buy',
+        'result': 'DRY_RUN_SIMULATED',
+        'reason': 'KIS dry-run auto simulated order.',
+        'qty': 1,
+        'notional': 9801,
+        'internal_status': 'DRY_RUN_SIMULATED',
+        'created_at': '2026-05-08T00:06:00',
+        'updated_at': '2026-05-08T00:06:00',
+        'dry_run': true,
+        'simulated': true,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      }),
+      OrderLogItem.fromJson({
+        'id': 10,
+        'order_id': 10,
+        'provider': 'alpaca',
+        'broker': 'alpaca',
+        'market': 'US',
+        'currency': 'USD',
+        'mode': 'manual_order',
+        'trigger_source': 'manual',
+        'symbol': 'AAPL',
+        'side': 'buy',
+        'action': 'buy',
+        'result': 'filled',
+        'reason': 'Alpaca paper order.',
+        'qty': 1,
+        'notional': 123.45,
+        'internal_status': 'filled',
+        'broker_order_status': 'filled',
+        'broker_order_id': 'alpaca-123',
+        'created_at': '2026-05-08T00:07:00',
+        'updated_at': '2026-05-08T00:08:00',
+      }),
+      OrderLogItem.fromJson({
+        'id': 11,
+        'order_id': 11,
+        'provider': 'alpaca',
+        'broker': 'alpaca',
+        'market': 'US',
+        'symbol': 'MSFT',
+        'side': 'buy',
+        'action': 'buy',
+        'result': 'submitted',
+        'reason': 'Null notional should not crash.',
+        'qty': 1,
+        'notional': null,
+        'internal_status': 'submitted',
+        'created_at': '2026-05-08T00:09:00',
+        'updated_at': '2026-05-08T00:09:00',
       }),
     ];
   }

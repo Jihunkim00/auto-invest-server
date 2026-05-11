@@ -38,6 +38,30 @@ void main() {
     expect(result.realOrderSubmitted, isFalse);
   });
 
+  test('runKisDryRunAuto posts auto endpoint without manual order payload',
+      () async {
+    late http.Request captured;
+    final client = ApiClient(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response(jsonEncode(_autoJson()), 200);
+      }),
+    );
+
+    final result = await client.runKisDryRunAuto(gateLevel: 7);
+
+    expect(captured.method, 'POST');
+    expect(captured.url.path, '/kis/auto/dry-run-once');
+    expect(captured.url.queryParameters['gate_level'], '7');
+    expect(captured.url.path, isNot(contains('/kis/orders/manual-submit')));
+    expect(captured.body, '{}');
+    expect(captured.body, isNot(contains('999999')));
+    expect(captured.body, isNot(contains('symbol')));
+    expect(captured.body, isNot(contains('qty')));
+    expect(captured.body, isNot(contains('side')));
+    expect(result.realOrderSubmitted, isFalse);
+  });
+
   testWidgets('KIS scheduler status panel shows simulation-only state',
       (tester) async {
     final controller = _schedulerController(_FakeSchedulerApiClient())
@@ -322,6 +346,29 @@ Map<String, dynamic> _runJson() {
     'run': {
       'created_at': '2026-05-08T00:00:00',
     },
+    'reason': 'dry_run_risk_approved',
+    'quant_buy_score': 74,
+    'ai_buy_score': 82,
+    'final_entry_score': 76,
+  };
+}
+
+Map<String, dynamic> _autoJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_dry_run_auto',
+    'dry_run': true,
+    'simulated': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'trigger_source': 'manual_kis_dry_run_auto',
+    'result': 'simulated_order_created',
+    'action': 'buy',
+    'triggered_symbol': '005930',
+    'signal_id': 123,
+    'order_id': 456,
     'reason': 'dry_run_risk_approved',
     'quant_buy_score': 74,
     'ai_buy_score': 82,
