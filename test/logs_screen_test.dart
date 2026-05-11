@@ -5,13 +5,14 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/core/utils/timestamp_formatter.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
 
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.physicalSize = const Size(1200, 5200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -111,7 +112,7 @@ void main() {
     expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('broker_submit_called=false'), findsWidgets);
     expect(find.text('manual_submit_called=false'), findsWidgets);
-    expect(find.text('real_orders_allowed=false'), findsOneWidget);
+    expect(find.text('real_orders_allowed=false'), findsWidgets);
     expect(find.text('live_scheduler=disabled'), findsOneWidget);
     expect(
       find.text(
@@ -238,13 +239,136 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('KIS live automation readiness card renders blocked state',
+      (tester) async {
+    final createdAt = _todayUtcTimestamp(kstHour: 10, minute: 15);
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        manualSafetyStatus: _manualSafety(
+          runtimeDryRun: true,
+          killSwitch: false,
+          kisEnabled: true,
+          kisRealOrderEnabled: true,
+        ),
+        schedulerStatus: const KisSchedulerSimulationStatus(
+          provider: 'kis',
+          market: 'KR',
+          enabled: false,
+          dryRun: true,
+          schedulerDryRun: true,
+          allowRealOrders: false,
+          configuredAllowRealOrders: false,
+          realOrdersAllowed: false,
+          realOrderSchedulerEnabled: false,
+          realOrderSubmitted: false,
+          brokerSubmitCalled: false,
+          manualSubmitCalled: false,
+          runtimeDryRun: true,
+          killSwitch: false,
+        ),
+        runs: [
+          _schedulerRun(
+            action: 'hold',
+            result: 'skipped',
+            reason: 'near_close_no_new_entry',
+            createdAt: createdAt,
+          ),
+        ],
+        orders: const [],
+        signals: const [],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('KIS Live Automation Readiness'), findsOneWidget);
+    expect(find.text('LIVE AUTO ORDER: NOT ENABLED'), findsOneWidget);
+    expect(find.text('READINESS ONLY'), findsOneWidget);
+    expect(find.text('LIVE AUTO DISABLED'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('MANUAL APPROVAL REQUIRED'), findsOneWidget);
+    expect(find.text('BLOCKED: dry_run=false readiness'), findsWidgets);
+    expect(find.text('dry_run is ON'), findsWidgets);
+    expect(find.text('real_orders_allowed=false'), findsWidgets);
+    expect(find.text('live_scheduler_orders_enabled=false'), findsOneWidget);
+    expect(find.text('recent simulation missing'), findsNothing);
+    expect(find.text('real_order_submitted=false'), findsWidgets);
+    expect(find.text('broker_submit_called=false'), findsWidgets);
+    expect(find.text('manual_submit_called=false'), findsWidgets);
+    expect(
+        find.textContaining('latest simulation has no broker id / no kis_odno'),
+        findsOneWidget);
+    expect(
+      find.text(
+          'Manual live orders are excluded from scheduler automation readiness.'),
+      findsOneWidget,
+    );
+    expect(find.text('Enable live KIS scheduler orders'), findsNothing);
+    expect(find.text('Enable KIS live scheduler'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS readiness treats missing safety fields as not ready',
+      (tester) async {
+    final createdAt = _todayUtcTimestamp(kstHour: 11);
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        manualSafetyStatus: KisManualOrderSafetyStatus.fromJson(const {}),
+        schedulerStatus: KisSchedulerSimulationStatus.fromJson(const {
+          'provider': 'kis',
+          'market': 'KR',
+          'real_orders_allowed': false,
+          'safety': {
+            'live_scheduler_orders_enabled': false,
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+          },
+        }),
+        runs: [
+          _schedulerRun(
+            action: 'buy',
+            result: 'simulated_order_created',
+            reason: 'dry_run_risk_approved',
+            orderId: 80,
+            signalId: 79,
+            createdAt: createdAt,
+          ),
+        ],
+        orders: [
+          _schedulerOrder(
+            orderId: 80,
+            side: 'buy',
+            notional: 50000,
+            createdAt: createdAt,
+          ),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('dry_run is unknown'), findsWidgets);
+    expect(find.text('kill_switch unknown'), findsWidgets);
+    expect(find.text('kis_enabled unknown'), findsWidgets);
+    expect(find.text('kis_real_order_enabled unknown'), findsWidgets);
+    expect(find.text('READY CHECKS'), findsOneWidget);
+    expect(find.textContaining('/14 passed'), findsOneWidget);
+    expect(find.text('LIVE AUTO ORDER: NOT ENABLED'), findsOneWidget);
+
+    controller.dispose();
+  });
 }
 
 Future<void> _pumpLogs(
   WidgetTester tester,
   DashboardController controller,
 ) async {
-  tester.view.physicalSize = const Size(1200, 2200);
+  tester.view.physicalSize = const Size(1200, 5200);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -266,6 +390,23 @@ String _todayUtcTimestamp({required int kstHour, int minute = 0}) {
     minute,
   );
   return kstTime.subtract(const Duration(hours: 9)).toIso8601String();
+}
+
+KisManualOrderSafetyStatus _manualSafety({
+  required bool runtimeDryRun,
+  required bool killSwitch,
+  required bool kisEnabled,
+  required bool kisRealOrderEnabled,
+}) {
+  return KisManualOrderSafetyStatus(
+    runtimeDryRun: runtimeDryRun,
+    killSwitch: killSwitch,
+    kisEnabled: kisEnabled,
+    kisRealOrderEnabled: kisRealOrderEnabled,
+    marketOpen: true,
+    entryAllowedNow: true,
+    noNewEntryAfter: '15:00',
+  );
 }
 
 TradingLogItem _schedulerRun({
@@ -397,14 +538,23 @@ class _FakeLogsApiClient extends ApiClient {
     this.signals,
     this.throwFetch = false,
     KisSchedulerSimulationStatus? schedulerStatus,
-  }) : schedulerStatus =
-            schedulerStatus ?? KisSchedulerSimulationStatus.safeDefault();
+    KisManualOrderSafetyStatus? manualSafetyStatus,
+  })  : schedulerStatus =
+            schedulerStatus ?? KisSchedulerSimulationStatus.safeDefault(),
+        manualSafetyStatus = manualSafetyStatus ??
+            _manualSafety(
+              runtimeDryRun: true,
+              killSwitch: false,
+              kisEnabled: true,
+              kisRealOrderEnabled: true,
+            );
 
   List<TradingLogItem>? runs;
   List<OrderLogItem>? orders;
   List<SignalLogItem>? signals;
   bool throwFetch;
   KisSchedulerSimulationStatus schedulerStatus;
+  KisManualOrderSafetyStatus manualSafetyStatus;
   int fetchRecentRunsCalls = 0;
 
   @override
@@ -620,5 +770,13 @@ class _FakeLogsApiClient extends ApiClient {
       throw const ApiRequestException('logs failed');
     }
     return schedulerStatus;
+  }
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return manualSafetyStatus;
   }
 }

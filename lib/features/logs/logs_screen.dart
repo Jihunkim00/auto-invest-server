@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
@@ -24,6 +25,7 @@ class _LogsScreenState extends State<LogsScreen> {
   List<SignalLogItem> _signals = const [];
   LogsSummary? _summary;
   KisSchedulerSimulationStatus? _kisSchedulerStatus;
+  KisManualOrderSafetyStatus? _kisManualSafetyStatus;
 
   @override
   void initState() {
@@ -44,6 +46,7 @@ class _LogsScreenState extends State<LogsScreen> {
         widget.controller.apiClient.fetchRecentSignals(limit: 50),
         widget.controller.apiClient.fetchLogsSummary(),
         widget.controller.apiClient.fetchKisSchedulerStatus(),
+        widget.controller.apiClient.fetchKisManualOrderSafetyStatus(),
       ]);
 
       if (!mounted) return;
@@ -53,6 +56,7 @@ class _LogsScreenState extends State<LogsScreen> {
         _signals = results[2] as List<SignalLogItem>;
         _summary = results[3] as LogsSummary;
         _kisSchedulerStatus = results[4] as KisSchedulerSimulationStatus;
+        _kisManualSafetyStatus = results[5] as KisManualOrderSafetyStatus;
       });
     } catch (e) {
       if (!mounted) return;
@@ -100,6 +104,17 @@ class _LogsScreenState extends State<LogsScreen> {
               orders: _orders,
               signals: _signals,
               schedulerStatus: _kisSchedulerStatus,
+              onRetry: _loading ? null : _loadLogs,
+            ),
+            const SizedBox(height: 14),
+            _KisLiveAutomationReadinessCard(
+              loading: _loading,
+              error: _error,
+              runs: _runs,
+              orders: _orders,
+              signals: _signals,
+              schedulerStatus: _kisSchedulerStatus,
+              manualSafetyStatus: _kisManualSafetyStatus,
               onRetry: _loading ? null : _loadLogs,
             ),
             const SizedBox(height: 14),
@@ -317,6 +332,300 @@ class _KisSimulationOpsSummaryCard extends StatelessWidget {
       ]),
     );
   }
+}
+
+class _KisLiveAutomationReadinessCard extends StatelessWidget {
+  const _KisLiveAutomationReadinessCard({
+    required this.loading,
+    required this.error,
+    required this.runs,
+    required this.orders,
+    required this.signals,
+    required this.schedulerStatus,
+    required this.manualSafetyStatus,
+    required this.onRetry,
+  });
+
+  final bool loading;
+  final String? error;
+  final List<TradingLogItem> runs;
+  final List<OrderLogItem> orders;
+  final List<SignalLogItem> signals;
+  final KisSchedulerSimulationStatus? schedulerStatus;
+  final KisManualOrderSafetyStatus? manualSafetyStatus;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = _KisSimulationOpsSummary.fromLogs(
+      runs: runs,
+      orders: orders,
+      signals: signals,
+    );
+    final checks = _readinessChecks(
+      summary: summary,
+      allLogsAvailable:
+          runs.isNotEmpty || orders.isNotEmpty || signals.isNotEmpty,
+      schedulerStatus: schedulerStatus,
+      manualSafetyStatus: manualSafetyStatus,
+    );
+    final passed = checks.where((check) => check.passed).length;
+    final blockers = checks.where((check) => !check.passed).take(5).toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.verified_user_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Live Automation Readiness',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          IconButton(
+            tooltip: 'Refresh KIS live automation readiness',
+            onPressed: onRetry,
+            icon: loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const _BadgeWrap(labels: [
+          'READINESS ONLY',
+          'LIVE AUTO DISABLED',
+          'NO BROKER SUBMIT',
+          'MANUAL APPROVAL REQUIRED',
+        ]),
+        const SizedBox(height: 10),
+        const Text('LIVE AUTO ORDER: NOT ENABLED',
+            style: TextStyle(
+                color: Colors.redAccent, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        if (loading)
+          const _SummaryStateLine(text: 'Loading KIS readiness checks...')
+        else if (error != null)
+          _SummaryErrorLine(
+            text: 'KIS readiness unavailable: ${_primaryLine(error!)}',
+            onRetry: onRetry,
+          )
+        else ...[
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            _SummaryMetric(
+                label: 'ready checks',
+                value: '$passed/${checks.length} passed'),
+            const _SummaryMetric(label: 'live automation', value: 'BLOCKED'),
+            _SummaryMetric(
+              label: 'manual live records',
+              value: '${summary.manualLiveOrderCount} separate',
+            ),
+          ]),
+          const SizedBox(height: 10),
+          if (blockers.isNotEmpty) ...[
+            const Text('Blockers',
+                style: TextStyle(
+                    color: Colors.white54, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final blocker in blockers)
+                _ReadinessChip(check: blocker, compact: true),
+            ]),
+            const SizedBox(height: 10),
+          ],
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final check in checks) _ReadinessChip(check: check),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            'Manual live orders are excluded from scheduler automation readiness.',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.70)),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _ReadinessChip extends StatelessWidget {
+  const _ReadinessChip({required this.check, this.compact = false});
+
+  final _ReadinessCheck check;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = check.passed ? Colors.greenAccent : Colors.redAccent;
+    return Container(
+      constraints: BoxConstraints(
+        minWidth: compact ? 140 : 180,
+        maxWidth: compact ? 280 : 340,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          '${check.passed ? 'PASS' : 'BLOCKED'}: ${check.label}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          check.detail,
+          maxLines: compact ? 2 : 3,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ReadinessCheck {
+  const _ReadinessCheck({
+    required this.label,
+    required this.detail,
+    required this.passed,
+  });
+
+  final String label;
+  final String detail;
+  final bool passed;
+}
+
+List<_ReadinessCheck> _readinessChecks({
+  required _KisSimulationOpsSummary summary,
+  required bool allLogsAvailable,
+  required KisSchedulerSimulationStatus? schedulerStatus,
+  required KisManualOrderSafetyStatus? manualSafetyStatus,
+}) {
+  final latest = summary.latestSchedulerRun;
+  return [
+    _ReadinessCheck(
+      label: 'dry_run=false readiness',
+      passed: manualSafetyStatus?.hasRuntimeDryRun == true &&
+          manualSafetyStatus?.runtimeDryRun == false,
+      detail: manualSafetyStatus?.hasRuntimeDryRun == true
+          ? 'dry_run is ${manualSafetyStatus!.runtimeDryRun ? 'ON' : 'OFF'}'
+          : 'dry_run is unknown',
+    ),
+    _ReadinessCheck(
+      label: 'kill_switch=false',
+      passed: manualSafetyStatus?.hasKillSwitch == true &&
+          manualSafetyStatus?.killSwitch == false,
+      detail: manualSafetyStatus?.hasKillSwitch == true
+          ? 'kill_switch=${_boolLabel(manualSafetyStatus!.killSwitch)}'
+          : 'kill_switch unknown',
+    ),
+    _ReadinessCheck(
+      label: 'kis_enabled=true',
+      passed: manualSafetyStatus?.hasKisEnabled == true &&
+          manualSafetyStatus?.kisEnabled == true,
+      detail: manualSafetyStatus?.hasKisEnabled == true
+          ? 'kis_enabled=${_boolLabel(manualSafetyStatus!.kisEnabled)}'
+          : 'kis_enabled unknown',
+    ),
+    _ReadinessCheck(
+      label: 'kis_real_order_enabled=true',
+      passed: manualSafetyStatus?.hasKisRealOrderEnabled == true &&
+          manualSafetyStatus?.kisRealOrderEnabled == true,
+      detail: manualSafetyStatus?.hasKisRealOrderEnabled == true
+          ? 'kis_real_order_enabled=${_boolLabel(manualSafetyStatus!.kisRealOrderEnabled)}'
+          : 'kis_real_order_enabled unknown',
+    ),
+    _ReadinessCheck(
+      label: 'kis_scheduler_enabled status',
+      passed: schedulerStatus?.enabled == true,
+      detail: schedulerStatus == null
+          ? 'kis_scheduler_enabled unknown'
+          : 'kis_scheduler_enabled=${_boolLabel(schedulerStatus.enabled)}',
+    ),
+    _ReadinessCheck(
+      label: 'kis_scheduler_dry_run=true',
+      passed: schedulerStatus?.schedulerDryRun == true,
+      detail: schedulerStatus?.schedulerDryRun == null
+          ? 'kis_scheduler_dry_run unknown'
+          : 'kis_scheduler_dry_run=${_boolLabel(schedulerStatus!.schedulerDryRun!)}',
+    ),
+    _ReadinessCheck(
+      label: 'kis_scheduler_allow_real_orders=false',
+      passed: schedulerStatus?.configuredAllowRealOrders == false,
+      detail: schedulerStatus?.configuredAllowRealOrders == null
+          ? 'kis_scheduler_allow_real_orders unknown'
+          : 'kis_scheduler_allow_real_orders=${_boolLabel(schedulerStatus!.configuredAllowRealOrders!)}',
+    ),
+    _ReadinessCheck(
+      label: 'real_orders_allowed=false',
+      passed:
+          schedulerStatus != null && schedulerStatus.realOrdersAllowed == false,
+      detail: schedulerStatus == null
+          ? 'real_orders_allowed unknown'
+          : 'real_orders_allowed=${_boolLabel(schedulerStatus.realOrdersAllowed)}',
+    ),
+    _ReadinessCheck(
+      label: 'live_scheduler_orders_enabled=false',
+      passed: schedulerStatus != null &&
+          schedulerStatus.realOrderSchedulerEnabled == false,
+      detail: schedulerStatus == null
+          ? 'live_scheduler_orders_enabled unknown'
+          : 'live_scheduler_orders_enabled=${_boolLabel(schedulerStatus.realOrderSchedulerEnabled)}',
+    ),
+    _ReadinessCheck(
+      label: 'recent KIS simulation runs exist',
+      passed: summary.schedulerRuns.isNotEmpty,
+      detail: summary.schedulerRuns.isEmpty
+          ? 'recent simulation missing'
+          : '${summary.schedulerRuns.length} scheduler dry-run record(s)',
+    ),
+    _ReadinessCheck(
+      label: 'recent simulation submit flags all false',
+      passed: summary.schedulerSubmitFlagsAllFalse,
+      detail: summary.schedulerRuns.isEmpty
+          ? 'latest submit flags unknown'
+          : 'real_order_submitted=${_boolLabel(summary.realOrderSubmitted)}, '
+              'broker_submit_called=${_boolLabel(summary.brokerSubmitCalled)}, '
+              'manual_submit_called=${_boolLabel(summary.schedulerManualSubmitCalled)}',
+    ),
+    _ReadinessCheck(
+      label: 'recent Logs/History records available',
+      passed: allLogsAvailable,
+      detail: allLogsAvailable ? 'logs loaded' : 'logs unavailable',
+    ),
+    _ReadinessCheck(
+      label: 'latest scheduler run has clear result/reason',
+      passed: latest != null &&
+          latest.result.trim().isNotEmpty &&
+          latest.reason.trim().isNotEmpty,
+      detail: latest == null
+          ? 'latest scheduler result missing'
+          : 'result=${_fallback(latest.result, "unknown")} / reason=${_fallback(latest.reason, "unknown")}',
+    ),
+    _ReadinessCheck(
+      label: 'latest simulation has no broker id / no kis_odno',
+      passed: summary.latestSimulationHasNoBrokerIds,
+      detail: summary.latestSimulationHasNoBrokerIds
+          ? 'no real broker id or kis_odno on latest simulation'
+          : 'real broker id or kis_odno is present or unknown',
+    ),
+  ];
 }
 
 class _LatestKisSimulationBlock extends StatelessWidget {
@@ -569,14 +878,28 @@ class _KisSimulationOpsSummary {
   bool get schedulerManualSubmitCalled =>
       schedulerRuns.any((run) => run.manualSubmitCalled == true);
 
-  String get latestSimulatedNotionalLabel {
-    OrderLogItem? order;
-    for (final item in kisOrders) {
-      if (item.isKisDryRunAuto) {
-        order = item;
-        break;
-      }
+  bool get schedulerSubmitFlagsAllFalse =>
+      schedulerRuns.isNotEmpty &&
+      schedulerRuns.every((run) =>
+          run.realOrderSubmitted == false &&
+          run.brokerSubmitCalled == false &&
+          run.manualSubmitCalled == false);
+
+  bool get latestSimulationHasNoBrokerIds {
+    final order = latestSchedulerOrder;
+    if (order == null) return schedulerRuns.isNotEmpty;
+    return order.brokerOrderId == null && order.kisOdno == null;
+  }
+
+  OrderLogItem? get latestSchedulerOrder {
+    for (final order in kisOrders) {
+      if (order.isKisDryRunAuto) return order;
     }
+    return null;
+  }
+
+  String get latestSimulatedNotionalLabel {
+    final order = latestSchedulerOrder;
     if (order == null) return 'n/a';
     return _moneyLabel(
       order.notional,

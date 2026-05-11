@@ -10,6 +10,10 @@ class KisManualOrderSafetyStatus {
     this.marketClosureReason,
     this.marketClosureName,
     this.effectiveClose,
+    this.hasRuntimeDryRun = true,
+    this.hasKillSwitch = true,
+    this.hasKisEnabled = true,
+    this.hasKisRealOrderEnabled = true,
   });
 
   factory KisManualOrderSafetyStatus.fromJson(Map<String, dynamic> json) {
@@ -30,6 +34,11 @@ class KisManualOrderSafetyStatus {
       marketClosureReason: _readNullableString(marketSession['closure_reason']),
       marketClosureName: _readNullableString(marketSession['closure_name']),
       effectiveClose: _readNullableString(marketSession['effective_close']),
+      hasRuntimeDryRun:
+          json.containsKey('runtime_dry_run') || json.containsKey('dry_run'),
+      hasKillSwitch: json.containsKey('kill_switch'),
+      hasKisEnabled: json.containsKey('kis_enabled'),
+      hasKisRealOrderEnabled: json.containsKey('kis_real_order_enabled'),
     );
   }
 
@@ -43,6 +52,10 @@ class KisManualOrderSafetyStatus {
   final String? marketClosureReason;
   final String? marketClosureName;
   final String? effectiveClose;
+  final bool hasRuntimeDryRun;
+  final bool hasKillSwitch;
+  final bool hasKisEnabled;
+  final bool hasKisRealOrderEnabled;
 
   static const safeDefault = KisManualOrderSafetyStatus(
     runtimeDryRun: true,
@@ -52,6 +65,10 @@ class KisManualOrderSafetyStatus {
     marketOpen: false,
     entryAllowedNow: false,
     noNewEntryAfter: '15:00',
+    hasRuntimeDryRun: false,
+    hasKillSwitch: false,
+    hasKisEnabled: false,
+    hasKisRealOrderEnabled: false,
   );
 }
 
