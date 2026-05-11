@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/kis_scheduler_simulation.dart';
 import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
 
@@ -22,6 +23,7 @@ class _LogsScreenState extends State<LogsScreen> {
   List<OrderLogItem> _orders = const [];
   List<SignalLogItem> _signals = const [];
   LogsSummary? _summary;
+  KisSchedulerSimulationStatus? _kisSchedulerStatus;
 
   @override
   void initState() {
@@ -41,6 +43,7 @@ class _LogsScreenState extends State<LogsScreen> {
         widget.controller.apiClient.fetchRecentOrders(limit: 50),
         widget.controller.apiClient.fetchRecentSignals(limit: 50),
         widget.controller.apiClient.fetchLogsSummary(),
+        widget.controller.apiClient.fetchKisSchedulerStatus(),
       ]);
 
       if (!mounted) return;
@@ -49,6 +52,7 @@ class _LogsScreenState extends State<LogsScreen> {
         _orders = results[1] as List<OrderLogItem>;
         _signals = results[2] as List<SignalLogItem>;
         _summary = results[3] as LogsSummary;
+        _kisSchedulerStatus = results[4] as KisSchedulerSimulationStatus;
       });
     } catch (e) {
       if (!mounted) return;
@@ -88,6 +92,16 @@ class _LogsScreenState extends State<LogsScreen> {
             ),
             const SizedBox(height: 12),
             _SummaryStrip(summary: _summary),
+            const SizedBox(height: 14),
+            _KisSimulationOpsSummaryCard(
+              loading: _loading,
+              error: _error,
+              runs: _runs,
+              orders: _orders,
+              signals: _signals,
+              schedulerStatus: _kisSchedulerStatus,
+              onRetry: _loading ? null : _loadLogs,
+            ),
             const SizedBox(height: 14),
             SegmentedButton<int>(
               segments: const [
@@ -206,6 +220,411 @@ class _CountTile extends StatelessWidget {
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _KisSimulationOpsSummaryCard extends StatelessWidget {
+  const _KisSimulationOpsSummaryCard({
+    required this.loading,
+    required this.error,
+    required this.runs,
+    required this.orders,
+    required this.signals,
+    required this.schedulerStatus,
+    required this.onRetry,
+  });
+
+  final bool loading;
+  final String? error;
+  final List<TradingLogItem> runs;
+  final List<OrderLogItem> orders;
+  final List<SignalLogItem> signals;
+  final KisSchedulerSimulationStatus? schedulerStatus;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = _KisSimulationOpsSummary.fromLogs(
+      runs: runs,
+      orders: orders,
+      signals: signals,
+    );
+    final status =
+        schedulerStatus ?? KisSchedulerSimulationStatus.safeDefault();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.monitor_heart_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Simulation Operations Summary',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          IconButton(
+            tooltip: 'Refresh KIS simulation summary',
+            onPressed: onRetry,
+            icon: loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const _BadgeWrap(labels: [
+          'SIMULATION ONLY',
+          'NO BROKER SUBMIT',
+          'NOT LIVE AUTOMATION',
+        ]),
+        const SizedBox(height: 10),
+        if (loading)
+          const _SummaryStateLine(text: 'Loading KIS simulation summary...')
+        else if (error != null)
+          _SummaryErrorLine(
+            text: 'KIS simulation summary unavailable: ${_primaryLine(error!)}',
+            onRetry: onRetry,
+          )
+        else if (!summary.hasKisActivity)
+          const _SummaryStateLine(
+            text: 'No KIS scheduler simulation logs for today.',
+          )
+        else ...[
+          _LatestKisSimulationBlock(summary: summary),
+          const SizedBox(height: 10),
+          _KisSimulationCountBlock(summary: summary),
+          const SizedBox(height: 10),
+          _KisSimulationSafetyBlock(status: status, summary: summary),
+          const SizedBox(height: 10),
+          _KisSimulationReasonBlock(summary: summary),
+          const SizedBox(height: 8),
+          Text(
+            'Manual live records are separate from scheduler simulation records.',
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.70)),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _LatestKisSimulationBlock extends StatelessWidget {
+  const _LatestKisSimulationBlock({required this.summary});
+
+  final _KisSimulationOpsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final latest = summary.latestSchedulerRun;
+    if (latest == null) {
+      return const _SummaryStateLine(
+        text: 'No scheduler dry-run result has been recorded today.',
+      );
+    }
+
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _SummaryMetric(
+        label: 'last run',
+        value: formatTimestampWithKst(latest.createdAt),
+      ),
+      _SummaryMetric(
+          label: 'last action', value: _fallback(latest.action, '-')),
+      _SummaryMetric(
+          label: 'last result', value: _fallback(latest.result, '-')),
+      _SummaryMetric(
+          label: 'last reason', value: _fallback(latest.reason, '-')),
+      _SummaryMetric(label: 'symbol', value: _fallback(latest.symbol, '-')),
+      _SummaryMetric(label: 'signal_id', value: latest.signalId ?? 'n/a'),
+      _SummaryMetric(label: 'order_id', value: latest.orderLabel),
+      _SummaryMetric(
+        label: 'sim notional',
+        value: summary.latestSimulatedNotionalLabel,
+      ),
+    ]);
+  }
+}
+
+class _KisSimulationCountBlock extends StatelessWidget {
+  const _KisSimulationCountBlock({required this.summary});
+
+  final _KisSimulationOpsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 8, runSpacing: 8, children: [
+      _MiniCount(label: 'Scheduler runs', value: summary.schedulerRuns.length),
+      _MiniCount(label: 'Sim buys', value: summary.simulatedBuyCount),
+      _MiniCount(label: 'Sim sells', value: summary.simulatedSellCount),
+      _MiniCount(label: 'Hold/skipped', value: summary.holdSkippedCount),
+      _MiniCount(label: 'Preview-only', value: summary.previewOnlyCount),
+      _MiniCount(label: 'Manual live', value: summary.manualLiveOrderCount),
+    ]);
+  }
+}
+
+class _KisSimulationSafetyBlock extends StatelessWidget {
+  const _KisSimulationSafetyBlock({
+    required this.status,
+    required this.summary,
+  });
+
+  final KisSchedulerSimulationStatus status;
+  final _KisSimulationOpsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _SafetyChip(
+        label:
+            'real_order_submitted=${_boolLabel(summary.realOrderSubmitted || status.realOrderSubmitted)}',
+      ),
+      _SafetyChip(
+        label:
+            'broker_submit_called=${_boolLabel(summary.brokerSubmitCalled || status.brokerSubmitCalled)}',
+      ),
+      _SafetyChip(
+        label:
+            'manual_submit_called=${_boolLabel(summary.schedulerManualSubmitCalled || status.manualSubmitCalled)}',
+      ),
+      _SafetyChip(
+        label: 'real_orders_allowed=${_boolLabel(status.realOrdersAllowed)}',
+      ),
+      _SafetyChip(
+        label:
+            'live_scheduler=${status.realOrderSchedulerEnabled ? "enabled" : "disabled"}',
+      ),
+    ]);
+  }
+}
+
+class _KisSimulationReasonBlock extends StatelessWidget {
+  const _KisSimulationReasonBlock({required this.summary});
+
+  final _KisSimulationOpsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final reasons = summary.topReasons;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Top recent block/risk reasons',
+          style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w700)),
+      const SizedBox(height: 6),
+      if (reasons.isEmpty)
+        const Text('n/a', style: TextStyle(color: Colors.white70))
+      else
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final reason in reasons)
+            _SafetyChip(label: '${reason.key} x${reason.value}'),
+        ]),
+    ]);
+  }
+}
+
+class _SummaryMetric extends StatelessWidget {
+  const _SummaryMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 124, maxWidth: 240),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text(value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white70, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+}
+
+class _MiniCount extends StatelessWidget {
+  const _MiniCount({required this.label, required this.value});
+
+  final String label;
+  final int value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 112),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11)),
+        const SizedBox(height: 3),
+        Text('$value',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+      ]),
+    );
+  }
+}
+
+class _SummaryStateLine extends StatelessWidget {
+  const _SummaryStateLine({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text, style: const TextStyle(color: Colors.white70));
+  }
+}
+
+class _SummaryErrorLine extends StatelessWidget {
+  const _SummaryErrorLine({required this.text, required this.onRetry});
+
+  final String text;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(text, style: const TextStyle(color: Colors.redAccent)),
+        TextButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh, size: 16),
+          label: const Text('Retry'),
+        ),
+      ],
+    );
+  }
+}
+
+class _KisSimulationOpsSummary {
+  const _KisSimulationOpsSummary({
+    required this.schedulerRuns,
+    required this.kisOrders,
+    required this.kisSignals,
+    required this.previewOnlyCount,
+    required this.manualLiveOrderCount,
+    required this.topReasons,
+  });
+
+  final List<TradingLogItem> schedulerRuns;
+  final List<OrderLogItem> kisOrders;
+  final List<SignalLogItem> kisSignals;
+  final int previewOnlyCount;
+  final int manualLiveOrderCount;
+  final List<MapEntry<String, int>> topReasons;
+
+  bool get hasKisActivity =>
+      schedulerRuns.isNotEmpty || kisOrders.isNotEmpty || kisSignals.isNotEmpty;
+
+  TradingLogItem? get latestSchedulerRun =>
+      schedulerRuns.isEmpty ? null : schedulerRuns.first;
+
+  int get simulatedBuyCount =>
+      schedulerRuns.where((run) => run.action.toLowerCase() == 'buy').length;
+
+  int get simulatedSellCount =>
+      schedulerRuns.where((run) => run.action.toLowerCase() == 'sell').length;
+
+  int get holdSkippedCount => schedulerRuns.where((run) {
+        final action = run.action.toLowerCase();
+        final result = run.result.toLowerCase();
+        return action == 'hold' ||
+            result == 'skipped' ||
+            result.contains('skipped') ||
+            result.contains('blocked');
+      }).length;
+
+  bool get realOrderSubmitted =>
+      schedulerRuns.any((run) => run.realOrderSubmitted == true);
+
+  bool get brokerSubmitCalled =>
+      schedulerRuns.any((run) => run.brokerSubmitCalled == true);
+
+  bool get schedulerManualSubmitCalled =>
+      schedulerRuns.any((run) => run.manualSubmitCalled == true);
+
+  String get latestSimulatedNotionalLabel {
+    OrderLogItem? order;
+    for (final item in kisOrders) {
+      if (item.isKisDryRunAuto) {
+        order = item;
+        break;
+      }
+    }
+    if (order == null) return 'n/a';
+    return _moneyLabel(
+      order.notional,
+      provider: order.provider,
+      market: order.market,
+      currency: order.currency,
+    );
+  }
+
+  factory _KisSimulationOpsSummary.fromLogs({
+    required List<TradingLogItem> runs,
+    required List<OrderLogItem> orders,
+    required List<SignalLogItem> signals,
+  }) {
+    final today = _todayKstStamp();
+    final todayRuns =
+        runs.where((run) => _isSameKstDay(run.createdAt, today)).toList();
+    final todayOrders =
+        orders.where((order) => _isSameKstDay(order.createdAt, today)).toList();
+    final todaySignals = signals
+        .where((signal) => _isSameKstDay(signal.createdAt, today))
+        .toList();
+    final schedulerRuns = todayRuns
+        .where(_isKisSchedulerDryRun)
+        .toList(growable: false)
+      ..sort((a, b) => _compareTimestampsDesc(a.createdAt, b.createdAt));
+    final kisOrders = todayOrders
+        .where((order) => order.isKis)
+        .toList(growable: false)
+      ..sort((a, b) => _compareTimestampsDesc(a.createdAt, b.createdAt));
+    final kisSignals = todaySignals
+        .where((signal) => signal.isKis)
+        .toList(growable: false)
+      ..sort((a, b) => _compareTimestampsDesc(a.createdAt, b.createdAt));
+    final previewOnlyCount = todayRuns.where((run) => run.isKisPreview).length;
+    final manualLiveOrderCount =
+        kisOrders.where((order) => order.isKisManualLive).length;
+
+    return _KisSimulationOpsSummary(
+      schedulerRuns: schedulerRuns,
+      kisOrders: kisOrders,
+      kisSignals: kisSignals,
+      previewOnlyCount: previewOnlyCount,
+      manualLiveOrderCount: manualLiveOrderCount,
+      topReasons: _topReasons(
+        runs: schedulerRuns,
+        orders: kisOrders,
+        signals: kisSignals,
       ),
     );
   }
@@ -472,6 +891,152 @@ class _SignalHistoryCard extends StatelessWidget {
   }
 }
 
+const _kstOffset = Duration(hours: 9);
+
+final _opsTimestampPattern = RegExp(
+  r'^\s*(?:(\d{4})-)?(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?\s*$',
+);
+
+bool _isKisSchedulerDryRun(TradingLogItem run) {
+  final trigger = run.triggerSource.toLowerCase();
+  final mode = run.mode.toLowerCase();
+  return run.isKis &&
+      trigger.contains('scheduler') &&
+      (trigger.contains('dry_run') || mode.contains('dry_run'));
+}
+
+List<MapEntry<String, int>> _topReasons({
+  required List<TradingLogItem> runs,
+  required List<OrderLogItem> orders,
+  required List<SignalLogItem> signals,
+}) {
+  final counts = <String, int>{};
+
+  void scanItem(Iterable<String> values) {
+    final seen = <String>{};
+    for (final value in values) {
+      final normalized = value.toLowerCase();
+      for (final reason in _trackedReasons) {
+        if (normalized.contains(reason)) {
+          seen.add(reason);
+        }
+      }
+    }
+    for (final reason in seen) {
+      counts[reason] = (counts[reason] ?? 0) + 1;
+    }
+  }
+
+  for (final run in runs) {
+    scanItem([run.result, run.reason, ...run.riskFlags, ...run.gatingNotes]);
+  }
+  for (final order in orders) {
+    scanItem([
+      order.result,
+      order.reason,
+      ...order.riskFlags,
+      ...order.gatingNotes,
+    ]);
+  }
+  for (final signal in signals) {
+    scanItem([
+      signal.result,
+      signal.reason,
+      ...signal.riskFlags,
+      ...signal.gatingNotes,
+    ]);
+  }
+
+  final entries = counts.entries.toList();
+  entries.sort((a, b) {
+    final countCompare = b.value.compareTo(a.value);
+    if (countCompare != 0) return countCompare;
+    return a.key.compareTo(b.key);
+  });
+  return entries.take(6).toList(growable: false);
+}
+
+const _trackedReasons = [
+  'market_closed',
+  'final_score_below_min_entry',
+  'near_close_no_new_entry',
+  'stop_loss_triggered',
+  'take_profit_triggered',
+  'kr_trading_disabled',
+  'preview_only',
+];
+
+String _todayKstStamp() {
+  final now = DateTime.now().toUtc().add(_kstOffset);
+  return _dateStamp(now);
+}
+
+bool _isSameKstDay(String timestamp, String todayStamp) {
+  return _kstDateStamp(timestamp) == todayStamp;
+}
+
+int _compareTimestampsDesc(String a, String b) {
+  final aTime = _parseToKst(a);
+  final bTime = _parseToKst(b);
+  if (aTime == null && bTime == null) return 0;
+  if (aTime == null) return 1;
+  if (bTime == null) return -1;
+  return bTime.compareTo(aTime);
+}
+
+String? _kstDateStamp(String value) {
+  final kst = _parseToKst(value);
+  if (kst == null) return null;
+  return _dateStamp(kst);
+}
+
+DateTime? _parseToKst(String value) {
+  final raw = value.trim();
+  if (raw.isEmpty || raw == 'null') return null;
+  final match = _opsTimestampPattern.firstMatch(raw);
+  if (match == null) return null;
+
+  final year = int.tryParse(match.group(1) ?? '2000');
+  final month = int.tryParse(match.group(2) ?? '');
+  final day = int.tryParse(match.group(3) ?? '');
+  final hour = int.tryParse(match.group(4) ?? '');
+  final minute = int.tryParse(match.group(5) ?? '');
+  final second = int.tryParse(match.group(6) ?? '0');
+  if (year == null ||
+      month == null ||
+      day == null ||
+      hour == null ||
+      minute == null ||
+      second == null) {
+    return null;
+  }
+
+  final sourceDateTime = DateTime.utc(year, month, day, hour, minute, second);
+  final offset = _opsOffsetDuration(match.group(7));
+  if (offset == null) return null;
+  return sourceDateTime.subtract(offset).add(_kstOffset);
+}
+
+Duration? _opsOffsetDuration(String? zone) {
+  if (zone == null || zone == 'Z') return Duration.zero;
+  final compact = zone.replaceAll(':', '');
+  if (compact.length != 5) return null;
+  final sign = compact.startsWith('-') ? -1 : 1;
+  if (!compact.startsWith('-') && !compact.startsWith('+')) return null;
+  final hours = int.tryParse(compact.substring(1, 3));
+  final minutes = int.tryParse(compact.substring(3, 5));
+  if (hours == null || minutes == null || hours > 23 || minutes > 59) {
+    return null;
+  }
+  return Duration(minutes: sign * ((hours * 60) + minutes));
+}
+
+String _dateStamp(DateTime value) {
+  return '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+}
+
 class _HistoryHeader extends StatelessWidget {
   const _HistoryHeader({
     required this.title,
@@ -596,6 +1161,14 @@ String _formatGate(int gateLevel) {
 
 String _fallback(String value, String fallback) {
   return value.isEmpty ? fallback : value;
+}
+
+String _primaryLine(String value) {
+  final lines = value
+      .split(RegExp(r'[\r\n]+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty);
+  return lines.isEmpty ? value.trim() : lines.first;
 }
 
 String _numberLabel(num? value) {

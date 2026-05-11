@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
+import 'package:auto_invest_dashboard/core/utils/timestamp_formatter.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
 
 void main() {
@@ -48,7 +50,7 @@ void main() {
     expect(find.text('REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('MANUAL ONLY'), findsOneWidget);
     expect(find.text('SIMULATED'), findsOneWidget);
-    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.text('real_order_submitted=true'), findsOneWidget);
     expect(find.text('broker_submit_called=true'), findsOneWidget);
     expect(find.text('manual_submit_called=true'), findsOneWidget);
@@ -62,11 +64,357 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('KIS simulation summary displays latest scheduler dry-run result',
+      (tester) async {
+    final createdAt = _todayUtcTimestamp(kstHour: 14, minute: 35);
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: [
+          _schedulerRun(
+            action: 'buy',
+            result: 'simulated_order_created',
+            reason: 'final_score_below_min_entry cleared for dry run',
+            symbol: '005930',
+            orderId: 44,
+            signalId: 43,
+            createdAt: createdAt,
+          ),
+        ],
+        orders: [
+          _schedulerOrder(
+            orderId: 44,
+            side: 'buy',
+            notional: 9801,
+            createdAt: createdAt,
+          ),
+          _manualLiveOrder(orderId: 45, createdAt: createdAt),
+        ],
+        signals: [_schedulerSignal(id: 43, createdAt: createdAt)],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('KIS Simulation Operations Summary'), findsOneWidget);
+    expect(find.text('SIMULATION ONLY'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('NOT LIVE AUTOMATION'), findsOneWidget);
+    expect(find.text(formatTimestampWithKst(createdAt)), findsWidgets);
+    expect(find.text('simulated_order_created'), findsWidgets);
+    expect(find.text('005930'), findsWidgets);
+    expect(find.text('43'), findsWidgets);
+    expect(find.text('44'), findsWidgets);
+    expect(find.text('\u20A99,801'), findsOneWidget);
+    expect(find.text(r'$9,801.00'), findsNothing);
+    expect(find.text('real_order_submitted=false'), findsWidgets);
+    expect(find.text('broker_submit_called=false'), findsWidgets);
+    expect(find.text('manual_submit_called=false'), findsWidgets);
+    expect(find.text('real_orders_allowed=false'), findsOneWidget);
+    expect(find.text('live_scheduler=disabled'), findsOneWidget);
+    expect(
+      find.text(
+          'Manual live records are separate from scheduler simulation records.'),
+      findsOneWidget,
+    );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS simulation summary shows simulated sell risk reasons',
+      (tester) async {
+    final stopLossTime = _todayUtcTimestamp(kstHour: 15, minute: 10);
+    final takeProfitTime = _todayUtcTimestamp(kstHour: 15, minute: 20);
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: [
+          _schedulerRun(
+            action: 'sell',
+            result: 'simulated_order_created',
+            reason: 'take_profit_triggered',
+            symbol: '005930',
+            orderId: 52,
+            signalId: 51,
+            createdAt: takeProfitTime,
+            riskFlags: const ['take_profit_triggered'],
+          ),
+          _schedulerRun(
+            action: 'sell',
+            result: 'simulated_order_created',
+            reason: 'stop_loss_triggered',
+            symbol: '000660',
+            orderId: 50,
+            signalId: 49,
+            createdAt: stopLossTime,
+            riskFlags: const ['stop_loss_triggered'],
+          ),
+        ],
+        orders: [
+          _schedulerOrder(
+            orderId: 52,
+            side: 'sell',
+            notional: 72000,
+            createdAt: takeProfitTime,
+          ),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('Sim sells'), findsOneWidget);
+    expect(find.text('take_profit_triggered x1'), findsOneWidget);
+    expect(find.text('stop_loss_triggered x1'), findsOneWidget);
+    expect(find.text('\u20A972,000'), findsOneWidget);
+    expect(find.text(formatTimestampWithKst(takeProfitTime)), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS simulation summary empty state displays with no KIS logs',
+      (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 20,
+            'run_key': 'alpaca-only',
+            'provider': 'alpaca',
+            'market': 'US',
+            'symbol': 'AAPL',
+            'trigger_source': 'manual',
+            'mode': 'watchlist',
+            'action': 'hold',
+            'result': 'skipped',
+            'reason': 'hold_signal',
+            'gate_level': 2,
+            'created_at': _todayUtcTimestamp(kstHour: 9),
+          }),
+        ],
+        orders: const [],
+        signals: const [],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(
+      find.text('No KIS scheduler simulation logs for today.'),
+      findsOneWidget,
+    );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS simulation summary error state shows retry', (tester) async {
+    final api = _FakeLogsApiClient(throwFetch: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.textContaining('KIS simulation summary unavailable'),
+        findsOneWidget);
+    expect(find.text('Retry'), findsWidgets);
+
+    api
+      ..throwFetch = false
+      ..runs = [
+        _schedulerRun(
+          action: 'hold',
+          result: 'skipped',
+          reason: 'near_close_no_new_entry',
+          createdAt: _todayUtcTimestamp(kstHour: 15),
+        ),
+      ];
+
+    await tester.tap(find.text('Retry').first);
+    await tester.pumpAndSettle();
+
+    expect(api.fetchRecentRunsCalls, greaterThanOrEqualTo(2));
+    expect(find.text('near_close_no_new_entry x1'), findsOneWidget);
+
+    controller.dispose();
+  });
+}
+
+Future<void> _pumpLogs(
+  WidgetTester tester,
+  DashboardController controller,
+) async {
+  tester.view.physicalSize = const Size(1200, 2200);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
+  await tester.pumpWidget(MaterialApp(
+    theme: ThemeData.dark(),
+    home: Scaffold(body: LogsScreen(controller: controller)),
+  ));
+  await tester.pumpAndSettle();
+}
+
+String _todayUtcTimestamp({required int kstHour, int minute = 0}) {
+  final kstNow = DateTime.now().toUtc().add(const Duration(hours: 9));
+  final kstTime = DateTime.utc(
+    kstNow.year,
+    kstNow.month,
+    kstNow.day,
+    kstHour,
+    minute,
+  );
+  return kstTime.subtract(const Duration(hours: 9)).toIso8601String();
+}
+
+TradingLogItem _schedulerRun({
+  required String action,
+  required String result,
+  required String reason,
+  String symbol = '005930',
+  int? orderId,
+  int? signalId,
+  required String createdAt,
+  List<String> riskFlags = const [],
+}) {
+  return TradingLogItem.fromJson({
+    'id': orderId ?? 40,
+    'run_key': 'scheduler-$createdAt',
+    'provider': 'kis',
+    'market': 'KR',
+    'symbol': symbol,
+    'trigger_source': 'scheduler_kis_dry_run_auto',
+    'mode': 'kis_scheduler_dry_run_auto',
+    'action': action,
+    'result': result,
+    'reason': reason,
+    if (orderId != null) 'order_id': orderId,
+    if (signalId != null) 'signal_id': signalId,
+    'gate_level': 2,
+    'created_at': createdAt,
+    'dry_run': true,
+    'simulated': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'risk_flags': riskFlags,
+  });
+}
+
+OrderLogItem _schedulerOrder({
+  required int orderId,
+  required String side,
+  required num notional,
+  required String createdAt,
+}) {
+  return OrderLogItem.fromJson({
+    'id': orderId,
+    'order_id': orderId,
+    'provider': 'kis',
+    'broker': 'kis',
+    'market': 'KR',
+    'mode': 'kis_scheduler_dry_run_auto',
+    'trigger_source': 'scheduler_kis_dry_run_auto',
+    'symbol': '005930',
+    'side': side,
+    'action': side,
+    'result': 'DRY_RUN_SIMULATED',
+    'reason': 'KIS scheduler simulated order.',
+    'qty': 1,
+    'notional': notional,
+    'internal_status': 'DRY_RUN_SIMULATED',
+    'created_at': createdAt,
+    'updated_at': createdAt,
+    'dry_run': true,
+    'simulated': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+  });
+}
+
+OrderLogItem _manualLiveOrder({
+  required int orderId,
+  required String createdAt,
+}) {
+  return OrderLogItem.fromJson({
+    'id': orderId,
+    'order_id': orderId,
+    'provider': 'kis',
+    'broker': 'kis',
+    'market': 'KR',
+    'mode': 'manual_live_order',
+    'trigger_source': 'manual',
+    'symbol': '005930',
+    'side': 'buy',
+    'action': 'buy',
+    'result': 'SUBMITTED',
+    'reason': 'Live KIS order submitted.',
+    'qty': 1,
+    'notional': 72000,
+    'internal_status': 'SUBMITTED',
+    'broker_order_status': 'submitted',
+    'kis_odno': '0001234567',
+    'created_at': createdAt,
+    'updated_at': createdAt,
+    'real_order_submitted': true,
+    'broker_submit_called': true,
+    'manual_submit_called': true,
+  });
+}
+
+SignalLogItem _schedulerSignal({
+  required int id,
+  required String createdAt,
+}) {
+  return SignalLogItem.fromJson({
+    'id': id,
+    'provider': 'kis',
+    'market': 'KR',
+    'symbol': '005930',
+    'action': 'buy',
+    'result': 'simulated',
+    'signal_status': 'simulated',
+    'buy_score': 72,
+    'sell_score': 12,
+    'confidence': 0.88,
+    'reason': 'dry_run_signal',
+    'trigger_source': 'scheduler_kis_dry_run_auto',
+    'created_at': createdAt,
+    'dry_run': true,
+    'simulated': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+  });
 }
 
 class _FakeLogsApiClient extends ApiClient {
+  _FakeLogsApiClient({
+    this.runs,
+    this.orders,
+    this.signals,
+    this.throwFetch = false,
+    KisSchedulerSimulationStatus? schedulerStatus,
+  }) : schedulerStatus =
+            schedulerStatus ?? KisSchedulerSimulationStatus.safeDefault();
+
+  List<TradingLogItem>? runs;
+  List<OrderLogItem>? orders;
+  List<SignalLogItem>? signals;
+  bool throwFetch;
+  KisSchedulerSimulationStatus schedulerStatus;
+  int fetchRecentRunsCalls = 0;
+
   @override
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
+    fetchRecentRunsCalls += 1;
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    final override = runs;
+    if (override != null) return override;
     return [
       TradingLogItem.fromJson({
         'id': 1,
@@ -126,6 +474,11 @@ class _FakeLogsApiClient extends ApiClient {
 
   @override
   Future<List<OrderLogItem>> fetchRecentOrders({int limit = 20}) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    final override = orders;
+    if (override != null) return override;
     return [
       OrderLogItem.fromJson({
         'id': 8,
@@ -219,6 +572,11 @@ class _FakeLogsApiClient extends ApiClient {
 
   @override
   Future<List<SignalLogItem>> fetchRecentSignals({int limit = 20}) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    final override = signals;
+    if (override != null) return override;
     return [
       SignalLogItem.fromJson({
         'id': 9,
@@ -245,11 +603,22 @@ class _FakeLogsApiClient extends ApiClient {
 
   @override
   Future<LogsSummary> fetchLogsSummary() async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
     return const LogsSummary(
       latestRun: null,
       latestOrder: null,
       latestSignal: null,
       counts: {'runs': 3, 'orders': 1, 'signals': 1},
     );
+  }
+
+  @override
+  Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return schedulerStatus;
   }
 }
