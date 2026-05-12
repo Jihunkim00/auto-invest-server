@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -78,6 +80,54 @@ def test_market_analysis_run_returns_single_symbol_analysis(monkeypatch):
     assert payload["action_hint"] in {"buy_candidate", "watch", "hold"}
     assert payload["reason"] == "test analysis"
     assert "price" in payload["indicators"]
+
+
+
+
+def test_market_analysis_run_passes_explicit_and_default_market_to_gpt(monkeypatch):
+    monkeypatch.setattr(
+        MarketDataService,
+        "get_recent_bars",
+        lambda self, symbol, limit=120, timeframe="1Min": make_dummy_bars(),
+    )
+    calls = []
+
+    def fake_run_and_save(self, db, symbol, indicators, gate_level=None, event_context=None, market="US"):
+        calls.append({"symbol": symbol, "market": market, "gate_level": gate_level})
+        return SimpleNamespace(
+            id=len(calls),
+            symbol=symbol,
+            market_regime="trend",
+            entry_bias="long",
+            entry_allowed=True,
+            market_confidence=0.72,
+            risk_note="test analysis",
+            macro_summary="test macro",
+            gate_level=gate_level,
+            gate_profile_name="test",
+            hard_block_reason=None,
+            hard_blocked=False,
+            gating_notes="[]",
+            created_at="2026-05-12T00:00:00Z",
+        )
+
+    monkeypatch.setattr(
+        "app.services.gpt_market_service.GPTMarketService.run_and_save",
+        fake_run_and_save,
+    )
+
+    client = TestClient(app)
+
+    kr_response = client.post("/market-analysis/run?symbol=005930&market=KR&gate_level=2")
+    assert kr_response.status_code == 200
+    assert kr_response.json()["market"] == "KR"
+
+    us_response = client.post("/market-analysis/run?symbol=aapl&gate_level=4")
+    assert us_response.status_code == 200
+    assert us_response.json()["market"] == "US"
+
+    assert calls[0] == {"symbol": "005930", "market": "KR", "gate_level": 2}
+    assert calls[1] == {"symbol": "AAPL", "market": "US", "gate_level": 4}
 
 
 def test_market_analysis_run_returns_json_error(monkeypatch):

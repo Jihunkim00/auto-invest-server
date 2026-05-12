@@ -1,3 +1,7 @@
+# KR entries under `sources` are metadata/reference-source descriptors for
+# KIS preview guidance. They are not web-fetchable by WebContentService unless
+# URL-based entries are added under a separate `sites` list. GPTMarketService
+# reference cache fetching only consumes `sites` entries with valid URLs.
 market: KR
 currency: KRW
 timezone: Asia/Seoul

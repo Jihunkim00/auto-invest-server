@@ -12,6 +12,7 @@ from app.services.entry_readiness_service import evaluate_entry_readiness, marke
 from app.services.gpt_market_service import GPTMarketService
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
+from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.quant_signal_service import QuantSignalService
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
 from app.services.reference_site_service import ReferenceSiteService
@@ -37,9 +38,22 @@ def _parse_json_array(raw_value: str | None) -> list:
 def run_market_analysis(
     symbol: str = Query(default="AAPL", min_length=1),
     gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    market: str = Query(default="US", pattern="^(US|KR)$"),
     db: Session = Depends(get_db),
 ):
-    normalized_symbol = symbol.upper()
+    normalized_market = market.upper()
+    try:
+        normalized_symbol = MarketProfileService().normalize_symbol(symbol, normalized_market)
+    except MarketProfileError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "invalid_symbol_for_market",
+                "symbol": symbol,
+                "market": normalized_market,
+                "message": str(exc),
+            },
+        ) from exc
     mds = MarketDataService()
     ids = IndicatorService()
     quant_service = QuantSignalService()
@@ -59,7 +73,13 @@ def run_market_analysis(
             max((quant["quant_buy_score"] * 0.75) + (ai["ai_buy_score"] * 0.25), 0.0),
             100.0,
         )
-        row = svc.run_and_save(db, normalized_symbol, indicators, gate_level=gate_level)
+        row = svc.run_and_save(
+            db,
+            normalized_symbol,
+            indicators,
+            gate_level=gate_level,
+            market=normalized_market,
+        )
         market_research_blocked = market_research_blocks_entry(
             entry_allowed=bool(row.entry_allowed),
             hard_blocked=bool(row.hard_blocked),
@@ -86,6 +106,7 @@ def run_market_analysis(
             detail={
                 "error": "market_analysis_failed",
                 "symbol": normalized_symbol,
+                "market": normalized_market,
                 "gate_level": gate_level,
                 "message": str(exc) or exc.__class__.__name__,
             },
@@ -94,6 +115,7 @@ def run_market_analysis(
     return {
         "id": row.id,
         "symbol": row.symbol,
+        "market": normalized_market,
         "entry_score": round(entry_score, 2),
         "quant_score": quant["quant_buy_score"],
         "buy_score": quant["quant_buy_score"],

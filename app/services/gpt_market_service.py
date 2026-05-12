@@ -545,11 +545,27 @@ class GPTMarketService:
                 "sell_or_exit_must_remain_allowed": True,
             },
             "required_output": {
+                "market_regime": ["unknown", "range", "trend", "volatile"],
+                "entry_bias": ["neutral", "long"],
+                "entry_allowed": "boolean; true only if quant-first fallback and event-risk filter both allow entry",
+                "market_confidence": "number from 0 to 1",
+                "reason": "non-empty string, max 600 chars",
                 "market_risk_regime": ["risk_on", "neutral", "risk_off", "panic"],
+                "technical_market_regime": ["unknown", "range", "trend"],
                 "event_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "fx_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "geopolitical_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "energy_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "political_regulatory_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "macro_risk_level": ["none", "low", "medium", "high", "extreme"],
+                "sector_fundamental_trend": ["improving", "stable", "mixed", "weakening", "unknown"],
+                "revenue_trend_context": ["improving", "stable", "mixed", "weakening", "unknown"],
+                "flow_signal": ["positive", "neutral", "negative", "unknown"],
+                "earnings_revision_signal": ["positive", "neutral", "negative", "unknown"],
+                "valuation_risk_level": ["none", "low", "medium", "high", "extreme"],
                 "entry_penalty": "integer from 0 to 30, or 999 for hard block",
                 "hard_block_new_buy": "boolean",
-                "allow_sell_or_exit": "boolean and should normally be true",
+                "allow_sell_or_exit": "boolean; must always be true",
             },
             "notes": {
                 "website_context_secondary": True,
@@ -868,7 +884,9 @@ class GPTMarketService:
             result["entry_bias"] = "long" if result["entry_allowed"] else "neutral"
             result["regime_confidence"] = round(effective_conf, 4)
 
-        result["allow_sell_or_exit"] = True if result.get("allow_sell_or_exit") is not False else False
+        if result.get("allow_sell_or_exit") is False:
+            notes.append("gpt_attempted_to_block_sell_exit_overridden")
+        result["allow_sell_or_exit"] = True
         result["hard_block_reason"] = hard_block_reason
         result["hard_blocked"] = bool(hard_block_reason)
         result["gating_notes"] = notes

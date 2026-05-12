@@ -106,3 +106,61 @@ def test_guardrails_keep_sell_exit_allowed_when_event_risk_hard_blocks_entry():
     assert guarded["hard_block_new_buy"] is True
     assert guarded["hard_blocked"] is True
     assert guarded["allow_sell_or_exit"] is True
+
+
+def test_required_output_includes_legacy_schema_and_new_risk_fields():
+    service = GPTMarketService()
+    context = MarketGateContext(cached_site_summaries=[], used_cache=False)
+
+    _, user_prompt = service._build_prompt(
+        symbol="AAPL",
+        indicators={"price": 100},
+        context=context,
+        gate_level=2,
+        gate_profile_name="conservative",
+        market="US",
+    )
+
+    for key in (
+        "market_regime",
+        "entry_bias",
+        "entry_allowed",
+        "market_confidence",
+        "reason",
+        "event_risk_level",
+        "entry_penalty",
+        "hard_block_new_buy",
+        "allow_sell_or_exit",
+    ):
+        assert f'"{key}"' in user_prompt
+
+
+def test_guardrails_override_gpt_attempt_to_block_sell_exit():
+    service = GPTMarketService()
+    normalized = service._normalize_candidate(
+        {
+            "market_regime": "trend",
+            "entry_bias": "long",
+            "entry_allowed": True,
+            "market_confidence": 0.9,
+            "event_risk_level": "extreme",
+            "allow_sell_or_exit": False,
+            "reason": "Extreme event risk.",
+        }
+    )
+
+    guarded = service._apply_guardrails(
+        normalized,
+        {
+            "regime_confidence": 0.8,
+            "hard_block_reason": None,
+            "gating_notes": [],
+        },
+        indicators={"ema20": 110, "ema50": 100},
+        gate_level=2,
+    )
+
+    assert guarded["entry_allowed"] is False
+    assert guarded["hard_block_new_buy"] is True
+    assert guarded["allow_sell_or_exit"] is True
+    assert "gpt_attempted_to_block_sell_exit_overridden" in guarded["gating_notes"]

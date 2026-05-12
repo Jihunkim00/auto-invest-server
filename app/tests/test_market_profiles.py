@@ -8,6 +8,7 @@ from app.services.market_profile_service import (
     MarketProfileError,
     MarketProfileService,
 )
+from app.services.reference_site_service import ReferenceSiteService
 from app.services.watchlist_service import WatchlistService
 
 
@@ -140,3 +141,21 @@ def test_kr_reference_sites_endpoint_returns_official_sources():
     assert body["market"] == "KR"
     assert "KIS Domestic Stock API" in names
     assert "OpenDART" in names
+
+
+def test_kr_reference_sources_are_metadata_not_web_fetch_sites():
+    profile_service = MarketProfileService()
+
+    references = profile_service.load_reference_sites("KR")
+    fetchable_sites = ReferenceSiteService(market="KR").load_sites()
+
+    assert references["market"] == "KR"
+    assert references["count"] >= 4
+    assert {source["name"] for source in references["sources"]} >= {
+        "KIS Domestic Stock API",
+        "KRX Listed Stock Information",
+        "OpenDART",
+        "KIND",
+    }
+    assert all("url" not in source for source in references["sources"])
+    assert fetchable_sites == []

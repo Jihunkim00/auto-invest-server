@@ -28,6 +28,21 @@ KR_DISABLED_REASONS = ["preview_only", "kr_trading_disabled"]
 EMPTY_INDICATORS = dict(EMPTY_TECHNICAL_INDICATORS)
 SCOREABLE_INDICATOR_STATUSES = {"ok", "partial"}
 
+KR_PREVIEW_GPT_MARKET_CONTEXT = """
+KR/KIS market risk checklist for advisory-only preview:
+- USD/KRW FX risk and KRW weakness, including foreign outflow pressure.
+- Previous US market session spillover from S&P 500, Nasdaq, Dow, and US growth sentiment.
+- SOX semiconductor sentiment for Samsung Electronics, SK Hynix, equipment, and materials.
+- KOSPI/KOSDAQ risk mood, breadth, small-cap pressure, and growth-stock pressure.
+- Foreign and institutional investor flow; persistent foreign selling increases entry risk.
+- Geopolitical risk including war, Middle East, China/Taiwan, North Korea, sanctions, and shipping lanes.
+- Energy and commodity risk including oil, gas, coal, lithium, copper, nickel, and sector impacts.
+- Korean political/regulatory risk including short-selling, tax, platform, financial, battery, semiconductor, defense, nuclear, bio, and AI policy.
+- Sector fundamental/revenue trend for the symbol's core business.
+- Company event risk including earnings shock, guidance cut, capital increase, lawsuit, accounting issue, supply disruption, customer concentration, block sale, and lock-up expiration.
+Use these only as risk adjustments. Positive news cannot create a buy signal alone. Negative context may reduce ai_buy_score or add risk_flags/gating_notes. Do not approve real orders.
+"""
+
 
 @dataclass(frozen=True)
 class KisGptPreview:
@@ -986,6 +1001,7 @@ class KisPreviewGptAdvisor:
             "You are the same conservative, quant-first market advisory layer "
             "used by the US/Alpaca watchlist flow, with KR/KIS market context. "
             "This is read-only preview analysis only.\n"
+            f"{KR_PREVIEW_GPT_MARKET_CONTEXT}\n"
             "Quant indicators are primary. GPT only explains or contextualizes "
             "the available data. Do not produce numeric scores unless real "
             "indicator values are provided in the prompt.\n"
