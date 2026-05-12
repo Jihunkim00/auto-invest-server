@@ -9,28 +9,14 @@ import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 void main() {
   testWidgets('Portfolio Snapshot switches between USD and KRW summaries',
       (tester) async {
-    final controller = DashboardController(_NoopApiClient(), autoload: false)
-      ..usPortfolioSummary = _usSummary
-      ..krPortfolioSummary = _krSummary;
-
-    await tester.pumpWidget(MaterialApp(
-      theme: ThemeData.dark(),
-      home: Scaffold(
-        body: SingleChildScrollView(
-          child: AnimatedBuilder(
-            animation: controller,
-            builder: (context, _) =>
-                PortfolioSnapshotSection(controller: controller),
-          ),
-        ),
-      ),
-    ));
+    final controller = await _pumpSnapshot(tester);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
     expect(find.text(r'$1,000.00'), findsOneWidget);
     expect(find.text('CASH'), findsOneWidget);
     expect(find.text(r'$123.45'), findsOneWidget);
     expect(find.text('₩1,200,000'), findsNothing);
+    expect(find.text('+25.00%'), findsOneWidget);
 
     await tester.tap(find.text('KR / KIS'));
     await tester.pumpAndSettle();
@@ -46,17 +32,85 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('KIS portfolio profit percent uses cost basis and P/L amount',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krSmallProfitSummary);
+
+    await tester.tap(find.text('KR / KIS'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₩9,867'), findsWidgets);
+    expect(find.text('₩9,830'), findsWidgets);
+    expect(find.text('+₩37'), findsWidgets);
+    expect(find.text('+0.38%'), findsNWidgets(2));
+    expect(find.text('+37.00%'), findsNothing);
+    expect(find.text('0.00%'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS negative P/L percent uses cost basis', (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krNegativeProfitSummary);
+
+    await tester.tap(find.text('KR / KIS'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('-₩200'), findsWidgets);
+    expect(find.text('-2.00%'), findsNWidgets(2));
+    expect(find.text('-200.00%'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS missing cost basis displays safe percent fallback',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krMissingCostSummary);
+
+    await tester.tap(find.text('KR / KIS'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₩9,867'), findsWidgets);
+    expect(find.text('+₩37'), findsWidgets);
+    expect(find.text('--'), findsNWidgets(2));
+    expect(find.text('+37.00%'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('US portfolio percent display keeps raw decimal behavior',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, usSummary: _usPositionSummary);
+
+    expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
+    expect(find.text(r'+$12.34'), findsWidgets);
+    expect(find.text('+12.34%'), findsNWidgets(2));
+
+    controller.dispose();
+  });
 }
 
 class _NoopApiClient extends ApiClient {
-  @override
-  Future<PortfolioSummary> fetchPortfolioSummary() async => _usSummary;
+  _NoopApiClient({
+    this.usSummary = _usSummary,
+    this.krSummary = _krSummary,
+  });
+
+  final PortfolioSummary usSummary;
+  final PortfolioSummary krSummary;
 
   @override
-  Future<PortfolioSummary> fetchUsPortfolioSummary() async => _usSummary;
+  Future<PortfolioSummary> fetchPortfolioSummary() async => usSummary;
 
   @override
-  Future<PortfolioSummary> fetchKrPortfolioSummary() async => _krSummary;
+  Future<PortfolioSummary> fetchUsPortfolioSummary() async => usSummary;
+
+  @override
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async => krSummary;
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
@@ -64,6 +118,33 @@ class _NoopApiClient extends ApiClient {
         ? fetchKrPortfolioSummary()
         : fetchUsPortfolioSummary();
   }
+}
+
+Future<DashboardController> _pumpSnapshot(
+  WidgetTester tester, {
+  PortfolioSummary usSummary = _usSummary,
+  PortfolioSummary krSummary = _krSummary,
+}) async {
+  final controller = DashboardController(
+    _NoopApiClient(usSummary: usSummary, krSummary: krSummary),
+    autoload: false,
+  )
+    ..usPortfolioSummary = usSummary
+    ..krPortfolioSummary = krSummary;
+
+  await tester.pumpWidget(MaterialApp(
+    theme: ThemeData.dark(),
+    home: Scaffold(
+      body: SingleChildScrollView(
+        child: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) =>
+              PortfolioSnapshotSection(controller: controller),
+        ),
+      ),
+    ),
+  ));
+  return controller;
 }
 
 const _usSummary = PortfolioSummary(
@@ -76,6 +157,32 @@ const _usSummary = PortfolioSummary(
   totalUnrealizedPlpc: 0.25,
   cash: 123.45,
   positions: [],
+  pendingOrders: [],
+);
+
+const _usPositionSummary = PortfolioSummary(
+  currency: 'USD',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 100,
+  totalMarketValue: 112.34,
+  totalUnrealizedPl: 12.34,
+  totalUnrealizedPlpc: 0.1234,
+  cash: 123.45,
+  positions: [
+    PositionSummary(
+      symbol: 'AAPL',
+      name: 'Apple',
+      side: 'long',
+      qty: 1,
+      avgEntryPrice: 100,
+      costBasis: 100,
+      currentPrice: 112.34,
+      marketValue: 112.34,
+      unrealizedPl: 12.34,
+      unrealizedPlpc: 0.1234,
+    ),
+  ],
   pendingOrders: [],
 );
 
@@ -119,4 +226,82 @@ const _krSummary = PortfolioSummary(
       submittedAt: '09:30:00',
     ),
   ],
+);
+
+const _krSmallProfitSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 9830,
+  totalMarketValue: 9867,
+  totalUnrealizedPl: 37,
+  totalUnrealizedPlpc: 0,
+  cash: 30000,
+  positions: [
+    PositionSummary(
+      symbol: '091810',
+      name: 'Small Profit',
+      side: 'long',
+      qty: 11,
+      avgEntryPrice: 893.64,
+      costBasis: 9830,
+      currentPrice: 897,
+      marketValue: 9867,
+      unrealizedPl: 37,
+      unrealizedPlpc: 37,
+    ),
+  ],
+  pendingOrders: [],
+);
+
+const _krNegativeProfitSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 10000,
+  totalMarketValue: 9800,
+  totalUnrealizedPl: -200,
+  totalUnrealizedPlpc: 0,
+  cash: 30000,
+  positions: [
+    PositionSummary(
+      symbol: '091810',
+      name: 'Small Loss',
+      side: 'long',
+      qty: 10,
+      avgEntryPrice: 1000,
+      costBasis: 10000,
+      currentPrice: 980,
+      marketValue: 9800,
+      unrealizedPl: -200,
+      unrealizedPlpc: -200,
+    ),
+  ],
+  pendingOrders: [],
+);
+
+const _krMissingCostSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 9867,
+  totalUnrealizedPl: 37,
+  totalUnrealizedPlpc: 37,
+  cash: 30000,
+  positions: [
+    PositionSummary(
+      symbol: '091810',
+      name: 'Missing Cost',
+      side: 'long',
+      qty: 11,
+      avgEntryPrice: 0,
+      costBasis: 0,
+      currentPrice: 897,
+      marketValue: 9867,
+      unrealizedPl: 37,
+      unrealizedPlpc: 37,
+    ),
+  ],
+  pendingOrders: [],
 );

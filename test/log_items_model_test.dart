@@ -60,6 +60,36 @@ void main() {
     expect(item.realOrderSubmitted, isFalse);
   });
 
+  test('TradingLogItem labels KIS exit preflight as preflight only', () {
+    final item = TradingLogItem.fromJson({
+      'id': 12,
+      'run_key': 'kis-exit-preflight',
+      'provider': 'kis',
+      'market': 'KR',
+      'symbol': '005930',
+      'trigger_source': 'manual_kis_live_exit_preflight',
+      'mode': 'kis_live_exit_preflight',
+      'action': 'sell',
+      'result': 'exit_candidate',
+      'reason': 'stop_loss_triggered',
+      'gate_level': 2,
+      'created_at': '2026-05-08T00:01:00',
+      'preflight': true,
+      'simulated': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    });
+
+    expect(item.sourceLabel, 'KIS EXIT PREFLIGHT');
+    expect(
+      item.safetyBadges,
+      containsAll(['PREFLIGHT ONLY', 'NO BROKER SUBMIT']),
+    );
+    expect(item.safetyBadges, isNot(contains('MANUAL ONLY')));
+    expect(item.isKisManualLive, isFalse);
+  });
+
   test('OrderLogItem labels KIS manual live order as manual only', () {
     final item = OrderLogItem.fromJson({
       'id': 30,

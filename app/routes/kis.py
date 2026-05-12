@@ -26,6 +26,7 @@ from app.services.kis_dry_run_auto_service import (
     KisDryRunAutoService,
 )
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
+from app.services.kis_live_exit_preflight_service import KisLiveExitPreflightService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -372,6 +373,17 @@ def run_kis_scheduler_dry_run_auto_once(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/live-exit/preflight-once")
+@router.post("/scheduler/live-exit-preflight-once")
+def run_kis_live_exit_preflight_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisLiveExitPreflightService(client)
+    return service.run_once(db, gate_level=gate_level)
 
 
 def _client(db: Session) -> KisClient:

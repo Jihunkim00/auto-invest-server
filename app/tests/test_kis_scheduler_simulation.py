@@ -343,21 +343,25 @@ def test_kis_scheduler_sell_simulation_not_blocked_by_entry_cap(
 
 
 @pytest.mark.parametrize(
-    ("unrealized_plpc", "expected_reason"),
+    ("unrealized_pl", "market_value", "expected_reason"),
     [
-        (-0.02, "stop_loss_triggered"),
-        (0.04, "take_profit_triggered"),
+        (-200, 9800, "stop_loss_triggered"),
+        (200, 10200, "take_profit_triggered"),
     ],
 )
 def test_kis_scheduler_exit_thresholds_trigger_sell_simulation(
-    monkeypatch, client, unrealized_plpc, expected_reason
+    monkeypatch, client, unrealized_pl, market_value, expected_reason
 ):
     held = {
         "symbol": "005930",
         "name": "Samsung",
         "qty": 2,
-        "current_price": 72000,
-        "unrealized_plpc": unrealized_plpc,
+        "current_price": market_value / 2,
+        "avg_entry_price": 5000,
+        "cost_basis": 10000,
+        "market_value": market_value,
+        "unrealized_pl": unrealized_pl,
+        "unrealized_plpc": unrealized_pl,
     }
     quiet_item = {
         **_candidate(
@@ -396,6 +400,60 @@ def test_kis_scheduler_exit_thresholds_trigger_sell_simulation(
     assert body["action"] == "sell"
     assert body["triggered_symbol"] == "005930"
     assert expected_reason in body["risk_flags"]
+
+
+def test_kis_scheduler_exit_threshold_does_not_use_profit_amount_as_percent(
+    monkeypatch, client
+):
+    held = {
+        "symbol": "091810",
+        "name": "Small Profit",
+        "qty": 11,
+        "current_price": 897,
+        "avg_entry_price": 0,
+        "cost_basis": 9841,
+        "market_value": 9867,
+        "unrealized_pl": 26,
+        "unrealized_plpc": 26,
+    }
+    quiet_item = {
+        **_candidate(
+            "091810",
+            final_entry_score=72,
+            quant_buy_score=72,
+            quant_sell_score=10,
+            ai_buy_score=70,
+            ai_sell_score=8,
+            final_sell_score=10,
+            current_price=897,
+        ),
+        "mode": "position_management_preview",
+        "symbol_role": "held_position",
+        "allowed_actions": ["hold", "sell"],
+        "position": held,
+    }
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_account_balance",
+        lambda self: {"cash": 1000000, "total_asset_value": 2000000, "unrealized_pl": 0},
+    )
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.list_positions", lambda self: [held])
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.list_open_orders", lambda self: [])
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisWatchlistPreviewService.run_preview",
+        lambda self, include_gpt=True, gate_level=2, db=None: _preview(
+            candidate=_candidate("091810", current_price=897),
+            held_positions=[held],
+            portfolio_items=[quiet_item],
+        ),
+    )
+
+    response = client.post("/kis/scheduler/run-dry-run-auto-once")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"] == "hold"
+    assert body["order_id"] is None
+    assert "take_profit_triggered" not in body["risk_flags"]
 
 
 def test_kis_scheduler_blocks_new_entry_when_daily_limit_reached(

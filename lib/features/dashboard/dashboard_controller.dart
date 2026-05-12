@@ -4,6 +4,7 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
@@ -112,6 +113,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerRunLoading = false;
   KisSchedulerRunResult? kisSchedulerRunResult;
   String? kisSchedulerRunError;
+  bool kisLiveExitPreflightLoading = false;
+  KisLiveExitPreflightResult? kisLiveExitPreflightResult;
+  String? kisLiveExitPreflightError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
@@ -973,6 +977,37 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerRunLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisLiveExitPreflight() async {
+    if (kisLiveExitPreflightLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS live exit preflight already in progress.',
+      );
+    }
+
+    kisLiveExitPreflightLoading = true;
+    kisLiveExitPreflightError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisLiveExitPreflight();
+      kisLiveExitPreflightResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS live exit preflight completed: ${result.action}.',
+      );
+    } catch (e) {
+      kisLiveExitPreflightError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLiveExitPreflightError!),
+      );
+    } finally {
+      kisLiveExitPreflightLoading = false;
       notifyListeners();
     }
   }

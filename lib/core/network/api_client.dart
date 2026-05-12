@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
@@ -166,6 +167,7 @@ class ApiClient {
         .whereType<Map>()
         .map((item) => PositionSummary.fromJson(
             Map<String, dynamic>.from(item.cast<String, dynamic>())))
+        .map(_normalizeKrPositionSummary)
         .toList();
 
     final rawOrders = ordersPayload['orders'] as List<dynamic>? ?? const [];
@@ -192,8 +194,7 @@ class ApiClient {
     final totalUnrealizedPl =
         _readNullableDouble(balance['unrealized_pl']) ?? summedUnrealizedPl;
     final totalUnrealizedPlpc =
-        _readNullableDouble(balance['unrealized_plpc']) ??
-            (totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0);
+        totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0.0;
     final cash = _readNullableDouble(balance['cash']) ??
         _readNullableDouble(balance['dnca_tot_amt']) ??
         0;
@@ -387,6 +388,46 @@ class ApiClient {
     final payload =
         await _postJsonBody('/kis/scheduler/run-dry-run-auto-once', const {});
     return KisSchedulerRunResult.fromJson(payload);
+  }
+
+  static PositionSummary _normalizeKrPositionSummary(PositionSummary position) {
+    final costBasis = position.costBasis > 0
+        ? position.costBasis
+        : position.qty > 0 && position.avgEntryPrice > 0
+            ? position.qty * position.avgEntryPrice
+            : 0.0;
+    final marketValue = position.marketValue > 0
+        ? position.marketValue
+        : position.qty > 0 &&
+                position.currentPrice != null &&
+                position.currentPrice! > 0
+            ? position.qty * position.currentPrice!
+            : 0.0;
+    final unrealizedPl = position.unrealizedPl != 0
+        ? position.unrealizedPl
+        : costBasis > 0 && marketValue > 0
+            ? marketValue - costBasis
+            : 0.0;
+    final unrealizedPlpc = costBasis > 0 ? unrealizedPl / costBasis : 0.0;
+
+    return PositionSummary(
+      symbol: position.symbol,
+      name: position.name,
+      side: position.side,
+      qty: position.qty,
+      avgEntryPrice: position.avgEntryPrice,
+      costBasis: costBasis,
+      currentPrice: position.currentPrice,
+      marketValue: marketValue,
+      unrealizedPl: unrealizedPl,
+      unrealizedPlpc: unrealizedPlpc,
+    );
+  }
+
+  Future<KisLiveExitPreflightResult> runKisLiveExitPreflight() async {
+    final payload =
+        await _postJsonBody('/kis/live-exit/preflight-once', const {});
+    return KisLiveExitPreflightResult.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({

@@ -66,7 +66,10 @@ class TradingLogItem {
         simulated,
         result,
       );
-  bool get isKisManualLive => isKis && !isKisPreview && !isKisDryRunAuto;
+  bool get isKisPreflight =>
+      _isKisPreflight(provider, market, mode, triggerSource, result);
+  bool get isKisManualLive =>
+      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
   String get sourceLabel => _sourceLabel(
         provider: provider,
         market: market,
@@ -214,7 +217,10 @@ class OrderLogItem {
         simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
         result,
       );
-  bool get isKisManualLive => isKis && !isKisPreview && !isKisDryRunAuto;
+  bool get isKisPreflight =>
+      _isKisPreflight(provider, market, mode, triggerSource, result);
+  bool get isKisManualLive =>
+      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
   String get sourceLabel => _sourceLabel(
         provider: provider,
         market: market,
@@ -359,7 +365,10 @@ class SignalLogItem {
         simulated,
         result,
       );
-  bool get isKisManualLive => isKis && !isKisPreview && !isKisDryRunAuto;
+  bool get isKisPreflight =>
+      _isKisPreflight(provider, market, mode, triggerSource, result);
+  bool get isKisManualLive =>
+      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
   String get sourceLabel => _sourceLabel(
         provider: provider,
         market: market,
@@ -571,6 +580,19 @@ bool _isKisDryRunAuto(
       result.toUpperCase() == 'DRY_RUN_SIMULATED';
 }
 
+bool _isKisPreflight(
+  String provider,
+  String market,
+  String mode,
+  String triggerSource,
+  String result,
+) {
+  if (!_isKis(provider, market, mode, triggerSource)) return false;
+  return mode.toLowerCase().contains('preflight') ||
+      triggerSource.toLowerCase().contains('preflight') ||
+      result.toLowerCase().contains('preflight');
+}
+
 String _sourceLabel({
   required String provider,
   required String market,
@@ -585,6 +607,9 @@ String _sourceLabel({
   if (_isKisDryRunAuto(
       provider, market, mode, triggerSource, simulated, result)) {
     return 'KIS DRY-RUN AUTO';
+  }
+  if (_isKisPreflight(provider, market, mode, triggerSource, result)) {
+    return 'KIS EXIT PREFLIGHT';
   }
   if (_isKisPreview(
       provider, market, mode, triggerSource, result, previewOnly)) {
@@ -623,19 +648,23 @@ List<String> _safetyBadges({
     simulated,
     result,
   );
+  final preflight =
+      _isKisPreflight(provider, market, mode, triggerSource, result);
   void add(String label) {
     if (!labels.contains(label)) labels.add(label);
   }
 
   if (dryRunAuto || simulated) add('SIMULATED');
   if (preview || previewOnly) add('PREVIEW ONLY');
+  if (preflight) add('PREFLIGHT ONLY');
   if (realOrderSubmitted == true) add('REAL ORDER SUBMITTED');
   if (kis &&
       (brokerSubmitCalled == false ||
-          (realOrderSubmitted == false && (dryRunAuto || preview)))) {
+          (realOrderSubmitted == false &&
+              (dryRunAuto || preview || preflight)))) {
     add('NO BROKER SUBMIT');
   }
-  if (kis && !dryRunAuto && !preview) add('MANUAL ONLY');
+  if (kis && !dryRunAuto && !preview && !preflight) add('MANUAL ONLY');
   if (manualSubmitCalled == true) add('MANUAL ONLY');
   return labels;
 }

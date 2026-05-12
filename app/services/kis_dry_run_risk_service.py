@@ -45,6 +45,11 @@ OPEN_ORDER_STATUSES = {
     InternalOrderStatus.SYNC_FAILED.value,
     "PENDING_SUBMIT",
 }
+DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL = 0.02
+DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL = 0.02
+EXIT_TRIGGER_SOURCE_COST_BASIS = "cost_basis"
+EXIT_TRIGGER_SOURCE_CURRENT_VALUE_FALLBACK = "current_value_fallback"
+EXIT_TRIGGER_SOURCE_MISSING_INPUTS = "missing_pl_inputs"
 
 
 @dataclass(frozen=True)
@@ -490,11 +495,10 @@ class KisDryRunRiskService:
     ) -> list[str]:
         reasons: list[str] = []
         position = item.get("position") if isinstance(item.get("position"), dict) else {}
-        unrealized_plpc = _position_pl_pct(position.get("unrealized_plpc"))
-        if unrealized_plpc is not None and unrealized_plpc <= -0.015:
-            reasons.append("stop_loss_triggered")
-        if unrealized_plpc is not None and unrealized_plpc >= 0.03:
-            reasons.append("take_profit_triggered")
+        threshold_reasons, diagnostics = position_exit_threshold_reasons(position)
+        if diagnostics:
+            item["pl_diagnostics"] = diagnostics
+        reasons.extend(threshold_reasons)
 
         if self._has_scoreable_indicators(item):
             sell_score = _sell_score(item)
@@ -730,13 +734,155 @@ def _notional(qty: float | None, price: float | None) -> float | None:
     return round(float(qty) * float(price), 2)
 
 
-def _position_pl_pct(value: Any) -> float | None:
+def normalize_exit_threshold_decimal(
+    value: Any,
+    default: float,
+) -> float:
     parsed = _safe_float_or_none(value)
     if parsed is None:
-        return None
-    if abs(parsed) > 1.0:
-        return parsed / 100.0
+        return abs(float(default))
+    parsed = abs(parsed)
+    if parsed == 0:
+        return abs(float(default))
+    if parsed > 1.0:
+        parsed = parsed / 100.0
     return parsed
+
+
+def position_exit_threshold_reasons(
+    position: dict[str, Any],
+    *,
+    take_profit_threshold: Any = None,
+    stop_loss_threshold: Any = None,
+) -> tuple[list[str], dict[str, Any]]:
+    diagnostics = position_pl_diagnostics(
+        position,
+        take_profit_threshold=take_profit_threshold,
+        stop_loss_threshold=stop_loss_threshold,
+    )
+    if diagnostics.get("exit_trigger_source") != EXIT_TRIGGER_SOURCE_COST_BASIS:
+        return [], diagnostics
+
+    unrealized_pl_pct = _safe_float_or_none(diagnostics.get("unrealized_pl_pct"))
+    if unrealized_pl_pct is None:
+        return [], diagnostics
+
+    take_profit_decimal = normalize_exit_threshold_decimal(
+        take_profit_threshold,
+        DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL,
+    )
+    stop_loss_decimal = normalize_exit_threshold_decimal(
+        stop_loss_threshold,
+        DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL,
+    )
+    reasons: list[str] = []
+    if unrealized_pl_pct <= -stop_loss_decimal:
+        reasons.append("stop_loss_triggered")
+    if unrealized_pl_pct >= take_profit_decimal:
+        reasons.append("take_profit_triggered")
+    return _dedupe(reasons), diagnostics
+
+
+def position_pl_diagnostics(
+    position: dict[str, Any] | None,
+    *,
+    take_profit_threshold: Any = None,
+    stop_loss_threshold: Any = None,
+) -> dict[str, Any]:
+    position = position if isinstance(position, dict) else {}
+    cost_basis = _position_cost_basis(position)
+    current_value = _position_current_value(position)
+    unrealized_pl = _position_unrealized_pl(
+        position,
+        cost_basis=cost_basis,
+        current_value=current_value,
+    )
+    take_profit_decimal = normalize_exit_threshold_decimal(
+        take_profit_threshold,
+        DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL,
+    )
+    stop_loss_decimal = normalize_exit_threshold_decimal(
+        stop_loss_threshold,
+        DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL,
+    )
+
+    unrealized_pl_pct: float | None = None
+    exit_trigger_source = EXIT_TRIGGER_SOURCE_MISSING_INPUTS
+    warning: str | None = "missing_or_invalid_pl_inputs"
+    if unrealized_pl is not None and cost_basis is not None and cost_basis > 0:
+        unrealized_pl_pct = unrealized_pl / cost_basis
+        exit_trigger_source = EXIT_TRIGGER_SOURCE_COST_BASIS
+        warning = None
+    elif unrealized_pl is not None and current_value is not None and current_value > 0:
+        unrealized_pl_pct = unrealized_pl / current_value
+        exit_trigger_source = EXIT_TRIGGER_SOURCE_CURRENT_VALUE_FALLBACK
+        warning = "cost_basis_unavailable_current_value_fallback"
+
+    return {
+        "cost_basis": _round_money(cost_basis),
+        "current_value": _round_money(current_value),
+        "unrealized_pl": _round_money(unrealized_pl),
+        "unrealized_pl_pct": _round_ratio(unrealized_pl_pct),
+        "take_profit_threshold_pct": round(take_profit_decimal * 100.0, 4),
+        "stop_loss_threshold_pct": round(stop_loss_decimal * 100.0, 4),
+        "exit_trigger_source": exit_trigger_source,
+        "pl_input_warning": warning,
+    }
+
+
+def _position_cost_basis(position: dict[str, Any]) -> float | None:
+    direct = _first_float(
+        position,
+        "cost_basis",
+        "total_cost",
+        "purchase_amount",
+        "pchs_amt",
+        "pchs_amt_smtl_amt",
+    )
+    if direct is not None and direct > 0:
+        return direct
+    qty = _first_float(position, "qty", "hldg_qty")
+    avg_price = _first_float(position, "avg_entry_price", "pchs_avg_pric")
+    if qty is not None and qty > 0 and avg_price is not None and avg_price > 0:
+        return qty * avg_price
+    return None
+
+
+def _position_current_value(position: dict[str, Any]) -> float | None:
+    direct = _first_float(position, "current_value", "market_value", "evlu_amt")
+    if direct is not None and direct > 0:
+        return direct
+    qty = _first_float(position, "qty", "hldg_qty")
+    price = _first_float(position, "current_price", "prpr", "stck_prpr")
+    if qty is not None and qty > 0 and price is not None and price > 0:
+        return qty * price
+    return None
+
+
+def _position_unrealized_pl(
+    position: dict[str, Any],
+    *,
+    cost_basis: float | None,
+    current_value: float | None,
+) -> float | None:
+    direct = _first_float(position, "unrealized_pl", "evlu_pfls_amt")
+    if direct is not None:
+        return direct
+    if cost_basis is not None and current_value is not None:
+        return current_value - cost_basis
+    return None
+
+
+def _round_money(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
+def _round_ratio(value: float | None) -> float | None:
+    if value is None:
+        return None
+    return round(float(value), 8)
 
 
 def _exit_priority(reasons: list[str]) -> int:

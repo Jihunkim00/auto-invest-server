@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
+import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -36,6 +37,31 @@ void main() {
     expect(captured.body, isNot(contains('qty')));
     expect(captured.body, isNot(contains('side')));
     expect(result.realOrderSubmitted, isFalse);
+  });
+
+  test('runKisLiveExitPreflight posts preflight endpoint with empty body',
+      () async {
+    late http.Request captured;
+    final client = ApiClient(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response(jsonEncode(_exitPreflightJson()), 200);
+      }),
+    );
+
+    final result = await client.runKisLiveExitPreflight();
+
+    expect(captured.method, 'POST');
+    expect(captured.url.path, '/kis/live-exit/preflight-once');
+    expect(captured.url.path, isNot(contains('/kis/orders/manual-submit')));
+    expect(captured.url.path, isNot(contains('/kis/orders/submit-manual')));
+    expect(captured.body, '{}');
+    expect(captured.body, isNot(contains('symbol')));
+    expect(captured.body, isNot(contains('qty')));
+    expect(captured.body, isNot(contains('side')));
+    expect(result.action, 'sell');
+    expect(result.realOrderSubmitted, isFalse);
+    expect(result.unrealizedPlPct, -0.02);
   });
 
   test('runKisDryRunAuto posts auto endpoint without manual order payload',
@@ -70,6 +96,12 @@ void main() {
     await tester.pumpWidget(_wrap(controller));
 
     expect(find.text('KIS Scheduler Simulation'), findsOneWidget);
+    expect(find.text('KIS Live Exit Preflight'), findsOneWidget);
+    expect(find.text('EXIT ONLY'), findsOneWidget);
+    expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
+    expect(find.text('Run Exit Preflight'), findsOneWidget);
     expect(find.text('DISABLED BY DEFAULT'), findsOneWidget);
     expect(find.text('DRY-RUN ONLY'), findsOneWidget);
     expect(find.text('REAL ORDER SCHEDULER DISABLED'), findsOneWidget);
@@ -82,6 +114,110 @@ void main() {
     expect(find.text('RUNTIME_SCHEDULER_ENABLED'), findsOneWidget);
     expect(find.text('RUNTIME_DRY_RUN'), findsOneWidget);
     expect(find.text('KILL_SWITCH'), findsOneWidget);
+    expect(find.text('Submit Live KIS Order'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Run Exit Preflight displays sell candidate without submit button',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeSchedulerApiClient();
+    final controller = _schedulerController(api)
+      ..kisSchedulerStatusLoaded = true
+      ..orderTicketSymbol = '999999';
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await tester.ensureVisible(find.text('Run Exit Preflight'));
+    await tester.tap(find.text('Run Exit Preflight'));
+    await tester.pumpAndSettle();
+
+    expect(api.exitPreflightCalls, 1);
+    expect(api.validationCalls, 0);
+    expect(
+      find.text('Exit candidate found, but live automation is still disabled.'),
+      findsOneWidget,
+    );
+    expect(find.text('sell'), findsWidgets);
+    expect(find.text('005930'), findsWidgets);
+    expect(find.text('2'), findsWidgets);
+    expect(find.text('₩141,120'), findsWidgets);
+    expect(find.text('-₩2,880'), findsOneWidget);
+    expect(find.text('-2.00%'), findsOneWidget);
+    expect(find.text('stop_loss_triggered'), findsWidgets);
+    expect(find.text('true'), findsWidgets);
+    expect(
+      find.textContaining('live_scheduler_orders_disabled'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('preflight_only'), findsWidgets);
+    expect(find.text('real_order_submitted=false'), findsOneWidget);
+    expect(find.text('broker_submit_called=false'), findsOneWidget);
+    expect(find.text('manual_submit_called=false'), findsOneWidget);
+    expect(find.text('Submit Live KIS Order'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Exit preflight displays no held position state', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeSchedulerApiClient(
+      exitPreflightPayload: _noHeldExitPreflightJson(),
+    );
+    final controller = _schedulerController(api)
+      ..kisSchedulerStatusLoaded = true;
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await tester.ensureVisible(find.text('Run Exit Preflight'));
+    await tester.tap(find.text('Run Exit Preflight'));
+    await tester.pumpAndSettle();
+
+    expect(api.exitPreflightCalls, 1);
+    expect(find.text('No held KIS position to evaluate.'), findsOneWidget);
+    expect(find.text('hold'), findsWidgets);
+    expect(find.text('n/a'), findsWidgets);
+    expect(find.textContaining('no_held_position'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Exit preflight displays KRW profit and percent separately',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeSchedulerApiClient(
+      exitPreflightPayload: _smallProfitHoldExitPreflightJson(),
+    );
+    final controller = _schedulerController(api)
+      ..kisSchedulerStatusLoaded = true;
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await tester.ensureVisible(find.text('Run Exit Preflight'));
+    await tester.tap(find.text('Run Exit Preflight'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('₩26'), findsOneWidget);
+    expect(find.text('+0.26%'), findsOneWidget);
+    expect(find.text('manual_review_required'), findsWidgets);
+    expect(find.textContaining('take_profit_triggered'), findsNothing);
+    expect(find.text('EXIT ONLY'), findsOneWidget);
+    expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
 
     controller.dispose();
   });
@@ -207,12 +343,15 @@ class _FakeSchedulerApiClient extends ApiClient {
   _FakeSchedulerApiClient({
     this.throwStatus = false,
     this.throwRun = false,
+    this.exitPreflightPayload,
   });
 
   bool throwStatus;
   bool throwRun;
+  Map<String, dynamic>? exitPreflightPayload;
   int statusCalls = 0;
   int schedulerRunCalls = 0;
+  int exitPreflightCalls = 0;
   int validationCalls = 0;
 
   @override
@@ -235,6 +374,14 @@ class _FakeSchedulerApiClient extends ApiClient {
       );
     }
     return KisSchedulerRunResult.fromJson(_runJson());
+  }
+
+  @override
+  Future<KisLiveExitPreflightResult> runKisLiveExitPreflight() async {
+    exitPreflightCalls += 1;
+    return KisLiveExitPreflightResult.fromJson(
+      exitPreflightPayload ?? _exitPreflightJson(),
+    );
   }
 
   @override
@@ -373,6 +520,115 @@ Map<String, dynamic> _autoJson() {
     'quant_buy_score': 74,
     'ai_buy_score': 82,
     'final_entry_score': 76,
+  };
+}
+
+Map<String, dynamic> _exitPreflightJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_live_exit_preflight',
+    'trigger_source': 'manual_kis_live_exit_preflight',
+    'preflight': true,
+    'simulated': false,
+    'live_order_submitted': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'action': 'sell',
+    'symbol': '005930',
+    'qty': 2,
+    'estimated_notional': 141120,
+    'cost_basis': 144000,
+    'current_value': 141120,
+    'unrealized_pl': -2880,
+    'unrealized_pl_pct': -0.02,
+    'take_profit_threshold_pct': 2.0,
+    'stop_loss_threshold_pct': 2.0,
+    'exit_trigger_source': 'cost_basis',
+    'reason': 'stop_loss_triggered',
+    'message': 'Exit candidate found, but live automation is still disabled.',
+    'would_submit_if_enabled': true,
+    'blocked_by': [
+      'kis_scheduler_allow_real_orders_false',
+      'live_scheduler_orders_disabled',
+      'preflight_only_no_broker_submit',
+    ],
+    'risk_flags': [
+      'exit_only',
+      'preflight_only',
+      'no_broker_submit',
+      'stop_loss_triggered',
+    ],
+    'readiness_checks': [
+      {'name': 'held_position_exists', 'passed': true},
+    ],
+    'result': 'exit_candidate',
+  };
+}
+
+Map<String, dynamic> _smallProfitHoldExitPreflightJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_live_exit_preflight',
+    'trigger_source': 'manual_kis_live_exit_preflight',
+    'preflight': true,
+    'simulated': false,
+    'live_order_submitted': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'action': 'hold',
+    'symbol': '091810',
+    'qty': 11,
+    'estimated_notional': 9867,
+    'cost_basis': 9841,
+    'current_value': 9867,
+    'unrealized_pl': 26,
+    'unrealized_pl_pct': 26 / 9841,
+    'take_profit_threshold_pct': 2.0,
+    'stop_loss_threshold_pct': 2.0,
+    'exit_trigger_source': 'cost_basis',
+    'reason': 'manual_review_required',
+    'message': 'No held KIS position currently qualifies for live exit automation.',
+    'would_submit_if_enabled': false,
+    'blocked_by': ['no_exit_condition'],
+    'risk_flags': [
+      'exit_only',
+      'preflight_only',
+      'no_broker_submit',
+      'manual_review_required',
+    ],
+    'readiness_checks': [
+      {'name': 'held_position_exists', 'passed': true},
+    ],
+    'result': 'skipped',
+  };
+}
+
+Map<String, dynamic> _noHeldExitPreflightJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_live_exit_preflight',
+    'live_order_submitted': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'action': 'hold',
+    'symbol': null,
+    'qty': null,
+    'estimated_notional': null,
+    'reason': 'manual_review_required',
+    'message': 'No held KIS position to evaluate.',
+    'would_submit_if_enabled': false,
+    'blocked_by': ['no_held_position'],
+    'risk_flags': ['manual_review_required', 'no_held_position'],
+    'readiness_checks': [
+      {'name': 'held_position_exists', 'passed': false},
+    ],
+    'result': 'skipped',
   };
 }
 

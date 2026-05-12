@@ -20,8 +20,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
         isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';
     final noPositionsText =
         isKr ? 'No open KR positions' : 'No open US positions';
-    final noOrdersText =
-        isKr ? 'No pending KR orders' : 'No pending US orders';
+    final noOrdersText = isKr ? 'No pending KR orders' : 'No pending US orders';
     final plColor = _valueColor(summary.totalUnrealizedPl);
 
     return SectionCard(
@@ -54,16 +53,21 @@ class PortfolioSnapshotSection extends StatelessWidget {
               controller.selectPortfolioMarket(selection.first),
         ),
         const SizedBox(height: 10),
-        Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          Text(marketTitle,
-              style: const TextStyle(
-                  color: Colors.white70, fontWeight: FontWeight.w800)),
-          if (isKr) ...[
-            const _SoftBadge(text: 'READ-ONLY', color: Colors.lightBlueAccent),
-            const _SoftBadge(
-                text: 'TRADING DISABLED', color: Colors.amberAccent),
-          ],
-        ]),
+        Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(marketTitle,
+                  style: const TextStyle(
+                      color: Colors.white70, fontWeight: FontWeight.w800)),
+              if (isKr) ...[
+                const _SoftBadge(
+                    text: 'READ-ONLY', color: Colors.lightBlueAccent),
+                const _SoftBadge(
+                    text: 'TRADING DISABLED', color: Colors.amberAccent),
+              ],
+            ]),
         if (controller.selectedPortfolioUnavailable) ...[
           const SizedBox(height: 10),
           const _EmptyLine(text: 'KIS account data unavailable'),
@@ -81,8 +85,8 @@ class PortfolioSnapshotSection extends StatelessWidget {
             _MetricTile(
                 width: tileWidth,
                 label: 'Total Cost',
-                value: _money(summary.totalCostBasis,
-                    currency: summary.currency),
+                value:
+                    _money(summary.totalCostBasis, currency: summary.currency),
                 color: Colors.white70),
             _MetricTile(
                 width: tileWidth,
@@ -93,7 +97,9 @@ class PortfolioSnapshotSection extends StatelessWidget {
             _MetricTile(
                 width: tileWidth,
                 label: 'Profit %',
-                value: _percent(summary.totalUnrealizedPlpc, signed: true),
+                value: _percentOrDash(
+                    _portfolioProfitPercent(summary, isKr: isKr),
+                    signed: true),
                 color: plColor),
             _MetricTile(
                 width: tileWidth,
@@ -110,7 +116,8 @@ class PortfolioSnapshotSection extends StatelessWidget {
         else
           Column(children: [
             for (final position in summary.positions) ...[
-              _PositionTile(position: position, currency: summary.currency),
+              _PositionTile(
+                  position: position, currency: summary.currency, isKr: isKr),
               if (position != summary.positions.last) const SizedBox(height: 8),
             ],
           ]),
@@ -186,10 +193,15 @@ class _MetricTile extends StatelessWidget {
 }
 
 class _PositionTile extends StatelessWidget {
-  const _PositionTile({required this.position, required this.currency});
+  const _PositionTile({
+    required this.position,
+    required this.currency,
+    required this.isKr,
+  });
 
   final PositionSummary position;
   final String currency;
+  final bool isKr;
 
   @override
   Widget build(BuildContext context) {
@@ -248,12 +260,14 @@ class _PositionTile extends StatelessWidget {
               value: _money(position.marketValue, currency: currency)),
           _DataPair(
               label: 'P/L',
-              value:
-                  _money(position.unrealizedPl, currency: currency, signed: true),
+              value: _money(position.unrealizedPl,
+                  currency: currency, signed: true),
               color: plColor),
           _DataPair(
               label: 'Profit',
-              value: _percent(position.unrealizedPlpc, signed: true),
+              value: _percentOrDash(
+                  _positionProfitPercent(position, isKr: isKr),
+                  signed: true),
               color: plColor),
         ]),
       ]),
@@ -286,7 +300,8 @@ class _PendingOrderTile extends StatelessWidget {
           _SoftBadge(text: side.isEmpty ? 'ORDER' : side, color: sideColor),
           const SizedBox(width: 8),
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(order.symbol,
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w800)),
@@ -310,11 +325,11 @@ class _PendingOrderTile extends StatelessWidget {
         Wrap(spacing: 14, runSpacing: 8, children: [
           _DataPair(label: 'Quantity', value: _orderQuantity(order)),
           if (order.unfilledQty != null)
-            _DataPair(
-                label: 'Unfilled', value: _quantity(order.unfilledQty!)),
+            _DataPair(label: 'Unfilled', value: _quantity(order.unfilledQty!)),
           if (order.price != null)
             _DataPair(
-                label: 'Price', value: _money(order.price!, currency: currency)),
+                label: 'Price',
+                value: _money(order.price!, currency: currency)),
           _DataPair(
               label: 'Estimated Amount',
               value: order.estimatedAmount == null
@@ -501,6 +516,35 @@ String _percent(double value, {bool signed = false}) {
           ? '-'
           : '';
   return '$prefix${(value.abs() * 100).toStringAsFixed(2)}%';
+}
+
+String _percentOrDash(double? value, {bool signed = false}) {
+  if (value == null) return '--';
+  return _percent(value, signed: signed);
+}
+
+double? _portfolioProfitPercent(
+  PortfolioSummary summary, {
+  required bool isKr,
+}) {
+  if (!isKr) return summary.totalUnrealizedPlpc;
+  if (summary.totalCostBasis <= 0) return null;
+  final unrealizedPl = summary.totalUnrealizedPl != 0
+      ? summary.totalUnrealizedPl
+      : summary.totalMarketValue - summary.totalCostBasis;
+  return unrealizedPl / summary.totalCostBasis;
+}
+
+double? _positionProfitPercent(
+  PositionSummary position, {
+  required bool isKr,
+}) {
+  if (!isKr) return position.unrealizedPlpc;
+  if (position.costBasis <= 0) return null;
+  final unrealizedPl = position.unrealizedPl != 0
+      ? position.unrealizedPl
+      : position.marketValue - position.costBasis;
+  return unrealizedPl / position.costBasis;
 }
 
 String _quantity(double value) {

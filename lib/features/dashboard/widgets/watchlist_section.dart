@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/kis_auto_simulator_result.dart';
+import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/market_watchlist.dart';
 import '../../dashboard/dashboard_controller.dart';
@@ -98,9 +99,174 @@ class WatchlistSection extends StatelessWidget {
           _KisAutoSimulatorPanel(controller: controller),
           const SizedBox(height: 12),
           _KisSchedulerSimulationPanel(controller: controller),
+          const SizedBox(height: 12),
+          _KisLiveExitPreflightCard(controller: controller),
         ],
       ]),
     );
+  }
+}
+
+class _KisLiveExitPreflightCard extends StatelessWidget {
+  const _KisLiveExitPreflightCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.kisLiveExitPreflightResult;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.logout_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Live Exit Preflight',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'EXIT ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'PREFLIGHT ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'LIVE AUTO STILL DISABLED', color: Colors.amberAccent),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisLiveExitPreflightLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.runKisLiveExitPreflight();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisLiveExitPreflightLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.fact_check_outlined),
+          label: Text(controller.kisLiveExitPreflightLoading
+              ? 'Running exit preflight...'
+              : 'Run Exit Preflight'),
+        ),
+        if (controller.kisLiveExitPreflightError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisLiveExitPreflightError!),
+              color: Colors.redAccent),
+        ],
+        if (result != null) ...[
+          const SizedBox(height: 10),
+          _KisLiveExitPreflightResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisLiveExitPreflightResultPanel extends StatelessWidget {
+  const _KisLiveExitPreflightResultPanel({required this.result});
+
+  final KisLiveExitPreflightResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final noHeldPosition = !result.hasHeldPosition ||
+        result.blockedBy.contains('no_held_position');
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (noHeldPosition) ...[
+        const _StateLine(text: 'No held KIS position to evaluate.'),
+        const SizedBox(height: 10),
+      ] else if (result.isSellCandidate) ...[
+        const _StateLine(
+          text: 'Exit candidate found, but live automation is still disabled.',
+        ),
+        const SizedBox(height: 10),
+      ],
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'real_order_submitted=${_boolText(result.realOrderSubmitted)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'broker_submit_called=${_boolText(result.brokerSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'manual_submit_called=${_boolText(result.manualSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
+        _ResultPair(label: 'qty', value: _qtyText(result.qty)),
+        _ResultPair(
+          label: 'estimated_notional',
+          value: _formatKrw(result.estimatedNotional),
+        ),
+        if (result.costBasis != null)
+          _ResultPair(
+            label: 'cost_basis',
+            value: _formatKrw(result.costBasis),
+          ),
+        if (result.currentValue != null)
+          _ResultPair(
+            label: 'current_value',
+            value: _formatKrw(result.currentValue),
+          ),
+        if (result.unrealizedPl != null)
+          _ResultPair(
+            label: 'unrealized_pl',
+            value: _formatKrw(result.unrealizedPl),
+          ),
+        if (result.unrealizedPlPct != null)
+          _ResultPair(
+            label: 'unrealized_pl_pct',
+            value: _formatPercentFromDecimal(result.unrealizedPlPct),
+          ),
+        if (result.takeProfitThresholdPct != null)
+          _ResultPair(
+            label: 'take_profit_threshold',
+            value: _formatPercentValue(result.takeProfitThresholdPct),
+          ),
+        if (result.stopLossThresholdPct != null)
+          _ResultPair(
+            label: 'stop_loss_threshold',
+            value: _formatPercentValue(result.stopLossThresholdPct),
+          ),
+        if (result.exitTriggerSource != null)
+          _ResultPair(
+            label: 'exit_trigger_source',
+            value: result.exitTriggerSource!,
+          ),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(
+          label: 'would_submit_if_enabled',
+          value: _boolText(result.wouldSubmitIfEnabled),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      _StateLine(text: 'blocked_by: ${_joinList(result.blockedBy)}'),
+      const SizedBox(height: 8),
+      _StateLine(text: 'risk_flags: ${_joinList(result.riskFlags)}'),
+    ]);
   }
 }
 
@@ -598,6 +764,44 @@ String _boolText(bool value) => value ? 'true' : 'false';
 String _nullableBoolText(bool? value) {
   if (value == null) return 'n/a';
   return _boolText(value);
+}
+
+String _qtyText(double? value) {
+  if (value == null) return 'n/a';
+  return value.truncateToDouble() == value
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(2);
+}
+
+String _formatKrw(double? value) {
+  if (value == null) return 'n/a';
+  final sign = value < 0 ? '-' : '';
+  final rounded = value.abs().round().toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < rounded.length; index += 1) {
+    final remaining = rounded.length - index;
+    buffer.write(rounded[index]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  return '${sign}₩${buffer.toString()}';
+}
+
+String _formatPercentFromDecimal(double? value) {
+  if (value == null) return 'n/a';
+  return _formatPercentValue(value * 100, signed: true);
+}
+
+String _formatPercentValue(double? value, {bool signed = false}) {
+  if (value == null) return 'n/a';
+  final sign = signed && value > 0 ? '+' : '';
+  return '$sign${value.toStringAsFixed(2)}%';
+}
+
+String _joinList(List<String> values) {
+  final items = values.where((item) => item.trim().isNotEmpty).toList();
+  return items.isEmpty ? 'n/a' : items.join(', ');
 }
 
 String _gptScore(KisAutoSimulatorResult result) {
