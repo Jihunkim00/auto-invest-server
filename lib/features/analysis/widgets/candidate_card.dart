@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/gpt_risk_context_view.dart';
 import '../../../models/candidate.dart';
 
 class CandidateCard extends StatelessWidget {
@@ -80,7 +81,18 @@ class CandidateCard extends StatelessWidget {
                   candidate.riskFlags.contains('kr_trading_disabled'))
                 const _Badge(
                     text: 'TRADING DISABLED', color: Colors.amberAccent),
+              if (candidate.warnings.contains('preview_only') ||
+                  candidate.riskFlags.contains('preview_only'))
+                const _Badge(
+                    text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
             ]),
+          ],
+          if (candidate.gptContext.hasDetails) ...[
+            const SizedBox(height: 6),
+            GptRiskContextSummaryBadges(
+              context: candidate.gptContext,
+              compact: true,
+            ),
           ],
           const SizedBox(height: 4),
           Text(detail,
@@ -141,9 +153,10 @@ class CandidateCard extends StatelessWidget {
                   style: TextStyle(color: Colors.white60, fontSize: 12)),
           ],
           if (candidate.reason.isNotEmpty ||
-              candidate.gptReason.isNotEmpty) ...[
+              candidate.gptReason.isNotEmpty ||
+              candidate.gptContext.hasDetails) ...[
             const SizedBox(height: 10),
-            const _SubsectionTitle(text: 'GPT advisory context'),
+            const _SubsectionTitle(text: 'GPT Advisory Context'),
             const Text('Quant-first \u00B7 GPT advisory only',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),
             const SizedBox(height: 4),
@@ -153,6 +166,13 @@ class CandidateCard extends StatelessWidget {
             if (candidate.gptReason.isNotEmpty)
               Text(candidate.gptReason,
                   style: const TextStyle(color: Colors.white60, fontSize: 12)),
+            if (candidate.gptContext.hasDetails) ...[
+              const SizedBox(height: 8),
+              GptRiskContextDetails(
+                context: candidate.gptContext,
+                title: 'GPT Risk Filter',
+              ),
+            ],
           ],
           if (candidate.hasRiskContext) ...[
             const SizedBox(height: 10),
@@ -167,6 +187,17 @@ class CandidateCard extends StatelessWidget {
                 _DataPair(
                     label: 'Approved By Risk',
                     value: candidate.approvedByRisk! ? 'YES' : 'NO'),
+              if (candidate.eventRiskLevel != null)
+                _DataPair(
+                    label: 'Event Risk', value: candidate.eventRiskLevel!),
+              if (candidate.entryPenalty != null)
+                _DataPair(
+                    label: 'Entry Penalty',
+                    value: candidate.entryPenalty!.toString()),
+              _DataPair(
+                label: 'New Buy Blocked',
+                value: candidate.hardBlockNewBuy ? 'YES' : 'NO',
+              ),
             ]),
             if (candidate.riskFlags.isNotEmpty) ...[
               const SizedBox(height: 4),
@@ -181,7 +212,7 @@ class CandidateCard extends StatelessWidget {
             if (candidate.blockReasons.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text('Block reasons: ${candidate.blockReasons.join(', ')}',
-                style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                  style: const TextStyle(color: Colors.white60, fontSize: 12)),
             ],
           ],
           if (onUseInOrderTicket != null) ...[

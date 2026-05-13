@@ -392,8 +392,10 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
         return KisGptPreview(
             gpt_used=True,
             action_hint="candidate",
-            gpt_reason="Advisory score based on KIS OHLCV indicators.",
+            gpt_reason="KR 정량 참고용입니다.",
             warnings=[],
+            risk_flags=["fx_pressure"],
+            gating_notes=["gpt_advisory_context_visible"],
             ai_buy_score=66.0,
             ai_sell_score=18.0,
             confidence=0.72,
@@ -425,6 +427,10 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert item["final_buy_score"] is not None
     assert item["final_sell_score"] is not None
     assert item["confidence"] == 0.72
+    assert "fx_pressure" in item["risk_flags"]
+    assert "gpt_advisory_context_visible" in item["gating_notes"]
+    assert item["gpt_reason"] == "KR 정량 참고용입니다."
+    assert item["event_risk"]["risk_level"] == "low"
     assert item["action"] == "hold"
     assert item["action_hint"] == "watch"
     assert item["entry_ready"] is False
@@ -553,13 +559,25 @@ def test_kis_preview_does_not_call_kis_order_paths(monkeypatch, client):
         lambda *args, **kwargs: pytest.fail("preview must not submit KIS orders"),
     )
     monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_order",
+        lambda *args, **kwargs: pytest.fail("preview must not submit KIS orders"),
+    )
+    monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.build_domestic_order_payload",
         lambda *args, **kwargs: pytest.fail("preview must not build order payloads"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("preview must not call manual submit"),
     )
 
     response = client.post("/kis/watchlist/preview")
 
     assert response.status_code == 200
+    body = response.json()
+    assert body["preview_only"] is True
+    assert body["trading_enabled"] is False
+    assert body["should_trade"] is False
 
 
 def test_kis_gpt_prompt_requires_korean_advisory():

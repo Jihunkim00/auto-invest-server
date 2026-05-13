@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
-from app.db.models import SignalLog
+from app.db.models import MarketAnalysis, SignalLog
 from app.services.signal_service import SignalService
+from app.services.gpt_risk_context import gpt_context_from_market_analysis
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
@@ -21,6 +22,17 @@ def _parse_json_array(raw_value: str | None) -> list:
     except Exception:
         return []
     return []
+
+
+def _signal_gpt_context(db: Session, row: SignalLog) -> dict | None:
+    if getattr(row, "gpt_context", None) is not None:
+        return row.gpt_context
+    if row.market_analysis_id is None:
+        return None
+    analysis = db.get(MarketAnalysis, row.market_analysis_id)
+    if analysis is None:
+        return None
+    return gpt_context_from_market_analysis(analysis)
 
 
 @router.post("/run")
@@ -52,6 +64,7 @@ def run_signal(
         "gating_notes": _parse_json_array(row.gating_notes),
         "approved_by_risk": row.approved_by_risk,
         "risk_flags": _parse_json_array(row.risk_flags),
+        "gpt_context": _signal_gpt_context(db, row),
         "position_size_pct": row.position_size_pct,
         "planned_stop_loss_pct": row.planned_stop_loss_pct,
         "planned_take_profit_pct": row.planned_take_profit_pct,
@@ -87,6 +100,7 @@ def list_signals(
             "approved_by_risk": row.approved_by_risk,
             "related_order_id": row.related_order_id,
             "risk_flags": _parse_json_array(row.risk_flags),
+            "gpt_context": _signal_gpt_context(db, row),
             "position_size_pct": row.position_size_pct,
             "planned_stop_loss_pct": row.planned_stop_loss_pct,
             "planned_take_profit_pct": row.planned_take_profit_pct,

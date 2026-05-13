@@ -7,7 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import OrderLog, SignalLog, TradeRunLog
+from app.db.models import MarketAnalysis, OrderLog, SignalLog, TradeRunLog
+from app.services.gpt_risk_context import (
+    build_gpt_context,
+    gpt_context_from_market_analysis,
+    has_observed_gpt_context,
+)
 
 router = APIRouter(tags=["history"])
 
@@ -94,6 +99,19 @@ def _payload_list(
         or _string_list(trade_result.get(key))
         or _string_list(request_payload.get(key))
     )
+
+
+def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        raw_context = payload.get("gpt_context")
+        if isinstance(raw_context, dict):
+            return build_gpt_context(raw_context)
+        context = build_gpt_context(payload)
+        if has_observed_gpt_context(context):
+            return context
+    return None
 
 
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
@@ -191,6 +209,14 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         ),
         "risk_flags": _payload_list(response_payload, trade_result, request_payload, "risk_flags"),
         "gating_notes": _payload_list(response_payload, trade_result, request_payload, "gating_notes"),
+        "gpt_context": _payload_gpt_context(
+            response_payload,
+            trade_result,
+            request_payload,
+            response_payload.get("final_best_candidate"),
+            response_payload.get("entry_candidate"),
+            request_payload.get("final_best_candidate"),
+        ),
     }
 
 
@@ -281,13 +307,19 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         "manual_submit_called": manual_submit_called,
         "risk_flags": risk_flags,
         "gating_notes": gating_notes,
+        "gpt_context": _payload_gpt_context(response_payload, request_payload),
     }
 
 
-def _serialize_signal(row: SignalLog) -> dict[str, Any]:
+def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
     provider = _infer_provider(mode=None, trigger_source=row.trigger_source)
     market = _infer_market(provider)
     simulated = provider == "kis" and str(row.signal_status or "").lower() == "simulated"
+    gpt_context = None
+    if row.market_analysis_id is not None:
+        analysis = db.get(MarketAnalysis, row.market_analysis_id)
+        if analysis is not None:
+            gpt_context = gpt_context_from_market_analysis(analysis)
     return {
         "id": row.id,
         "run_key": None,
@@ -317,6 +349,7 @@ def _serialize_signal(row: SignalLog) -> dict[str, Any]:
         "manual_submit_called": False if simulated else None,
         "risk_flags": _parse_json_array(row.risk_flags),
         "gating_notes": _parse_json_array(row.gating_notes),
+        "gpt_context": gpt_context,
     }
 
 
@@ -362,7 +395,7 @@ def get_recent_signals(
         query = query.filter(SignalLog.symbol == symbol.upper())
 
     rows = query.order_by(SignalLog.created_at.desc()).limit(limit).all()
-    return {"items": [_serialize_signal(row) for row in rows]}
+    return {"items": [_serialize_signal(row, db) for row in rows]}
 
 
 @router.get("/logs/summary")
@@ -374,7 +407,7 @@ def get_logs_summary(db: Session = Depends(get_db)):
     return {
         "latest_run": _serialize_run(latest_run) if latest_run else None,
         "latest_order": _serialize_order(latest_order) if latest_order else None,
-        "latest_signal": _serialize_signal(latest_signal) if latest_signal else None,
+        "latest_signal": _serialize_signal(latest_signal, db) if latest_signal else None,
         "counts": {
             "runs": db.query(TradeRunLog).count(),
             "orders": db.query(OrderLog).count(),

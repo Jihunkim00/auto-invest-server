@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
+import '../../../models/candidate.dart';
 import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
@@ -94,6 +95,16 @@ class WatchlistSection extends StatelessWidget {
                   : 'Running Alpaca watchlist...')
               : (isKr ? 'Run KIS Preview' : 'Run Alpaca Watchlist')),
         ),
+        if (isKr &&
+            controller.hasLatestRunResult &&
+            controller.runResult.finalRankedCandidates.isNotEmpty &&
+            _isKisPreviewCandidate(
+                controller.runResult.finalRankedCandidates.first)) ...[
+          const SizedBox(height: 12),
+          _KisPreviewAdvisoryPanel(
+            candidate: controller.runResult.finalRankedCandidates.first,
+          ),
+        ],
         if (isKr) ...[
           const SizedBox(height: 12),
           _KisAutoSimulatorPanel(controller: controller),
@@ -477,7 +488,109 @@ class _KisSchedulerResultPanel extends StatelessWidget {
           value: _boolText(result.schedulerAllowRealOrders),
         ),
       ]),
+      if (result.aiBuyScore != null ||
+          result.aiSellScore != null ||
+          result.confidence != null ||
+          result.riskFlags.isNotEmpty ||
+          result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        const _StateLine(
+            text: 'GPT Advisory Context - Preview Only - No Broker Submit'),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'ai_buy_score', value: _score(result.aiBuyScore)),
+          _ResultPair(
+              label: 'ai_sell_score', value: _score(result.aiSellScore)),
+          _ResultPair(label: 'confidence', value: _score(result.confidence)),
+          _ResultPair(
+              label: 'final_entry_score',
+              value: _score(result.finalEntryScore)),
+          _ResultPair(
+              label: 'event_risk', value: _eventRiskLabel(result.eventRisk)),
+          _ResultPair(
+              label: 'indicator_status',
+              value: result.indicatorStatus ?? 'n/a'),
+        ]),
+        if (result.gptReason?.isNotEmpty == true) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gpt_reason: ${result.gptReason!}'),
+        ],
+        const SizedBox(height: 8),
+        if (result.riskFlags.isNotEmpty)
+          _StateLine(text: 'risk_flags: ${_joinList(result.riskFlags)}'),
+        if (result.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gating_notes: ${_joinList(result.gatingNotes)}'),
+        ],
+      ],
     ]);
+  }
+}
+
+class _KisPreviewAdvisoryPanel extends StatelessWidget {
+  const _KisPreviewAdvisoryPanel({required this.candidate});
+
+  final Candidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.psychology_alt_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS GPT Advisory Context',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'PREVIEW ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'symbol', value: candidate.symbol),
+          _ResultPair(
+              label: 'ai_buy_score', value: _score(candidate.aiBuyScore)),
+          _ResultPair(
+              label: 'ai_sell_score', value: _score(candidate.aiSellScore)),
+          _ResultPair(label: 'confidence', value: _score(candidate.confidence)),
+          _ResultPair(
+              label: 'event_risk', value: candidate.eventRiskLevel ?? 'n/a'),
+          _ResultPair(
+              label: 'indicator_status',
+              value: candidate.indicatorStatus.isEmpty
+                  ? 'n/a'
+                  : candidate.indicatorStatus),
+          _ResultPair(
+              label: 'final_buy_score', value: _score(candidate.finalBuyScore)),
+          _ResultPair(
+              label: 'final_sell_score',
+              value: _score(candidate.finalSellScore)),
+        ]),
+        if (candidate.gptReason.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gpt_reason: ${candidate.gptReason}'),
+        ],
+        if (candidate.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'risk_flags: ${_joinList(candidate.riskFlags)}'),
+        ],
+        if (candidate.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gating_notes: ${_joinList(candidate.gatingNotes)}'),
+        ],
+      ]),
+    );
   }
 }
 
@@ -802,6 +915,27 @@ String _formatPercentValue(double? value, {bool signed = false}) {
 String _joinList(List<String> values) {
   final items = values.where((item) => item.trim().isNotEmpty).toList();
   return items.isEmpty ? 'n/a' : items.join(', ');
+}
+
+bool _isKisPreviewCandidate(Candidate candidate) {
+  final market = candidate.market.trim().toUpperCase();
+  return candidate.currency.trim().toUpperCase() == 'KRW' ||
+      market == 'KR' ||
+      market == 'KOSPI' ||
+      market == 'KOSDAQ' ||
+      candidate.riskFlags.contains('kr_trading_disabled') ||
+      candidate.riskFlags.contains('preview_only');
+}
+
+String _eventRiskLabel(Map<String, dynamic>? value) {
+  if (value == null || value.isEmpty) return 'n/a';
+  final riskLevel = value['risk_level']?.toString();
+  final eventType = value['event_type']?.toString();
+  if (riskLevel == null || riskLevel.isEmpty) return 'n/a';
+  if (eventType == null || eventType.isEmpty || eventType == 'null') {
+    return riskLevel;
+  }
+  return '$riskLevel / $eventType';
 }
 
 String _gptScore(KisAutoSimulatorResult result) {

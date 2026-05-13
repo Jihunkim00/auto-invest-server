@@ -1,4 +1,5 @@
 from app.config import get_settings
+from app.services.watchlist_research_service import WatchlistResearchService
 from app.services.watchlist_run_service import WatchlistRunService
 
 
@@ -265,3 +266,51 @@ def test_watchlist_no_event_keeps_existing_trade_selection(
     assert "event_risk_position_size_reduced" not in candidate["gating_notes"]
     assert payload["event_risk"]["has_near_event"] is False
     assert child_calls[0]["request_payload"]["event_risk"]["has_near_event"] is False
+
+
+def test_watchlist_research_passes_through_gpt_context(monkeypatch, db_session):
+    def fake_analyze(self, db, symbol, indicators, gate_level):
+        return {
+            "market_regime": "trend",
+            "entry_bias": "long",
+            "entry_allowed": True,
+            "market_confidence": 0.64,
+            "reason": "External risk is elevated; new buy entries should be cautious.",
+            "market_risk_regime": "risk_off",
+            "technical_market_regime": "trend",
+            "event_risk_level": "high",
+            "fx_risk_level": "medium",
+            "entry_penalty": 6,
+            "hard_block_new_buy": False,
+            "allow_sell_or_exit": True,
+            "gpt_buy_score": 58,
+            "gpt_sell_score": 54,
+            "affected_sectors": ["semiconductor"],
+            "risk_flags": ["fx_pressure", "foreign_outflow"],
+            "gating_notes": ["GPT applied entry penalty due to FX pressure."],
+            "hard_blocked": False,
+            "audit": {"fallback_used": False},
+        }
+
+    monkeypatch.setattr(
+        "app.services.gpt_market_service.GPTMarketService.analyze",
+        fake_analyze,
+    )
+
+    result = WatchlistResearchService().analyze_candidate(
+        db_session,
+        symbol="AAPL",
+        indicators={"price": 100, "ema20": 101, "ema50": 99},
+        gate_level=2,
+    )
+
+    assert result["market_research_score"] == 64
+    assert result["event_risk_level"] == "high"
+    assert result["entry_penalty"] == 6
+    assert result["entry_penalty_observed"] == 6
+    assert result["hard_block_new_buy"] is False
+    assert result["allow_sell_or_exit"] is True
+    assert result["risk_flags"] == ["fx_pressure", "foreign_outflow"]
+    assert result["gating_notes"] == ["GPT applied entry penalty due to FX pressure."]
+    assert result["gpt_context"]["market_risk_regime"] == "risk_off"
+    assert result["gpt_context"]["gpt_buy_score"] == 58.0

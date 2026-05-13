@@ -66,6 +66,49 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Logs screen displays GPT context when present', (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 1,
+            'run_key': 'manual_1',
+            'symbol': 'AAPL',
+            'trigger_source': 'manual',
+            'mode': 'entry_scan',
+            'action': 'hold',
+            'result': 'skipped',
+            'reason': 'signal action is HOLD; execution skipped',
+            'created_at': '2026-05-08T00:00:00Z',
+            'gate_level': 2,
+            'gpt_context': {
+              'market_risk_regime': 'risk_off',
+              'event_risk_level': 'high',
+              'entry_penalty': 6,
+              'hard_block_new_buy': true,
+              'risk_flags': ['fx_pressure'],
+              'gating_notes': ['entry penalty observed'],
+              'reason': 'External risk is elevated.',
+            },
+          }),
+        ],
+        orders: const [],
+        signals: const [],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('Event Risk high'), findsOneWidget);
+    expect(find.text('Entry penalty'), findsOneWidget);
+    expect(find.text('6'), findsWidgets);
+    expect(find.text('New Buy Blocked'), findsOneWidget);
+    expect(find.text('External risk is elevated.'), findsOneWidget);
+
+    controller.dispose();
+  });
+
   testWidgets('KIS simulation summary displays latest scheduler dry-run result',
       (tester) async {
     final createdAt = _todayUtcTimestamp(kstHour: 14, minute: 35);

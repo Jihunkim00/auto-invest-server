@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/utils/timestamp_formatter.dart';
+import '../../core/widgets/gpt_risk_context_view.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/gpt_risk_context.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/log_items.dart';
@@ -1044,6 +1046,8 @@ class _RunHistoryCard extends StatelessWidget {
             _DetailRow(label: 'Action', value: _fallback(run.action, 'hold')),
             _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
             _DetailRow(label: 'Reason', value: _fallback(run.reason, 'none')),
+            if (run.gptContext.hasDetails)
+              _GptLogContextBlock(context: run.gptContext),
             _DetailRow(label: 'Order ID', value: run.orderLabel),
             if (run.signalId != null)
               _DetailRow(label: 'Signal ID', value: run.signalId!),
@@ -1109,6 +1113,8 @@ class _OrderHistoryCard extends StatelessWidget {
                 label: 'Result',
                 value: _fallback(order.result, order.internalStatus)),
             _DetailRow(label: 'Reason', value: _fallback(order.reason, 'none')),
+            if (order.gptContext.hasDetails)
+              _GptLogContextBlock(context: order.gptContext),
             _DetailRow(label: 'Qty', value: _numberLabel(order.qty)),
             _DetailRow(
               label: 'Notional',
@@ -1186,6 +1192,8 @@ class _SignalHistoryCard extends StatelessWidget {
                 value: _fallback(signal.result, signal.signalStatus)),
             _DetailRow(
                 label: 'Reason', value: _fallback(signal.reason, 'none')),
+            if (signal.gptContext.hasDetails)
+              _GptLogContextBlock(context: signal.gptContext),
             _DetailRow(
                 label: 'Buy score', value: _numberLabel(signal.buyScore)),
             _DetailRow(
@@ -1210,6 +1218,48 @@ class _SignalHistoryCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _GptLogContextBlock extends StatelessWidget {
+  const _GptLogContextBlock({required this.context});
+
+  final GptRiskContext context;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        GptRiskContextSummaryBadges(context: this.context, compact: true),
+        _DetailRow(
+          label: 'GPT Risk',
+          value: this.context.marketRiskRegime ??
+              this.context.eventRiskLevel ??
+              'n/a',
+        ),
+        _DetailRow(
+          label: 'Entry penalty',
+          value: this.context.entryPenalty?.toString() ?? 'n/a',
+        ),
+        _DetailRow(
+          label: 'New Buy Blocked',
+          value: this.context.hardBlockNewBuy ? 'true' : 'false',
+        ),
+        if (this.context.reason?.isNotEmpty == true)
+          _DetailRow(label: 'GPT reason', value: this.context.reason!),
+        if (this.context.riskFlags.isNotEmpty)
+          _DetailRow(
+            label: 'GPT flags',
+            value: this.context.riskFlags.join(', '),
+          ),
+        if (this.context.gatingNotes.isNotEmpty)
+          _DetailRow(
+            label: 'GPT gates',
+            value: _compactText(this.context.gatingNotes),
+          ),
+      ]),
     );
   }
 }

@@ -82,6 +82,66 @@ def test_market_analysis_run_returns_single_symbol_analysis(monkeypatch):
     assert "price" in payload["indicators"]
 
 
+def test_market_analysis_run_returns_gpt_context(monkeypatch):
+    monkeypatch.setattr(
+        MarketDataService,
+        "get_recent_bars",
+        lambda self, symbol, limit=120, timeframe="1Min": make_dummy_bars(),
+    )
+
+    def fake_gpt_analyze(self, db, symbol, indicators, gate_level=None, **kwargs):
+        return {
+            "market_regime": "trend",
+            "entry_bias": "long",
+            "entry_allowed": True,
+            "regime_confidence": 0.72,
+            "market_confidence": 0.72,
+            "risk_note": "External risk is elevated.",
+            "reason": "External risk is elevated.",
+            "macro_summary": "test macro",
+            "market_risk_regime": "risk_off",
+            "technical_market_regime": "trend",
+            "event_risk_level": "high",
+            "fx_risk_level": "medium",
+            "macro_risk_level": "medium",
+            "entry_penalty": 6,
+            "hard_block_new_buy": False,
+            "allow_sell_or_exit": True,
+            "gpt_buy_score": 58,
+            "gpt_sell_score": 54,
+            "affected_sectors": ["semiconductor"],
+            "risk_flags": ["fx_pressure"],
+            "gating_notes": ["GPT applied entry penalty due to FX pressure."],
+            "gate_level": gate_level,
+            "gate_profile_name": "loose_test_mode",
+            "hard_block_reason": None,
+            "hard_blocked": False,
+        }
+
+    monkeypatch.setattr(
+        "app.services.gpt_market_service.GPTMarketService.analyze",
+        fake_gpt_analyze,
+    )
+
+    client = TestClient(app)
+    response = client.post("/market-analysis/run?symbol=aapl&gate_level=4")
+    assert response.status_code == 200
+
+    context = response.json()["gpt_context"]
+    assert context["market_risk_regime"] == "risk_off"
+    assert context["technical_market_regime"] == "trend"
+    assert context["event_risk_level"] == "high"
+    assert context["fx_risk_level"] == "medium"
+    assert context["macro_risk_level"] == "medium"
+    assert context["entry_penalty"] == 6
+    assert context["hard_block_new_buy"] is False
+    assert context["allow_sell_or_exit"] is True
+    assert context["gpt_buy_score"] == 58.0
+    assert context["gpt_sell_score"] == 54.0
+    assert context["affected_sectors"] == ["semiconductor"]
+    assert context["risk_flags"] == ["fx_pressure"]
+    assert context["gating_notes"] == ["GPT applied entry penalty due to FX pressure."]
+
 
 
 def test_market_analysis_run_passes_explicit_and_default_market_to_gpt(monkeypatch):

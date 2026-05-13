@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import OrderLog, SignalLog
+from app.db.models import MarketAnalysis, OrderLog, SignalLog
+from app.services.gpt_risk_context import gpt_context_from_market_analysis
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -19,6 +20,15 @@ def _parse_json_array(raw_value: str | None) -> list:
     except Exception:
         return []
     return []
+
+
+def _signal_gpt_context(db: Session, row: SignalLog) -> dict | None:
+    if row.market_analysis_id is None:
+        return None
+    analysis = db.get(MarketAnalysis, row.market_analysis_id)
+    if analysis is None:
+        return None
+    return gpt_context_from_market_analysis(analysis)
 
 
 @router.get("/orders")
@@ -87,6 +97,7 @@ def get_signal_logs(
             "ai_reason": row.ai_reason,
             "indicator_payload": row.indicator_payload,
             "risk_flags": _parse_json_array(row.risk_flags),
+            "gpt_context": _signal_gpt_context(db, row),
             "approved_by_risk": row.approved_by_risk,
             "signal_status": row.signal_status,
             "gate_level": row.gate_level,

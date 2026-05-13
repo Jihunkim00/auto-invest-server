@@ -335,6 +335,12 @@ void main() {
     expect(candidate.aiBuyScore, 70);
     expect(candidate.finalBuyScore, 64);
     expect(candidate.confidence, 0.72);
+    expect(find.text('KIS GPT Advisory Context'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('AI_BUY_SCORE'), findsOneWidget);
+    expect(find.text('70'), findsWidgets);
+    expect(find.text('gpt_reason: KR 정량 참고용'), findsOneWidget);
+    expect(find.textContaining('GPT approved'), findsNothing);
     expect(
         candidate.indicatorPayload.keys,
         containsAll(<String>[
@@ -1081,6 +1087,7 @@ class _FakeApiClient extends ApiClient {
           reason:
               'Only current price is available; technical indicator score was not calculated.',
           gptReason: 'KR preview \uCC38\uACE0\uC6A9',
+          eventRiskLevel: 'low',
           riskFlags: ['kr_trading_disabled', 'preview_only'],
           gatingNotes: [
             'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
@@ -1157,8 +1164,10 @@ class _FakeApiClient extends ApiClient {
           blockReason: 'kr_trading_disabled',
           reason: 'KIS OHLCV quant indicators calculated for preview.',
           gptReason: 'KR \uC815\uB7C9 \uCC38\uACE0\uC6A9',
-          riskFlags: ['kr_trading_disabled', 'preview_only'],
+          eventRiskLevel: 'low',
+          riskFlags: ['kr_trading_disabled', 'preview_only', 'fx_pressure'],
           gatingNotes: [
+            'gpt_advisory_context_visible',
             'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
           ],
           blockReasons: ['preview_only', 'kr_trading_disabled'],

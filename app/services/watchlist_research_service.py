@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.services.entry_readiness_service import market_research_blocks_entry
 from app.services.gpt_market_service import GPTMarketService
+from app.services.gpt_risk_context import build_gpt_context
 
 
 @dataclass
@@ -46,6 +47,7 @@ class WatchlistResearchService:
         hard_blocked = bool(analysis.get("hard_blocked"))
         entry_allowed = bool(analysis.get("entry_allowed"))
         reason = str(analysis.get("reason", "") or "").strip()
+        gpt_context = build_gpt_context(analysis, reason=reason)
 
         research_blocks_entry = market_research_blocks_entry(
             entry_allowed=entry_allowed,
@@ -75,11 +77,20 @@ class WatchlistResearchService:
             "market_research_score": research_score,
             "market_confidence": market_confidence,
             "event_risk": event_risk,
+            "event_risk_level": gpt_context.get("event_risk_level"),
             "sector_context": sector_context,
             "news_risk": news_risk,
             "macro_risk": macro_risk,
             "gpt_action_hint": gpt_action_hint,
             "market_research_reason": reason or "No research reason provided.",
+            "gpt_context": gpt_context,
+            "entry_penalty": gpt_context.get("entry_penalty"),
+            # Surface the GPT penalty for UI/audit without changing existing watchlist score math.
+            "entry_penalty_observed": gpt_context.get("entry_penalty"),
+            "hard_block_new_buy": bool(gpt_context.get("hard_block_new_buy", False)),
+            "allow_sell_or_exit": bool(gpt_context.get("allow_sell_or_exit", True)),
+            "risk_flags": list(gpt_context.get("risk_flags") or []),
+            "gating_notes": list(gpt_context.get("gating_notes") or []),
             "hard_blocked": hard_blocked,
             "soft_entry_allowed": bool(entry_allowed and not hard_blocked),
             "entry_allowed": entry_allowed,

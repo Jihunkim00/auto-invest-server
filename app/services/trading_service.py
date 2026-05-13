@@ -105,6 +105,7 @@ class TradingService:
             "hard_blocked": bool(signal.hard_blocked),
             "gating_notes": _parse_json_array(signal.gating_notes),
             "risk_flags": _parse_json_array(signal.risk_flags),
+            "gpt_context": getattr(signal, "gpt_context", None),
         }
 
     def run_once(

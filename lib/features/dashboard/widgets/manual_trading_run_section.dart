@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/gpt_risk_context_view.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/manual_trading_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
@@ -110,9 +111,8 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
           onPressed: controller.manualRunLoading || symbol.isEmpty
               ? null
               : () async {
-                  final confirmed =
-                      await _showConfirmDialog(
-                          context, symbol, controller.selectedGateLevel);
+                  final confirmed = await _showConfirmDialog(
+                      context, symbol, controller.selectedGateLevel);
                   if (!confirmed || !context.mounted) return;
 
                   final result = await controller.runTradingOnce(
@@ -289,6 +289,14 @@ class _ManualRunResultPanel extends StatelessWidget {
           title: 'Quant / AI Reason',
           child: _ReasonDetails(result: result),
         ),
+        if (result.gptContext.hasDetails)
+          _ResultExpansion(
+            title: 'GPT Risk Context',
+            child: GptRiskContextDetails(
+              context: result.gptContext,
+              title: 'GPT Risk Filter',
+            ),
+          ),
         if (result.indicatorPayload.isNotEmpty ||
             result.rawIndicatorPayload != null)
           _ResultExpansion(

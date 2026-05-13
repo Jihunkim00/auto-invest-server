@@ -124,6 +124,9 @@ class KisSchedulerRunResult {
     this.confidence,
     this.finalEntryScore,
     this.finalScoreGap,
+    this.gptReason,
+    this.eventRisk,
+    this.indicatorStatus,
     this.riskFlags = const [],
     this.gatingNotes = const [],
     this.triggerSources = const [],
@@ -131,6 +134,7 @@ class KisSchedulerRunResult {
 
   factory KisSchedulerRunResult.fromJson(Map<String, dynamic> json) {
     final run = _optionalMap(json['run']);
+    final finalBestCandidate = _optionalMap(json['final_best_candidate']);
     return KisSchedulerRunResult(
       provider: _stringValue(json['provider'], fallback: 'kis'),
       market: _stringValue(json['market'], fallback: 'KR'),
@@ -166,6 +170,14 @@ class KisSchedulerRunResult {
       confidence: _nullableDouble(json['confidence']),
       finalEntryScore: _nullableDouble(json['final_entry_score']),
       finalScoreGap: _nullableDouble(json['final_score_gap']),
+      gptReason: _nullableString(
+        json['gpt_reason'] ?? finalBestCandidate?['gpt_reason'],
+      ),
+      eventRisk:
+          _optionalMap(json['event_risk'] ?? finalBestCandidate?['event_risk']),
+      indicatorStatus: _nullableString(
+        json['indicator_status'] ?? finalBestCandidate?['indicator_status'],
+      ),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
       triggerSources: _stringList(json['trigger_sources']),
@@ -201,6 +213,9 @@ class KisSchedulerRunResult {
   final double? confidence;
   final double? finalEntryScore;
   final double? finalScoreGap;
+  final String? gptReason;
+  final Map<String, dynamic>? eventRisk;
+  final String? indicatorStatus;
   final List<String> riskFlags;
   final List<String> gatingNotes;
   final List<String> triggerSources;

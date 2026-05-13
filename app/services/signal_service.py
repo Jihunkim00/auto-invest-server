@@ -16,6 +16,7 @@ from app.db.models import SignalLog
 from app.services.ai_signal_service import AISignalService
 from app.services.event_risk_service import EventRiskService
 from app.services.gpt_market_service import GPTMarketService
+from app.services.gpt_risk_context import gpt_context_from_market_analysis
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
 from app.services.quant_signal_service import QuantSignalService
@@ -192,4 +193,5 @@ class SignalService:
         db.add(signal)
         db.commit()
         db.refresh(signal)
+        signal.gpt_context = gpt_context_from_market_analysis(market_analysis)
         return signal

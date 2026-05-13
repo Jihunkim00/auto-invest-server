@@ -119,7 +119,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Run Exit Preflight displays sell candidate without submit button',
+  testWidgets(
+      'Run Exit Preflight displays sell candidate without submit button',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -253,6 +254,13 @@ void main() {
     expect(find.text('simulated_order_created'), findsWidgets);
     expect(find.text('buy'), findsWidgets);
     expect(find.text('dry_run_risk_approved'), findsWidgets);
+    expect(find.text('GPT Advisory Context - Preview Only - No Broker Submit'),
+        findsOneWidget);
+    expect(find.text('AI_BUY_SCORE'), findsOneWidget);
+    expect(find.text('AI_SELL_SCORE'), findsOneWidget);
+    expect(
+        find.text('gpt_reason: KR scheduler advisory context'), findsOneWidget);
+    expect(find.textContaining('GPT approved'), findsNothing);
     expect(find.text('123'), findsOneWidget);
     expect(find.text('456'), findsOneWidget);
     expect(find.text('05-08 00:00 (KST 09:00)'), findsOneWidget);
@@ -496,7 +504,19 @@ Map<String, dynamic> _runJson() {
     'reason': 'dry_run_risk_approved',
     'quant_buy_score': 74,
     'ai_buy_score': 82,
+    'ai_sell_score': 21,
+    'confidence': 0.71,
     'final_entry_score': 76,
+    'risk_flags': ['dry_run_only', 'fx_pressure'],
+    'gating_notes': ['No real KIS order submitted.'],
+    'final_best_candidate': {
+      'gpt_reason': 'KR scheduler advisory context',
+      'indicator_status': 'ok',
+      'event_risk': {
+        'risk_level': 'medium',
+        'event_type': 'earnings',
+      },
+    },
   };
 }
 
@@ -591,7 +611,8 @@ Map<String, dynamic> _smallProfitHoldExitPreflightJson() {
     'stop_loss_threshold_pct': 2.0,
     'exit_trigger_source': 'cost_basis',
     'reason': 'manual_review_required',
-    'message': 'No held KIS position currently qualifies for live exit automation.',
+    'message':
+        'No held KIS position currently qualifies for live exit automation.',
     'would_submit_if_enabled': false,
     'blocked_by': ['no_exit_condition'],
     'risk_flags': [

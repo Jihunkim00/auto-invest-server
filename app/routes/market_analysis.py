@@ -10,6 +10,7 @@ from app.db.models import MarketAnalysis
 from app.services.ai_signal_service import AISignalService
 from app.services.entry_readiness_service import evaluate_entry_readiness, market_research_blocks_entry
 from app.services.gpt_market_service import GPTMarketService
+from app.services.gpt_risk_context import gpt_context_from_market_analysis
 from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
@@ -32,6 +33,29 @@ def _parse_json_array(raw_value: str | None) -> list:
     except Exception:
         return []
     return []
+
+
+def _serialize_market_analysis_row(row: MarketAnalysis) -> dict:
+    gpt_context = gpt_context_from_market_analysis(row)
+    return {
+        "id": row.id,
+        "symbol": row.symbol,
+        "market_regime": row.market_regime,
+        "entry_bias": row.entry_bias,
+        "entry_allowed": row.entry_allowed,
+        "regime_confidence": row.market_confidence,
+        "market_confidence": row.market_confidence,
+        "gate_level": row.gate_level,
+        "gate_profile_name": row.gate_profile_name,
+        "hard_block_reason": row.hard_block_reason,
+        "hard_blocked": bool(row.hard_blocked),
+        "gating_notes": _parse_json_array(row.gating_notes),
+        "reason": row.risk_note,
+        "risk_note": row.risk_note,
+        "macro_summary": row.macro_summary,
+        "gpt_context": gpt_context,
+        "created_at": row.created_at,
+    }
 
 
 @router.post("/run")
@@ -113,8 +137,7 @@ def run_market_analysis(
         ) from exc
 
     return {
-        "id": row.id,
-        "symbol": row.symbol,
+        **_serialize_market_analysis_row(row),
         "market": normalized_market,
         "entry_score": round(entry_score, 2),
         "quant_score": quant["quant_buy_score"],
@@ -136,20 +159,6 @@ def run_market_analysis(
         "market_research_blocked": market_research_blocked,
         "has_indicators": bool(indicators),
         "indicators": indicators,
-        "market_regime": row.market_regime,
-        "entry_bias": row.entry_bias,
-        "entry_allowed": row.entry_allowed,
-        "regime_confidence": row.market_confidence,
-        "market_confidence": row.market_confidence,
-        "gate_level": row.gate_level,
-        "gate_profile_name": row.gate_profile_name,
-        "hard_block_reason": row.hard_block_reason,
-        "hard_blocked": bool(row.hard_blocked),
-        "gating_notes": _parse_json_array(row.gating_notes),
-        "reason": row.risk_note,
-        "risk_note": row.risk_note,
-        "macro_summary": row.macro_summary,
-        "created_at": row.created_at,
     }
 
 
@@ -196,24 +205,4 @@ def list_market_analysis(
         query = query.filter(MarketAnalysis.symbol == symbol.upper())
 
     rows = query.order_by(MarketAnalysis.created_at.desc()).limit(limit).all()
-    return [
-        {
-            "id": row.id,
-            "symbol": row.symbol,
-            "market_regime": row.market_regime,
-            "entry_bias": row.entry_bias,
-            "entry_allowed": row.entry_allowed,
-            "regime_confidence": row.market_confidence,
-            "market_confidence": row.market_confidence,
-            "gate_level": row.gate_level,
-            "gate_profile_name": row.gate_profile_name,
-            "hard_block_reason": row.hard_block_reason,
-            "hard_blocked": bool(row.hard_blocked),
-            "gating_notes": _parse_json_array(row.gating_notes),
-            "reason": row.risk_note,
-            "risk_note": row.risk_note,
-            "macro_summary": row.macro_summary,
-            "created_at": row.created_at,
-        }
-        for row in rows
-    ]
+    return [_serialize_market_analysis_row(row) for row in rows]

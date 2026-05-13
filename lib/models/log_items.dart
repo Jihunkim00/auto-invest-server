@@ -1,3 +1,5 @@
+import 'gpt_risk_context.dart';
+
 class TradingLogItem {
   const TradingLogItem({
     required this.id,
@@ -25,6 +27,7 @@ class TradingLogItem {
     this.manualSubmitCalled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.gptContext = GptRiskContext.empty,
   });
 
   final int id;
@@ -52,6 +55,7 @@ class TradingLogItem {
   final bool? manualSubmitCalled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final GptRiskContext gptContext;
 
   bool get hasOrder => relatedOrderId != null;
   bool get isHold => action.toLowerCase() == 'hold';
@@ -129,6 +133,7 @@ class TradingLogItem {
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
+      gptContext: GptRiskContext.fromJson(json['gpt_context']),
     );
   }
 }
@@ -168,6 +173,7 @@ class OrderLogItem {
     this.manualSubmitCalled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.gptContext = GptRiskContext.empty,
   });
 
   final int id;
@@ -203,6 +209,7 @@ class OrderLogItem {
   final bool? manualSubmitCalled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final GptRiskContext gptContext;
 
   String get statusLabel => brokerOrderStatus ?? brokerStatus ?? internalStatus;
   String get orderLabel => kisOdno ?? brokerOrderId ?? 'No broker order';
@@ -293,6 +300,7 @@ class OrderLogItem {
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
+      gptContext: GptRiskContext.fromJson(json['gpt_context']),
     );
   }
 }
@@ -323,6 +331,7 @@ class SignalLogItem {
     this.manualSubmitCalled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.gptContext = GptRiskContext.empty,
   });
 
   final int id;
@@ -349,6 +358,7 @@ class SignalLogItem {
   final bool? manualSubmitCalled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final GptRiskContext gptContext;
 
   bool get hasOrder => relatedOrderId != null;
   String get orderLabel => hasOrder ? relatedOrderId! : 'No order';
@@ -422,6 +432,7 @@ class SignalLogItem {
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
+      gptContext: GptRiskContext.fromJson(json['gpt_context']),
     );
   }
 }

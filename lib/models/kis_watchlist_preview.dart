@@ -39,7 +39,8 @@ class KisWatchlistPreview {
       configuredSymbolCount: _readInt(json['configured_symbol_count'], 0),
       analyzedSymbolCount: _readInt(json['analyzed_symbol_count'], 0),
       quantCandidatesCount: _readInt(json['quant_candidates_count'], 0),
-      researchedCandidatesCount: _readInt(json['researched_candidates_count'], 0),
+      researchedCandidatesCount:
+          _readInt(json['researched_candidates_count'], 0),
       finalBestCandidate: _readNullableString(json['final_best_candidate']),
       bestScore: _readNullableDouble(json['best_score']),
       shouldTrade: json['should_trade'] == true,
@@ -124,6 +125,13 @@ class KisWatchlistPreviewItem {
     required this.blockReason,
     required this.reason,
     required this.gptReason,
+    required this.riskFlags,
+    required this.gatingNotes,
+    required this.eventRisk,
+    required this.dryRun,
+    required this.previewOnly,
+    required this.tradingEnabled,
+    required this.realOrderSubmitted,
     required this.blockReasons,
     required this.warnings,
     required this.error,
@@ -136,7 +144,8 @@ class KisWatchlistPreviewItem {
       market: _readString(json['market'], ''),
       currentPrice: _readNullableDouble(json['current_price']),
       currency: _readString(json['currency'], 'KRW'),
-      indicatorStatus: _readString(json['indicator_status'], 'insufficient_data'),
+      indicatorStatus:
+          _readString(json['indicator_status'], 'insufficient_data'),
       indicatorPayload:
           Map<String, dynamic>.from((json['indicator_payload'] as Map?) ?? {}),
       quantBuyScore: _readNullableDouble(json['quant_buy_score']),
@@ -152,6 +161,13 @@ class KisWatchlistPreviewItem {
       blockReason: _readString(json['block_reason'], ''),
       reason: _readString(json['reason'], ''),
       gptReason: _readString(json['gpt_reason'], ''),
+      riskFlags: _readStringList(json['risk_flags']),
+      gatingNotes: _readStringList(json['gating_notes']),
+      eventRisk: Map<String, dynamic>.from((json['event_risk'] as Map?) ?? {}),
+      dryRun: json['dry_run'] == true,
+      previewOnly: json['preview_only'] == true,
+      tradingEnabled: json['trading_enabled'] == true,
+      realOrderSubmitted: json['real_order_submitted'] == true,
       blockReasons: _readStringList(json['block_reasons']),
       warnings: _readStringList(json['warnings']),
       error: _readNullableString(json['error']),
@@ -178,6 +194,13 @@ class KisWatchlistPreviewItem {
   final String blockReason;
   final String reason;
   final String gptReason;
+  final List<String> riskFlags;
+  final List<String> gatingNotes;
+  final Map<String, dynamic> eventRisk;
+  final bool dryRun;
+  final bool previewOnly;
+  final bool tradingEnabled;
+  final bool realOrderSubmitted;
   final List<String> blockReasons;
   final List<String> warnings;
   final String? error;

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'gpt_risk_context.dart';
+
 class ManualTradingRunResult {
   const ManualTradingRunResult({
     required this.symbol,
@@ -37,6 +39,7 @@ class ManualTradingRunResult {
     required this.hardBlockReason,
     required this.hardBlocked,
     required this.createdAt,
+    this.gptContext = GptRiskContext.empty,
   });
 
   final String symbol;
@@ -74,6 +77,7 @@ class ManualTradingRunResult {
   final String? hardBlockReason;
   final bool hardBlocked;
   final String? createdAt;
+  final GptRiskContext gptContext;
 
   bool get isHold => action.toLowerCase() == 'hold';
   bool get noOrderCreated => orderId == null && relatedOrderId == null;
@@ -164,6 +168,9 @@ class ManualTradingRunResult {
       hardBlocked:
           _boolValue(json['hard_blocked'] ?? payload['hard_blocked']) ?? false,
       createdAt: _nullableString(json['created_at'] ?? payload['created_at']),
+      gptContext: GptRiskContext.fromJson(
+        json['gpt_context'] ?? payload['gpt_context'],
+      ),
     );
   }
 

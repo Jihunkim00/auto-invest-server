@@ -1,3 +1,5 @@
+import 'gpt_risk_context.dart';
+
 class Candidate {
   const Candidate({
     required this.symbol,
@@ -24,6 +26,11 @@ class Candidate {
     this.approvedByRisk,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.eventRiskLevel,
+    this.entryPenalty,
+    this.hardBlockNewBuy = false,
+    this.allowSellOrExit = true,
+    this.gptContext = GptRiskContext.empty,
     this.reason = '',
     this.gptReason = '',
     this.warnings = const [],
@@ -54,6 +61,11 @@ class Candidate {
   final bool? approvedByRisk;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final String? eventRiskLevel;
+  final int? entryPenalty;
+  final bool hardBlockNewBuy;
+  final bool allowSellOrExit;
+  final GptRiskContext gptContext;
   final String reason;
   final String gptReason;
   final List<String> warnings;
@@ -76,6 +88,11 @@ class Candidate {
       approvedByRisk != null ||
       riskFlags.isNotEmpty ||
       gatingNotes.isNotEmpty ||
+      eventRiskLevel != null ||
+      entryPenalty != null ||
+      hardBlockNewBuy ||
+      !allowSellOrExit ||
+      gptContext.hasDetails ||
       blockReasons.isNotEmpty;
 
   factory Candidate.fromJson(Map<String, dynamic> json,
@@ -84,6 +101,11 @@ class Candidate {
     final score = rawScore is num
         ? rawScore.round()
         : int.tryParse(rawScore?.toString() ?? '');
+    final gptContext = GptRiskContext.fromJson(json['gpt_context']);
+    final riskFlags = _dedupeStringList(
+        _readStringList(json['risk_flags']) + gptContext.riskFlags);
+    final gatingNotes = _dedupeStringList(
+        _readStringList(json['gating_notes']) + gptContext.gatingNotes);
     return Candidate(
       symbol: json['symbol']?.toString() ?? '',
       score: score,
@@ -108,14 +130,39 @@ class Candidate {
       action: json['action']?.toString() ?? 'hold',
       tradeAllowed: _readNullableBool(json['trade_allowed']),
       approvedByRisk: _readNullableBool(json['approved_by_risk']),
-      riskFlags: _readStringList(json['risk_flags']),
-      gatingNotes: _readStringList(json['gating_notes']),
+      riskFlags: riskFlags,
+      gatingNotes: gatingNotes,
+      eventRiskLevel: json['event_risk_level']?.toString() ??
+          _readMapString(json['event_risk'], 'risk_level') ??
+          gptContext.eventRiskLevel,
+      entryPenalty: _readNullableInt(json['entry_penalty']) ??
+          _readNullableInt(json['entry_penalty_observed']) ??
+          gptContext.entryPenalty,
+      hardBlockNewBuy: _readNullableBool(json['hard_block_new_buy']) ??
+          gptContext.hardBlockNewBuy,
+      allowSellOrExit: _readNullableBool(json['allow_sell_or_exit']) ??
+          gptContext.allowSellOrExit,
+      gptContext: gptContext,
       reason: json['reason']?.toString() ?? '',
       gptReason: json['gpt_reason']?.toString() ?? '',
       warnings: _readStringList(json['warnings']),
       blockReasons: _readStringList(json['block_reasons']),
     );
   }
+}
+
+String? _readMapString(Object? value, String key) {
+  if (value is Map<String, dynamic>) return value[key]?.toString();
+  if (value is Map) return value[key]?.toString();
+  return null;
+}
+
+int? _readNullableInt(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toInt();
+  final text = value.toString().trim().replaceAll(',', '');
+  if (text.isEmpty || text == 'null') return null;
+  return int.tryParse(text) ?? double.tryParse(text)?.toInt();
 }
 
 double? _readNullableDouble(Object? value) {
@@ -138,4 +185,15 @@ bool? _readNullableBool(Object? value) {
 List<String> _readStringList(Object? value) {
   if (value is! List) return const [];
   return value.map((item) => item.toString()).toList();
+}
+
+List<String> _dedupeStringList(List<String> values) {
+  final result = <String>[];
+  for (final value in values) {
+    final text = value.trim();
+    if (text.isNotEmpty && !result.contains(text)) {
+      result.add(text);
+    }
+  }
+  return result;
 }
