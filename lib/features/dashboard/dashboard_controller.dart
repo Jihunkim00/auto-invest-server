@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
@@ -116,6 +117,11 @@ class DashboardController extends ChangeNotifier {
   bool kisLiveExitPreflightLoading = false;
   KisLiveExitPreflightResult? kisLiveExitPreflightResult;
   String? kisLiveExitPreflightError;
+  bool kisAutoReadinessLoading = false;
+  bool kisAutoPreflightLoading = false;
+  bool kisAutoReadinessLoaded = false;
+  KisAutoReadiness? kisAutoReadinessResult;
+  String? kisAutoReadinessError;
   String orderTicketSymbol = '005930';
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
@@ -977,6 +983,68 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerRunLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisAutoReadiness({bool silent = false}) async {
+    if (kisAutoReadinessLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS auto readiness refresh already in progress.',
+      );
+    }
+
+    kisAutoReadinessLoading = true;
+    kisAutoReadinessError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchKisAutoReadiness();
+      kisAutoReadinessResult = result;
+      kisAutoReadinessLoaded = true;
+      return const ActionResult(
+        success: true,
+        message: 'KIS auto readiness refreshed.',
+      );
+    } catch (e) {
+      kisAutoReadinessError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisAutoReadinessError!),
+      );
+    } finally {
+      kisAutoReadinessLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisAutoPreflightOnce() async {
+    if (kisAutoPreflightLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS auto preflight already in progress.',
+      );
+    }
+
+    kisAutoPreflightLoading = true;
+    kisAutoReadinessError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisAutoPreflightOnce();
+      kisAutoReadinessResult = result;
+      kisAutoReadinessLoaded = true;
+      return ActionResult(
+        success: true,
+        message: 'KIS auto preflight completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisAutoReadinessError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisAutoReadinessError!),
+      );
+    } finally {
+      kisAutoPreflightLoading = false;
       notifyListeners();
     }
   }

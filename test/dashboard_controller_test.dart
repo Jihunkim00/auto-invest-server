@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
+import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -319,6 +320,36 @@ void main() {
 
     controller.dispose();
   });
+
+  test('KIS auto readiness refresh stores blocked result', () async {
+    final api = _FakeApiClient(autoReadiness: _autoReadiness());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshKisAutoReadiness();
+
+    expect(result.success, isTrue);
+    expect(api.fetchKisAutoReadinessCalls, 1);
+    expect(controller.kisAutoReadinessLoaded, isTrue);
+    expect(controller.kisAutoReadinessLoading, isFalse);
+    expect(controller.kisAutoReadinessResult?.autoOrderReady, isFalse);
+    expect(controller.kisAutoReadinessResult?.realOrderSubmitAllowed, isFalse);
+
+    controller.dispose();
+  });
+
+  test('KIS auto preflight stores error and clears loading', () async {
+    final api = _FakeApiClient(throwAutoPreflight: true);
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisAutoPreflightOnce();
+
+    expect(result.success, isFalse);
+    expect(api.runKisAutoPreflightCalls, 1);
+    expect(controller.kisAutoPreflightLoading, isFalse);
+    expect(controller.kisAutoReadinessError, contains('preflight failed'));
+
+    controller.dispose();
+  });
 }
 
 DashboardController _readyKisController({
@@ -357,6 +388,30 @@ KisManualOrderSafetyStatus _safetyStatus({
   );
 }
 
+KisAutoReadiness _autoReadiness({bool preflight = false}) {
+  return KisAutoReadiness.fromJson({
+    'auto_order_ready': false,
+    'future_auto_order_ready': false,
+    'live_auto_enabled': false,
+    'real_order_submit_allowed': false,
+    'reason': 'live_auto_disabled_by_default',
+    'preflight': preflight,
+    'checks': {
+      'dry_run': true,
+      'kill_switch': false,
+      'live_auto_buy_enabled': false,
+      'live_auto_sell_enabled': false,
+    },
+    'safety': {
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'requires_manual_confirm': true,
+    },
+  });
+}
+
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.latest,
@@ -371,6 +426,8 @@ class _FakeApiClient extends ApiClient {
     this.settingsDryRun = true,
     this.refreshedDryRun,
     this.throwUpdateOpsSettings = false,
+    this.autoReadiness,
+    this.throwAutoPreflight = false,
   });
 
   final WatchlistRunResult? latest;
@@ -385,9 +442,13 @@ class _FakeApiClient extends ApiClient {
   final bool settingsDryRun;
   final bool? refreshedDryRun;
   final bool throwUpdateOpsSettings;
+  final KisAutoReadiness? autoReadiness;
+  final bool throwAutoPreflight;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
+  int fetchKisAutoReadinessCalls = 0;
+  int runKisAutoPreflightCalls = 0;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
   String? lastProvider;
@@ -448,6 +509,23 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async =>
       KisSchedulerSimulationStatus.safeDefault();
+
+  @override
+  Future<KisAutoReadiness> fetchKisAutoReadiness() async {
+    fetchKisAutoReadinessCalls += 1;
+    return autoReadiness ?? _autoReadiness();
+  }
+
+  @override
+  Future<KisAutoReadiness> runKisAutoPreflightOnce() async {
+    runKisAutoPreflightCalls += 1;
+    if (throwAutoPreflight) {
+      throw const ApiRequestException(
+        'HTTP 503: {"message":"preflight failed"}',
+      );
+    }
+    return autoReadiness ?? _autoReadiness(preflight: true);
+  }
 
   @override
   Future<PortfolioSummary> fetchPortfolioSummary() async =>

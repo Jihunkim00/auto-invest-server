@@ -34,6 +34,7 @@ from app.services.kis_order_sync_service import (
     serialize_kis_order,
     summarize_kis_orders,
 )
+from app.services.kis_auto_readiness_service import KisAutoReadinessService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileError
 from app.services.market_session_service import MarketSessionError, MarketSessionService
@@ -336,6 +337,20 @@ def run_kis_auto_dry_run_once(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/auto/readiness")
+def get_kis_auto_readiness(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisAutoReadinessService(client)
+    return service.readiness(db)
+
+
+@router.post("/auto/preflight-once")
+def run_kis_auto_preflight_once(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisAutoReadinessService(client)
+    return service.preflight_once(db)
 
 
 @router.post("/scheduler/run-dry-run-once")

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
+import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_simulation.dart';
@@ -390,6 +391,16 @@ class ApiClient {
     return KisSchedulerRunResult.fromJson(payload);
   }
 
+  Future<KisAutoReadiness> fetchKisAutoReadiness() async {
+    final payload = await _getJsonNoCache('/kis/auto/readiness');
+    return KisAutoReadiness.fromJson(payload);
+  }
+
+  Future<KisAutoReadiness> runKisAutoPreflightOnce() async {
+    final payload = await _postJsonBody('/kis/auto/preflight-once', const {});
+    return KisAutoReadiness.fromJson(payload);
+  }
+
   static PositionSummary _normalizeKrPositionSummary(PositionSummary position) {
     final costBasis = position.costBasis > 0
         ? position.costBasis
@@ -457,6 +468,15 @@ class ApiClient {
             j['max_daily_entries'] ?? j['global_daily_entry_limit'], 2),
         minEntryScore: _readInt(j['min_entry_score'], 65),
         minScoreGap: _readInt(j['min_score_gap'], 3),
+        kisLiveAutoEnabled: j['kis_live_auto_enabled'] == true,
+        kisLiveAutoBuyEnabled: j['kis_live_auto_buy_enabled'] == true,
+        kisLiveAutoSellEnabled: j['kis_live_auto_sell_enabled'] == true,
+        kisLiveAutoRequiresManualConfirm:
+            j['kis_live_auto_requires_manual_confirm'] != false,
+        kisLiveAutoMaxOrdersPerDay:
+            _readInt(j['kis_live_auto_max_orders_per_day'], 1),
+        kisLiveAutoMaxNotionalPct:
+            _readNullableDouble(j['kis_live_auto_max_notional_pct']) ?? 0.03,
       );
     } catch (_) {
       return const OpsSettings(

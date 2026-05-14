@@ -28,6 +28,12 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     max_open_positions: int | None = Field(default=None, ge=1, le=100)
     near_close_block_minutes: int | None = Field(default=None, ge=0, le=120)
     same_direction_cooldown_minutes: int | None = Field(default=None, ge=0, le=1440)
+    kis_live_auto_enabled: bool | None = None
+    kis_live_auto_buy_enabled: bool | None = None
+    kis_live_auto_sell_enabled: bool | None = None
+    kis_live_auto_requires_manual_confirm: bool | None = None
+    kis_live_auto_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
+    kis_live_auto_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
 
 
 class RunNowRequest(BaseModel):

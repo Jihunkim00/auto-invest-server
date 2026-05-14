@@ -376,13 +376,14 @@ void main() {
     expect(find.text('Dry-run only'), findsOneWidget);
     expect(find.text('Run KIS Dry-Run Auto'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Run KIS Dry-Run Auto'));
     await tester.tap(find.text('Run KIS Dry-Run Auto'));
     await tester.pumpAndSettle();
 
     expect(api.dryRunAutoCalls, 1);
     expect(api.lastDryRunGateLevel, 2);
     expect(controller.kisAutoSimulatorResult?.realOrderSubmitted, isFalse);
-    expect(find.text('real_order_submitted=false'), findsOneWidget);
+    expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('simulated_order_created'), findsWidgets);
     expect(find.text('005930'), findsWidgets);
     expect(find.text('123'), findsOneWidget);

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/candidate.dart';
+import '../../../models/kis_auto_readiness.dart';
 import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
@@ -107,6 +108,8 @@ class WatchlistSection extends StatelessWidget {
         ],
         if (isKr) ...[
           const SizedBox(height: 12),
+          _KisLiveAutoReadinessCard(controller: controller),
+          const SizedBox(height: 12),
           _KisAutoSimulatorPanel(controller: controller),
           const SizedBox(height: 12),
           _KisSchedulerSimulationPanel(controller: controller),
@@ -115,6 +118,221 @@ class WatchlistSection extends StatelessWidget {
         ],
       ]),
     );
+  }
+}
+
+class _KisLiveAutoReadinessCard extends StatelessWidget {
+  const _KisLiveAutoReadinessCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result =
+        controller.kisAutoReadinessResult ?? KisAutoReadiness.safeDefault();
+    final liveAutoLabel =
+        result.liveAutoEnabled ? 'enabled flag / submit blocked' : 'disabled';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.security_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Live Auto Readiness',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          IconButton(
+            tooltip: 'Refresh KIS auto readiness',
+            onPressed: controller.kisAutoReadinessLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.refreshKisAutoReadiness();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisAutoReadinessLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'READINESS ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'LIVE AUTO DISABLED', color: Colors.amberAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'MANUAL CONFIRM REQUIRED', color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'auto_order_ready',
+              value: _boolText(result.autoOrderReady)),
+          _ResultPair(label: 'live auto order', value: liveAutoLabel),
+          _ResultPair(
+              label: 'real_order_submit_allowed',
+              value: _boolText(result.realOrderSubmitAllowed)),
+          _ResultPair(
+              label: 'future readiness',
+              value: _boolText(result.futureAutoOrderReady)),
+          _ResultPair(label: 'preflight', value: _boolText(result.preflight)),
+          _ResultPair(
+              label: 'reason',
+              value: result.reason.isEmpty ? 'n/a' : result.reason),
+        ]),
+        if (!controller.kisAutoReadinessLoaded &&
+            controller.kisAutoReadinessResult == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text: 'Readiness not loaded yet. Safe default: live auto blocked.',
+          ),
+        ],
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+            text: 'auto_order_ready=${_boolText(result.autoOrderReady)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'real_order_submit_allowed=${_boolText(result.realOrderSubmitAllowed)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                "real_order_submitted=${_boolText(result.safetyFlag('real_order_submitted'))}",
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                "broker_submit_called=${_boolText(result.safetyFlag('broker_submit_called'))}",
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                "manual_submit_called=${_boolText(result.safetyFlag('manual_submit_called'))}",
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                "scheduler_real_order_enabled=${_boolText(result.safetyFlag('scheduler_real_order_enabled'))}",
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                "requires_manual_confirm=${_boolText(result.safetyFlag('requires_manual_confirm'))}",
+            color: Colors.greenAccent,
+          ),
+        ]),
+        const SizedBox(height: 10),
+        _KisAutoReadinessChecks(result: result),
+        if (result.blockedBy.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'blocked_by: ${_joinList(result.blockedBy)}'),
+        ],
+        if (controller.kisAutoReadinessError != null) ...[
+          const SizedBox(height: 10),
+          _RetryLine(
+            text: _primaryLine(controller.kisAutoReadinessError!),
+            onRetry: controller.kisAutoReadinessLoading
+                ? null
+                : controller.refreshKisAutoReadiness,
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            onPressed: controller.kisAutoReadinessLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.refreshKisAutoReadiness();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: const Icon(Icons.refresh),
+            label: Text(controller.kisAutoReadinessLoading
+                ? 'Refreshing...'
+                : 'Refresh'),
+          ),
+          FilledButton.icon(
+            onPressed: controller.kisAutoPreflightLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.runKisAutoPreflightOnce();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisAutoPreflightLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.fact_check_outlined),
+            label: Text(controller.kisAutoPreflightLoading
+                ? 'Running preflight...'
+                : 'Run Preflight Once'),
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _KisAutoReadinessChecks extends StatelessWidget {
+  const _KisAutoReadinessChecks({required this.result});
+
+  final KisAutoReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    const keys = [
+      'dry_run',
+      'kill_switch',
+      'kis_enabled',
+      'kis_real_order_enabled',
+      'kis_scheduler_enabled',
+      'kis_scheduler_allow_real_orders',
+      'market_open',
+      'entry_allowed_now',
+      'daily_loss_ok',
+      'trade_limit_ok',
+      'gpt_context_available',
+      'risk_engine_ok',
+      'live_auto_buy_enabled',
+      'live_auto_sell_enabled',
+    ];
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      for (final key in keys)
+        _ResultPair(label: key, value: _boolText(result.check(key))),
+    ]);
   }
 }
 

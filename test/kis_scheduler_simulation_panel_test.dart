@@ -99,7 +99,7 @@ void main() {
     expect(find.text('KIS Live Exit Preflight'), findsOneWidget);
     expect(find.text('EXIT ONLY'), findsOneWidget);
     expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
-    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
     expect(find.text('Run Exit Preflight'), findsOneWidget);
     expect(find.text('DISABLED BY DEFAULT'), findsOneWidget);
@@ -107,13 +107,13 @@ void main() {
     expect(find.text('REAL ORDER SCHEDULER DISABLED'), findsOneWidget);
     expect(find.text('real_orders_allowed=false'), findsOneWidget);
     expect(find.text('ENABLED'), findsOneWidget);
-    expect(find.text('DRY_RUN'), findsOneWidget);
+    expect(find.text('DRY_RUN'), findsWidgets);
     expect(find.text('ALLOW_REAL_ORDERS'), findsOneWidget);
     expect(find.text('REAL_ORDERS_ALLOWED'), findsOneWidget);
     expect(find.text('REAL_ORDER_SCHEDULER_ENABLED'), findsOneWidget);
     expect(find.text('RUNTIME_SCHEDULER_ENABLED'), findsOneWidget);
     expect(find.text('RUNTIME_DRY_RUN'), findsOneWidget);
-    expect(find.text('KILL_SWITCH'), findsOneWidget);
+    expect(find.text('KILL_SWITCH'), findsWidgets);
     expect(find.text('Submit Live KIS Order'), findsNothing);
 
     controller.dispose();
@@ -157,9 +157,9 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('preflight_only'), findsWidgets);
-    expect(find.text('real_order_submitted=false'), findsOneWidget);
-    expect(find.text('broker_submit_called=false'), findsOneWidget);
-    expect(find.text('manual_submit_called=false'), findsOneWidget);
+    expect(find.text('real_order_submitted=false'), findsWidgets);
+    expect(find.text('broker_submit_called=false'), findsWidgets);
+    expect(find.text('manual_submit_called=false'), findsWidgets);
     expect(find.text('Submit Live KIS Order'), findsNothing);
 
     controller.dispose();
@@ -217,7 +217,7 @@ void main() {
     expect(find.textContaining('take_profit_triggered'), findsNothing);
     expect(find.text('EXIT ONLY'), findsOneWidget);
     expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
-    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
 
     controller.dispose();
@@ -247,9 +247,9 @@ void main() {
     expect(controller.kisSchedulerRunResult?.realOrderSubmitted, isFalse);
     expect(controller.kisSchedulerRunResult?.brokerSubmitCalled, isFalse);
     expect(controller.kisSchedulerRunResult?.manualSubmitCalled, isFalse);
-    expect(find.text('real_order_submitted=false'), findsOneWidget);
-    expect(find.text('broker_submit_called=false'), findsOneWidget);
-    expect(find.text('manual_submit_called=false'), findsOneWidget);
+    expect(find.text('real_order_submitted=false'), findsWidgets);
+    expect(find.text('broker_submit_called=false'), findsWidgets);
+    expect(find.text('manual_submit_called=false'), findsWidgets);
     expect(find.text('005930'), findsWidgets);
     expect(find.text('simulated_order_created'), findsWidgets);
     expect(find.text('buy'), findsWidgets);

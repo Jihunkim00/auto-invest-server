@@ -202,6 +202,12 @@ class RuntimeSetting(Base):
     max_open_positions = Column(Integer, nullable=False, default=3)
     near_close_block_minutes = Column(Integer, nullable=False, default=15)
     same_direction_cooldown_minutes = Column(Integer, nullable=False, default=120)
+    kis_live_auto_enabled = Column(Boolean, nullable=False, default=False)
+    kis_live_auto_buy_enabled = Column(Boolean, nullable=False, default=False)
+    kis_live_auto_sell_enabled = Column(Boolean, nullable=False, default=False)
+    kis_live_auto_requires_manual_confirm = Column(Boolean, nullable=False, default=True)
+    kis_live_auto_max_orders_per_day = Column(Integer, nullable=False, default=1)
+    kis_live_auto_max_notional_pct = Column(Float, nullable=False, default=0.03)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

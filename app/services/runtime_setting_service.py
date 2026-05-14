@@ -28,6 +28,12 @@ class RuntimeSettingService:
             "max_open_positions": 3,
             "near_close_block_minutes": NEAR_CLOSE_MINUTES,
             "same_direction_cooldown_minutes": 120,
+            "kis_live_auto_enabled": False,
+            "kis_live_auto_buy_enabled": False,
+            "kis_live_auto_sell_enabled": False,
+            "kis_live_auto_requires_manual_confirm": True,
+            "kis_live_auto_max_orders_per_day": 1,
+            "kis_live_auto_max_notional_pct": 0.03,
         }
 
     def get_or_create(self, db: Session) -> RuntimeSetting:
@@ -58,6 +64,18 @@ class RuntimeSettingService:
             "max_open_positions": int(row.max_open_positions),
             "near_close_block_minutes": int(row.near_close_block_minutes),
             "same_direction_cooldown_minutes": int(row.same_direction_cooldown_minutes),
+            "kis_live_auto_enabled": bool(row.kis_live_auto_enabled),
+            "kis_live_auto_buy_enabled": bool(row.kis_live_auto_buy_enabled),
+            "kis_live_auto_sell_enabled": bool(row.kis_live_auto_sell_enabled),
+            "kis_live_auto_requires_manual_confirm": bool(
+                row.kis_live_auto_requires_manual_confirm
+            ),
+            "kis_live_auto_max_orders_per_day": int(
+                row.kis_live_auto_max_orders_per_day
+            ),
+            "kis_live_auto_max_notional_pct": float(
+                row.kis_live_auto_max_notional_pct
+            ),
             "updated_at": row.updated_at,
         }
         settings["trade_limits"] = self._trade_limits(settings)
@@ -142,6 +160,12 @@ class RuntimeSettingService:
             "max_open_positions",
             "near_close_block_minutes",
             "same_direction_cooldown_minutes",
+            "kis_live_auto_enabled",
+            "kis_live_auto_buy_enabled",
+            "kis_live_auto_sell_enabled",
+            "kis_live_auto_requires_manual_confirm",
+            "kis_live_auto_max_orders_per_day",
+            "kis_live_auto_max_notional_pct",
         ):
             if key not in payload:
                 continue

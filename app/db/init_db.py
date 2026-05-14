@@ -143,6 +143,12 @@ def _create_runtime_settings_table_if_missing():
                     max_open_positions INTEGER NOT NULL DEFAULT 3,
                     near_close_block_minutes INTEGER NOT NULL DEFAULT 15,
                     same_direction_cooldown_minutes INTEGER NOT NULL DEFAULT 120,
+                    kis_live_auto_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_live_auto_buy_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_live_auto_sell_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_live_auto_requires_manual_confirm BOOLEAN NOT NULL DEFAULT 1,
+                    kis_live_auto_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    kis_live_auto_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -265,6 +271,12 @@ def init_db():
         "max_open_positions": "INTEGER DEFAULT 3",
         "near_close_block_minutes": "INTEGER DEFAULT 15",
         "same_direction_cooldown_minutes": "INTEGER DEFAULT 120",
+        "kis_live_auto_enabled": "BOOLEAN DEFAULT 0",
+        "kis_live_auto_buy_enabled": "BOOLEAN DEFAULT 0",
+        "kis_live_auto_sell_enabled": "BOOLEAN DEFAULT 0",
+        "kis_live_auto_requires_manual_confirm": "BOOLEAN DEFAULT 1",
+        "kis_live_auto_max_orders_per_day": "INTEGER DEFAULT 1",
+        "kis_live_auto_max_notional_pct": "FLOAT DEFAULT 0.03",
     }
 
     trade_run_log_columns = {
