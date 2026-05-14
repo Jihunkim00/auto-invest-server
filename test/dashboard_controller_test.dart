@@ -4,6 +4,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
+import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -316,6 +317,53 @@ void main() {
     expect(controller.orderTicketQty, 1);
     expect(controller.orderValidationResult, isNull);
     expect(controller.orderValidationError, isNull);
+    expect(api.validationCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('KIS exit candidate prepares manual sell ticket without validation', () {
+    final api = _FakeApiClient(validationResult: _validationResult());
+    final controller = DashboardController(api, autoload: false)
+      ..selectedOrderMarket = PortfolioMarket.us
+      ..orderTicketSymbol = 'AAPL'
+      ..orderTicketSide = 'buy'
+      ..orderTicketQty = 9
+      ..orderTicketQtyInput = '9'
+      ..kisLiveConfirmation = true
+      ..orderValidationResult = _validationResult()
+      ..orderValidationError = 'previous error'
+      ..kisManualOrderError = 'previous submit error';
+
+    final result = controller.prepareKisManualSellFromExitCandidate(
+      const KisLiveExitCandidate(
+        symbol: '005930',
+        side: 'sell',
+        suggestedQuantity: 2,
+        trigger: 'stop_loss',
+        triggerSource: 'cost_basis_pl_pct',
+        severity: 'review',
+        actionHint: 'manual_confirm_sell',
+        reason: 'Manual confirmation is required.',
+        submitReady: false,
+        manualConfirmRequired: true,
+        realOrderSubmitAllowed: false,
+        realOrderSubmitted: false,
+        brokerSubmitCalled: false,
+        manualSubmitCalled: false,
+      ),
+    );
+
+    expect(result.success, isTrue);
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'sell');
+    expect(controller.orderTicketQty, 2);
+    expect(controller.orderTicketQtyInput, '2');
+    expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.orderValidationError, isNull);
+    expect(controller.kisManualOrderError, isNull);
     expect(api.validationCalls, 0);
 
     controller.dispose();

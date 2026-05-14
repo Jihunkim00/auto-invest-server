@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -213,14 +214,53 @@ class KisLiveExitPreflightService:
             [
                 "KIS live exit preflight only; no broker submit was attempted.",
                 "KIS live scheduler order submission remains disabled.",
+                "Manual confirmation is required before any live sell order.",
             ]
             + candidate.gating_notes
         )
+        manual_candidates = _manual_exit_candidates(candidate)
+        safety = {
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
+            "scheduler_real_order_enabled": False,
+            "auto_buy_enabled": False,
+            "auto_sell_enabled": False,
+            "manual_confirm_required": True,
+            "requires_manual_confirm": True,
+        }
+        manual_order = {
+            "submit_endpoint": "/kis/orders/manual-submit",
+            "legacy_submit_endpoint": "/kis/orders/submit-manual",
+            "validate_endpoint": "/kis/orders/validate",
+            "requires_existing_manual_flow": True,
+            "confirm_live_required": True,
+            "real_order_submitted": False,
+        }
+        diagnostics = _preflight_diagnostics(
+            candidate,
+            positions=positions,
+            critical_blockers=critical_blockers,
+        )
+        checked_at = datetime.now(UTC).isoformat()
 
         payload = {
+            "status": "ok",
             "provider": PROVIDER,
             "market": MARKET,
             "mode": MODE,
+            "execution_mode": "manual_confirm_only",
+            "live_auto_enabled": False,
+            "auto_buy_enabled": False,
+            "auto_sell_enabled": False,
+            "real_order_submit_allowed": False,
+            "manual_confirm_required": True,
+            "candidate_count": len(manual_candidates),
+            "candidates": manual_candidates,
+            "checked_at": checked_at,
+            "safety": safety,
+            "manual_order": manual_order,
+            "diagnostics": diagnostics,
             "trigger_source": TRIGGER_SOURCE,
             "preflight": True,
             "simulated": False,
@@ -770,8 +810,121 @@ def _message_for_candidate(candidate: _ExitCandidate, held_position_exists: bool
     if not held_position_exists:
         return "No held KIS position to evaluate."
     if candidate.action == SELL:
-        return "Exit candidate found, but live automation is still disabled."
+        return (
+            "Exit candidate found. Manual confirmation is required before any "
+            "live sell order."
+        )
     return "No held KIS position currently qualifies for live exit automation."
+
+
+def _manual_exit_candidates(candidate: _ExitCandidate) -> list[dict[str, Any]]:
+    if candidate.action != SELL:
+        return []
+    return [_manual_exit_candidate(candidate)]
+
+
+def _manual_exit_candidate(candidate: _ExitCandidate) -> dict[str, Any]:
+    diagnostics = candidate.pl_diagnostics or {}
+    risk_flags = _dedupe(
+        candidate.risk_flags
+        + [
+            "manual_confirm_required",
+            "no_auto_submit",
+        ]
+    )
+    gating_notes = _dedupe(
+        candidate.gating_notes
+        + [
+            "manual_confirm_required",
+            "no_auto_submit",
+        ]
+    )
+    return {
+        "symbol": candidate.symbol,
+        "side": SELL,
+        "quantity_available": candidate.qty,
+        "suggested_quantity": candidate.qty,
+        "current_price": candidate.estimated_price,
+        "cost_basis": diagnostics.get("cost_basis"),
+        "current_value": diagnostics.get("current_value"),
+        "unrealized_pl": diagnostics.get("unrealized_pl"),
+        "unrealized_pl_pct": diagnostics.get("unrealized_pl_pct"),
+        "trigger": _manual_exit_trigger(candidate.reason),
+        "trigger_source": _manual_exit_trigger_source(candidate),
+        "severity": "review",
+        "action_hint": "manual_confirm_sell",
+        "reason": _manual_exit_reason(candidate.reason),
+        "risk_flags": risk_flags,
+        "gating_notes": gating_notes,
+        "submit_ready": False,
+        "manual_confirm_required": True,
+        "real_order_submit_allowed": False,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "estimated_notional": candidate.estimated_notional,
+        "diagnostics": diagnostics,
+    }
+
+
+def _manual_exit_trigger(reason: str) -> str:
+    if reason == "stop_loss_triggered":
+        return "stop_loss"
+    if reason == "take_profit_triggered":
+        return "take_profit"
+    return "manual_review"
+
+
+def _manual_exit_trigger_source(candidate: _ExitCandidate) -> str:
+    diagnostics = candidate.pl_diagnostics or {}
+    if (
+        candidate.reason in {"stop_loss_triggered", "take_profit_triggered"}
+        and diagnostics.get("exit_trigger_source") == "cost_basis"
+    ):
+        return "cost_basis_pl_pct"
+    return str(diagnostics.get("exit_trigger_source") or "manual_review")
+
+
+def _manual_exit_reason(reason: str) -> str:
+    if reason == "stop_loss_triggered":
+        return (
+            "Position reached stop-loss review threshold. Manual confirmation "
+            "is required before any live sell order."
+        )
+    if reason == "take_profit_triggered":
+        return (
+            "Position reached take-profit review threshold. Manual confirmation "
+            "is required before any live sell order."
+        )
+    if reason == "risk_exit":
+        return (
+            "Position matched a risk-exit review condition. Manual confirmation "
+            "is required before any live sell order."
+        )
+    return (
+        "Position requires manual review. Manual confirmation is required "
+        "before any live sell order."
+    )
+
+
+def _preflight_diagnostics(
+    candidate: _ExitCandidate,
+    *,
+    positions: list[dict[str, Any]],
+    critical_blockers: list[str],
+) -> dict[str, Any]:
+    diagnostics = candidate.pl_diagnostics or {}
+    return {
+        "candidate_selected": candidate.action == SELL,
+        "candidate_action": candidate.action,
+        "candidate_reason": candidate.reason,
+        "positions_evaluated": len(positions),
+        "pl_trigger_source": diagnostics.get("exit_trigger_source"),
+        "pl_input_warning": diagnostics.get("pl_input_warning"),
+        "critical_blockers": critical_blockers,
+        "cost_basis_required_for_stop_loss_take_profit": True,
+        "preflight_only_no_submit": True,
+    }
 
 
 def _supported_exit_reasons() -> set[str]:

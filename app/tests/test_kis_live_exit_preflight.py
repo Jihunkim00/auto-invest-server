@@ -206,6 +206,60 @@ def test_preflight_returns_sell_when_stop_loss_triggered(monkeypatch, client):
     assert "live_scheduler_orders_disabled" in body["blocked_by"]
 
 
+def test_preflight_response_is_manual_confirm_only_and_no_submit(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.list_positions",
+        lambda self: [
+            _position(
+                cost_basis=10000,
+                market_value=9800,
+                current_price=4900,
+                unrealized_pl=-200,
+                unrealized_plpc=-99,
+            )
+        ],
+    )
+
+    response = client.post("/kis/live-exit/preflight-once", json={})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["execution_mode"] == "manual_confirm_only"
+    assert body["manual_confirm_required"] is True
+    assert body["live_auto_enabled"] is False
+    assert body["auto_buy_enabled"] is False
+    assert body["auto_sell_enabled"] is False
+    assert body["real_order_submit_allowed"] is False
+    assert body["candidate_count"] == 1
+
+    candidate = body["candidates"][0]
+    assert candidate["symbol"] == "005930"
+    assert candidate["side"] == "sell"
+    assert candidate["trigger"] == "stop_loss"
+    assert candidate["trigger_source"] == "cost_basis_pl_pct"
+    assert candidate["action_hint"] == "manual_confirm_sell"
+    assert candidate["submit_ready"] is False
+    assert candidate["manual_confirm_required"] is True
+    assert candidate["real_order_submit_allowed"] is False
+    assert "manual_confirm_required" in candidate["gating_notes"]
+    assert "no_auto_submit" in candidate["gating_notes"]
+
+    safety = body["safety"]
+    assert safety["real_order_submitted"] is False
+    assert safety["broker_submit_called"] is False
+    assert safety["manual_submit_called"] is False
+    assert safety["scheduler_real_order_enabled"] is False
+    assert safety["auto_buy_enabled"] is False
+    assert safety["auto_sell_enabled"] is False
+    assert safety["manual_confirm_required"] is True
+
+    assert body["manual_order"]["submit_endpoint"] == "/kis/orders/manual-submit"
+    assert body["manual_order"]["confirm_live_required"] is True
+    assert body["manual_order"]["requires_existing_manual_flow"] is True
+    assert body["manual_order"]["real_order_submitted"] is False
+
+
 def test_preflight_returns_sell_when_take_profit_triggered(monkeypatch, client):
     monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.list_positions",
@@ -215,7 +269,7 @@ def test_preflight_returns_sell_when_take_profit_triggered(monkeypatch, client):
                 market_value=10200,
                 current_price=5100,
                 unrealized_pl=200,
-                unrealized_plpc=2,
+                unrealized_plpc=999,
             )
         ],
     )
@@ -229,6 +283,12 @@ def test_preflight_returns_sell_when_take_profit_triggered(monkeypatch, client):
     assert body["unrealized_pl_pct"] == pytest.approx(0.02)
     assert body["take_profit_threshold_pct"] == pytest.approx(2.0)
     assert body["would_submit_if_enabled"] is True
+    assert body["candidate_count"] == 1
+    candidate = body["candidates"][0]
+    assert candidate["trigger"] == "take_profit"
+    assert candidate["trigger_source"] == "cost_basis_pl_pct"
+    assert candidate["unrealized_pl_pct"] == pytest.approx(200 / 10000)
+    assert candidate["reason"].startswith("Position reached take-profit")
 
 
 def test_preflight_small_profit_amount_does_not_trigger_take_profit(
@@ -314,6 +374,9 @@ def test_preflight_missing_cost_basis_does_not_trigger_take_profit(
     assert body["exit_trigger_source"] == "current_value_fallback"
     assert "cost_basis_unavailable_current_value_fallback" in body["risk_flags"]
     assert "take_profit_triggered" not in body["risk_flags"]
+    assert body["candidate_count"] == 0
+    assert body["candidates"] == []
+    assert body["diagnostics"]["cost_basis_required_for_stop_loss_take_profit"] is True
 
 
 def test_exit_threshold_unit_normalization():

@@ -548,6 +548,35 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  ActionResult prepareKisManualSellFromExitCandidate(
+      KisLiveExitCandidate candidate) {
+    final symbol = candidate.symbol.trim();
+    final qty = candidate.suggestedQuantityInt;
+    if (symbol.isEmpty || qty == null) {
+      return const ActionResult(
+        success: false,
+        message: 'Exit candidate is missing a sell symbol or quantity.',
+      );
+    }
+
+    selectedOrderMarket = PortfolioMarket.kr;
+    orderTicketSymbol = symbol;
+    orderTicketSide = 'sell';
+    orderTicketQty = qty;
+    orderTicketQtyInput = qty.toString();
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    notifyListeners();
+    return const ActionResult(
+      success: true,
+      message:
+          'Manual sell ticket prepared. Validate and confirm before submit.',
+    );
+  }
+
   Future<void> loadMarketWatchlists() async {
     watchlistLoading = true;
     watchlistError = null;

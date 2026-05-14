@@ -357,17 +357,21 @@ class _KisLiveExitPreflightCard extends StatelessWidget {
           const Icon(Icons.logout_outlined, size: 18),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Live Exit Preflight',
+            child: Text('KIS Live Exit Manual Confirm',
                 style: Theme.of(context).textTheme.titleSmall),
           ),
         ]),
         const SizedBox(height: 8),
         const Wrap(spacing: 8, runSpacing: 8, children: [
-          _SoftBadge(text: 'EXIT ONLY', color: Colors.greenAccent),
-          _SoftBadge(text: 'PREFLIGHT ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(
+              text: 'EXIT PREFLIGHT ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'MANUAL CONFIRM SELL', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO AUTO SELL', color: Colors.amberAccent),
           _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
           _SoftBadge(
-              text: 'LIVE AUTO STILL DISABLED', color: Colors.amberAccent),
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+          _SoftBadge(
+              text: 'LIVE AUTO REMAINS DISABLED', color: Colors.amberAccent),
         ]),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -401,7 +405,10 @@ class _KisLiveExitPreflightCard extends StatelessWidget {
         ],
         if (result != null) ...[
           const SizedBox(height: 10),
-          _KisLiveExitPreflightResultPanel(result: result),
+          _KisLiveExitPreflightResultPanel(
+            result: result,
+            controller: controller,
+          ),
         ],
       ]),
     );
@@ -409,9 +416,13 @@ class _KisLiveExitPreflightCard extends StatelessWidget {
 }
 
 class _KisLiveExitPreflightResultPanel extends StatelessWidget {
-  const _KisLiveExitPreflightResultPanel({required this.result});
+  const _KisLiveExitPreflightResultPanel({
+    required this.result,
+    required this.controller,
+  });
 
   final KisLiveExitPreflightResult result;
+  final DashboardController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -421,9 +432,15 @@ class _KisLiveExitPreflightResultPanel extends StatelessWidget {
       if (noHeldPosition) ...[
         const _StateLine(text: 'No held KIS position to evaluate.'),
         const SizedBox(height: 10),
-      ] else if (result.isSellCandidate) ...[
+      ] else if (result.candidates.isNotEmpty) ...[
         const _StateLine(
-          text: 'Exit candidate found, but live automation is still disabled.',
+          text:
+              'Exit candidate found. Manual confirmation is required before any live sell order.',
+        ),
+        const SizedBox(height: 10),
+      ] else ...[
+        const _StateLine(
+          text: 'Hold / manual review only. No auto sell and no broker submit.',
         ),
         const SizedBox(height: 10),
       ],
@@ -440,9 +457,33 @@ class _KisLiveExitPreflightResultPanel extends StatelessWidget {
           text: 'manual_submit_called=${_boolText(result.manualSubmitCalled)}',
           color: Colors.lightBlueAccent,
         ),
+        _SoftBadge(
+          text:
+              'real_order_submit_allowed=${_boolText(result.realOrderSubmitAllowed)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              'manual_confirm_required=${_boolText(result.manualConfirmRequired)}',
+          color: Colors.greenAccent,
+        ),
+        _SoftBadge(
+          text: 'auto_sell_enabled=${_boolText(result.autoSellEnabled)}',
+          color: Colors.amberAccent,
+        ),
       ]),
       const SizedBox(height: 10),
       Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'status', value: result.status),
+        _ResultPair(label: 'mode', value: result.executionMode),
+        _ResultPair(
+          label: 'live_auto_enabled',
+          value: _boolText(result.liveAutoEnabled),
+        ),
+        _ResultPair(
+          label: 'candidate_count',
+          value: result.candidateCount.toString(),
+        ),
         _ResultPair(label: 'action', value: result.action),
         _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
         _ResultPair(label: 'qty', value: _qtyText(result.qty)),
@@ -491,11 +532,154 @@ class _KisLiveExitPreflightResultPanel extends StatelessWidget {
           value: _boolText(result.wouldSubmitIfEnabled),
         ),
       ]),
+      if (result.candidates.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        for (final candidate in result.candidates) ...[
+          _KisLiveExitCandidateCard(
+            candidate: candidate,
+            controller: controller,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ],
       const SizedBox(height: 10),
       _StateLine(text: 'blocked_by: ${_joinList(result.blockedBy)}'),
       const SizedBox(height: 8),
       _StateLine(text: 'risk_flags: ${_joinList(result.riskFlags)}'),
+      if (result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'gating_notes: ${_joinList(result.gatingNotes)}'),
+      ],
     ]);
+  }
+}
+
+class _KisLiveExitCandidateCard extends StatelessWidget {
+  const _KisLiveExitCandidateCard({
+    required this.candidate,
+    required this.controller,
+  });
+
+  final KisLiveExitCandidate candidate;
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.assignment_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(candidate.symbol,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(text: candidate.trigger, color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 10),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'PREPARE ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(
+              text: 'MANUAL CONFIRM REQUIRED', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO AUTO SELL', color: Colors.amberAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'side', value: candidate.side),
+          _ResultPair(
+            label: 'quantity_available',
+            value: _qtyText(candidate.quantityAvailable),
+          ),
+          _ResultPair(
+            label: 'suggested_quantity',
+            value: _qtyText(candidate.suggestedQuantity),
+          ),
+          _ResultPair(
+            label: 'current_price',
+            value: _formatKrwOrDash(candidate.currentPrice),
+          ),
+          _ResultPair(
+            label: 'cost_basis',
+            value: _formatKrwOrDash(candidate.costBasis),
+          ),
+          _ResultPair(
+            label: 'current_value',
+            value: _formatKrwOrDash(candidate.currentValue),
+          ),
+          _ResultPair(
+            label: 'unrealized_pl',
+            value: _formatKrwOrDash(candidate.unrealizedPl),
+          ),
+          _ResultPair(
+            label: 'unrealized_pl_pct',
+            value: _formatSafePlPercent(candidate),
+          ),
+          _ResultPair(label: 'trigger_source', value: candidate.triggerSource),
+          _ResultPair(label: 'severity', value: candidate.severity),
+          _ResultPair(label: 'action_hint', value: candidate.actionHint),
+          _ResultPair(
+            label: 'submit_ready',
+            value: _boolText(candidate.submitReady),
+          ),
+        ]),
+        if (candidate.reason.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _StateLine(text: candidate.reason),
+        ],
+        if (candidate.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'risk_flags: ${_joinList(candidate.riskFlags)}'),
+        ],
+        if (candidate.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gating_notes: ${_joinList(candidate.gatingNotes)}'),
+        ],
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+            text:
+                'real_order_submit_allowed=${_boolText(candidate.realOrderSubmitAllowed)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'broker_submit_called=${_boolText(candidate.brokerSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'manual_submit_called=${_boolText(candidate.manualSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: candidate.suggestedQuantityInt == null
+              ? null
+              : () {
+                  final actionResult =
+                      controller.prepareKisManualSellFromExitCandidate(
+                    candidate,
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: const Icon(Icons.edit_note_outlined),
+          label: const Text('Prepare Manual Sell Ticket'),
+        ),
+      ]),
+    );
   }
 }
 
@@ -1119,9 +1303,19 @@ String _formatKrw(double? value) {
   return '${sign}₩${buffer.toString()}';
 }
 
+String _formatKrwOrDash(double? value) {
+  if (value == null) return '--';
+  return _formatKrw(value);
+}
+
 String _formatPercentFromDecimal(double? value) {
   if (value == null) return 'n/a';
   return _formatPercentValue(value * 100, signed: true);
+}
+
+String _formatSafePlPercent(KisLiveExitCandidate candidate) {
+  if (!candidate.hasSafePlPct) return '--';
+  return _formatPercentFromDecimal(candidate.unrealizedPlPct);
 }
 
 String _formatPercentValue(double? value, {bool signed = false}) {

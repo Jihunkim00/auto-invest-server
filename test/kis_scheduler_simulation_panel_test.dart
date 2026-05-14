@@ -96,11 +96,13 @@ void main() {
     await tester.pumpWidget(_wrap(controller));
 
     expect(find.text('KIS Scheduler Simulation'), findsOneWidget);
-    expect(find.text('KIS Live Exit Preflight'), findsOneWidget);
-    expect(find.text('EXIT ONLY'), findsOneWidget);
-    expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('KIS Live Exit Manual Confirm'), findsOneWidget);
+    expect(find.text('EXIT PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('MANUAL CONFIRM SELL'), findsOneWidget);
+    expect(find.text('NO AUTO SELL'), findsWidgets);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
-    expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
+    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsWidgets);
+    expect(find.text('LIVE AUTO REMAINS DISABLED'), findsOneWidget);
     expect(find.text('Run Exit Preflight'), findsOneWidget);
     expect(find.text('DISABLED BY DEFAULT'), findsOneWidget);
     expect(find.text('DRY-RUN ONLY'), findsOneWidget);
@@ -141,15 +143,18 @@ void main() {
     expect(api.exitPreflightCalls, 1);
     expect(api.validationCalls, 0);
     expect(
-      find.text('Exit candidate found, but live automation is still disabled.'),
+      find.text(
+        'Exit candidate found. Manual confirmation is required before any live sell order.',
+      ),
       findsOneWidget,
     );
     expect(find.text('sell'), findsWidgets);
     expect(find.text('005930'), findsWidgets);
     expect(find.text('2'), findsWidgets);
     expect(find.text('₩141,120'), findsWidgets);
-    expect(find.text('-₩2,880'), findsOneWidget);
-    expect(find.text('-2.00%'), findsOneWidget);
+    expect(find.text('-₩2,880'), findsWidgets);
+    expect(find.text('-2.00%'), findsWidgets);
+    expect(find.text('stop_loss'), findsWidgets);
     expect(find.text('stop_loss_triggered'), findsWidgets);
     expect(find.text('true'), findsWidgets);
     expect(
@@ -160,7 +165,21 @@ void main() {
     expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('broker_submit_called=false'), findsWidgets);
     expect(find.text('manual_submit_called=false'), findsWidgets);
+    expect(find.text('real_order_submit_allowed=false'), findsWidgets);
+    expect(find.text('manual_confirm_required=true'), findsWidgets);
+    expect(find.text('Prepare Manual Sell Ticket'), findsOneWidget);
     expect(find.text('Submit Live KIS Order'), findsNothing);
+
+    await tester.ensureVisible(find.text('Prepare Manual Sell Ticket'));
+    await tester.tap(find.text('Prepare Manual Sell Ticket'));
+    await tester.pumpAndSettle();
+
+    expect(api.validationCalls, 0);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'sell');
+    expect(controller.orderTicketQty, 2);
+    expect(controller.orderTicketQtyInput, '2');
+    expect(controller.kisLiveConfirmation, isFalse);
 
     controller.dispose();
   });
@@ -215,10 +234,38 @@ void main() {
     expect(find.text('+0.26%'), findsOneWidget);
     expect(find.text('manual_review_required'), findsWidgets);
     expect(find.textContaining('take_profit_triggered'), findsNothing);
-    expect(find.text('EXIT ONLY'), findsOneWidget);
-    expect(find.text('PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('EXIT PREFLIGHT ONLY'), findsOneWidget);
+    expect(find.text('MANUAL CONFIRM SELL'), findsOneWidget);
+    expect(find.text('NO AUTO SELL'), findsWidgets);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
-    expect(find.text('LIVE AUTO STILL DISABLED'), findsOneWidget);
+    expect(find.text('LIVE AUTO REMAINS DISABLED'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Exit candidate with unsafe P/L percent displays dashes',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeSchedulerApiClient(
+      exitPreflightPayload: _unsafePlExitPreflightJson(),
+    );
+    final controller = _schedulerController(api)
+      ..kisSchedulerStatusLoaded = true;
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await tester.ensureVisible(find.text('Run Exit Preflight'));
+    await tester.tap(find.text('Run Exit Preflight'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('risk_exit'), findsWidgets);
+    expect(find.text('--'), findsWidgets);
+    expect(find.text('NO AUTO SELL'), findsWidgets);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
 
     controller.dispose();
   });
@@ -545,9 +592,17 @@ Map<String, dynamic> _autoJson() {
 
 Map<String, dynamic> _exitPreflightJson() {
   return {
+    'status': 'ok',
     'provider': 'kis',
     'market': 'KR',
     'mode': 'kis_live_exit_preflight',
+    'execution_mode': 'manual_confirm_only',
+    'live_auto_enabled': false,
+    'auto_buy_enabled': false,
+    'auto_sell_enabled': false,
+    'real_order_submit_allowed': false,
+    'manual_confirm_required': true,
+    'candidate_count': 1,
     'trigger_source': 'manual_kis_live_exit_preflight',
     'preflight': true,
     'simulated': false,
@@ -567,7 +622,8 @@ Map<String, dynamic> _exitPreflightJson() {
     'stop_loss_threshold_pct': 2.0,
     'exit_trigger_source': 'cost_basis',
     'reason': 'stop_loss_triggered',
-    'message': 'Exit candidate found, but live automation is still disabled.',
+    'message':
+        'Exit candidate found. Manual confirmation is required before any live sell order.',
     'would_submit_if_enabled': true,
     'blocked_by': [
       'kis_scheduler_allow_real_orders_false',
@@ -582,6 +638,49 @@ Map<String, dynamic> _exitPreflightJson() {
     ],
     'readiness_checks': [
       {'name': 'held_position_exists', 'passed': true},
+    ],
+    'safety': {
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'manual_confirm_required': true,
+    },
+    'candidates': [
+      {
+        'symbol': '005930',
+        'side': 'sell',
+        'quantity_available': 2,
+        'suggested_quantity': 2,
+        'current_price': 70560,
+        'cost_basis': 144000,
+        'current_value': 141120,
+        'unrealized_pl': -2880,
+        'unrealized_pl_pct': -0.02,
+        'trigger': 'stop_loss',
+        'trigger_source': 'cost_basis_pl_pct',
+        'severity': 'review',
+        'action_hint': 'manual_confirm_sell',
+        'reason':
+            'Position reached stop-loss review threshold. Manual confirmation is required before any live sell order.',
+        'risk_flags': [
+          'stop_loss_triggered',
+          'manual_confirm_required',
+          'no_auto_submit',
+        ],
+        'gating_notes': [
+          'manual_confirm_required',
+          'no_auto_submit',
+        ],
+        'submit_ready': false,
+        'manual_confirm_required': true,
+        'real_order_submit_allowed': false,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      },
     ],
     'result': 'exit_candidate',
   };
@@ -625,6 +724,80 @@ Map<String, dynamic> _smallProfitHoldExitPreflightJson() {
       {'name': 'held_position_exists', 'passed': true},
     ],
     'result': 'skipped',
+  };
+}
+
+Map<String, dynamic> _unsafePlExitPreflightJson() {
+  return {
+    'status': 'ok',
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_live_exit_preflight',
+    'execution_mode': 'manual_confirm_only',
+    'live_auto_enabled': false,
+    'auto_buy_enabled': false,
+    'auto_sell_enabled': false,
+    'real_order_submit_allowed': false,
+    'manual_confirm_required': true,
+    'candidate_count': 1,
+    'live_order_submitted': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'action': 'sell',
+    'symbol': '005930',
+    'qty': 1,
+    'estimated_notional': 72000,
+    'cost_basis': null,
+    'current_value': 72000,
+    'unrealized_pl': null,
+    'unrealized_pl_pct': null,
+    'reason': 'risk_exit',
+    'message':
+        'Exit candidate found. Manual confirmation is required before any live sell order.',
+    'would_submit_if_enabled': true,
+    'blocked_by': ['preflight_only_no_broker_submit'],
+    'risk_flags': [
+      'risk_exit',
+      'cost_basis_unavailable_current_value_fallback'
+    ],
+    'safety': {
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'manual_confirm_required': true,
+    },
+    'candidates': [
+      {
+        'symbol': '005930',
+        'side': 'sell',
+        'quantity_available': 1,
+        'suggested_quantity': 1,
+        'current_price': 72000,
+        'cost_basis': null,
+        'current_value': 72000,
+        'unrealized_pl': null,
+        'unrealized_pl_pct': null,
+        'trigger': 'manual_review',
+        'trigger_source': 'current_value_fallback',
+        'severity': 'review',
+        'action_hint': 'manual_confirm_sell',
+        'reason':
+            'Position matched a risk-exit review condition. Manual confirmation is required before any live sell order.',
+        'risk_flags': ['risk_exit'],
+        'gating_notes': ['manual_confirm_required', 'no_auto_submit'],
+        'submit_ready': false,
+        'manual_confirm_required': true,
+        'real_order_submit_allowed': false,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      },
+    ],
+    'result': 'exit_candidate',
   };
 }
 
