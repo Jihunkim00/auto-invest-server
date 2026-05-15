@@ -13,6 +13,10 @@ from app.services.gpt_risk_context import (
     gpt_context_from_market_analysis,
     has_observed_gpt_context,
 )
+from app.services.kis_order_audit import (
+    kis_order_source_fields,
+    kis_order_source_metadata_from_payloads,
+)
 
 router = APIRouter(tags=["history"])
 
@@ -71,6 +75,28 @@ def _string_list(value: Any) -> list[str]:
     return []
 
 
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _rejected_reason(row: OrderLog, response_payload: dict[str, Any]) -> str | None:
+    status = str(row.internal_status or "").upper()
+    if status not in {"REJECTED", "REJECTED_BY_SAFETY_GATE", "FAILED"}:
+        return None
+    value = (
+        row.error_message
+        or row.sync_error
+        or response_payload.get("rejected_reason")
+        or response_payload.get("message")
+    )
+    text = str(value or "").strip()
+    return text or None
+
+
 def _infer_provider(*, broker: str | None = None, mode: str | None = None, trigger_source: str | None = None) -> str:
     broker_text = str(broker or "").strip().lower()
     if broker_text:
@@ -101,6 +127,11 @@ def _payload_list(
     )
 
 
+def _payload_candidate(response_payload: dict[str, Any]) -> dict[str, Any]:
+    candidate = response_payload.get("candidate")
+    return candidate if isinstance(candidate, dict) else {}
+
+
 def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
     for payload in payloads:
         if not isinstance(payload, dict):
@@ -117,6 +148,10 @@ def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     request_payload = _parse_json_object(row.request_payload)
     response_payload = _parse_json_object(row.response_payload)
+    candidate_payload = _payload_candidate(response_payload)
+    audit_metadata = candidate_payload.get("audit_metadata")
+    if not isinstance(audit_metadata, dict):
+        audit_metadata = {}
     trade_result = response_payload.get("trade_result")
     if not isinstance(trade_result, dict):
         trade_result = {}
@@ -207,6 +242,85 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
                 request_payload.get("manual_submit_called"),
             )
         ),
+        "real_order_submit_allowed": _bool_or_none(
+            _first_present(
+                response_payload.get("real_order_submit_allowed"),
+                candidate_payload.get("real_order_submit_allowed"),
+                audit_metadata.get("real_order_submit_allowed"),
+                request_payload.get("real_order_submit_allowed"),
+            )
+        ),
+        "auto_sell_enabled": _bool_or_none(
+            _first_present(
+                response_payload.get("auto_sell_enabled"),
+                candidate_payload.get("auto_sell_enabled"),
+                audit_metadata.get("auto_sell_enabled"),
+            )
+        ),
+        "scheduler_real_order_enabled": _bool_or_none(
+            _first_present(
+                response_payload.get("scheduler_real_order_enabled"),
+                candidate_payload.get("scheduler_real_order_enabled"),
+                audit_metadata.get("scheduler_real_order_enabled"),
+            )
+        ),
+        "manual_confirm_required": _bool_or_none(
+            _first_present(
+                response_payload.get("manual_confirm_required"),
+                candidate_payload.get("manual_confirm_required"),
+                audit_metadata.get("manual_confirm_required"),
+            )
+        ),
+        "source": _first_present(
+            response_payload.get("source"),
+            audit_metadata.get("source"),
+            request_payload.get("source"),
+        ),
+        "source_type": _first_present(
+            response_payload.get("source_type"),
+            audit_metadata.get("source_type"),
+            request_payload.get("source_type"),
+        ),
+        "exit_trigger": _first_present(
+            response_payload.get("exit_trigger"),
+            candidate_payload.get("trigger"),
+            audit_metadata.get("exit_trigger"),
+        ),
+        "exit_trigger_source": _first_present(
+            response_payload.get("exit_trigger_source"),
+            candidate_payload.get("trigger_source"),
+            audit_metadata.get("trigger_source"),
+        ),
+        "suggested_quantity": _first_present(
+            response_payload.get("suggested_quantity"),
+            candidate_payload.get("suggested_quantity"),
+            audit_metadata.get("suggested_quantity"),
+        ),
+        "cost_basis": _first_present(
+            response_payload.get("cost_basis"),
+            candidate_payload.get("cost_basis"),
+            audit_metadata.get("cost_basis"),
+        ),
+        "current_value": _first_present(
+            response_payload.get("current_value"),
+            candidate_payload.get("current_value"),
+            audit_metadata.get("current_value"),
+        ),
+        "current_price": _first_present(
+            response_payload.get("current_price"),
+            candidate_payload.get("current_price"),
+            audit_metadata.get("current_price"),
+        ),
+        "unrealized_pl": _first_present(
+            response_payload.get("unrealized_pl"),
+            candidate_payload.get("unrealized_pl"),
+            audit_metadata.get("unrealized_pl"),
+        ),
+        "unrealized_pl_pct": _first_present(
+            response_payload.get("unrealized_pl_pct"),
+            candidate_payload.get("unrealized_pl_pct"),
+            audit_metadata.get("unrealized_pl_pct"),
+        ),
         "risk_flags": _payload_list(response_payload, trade_result, request_payload, "risk_flags"),
         "gating_notes": _payload_list(response_payload, trade_result, request_payload, "gating_notes"),
         "gpt_context": _payload_gpt_context(
@@ -223,9 +337,32 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
 def _serialize_order(row: OrderLog) -> dict[str, Any]:
     request_payload = _parse_json_object(row.request_payload)
     response_payload = _parse_json_object(row.response_payload)
+    last_sync_payload = _parse_json_object(row.last_sync_payload)
     provider = _infer_provider(broker=row.broker)
     market = _infer_market(provider, row.market)
-    source = str(request_payload.get("source") or response_payload.get("source") or "")
+    source_metadata = kis_order_source_metadata_from_payloads(
+        request_payload,
+        response_payload,
+        last_sync_payload,
+    )
+    source_fields = kis_order_source_fields(source_metadata)
+    source = str(
+        _first_present(
+            source_fields.get("source"),
+            request_payload.get("source"),
+            response_payload.get("source"),
+            "",
+        )
+        or ""
+    )
+    mode = str(
+        _first_present(
+            response_payload.get("mode"),
+            request_payload.get("mode"),
+            "kis_dry_run_auto" if str(row.internal_status or "").upper() == "DRY_RUN_SIMULATED" else None,
+            "manual_live" if provider == "kis" else "manual_order",
+        )
+    )
     simulated = (
         _bool_or_none(_first_present(response_payload.get("simulated"), request_payload.get("simulated")))
         or str(row.internal_status or "").upper() == "DRY_RUN_SIMULATED"
@@ -261,12 +398,16 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         )
     )
     if provider == "kis" and manual_submit_called is None:
-        manual_submit_called = not simulated and source != "kis_dry_run_auto"
-    risk_flags = _string_list(response_payload.get("risk_flags")) or _string_list(
-        response_payload.get("block_reasons")
+        manual_submit_called = bool(real_order_submitted)
+    risk_flags = _dedupe(
+        _string_list(source_fields.get("risk_flags"))
+        + _string_list(response_payload.get("risk_flags"))
+        + _string_list(response_payload.get("block_reasons"))
     )
-    gating_notes = _string_list(response_payload.get("gating_notes")) or _string_list(
-        response_payload.get("failed_checks")
+    gating_notes = _dedupe(
+        _string_list(source_fields.get("gating_notes"))
+        + _string_list(response_payload.get("gating_notes"))
+        + _string_list(response_payload.get("failed_checks"))
     )
     return {
         "id": row.id,
@@ -274,8 +415,13 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         "provider": provider,
         "broker": row.broker,
         "market": market,
-        "mode": source or ("kis_dry_run_auto" if simulated else "manual_live_order"),
-        "trigger_source": source or ("kis_dry_run_auto" if simulated else "manual"),
+        "mode": mode,
+        "source": source,
+        "source_type": source_fields.get("source_type"),
+        "exit_trigger": source_fields.get("exit_trigger"),
+        "exit_trigger_source": source_fields.get("exit_trigger_source"),
+        "trigger_source": source_fields.get("exit_trigger_source")
+        or ("kis_dry_run_auto" if simulated else "manual"),
         "symbol": row.symbol,
         "side": row.side,
         "action": row.side,
@@ -289,6 +435,13 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         ),
         "qty": row.qty,
         "notional": row.notional,
+        "requested_qty": row.requested_qty or row.qty,
+        "filled_quantity": row.filled_qty,
+        "remaining_quantity": row.remaining_qty,
+        "average_fill_price": row.avg_fill_price or row.filled_avg_price,
+        "filled_qty": row.filled_qty,
+        "remaining_qty": row.remaining_qty,
+        "avg_fill_price": row.avg_fill_price or row.filled_avg_price,
         "broker_order_id": row.broker_order_id,
         "kis_odno": row.kis_odno,
         "broker_status": row.broker_status,
@@ -299,12 +452,28 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         "updated_at": row.updated_at,
         "submitted_at": row.submitted_at,
         "filled_at": row.filled_at,
+        "last_sync_at": row.last_synced_at,
+        "last_synced_at": row.last_synced_at,
+        "rejected_reason": _rejected_reason(row, response_payload),
         "dry_run": _bool_or_none(_first_present(response_payload.get("dry_run"), request_payload.get("dry_run"))),
         "simulated": simulated,
         "preview_only": preview_only,
         "real_order_submitted": real_order_submitted,
         "broker_submit_called": broker_submit_called,
         "manual_submit_called": manual_submit_called,
+        **{
+            key: value
+            for key, value in source_fields.items()
+            if key
+            not in {
+                "source",
+                "source_type",
+                "exit_trigger",
+                "exit_trigger_source",
+                "risk_flags",
+                "gating_notes",
+            }
+        },
         "risk_flags": risk_flags,
         "gating_notes": gating_notes,
         "gpt_context": _payload_gpt_context(response_payload, request_payload),

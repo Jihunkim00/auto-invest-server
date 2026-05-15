@@ -161,6 +161,10 @@ class _KrOrderTicket extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       _RuntimeSafetyStatusCard(controller: controller),
+      if (controller.hasPreparedKisExitSellTicket) ...[
+        const SizedBox(height: 12),
+        _ExitPreflightPreparedNotice(controller: controller),
+      ],
       const SizedBox(height: 12),
       LayoutBuilder(builder: (context, constraints) {
         final vertical = constraints.maxWidth < 620;
@@ -372,6 +376,64 @@ class _KrOrderTicket extends StatelessWidget {
         orders: controller.kisOrders,
       ),
     ]);
+  }
+}
+
+class _ExitPreflightPreparedNotice extends StatelessWidget {
+  const _ExitPreflightPreparedNotice({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final metadata = controller.orderTicketSourceMetadata ?? const {};
+    final trigger = metadata['exit_trigger']?.toString();
+    final triggerSource = metadata['trigger_source']?.toString();
+    final fromShadow = metadata['source'] == 'kis_exit_shadow_decision';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.greenAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.28)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          fromShadow
+              ? 'Prepared from exit shadow decision'
+              : 'Prepared from exit preflight',
+          style: TextStyle(
+            color: Colors.greenAccent,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'MANUAL CONFIRMATION REQUIRED', color: Colors.greenAccent),
+          const _SoftBadge(text: 'NO AUTO SELL', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'VALIDATE BEFORE SUBMIT', color: Colors.lightBlueAccent),
+          const _SoftBadge(
+              text: 'confirm_live required', color: Colors.redAccent),
+          if (fromShadow)
+            const _SoftBadge(
+                text: 'SHADOW EXIT ONLY', color: Colors.lightBlueAccent),
+          if (fromShadow)
+            const _SoftBadge(
+                text: 'NO MANUAL SUBMIT YET', color: Colors.orangeAccent),
+        ]),
+        if (trigger != null || triggerSource != null) ...[
+          const SizedBox(height: 8),
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            if (trigger != null) _DataPair(label: 'trigger', value: trigger),
+            if (triggerSource != null)
+              _DataPair(label: 'trigger_source', value: triggerSource),
+          ]),
+        ],
+      ]),
+    );
   }
 }
 

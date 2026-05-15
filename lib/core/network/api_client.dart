@@ -6,6 +6,7 @@ import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_manual_order_result.dart';
@@ -236,8 +237,10 @@ class ApiClient {
     required String side,
     required int qty,
     String orderType = 'market',
+    Map<String, dynamic>? sourceMetadata,
   }) async {
-    final payload = await _postJsonBody('/kis/orders/validate', {
+    final auditMetadata = _safeKisAuditSourceMetadata(sourceMetadata);
+    final body = {
       'market': 'KR',
       'symbol': symbol.trim(),
       'side': side.trim().toLowerCase(),
@@ -245,7 +248,9 @@ class ApiClient {
       'order_type': orderType,
       'dry_run': true,
       'reason': 'manual Flutter dashboard dry-run',
-    });
+      if (auditMetadata.isNotEmpty) 'source_metadata': auditMetadata,
+    };
+    final payload = await _postJsonBody('/kis/orders/validate', body);
     return OrderValidationResult.fromJson(payload);
   }
 
@@ -255,8 +260,10 @@ class ApiClient {
     required int qty,
     String orderType = 'market',
     required bool confirmLive,
+    Map<String, dynamic>? sourceMetadata,
   }) async {
-    final payload = await _postJsonBody('/kis/orders/manual-submit', {
+    final auditMetadata = _safeKisAuditSourceMetadata(sourceMetadata);
+    final body = {
       'market': 'KR',
       'symbol': symbol.trim(),
       'side': side.trim().toLowerCase(),
@@ -266,7 +273,9 @@ class ApiClient {
       'confirm_live': confirmLive,
       'confirmation': confirmLive ? _kisLiveConfirmationPhrase : null,
       'reason': 'manual Flutter dashboard live KIS order',
-    });
+      if (auditMetadata.isNotEmpty) 'source_metadata': auditMetadata,
+    };
+    final payload = await _postJsonBody('/kis/orders/manual-submit', body);
     return KisManualOrderResult.fromJson(payload);
   }
 
@@ -439,6 +448,11 @@ class ApiClient {
     final payload =
         await _postJsonBody('/kis/live-exit/preflight-once', const {});
     return KisLiveExitPreflightResult.fromJson(payload);
+  }
+
+  Future<KisExitShadowDecision> runKisExitShadowOnce() async {
+    final payload = await _postJsonBody('/kis/exit-shadow/run-once', const {});
+    return KisExitShadowDecision.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({
@@ -775,6 +789,119 @@ class ApiClient {
       triggerSource: 'manual',
     );
   }
+}
+
+Map<String, dynamic> _safeKisAuditSourceMetadata(
+    Map<String, dynamic>? sourceMetadata) {
+  if (sourceMetadata == null) return const <String, dynamic>{};
+  final source = sourceMetadata['source'];
+  final isExitPreflight = source == 'kis_live_exit_preflight';
+  final isExitShadow = source == 'kis_exit_shadow_decision';
+  if (!isExitPreflight && !isExitShadow) {
+    return const <String, dynamic>{};
+  }
+
+  final result = <String, dynamic>{};
+  const stringKeys = {
+    'source',
+    'source_type',
+    'preflight_id',
+    'preflight_run_key',
+    'preflight_checked_at',
+    'shadow_decision_run_key',
+    'shadow_decision_checked_at',
+    'checked_at',
+    'exit_trigger',
+    'trigger_source',
+  };
+  const numberKeys = {
+    'unrealized_pl',
+    'unrealized_pl_pct',
+    'cost_basis',
+    'current_value',
+    'current_price',
+    'suggested_quantity',
+  };
+  const boolKeys = {
+    'manual_confirm_required',
+    'auto_sell_enabled',
+    'scheduler_real_order_enabled',
+    'real_order_submit_allowed',
+    'preflight_real_order_submitted',
+    'preflight_broker_submit_called',
+    'preflight_manual_submit_called',
+    'shadow_real_order_submitted',
+    'shadow_broker_submit_called',
+    'shadow_manual_submit_called',
+  };
+  const listKeys = {'risk_flags', 'gating_notes'};
+
+  for (final key in stringKeys) {
+    final text = _auditString(sourceMetadata[key]);
+    if (text != null) result[key] = text;
+  }
+  for (final key in numberKeys) {
+    final number = _auditNumber(sourceMetadata[key]);
+    if (number != null) result[key] = number;
+  }
+  for (final key in boolKeys) {
+    final value = _auditBool(sourceMetadata[key]);
+    if (value != null) result[key] = value;
+  }
+  for (final key in listKeys) {
+    final values = _auditStringList(sourceMetadata[key]);
+    if (values.isNotEmpty) result[key] = values;
+  }
+
+  result['source'] =
+      isExitShadow ? 'kis_exit_shadow_decision' : 'kis_live_exit_preflight';
+  result['source_type'] =
+      isExitShadow ? 'dry_run_sell_simulation' : 'manual_confirm_exit';
+  result['manual_confirm_required'] = true;
+  result['auto_sell_enabled'] = false;
+  result['scheduler_real_order_enabled'] = false;
+  result['real_order_submit_allowed'] = false;
+  if (isExitShadow) {
+    result['shadow_real_order_submitted'] = false;
+    result['shadow_broker_submit_called'] = false;
+    result['shadow_manual_submit_called'] = false;
+  } else {
+    result['preflight_real_order_submitted'] = false;
+    result['preflight_broker_submit_called'] = false;
+    result['preflight_manual_submit_called'] = false;
+  }
+  return result;
+}
+
+String? _auditString(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text.length > 200 ? text.substring(0, 200) : text;
+}
+
+num? _auditNumber(Object? value) {
+  if (value is num) return value;
+  final text = value?.toString().trim().replaceAll(',', '');
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return num.tryParse(text);
+}
+
+bool? _auditBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
+}
+
+List<String> _auditStringList(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (_auditString(item) != null) _auditString(item)!,
+  ];
 }
 
 const mockRuns = <TradingRun>[

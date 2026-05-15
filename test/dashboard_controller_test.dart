@@ -364,6 +364,15 @@ void main() {
     expect(controller.orderValidationResult, isNull);
     expect(controller.orderValidationError, isNull);
     expect(controller.kisManualOrderError, isNull);
+    expect(controller.hasExitPreflightPreparedSellTicket, isTrue);
+    expect(controller.orderTicketSourceMetadata?['source'],
+        'kis_live_exit_preflight');
+    expect(controller.orderTicketSourceMetadata?['source_type'],
+        'manual_confirm_exit');
+    expect(controller.orderTicketSourceMetadata?['exit_trigger'], 'stop_loss');
+    expect(controller.orderTicketSourceMetadata?['trigger_source'],
+        'cost_basis_pl_pct');
+    expect(controller.orderTicketSourceMetadata?['auto_sell_enabled'], isFalse);
     expect(api.validationCalls, 0);
 
     controller.dispose();
@@ -608,6 +617,7 @@ class _FakeApiClient extends ApiClient {
     required String side,
     required int qty,
     String orderType = 'market',
+    Map<String, dynamic>? sourceMetadata,
   }) async {
     validationCalls += 1;
     return validationResult ??

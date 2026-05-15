@@ -13,23 +13,40 @@ class QuickActionsSection extends StatelessWidget {
     return Column(children: [
       SectionCard(
         child: Column(children: [
-          const Text('EMERGENCY PROTOCOL', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700, fontSize: 11)),
+          const Text('EMERGENCY PROTOCOL',
+              style: TextStyle(
+                  color: Colors.redAccent,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11)),
           const SizedBox(height: 8),
-          const Text('KILL SWITCH', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
+          const Text('KILL SWITCH',
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
           FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red.shade800, minimumSize: const Size.fromHeight(46)),
+            style: FilledButton.styleFrom(
+                backgroundColor: Colors.red.shade800,
+                minimumSize: const Size.fromHeight(46)),
             onPressed: controller.killSwitchLoading
                 ? null
                 : () async {
-                    final result = await controller.toggleKillSwitch(!controller.settings.killSwitch);
+                    final result = await controller
+                        .toggleKillSwitch(!controller.settings.killSwitch);
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(result.message),
-                      backgroundColor: result.success ? Colors.green : Colors.redAccent,
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
                     ));
                   },
-            icon: controller.killSwitchLoading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.0, color: Colors.white)) : const Icon(Icons.power_settings_new),
-            label: Text(controller.settings.killSwitch ? 'TURN OFF KILL SWITCH' : 'HALT ALL TRADING'),
+            icon: controller.killSwitchLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.0, color: Colors.white))
+                : const Icon(Icons.power_settings_new),
+            label: Text(controller.settings.killSwitch
+                ? 'TURN OFF KILL SWITCH'
+                : 'HALT ALL TRADING'),
           )
         ]),
       ),
@@ -43,11 +60,19 @@ class QuickActionsSection extends StatelessWidget {
                     final result = await controller.runOnce();
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(result.message),
-                      backgroundColor: result.success ? Colors.green : Colors.redAccent,
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
                     ));
                   },
-            icon: controller.runOnceLoading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2.0)) : const Icon(Icons.play_arrow),
-            label: Text(controller.runOnceLoading ? 'Running watchlist analysis...' : 'Run Watchlist Once'),
+            icon: controller.runOnceLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2.0))
+                : const Icon(Icons.play_arrow),
+            label: Text(controller.runOnceLoading
+                ? 'Running watchlist analysis...'
+                : 'Run Watchlist Once'),
           ),
           const SizedBox(height: 8),
           Row(children: [
@@ -56,15 +81,22 @@ class QuickActionsSection extends StatelessWidget {
                 onPressed: controller.schedulerLoading
                     ? null
                     : () async {
-                        final result = await controller.toggleScheduler(!controller.settings.schedulerEnabled);
+                        final result = await controller.toggleScheduler(
+                            !controller.settings.schedulerEnabled);
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(result.message),
-                          backgroundColor: result.success ? Colors.green : Colors.redAccent,
+                          backgroundColor:
+                              result.success ? Colors.green : Colors.redAccent,
                         ));
                       },
                 child: controller.schedulerLoading
-                    ? const SizedBox(height: 18, child: Center(child: CircularProgressIndicator(strokeWidth: 2.0)))
-                    : Text(controller.settings.schedulerEnabled ? 'Scheduler OFF' : 'Scheduler ON'),
+                    ? const SizedBox(
+                        height: 18,
+                        child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 2.0)))
+                    : Text(controller.settings.schedulerEnabled
+                        ? 'Scheduler OFF'
+                        : 'Scheduler ON'),
               ),
             ),
             const SizedBox(width: 8),
@@ -73,15 +105,21 @@ class QuickActionsSection extends StatelessWidget {
                 onPressed: controller.botLoading
                     ? null
                     : () async {
-                        final result = await controller.toggleBot(!controller.settings.botEnabled);
+                        final result = await controller
+                            .toggleBot(!controller.settings.botEnabled);
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(result.message),
-                          backgroundColor: result.success ? Colors.green : Colors.redAccent,
+                          backgroundColor:
+                              result.success ? Colors.green : Colors.redAccent,
                         ));
                       },
                 child: controller.botLoading
-                    ? const SizedBox(height: 18, child: Center(child: CircularProgressIndicator(strokeWidth: 2.0)))
-                    : Text(controller.settings.botEnabled ? 'Bot OFF' : 'Bot ON'),
+                    ? const SizedBox(
+                        height: 18,
+                        child: Center(
+                            child: CircularProgressIndicator(strokeWidth: 2.0)))
+                    : Text(
+                        controller.settings.botEnabled ? 'Bot OFF' : 'Bot ON'),
               ),
             ),
           ])

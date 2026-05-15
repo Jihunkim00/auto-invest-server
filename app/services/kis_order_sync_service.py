@@ -17,6 +17,10 @@ from app.services.kis_order_mapper import (
     map_kis_order_row,
     stale_kis_order_status,
 )
+from app.services.kis_order_audit import (
+    kis_order_source_fields,
+    kis_order_source_metadata_from_payloads,
+)
 from app.services.kis_payload_sanitizer import sanitize_kis_payload, sanitize_kis_text
 
 KR_TZ = ZoneInfo("Asia/Seoul")
@@ -191,9 +195,14 @@ class KisOrderSyncService:
         order.internal_status = mapped.internal_status
         order.last_synced_at = now
         order.sync_error = None
-        order.error_message = None
+        order.error_message = (
+            _rejected_reason(mapped.raw_payload)
+            if mapped.internal_status == InternalOrderStatus.REJECTED.value
+            else None
+        )
         order.last_sync_payload = json.dumps(
             {
+                **kis_order_source_fields(_order_source_metadata(order)),
                 "matched_order": _sanitize_payload(mapped.raw_payload),
                 "inquiry": _sanitize_payload(inquiry),
             },
@@ -221,6 +230,7 @@ class KisOrderSyncService:
         order.error_message = order.sync_error
         order.last_sync_payload = json.dumps(
             {
+                **kis_order_source_fields(_order_source_metadata(order)),
                 "order_no": mapped.order_no,
                 "inquiry": _sanitize_payload(inquiry),
             },
@@ -332,6 +342,7 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "order_id": order.id,
         "broker": order.broker,
         "market": order.market or "KR",
+        "mode": "manual_live",
         "symbol": order.symbol,
         "side": order.side,
         "order_type": order.order_type,
@@ -339,9 +350,11 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "filled_qty": filled_qty,
         "remaining_qty": _nullable_float(remaining_qty),
         "avg_fill_price": _nullable_float(order.avg_fill_price or order.filled_avg_price),
+        "average_fill_price": _nullable_float(order.avg_fill_price or order.filled_avg_price),
         "internal_status": order.internal_status,
         "broker_order_status": order.broker_order_status or order.broker_status,
         "broker_status": order.broker_status,
+        "broker_order_id": order.broker_order_id,
         "kis_odno": order.kis_odno or order.broker_order_id,
         "kis_orgn_odno": order.kis_orgn_odno,
         "created_at": _iso(order.created_at),
@@ -349,13 +362,17 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "filled_at": _iso(order.filled_at),
         "canceled_at": _iso(order.canceled_at),
         "last_synced_at": _iso(order.last_synced_at),
+        "last_sync_at": _iso(order.last_synced_at),
         "sync_error": order.sync_error or order.error_message,
+        "rejected_reason": _rejected_reason_from_order(order),
+        "needs_manual_review": internal_status in {"UNKNOWN_STALE", "SYNC_FAILED"},
         "is_live_order": bool(str(order.broker or "").lower() == "kis" and (order.kis_odno or order.broker_order_id)),
         "is_terminal": is_terminal,
         "is_syncable": is_syncable,
         "clear_status": _clear_status_label(internal_status),
         "display_status": _display_status(internal_status),
     }
+    payload.update(kis_order_source_fields(_order_source_metadata(order)))
     if include_sync_payload and order.last_sync_payload:
         try:
             payload["last_sync_payload"] = _sanitize_payload(json.loads(order.last_sync_payload))
@@ -370,7 +387,8 @@ def _display_status(internal_status: str) -> str:
         "PARTIALLY_FILLED": "Partially filled",
         "SUBMITTED": "Submitted",
         "ACCEPTED": "Submitted",
-        "UNKNOWN_STALE": "Sync uncertain",
+        "UNKNOWN_STALE": "Needs manual review",
+        "SYNC_FAILED": "Needs manual review",
         "FAILED": "Failed",
         "REJECTED_BY_SAFETY_GATE": "Rejected by safety gate",
         "CANCELED": "Canceled",
@@ -598,6 +616,7 @@ def _sync_failure_payload(
     final_error = _exception_payload(exc)
     payload = {
         "event": "kis_order_sync_failed",
+        **kis_order_source_fields(_order_source_metadata(order)),
         "error_type": exc.__class__.__name__,
         "error_message": _safe_error(exc),
         "order": {
@@ -655,6 +674,45 @@ def _exception_payload(exc: Exception) -> dict[str, Any]:
 
 def _sanitize_payload(value: Any) -> Any:
     return sanitize_kis_payload(value)
+
+
+def _order_source_metadata(order: OrderLog) -> dict[str, Any]:
+    payloads = []
+    for raw in (order.request_payload, order.response_payload):
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+    return kis_order_source_metadata_from_payloads(*payloads)
+
+
+def _rejected_reason(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = (
+        payload.get("rjct_rson_name")
+        or payload.get("rjct_rson")
+        or payload.get("reject_reason")
+        or payload.get("msg1")
+    )
+    if value is None or not str(value).strip():
+        return None
+    return _sanitize_text(str(value).strip())
+
+
+def _rejected_reason_from_order(order: OrderLog) -> str | None:
+    status = str(order.internal_status or "").upper()
+    if status not in {
+        InternalOrderStatus.REJECTED.value,
+        InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+        InternalOrderStatus.FAILED.value,
+    }:
+        return None
+    return _sanitize_text(str(order.error_message or order.sync_error or "").strip()) or None
 
 
 def _sanitize_text(value: str) -> str:

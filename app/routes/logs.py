@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import MarketAnalysis, OrderLog, SignalLog
 from app.services.gpt_risk_context import gpt_context_from_market_analysis
+from app.services.kis_order_audit import (
+    kis_order_source_fields,
+    kis_order_source_metadata_from_payloads,
+)
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
@@ -20,6 +24,18 @@ def _parse_json_array(raw_value: str | None) -> list:
     except Exception:
         return []
     return []
+
+
+def _parse_json_object(raw_value: str | None) -> dict:
+    if not raw_value:
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return {}
+    return {}
 
 
 def _signal_gpt_context(db: Session, row: SignalLog) -> dict | None:
@@ -44,8 +60,15 @@ def get_order_logs(
 
     rows = query.order_by(OrderLog.created_at.desc()).limit(limit).all()
 
-    return [
-        {
+    items = []
+    for row in rows:
+        request_payload = _parse_json_object(row.request_payload)
+        response_payload = _parse_json_object(row.response_payload)
+        source_fields = kis_order_source_fields(
+            kis_order_source_metadata_from_payloads(request_payload, response_payload)
+        )
+        items.append(
+            {
             "id": row.id,
             "symbol": row.symbol,
             "side": row.side,
@@ -59,9 +82,10 @@ def get_order_logs(
             "submitted_at": row.submitted_at,
             "filled_at": row.filled_at,
             "created_at": row.created_at,
+            **source_fields,
         }
-        for row in rows
-    ]
+        )
+    return items
 
 
 @router.get("/signals")

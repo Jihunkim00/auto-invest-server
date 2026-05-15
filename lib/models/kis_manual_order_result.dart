@@ -23,6 +23,16 @@ class KisManualOrderResult {
     required this.clearStatusLabel,
     required this.isSyncable,
     required this.isTerminal,
+    this.sourceMetadata = const {},
+    this.source,
+    this.sourceType,
+    this.exitTrigger,
+    this.exitTriggerSource,
+    this.rejectedReason,
+    this.manualConfirmRequired,
+    this.autoSellEnabled,
+    this.schedulerRealOrderEnabled,
+    this.realOrderSubmitAllowed,
   });
 
   final int orderId;
@@ -48,9 +58,20 @@ class KisManualOrderResult {
   final String clearStatusLabel;
   final bool isSyncable;
   final bool isTerminal;
+  final Map<String, dynamic> sourceMetadata;
+  final String? source;
+  final String? sourceType;
+  final String? exitTrigger;
+  final String? exitTriggerSource;
+  final String? rejectedReason;
+  final bool? manualConfirmRequired;
+  final bool? autoSellEnabled;
+  final bool? schedulerRealOrderEnabled;
+  final bool? realOrderSubmitAllowed;
 
   bool get hasSyncError => syncError != null && syncError!.isNotEmpty;
   bool get hasKisOdno => kisOdno != null && kisOdno!.trim().isNotEmpty;
+  bool get isFromExitPreflight => source == 'kis_live_exit_preflight';
   bool get canCancel => hasKisOdno && isSyncable && !isTerminal;
   bool get isFilled => internalStatus.toUpperCase() == 'FILLED';
   bool get isPartial => internalStatus.toUpperCase() == 'PARTIALLY_FILLED';
@@ -96,6 +117,19 @@ class KisManualOrderResult {
           json['is_syncable'] == true || isSyncableKisStatus(internalStatus),
       isTerminal:
           json['is_terminal'] == true || isTerminalKisStatus(internalStatus),
+      sourceMetadata:
+          Map<String, dynamic>.from((json['source_metadata'] as Map?) ?? {}),
+      source: _readNullableString(json['source']),
+      sourceType: _readNullableString(json['source_type']),
+      exitTrigger: _readNullableString(json['exit_trigger']),
+      exitTriggerSource: _readNullableString(json['exit_trigger_source']),
+      rejectedReason: _readNullableString(json['rejected_reason']),
+      manualConfirmRequired: _readNullableBool(json['manual_confirm_required']),
+      autoSellEnabled: _readNullableBool(json['auto_sell_enabled']),
+      schedulerRealOrderEnabled:
+          _readNullableBool(json['scheduler_real_order_enabled']),
+      realOrderSubmitAllowed:
+          _readNullableBool(json['real_order_submit_allowed']),
     );
   }
 }
@@ -221,4 +255,14 @@ String? _readNullableString(Object? value) {
   final text = raw.trim();
   if (text.isEmpty || text == 'null') return null;
   return text;
+}
+
+bool? _readNullableBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
 }

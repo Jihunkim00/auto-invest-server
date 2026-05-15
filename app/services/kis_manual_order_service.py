@@ -16,6 +16,11 @@ from app.core.enums import InternalOrderStatus
 from app.db.models import KisOrderValidationLog, OrderLog
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.kis_order_messages import concise_order_block
+from app.services.kis_order_audit import (
+    kis_order_source_fields,
+    kis_order_source_metadata_from_payloads,
+    merge_kis_order_source_metadata,
+)
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -55,6 +60,7 @@ class KisManualOrderSubmitRequest(BaseModel):
     confirm_live: bool = Field(default=False)
     confirmation: str | None = Field(default=None, max_length=300)
     reason: str | None = Field(default=None, max_length=500)
+    source_metadata: dict[str, Any] | None = Field(default=None)
 
 
 class KisManualOrderService:
@@ -232,6 +238,10 @@ class KisManualOrderService:
                 order_type=normalized_order_type,
                 now_utc=now_utc,
             )
+        source_metadata = merge_kis_order_source_metadata(
+            _source_metadata_from_validation(latest_validation),
+            request.source_metadata,
+        )
         check(
             "recent_dry_run_validation_passed",
             latest_validation is not None,
@@ -331,6 +341,7 @@ class KisManualOrderService:
                 failed_checks=failed_checks,
                 broker_order_id=None,
                 broker_status=None,
+                source_metadata=source_metadata,
             )
             order = self._create_order_log(
                 db,
@@ -341,6 +352,7 @@ class KisManualOrderService:
                 notional=estimated_amount,
                 internal_status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
                 response_payload=response,
+                source_metadata=source_metadata,
             )
             response["order_log_id"] = order.id
             response["order_id"] = order.id
@@ -359,6 +371,7 @@ class KisManualOrderService:
             notional=estimated_amount,
             internal_status=InternalOrderStatus.REQUESTED.value,
             response_payload=None,
+            source_metadata=source_metadata,
         )
 
         try:
@@ -385,6 +398,7 @@ class KisManualOrderService:
                 failed_checks=[],
                 broker_order_id=None,
                 broker_status="failed",
+                source_metadata=source_metadata,
             )
             response["error"] = _safe_error(exc)
             response["order_log_id"] = order.id
@@ -413,6 +427,7 @@ class KisManualOrderService:
             failed_checks=[],
             broker_order_id=broker_order_id,
             broker_status=broker_status,
+            source_metadata=source_metadata,
         )
         response["order_log_id"] = order.id
         response["order_id"] = order.id
@@ -496,6 +511,7 @@ class KisManualOrderService:
         notional: float | None,
         internal_status: str,
         response_payload: dict[str, Any] | None,
+        source_metadata: dict[str, Any] | None,
     ) -> OrderLog:
         order_payload_preview = None
         if re.fullmatch(r"\d{6}", symbol or "") and side in {"buy", "sell"}:
@@ -510,6 +526,7 @@ class KisManualOrderService:
             except Exception:
                 order_payload_preview = None
 
+        source_fields = kis_order_source_fields(source_metadata)
         row = OrderLog(
             broker="kis",
             market=str(request.market or "KR").strip().upper() or "KR",
@@ -526,7 +543,9 @@ class KisManualOrderService:
             internal_status=internal_status,
             request_payload=json.dumps(
                 {
+                    "provider": "kis",
                     "market": request.market,
+                    "mode": "manual_live",
                     "symbol": request.symbol,
                     "side": request.side,
                     "qty": request.qty,
@@ -536,6 +555,7 @@ class KisManualOrderService:
                     "reason": request.reason,
                     "confirmation_provided": bool(request.confirmation),
                     "order_payload_preview": order_payload_preview,
+                    **source_fields,
                 },
                 ensure_ascii=False,
                 default=str,
@@ -565,6 +585,7 @@ class KisManualOrderService:
         failed_checks: list[str],
         broker_order_id: str | None,
         broker_status: str | None,
+        source_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         block_reasons = [
             str(safety_checks[name].get("reason"))
@@ -581,10 +602,14 @@ class KisManualOrderService:
             if block_reasons
             else {}
         )
+        source_fields = kis_order_source_fields(source_metadata)
         response = {
             "provider": "kis",
             "market": normalized_market,
+            "mode": "manual_live",
             "real_order_submitted": real_order_submitted,
+            "broker_submit_called": real_order_submitted,
+            "manual_submit_called": real_order_submitted,
             "symbol": normalized_symbol or request.symbol,
             "side": normalized_side or request.side,
             "qty": request.qty,
@@ -595,6 +620,7 @@ class KisManualOrderService:
             "safety_checks": safety_checks,
             "failed_checks": failed_checks,
             "block_reasons": block_reasons,
+            **source_fields,
         }
         response.update({key: value for key, value in concise.items() if value is not None})
         return response
@@ -660,6 +686,24 @@ def _extract_broker_status(response: dict[str, Any]) -> str:
     if rt_cd in {"0", ""}:
         return "submitted"
     return str(response.get("msg_cd") or rt_cd)
+
+
+def _source_metadata_from_validation(
+    validation: KisOrderValidationLog | None,
+) -> dict[str, Any]:
+    if validation is None:
+        return {}
+    payloads: list[dict[str, Any]] = []
+    for raw in (validation.request_payload, validation.response_payload):
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            payloads.append(parsed)
+    return kis_order_source_metadata_from_payloads(*payloads)
 
 
 def _sanitize_payload(value: Any) -> Any:

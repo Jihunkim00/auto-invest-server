@@ -53,16 +53,28 @@ def _seed_order(
     *,
     broker="kis",
     symbol="005930",
+    side="buy",
     status=InternalOrderStatus.SUBMITTED.value,
     odno="0001234567",
     qty=3,
     submitted_at=None,
+    source_metadata=None,
 ):
+    source_payload = {}
+    if source_metadata:
+        source_payload = {
+            "mode": "manual_live",
+            "source": source_metadata.get("source"),
+            "source_type": source_metadata.get("source_type"),
+            "exit_trigger": source_metadata.get("exit_trigger"),
+            "exit_trigger_source": source_metadata.get("trigger_source"),
+            "source_metadata": source_metadata,
+        }
     row = OrderLog(
         broker=broker,
         market="KR" if broker == "kis" else "US",
         symbol=symbol,
-        side="buy",
+        side=side,
         order_type="market",
         time_in_force="day",
         qty=float(qty),
@@ -74,11 +86,28 @@ def _seed_order(
         broker_status="submitted",
         broker_order_status="submitted",
         submitted_at=submitted_at,
+        request_payload=json.dumps(source_payload) if source_payload else None,
+        response_payload=json.dumps(source_payload) if source_payload else None,
     )
     db_session.add(row)
     db_session.commit()
     db_session.refresh(row)
     return row
+
+
+def _exit_source_metadata():
+    return {
+        "source": "kis_live_exit_preflight",
+        "source_type": "manual_confirm_exit",
+        "exit_trigger": "stop_loss",
+        "trigger_source": "cost_basis_pl_pct",
+        "manual_confirm_required": True,
+        "auto_sell_enabled": False,
+        "scheduler_real_order_enabled": False,
+        "real_order_submit_allowed": False,
+        "risk_flags": ["stop_loss_triggered"],
+        "gating_notes": ["manual_confirm_required", "no_auto_submit"],
+    }
 
 
 class _FakeResponse:
@@ -500,7 +529,12 @@ def test_kis_sync_single_order_route_updates_local_status(
     db_session,
 ):
     monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
-    order = _seed_order(db_session, qty=3)
+    order = _seed_order(
+        db_session,
+        qty=3,
+        side="sell",
+        source_metadata=_exit_source_metadata(),
+    )
 
     def fake_inquire(self, *, order_no, start_date, end_date):
         assert order_no == "0001234567"
@@ -536,9 +570,73 @@ def test_kis_sync_single_order_route_updates_local_status(
     assert body["avg_fill_price"] == 71500
     assert body["last_synced_at"] is not None
     assert body["sync_error"] is None
+    assert body["source"] == "kis_live_exit_preflight"
+    assert body["source_type"] == "manual_confirm_exit"
+    assert body["exit_trigger"] == "stop_loss"
+    assert body["exit_trigger_source"] == "cost_basis_pl_pct"
     assert "last_sync_payload" not in body
     assert "010-1234-5678" not in response.text
     assert "203.0.113.24" not in response.text
+
+    synced = db_session.get(OrderLog, order.id)
+    payload = json.loads(synced.last_sync_payload)
+    assert payload["source"] == "kis_live_exit_preflight"
+    assert payload["source_metadata"]["source_type"] == "manual_confirm_exit"
+
+
+def test_kis_sync_rejected_and_canceled_statuses_include_lifecycle_details(
+    db_session,
+):
+    rejected = _seed_order(
+        db_session,
+        odno="0000000201",
+        qty=2,
+        source_metadata=_exit_source_metadata(),
+    )
+    canceled = _seed_order(db_session, odno="0000000202", qty=2)
+
+    class _Client:
+        def inquire_daily_order_executions(self, *, order_no, start_date, end_date):
+            if order_no == "0000000201":
+                return {
+                    "orders": [
+                        {
+                            "odno": order_no,
+                            "ord_qty": "2",
+                            "tot_ccld_qty": "0",
+                            "rmn_qty": "2",
+                            "rjct_qty": "2",
+                            "rjct_rson_name": "price band rejected",
+                        }
+                    ]
+                }
+            return {
+                "orders": [
+                    {
+                        "odno": order_no,
+                        "ord_qty": "2",
+                        "tot_ccld_qty": "0",
+                        "rmn_qty": "0",
+                        "cncl_yn": "Y",
+                        "ordr_stat_name": "canceled",
+                    }
+                ]
+            }
+
+    service = KisOrderSyncService(
+        _Client(),
+        now_provider=lambda: datetime(2026, 5, 4, 15, 0, tzinfo=KR_TZ),
+    )
+    rejected_synced = service.sync_order(db_session, rejected.id)
+    canceled_synced = service.sync_order(db_session, canceled.id)
+
+    assert rejected_synced.internal_status == "REJECTED"
+    assert rejected_synced.error_message == "price band rejected"
+    assert canceled_synced.internal_status == "CANCELED"
+    assert canceled_synced.canceled_at is not None
+
+    rejected_payload = json.loads(rejected_synced.last_sync_payload)
+    assert rejected_payload["source"] == "kis_live_exit_preflight"
 
 
 def test_kis_sync_open_route_syncs_only_open_kis_orders(

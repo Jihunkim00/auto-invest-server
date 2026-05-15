@@ -66,6 +66,169 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Logs screen shows exit preflight manual sell audit fields',
+      (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: const [],
+        signals: const [],
+        orders: [
+          OrderLogItem.fromJson({
+            'id': 21,
+            'order_id': 21,
+            'provider': 'kis',
+            'broker': 'kis',
+            'market': 'KR',
+            'mode': 'manual_live',
+            'source': 'kis_live_exit_preflight',
+            'source_type': 'manual_confirm_exit',
+            'exit_trigger': 'stop_loss',
+            'exit_trigger_source': 'cost_basis_pl_pct',
+            'symbol': '005930',
+            'side': 'sell',
+            'action': 'sell',
+            'result': 'PARTIALLY_FILLED',
+            'reason': 'manual exit submit',
+            'qty': 2,
+            'filled_quantity': 1,
+            'remaining_quantity': 1,
+            'average_fill_price': 72000,
+            'internal_status': 'PARTIALLY_FILLED',
+            'broker_order_status': 'partial',
+            'kis_odno': '0001234567',
+            'created_at': '2026-05-08T00:03:00',
+            'updated_at': '2026-05-08T00:04:00',
+            'last_synced_at': '2026-05-08T00:05:00',
+            'real_order_submitted': true,
+            'broker_submit_called': true,
+            'manual_submit_called': true,
+            'manual_confirm_required': true,
+            'auto_sell_enabled': false,
+            'scheduler_real_order_enabled': false,
+          }),
+          OrderLogItem.fromJson({
+            'id': 22,
+            'order_id': 22,
+            'provider': 'kis',
+            'broker': 'kis',
+            'market': 'KR',
+            'mode': 'kis_live_exit_preflight',
+            'trigger_source': 'manual_kis_live_exit_preflight',
+            'source': 'kis_live_exit_preflight',
+            'source_type': 'manual_confirm_exit',
+            'exit_trigger': 'manual_review',
+            'symbol': '005930',
+            'side': 'sell',
+            'action': 'sell',
+            'result': 'PREFLIGHT_ONLY',
+            'reason': 'manual confirmation required',
+            'qty': 2,
+            'internal_status': 'PREFLIGHT_ONLY',
+            'created_at': '2026-05-08T00:01:00',
+            'updated_at': '2026-05-08T00:01:00',
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'manual_confirm_required': true,
+            'auto_sell_enabled': false,
+            'scheduler_real_order_enabled': false,
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+    await tester.tap(find.text('Orders').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('005930 - SELL'), findsWidgets);
+    expect(find.text('KIS MANUAL LIVE'), findsOneWidget);
+    expect(find.text('KIS EXIT PREFLIGHT'), findsOneWidget);
+    expect(find.text('EXIT PREFLIGHT'), findsWidgets);
+    expect(find.text('MANUAL SUBMIT'), findsOneWidget);
+    expect(find.text('NO AUTO SELL'), findsWidgets);
+    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsWidgets);
+    expect(find.text('PREFLIGHT ONLY'), findsWidgets);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('MANUAL CONFIRMATION REQUIRED'), findsWidgets);
+    expect(find.text('stop_loss'), findsOneWidget);
+    expect(find.text('manual_review'), findsOneWidget);
+    expect(find.text('0001234567'), findsOneWidget);
+    expect(find.text('\u20A972,000'), findsOneWidget);
+    expect(find.text('05-08 00:05 (KST 09:05)'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Logs screen shows shadow exit dry-run decision fields',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 31,
+            'run_key': 'kis-exit-shadow',
+            'provider': 'kis',
+            'market': 'KR',
+            'symbol': '005930',
+            'trigger_source': 'shadow_exit',
+            'mode': 'shadow_exit_dry_run',
+            'source': 'kis_exit_shadow_decision',
+            'source_type': 'dry_run_sell_simulation',
+            'action': 'sell',
+            'result': 'would_sell',
+            'reason': 'would_sell_stop_loss',
+            'gate_level': 2,
+            'created_at': '2026-05-15T00:01:00',
+            'dry_run': true,
+            'simulated': true,
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'real_order_submit_allowed': false,
+            'manual_confirm_required': true,
+            'auto_sell_enabled': false,
+            'scheduler_real_order_enabled': false,
+            'exit_trigger': 'stop_loss',
+            'exit_trigger_source': 'cost_basis_pl_pct',
+            'suggested_quantity': 2,
+            'cost_basis': 144000,
+            'current_value': 141120,
+            'current_price': 70560,
+            'unrealized_pl': -2880,
+            'unrealized_pl_pct': -0.02,
+          }),
+        ],
+        orders: const [],
+        signals: const [],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('KIS SHADOW EXIT'), findsOneWidget);
+    expect(find.text('SHADOW EXIT'), findsOneWidget);
+    expect(find.text('DRY RUN SELL SIMULATION'), findsOneWidget);
+    expect(find.text('WOULD SELL'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('NO MANUAL SUBMIT'), findsOneWidget);
+    expect(find.text('Trigger'), findsOneWidget);
+    expect(find.text('stop_loss'), findsOneWidget);
+    expect(find.text('Trigger src'), findsOneWidget);
+    expect(find.text('cost_basis_pl_pct'), findsOneWidget);
+    expect(find.text('Unrealized P/L %'), findsOneWidget);
+    expect(find.text('-2.00%'), findsOneWidget);
+
+    controller.dispose();
+  });
+
   testWidgets('Logs screen displays GPT context when present', (tester) async {
     final controller = DashboardController(
       _FakeLogsApiClient(

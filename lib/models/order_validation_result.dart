@@ -21,6 +21,11 @@ class OrderValidationResult {
     this.primaryBlockReason,
     this.message,
     this.detail = const {},
+    this.sourceMetadata = const {},
+    this.source,
+    this.sourceType,
+    this.exitTrigger,
+    this.exitTriggerSource,
   });
 
   factory OrderValidationResult.fromJson(Map<String, dynamic> json) {
@@ -48,6 +53,12 @@ class OrderValidationResult {
       primaryBlockReason: _readNullableString(json['primary_block_reason']),
       message: _readNullableString(json['message']),
       detail: Map<String, dynamic>.from((json['detail'] as Map?) ?? {}),
+      sourceMetadata:
+          Map<String, dynamic>.from((json['source_metadata'] as Map?) ?? {}),
+      source: _readNullableString(json['source']),
+      sourceType: _readNullableString(json['source_type']),
+      exitTrigger: _readNullableString(json['exit_trigger']),
+      exitTriggerSource: _readNullableString(json['exit_trigger_source']),
     );
   }
 
@@ -72,6 +83,13 @@ class OrderValidationResult {
   final String? primaryBlockReason;
   final String? message;
   final Map<String, dynamic> detail;
+  final Map<String, dynamic> sourceMetadata;
+  final String? source;
+  final String? sourceType;
+  final String? exitTrigger;
+  final String? exitTriggerSource;
+
+  bool get isFromExitPreflight => source == 'kis_live_exit_preflight';
 }
 
 class MarketSessionStatus {

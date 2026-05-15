@@ -180,6 +180,22 @@ void main() {
     expect(controller.orderTicketQty, 2);
     expect(controller.orderTicketQtyInput, '2');
     expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderTicketSourceMetadata?['source'],
+        'kis_live_exit_preflight');
+    expect(controller.orderTicketSourceMetadata?['source_type'],
+        'manual_confirm_exit');
+    expect(controller.orderTicketSourceMetadata?['exit_trigger'], 'stop_loss');
+    expect(controller.orderTicketSourceMetadata?['trigger_source'],
+        'cost_basis_pl_pct');
+    expect(controller.orderTicketSourceMetadata?['current_price'], 70560);
+    expect(controller.orderTicketSourceMetadata?['suggested_quantity'], 2);
+    expect(controller.orderTicketSourceMetadata?['preflight_checked_at'],
+        '2026-05-14T01:00:00Z');
+    expect(controller.orderTicketSourceMetadata?['preflight_run_key'],
+        'kis_live_exit_preflight_abcd1234');
+    expect(controller.orderTicketSourceMetadata?['preflight_id'], 42);
+    expect(controller.orderTicketSourceMetadata?['real_order_submit_allowed'],
+        isFalse);
 
     controller.dispose();
   });
@@ -461,6 +477,7 @@ class _FakeSchedulerApiClient extends ApiClient {
     required String side,
     required int qty,
     String orderType = 'market',
+    Map<String, dynamic>? sourceMetadata,
   }) async {
     validationCalls += 1;
     return OrderValidationResult(
@@ -602,6 +619,11 @@ Map<String, dynamic> _exitPreflightJson() {
     'auto_sell_enabled': false,
     'real_order_submit_allowed': false,
     'manual_confirm_required': true,
+    'checked_at': '2026-05-14T01:00:00Z',
+    'run': {
+      'run_key': 'kis_live_exit_preflight_abcd1234',
+      'run_id': 42,
+    },
     'candidate_count': 1,
     'trigger_source': 'manual_kis_live_exit_preflight',
     'preflight': true,

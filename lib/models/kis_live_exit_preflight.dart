@@ -22,6 +22,8 @@ class KisLiveExitPreflightResult {
     this.safety = const {},
     this.checkedAt,
     this.createdAt,
+    this.runKey,
+    this.runId,
     this.symbol,
     this.qty,
     this.estimatedNotional,
@@ -63,6 +65,8 @@ class KisLiveExitPreflightResult {
       safety: _boolMap(json['safety']),
       checkedAt: _nullableString(json['checked_at']),
       createdAt: _nullableString(json['created_at']),
+      runKey: _nullableString(_optionalMap(json['run'])?['run_key']),
+      runId: _nullableInt(_optionalMap(json['run'])?['run_id']),
       action: _stringValue(json['action'], fallback: 'hold'),
       symbol: _nullableString(json['symbol']),
       qty: _nullableDouble(json['qty']),
@@ -107,6 +111,8 @@ class KisLiveExitPreflightResult {
   final Map<String, bool> safety;
   final String? checkedAt;
   final String? createdAt;
+  final String? runKey;
+  final int? runId;
   final String action;
   final String? symbol;
   final double? qty;
@@ -355,6 +361,12 @@ Map<String, bool> _boolMap(Object? value) {
   if (value is! Map) return const {};
   return value
       .map((key, item) => MapEntry(key.toString(), _boolValue(item) ?? false));
+}
+
+Map<String, dynamic>? _optionalMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return null;
 }
 
 List<KisLiveExitReadinessCheck> _readinessList(Object? value) {

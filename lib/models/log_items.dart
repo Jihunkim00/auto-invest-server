@@ -25,6 +25,24 @@ class TradingLogItem {
     this.realOrderSubmitted,
     this.brokerSubmitCalled,
     this.manualSubmitCalled,
+    this.source = '',
+    this.sourceType,
+    this.exitTrigger,
+    this.exitTriggerSource,
+    this.suggestedQuantity,
+    this.costBasis,
+    this.currentValue,
+    this.currentPrice,
+    this.unrealizedPl,
+    this.unrealizedPlPct,
+    this.filledQuantity,
+    this.remainingQuantity,
+    this.averageFillPrice,
+    this.rejectedReason,
+    this.lastSyncedAt,
+    this.manualConfirmRequired,
+    this.autoSellEnabled,
+    this.schedulerRealOrderEnabled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
     this.gptContext = GptRiskContext.empty,
@@ -53,6 +71,24 @@ class TradingLogItem {
   final bool? realOrderSubmitted;
   final bool? brokerSubmitCalled;
   final bool? manualSubmitCalled;
+  final String source;
+  final String? sourceType;
+  final String? exitTrigger;
+  final String? exitTriggerSource;
+  final double? suggestedQuantity;
+  final double? costBasis;
+  final double? currentValue;
+  final double? currentPrice;
+  final double? unrealizedPl;
+  final double? unrealizedPlPct;
+  final double? filledQuantity;
+  final double? remainingQuantity;
+  final double? averageFillPrice;
+  final String? rejectedReason;
+  final String? lastSyncedAt;
+  final bool? manualConfirmRequired;
+  final bool? autoSellEnabled;
+  final bool? schedulerRealOrderEnabled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
   final GptRiskContext gptContext;
@@ -62,7 +98,9 @@ class TradingLogItem {
   bool get isKis => _isKis(provider, market, mode, triggerSource);
   bool get isKisPreview =>
       _isKisPreview(provider, market, mode, triggerSource, result, previewOnly);
-  bool get isKisDryRunAuto => _isKisDryRunAuto(
+  bool get isKisDryRunAuto =>
+      !isKisExitShadow &&
+      _isKisDryRunAuto(
         provider,
         market,
         mode,
@@ -72,29 +110,76 @@ class TradingLogItem {
       );
   bool get isKisPreflight =>
       _isKisPreflight(provider, market, mode, triggerSource, result);
+  bool get isKisExitShadow => _isKisExitShadow(
+        provider,
+        market,
+        mode,
+        triggerSource,
+        source,
+        sourceType,
+      );
   bool get isKisManualLive =>
-      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
-  String get sourceLabel => _sourceLabel(
-        provider: provider,
-        market: market,
-        mode: mode,
-        triggerSource: triggerSource,
-        result: result,
-        simulated: simulated,
-        previewOnly: previewOnly,
-      );
-  List<String> get safetyBadges => _safetyBadges(
-        provider: provider,
-        market: market,
-        mode: mode,
-        triggerSource: triggerSource,
-        result: result,
-        simulated: simulated,
-        previewOnly: previewOnly,
-        realOrderSubmitted: realOrderSubmitted,
-        brokerSubmitCalled: brokerSubmitCalled,
-        manualSubmitCalled: manualSubmitCalled,
-      );
+      isKis &&
+      !isKisPreview &&
+      !isKisDryRunAuto &&
+      !isKisPreflight &&
+      !isKisExitShadow;
+  String get sourceLabel {
+    if (isKisExitShadow) return 'KIS SHADOW EXIT';
+    return _sourceLabel(
+      provider: provider,
+      market: market,
+      mode: mode,
+      triggerSource: triggerSource,
+      result: result,
+      simulated: simulated,
+      previewOnly: previewOnly,
+    );
+  }
+
+  List<String> get safetyBadges {
+    final labels = _safetyBadges(
+      provider: provider,
+      market: market,
+      mode: mode,
+      triggerSource: triggerSource,
+      result: result,
+      simulated: simulated,
+      previewOnly: previewOnly,
+      realOrderSubmitted: realOrderSubmitted,
+      brokerSubmitCalled: brokerSubmitCalled,
+      manualSubmitCalled: manualSubmitCalled,
+    );
+    if (source == 'kis_live_exit_preflight') {
+      _addUnique(labels, 'EXIT PREFLIGHT');
+      _addUnique(labels, 'PREFLIGHT ONLY');
+      _addUnique(labels, 'NO AUTO SELL');
+      _addUnique(labels, 'NO BROKER SUBMIT');
+    }
+    if (isKisExitShadow) {
+      _addUnique(labels, 'SHADOW EXIT');
+      _addUnique(labels, 'DRY RUN');
+      _addUnique(labels, 'DRY RUN SELL SIMULATION');
+      _addUnique(
+          labels,
+          result.toLowerCase() == 'would_sell'
+              ? 'WOULD SELL'
+              : action.toLowerCase() == 'hold'
+                  ? 'HOLD'
+                  : action.toUpperCase());
+      _addUnique(labels, 'NO BROKER SUBMIT');
+      _addUnique(labels, 'NO MANUAL SUBMIT');
+      _addUnique(labels, 'LIVE AUTO SELL DISABLED');
+    }
+    if (manualConfirmRequired == true) {
+      _addUnique(labels, 'MANUAL CONFIRMATION REQUIRED');
+    }
+    if (schedulerRealOrderEnabled == false) {
+      _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
+    }
+    return labels;
+  }
+
   String get orderLabel => hasOrder ? relatedOrderId! : 'No order';
   String get statusLine {
     final actionText = action.isEmpty ? 'HOLD' : action.toUpperCase();
@@ -131,6 +216,30 @@ class TradingLogItem {
       realOrderSubmitted: _boolValue(json['real_order_submitted']),
       brokerSubmitCalled: _boolValue(json['broker_submit_called']),
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
+      source: _stringValue(json['source'], fallback: ''),
+      sourceType: _nullableString(json['source_type']),
+      exitTrigger: _nullableString(json['exit_trigger']),
+      exitTriggerSource: _nullableString(
+          json['exit_trigger_source'] ?? json['trigger_source']),
+      suggestedQuantity: _doubleValue(json['suggested_quantity']),
+      costBasis: _doubleValue(json['cost_basis']),
+      currentValue: _doubleValue(json['current_value']),
+      currentPrice: _doubleValue(json['current_price']),
+      unrealizedPl: _doubleValue(json['unrealized_pl']),
+      unrealizedPlPct: _doubleValue(json['unrealized_pl_pct']),
+      filledQuantity:
+          _doubleValue(json['filled_quantity'] ?? json['filled_qty']),
+      remainingQuantity:
+          _doubleValue(json['remaining_quantity'] ?? json['remaining_qty']),
+      averageFillPrice:
+          _doubleValue(json['average_fill_price'] ?? json['avg_fill_price']),
+      rejectedReason: _nullableString(json['rejected_reason']),
+      lastSyncedAt:
+          _nullableString(json['last_synced_at'] ?? json['last_sync_at']),
+      manualConfirmRequired: _boolValue(json['manual_confirm_required']),
+      autoSellEnabled: _boolValue(json['auto_sell_enabled']),
+      schedulerRealOrderEnabled:
+          _boolValue(json['scheduler_real_order_enabled']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
       gptContext: GptRiskContext.fromJson(json['gpt_context']),
@@ -171,6 +280,18 @@ class OrderLogItem {
     this.realOrderSubmitted,
     this.brokerSubmitCalled,
     this.manualSubmitCalled,
+    this.source = '',
+    this.sourceType,
+    this.exitTrigger,
+    this.exitTriggerSource,
+    this.filledQuantity,
+    this.remainingQuantity,
+    this.averageFillPrice,
+    this.rejectedReason,
+    this.lastSyncedAt,
+    this.manualConfirmRequired,
+    this.autoSellEnabled,
+    this.schedulerRealOrderEnabled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
     this.gptContext = GptRiskContext.empty,
@@ -207,6 +328,18 @@ class OrderLogItem {
   final bool? realOrderSubmitted;
   final bool? brokerSubmitCalled;
   final bool? manualSubmitCalled;
+  final String source;
+  final String? sourceType;
+  final String? exitTrigger;
+  final String? exitTriggerSource;
+  final double? filledQuantity;
+  final double? remainingQuantity;
+  final double? averageFillPrice;
+  final String? rejectedReason;
+  final String? lastSyncedAt;
+  final bool? manualConfirmRequired;
+  final bool? autoSellEnabled;
+  final bool? schedulerRealOrderEnabled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
   final GptRiskContext gptContext;
@@ -238,19 +371,42 @@ class OrderLogItem {
             simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
         previewOnly: previewOnly,
       );
-  List<String> get safetyBadges => _safetyBadges(
-        provider: provider,
-        market: market,
-        mode: mode,
-        triggerSource: triggerSource,
-        result: result.isEmpty ? internalStatus : result,
-        simulated:
-            simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
-        previewOnly: previewOnly,
-        realOrderSubmitted: realOrderSubmitted,
-        brokerSubmitCalled: brokerSubmitCalled,
-        manualSubmitCalled: manualSubmitCalled,
-      );
+  bool get isFromExitPreflight => source == 'kis_live_exit_preflight';
+  List<String> get safetyBadges {
+    final labels = _safetyBadges(
+      provider: provider,
+      market: market,
+      mode: mode,
+      triggerSource: triggerSource,
+      result: result.isEmpty ? internalStatus : result,
+      simulated:
+          simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
+      previewOnly: previewOnly,
+      realOrderSubmitted: realOrderSubmitted,
+      brokerSubmitCalled: brokerSubmitCalled,
+      manualSubmitCalled: manualSubmitCalled,
+    );
+    if (isFromExitPreflight) {
+      _addUnique(labels, 'EXIT PREFLIGHT');
+      _addUnique(labels, 'NO AUTO SELL');
+      if (realOrderSubmitted != true &&
+          brokerSubmitCalled != true &&
+          manualSubmitCalled != true) {
+        _addUnique(labels, 'PREFLIGHT ONLY');
+        _addUnique(labels, 'NO BROKER SUBMIT');
+      }
+    }
+    if (manualConfirmRequired == true) {
+      _addUnique(labels, 'MANUAL CONFIRMATION REQUIRED');
+    }
+    if (schedulerRealOrderEnabled == false) {
+      _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
+    }
+    if (manualSubmitCalled == true) {
+      _addUnique(labels, 'MANUAL SUBMIT');
+    }
+    return labels;
+  }
 
   factory OrderLogItem.fromJson(Map<String, dynamic> json) {
     final provider = _stringValue(
@@ -298,6 +454,24 @@ class OrderLogItem {
       realOrderSubmitted: _boolValue(json['real_order_submitted']),
       brokerSubmitCalled: _boolValue(json['broker_submit_called']),
       manualSubmitCalled: _boolValue(json['manual_submit_called']),
+      source: _stringValue(json['source'], fallback: ''),
+      sourceType: _nullableString(json['source_type']),
+      exitTrigger: _nullableString(json['exit_trigger']),
+      exitTriggerSource: _nullableString(
+          json['exit_trigger_source'] ?? json['trigger_source']),
+      filledQuantity:
+          _doubleValue(json['filled_quantity'] ?? json['filled_qty']),
+      remainingQuantity:
+          _doubleValue(json['remaining_quantity'] ?? json['remaining_qty']),
+      averageFillPrice:
+          _doubleValue(json['average_fill_price'] ?? json['avg_fill_price']),
+      rejectedReason: _nullableString(json['rejected_reason']),
+      lastSyncedAt:
+          _nullableString(json['last_synced_at'] ?? json['last_sync_at']),
+      manualConfirmRequired: _boolValue(json['manual_confirm_required']),
+      autoSellEnabled: _boolValue(json['auto_sell_enabled']),
+      schedulerRealOrderEnabled:
+          _boolValue(json['scheduler_real_order_enabled']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
       gptContext: GptRiskContext.fromJson(json['gpt_context']),
@@ -604,6 +778,22 @@ bool _isKisPreflight(
       result.toLowerCase().contains('preflight');
 }
 
+bool _isKisExitShadow(
+  String provider,
+  String market,
+  String mode,
+  String triggerSource,
+  String source,
+  String? sourceType,
+) {
+  if (!_isKis(provider, market, mode, triggerSource)) return false;
+  final hint = '$mode $triggerSource $source ${sourceType ?? ''}'.toLowerCase();
+  return hint.contains('shadow_exit') ||
+      hint.contains('exit_shadow') ||
+      source == 'kis_exit_shadow_decision' ||
+      sourceType == 'dry_run_sell_simulation';
+}
+
 String _sourceLabel({
   required String provider,
   required String market,
@@ -678,6 +868,10 @@ List<String> _safetyBadges({
   if (kis && !dryRunAuto && !preview && !preflight) add('MANUAL ONLY');
   if (manualSubmitCalled == true) add('MANUAL ONLY');
   return labels;
+}
+
+void _addUnique(List<String> labels, String label) {
+  if (!labels.contains(label)) labels.add(label);
 }
 
 const mockTradingLogManualHold = TradingLogItem(

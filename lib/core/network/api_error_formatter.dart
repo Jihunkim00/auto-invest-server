@@ -56,7 +56,8 @@ class ApiErrorFormatter {
       return 'HTTP 409: ${jsonEncode(json)}';
     }
 
-    final blockReasons = (json['block_reasons'] as List<dynamic>?)?.cast<String>() ?? [];
+    final blockReasons =
+        (json['block_reasons'] as List<dynamic>?)?.cast<String>() ?? [];
     final realOrderSubmitted = json['real_order_submitted'] as bool? ?? true;
     final closureName = json['closure_name'] as String?;
 

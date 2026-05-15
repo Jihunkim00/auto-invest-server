@@ -955,6 +955,7 @@ class _FakeApiClient extends ApiClient {
     required String side,
     required int qty,
     String orderType = 'market',
+    Map<String, dynamic>? sourceMetadata,
   }) async {
     validationCalls += 1;
     lastValidationQty = qty;
@@ -1002,6 +1003,7 @@ class _FakeApiClient extends ApiClient {
     required int qty,
     String orderType = 'market',
     required bool confirmLive,
+    Map<String, dynamic>? sourceMetadata,
   }) async {
     submitCalls += 1;
     lastSubmitQty = qty;

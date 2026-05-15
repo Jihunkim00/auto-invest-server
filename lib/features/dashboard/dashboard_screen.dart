@@ -24,9 +24,10 @@ class DashboardScreen extends StatelessWidget {
             controller.hasLatestRunResult || controller.showingOfflineFallback
                 ? controller.runResult.action
                 : 'No run yet';
-        final modeBadgeText = controller.selectedProvider == SelectedProvider.kis
-            ? 'KIS Preview / Manual Only'
-            : 'Paper Mode';
+        final modeBadgeText =
+            controller.selectedProvider == SelectedProvider.kis
+                ? 'KIS Preview / Manual Only'
+                : 'Paper Mode';
         return SafeArea(
           child: RefreshIndicator(
             onRefresh: controller.load,
@@ -52,8 +53,7 @@ class DashboardScreen extends StatelessWidget {
                     ),
                   ],
                   selected: {controller.selectedProvider},
-                  onSelectionChanged: (v) =>
-                      controller.setProvider(v.first),
+                  onSelectionChanged: (v) => controller.setProvider(v.first),
                 ),
                 const SizedBox(height: 10),
                 Row(children: [
@@ -81,7 +81,8 @@ class DashboardScreen extends StatelessWidget {
                         const SizedBox(height: 12),
                         LastRunSummaryCard(controller: controller),
                         const SizedBox(height: 12),
-                        if (controller.selectedProvider == SelectedProvider.alpaca)
+                        if (controller.selectedProvider ==
+                            SelectedProvider.alpaca)
                           ManualTradingRunSection(controller: controller),
                         const SizedBox(height: 12),
                         QuickActionsSection(controller: controller),

@@ -5,6 +5,7 @@ import '../../../core/widgets/section_card.dart';
 import '../../../models/candidate.dart';
 import '../../../models/kis_auto_readiness.dart';
 import '../../../models/kis_auto_simulator_result.dart';
+import '../../../models/kis_exit_shadow_decision.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/market_watchlist.dart';
@@ -113,6 +114,8 @@ class WatchlistSection extends StatelessWidget {
           _KisAutoSimulatorPanel(controller: controller),
           const SizedBox(height: 12),
           _KisSchedulerSimulationPanel(controller: controller),
+          const SizedBox(height: 12),
+          _KisExitShadowDecisionCard(controller: controller),
           const SizedBox(height: 12),
           _KisLiveExitPreflightCard(controller: controller),
         ],
@@ -415,6 +418,307 @@ class _KisLiveExitPreflightCard extends StatelessWidget {
   }
 }
 
+class _KisExitShadowDecisionCard extends StatelessWidget {
+  const _KisExitShadowDecisionCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.latestKisExitShadowDecision;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.manage_search_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Exit Shadow Decision',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'SHADOW EXIT ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(
+              text: 'DRY-RUN SELL SIMULATION', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'NO MANUAL SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'LIVE AUTO SELL DISABLED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisExitShadowLoading
+              ? null
+              : () async {
+                  final actionResult = await controller.runKisExitShadowOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisExitShadowLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.rule_folder_outlined),
+          label: Text(controller.kisExitShadowLoading
+              ? 'Running shadow exit...'
+              : 'Run Shadow Exit Once'),
+        ),
+        if (controller.kisExitShadowError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisExitShadowError!),
+              color: Colors.redAccent),
+        ],
+        if (result != null) ...[
+          const SizedBox(height: 10),
+          _KisExitShadowDecisionPanel(
+            result: result,
+            controller: controller,
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No shadow decision run yet. Running this only records a dry-run decision.',
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisExitShadowDecisionPanel extends StatelessWidget {
+  const _KisExitShadowDecisionPanel({
+    required this.result,
+    required this.controller,
+  });
+
+  final KisExitShadowDecision result;
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final candidate = result.candidate;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _StateLine(
+        text: candidate == null
+            ? 'HOLD. No shadow sell candidate was selected.'
+            : '${_shadowDecisionLabel(result.decision)}. ${candidate.symbol} remains manual-confirm only.',
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'decision=${_shadowDecisionLabel(result.decision)}',
+          color: result.isWouldSell ? Colors.greenAccent : Colors.white70,
+        ),
+        _SoftBadge(
+          text: 'real_order_submitted=${_boolText(result.realOrderSubmitted)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'broker_submit_called=${_boolText(result.brokerSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'manual_submit_called=${_boolText(result.manualSubmitCalled)}',
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              'real_order_submit_allowed=${_boolText(result.realOrderSubmitAllowed)}',
+          color: Colors.lightBlueAccent,
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'mode', value: result.mode),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(
+          label: 'auto_sell_enabled',
+          value: _boolText(result.autoSellEnabled),
+        ),
+        _ResultPair(
+          label: 'scheduler_real_order_enabled',
+          value: _boolText(result.schedulerRealOrderEnabled),
+        ),
+        _ResultPair(
+          label: 'manual_confirm_required',
+          value: _boolText(result.manualConfirmRequired),
+        ),
+        if (result.createdAt != null)
+          _ResultPair(
+            label: 'created_at',
+            value: formatTimestampWithKst(result.createdAt),
+          ),
+      ]),
+      if (candidate != null) ...[
+        const SizedBox(height: 12),
+        _KisExitShadowCandidateCard(
+          candidate: candidate,
+          decision: result,
+          controller: controller,
+        ),
+      ],
+      const SizedBox(height: 10),
+      _StateLine(text: 'risk_flags: ${_joinList(result.riskFlags)}'),
+      if (result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'gating_notes: ${_joinList(result.gatingNotes)}'),
+      ],
+      if (result.candidatesEvaluated.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'candidates_evaluated: ${result.candidatesEvaluated.length.toString()}',
+        ),
+      ],
+    ]);
+  }
+}
+
+class _KisExitShadowCandidateCard extends StatelessWidget {
+  const _KisExitShadowCandidateCard({
+    required this.candidate,
+    required this.decision,
+    required this.controller,
+  });
+
+  final KisExitShadowCandidate candidate;
+  final KisExitShadowDecision decision;
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.assignment_late_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(candidate.symbol,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(text: candidate.trigger, color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 10),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'WOULD SELL ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(
+              text: 'MANUAL CONFIRM REQUIRED', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO AUTO SELL', color: Colors.amberAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'side', value: candidate.side),
+          _ResultPair(
+            label: 'quantity_available',
+            value: _qtyText(candidate.quantityAvailable),
+          ),
+          _ResultPair(
+            label: 'suggested_quantity',
+            value: _qtyText(candidate.suggestedQuantity),
+          ),
+          _ResultPair(
+            label: 'current_price',
+            value: _formatKrwOrDash(candidate.currentPrice),
+          ),
+          _ResultPair(
+            label: 'cost_basis',
+            value: _formatKrwOrDash(candidate.costBasis),
+          ),
+          _ResultPair(
+            label: 'current_value',
+            value: _formatKrwOrDash(candidate.currentValue),
+          ),
+          _ResultPair(
+            label: 'unrealized_pl',
+            value: _formatKrwOrDash(candidate.unrealizedPl),
+          ),
+          _ResultPair(
+            label: 'unrealized_pl_pct',
+            value: _formatShadowPlPercent(candidate),
+          ),
+          _ResultPair(label: 'trigger', value: candidate.trigger),
+          _ResultPair(label: 'trigger_source', value: candidate.triggerSource),
+        ]),
+        if (candidate.reason.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _StateLine(text: candidate.reason),
+        ],
+        if (candidate.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'risk_flags: ${_joinList(candidate.riskFlags)}'),
+        ],
+        if (candidate.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gating_notes: ${_joinList(candidate.gatingNotes)}'),
+        ],
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+            text:
+                'real_order_submit_allowed=${_boolText(candidate.realOrderSubmitAllowed)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'broker_submit_called=${_boolText(candidate.brokerSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'manual_submit_called=${_boolText(candidate.manualSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: candidate.suggestedQuantityInt == null
+              ? null
+              : () {
+                  final actionResult =
+                      controller.prepareKisManualSellFromShadowCandidate(
+                    candidate,
+                    decision: decision,
+                  );
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: const Icon(Icons.edit_note_outlined),
+          label: const Text('Prepare Manual Sell Ticket'),
+        ),
+      ]),
+    );
+  }
+}
+
 class _KisLiveExitPreflightResultPanel extends StatelessWidget {
   const _KisLiveExitPreflightResultPanel({
     required this.result,
@@ -537,6 +841,7 @@ class _KisLiveExitPreflightResultPanel extends StatelessWidget {
         for (final candidate in result.candidates) ...[
           _KisLiveExitCandidateCard(
             candidate: candidate,
+            preflight: result,
             controller: controller,
           ),
           const SizedBox(height: 10),
@@ -557,10 +862,12 @@ class _KisLiveExitPreflightResultPanel extends StatelessWidget {
 class _KisLiveExitCandidateCard extends StatelessWidget {
   const _KisLiveExitCandidateCard({
     required this.candidate,
+    required this.preflight,
     required this.controller,
   });
 
   final KisLiveExitCandidate candidate;
+  final KisLiveExitPreflightResult preflight;
   final DashboardController controller;
 
   @override
@@ -668,6 +975,7 @@ class _KisLiveExitCandidateCard extends StatelessWidget {
                   final actionResult =
                       controller.prepareKisManualSellFromExitCandidate(
                     candidate,
+                    preflight: preflight,
                   );
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(actionResult.message),
@@ -1316,6 +1624,18 @@ String _formatPercentFromDecimal(double? value) {
 String _formatSafePlPercent(KisLiveExitCandidate candidate) {
   if (!candidate.hasSafePlPct) return '--';
   return _formatPercentFromDecimal(candidate.unrealizedPlPct);
+}
+
+String _formatShadowPlPercent(KisExitShadowCandidate candidate) {
+  if (!candidate.hasSafePlPct) return '--';
+  return _formatPercentFromDecimal(candidate.unrealizedPlPct);
+}
+
+String _shadowDecisionLabel(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'would_sell') return 'WOULD SELL';
+  if (normalized == 'manual_review') return 'MANUAL REVIEW';
+  return 'HOLD';
 }
 
 String _formatPercentValue(double? value, {bool signed = false}) {

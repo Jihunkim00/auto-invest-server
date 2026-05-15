@@ -72,14 +72,17 @@ String _readString(Object? value, String fallback) {
 
 List<String> _readSlots(Object? value) {
   if (value is! List) return const [];
-  return value.map((item) {
-    if (item is Map) {
-      final name = item['name']?.toString() ?? '';
-      final time = item['time']?.toString() ?? '';
-      if (name.isEmpty) return time;
-      if (time.isEmpty) return name;
-      return '$name $time';
-    }
-    return item.toString();
-  }).where((item) => item.trim().isNotEmpty).toList();
+  return value
+      .map((item) {
+        if (item is Map) {
+          final name = item['name']?.toString() ?? '';
+          final time = item['time']?.toString() ?? '';
+          if (name.isEmpty) return time;
+          if (time.isEmpty) return name;
+          return '$name $time';
+        }
+        return item.toString();
+      })
+      .where((item) => item.trim().isNotEmpty)
+      .toList();
 }

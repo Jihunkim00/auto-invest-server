@@ -5,6 +5,7 @@ import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
@@ -117,6 +118,9 @@ class DashboardController extends ChangeNotifier {
   bool kisLiveExitPreflightLoading = false;
   KisLiveExitPreflightResult? kisLiveExitPreflightResult;
   String? kisLiveExitPreflightError;
+  bool kisExitShadowLoading = false;
+  KisExitShadowDecision? latestKisExitShadowDecision;
+  String? kisExitShadowError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -126,6 +130,7 @@ class DashboardController extends ChangeNotifier {
   String orderTicketSide = 'buy';
   int orderTicketQty = 1;
   String orderTicketQtyInput = '1';
+  Map<String, dynamic>? orderTicketSourceMetadata;
   bool orderValidationLoading = false;
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
@@ -156,6 +161,17 @@ class DashboardController extends ChangeNotifier {
 
   bool get isOrderTicketInputValid =>
       orderTicketSymbol.trim().isNotEmpty && isOrderTicketQtyValid;
+
+  bool get hasExitPreflightPreparedSellTicket =>
+      orderTicketSourceMetadata?['source'] == 'kis_live_exit_preflight' &&
+      orderTicketSide == 'sell';
+
+  bool get hasExitShadowPreparedSellTicket =>
+      orderTicketSourceMetadata?['source'] == 'kis_exit_shadow_decision' &&
+      orderTicketSide == 'sell';
+
+  bool get hasPreparedKisExitSellTicket =>
+      hasExitPreflightPreparedSellTicket || hasExitShadowPreparedSellTicket;
 
   bool get canSubmitLiveKisOrder {
     final validation = orderValidationResult;
@@ -509,11 +525,13 @@ class DashboardController extends ChangeNotifier {
 
   void setOrderTicketSymbol(String value) {
     orderTicketSymbol = value.trim();
+    _clearOrderTicketSourceMetadata();
     notifyListeners();
   }
 
   void setOrderTicketSide(String value) {
     orderTicketSide = value.trim().toLowerCase() == 'sell' ? 'sell' : 'buy';
+    _clearOrderTicketSourceMetadata();
     notifyListeners();
   }
 
@@ -527,6 +545,7 @@ class DashboardController extends ChangeNotifier {
     if (parsed != null) {
       orderTicketQty = parsed;
     }
+    _clearOrderTicketSourceMetadata();
     notifyListeners();
   }
 
@@ -545,11 +564,14 @@ class DashboardController extends ChangeNotifier {
     }
     orderValidationResult = null;
     orderValidationError = null;
+    orderTicketSourceMetadata = null;
     notifyListeners();
   }
 
   ActionResult prepareKisManualSellFromExitCandidate(
-      KisLiveExitCandidate candidate) {
+    KisLiveExitCandidate candidate, {
+    KisLiveExitPreflightResult? preflight,
+  }) {
     final symbol = candidate.symbol.trim();
     final qty = candidate.suggestedQuantityInt;
     if (symbol.isEmpty || qty == null) {
@@ -569,11 +591,46 @@ class DashboardController extends ChangeNotifier {
     kisLiveConfirmation = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata =
+        _exitPreflightSourceMetadata(candidate, preflight: preflight);
     notifyListeners();
     return const ActionResult(
       success: true,
       message:
           'Manual sell ticket prepared. Validate and confirm before submit.',
+    );
+  }
+
+  ActionResult prepareKisManualSellFromShadowCandidate(
+    KisExitShadowCandidate candidate, {
+    KisExitShadowDecision? decision,
+  }) {
+    final symbol = candidate.symbol.trim();
+    final qty = candidate.suggestedQuantityInt;
+    if (symbol.isEmpty || qty == null) {
+      return const ActionResult(
+        success: false,
+        message: 'Shadow candidate is missing a sell symbol or quantity.',
+      );
+    }
+
+    selectedOrderMarket = PortfolioMarket.kr;
+    orderTicketSymbol = symbol;
+    orderTicketSide = 'sell';
+    orderTicketQty = qty;
+    orderTicketQtyInput = qty.toString();
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata =
+        _exitShadowSourceMetadata(candidate, decision: decision);
+    notifyListeners();
+    return const ActionResult(
+      success: true,
+      message:
+          'Manual sell ticket prepared from shadow decision. Validate and confirm before submit.',
     );
   }
 
@@ -655,6 +712,7 @@ class DashboardController extends ChangeNotifier {
         symbol: symbol,
         side: side,
         qty: qty,
+        sourceMetadata: orderTicketSourceMetadata,
       );
       orderValidationResult = result;
       final status = result.validatedForSubmission
@@ -700,6 +758,7 @@ class DashboardController extends ChangeNotifier {
         qty: parsedOrderTicketQty!,
         orderType: 'market',
         confirmLive: kisLiveConfirmation,
+        sourceMetadata: orderTicketSourceMetadata,
       );
       latestKisManualOrder = result;
       _upsertKisOrder(result);
@@ -1109,6 +1168,37 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> runKisExitShadowOnce() async {
+    if (kisExitShadowLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS exit shadow decision already in progress.',
+      );
+    }
+
+    kisExitShadowLoading = true;
+    kisExitShadowError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisExitShadowOnce();
+      latestKisExitShadowDecision = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS exit shadow decision completed: ${result.decision}.',
+      );
+    } catch (e) {
+      kisExitShadowError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisExitShadowError!),
+      );
+    } finally {
+      kisExitShadowLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _refreshPortfolioSummaries() async {
     await _refreshUsPortfolioSummary();
     await _refreshKrPortfolioSummary();
@@ -1357,6 +1447,14 @@ class DashboardController extends ChangeNotifier {
         return true;
     }
   }
+
+  void _clearOrderTicketSourceMetadata() {
+    if (orderTicketSourceMetadata == null) return;
+    orderTicketSourceMetadata = null;
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+  }
 }
 
 int? _parseOrderTicketQty(String value) {
@@ -1400,4 +1498,71 @@ DateTime _createdAtForSort(KisManualOrderResult order) {
 
 bool _isPollableKisOrder(KisManualOrderResult? order) {
   return order != null && order.isSyncable && !order.isTerminal;
+}
+
+Map<String, dynamic> _exitPreflightSourceMetadata(
+  KisLiveExitCandidate candidate, {
+  KisLiveExitPreflightResult? preflight,
+}) {
+  final checkedAt = preflight?.checkedAt ?? preflight?.createdAt;
+  final suggestedQuantity =
+      candidate.suggestedQuantity ?? candidate.quantityAvailable;
+  return {
+    'source': 'kis_live_exit_preflight',
+    'source_type': 'manual_confirm_exit',
+    if (checkedAt != null) 'preflight_checked_at': checkedAt,
+    if (preflight?.runKey != null) 'preflight_run_key': preflight!.runKey,
+    if (preflight?.runId != null) 'preflight_id': preflight!.runId,
+    'exit_trigger': candidate.trigger,
+    'trigger_source': candidate.triggerSource,
+    if (candidate.unrealizedPl != null) 'unrealized_pl': candidate.unrealizedPl,
+    if (candidate.unrealizedPlPct != null)
+      'unrealized_pl_pct': candidate.unrealizedPlPct,
+    if (candidate.costBasis != null) 'cost_basis': candidate.costBasis,
+    if (candidate.currentValue != null) 'current_value': candidate.currentValue,
+    if (candidate.currentPrice != null) 'current_price': candidate.currentPrice,
+    if (suggestedQuantity != null) 'suggested_quantity': suggestedQuantity,
+    'risk_flags': candidate.riskFlags,
+    'gating_notes': candidate.gatingNotes,
+    'manual_confirm_required': true,
+    'auto_sell_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'real_order_submit_allowed': false,
+    'preflight_real_order_submitted': false,
+    'preflight_broker_submit_called': false,
+    'preflight_manual_submit_called': false,
+  };
+}
+
+Map<String, dynamic> _exitShadowSourceMetadata(
+  KisExitShadowCandidate candidate, {
+  KisExitShadowDecision? decision,
+}) {
+  final checkedAt = decision?.checkedAt ?? decision?.createdAt;
+  final suggestedQuantity =
+      candidate.suggestedQuantity ?? candidate.quantityAvailable;
+  return {
+    'source': 'kis_exit_shadow_decision',
+    'source_type': 'dry_run_sell_simulation',
+    if (checkedAt != null) 'shadow_decision_checked_at': checkedAt,
+    if (decision?.runKey != null) 'shadow_decision_run_key': decision!.runKey,
+    'exit_trigger': candidate.trigger,
+    'trigger_source': candidate.triggerSource,
+    if (candidate.unrealizedPl != null) 'unrealized_pl': candidate.unrealizedPl,
+    if (candidate.unrealizedPlPct != null)
+      'unrealized_pl_pct': candidate.unrealizedPlPct,
+    if (candidate.costBasis != null) 'cost_basis': candidate.costBasis,
+    if (candidate.currentValue != null) 'current_value': candidate.currentValue,
+    if (candidate.currentPrice != null) 'current_price': candidate.currentPrice,
+    if (suggestedQuantity != null) 'suggested_quantity': suggestedQuantity,
+    'risk_flags': candidate.riskFlags,
+    'gating_notes': candidate.gatingNotes,
+    'manual_confirm_required': true,
+    'auto_sell_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'real_order_submit_allowed': false,
+    'shadow_real_order_submitted': false,
+    'shadow_broker_submit_called': false,
+    'shadow_manual_submit_called': false,
+  };
 }

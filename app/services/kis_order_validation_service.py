@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime
 import json
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
@@ -13,6 +14,10 @@ from app.db.models import KisOrderValidationLog
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_order_messages import concise_order_block
+from app.services.kis_order_audit import (
+    kis_order_source_fields,
+    normalize_kis_order_source_metadata,
+)
 
 
 class KisOrderValidationError(ValueError):
@@ -29,6 +34,7 @@ class KisOrderValidationRequest(BaseModel):
     order_type: str = Field(default="market", examples=["market"])
     dry_run: bool = Field(default=True)
     reason: str | None = Field(default=None, max_length=500)
+    source_metadata: dict[str, Any] | None = Field(default=None)
 
     @field_validator("market")
     @classmethod
@@ -84,12 +90,15 @@ class KisOrderValidationResult:
     block_reasons: list[str]
     market_session: dict
     order_preview: KisOrderPreview
+    source_metadata: dict | None = None
     primary_block_reason: str | None = None
     message: str | None = None
     detail: dict | None = None
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = asdict(self)
+        payload.update(kis_order_source_fields(self.source_metadata))
+        return payload
 
 
 class KisOrderValidationService:
@@ -197,6 +206,7 @@ class KisOrderValidationService:
         warnings = _dedupe(warnings)
         validated = len(block_reasons) == 0
         public_session = _public_market_session(market_session)
+        source_metadata = normalize_kis_order_source_metadata(request.source_metadata)
         concise = (
             {}
             if validated
@@ -222,6 +232,7 @@ class KisOrderValidationService:
             block_reasons=block_reasons,
             market_session=public_session,
             order_preview=preview,
+            source_metadata=source_metadata or None,
             primary_block_reason=concise.get("primary_block_reason"),
             message=concise.get("message"),
             detail=concise.get("detail"),
@@ -310,7 +321,16 @@ def record_kis_order_validation(
         validated_for_submission=result.validated_for_submission,
         current_price=result.current_price,
         estimated_amount=result.estimated_amount,
-        request_payload=json.dumps(request.model_dump(), ensure_ascii=False, default=str),
+        request_payload=json.dumps(
+            {
+                **request.model_dump(exclude={"source_metadata"}),
+                **kis_order_source_fields(
+                    normalize_kis_order_source_metadata(request.source_metadata)
+                ),
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
         response_payload=json.dumps(result.to_dict(), ensure_ascii=False, default=str),
     )
     db.add(row)

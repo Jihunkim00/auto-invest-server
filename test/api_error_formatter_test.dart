@@ -5,19 +5,22 @@ import 'package:auto_invest_dashboard/core/network/api_error_formatter.dart';
 void main() {
   group('ApiErrorFormatter', () {
     test('formats safety gate HTTP 409 error', () {
-      const errorJson = '{"internal_status":"REJECTED_BY_SAFETY_GATE","block_reasons":["market_closed","today_is_holiday"],"safety_checks":{},"real_order_submitted":false,"closure_name":"Christmas"}';
+      const errorJson =
+          '{"internal_status":"REJECTED_BY_SAFETY_GATE","block_reasons":["market_closed","today_is_holiday"],"safety_checks":{},"real_order_submitted":false,"closure_name":"Christmas"}';
       const errorMessage = 'HTTP 409: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
 
-      expect(formatted, 'No real order was submitted. Market is closed. Today is a holiday: Christmas.');
+      expect(formatted,
+          'No real order was submitted. Market is closed. Today is a holiday: Christmas.');
       expect(formatted, isNot(contains('safety_checks')));
       expect(formatted, isNot(contains('{')));
       expect(formatted, isNot(contains('}')));
     });
 
     test('formats safety gate with all block reasons', () {
-      const errorJson = '{"internal_status":"REJECTED_BY_SAFETY_GATE","block_reasons":["market_closed","today_is_holiday","buy_entry_not_allowed_now","sell_entry_not_allowed_now","recent_dry_run_validation_missing","kill_switch_enabled","kis_disabled","kis_real_order_disabled","confirmation_required","dry_run_must_be_false"],"real_order_submitted":false}';
+      const errorJson =
+          '{"internal_status":"REJECTED_BY_SAFETY_GATE","block_reasons":["market_closed","today_is_holiday","buy_entry_not_allowed_now","sell_entry_not_allowed_now","recent_dry_run_validation_missing","kill_switch_enabled","kis_disabled","kis_real_order_disabled","confirmation_required","dry_run_must_be_false"],"real_order_submitted":false}';
       const errorMessage = 'HTTP 409: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
@@ -36,7 +39,8 @@ void main() {
     });
 
     test('formats KIS balance inquiry HTTP 502 error', () {
-      const errorJson = '{"path":"/kis/inquire-balance","tr_id":"FHKST01010100","detail":{"message":"Balance inquiry failed","details":"Additional details"},"msg_cd":"EGW00123","msg1":"System error"}';
+      const errorJson =
+          '{"path":"/kis/inquire-balance","tr_id":"FHKST01010100","detail":{"message":"Balance inquiry failed","details":"Additional details"},"msg_cd":"EGW00123","msg1":"System error"}';
       const errorMessage = 'HTTP 502: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
@@ -45,7 +49,8 @@ void main() {
     });
 
     test('formats generic KIS read-only HTTP 502 error', () {
-      const errorJson = '{"path":"/kis/some-other-endpoint","detail":{"message":"Some error occurred"}}';
+      const errorJson =
+          '{"path":"/kis/some-other-endpoint","detail":{"message":"Some error occurred"}}';
       const errorMessage = 'HTTP 502: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
@@ -53,9 +58,9 @@ void main() {
       expect(formatted, 'Some error occurred');
     });
 
-
     test('prefers concise backend error message fields', () {
-      const errorJson = '{"message":"Kill switch is ON.","primary_message":"Fallback primary","detail":{"message":"Fallback detail"}}';
+      const errorJson =
+          '{"message":"Kill switch is ON.","primary_message":"Fallback primary","detail":{"message":"Fallback detail"}}';
       const errorMessage = 'HTTP 409: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
@@ -64,12 +69,14 @@ void main() {
     });
 
     test('falls back to detail message field', () {
-      const errorJson = '{"detail":{"message":"Backend dry-run is ON, so live KIS orders are blocked."}}';
+      const errorJson =
+          '{"detail":{"message":"Backend dry-run is ON, so live KIS orders are blocked."}}';
       const errorMessage = 'HTTP 400: $errorJson';
 
       final formatted = ApiErrorFormatter.format(errorMessage);
 
-      expect(formatted, 'Backend dry-run is ON, so live KIS orders are blocked.');
+      expect(
+          formatted, 'Backend dry-run is ON, so live KIS orders are blocked.');
     });
 
     test('falls back to original message for non-JSON errors', () {

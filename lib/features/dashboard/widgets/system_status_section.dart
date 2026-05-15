@@ -15,7 +15,8 @@ class SystemStatusSection extends StatelessWidget {
     final krScheduler = controller.schedulerStatus.kr;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('System Integrity', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
+        const Text('System Integrity',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
         const SizedBox(height: 14),
         GridView.count(
           crossAxisCount: 2,
@@ -25,10 +26,26 @@ class SystemStatusSection extends StatelessWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           children: [
-            MetricCard(label: 'Bot Status', value: s.botEnabled ? 'ON' : 'OFF', icon: Icons.smart_toy, highlight: s.botEnabled),
-            MetricCard(label: 'Scheduler', value: s.schedulerEnabled ? 'ON' : 'OFF', icon: Icons.schedule, highlight: s.schedulerEnabled),
-            MetricCard(label: 'Dry Run', value: s.dryRun ? 'ENABLED' : 'OFF', icon: Icons.science, highlight: s.dryRun),
-            MetricCard(label: 'Broker Mode', value: 'ALPACA PAPER', icon: Icons.account_balance, highlight: true),
+            MetricCard(
+                label: 'Bot Status',
+                value: s.botEnabled ? 'ON' : 'OFF',
+                icon: Icons.smart_toy,
+                highlight: s.botEnabled),
+            MetricCard(
+                label: 'Scheduler',
+                value: s.schedulerEnabled ? 'ON' : 'OFF',
+                icon: Icons.schedule,
+                highlight: s.schedulerEnabled),
+            MetricCard(
+                label: 'Dry Run',
+                value: s.dryRun ? 'ENABLED' : 'OFF',
+                icon: Icons.science,
+                highlight: s.dryRun),
+            MetricCard(
+                label: 'Broker Mode',
+                value: 'ALPACA PAPER',
+                icon: Icons.account_balance,
+                highlight: true),
           ],
         ),
         const SizedBox(height: 12),
@@ -54,7 +71,8 @@ class SystemStatusSection extends StatelessWidget {
         const SizedBox(height: 8),
         _StatusLine(
           icon: Icons.visibility_outlined,
-          text: krScheduler.previewOnly ? 'Preview only' : 'Preview unavailable',
+          text:
+              krScheduler.previewOnly ? 'Preview only' : 'Preview unavailable',
           color: Colors.lightBlueAccent,
         ),
       ]),

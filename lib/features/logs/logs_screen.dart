@@ -1046,6 +1046,49 @@ class _RunHistoryCard extends StatelessWidget {
             _DetailRow(label: 'Action', value: _fallback(run.action, 'hold')),
             _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
             _DetailRow(label: 'Reason', value: _fallback(run.reason, 'none')),
+            if (run.exitTrigger != null)
+              _DetailRow(label: 'Trigger', value: run.exitTrigger!),
+            if (run.exitTriggerSource != null)
+              _DetailRow(label: 'Trigger src', value: run.exitTriggerSource!),
+            if (run.suggestedQuantity != null)
+              _DetailRow(
+                  label: 'Suggested qty',
+                  value: _numberLabel(run.suggestedQuantity)),
+            if (run.currentPrice != null)
+              _DetailRow(
+                label: 'Current price',
+                value: _moneyLabel(
+                  run.currentPrice,
+                  provider: run.provider,
+                  market: run.market,
+                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                ),
+              ),
+            if (run.costBasis != null)
+              _DetailRow(
+                label: 'Cost basis',
+                value: _moneyLabel(
+                  run.costBasis,
+                  provider: run.provider,
+                  market: run.market,
+                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                ),
+              ),
+            if (run.unrealizedPl != null)
+              _DetailRow(
+                label: 'Unrealized P/L',
+                value: _moneyLabel(
+                  run.unrealizedPl,
+                  provider: run.provider,
+                  market: run.market,
+                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                ),
+              ),
+            if (run.unrealizedPlPct != null)
+              _DetailRow(
+                label: 'Unrealized P/L %',
+                value: _percentFromDecimal(run.unrealizedPlPct),
+              ),
             if (run.gptContext.hasDetails)
               _GptLogContextBlock(context: run.gptContext),
             _DetailRow(label: 'Order ID', value: run.orderLabel),
@@ -1128,6 +1171,37 @@ class _OrderHistoryCard extends StatelessWidget {
             _DetailRow(
                 label: 'Order ID', value: '${order.orderId ?? order.id}'),
             _DetailRow(label: 'Broker ID', value: order.orderLabel),
+            if (order.isFromExitPreflight)
+              const _DetailRow(
+                  label: 'Source', value: 'Prepared from exit preflight'),
+            if (order.exitTrigger != null)
+              _DetailRow(label: 'Trigger', value: order.exitTrigger!),
+            if (order.exitTriggerSource != null)
+              _DetailRow(label: 'Trigger src', value: order.exitTriggerSource!),
+            if (order.filledQuantity != null)
+              _DetailRow(
+                  label: 'Filled qty',
+                  value: _numberLabel(order.filledQuantity)),
+            if (order.remainingQuantity != null)
+              _DetailRow(
+                  label: 'Remaining',
+                  value: _numberLabel(order.remainingQuantity)),
+            if (order.averageFillPrice != null)
+              _DetailRow(
+                label: 'Avg fill',
+                value: _moneyLabel(
+                  order.averageFillPrice,
+                  provider: order.provider,
+                  market: order.market,
+                  currency: order.currency,
+                ),
+              ),
+            if (order.rejectedReason != null)
+              _DetailRow(label: 'Rejected', value: order.rejectedReason!),
+            if (order.lastSyncedAt != null)
+              _DetailRow(
+                  label: 'Last sync',
+                  value: formatTimestampWithKst(order.lastSyncedAt!)),
             if (order.signalId != null)
               _DetailRow(label: 'Signal ID', value: order.signalId!),
             if (order.brokerOrderStatus != null)
@@ -1547,6 +1621,13 @@ String _primaryLine(String value) {
 String _numberLabel(num? value) {
   if (value == null) return '-';
   return value.toStringAsFixed(value % 1 == 0 ? 0 : 2);
+}
+
+String _percentFromDecimal(num? value) {
+  if (value == null) return '-';
+  final percent = value * 100;
+  final sign = percent > 0 ? '+' : '';
+  return '$sign${percent.toStringAsFixed(2)}%';
 }
 
 String _moneyLabel(
