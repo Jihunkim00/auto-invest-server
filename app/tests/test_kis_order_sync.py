@@ -15,6 +15,8 @@ from app.main import app
 from app.services.kis_order_mapper import find_kis_order_row, map_kis_order_row
 from app.services.kis_order_sync_service import KR_TZ, KisOrderSyncService
 
+_DEFAULT_SUBMITTED_AT = datetime(2026, 5, 4, 4, 10, 24, 698131)
+
 
 def _settings(**overrides):
     values = {
@@ -85,7 +87,9 @@ def _seed_order(
         internal_status=status,
         broker_status="submitted",
         broker_order_status="submitted",
-        submitted_at=submitted_at,
+        submitted_at=(
+            submitted_at if submitted_at is not None else _DEFAULT_SUBMITTED_AT
+        ),
         request_payload=json.dumps(source_payload) if source_payload else None,
         response_payload=json.dumps(source_payload) if source_payload else None,
     )

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
@@ -28,6 +29,10 @@ from app.services.kis_dry_run_auto_service import (
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_live_exit_preflight_service import KisLiveExitPreflightService
 from app.services.kis_exit_shadow_decision_service import KisExitShadowDecisionService
+from app.services.kis_shadow_exit_review_service import KisShadowExitReviewService
+from app.services.kis_shadow_exit_review_queue_service import (
+    KisShadowExitReviewQueueService,
+)
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -42,6 +47,14 @@ from app.services.market_session_service import MarketSessionError, MarketSessio
 from app.services.runtime_setting_service import RuntimeSettingService
 
 router = APIRouter(prefix="/kis", tags=["kis"])
+
+
+class KisShadowExitReviewQueueActionRequest(BaseModel):
+    operator_note: str | None = None
+    note: str | None = None
+
+    def note_value(self) -> str | None:
+        return self.operator_note if self.operator_note is not None else self.note
 
 
 @router.get("/manual-order/status")
@@ -410,6 +423,55 @@ def run_kis_exit_shadow_once(
     client = _client(db)
     service = KisExitShadowDecisionService(client)
     return service.run_once(db, gate_level=gate_level)
+
+
+@router.get("/exit-shadow/review")
+def get_kis_exit_shadow_review(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    symbol: str | None = Query(default=None, min_length=1),
+    db: Session = Depends(get_db),
+):
+    service = KisShadowExitReviewService()
+    return service.review(db, limit=limit, days=days, symbol=symbol)
+
+
+@router.get("/exit-shadow/review-queue")
+def get_kis_exit_shadow_review_queue(
+    limit: int = Query(default=50, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    service = KisShadowExitReviewQueueService()
+    return service.queue(db, limit=limit, days=days)
+
+
+@router.post("/exit-shadow/review-queue/{queue_id}/mark-reviewed")
+def mark_kis_exit_shadow_queue_item_reviewed(
+    queue_id: str,
+    payload: KisShadowExitReviewQueueActionRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    service = KisShadowExitReviewQueueService()
+    return service.mark_reviewed(
+        db,
+        queue_id=queue_id,
+        operator_note=payload.note_value() if payload is not None else None,
+    )
+
+
+@router.post("/exit-shadow/review-queue/{queue_id}/dismiss")
+def dismiss_kis_exit_shadow_queue_item(
+    queue_id: str,
+    payload: KisShadowExitReviewQueueActionRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    service = KisShadowExitReviewQueueService()
+    return service.dismiss(
+        db,
+        queue_id=queue_id,
+        operator_note=payload.note_value() if payload is not None else None,
+    )
 
 
 def _client(db: Session) -> KisClient:

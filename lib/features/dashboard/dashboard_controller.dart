@@ -6,6 +6,8 @@ import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_shadow_exit_review.dart';
+import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
@@ -121,6 +123,12 @@ class DashboardController extends ChangeNotifier {
   bool kisExitShadowLoading = false;
   KisExitShadowDecision? latestKisExitShadowDecision;
   String? kisExitShadowError;
+  bool kisShadowExitReviewLoading = false;
+  KisShadowExitReview? latestKisShadowExitReview;
+  String? kisShadowExitReviewError;
+  bool kisShadowExitReviewQueueLoading = false;
+  KisShadowExitReviewQueue? latestKisShadowExitReviewQueue;
+  String? kisShadowExitReviewQueueError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -1195,6 +1203,134 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisExitShadowLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisShadowExitReview() async {
+    if (kisShadowExitReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS shadow exit review already in progress.',
+      );
+    }
+
+    kisShadowExitReviewLoading = true;
+    kisShadowExitReviewError = null;
+    notifyListeners();
+    try {
+      latestKisShadowExitReview =
+          await apiClient.fetchKisShadowExitReview(days: 30, limit: 20);
+      return const ActionResult(
+        success: true,
+        message: 'KIS shadow exit review refreshed.',
+      );
+    } catch (e) {
+      kisShadowExitReviewError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisShadowExitReviewError!),
+      );
+    } finally {
+      kisShadowExitReviewLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisShadowExitReviewQueue() async {
+    if (kisShadowExitReviewQueueLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS shadow exit review queue already in progress.',
+      );
+    }
+
+    kisShadowExitReviewQueueLoading = true;
+    kisShadowExitReviewQueueError = null;
+    notifyListeners();
+    try {
+      latestKisShadowExitReviewQueue =
+          await apiClient.fetchKisShadowExitReviewQueue(days: 30, limit: 50);
+      return const ActionResult(
+        success: true,
+        message: 'KIS shadow exit review queue refreshed.',
+      );
+    } catch (e) {
+      kisShadowExitReviewQueueError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisShadowExitReviewQueueError!),
+      );
+    } finally {
+      kisShadowExitReviewQueueLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> markKisShadowExitQueueItemReviewed(
+    String queueId, {
+    String? note,
+  }) async {
+    if (kisShadowExitReviewQueueLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS shadow exit review queue already in progress.',
+      );
+    }
+
+    kisShadowExitReviewQueueLoading = true;
+    kisShadowExitReviewQueueError = null;
+    notifyListeners();
+    try {
+      await apiClient.markKisShadowExitQueueItemReviewed(queueId, note: note);
+      latestKisShadowExitReviewQueue =
+          await apiClient.fetchKisShadowExitReviewQueue(days: 30, limit: 50);
+      return const ActionResult(
+        success: true,
+        message: 'KIS shadow exit queue item marked reviewed.',
+      );
+    } catch (e) {
+      kisShadowExitReviewQueueError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisShadowExitReviewQueueError!),
+      );
+    } finally {
+      kisShadowExitReviewQueueLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> dismissKisShadowExitQueueItem(
+    String queueId, {
+    String? note,
+  }) async {
+    if (kisShadowExitReviewQueueLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS shadow exit review queue already in progress.',
+      );
+    }
+
+    kisShadowExitReviewQueueLoading = true;
+    kisShadowExitReviewQueueError = null;
+    notifyListeners();
+    try {
+      await apiClient.dismissKisShadowExitQueueItem(queueId, note: note);
+      latestKisShadowExitReviewQueue =
+          await apiClient.fetchKisShadowExitReviewQueue(days: 30, limit: 50);
+      return const ActionResult(
+        success: true,
+        message: 'KIS shadow exit queue item dismissed.',
+      );
+    } catch (e) {
+      kisShadowExitReviewQueueError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisShadowExitReviewQueueError!),
+      );
+    } finally {
+      kisShadowExitReviewQueueLoading = false;
       notifyListeners();
     }
   }

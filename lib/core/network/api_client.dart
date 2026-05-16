@@ -7,6 +7,8 @@ import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_shadow_exit_review.dart';
+import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_manual_order_result.dart';
@@ -453,6 +455,88 @@ class ApiClient {
   Future<KisExitShadowDecision> runKisExitShadowOnce() async {
     final payload = await _postJsonBody('/kis/exit-shadow/run-once', const {});
     return KisExitShadowDecision.fromJson(payload);
+  }
+
+  Future<KisShadowExitReview> fetchKisShadowExitReview({
+    int days = 30,
+    int limit = 20,
+    String? symbol,
+  }) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/exit-shadow/review')
+        .replace(queryParameters: {
+      'days': days.toString(),
+      'limit': limit.toString(),
+      if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+      '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+    });
+    final r = await _client.get(uri, headers: const {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    });
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException('Invalid KIS shadow review response.');
+    }
+    return KisShadowExitReview.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
+  Future<KisShadowExitReviewQueue> fetchKisShadowExitReviewQueue({
+    int days = 30,
+    int limit = 50,
+  }) async {
+    final uri = Uri.parse('${AppConfig.baseUrl}/kis/exit-shadow/review-queue')
+        .replace(queryParameters: {
+      'days': days.toString(),
+      'limit': limit.toString(),
+      '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
+    });
+    final r = await _client.get(uri, headers: const {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    });
+    if (r.statusCode >= 400) {
+      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is! Map) {
+      throw const ApiRequestException(
+          'Invalid KIS shadow review queue response.');
+    }
+    return KisShadowExitReviewQueue.fromJson(
+        Map<String, dynamic>.from(decoded));
+  }
+
+  Future<KisShadowExitReviewQueueAction> markKisShadowExitQueueItemReviewed(
+    String queueId, {
+    String? note,
+  }) async {
+    final encodedQueueId = Uri.encodeComponent(queueId);
+    final payload = await _postJsonBody(
+      '/kis/exit-shadow/review-queue/$encodedQueueId/mark-reviewed',
+      {
+        if (note != null && note.trim().isNotEmpty)
+          'operator_note': note.trim(),
+      },
+    );
+    return KisShadowExitReviewQueueAction.fromJson(payload);
+  }
+
+  Future<KisShadowExitReviewQueueAction> dismissKisShadowExitQueueItem(
+    String queueId, {
+    String? note,
+  }) async {
+    final encodedQueueId = Uri.encodeComponent(queueId);
+    final payload = await _postJsonBody(
+      '/kis/exit-shadow/review-queue/$encodedQueueId/dismiss',
+      {
+        if (note != null && note.trim().isNotEmpty)
+          'operator_note': note.trim(),
+      },
+    );
+    return KisShadowExitReviewQueueAction.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({

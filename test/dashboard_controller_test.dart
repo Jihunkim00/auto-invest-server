@@ -7,6 +7,8 @@ import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
 import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
+import 'package:auto_invest_dashboard/models/kis_shadow_exit_review.dart';
+import 'package:auto_invest_dashboard/models/kis_shadow_exit_review_queue.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -407,6 +409,100 @@ void main() {
 
     controller.dispose();
   });
+
+  test('KIS shadow exit review refresh stores read-only result', () async {
+    final api = _FakeApiClient(shadowExitReview: _shadowExitReview());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshKisShadowExitReview();
+
+    expect(result.success, isTrue);
+    expect(api.fetchKisShadowExitReviewCalls, 1);
+    expect(controller.kisShadowExitReviewLoading, isFalse);
+    expect(controller.latestKisShadowExitReview?.mode, 'shadow_exit_review');
+    expect(controller.latestKisShadowExitReview?.safety.readOnly, isTrue);
+    expect(controller.latestKisShadowExitReview?.safety.brokerSubmitCalled,
+        isFalse);
+    expect(api.validationCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('KIS shadow exit review refresh stores error and clears loading',
+      () async {
+    final api = _FakeApiClient(throwShadowExitReview: true);
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshKisShadowExitReview();
+
+    expect(result.success, isFalse);
+    expect(api.fetchKisShadowExitReviewCalls, 1);
+    expect(controller.kisShadowExitReviewLoading, isFalse);
+    expect(controller.kisShadowExitReviewError, contains('review failed'));
+
+    controller.dispose();
+  });
+
+  test('KIS shadow exit review queue refresh stores read-only queue', () async {
+    final api = _FakeApiClient(shadowExitReviewQueue: _shadowExitReviewQueue());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshKisShadowExitReviewQueue();
+
+    expect(result.success, isTrue);
+    expect(api.fetchKisShadowExitReviewQueueCalls, 1);
+    expect(controller.kisShadowExitReviewQueueLoading, isFalse);
+    expect(controller.latestKisShadowExitReviewQueue?.mode,
+        'shadow_exit_review_queue');
+    expect(controller.latestKisShadowExitReviewQueue?.safety.readOnly, isTrue);
+    expect(controller.latestKisShadowExitReviewQueue?.safety.brokerSubmitCalled,
+        isFalse);
+    expect(api.validationCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('KIS shadow exit review queue refresh stores error and clears loading',
+      () async {
+    final api = _FakeApiClient(throwShadowExitReviewQueue: true);
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshKisShadowExitReviewQueue();
+
+    expect(result.success, isFalse);
+    expect(api.fetchKisShadowExitReviewQueueCalls, 1);
+    expect(controller.kisShadowExitReviewQueueLoading, isFalse);
+    expect(controller.kisShadowExitReviewQueueError, contains('queue failed'));
+
+    controller.dispose();
+  });
+
+  test('KIS shadow exit queue mark-reviewed and dismiss refresh local state',
+      () async {
+    final api = _FakeApiClient(shadowExitReviewQueue: _shadowExitReviewQueue());
+    final controller = DashboardController(api, autoload: false);
+
+    final reviewed = await controller.markKisShadowExitQueueItemReviewed(
+      '005930:take_profit:cost_basis_pl_pct',
+      note: 'reviewed',
+    );
+    final dismissed = await controller.dismissKisShadowExitQueueItem(
+      '005930:take_profit:cost_basis_pl_pct',
+      note: 'dismissed',
+    );
+
+    expect(reviewed.success, isTrue);
+    expect(dismissed.success, isTrue);
+    expect(api.markKisShadowExitQueueItemReviewedCalls, 1);
+    expect(api.dismissKisShadowExitQueueItemCalls, 1);
+    expect(api.fetchKisShadowExitReviewQueueCalls, 2);
+    expect(api.validationCalls, 0);
+    expect(api.lastQueueNote, 'dismissed');
+    expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+
+    controller.dispose();
+  });
 }
 
 DashboardController _readyKisController({
@@ -469,6 +565,104 @@ KisAutoReadiness _autoReadiness({bool preflight = false}) {
   });
 }
 
+KisShadowExitReview _shadowExitReview() {
+  return KisShadowExitReview.fromJson({
+    'status': 'ok',
+    'mode': 'shadow_exit_review',
+    'review_window_days': 30,
+    'summary': {
+      'total_shadow_runs': 1,
+      'would_sell_count': 1,
+      'hold_count': 0,
+      'manual_review_count': 0,
+      'no_submit_invariant_ok': true,
+    },
+    'recent_decisions': const [],
+    'safety': {
+      'read_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'scheduler_real_order_enabled': false,
+      'no_submit_invariant_ok': true,
+    },
+  });
+}
+
+KisShadowExitReviewQueue _shadowExitReviewQueue() {
+  return KisShadowExitReviewQueue.fromJson({
+    'status': 'ok',
+    'mode': 'shadow_exit_review_queue',
+    'review_window_days': 30,
+    'summary': {
+      'open_count': 1,
+      'reviewed_count': 0,
+      'dismissed_count': 0,
+      'would_sell_open_count': 1,
+      'manual_review_open_count': 0,
+      'repeated_symbol_count': 1,
+      'latest_open_at': '2026-05-15T01:03:00+00:00',
+    },
+    'items': [
+      {
+        'queue_id': '005930:take_profit:cost_basis_pl_pct',
+        'symbol': '005930',
+        'decision': 'would_sell',
+        'action': 'sell',
+        'trigger': 'take_profit',
+        'trigger_source': 'cost_basis_pl_pct',
+        'severity': 'review',
+        'occurrence_count': 2,
+        'latest_unrealized_pl': 2500,
+        'latest_unrealized_pl_pct': 0.031,
+        'status': 'open',
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      }
+    ],
+    'safety': {
+      'read_only': true,
+      'operator_state_only': true,
+      'creates_orders': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'scheduler_real_order_enabled': false,
+    },
+  });
+}
+
+Map<String, dynamic> _queueActionJson({required String status, String? note}) {
+  return {
+    'status': 'ok',
+    'mode': 'shadow_exit_review_queue',
+    'action': status == 'reviewed' ? 'mark-reviewed' : 'dismiss',
+    'item': {
+      'queue_id': '005930:take_profit:cost_basis_pl_pct',
+      'symbol': '005930',
+      'trigger': 'take_profit',
+      'status': status,
+      'operator_note': note,
+    },
+    'safety': {
+      'read_only': true,
+      'operator_state_only': true,
+      'creates_orders': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'scheduler_real_order_enabled': false,
+    },
+  };
+}
+
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.latest,
@@ -485,6 +679,10 @@ class _FakeApiClient extends ApiClient {
     this.throwUpdateOpsSettings = false,
     this.autoReadiness,
     this.throwAutoPreflight = false,
+    this.shadowExitReview,
+    this.throwShadowExitReview = false,
+    this.shadowExitReviewQueue,
+    this.throwShadowExitReviewQueue = false,
   });
 
   final WatchlistRunResult? latest;
@@ -501,11 +699,20 @@ class _FakeApiClient extends ApiClient {
   final bool throwUpdateOpsSettings;
   final KisAutoReadiness? autoReadiness;
   final bool throwAutoPreflight;
+  final KisShadowExitReview? shadowExitReview;
+  final bool throwShadowExitReview;
+  final KisShadowExitReviewQueue? shadowExitReviewQueue;
+  final bool throwShadowExitReviewQueue;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
   int fetchKisAutoReadinessCalls = 0;
   int runKisAutoPreflightCalls = 0;
+  int fetchKisShadowExitReviewCalls = 0;
+  int fetchKisShadowExitReviewQueueCalls = 0;
+  int markKisShadowExitQueueItemReviewedCalls = 0;
+  int dismissKisShadowExitQueueItemCalls = 0;
+  String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
   String? lastProvider;
@@ -582,6 +789,61 @@ class _FakeApiClient extends ApiClient {
       );
     }
     return autoReadiness ?? _autoReadiness(preflight: true);
+  }
+
+  @override
+  Future<KisShadowExitReview> fetchKisShadowExitReview({
+    int days = 30,
+    int limit = 20,
+    String? symbol,
+  }) async {
+    fetchKisShadowExitReviewCalls += 1;
+    if (throwShadowExitReview) {
+      throw const ApiRequestException(
+        'HTTP 503: {"message":"review failed"}',
+      );
+    }
+    return shadowExitReview ?? _shadowExitReview();
+  }
+
+  @override
+  Future<KisShadowExitReviewQueue> fetchKisShadowExitReviewQueue({
+    int days = 30,
+    int limit = 50,
+  }) async {
+    fetchKisShadowExitReviewQueueCalls += 1;
+    if (throwShadowExitReviewQueue) {
+      throw const ApiRequestException(
+        'HTTP 503: {"message":"queue failed"}',
+      );
+    }
+    return shadowExitReviewQueue ?? _shadowExitReviewQueue();
+  }
+
+  @override
+  Future<KisShadowExitReviewQueueAction> markKisShadowExitQueueItemReviewed(
+    String queueId, {
+    String? note,
+  }) async {
+    markKisShadowExitQueueItemReviewedCalls += 1;
+    lastQueueNote = note;
+    return KisShadowExitReviewQueueAction.fromJson(_queueActionJson(
+      status: 'reviewed',
+      note: note,
+    ));
+  }
+
+  @override
+  Future<KisShadowExitReviewQueueAction> dismissKisShadowExitQueueItem(
+    String queueId, {
+    String? note,
+  }) async {
+    dismissKisShadowExitQueueItemCalls += 1;
+    lastQueueNote = note;
+    return KisShadowExitReviewQueueAction.fromJson(_queueActionJson(
+      status: 'dismissed',
+      note: note,
+    ));
   }
 
   @override

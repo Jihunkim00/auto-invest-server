@@ -212,6 +212,21 @@ class RuntimeSetting(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class KisShadowExitReviewQueueState(Base):
+    __tablename__ = "kis_shadow_exit_review_queue_state"
+
+    id = Column(Integer, primary_key=True, index=True)
+    queue_key = Column(String(180), nullable=False, unique=True, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    trigger = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="open", index=True)
+    operator_note = Column(Text, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class TradeRunLog(Base):
     __tablename__ = "trade_run_logs"
 

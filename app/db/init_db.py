@@ -157,6 +157,49 @@ def _create_runtime_settings_table_if_missing():
         )
 
 
+def _create_kis_shadow_exit_review_queue_state_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS kis_shadow_exit_review_queue_state (
+                    id INTEGER PRIMARY KEY,
+                    queue_key VARCHAR(180) NOT NULL UNIQUE,
+                    symbol VARCHAR(20) NOT NULL,
+                    trigger VARCHAR(50) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    operator_note TEXT,
+                    reviewed_at DATETIME,
+                    dismissed_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_kis_shadow_exit_review_queue_state_queue_key "
+                "ON kis_shadow_exit_review_queue_state (queue_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_kis_shadow_exit_review_queue_state_symbol "
+                "ON kis_shadow_exit_review_queue_state (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_kis_shadow_exit_review_queue_state_status "
+                "ON kis_shadow_exit_review_queue_state (status)"
+            )
+        )
+
+
 def _create_broker_auth_tokens_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -217,6 +260,7 @@ def init_db():
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
 

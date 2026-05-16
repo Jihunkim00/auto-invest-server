@@ -6,6 +6,8 @@ import '../../../models/candidate.dart';
 import '../../../models/kis_auto_readiness.dart';
 import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_exit_shadow_decision.dart';
+import '../../../models/kis_shadow_exit_review.dart';
+import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/market_watchlist.dart';
@@ -116,6 +118,10 @@ class WatchlistSection extends StatelessWidget {
           _KisSchedulerSimulationPanel(controller: controller),
           const SizedBox(height: 12),
           _KisExitShadowDecisionCard(controller: controller),
+          const SizedBox(height: 12),
+          _KisShadowExitReviewCard(controller: controller),
+          const SizedBox(height: 12),
+          _KisShadowExitReviewQueueCard(controller: controller),
           const SizedBox(height: 12),
           _KisLiveExitPreflightCard(controller: controller),
         ],
@@ -496,6 +502,467 @@ class _KisExitShadowDecisionCard extends StatelessWidget {
             text:
                 'No shadow decision run yet. Running this only records a dry-run decision.',
           ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisShadowExitReviewCard extends StatelessWidget {
+  const _KisShadowExitReviewCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final review = controller.latestKisShadowExitReview;
+    final summary = review?.summary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.analytics_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Shadow Exit Review',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'REVIEW ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(
+              text: 'SHADOW DECISION QUALITY', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'NO MANUAL SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'LIVE AUTO SELL DISABLED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisShadowExitReviewLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshKisShadowExitReview();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisShadowExitReviewLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(controller.kisShadowExitReviewLoading
+              ? 'Refreshing review...'
+              : 'Refresh Review only'),
+        ),
+        if (controller.kisShadowExitReviewError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisShadowExitReviewError!),
+              color: Colors.redAccent),
+        ],
+        if (summary == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'Review not loaded yet. This card only reads historical shadow decisions.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisShadowExitReviewSummaryPanel(summary: summary),
+          const SizedBox(height: 12),
+          _StateLine(
+            text: review!.safety.noSubmitInvariantOk
+                ? 'No-submit invariant: OK'
+                : 'No-submit invariant: historical warning found',
+            color: review.safety.noSubmitInvariantOk
+                ? Colors.greenAccent
+                : Colors.redAccent,
+          ),
+          if (review.recentDecisions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final decision in review.recentDecisions.take(5)) ...[
+              _KisShadowExitReviewDecisionTile(decision: decision),
+              const SizedBox(height: 8),
+            ],
+          ] else ...[
+            const SizedBox(height: 12),
+            const _StateLine(text: 'No shadow exit decisions in this window.'),
+          ],
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisShadowExitReviewSummaryPanel extends StatelessWidget {
+  const _KisShadowExitReviewSummaryPanel({required this.summary});
+
+  final KisShadowExitReviewSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(
+          label: 'total shadow runs',
+          value: summary.totalShadowRuns.toString()),
+      _ResultPair(
+          label: 'would sell count', value: summary.wouldSellCount.toString()),
+      _ResultPair(label: 'hold count', value: summary.holdCount.toString()),
+      _ResultPair(
+          label: 'manual review count',
+          value: summary.manualReviewCount.toString()),
+      _ResultPair(
+          label: 'would sell rate', value: _formatRate(summary.wouldSellRate)),
+      _ResultPair(
+          label: 'manual sell followed',
+          value:
+              '${summary.manualSellFollowedCount} / ${_formatRate(summary.manualSellFollowedRate)}'),
+      _ResultPair(
+          label: 'stop-loss count', value: summary.stopLossCount.toString()),
+      _ResultPair(
+          label: 'take-profit count',
+          value: summary.takeProfitCount.toString()),
+      _ResultPair(
+          label: 'insufficient cost basis',
+          value: summary.insufficientCostBasisCount.toString()),
+      _ResultPair(
+          label: 'no-submit invariant',
+          value: summary.noSubmitInvariantOk ? 'OK' : 'WARNING'),
+    ]);
+  }
+}
+
+class _KisShadowExitReviewDecisionTile extends StatelessWidget {
+  const _KisShadowExitReviewDecisionTile({required this.decision});
+
+  final KisShadowExitReviewDecision decision;
+
+  @override
+  Widget build(BuildContext context) {
+    final linkedStatus = decision.linkedManualOrderStatus;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(decision.symbol,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(
+            text: _shadowDecisionLabel(decision.decision),
+            color: decision.decision == 'would_sell'
+                ? Colors.greenAccent
+                : Colors.white70,
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'trigger', value: decision.trigger ?? 'n/a'),
+          _ResultPair(
+            label: 'unrealized P/L',
+            value:
+                '${_formatReviewKrwOrDash(decision.unrealizedPl)} / ${_formatReviewPlPercent(decision)}',
+          ),
+          _ResultPair(
+            label: 'linked manual order',
+            value: linkedStatus ?? 'n/a',
+          ),
+          if (decision.createdAt.isNotEmpty)
+            _ResultPair(
+              label: 'created_at',
+              value: formatTimestampWithKst(decision.createdAt),
+            ),
+        ]),
+        if (decision.reason.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: decision.reason),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisShadowExitReviewQueueCard extends StatelessWidget {
+  const _KisShadowExitReviewQueueCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final queue = controller.latestKisShadowExitReviewQueue;
+    final summary = queue?.summary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.playlist_add_check_circle_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Shadow Exit Review Queue',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'OPERATOR REVIEW', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'SHADOW EXIT ALERTS', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'NO MANUAL SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'LIVE AUTO SELL DISABLED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisShadowExitReviewQueueLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshKisShadowExitReviewQueue();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisShadowExitReviewQueueLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(controller.kisShadowExitReviewQueueLoading
+              ? 'Refreshing queue...'
+              : 'Refresh Queue'),
+        ),
+        if (controller.kisShadowExitReviewQueueError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisShadowExitReviewQueueError!),
+              color: Colors.redAccent),
+        ],
+        if (summary == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'Queue not loaded yet. Review and dismiss actions only update local operator state.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisShadowExitReviewQueueSummaryPanel(summary: summary),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _SoftBadge(
+              text: 'read_only=${_boolText(queue!.safety.readOnly)}',
+              color: Colors.lightBlueAccent,
+            ),
+            _SoftBadge(
+              text:
+                  'real_order_submitted=${_boolText(queue.safety.realOrderSubmitted)}',
+              color: Colors.lightBlueAccent,
+            ),
+            _SoftBadge(
+              text:
+                  'broker_submit_called=${_boolText(queue.safety.brokerSubmitCalled)}',
+              color: Colors.lightBlueAccent,
+            ),
+            _SoftBadge(
+              text:
+                  'manual_submit_called=${_boolText(queue.safety.manualSubmitCalled)}',
+              color: Colors.lightBlueAccent,
+            ),
+          ]),
+          if (queue.items.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            for (final item in queue.items.take(5)) ...[
+              _KisShadowExitReviewQueueItemTile(
+                item: item,
+                controller: controller,
+              ),
+              const SizedBox(height: 8),
+            ],
+          ] else ...[
+            const SizedBox(height: 12),
+            const _StateLine(text: 'No open shadow exit review alerts.'),
+          ],
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisShadowExitReviewQueueSummaryPanel extends StatelessWidget {
+  const _KisShadowExitReviewQueueSummaryPanel({required this.summary});
+
+  final KisShadowExitReviewQueueSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(label: 'open count', value: summary.openCount.toString()),
+      _ResultPair(
+          label: 'reviewed count', value: summary.reviewedCount.toString()),
+      _ResultPair(
+          label: 'dismissed count', value: summary.dismissedCount.toString()),
+      _ResultPair(
+          label: 'would-sell open',
+          value: summary.wouldSellOpenCount.toString()),
+      _ResultPair(
+          label: 'manual-review open',
+          value: summary.manualReviewOpenCount.toString()),
+      _ResultPair(
+          label: 'repeated symbols',
+          value: summary.repeatedSymbolCount.toString()),
+      _ResultPair(
+        label: 'latest open',
+        value: summary.latestOpenAt == null
+            ? 'n/a'
+            : formatTimestampWithKst(summary.latestOpenAt),
+      ),
+    ]);
+  }
+}
+
+class _KisShadowExitReviewQueueItemTile extends StatelessWidget {
+  const _KisShadowExitReviewQueueItemTile({
+    required this.item,
+    required this.controller,
+  });
+
+  final KisShadowExitReviewQueueItem item;
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final linkedStatus = item.linkedManualOrderStatus;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(item.symbol,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(
+            text: _shadowDecisionLabel(item.decision),
+            color: item.decision == 'would_sell'
+                ? Colors.greenAccent
+                : Colors.amberAccent,
+          ),
+          const SizedBox(width: 8),
+          _SoftBadge(
+            text: _queueStatusLabel(item.status),
+            color: _queueStatusColor(item.status),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'trigger', value: item.trigger),
+          _ResultPair(
+              label: 'occurrences', value: item.occurrenceCount.toString()),
+          _ResultPair(
+            label: 'latest P/L',
+            value:
+                '${_formatReviewKrwOrDash(item.latestUnrealizedPl)} / ${_formatQueuePlPercent(item)}',
+          ),
+          _ResultPair(
+            label: 'linked manual order',
+            value: linkedStatus ?? 'n/a',
+          ),
+          if (item.latestSeenAt != null)
+            _ResultPair(
+              label: 'latest_seen',
+              value: formatTimestampWithKst(item.latestSeenAt),
+            ),
+        ]),
+        if (item.reason.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: item.reason),
+        ],
+        if (item.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'risk_flags: ${_joinList(item.riskFlags)}'),
+        ],
+        if (item.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'gating_notes: ${_joinList(item.gatingNotes)}'),
+        ],
+        if (item.operatorNote?.isNotEmpty == true) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'operator_note: ${item.operatorNote!}'),
+        ],
+        if (item.isOpen) ...[
+          const SizedBox(height: 10),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(
+              onPressed: controller.kisShadowExitReviewQueueLoading
+                  ? null
+                  : () async {
+                      final result = await controller
+                          .markKisShadowExitQueueItemReviewed(item.queueId);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.redAccent,
+                      ));
+                    },
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Mark Reviewed'),
+            ),
+            TextButton.icon(
+              onPressed: controller.kisShadowExitReviewQueueLoading
+                  ? null
+                  : () async {
+                      final result = await controller
+                          .dismissKisShadowExitQueueItem(item.queueId);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.redAccent,
+                      ));
+                    },
+              icon: const Icon(Icons.close),
+              label: const Text('Dismiss'),
+            ),
+          ]),
         ],
       ]),
     );
@@ -1631,6 +2098,31 @@ String _formatShadowPlPercent(KisExitShadowCandidate candidate) {
   return _formatPercentFromDecimal(candidate.unrealizedPlPct);
 }
 
+String _formatReviewPlPercent(KisShadowExitReviewDecision decision) {
+  if (decision.unrealizedPlPct == null) return '--';
+  return _formatPercentFromDecimal(decision.unrealizedPlPct);
+}
+
+String _formatQueuePlPercent(KisShadowExitReviewQueueItem item) {
+  if (item.latestUnrealizedPlPct == null) return '--';
+  return _formatPercentFromDecimal(item.latestUnrealizedPlPct);
+}
+
+String _formatReviewKrwOrDash(double? value) {
+  if (value == null) return '--';
+  final sign = value < 0 ? '-' : '';
+  final rounded = value.abs().round().toString();
+  final buffer = StringBuffer();
+  for (var index = 0; index < rounded.length; index += 1) {
+    final remaining = rounded.length - index;
+    buffer.write(rounded[index]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  return 'KRW $sign${buffer.toString()}';
+}
+
 String _shadowDecisionLabel(String value) {
   final normalized = value.trim().toLowerCase();
   if (normalized == 'would_sell') return 'WOULD SELL';
@@ -1638,10 +2130,28 @@ String _shadowDecisionLabel(String value) {
   return 'HOLD';
 }
 
+String _queueStatusLabel(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'reviewed') return 'REVIEWED';
+  if (normalized == 'dismissed') return 'DISMISSED';
+  return 'OPEN';
+}
+
+Color _queueStatusColor(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'reviewed') return Colors.greenAccent;
+  if (normalized == 'dismissed') return Colors.white54;
+  return Colors.lightBlueAccent;
+}
+
 String _formatPercentValue(double? value, {bool signed = false}) {
   if (value == null) return 'n/a';
   final sign = signed && value > 0 ? '+' : '';
   return '$sign${value.toStringAsFixed(2)}%';
+}
+
+String _formatRate(double value) {
+  return _formatPercentValue(value * 100);
 }
 
 String _joinList(List<String> values) {

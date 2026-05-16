@@ -48,8 +48,8 @@ void main() {
     expect(find.text('SHADOW EXIT ONLY'), findsOneWidget);
     expect(find.text('DRY-RUN SELL SIMULATION'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
-    expect(find.text('NO MANUAL SUBMIT'), findsOneWidget);
-    expect(find.text('LIVE AUTO SELL DISABLED'), findsOneWidget);
+    expect(find.text('NO MANUAL SUBMIT'), findsWidgets);
+    expect(find.text('LIVE AUTO SELL DISABLED'), findsWidgets);
     expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsWidgets);
     expect(find.text('Run Shadow Exit Once'), findsOneWidget);
     expect(find.text('Submit Live KIS Order'), findsNothing);

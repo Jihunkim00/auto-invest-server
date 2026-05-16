@@ -159,6 +159,8 @@ class TradingLogItem {
     if (isKisExitShadow) {
       _addUnique(labels, 'SHADOW EXIT');
       _addUnique(labels, 'DRY RUN');
+      _addUnique(labels, 'REVIEWED');
+      _addUnique(labels, 'NO SUBMIT');
       _addUnique(labels, 'DRY RUN SELL SIMULATION');
       _addUnique(
           labels,
