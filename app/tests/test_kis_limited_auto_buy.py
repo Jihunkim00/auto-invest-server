@@ -278,7 +278,16 @@ def test_limited_auto_buy_market_closed_blocks(db_session):
         ({}, {"current_price": 0}, "current_price_unavailable"),
         ({}, {"final_score": 60}, "score_threshold_not_met"),
         ({}, {"confidence": 0.3}, "confidence_threshold_not_met"),
-        ({}, {"risk_flags": ["gpt_hard_block_new_buy"]}, "gpt_hard_block_new_buy"),
+        (
+            {},
+            {
+                "risk_flags": ["gpt_hard_block_new_buy", "trading_halt"],
+                "gating_notes": ["Direct severe symbol risk: trading halt."],
+                "reason": "Trading halt after accounting fraud allegations.",
+                "hard_block_reason": "trading_halt_accounting_fraud",
+            },
+            "gpt_hard_block_new_buy",
+        ),
     ],
 )
 def test_limited_auto_buy_candidate_gates_block_without_submit(
@@ -299,6 +308,25 @@ def test_limited_auto_buy_candidate_gates_block_without_submit(
     assert result["reason"] == reason
     assert result["real_order_submitted"] is False
     assert broker.buy_calls == []
+
+
+def test_limited_auto_buy_treats_broad_gpt_hard_flag_as_advisory(db_session):
+    _enable_runtime(db_session, kis_limited_auto_buy_requires_shadow_review=False)
+    broker = _FakeBroker()
+    shadow = _FakeShadowService(
+        _shadow_would_buy(
+            risk_flags=["gpt_hard_block_new_buy"],
+            gating_notes=["Broad macro risk-off caution only."],
+            reason="Broad macro risk-off caution without direct symbol impairment.",
+        )
+    )
+
+    result = _service(broker=broker, shadow_service=shadow).run_once(db_session)
+
+    assert result["result"] == "submitted"
+    assert result["checks"]["gpt_hard_block_new_buy"] is False
+    assert result["broker_submit_called"] is True
+    assert broker.buy_calls == [{"symbol": "005930", "qty": 4}]
 
 
 def test_limited_auto_buy_shadow_review_required_blocks_by_default(db_session):

@@ -155,11 +155,11 @@ def test_trading_run_watchlist_once_blocks_when_no_entry_ready_candidate(monkeyp
     def fake_gpt_analyze(self, db, symbol, indicators, gate_level):
         return {
             "market_confidence": 0.80,
-            "entry_allowed": True,
+            "entry_allowed": False,
             "hard_blocked": False,
             "market_regime": "range",
             "entry_bias": "neutral",
-            "reason": "No strong long entry edge; setup lacks a clean long edge.",
+            "reason": "Trading halt risk creates direct severe entry risk.",
             "audit": {"fallback_used": False},
         }
 

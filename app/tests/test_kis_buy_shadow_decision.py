@@ -407,7 +407,7 @@ def test_buy_shadow_blocks_market_closed_and_late_entry(db_session):
     assert late["broker_submit_called"] is False
 
 
-def test_buy_shadow_blocks_kill_switch_and_gpt_hard_block(db_session):
+def test_buy_shadow_blocks_kill_switch_and_only_severe_gpt_hard_block(db_session):
     _runtime(db_session, kill_switch=True)
     kill_service, _ = _service()
     kill = kill_service.run_once(db_session)
@@ -415,20 +415,40 @@ def test_buy_shadow_blocks_kill_switch_and_gpt_hard_block(db_session):
 
     db_session.query(RuntimeSetting).delete()
     db_session.commit()
-    gpt_service, _ = _service(
+    advisory_service, _ = _service(
         preview=_preview(
             candidates=[
                 _candidate(
                     hard_blocked=True,
                     hard_block_reason="hard_block_new_buy",
                     risk_flags=["gpt_hard_block_new_buy"],
+                    gating_notes=["Broad macro caution only."],
+                    reason="Broad macro risk-off caution without direct symbol impairment.",
                 )
             ]
         )
     )
-    gpt = gpt_service.run_once(db_session)
-    assert gpt["reason"] == "gpt_hard_block_new_buy"
-    assert gpt["real_order_submitted"] is False
+    advisory = advisory_service.run_once(db_session)
+    assert advisory["decision"] == "would_buy"
+    assert advisory["checks"]["gpt_hard_block_new_buy"] is False
+    assert advisory["real_order_submitted"] is False
+
+    severe_service, _ = _service(
+        preview=_preview(
+            candidates=[
+                _candidate(
+                    hard_blocked=True,
+                    hard_block_reason="trading_halt_accounting_fraud",
+                    risk_flags=["gpt_hard_block_new_buy", "trading_halt"],
+                    gating_notes=["Direct severe symbol risk: accounting fraud."],
+                    reason="Trading halt after accounting fraud allegations.",
+                )
+            ]
+        )
+    )
+    severe = severe_service.run_once(db_session)
+    assert severe["reason"] == "gpt_hard_block_new_buy"
+    assert severe["real_order_submitted"] is False
 
 
 def test_buy_shadow_blocks_daily_loss_and_account_equity_unavailable(db_session):
