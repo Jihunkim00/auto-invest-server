@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.constants import KILL_SWITCH_DEFAULT, get_gate_profile, resolve_gate_level
 from app.db.models import MarketAnalysis
+from app.services.gpt_hard_block_policy import (
+    advisory_downgrade_note,
+    normalize_entry_penalty_level,
+    should_apply_gpt_hard_block,
+    true_severe_gpt_hard_block,
+)
 from app.services.market_gate_schema import parse_market_gate_response
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
 from app.services.reference_site_service import ReferenceSiteService
@@ -36,12 +42,34 @@ The risk engine is the final authority.
 Quant indicators are primary.
 Your role is to evaluate whether macro, geopolitical, FX, energy,
 political, regulatory, sector, earnings, revenue, flow, and event context
-should penalize or block new buy entries.
+should penalize new buy entries and, only in rare direct-severe cases,
+block new buy entries.
 
 Positive news must NOT directly approve a buy.
-Negative, uncertain, or unstable context may reduce score or block new buy entries.
+Negative, uncertain, or unstable context should normally reduce score via a
+graded entry_penalty and explain the caution.
 
-High or extreme event risk should block new buy entries.
+GPT advisory should not be the primary hard-block mechanism. For gate levels
+1-4, do not set hard_block_new_buy=true except for direct, severe, and
+immediate risks that should block all new buys regardless of quant strength.
+Broad macro, geopolitical, energy, rate, market-volatility, risk-off,
+sector uncertainty, or broad market selloff conditions must normally be
+represented as a graded entry_penalty between 20 and 70.
+
+Keep entry_penalty=999 extremely rare. If uncertain whether a risk deserves
+999, use 50 or 70 instead. Use 999 only for direct severe risks such as
+trading halt, bankruptcy or delisting risk, accounting fraud, severe
+regulatory action, existential lawsuit, severe liquidity or solvency concern,
+stale or invalid price/data that makes analysis unsafe, circuit-breaker-level
+panic, disorderly market conditions, or broker/market infrastructure issues.
+
+Do not use hard_block_new_buy for general caution. The risk engine already
+handles trade limits, session rules, position sizing, dry_run, kill_switch,
+duplicate orders, and broker permissions. Your role is to provide advisory
+scores and context.
+
+Always return numeric gpt_buy_score and gpt_sell_score when possible. A HOLD
+or cautious recommendation should still include numeric scores.
 Sell, stop-loss, take-profit, and risk-reduction actions must remain allowed.
 
 Default behavior:
@@ -141,7 +169,8 @@ Do not create a buy signal from positive news alone.
 
 If external context is favorable, entry_penalty may be low.
 If external context is mixed, apply moderate penalty.
-If external context is high risk, block new buy entries.
+If external context is high risk, apply a high advisory penalty such as 50 or
+70 unless there is a direct severe risk that truly justifies a hard block.
 Sell or exit actions must remain allowed.
 """
 
@@ -242,7 +271,8 @@ Do not create a buy signal from positive news alone.
 
 If external context is favorable, entry_penalty may be low.
 If external context is mixed, apply moderate penalty.
-If external context is high risk, block new buy entries.
+If external context is high risk, apply a high advisory penalty such as 50 or
+70 unless there is a direct severe risk that truly justifies a hard block.
 Sell or exit actions must remain allowed.
 """
 
@@ -250,10 +280,10 @@ RISK_LEVELS = {"unknown", "none", "low", "medium", "high", "extreme"}
 RISK_PENALTY = {
     "unknown": 0,
     "none": 0,
-    "low": 1,
-    "medium": 3,
-    "high": 6,
-    "extreme": 999,
+    "low": 10,
+    "medium": 20,
+    "high": 50,
+    "extreme": 70,
 }
 
 
@@ -430,6 +460,11 @@ class GPTMarketService:
                 "entry_bias": "neutral",
                 "entry_allowed": False,
                 "regime_confidence": 0.20,
+                "gpt_buy_score": 0.0,
+                "gpt_sell_score": 100.0,
+                "entry_penalty": 999,
+                "hard_block_new_buy": True,
+                "allow_sell_or_exit": True,
                 "hard_block_reason": "insufficient_indicators",
                 "hard_blocked": True,
                 "gating_notes": ["Insufficient indicator history"],
@@ -478,6 +513,11 @@ class GPTMarketService:
                 "entry_bias": "neutral",
                 "entry_allowed": False,
                 "regime_confidence": 0.30,
+                "gpt_buy_score": 20.0,
+                "gpt_sell_score": 80.0,
+                "entry_penalty": 70,
+                "hard_block_new_buy": False,
+                "allow_sell_or_exit": True,
                 "hard_block_reason": "extreme_bearish_regime",
                 "hard_blocked": True,
                 "gating_notes": notes + ["hard_block_extreme_bearish_regime"],
@@ -501,6 +541,11 @@ class GPTMarketService:
             "entry_bias": "long" if trend_up else "neutral",
             "entry_allowed": entry_allowed,
             "regime_confidence": regime_confidence,
+            "gpt_buy_score": round(max(0.0, min(regime_confidence * 100.0, 100.0)), 2),
+            "gpt_sell_score": round(max(0.0, min((1.0 - regime_confidence) * 100.0, 100.0)), 2),
+            "entry_penalty": 0,
+            "hard_block_new_buy": False,
+            "allow_sell_or_exit": True,
             "hard_block_reason": None,
             "hard_blocked": False,
             "gating_notes": notes,
@@ -540,14 +585,31 @@ class GPTMarketService:
             "scoring_rules": {
                 "quant_is_primary": True,
                 "gpt_is_risk_filter": True,
+                "gpt_advisory_not_primary_hard_block": True,
                 "positive_news_cannot_directly_approve_buy": True,
-                "negative_context_can_penalize_or_block_new_buy": True,
+                "negative_context_should_use_graded_penalty": True,
                 "sell_or_exit_must_remain_allowed": True,
+                "entry_penalty_scale": {
+                    "0": "no external penalty",
+                    "10": "mild caution",
+                    "20": "moderate caution",
+                    "30": "meaningful caution",
+                    "50": "high caution",
+                    "70": "severe caution; normally avoid entry unless setup is exceptional",
+                    "999": "true hard block only; almost never used",
+                },
+                "hard_block_new_buy_allowed_only_for": [
+                    "direct symbol trading halt, bankruptcy, delisting, accounting fraud, severe regulatory action, existential lawsuit, or severe liquidity/solvency risk",
+                    "stale or invalid price, impossible indicator values, or missing critical market data that makes the trade unsafe",
+                    "circuit-breaker-level crash, extreme disorderly market, or broker/market infrastructure issue",
+                    "direct, imminent, severe symbol or sector risk; broad headline risk is insufficient",
+                ],
+                "broad_macro_geopolitical_energy_risk_is_penalty_not_hard_block": True,
             },
             "required_output": {
                 "market_regime": ["unknown", "range", "trend", "volatile"],
                 "entry_bias": ["neutral", "long"],
-                "entry_allowed": "boolean; true only if quant-first fallback and event-risk filter both allow entry",
+                "entry_allowed": "boolean advisory; false may reduce confidence but should not be used as a hard block unless direct severe hard_block_new_buy is true",
                 "market_confidence": "number from 0 to 1",
                 "reason": "non-empty string, max 600 chars",
                 "market_risk_regime": ["risk_on", "neutral", "risk_off", "panic"],
@@ -563,9 +625,14 @@ class GPTMarketService:
                 "flow_signal": ["positive", "neutral", "negative", "unknown"],
                 "earnings_revision_signal": ["positive", "neutral", "negative", "unknown"],
                 "valuation_risk_level": ["none", "low", "medium", "high", "extreme"],
-                "entry_penalty": "integer from 0 to 30, or 999 for hard block",
-                "hard_block_new_buy": "boolean",
+                "entry_penalty": "integer, one of 0, 10, 20, 30, 50, 70, or 999; keep 999 extremely rare",
+                "hard_block_new_buy": "boolean; default false; only true for direct severe immediate risk",
                 "allow_sell_or_exit": "boolean; must always be true",
+                "gpt_buy_score": "number from 0 to 100; return whenever possible even for HOLD",
+                "gpt_sell_score": "number from 0 to 100; return whenever possible even for HOLD",
+                "confidence": "number from 0 to 1",
+                "risk_flags": "array of machine-readable strings",
+                "gating_notes": "array of concise notes",
             },
             "notes": {
                 "website_context_secondary": True,
@@ -754,12 +821,19 @@ class GPTMarketService:
             value = str(result.get(key, "unknown") or "unknown").strip().lower()
             result[key] = value if value in {"positive", "neutral", "negative", "unknown"} else "unknown"
 
+        severe_hard_block = true_severe_gpt_hard_block(result)
+        downgrade_note = advisory_downgrade_note(result)
         result["entry_penalty"] = self._normalized_entry_penalty(result)
-        if result["entry_penalty"] == 999 or result["event_risk_level"] == "extreme":
+        if should_apply_gpt_hard_block(result):
+            result["entry_penalty"] = 999
             result["hard_block_new_buy"] = True
             result["entry_allowed"] = False
-        elif result["hard_block_new_buy"]:
-            result["entry_allowed"] = False
+        elif result["hard_block_new_buy"] or result["entry_penalty"] >= 999:
+            result["entry_penalty"] = normalize_entry_penalty_level(
+                result["entry_penalty"],
+                severe=severe_hard_block,
+            )
+            result["hard_block_new_buy"] = False
 
         for score_key in ("gpt_buy_score", "gpt_sell_score", "ai_buy_score", "ai_sell_score"):
             if score_key in result:
@@ -781,6 +855,10 @@ class GPTMarketService:
                 result[list_key] = [str(raw)[:120]]
             else:
                 result[list_key] = []
+        if downgrade_note and downgrade_note not in result["gating_notes"]:
+            result["gating_notes"].append(downgrade_note)
+            if "gpt_hard_block_advisory" not in result["risk_flags"]:
+                result["risk_flags"].append("gpt_hard_block_advisory")
 
         reason = str(result.get("reason", "") or "").strip()
         result["reason"] = reason or "Model returned no reason."
@@ -803,20 +881,23 @@ class GPTMarketService:
             "valuation_risk_level",
             "event_risk_level",
         )
-        risk_penalties = [RISK_PENALTY.get(str(result.get(key, "none")).lower(), 0) for key in risk_keys]
-        if any(value >= 999 for value in risk_penalties) or penalty >= 999:
-            return 999
+        severe = true_severe_gpt_hard_block(result)
+        risk_penalties = [
+            RISK_PENALTY.get(str(result.get(key, "none")).lower(), 0)
+            for key in risk_keys
+        ]
 
         flow_signal = str(result.get("flow_signal", "unknown") or "unknown").lower()
         sector_trend = str(result.get("sector_fundamental_trend", "unknown") or "unknown").lower()
         revenue_trend = str(result.get("revenue_trend_context", "unknown") or "unknown").lower()
         earnings_signal = str(result.get("earnings_revision_signal", "unknown") or "unknown").lower()
-        context_penalty = sum(risk_penalties)
-        context_penalty += {"negative": 3, "neutral": 1, "unknown": 1, "positive": 0}.get(flow_signal, 0)
-        context_penalty += {"weakening": 3, "mixed": 2, "unknown": 1, "stable": 0, "improving": 0}.get(sector_trend, 0)
-        context_penalty += {"weakening": 3, "mixed": 2, "unknown": 1, "stable": 0, "improving": 0}.get(revenue_trend, 0)
-        context_penalty += {"negative": 3, "neutral": 1, "unknown": 1, "positive": 0}.get(earnings_signal, 0)
-        return max(0, min(max(penalty, context_penalty), 30))
+        context_penalty = max(risk_penalties or [0])
+        context_penalty += {"negative": 20, "neutral": 0, "unknown": 0, "positive": 0}.get(flow_signal, 0)
+        context_penalty += {"weakening": 20, "mixed": 10, "unknown": 0, "stable": 0, "improving": 0}.get(sector_trend, 0)
+        context_penalty += {"weakening": 20, "mixed": 10, "unknown": 0, "stable": 0, "improving": 0}.get(revenue_trend, 0)
+        context_penalty += {"negative": 20, "neutral": 0, "unknown": 0, "positive": 0}.get(earnings_signal, 0)
+        raw_penalty = max(penalty, context_penalty)
+        return normalize_entry_penalty_level(raw_penalty, severe=severe)
 
     def _clamp_float(self, value: Any, min_value: float, max_value: float) -> float:
         try:
@@ -839,7 +920,7 @@ class GPTMarketService:
         gpt_conf = float(result.get("market_confidence", 0) or 0)
         fallback_conf = float(fallback.get("regime_confidence", 0) or 0)
         entry_penalty = int(result.get("entry_penalty", 0) or 0)
-        penalty_confidence = 1.0 if entry_penalty >= 999 else min(entry_penalty, 30) / 100.0
+        penalty_confidence = 1.0 if entry_penalty >= 999 else min(entry_penalty, 70) / 100.0
         # GPT is a risk filter: it may lower but must not raise the quant-first fallback confidence.
         result["regime_confidence"] = round(max(0.0, min(fallback_conf, gpt_conf if gpt_conf > 0 else fallback_conf) - penalty_confidence), 4)
 
@@ -855,16 +936,16 @@ class GPTMarketService:
             hard_block_reason = "kill_switch_active"
 
         event_risk_level = str(result.get("event_risk_level", "none") or "none").lower()
-        if result.get("hard_block_new_buy"):
+        if result.get("hard_block_new_buy") and should_apply_gpt_hard_block(result):
             hard_block_reason = hard_block_reason or "gpt_hard_block_new_buy"
+        elif result.get("hard_block_new_buy"):
+            result["hard_block_new_buy"] = False
+            notes.append("gpt_hard_block_downgraded_to_advisory")
+
         if event_risk_level == "extreme":
-            result["hard_block_new_buy"] = True
-            hard_block_reason = hard_block_reason or "extreme_event_risk"
+            notes.append("extreme_event_risk_entry_penalty")
         elif event_risk_level == "high":
             notes.append("high_event_risk_entry_penalty")
-            if gate_level <= 2 or entry_penalty >= 6:
-                result["entry_allowed"] = False
-                result["entry_bias"] = "neutral"
 
         if hard_block_reason:
             result["entry_allowed"] = False

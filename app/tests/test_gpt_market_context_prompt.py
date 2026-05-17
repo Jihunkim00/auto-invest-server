@@ -49,11 +49,12 @@ def test_user_payload_is_market_aware_and_quant_first():
     assert '"market": "KR"' in user_prompt
     assert '"quant_is_primary": true' in user_prompt
     assert '"gpt_is_risk_filter": true' in user_prompt
+    assert '"gpt_advisory_not_primary_hard_block": true' in user_prompt
     assert '"positive_news_cannot_directly_approve_buy": true' in user_prompt
     assert '"allow_sell_or_exit"' in user_prompt
 
 
-def test_gpt_response_normalization_extreme_event_blocks_only_new_buy_and_clamps():
+def test_gpt_response_normalization_broad_extreme_risk_is_advisory_penalty():
     service = GPTMarketService()
 
     normalized = service._normalize_candidate(
@@ -62,22 +63,49 @@ def test_gpt_response_normalization_extreme_event_blocks_only_new_buy_and_clamps
             "entry_bias": "long",
             "entry_allowed": True,
             "confidence": 72,
+            "market_risk_regime": "risk_off",
+            "geopolitical_risk_level": "extreme",
+            "energy_risk_level": "high",
+            "macro_risk_level": "high",
+            "hard_block_new_buy": True,
             "event_risk_level": "extreme",
             "entry_penalty": 1200,
             "allow_sell_or_exit": True,
-            "reason": "Extreme macro event risk.",
+            "reason": "Broad macro, oil, and geopolitical headline risk.",
+        }
+    )
+
+    assert normalized["hard_block_new_buy"] is False
+    assert normalized["allow_sell_or_exit"] is True
+    assert normalized["market_confidence"] == 0.72
+    assert normalized["confidence"] == 0.72
+    assert normalized["entry_penalty"] == 70
+    assert "gpt_hard_block_downgraded_to_advisory" in normalized["gating_notes"]
+
+
+def test_gpt_response_normalization_true_severe_symbol_risk_allows_999():
+    service = GPTMarketService()
+
+    normalized = service._normalize_candidate(
+        {
+            "market_regime": "volatile",
+            "entry_bias": "neutral",
+            "entry_allowed": True,
+            "market_confidence": 0.7,
+            "event_risk_level": "extreme",
+            "entry_penalty": 999,
+            "hard_block_new_buy": True,
+            "allow_sell_or_exit": True,
+            "reason": "Direct severe symbol risk: trading halt after accounting fraud allegations.",
         }
     )
 
     assert normalized["hard_block_new_buy"] is True
     assert normalized["entry_allowed"] is False
-    assert normalized["allow_sell_or_exit"] is True
-    assert normalized["market_confidence"] == 0.72
-    assert normalized["confidence"] == 0.72
     assert normalized["entry_penalty"] == 999
 
 
-def test_guardrails_keep_sell_exit_allowed_when_event_risk_hard_blocks_entry():
+def test_guardrails_keep_broad_event_risk_as_advisory_and_sell_exit_allowed():
     service = GPTMarketService()
     normalized = service._normalize_candidate(
         {
@@ -85,9 +113,12 @@ def test_guardrails_keep_sell_exit_allowed_when_event_risk_hard_blocks_entry():
             "entry_bias": "long",
             "entry_allowed": True,
             "market_confidence": 0.9,
+            "market_risk_regime": "risk_off",
             "event_risk_level": "extreme",
+            "entry_penalty": 70,
+            "hard_block_new_buy": True,
             "allow_sell_or_exit": True,
-            "reason": "Extreme geopolitical risk.",
+            "reason": "Extreme geopolitical and energy headline risk without direct symbol impairment.",
         }
     )
 
@@ -103,9 +134,10 @@ def test_guardrails_keep_sell_exit_allowed_when_event_risk_hard_blocks_entry():
     )
 
     assert guarded["entry_allowed"] is False
-    assert guarded["hard_block_new_buy"] is True
-    assert guarded["hard_blocked"] is True
+    assert guarded["hard_block_new_buy"] is False
+    assert guarded["hard_blocked"] is False
     assert guarded["allow_sell_or_exit"] is True
+    assert guarded["hard_block_reason"] is None
 
 
 def test_required_output_includes_legacy_schema_and_new_risk_fields():
@@ -131,6 +163,11 @@ def test_required_output_includes_legacy_schema_and_new_risk_fields():
         "entry_penalty",
         "hard_block_new_buy",
         "allow_sell_or_exit",
+        "gpt_buy_score",
+        "gpt_sell_score",
+        "confidence",
+        "risk_flags",
+        "gating_notes",
     ):
         assert f'"{key}"' in user_prompt
 
@@ -144,8 +181,10 @@ def test_guardrails_override_gpt_attempt_to_block_sell_exit():
             "entry_allowed": True,
             "market_confidence": 0.9,
             "event_risk_level": "extreme",
+            "entry_penalty": 999,
+            "hard_block_new_buy": True,
             "allow_sell_or_exit": False,
-            "reason": "Extreme event risk.",
+            "reason": "Direct severe symbol risk: trading halt after bankruptcy filing.",
         }
     )
 

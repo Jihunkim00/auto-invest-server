@@ -3,15 +3,21 @@ from __future__ import annotations
 from typing import Any
 
 from app.core.constants import get_gate_profile
+from app.services.gpt_hard_block_policy import true_severe_gpt_hard_block
 
 _MARKET_RESEARCH_BLOCK_PHRASES = (
-    "entry is not allowed",
-    "entry not allowed",
-    "no strong long entry edge",
-    "does not support entry",
-    "lacks a clean long edge",
-    "block entry",
-    "blocked entry",
+    "trading halt",
+    "bankruptcy",
+    "delisting",
+    "accounting fraud",
+    "severe regulatory action",
+    "existential lawsuit",
+    "severe liquidity",
+    "solvency",
+    "stale price",
+    "invalid price",
+    "circuit breaker",
+    "disorderly market",
 )
 
 
@@ -93,11 +99,16 @@ def market_research_blocks_entry(
     entry_bias: object = "",
 ) -> bool:
     if hard_blocked or not entry_allowed:
-        return True
+        if hard_blocked:
+            return True
+        if true_severe_gpt_hard_block({"reason": reason}):
+            return True
 
     normalized_reason = str(reason or "").strip().lower()
     if any(phrase in normalized_reason for phrase in _MARKET_RESEARCH_BLOCK_PHRASES):
         return True
 
     normalized_bias = str(entry_bias or "").strip().lower()
-    return normalized_bias in {"hold", "avoid", "short", "blocked", "block_entry"}
+    return normalized_bias in {"blocked", "block_entry"} and true_severe_gpt_hard_block(
+        {"reason": reason, "entry_bias": normalized_bias}
+    )

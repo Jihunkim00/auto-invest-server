@@ -18,6 +18,7 @@ from app.core.constants import (
 )
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog
+from app.services.gpt_hard_block_policy import should_apply_gpt_hard_block
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import indicator_payload_is_quant_ready
 
@@ -674,11 +675,7 @@ class KisDryRunRiskService:
 
     @staticmethod
     def _gpt_blocks_entry(candidate: dict[str, Any]) -> bool:
-        flags = {item.lower() for item in _string_list(candidate.get("risk_flags"))}
-        hint = str(
-            candidate.get("gpt_action_hint") or candidate.get("action_hint") or ""
-        ).strip().lower()
-        return hint == "block_entry" or "gpt_blocked_entry" in flags
+        return should_apply_gpt_hard_block(candidate)
 
     @staticmethod
     def _blocked(
