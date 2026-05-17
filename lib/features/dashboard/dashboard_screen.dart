@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../core/utils/timestamp_formatter.dart';
+import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/portfolio_summary.dart';
+import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
-import 'widgets/last_run_summary_card.dart';
-import 'widgets/manual_trading_run_section.dart';
-import 'widgets/order_ticket_section.dart';
-import 'widgets/portfolio_snapshot_section.dart';
-import 'widgets/quick_actions_section.dart';
-import 'widgets/system_status_section.dart';
-import 'widgets/watchlist_section.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key, required this.controller});
@@ -20,111 +17,36 @@ class DashboardScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final runAction =
-            controller.hasLatestRunResult || controller.showingOfflineFallback
-                ? controller.runResult.action
-                : 'No run yet';
-        final modeBadgeText =
-            controller.selectedProvider == SelectedProvider.kis
-                ? 'KIS Preview / Manual Only'
-                : 'Paper Mode';
         return SafeArea(
           child: RefreshIndicator(
             onRefresh: controller.load,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text('Auto Invest Command Center',
-                    style: Theme.of(context).textTheme.headlineMedium),
-                const SizedBox(height: 4),
                 const Text(
-                    'Paper trading dashboard. Monitoring 50 watchlist symbols.',
-                    style: TextStyle(color: Colors.white70)),
-                const SizedBox(height: 10),
-                SegmentedButton<SelectedProvider>(
-                  segments: const [
-                    ButtonSegment(
-                      value: SelectedProvider.alpaca,
-                      label: Text('Alpaca / US'),
-                    ),
-                    ButtonSegment(
-                      value: SelectedProvider.kis,
-                      label: Text('KIS / KR'),
-                    ),
-                  ],
-                  selected: {controller.selectedProvider},
-                  onSelectionChanged: (v) => controller.setProvider(v.first),
+                  'Home',
+                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: 10),
-                Row(children: [
-                  StatusBadge(text: modeBadgeText, active: true),
-                  const SizedBox(width: 8),
-                  StatusBadge(
-                      text: runAction.isEmpty ? 'No run yet' : runAction,
-                      active: false,
-                      alert: runAction == 'hold'),
-                ]),
-                const SizedBox(height: 16),
-                LayoutBuilder(
-                  builder: (context, c) {
-                    final vertical = c.maxWidth < 900;
-                    if (vertical) {
-                      return Column(children: [
-                        SystemStatusSection(controller: controller),
-                        const SizedBox(height: 12),
-                        PortfolioSnapshotSection(controller: controller),
-                        const SizedBox(height: 12),
-                        if (controller.selectedProvider == SelectedProvider.kis)
-                          OrderTicketSection(controller: controller),
-                        const SizedBox(height: 12),
-                        WatchlistSection(controller: controller),
-                        const SizedBox(height: 12),
-                        LastRunSummaryCard(controller: controller),
-                        const SizedBox(height: 12),
-                        if (controller.selectedProvider ==
-                            SelectedProvider.alpaca)
-                          ManualTradingRunSection(controller: controller),
-                        const SizedBox(height: 12),
-                        QuickActionsSection(controller: controller),
-                      ]);
-                    }
-                    return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                              flex: 8,
-                              child: Column(children: [
-                                SystemStatusSection(controller: controller),
-                                const SizedBox(height: 12),
-                                PortfolioSnapshotSection(
-                                    controller: controller),
-                                const SizedBox(height: 12),
-                                if (controller.selectedProvider ==
-                                    SelectedProvider.kis)
-                                  OrderTicketSection(controller: controller),
-                                const SizedBox(height: 12),
-                                WatchlistSection(controller: controller),
-                                const SizedBox(height: 12),
-                                LastRunSummaryCard(controller: controller),
-                                const SizedBox(height: 12),
-                                if (controller.selectedProvider ==
-                                    SelectedProvider.alpaca)
-                                  ManualTradingRunSection(
-                                      controller: controller),
-                              ])),
-                          const SizedBox(width: 12),
-                          Expanded(
-                              flex: 4,
-                              child:
-                                  QuickActionsSection(controller: controller)),
-                        ]);
-                  },
+                const SizedBox(height: 6),
+                const Text(
+                  'Safety, next action, and recent activity at a glance.',
+                  style: TextStyle(color: Colors.white70),
                 ),
+                const SizedBox(height: 14),
+                _SafetySummary(controller: controller),
+                const SizedBox(height: 12),
+                _PortfolioSummaryCard(controller: controller),
+                const SizedBox(height: 12),
+                _NextActionCard(controller: controller),
+                const SizedBox(height: 12),
+                _RecentActivityCard(controller: controller),
                 if (controller.error != null) ...[
                   const SizedBox(height: 12),
-                  Text(controller.error!,
-                      style: const TextStyle(color: Colors.orangeAccent)),
-                ]
+                  Text(
+                    controller.error!,
+                    style: const TextStyle(color: Colors.orangeAccent),
+                  ),
+                ],
               ],
             ),
           ),
@@ -132,4 +54,322 @@ class DashboardScreen extends StatelessWidget {
       },
     );
   }
+}
+
+class _SafetySummary extends StatelessWidget {
+  const _SafetySummary({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final safety = controller.kisSafetyStatus;
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.health_and_safety_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Safety Summary',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          StatusBadge(
+            text: safety.killSwitch ? 'HALTED' : 'GUARDED',
+            active: !safety.killSwitch,
+            alert: safety.killSwitch,
+          ),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SafetyPill(
+            text: settings.dryRun ? 'Dry run ON' : 'Dry run OFF',
+            color: settings.dryRun ? Colors.lightBlueAccent : Colors.redAccent,
+          ),
+          _SafetyPill(
+            text: settings.killSwitch ? 'Kill switch ON' : 'Kill switch OFF',
+            color: settings.killSwitch ? Colors.redAccent : Colors.greenAccent,
+          ),
+          _SafetyPill(
+            text: safety.kisRealOrderEnabled
+                ? 'KIS real orders allowed'
+                : 'KIS real orders disabled',
+            color:
+                safety.kisRealOrderEnabled ? Colors.redAccent : Colors.white70,
+          ),
+          _SafetyPill(
+            text: controller.schedulerStatus.kr.realOrdersAllowed
+                ? 'KR scheduler real orders allowed'
+                : 'KR scheduler real orders disabled',
+            color: controller.schedulerStatus.kr.realOrdersAllowed
+                ? Colors.redAccent
+                : Colors.white70,
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _PortfolioSummaryCard extends StatelessWidget {
+  const _PortfolioSummaryCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final us = controller.usPortfolioSummary;
+    final kr = controller.krPortfolioSummary;
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.account_balance_wallet_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Portfolio Summary',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        LayoutBuilder(builder: (context, constraints) {
+          final vertical = constraints.maxWidth < 640;
+          final items = [
+            _PortfolioMarketSummary(label: 'US', summary: us),
+            _PortfolioMarketSummary(label: 'KR', summary: kr),
+          ];
+          if (vertical) {
+            return Column(
+              children: [
+                for (final item in items) ...[
+                  item,
+                  if (item != items.last) const SizedBox(height: 8),
+                ],
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: items[0]),
+              const SizedBox(width: 8),
+              Expanded(child: items[1]),
+            ],
+          );
+        }),
+      ]),
+    );
+  }
+}
+
+class _PortfolioMarketSummary extends StatelessWidget {
+  const _PortfolioMarketSummary({required this.label, required this.summary});
+
+  final String label;
+  final PortfolioSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final plColor = summary.totalUnrealizedPl > 0
+        ? Colors.greenAccent
+        : summary.totalUnrealizedPl < 0
+            ? Colors.redAccent
+            : Colors.white70;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label,
+            style: const TextStyle(
+                color: Colors.white70, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataLine(
+          label: 'Value',
+          value: _money(summary.totalMarketValue, summary.currency),
+        ),
+        _DataLine(
+          label: 'P/L',
+          value:
+              _money(summary.totalUnrealizedPl, summary.currency, signed: true),
+          color: plColor,
+        ),
+        _DataLine(
+          label: 'Held',
+          value: '${summary.positionsCount}',
+        ),
+      ]),
+    );
+  }
+}
+
+class _NextActionCard extends StatelessWidget {
+  const _NextActionCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final run = controller.runResult;
+    final hasRun =
+        controller.hasLatestRunResult || controller.showingOfflineFallback;
+    final candidate = run.finalBestCandidate.isEmpty
+        ? 'No candidate yet'
+        : run.finalBestCandidate;
+    final nextAction = _nextAction(controller);
+    final block = run.triggerBlockReason.isEmpty
+        ? 'No block reason'
+        : run.triggerBlockReason;
+
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.assistant_direction_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Next Action',
+                style: Theme.of(context).textTheme.titleMedium),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Text(
+          hasRun
+              ? nextAction
+              : 'Start a watchlist scan to find the next candidate.',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        _DataLine(label: 'Top candidate', value: candidate),
+        _DataLine(
+            label: 'Block reason', value: block, color: Colors.orangeAccent),
+      ]),
+    );
+  }
+}
+
+class _RecentActivityCard extends StatelessWidget {
+  const _RecentActivityCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final runs = controller.recentRuns.take(3).toList(growable: false);
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.timeline_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Recent Activity',
+                style: Theme.of(context).textTheme.titleMedium),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        if (runs.isEmpty)
+          const Text('No recent activity yet.',
+              style: TextStyle(color: Colors.white70))
+        else
+          for (final run in runs) _ActivityLine(run: run),
+      ]),
+    );
+  }
+}
+
+class _ActivityLine extends StatelessWidget {
+  const _ActivityLine({required this.run});
+
+  final TradingRun run;
+
+  @override
+  Widget build(BuildContext context) {
+    final action = run.action.isEmpty ? 'hold' : run.action;
+    final orderText =
+        run.orderId == null ? 'No order submitted.' : 'Order ${run.orderId}.';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        '${formatTimestampWithKst(run.timestamp)} - ${run.symbol}: $action. $orderText',
+        style: const TextStyle(color: Colors.white70),
+      ),
+    );
+  }
+}
+
+class _DataLine extends StatelessWidget {
+  const _DataLine({required this.label, required this.value, this.color});
+
+  final String label;
+  final String value;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 5),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(
+          width: 110,
+          child: Text(label, style: const TextStyle(color: Colors.white54)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(color: color ?? Colors.white),
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _SafetyPill extends StatelessWidget {
+  const _SafetyPill({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.34)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+String _nextAction(DashboardController controller) {
+  final run = controller.runResult;
+  if (controller.settings.killSwitch)
+    return 'Kill switch is ON. Keep trading halted.';
+  if (run.finalBestCandidate.isEmpty) return 'Run a watchlist scan.';
+  if (!run.finalEntryReady) return 'Review the block reason before any ticket.';
+  return 'Review ${run.finalBestCandidate} in Manual Order before any submit.';
+}
+
+String _money(double value, String currency, {bool signed = false}) {
+  final normalizedCurrency = currency.isEmpty ? 'USD' : currency;
+  final decimals = normalizedCurrency == 'KRW' ? 0 : 2;
+  final sign = signed && value > 0 ? '+' : '';
+  final amount = decimals == 0
+      ? value.round().toString()
+      : value.toStringAsFixed(decimals);
+  return '$normalizedCurrency $sign$amount';
 }

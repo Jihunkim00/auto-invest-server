@@ -48,10 +48,13 @@ void main() {
       ),
     ));
 
+    expect(find.text('Advanced Details'), findsOneWidget);
+    await tester.ensureVisible(find.text('Advanced Details'));
+    await tester.tap(find.text('Advanced Details'));
+    await tester.pumpAndSettle();
+
     expect(find.text('GPT Risk Context'), findsOneWidget);
     await tester.ensureVisible(find.text('GPT Risk Context'));
-    await tester.tap(find.text('GPT Risk Context'));
-    await tester.pumpAndSettle();
 
     expect(find.text('GPT Risk Filter'), findsOneWidget);
     expect(find.text('Market Risk'), findsOneWidget);

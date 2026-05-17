@@ -7,9 +7,18 @@ import '../../../models/portfolio_summary.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class PortfolioSnapshotSection extends StatelessWidget {
-  const PortfolioSnapshotSection({super.key, required this.controller});
+  const PortfolioSnapshotSection({
+    super.key,
+    required this.controller,
+    this.managementMode = false,
+    this.onOpenManualOrder,
+    this.onReviewPosition,
+  });
 
   final DashboardController controller;
+  final bool managementMode;
+  final VoidCallback? onOpenManualOrder;
+  final VoidCallback? onReviewPosition;
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +126,14 @@ class PortfolioSnapshotSection extends StatelessWidget {
           Column(children: [
             for (final position in summary.positions) ...[
               _PositionTile(
-                  position: position, currency: summary.currency, isKr: isKr),
+                controller: controller,
+                position: position,
+                currency: summary.currency,
+                isKr: isKr,
+                managementMode: managementMode,
+                onOpenManualOrder: onOpenManualOrder,
+                onReviewPosition: onReviewPosition,
+              ),
               if (position != summary.positions.last) const SizedBox(height: 8),
             ],
           ]),
@@ -194,18 +210,28 @@ class _MetricTile extends StatelessWidget {
 
 class _PositionTile extends StatelessWidget {
   const _PositionTile({
+    required this.controller,
     required this.position,
     required this.currency,
     required this.isKr,
+    required this.managementMode,
+    this.onOpenManualOrder,
+    this.onReviewPosition,
   });
 
+  final DashboardController controller;
   final PositionSummary position;
   final String currency;
   final bool isKr;
+  final bool managementMode;
+  final VoidCallback? onOpenManualOrder;
+  final VoidCallback? onReviewPosition;
 
   @override
   Widget build(BuildContext context) {
     final plColor = _valueColor(position.unrealizedPl);
+    final status = _positionStatus(position, isKr: isKr);
+    final reason = _positionStatusReason(position, isKr: isKr);
 
     return Container(
       width: double.infinity,
@@ -235,6 +261,8 @@ class _PositionTile extends StatelessWidget {
               ],
             ]),
           ),
+          const SizedBox(width: 8),
+          _SoftBadge(text: status, color: _positionStatusColor(status)),
           const SizedBox(width: 8),
           _SoftBadge(text: position.side.toUpperCase(), color: Colors.white70),
           const SizedBox(width: 8),
@@ -269,7 +297,33 @@ class _PositionTile extends StatelessWidget {
                   _positionProfitPercent(position, isKr: isKr),
                   signed: true),
               color: plColor),
+          _DataPair(label: 'Status reason', value: reason),
         ]),
+        if (managementMode) ...[
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            OutlinedButton.icon(
+              onPressed: onReviewPosition,
+              icon: const Icon(Icons.rate_review_outlined, size: 18),
+              label: const Text('Review'),
+            ),
+            if (isKr)
+              OutlinedButton.icon(
+                onPressed: () {
+                  final result =
+                      controller.prepareKisManualSellFromPosition(position);
+                  if (result.success) onOpenManualOrder?.call();
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(result.message),
+                    backgroundColor:
+                        result.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+                icon: const Icon(Icons.request_quote_outlined, size: 18),
+                label: const Text('Prepare Sell Ticket'),
+              ),
+          ]),
+        ],
       ]),
     );
   }
@@ -545,6 +599,38 @@ double? _positionProfitPercent(
       ? position.unrealizedPl
       : position.marketValue - position.costBasis;
   return unrealizedPl / position.costBasis;
+}
+
+String _positionStatus(PositionSummary position, {required bool isKr}) {
+  final profit = _positionProfitPercent(position, isKr: isKr);
+  if (profit == null) return 'MANUAL REVIEW';
+  if (profit <= -0.07) return 'STOP-LOSS WATCH';
+  if (profit <= -0.03) return 'REVIEW SELL';
+  if (profit >= 0.10) return 'TAKE-PROFIT WATCH';
+  return 'HOLD';
+}
+
+String _positionStatusReason(PositionSummary position, {required bool isKr}) {
+  final profit = _positionProfitPercent(position, isKr: isKr);
+  if (profit == null) return 'No reliable P/L percentage available.';
+  if (profit <= -0.07) return 'Loss is near the stop-loss review band.';
+  if (profit <= -0.03) return 'Position is down enough to review.';
+  if (profit >= 0.10) return 'Profit is high enough to review taking gains.';
+  return 'No sell review trigger from the portfolio view.';
+}
+
+Color _positionStatusColor(String status) {
+  switch (status) {
+    case 'STOP-LOSS WATCH':
+      return Colors.redAccent;
+    case 'REVIEW SELL':
+    case 'MANUAL REVIEW':
+      return Colors.amberAccent;
+    case 'TAKE-PROFIT WATCH':
+      return Colors.greenAccent;
+    default:
+      return Colors.lightBlueAccent;
+  }
 }
 
 String _quantity(double value) {

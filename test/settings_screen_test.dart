@@ -67,6 +67,25 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('settings do not expose dangerous KIS live enable toggles',
+      (tester) async {
+    final controller =
+        DashboardController(_SettingsFakeApiClient(), autoload: false);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(
+        find.widgetWithText(SwitchListTile, 'KIS live auto buy'), findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'KIS live auto sell'),
+        findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'Scheduler real orders'),
+        findsNothing);
+    expect(find.widgetWithText(SwitchListTile, 'Dry Run'), findsOneWidget);
+    expect(find.widgetWithText(SwitchListTile, 'Kill Switch'), findsOneWidget);
+
+    controller.dispose();
+  });
 }
 
 Widget _wrap(DashboardController controller) {

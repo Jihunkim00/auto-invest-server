@@ -6,9 +6,14 @@ import '../../../models/manual_trading_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class ManualTradingRunSection extends StatefulWidget {
-  const ManualTradingRunSection({super.key, required this.controller});
+  const ManualTradingRunSection({
+    super.key,
+    required this.controller,
+    this.onOpenManualOrder,
+  });
 
   final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
 
   @override
   State<ManualTradingRunSection> createState() =>
@@ -16,7 +21,7 @@ class ManualTradingRunSection extends StatefulWidget {
 }
 
 class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
-  static const _symbols = <String>[
+  static const _usSymbols = <String>[
     'AAPL',
     'MSFT',
     'NVDA',
@@ -31,13 +36,16 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
     'ARM',
     'SHOP',
   ];
+  static const _fallbackKrSymbols = <String>['005930', '000660', '035420'];
 
   late final TextEditingController _symbolController;
+  PortfolioMarket _market = PortfolioMarket.us;
+  String? _lastPreparedKisSymbol;
 
   @override
   void initState() {
     super.initState();
-    _symbolController = TextEditingController(text: _symbols.first);
+    _symbolController = TextEditingController(text: _usSymbols.first);
   }
 
   @override
@@ -50,16 +58,38 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final symbol = _normalizedSymbol;
-    final dropdownValue = _symbols.contains(symbol) ? symbol : null;
+    final symbols = _symbolsForMarket(controller);
+    final dropdownValue = symbols.contains(symbol) ? symbol : null;
+    final isKis = _market == PortfolioMarket.kr;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.play_circle_outline, size: 20),
           const SizedBox(width: 8),
-          Text('Manual Trading Run',
+          Text('Single Symbol Trading',
               style: Theme.of(context).textTheme.titleMedium),
         ]),
+        const SizedBox(height: 12),
+        SegmentedButton<PortfolioMarket>(
+          segments: const [
+            ButtonSegment(
+              value: PortfolioMarket.us,
+              label: Text('Alpaca Paper / US'),
+              icon: Icon(Icons.public, size: 16),
+            ),
+            ButtonSegment(
+              value: PortfolioMarket.kr,
+              label: Text('KIS / KR'),
+              icon: Icon(Icons.account_balance, size: 16),
+            ),
+          ],
+          selected: {_market},
+          onSelectionChanged: (selection) =>
+              _setMarket(selection.first, controller),
+        ),
+        const SizedBox(height: 10),
+        _ModeHelp(isKis: isKis),
         const SizedBox(height: 12),
         LayoutBuilder(builder: (context, constraints) {
           final vertical = constraints.maxWidth < 520;
@@ -68,7 +98,7 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
             initialValue: dropdownValue,
             decoration: const InputDecoration(
                 labelText: 'Symbol selector', border: OutlineInputBorder()),
-            items: _symbols
+            items: symbols
                 .map((symbol) =>
                     DropdownMenuItem(value: symbol, child: Text(symbol)))
                 .toList(),
@@ -86,7 +116,7 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
             controller: _symbolController,
             textCapitalization: TextCapitalization.characters,
             decoration: const InputDecoration(
-                labelText: 'Manual symbol', border: OutlineInputBorder()),
+                labelText: 'Symbol', border: OutlineInputBorder()),
             onChanged: (_) => setState(() {}),
           );
 
@@ -104,37 +134,70 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
           ]);
         }),
         const SizedBox(height: 12),
-        Text('Using Gate ${controller.selectedGateLevel}',
-            style: const TextStyle(color: Colors.white70)),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: controller.manualRunLoading || symbol.isEmpty
-              ? null
-              : () async {
-                  final confirmed = await _showConfirmDialog(
-                      context, symbol, controller.selectedGateLevel);
-                  if (!confirmed || !context.mounted) return;
-
-                  final result = await controller.runTradingOnce(
-                      symbol: symbol, gateLevel: controller.selectedGateLevel);
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(result.message),
-                    backgroundColor:
-                        result.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-          icon: controller.manualRunLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2.0))
-              : const Icon(Icons.play_arrow),
-          label: Text(controller.manualRunLoading
-              ? 'Running trading check...'
-              : 'Run Trading Once'),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 1, label: Text('Gate 1')),
+            ButtonSegment(value: 2, label: Text('Gate 2')),
+            ButtonSegment(value: 3, label: Text('Gate 3')),
+            ButtonSegment(value: 4, label: Text('Gate 4')),
+          ],
+          selected: {controller.selectedGateLevel},
+          onSelectionChanged: (selection) =>
+              controller.setSelectedGateLevel(selection.first),
         ),
-        if (controller.manualRunLoading) ...[
+        const SizedBox(height: 12),
+        isKis
+            ? FilledButton.icon(
+                onPressed: symbol.isEmpty
+                    ? null
+                    : () {
+                        final result =
+                            controller.prepareKisManualBuyTicketFromSymbol(
+                          symbol,
+                          gateLevel: controller.selectedGateLevel,
+                        );
+                        if (result.success) {
+                          setState(() => _lastPreparedKisSymbol = symbol);
+                          widget.onOpenManualOrder?.call();
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(result.message),
+                          backgroundColor:
+                              result.success ? Colors.green : Colors.redAccent,
+                        ));
+                      },
+                icon: const Icon(Icons.input),
+                label: const Text('Prepare Buy Ticket'),
+              )
+            : FilledButton.icon(
+                onPressed: controller.manualRunLoading || symbol.isEmpty
+                    ? null
+                    : () async {
+                        final confirmed = await _showConfirmDialog(
+                            context, symbol, controller.selectedGateLevel);
+                        if (!confirmed || !context.mounted) return;
+
+                        final result = await controller.runTradingOnce(
+                            symbol: symbol,
+                            gateLevel: controller.selectedGateLevel);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(result.message),
+                          backgroundColor:
+                              result.success ? Colors.green : Colors.redAccent,
+                        ));
+                      },
+                icon: controller.manualRunLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.0))
+                    : const Icon(Icons.play_arrow),
+                label: Text(controller.manualRunLoading
+                    ? 'Running single symbol...'
+                    : 'Run Single Symbol'),
+              ),
+        if (!isKis && controller.manualRunLoading) ...[
           const SizedBox(height: 10),
           Row(children: [
             const SizedBox(
@@ -147,15 +210,50 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
                     'Running trading check for ${controller.manualRunSymbol ?? symbol}...')),
           ]),
         ],
-        if (controller.manualRunResult != null) ...[
+        if (!isKis && controller.manualRunResult != null) ...[
           const SizedBox(height: 12),
           _ManualRunResultPanel(result: controller.manualRunResult!),
+        ],
+        if (isKis &&
+            _lastPreparedKisSymbol != null &&
+            controller.orderTicketSourceMetadata?['source'] ==
+                'single_symbol_trading') ...[
+          const SizedBox(height: 12),
+          _KisPreparedTicketPanel(
+            symbol: _lastPreparedKisSymbol!,
+            gateLevel: controller.selectedGateLevel,
+          ),
         ],
       ]),
     );
   }
 
   String get _normalizedSymbol => _symbolController.text.trim().toUpperCase();
+
+  List<String> _symbolsForMarket(DashboardController controller) {
+    if (_market == PortfolioMarket.us) return _usSymbols;
+    final symbols = controller.krWatchlist.symbols
+        .map((item) => item.symbol.trim().toUpperCase())
+        .where((symbol) => symbol.isNotEmpty)
+        .toList();
+    if (symbols.isEmpty) return _fallbackKrSymbols;
+    for (final symbol in _fallbackKrSymbols) {
+      if (!symbols.contains(symbol)) symbols.add(symbol);
+    }
+    return symbols;
+  }
+
+  void _setMarket(PortfolioMarket market, DashboardController controller) {
+    if (_market == market) return;
+    setState(() {
+      _market = market;
+      final nextSymbol = _symbolsForMarket(controller).first;
+      _symbolController.value = TextEditingValue(
+        text: nextSymbol,
+        selection: TextSelection.collapsed(offset: nextSymbol.length),
+      );
+    });
+  }
 
   Future<bool> _showConfirmDialog(
       BuildContext context, String symbol, int gateLevel) async {
@@ -209,6 +307,34 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
       },
     );
     return confirmed == true;
+  }
+}
+
+class _ModeHelp extends StatelessWidget {
+  const _ModeHelp({required this.isKis});
+
+  final bool isKis;
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = isKis
+        ? const [
+            'Manual Order only',
+            'No KIS live submit here',
+            'confirm_live remains unchecked',
+          ]
+        : const [
+            'Uses existing risk engine',
+            'Paper order may be created if risk-approved',
+            'HOLD is normal',
+          ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final label in labels) _SafetyBadge(text: label),
+      ],
+    );
   }
 }
 
@@ -273,7 +399,7 @@ class _ManualRunResultPanel extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Manual Run Result',
+        const Text('Result Summary',
             style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         _DecisionSummary(result: result),
@@ -286,23 +412,30 @@ class _ManualRunResultPanel extends StatelessWidget {
           child: _ScoreBreakdown(result: result),
         ),
         _ResultExpansion(
-          title: 'Quant / AI Reason',
-          child: _ReasonDetails(result: result),
+          title: 'Advanced Details',
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _ReasonDetails(result: result),
+            if (result.gptContext.hasDetails) ...[
+              const SizedBox(height: 10),
+              const Text('GPT Risk Context',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              GptRiskContextDetails(
+                context: result.gptContext,
+                title: 'GPT Risk Filter',
+              ),
+            ],
+            if (result.indicatorPayload.isNotEmpty ||
+                result.rawIndicatorPayload != null) ...[
+              const SizedBox(height: 10),
+              const Text('Indicator Details',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              _IndicatorDetails(result: result),
+            ],
+          ]),
         ),
-        if (result.gptContext.hasDetails)
-          _ResultExpansion(
-            title: 'GPT Risk Context',
-            child: GptRiskContextDetails(
-              context: result.gptContext,
-              title: 'GPT Risk Filter',
-            ),
-          ),
-        if (result.indicatorPayload.isNotEmpty ||
-            result.rawIndicatorPayload != null)
-          _ResultExpansion(
-            title: 'Indicator Details',
-            child: _IndicatorDetails(result: result),
-          ),
       ]),
     );
   }
@@ -333,6 +466,10 @@ class _DecisionSummary extends StatelessWidget {
       ]),
       const SizedBox(height: 10),
       _ResultRow('symbol', result.symbol),
+      _ResultRow('action', result.action.toLowerCase()),
+      _ResultRow('signal status', result.displayStatus),
+      _ResultRow('approved_by_risk',
+          (result.approvedByRisk ?? result.riskApproved ?? false).toString()),
       _ResultRow('order', result.displayOrderId),
       _ResultRow('gate', result.gateLabel),
       if (result.createdAt != null) _ResultRow('created_at', result.createdAt!),
@@ -439,6 +576,9 @@ class _ScoreBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = <_MetricValue>[
+      _MetricValue('Quant Score', result.quantBuyScore ?? result.buyScore),
+      _MetricValue('AI Score', result.aiBuyScore),
+      _MetricValue('Final Score', result.finalBuyScore ?? result.buyScore),
       _MetricValue('Buy Score', result.buyScore),
       _MetricValue('Sell Score', result.sellScore),
       _MetricValue('Final Buy', result.finalBuyScore),
@@ -457,6 +597,51 @@ class _ScoreBreakdown extends StatelessWidget {
           .map((metric) => _MiniMetricCard(
               label: metric.label, value: _formatNullable(metric.value)))
           .toList(),
+    );
+  }
+}
+
+class _KisPreparedTicketPanel extends StatelessWidget {
+  const _KisPreparedTicketPanel({
+    required this.symbol,
+    required this.gateLevel,
+  });
+
+  final String symbol;
+  final int gateLevel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.20),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Result Summary',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 10),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _DecisionBadge(text: 'BUY TICKET', color: Colors.lightBlueAccent),
+          _DecisionBadge(text: 'MANUAL REVIEW', color: Colors.amberAccent),
+          _DecisionBadge(text: 'NO SUBMIT', color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 10),
+        _ResultRow('symbol', symbol),
+        const _ResultRow('action', 'buy'),
+        const _ResultRow('signal status', 'manual_review'),
+        const _ResultRow('approved_by_risk', 'false'),
+        const _ResultRow('order', 'No order created'),
+        _ResultRow('gate', 'Gate $gateLevel'),
+        const SizedBox(height: 8),
+        const Text(
+          'KIS live submit is only available from Manual Order after validation and an explicit confirm_live check.',
+          style: TextStyle(color: Colors.white70),
+        ),
+      ]),
     );
   }
 }
