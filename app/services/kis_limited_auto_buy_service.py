@@ -15,6 +15,7 @@ from app.brokers.kis_client import KisClient
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, SignalLog, TradeRunLog
+from app.services.gpt_hard_block_policy import should_apply_gpt_hard_block
 from app.services.kis_buy_shadow_decision_service import (
     MODE as SHADOW_BUY_MODE,
     KisBuyShadowDecisionService,
@@ -1205,19 +1206,7 @@ def _account_equity(account_state: dict[str, Any]) -> float | None:
 
 
 def _gpt_hard_block(candidate: dict[str, Any]) -> bool:
-    if candidate.get("hard_blocked") is True:
-        return True
-    hard_reason = str(candidate.get("hard_block_reason") or "").strip()
-    if hard_reason:
-        return True
-    flags = {item.lower() for item in _string_list(candidate.get("risk_flags"))}
-    context = candidate.get("gpt_context") if isinstance(candidate.get("gpt_context"), dict) else {}
-    return (
-        "gpt_hard_block_new_buy" in flags
-        or "hard_block_new_buy" in flags
-        or "gpt_blocked_entry" in flags
-        or context.get("hard_block_new_buy") is True
-    )
+    return should_apply_gpt_hard_block(candidate)
 
 
 def _normalize_position(item: Any) -> dict[str, Any]:

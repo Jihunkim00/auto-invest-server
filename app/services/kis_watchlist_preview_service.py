@@ -41,6 +41,7 @@ KR/KIS market risk checklist for advisory-only preview:
 - Sector fundamental/revenue trend for the symbol's core business.
 - Company event risk including earnings shock, guidance cut, capital increase, lawsuit, accounting issue, supply disruption, customer concentration, block sale, and lock-up expiration.
 Use these only as risk adjustments. Positive news cannot create a buy signal alone. Negative context may reduce ai_buy_score or add risk_flags/gating_notes. Do not approve real orders.
+GPT advisory is not a primary hard-block mechanism. Broad macro, geopolitical, energy, FX, volatility, or risk-off conditions should normally be reflected as graded caution and lower advisory scores, not hard_block_reason. Reserve hard_block_reason for direct, severe, immediate risks such as trading halt, bankruptcy/delisting risk, accounting fraud, severe regulatory action, existential lawsuit, stale/invalid price data, circuit-breaker-level panic, disorderly market, or broker/market infrastructure issues.
 """
 
 
@@ -1014,6 +1015,13 @@ class KisPreviewGptAdvisor:
             "primarily on news sentiment.\n"
             "Do not approve real trading, do not produce order payloads, and "
             "do not write buy/sell as executable instructions.\n"
+            "Do not use hard_block_reason for general caution. Broad KR macro, "
+            "FX, geopolitical, energy, volatility, or risk-off context should "
+            "be advisory only through lower scores, risk_flags, and "
+            "gating_notes. Reserve hard_block_reason for direct severe and "
+            "immediate risks such as trading halt, bankruptcy, delisting, "
+            "accounting fraud, severe regulatory action, stale/invalid price "
+            "data, circuit-breaker-level panic, or infrastructure issues.\n"
             "If indicators are missing, say analysis is limited. If market is "
             "closed or holiday, mention it. Since KR trading is disabled, "
             "entry_ready and trade_allowed must be false.\n"
@@ -1067,6 +1075,7 @@ class KisPreviewGptAdvisor:
                     "Return gpt_reason in Korean.",
                     "Keep risk_flags, gating_notes, hard_block_reason, action, and action_hint machine-readable in English.",
                     "Do not treat upcoming earnings as bullish.",
+                    "Do not set hard_block_reason for broad macro, FX, geopolitical, energy, volatility, or risk-off caution.",
                 ],
         }
         if event_context:
