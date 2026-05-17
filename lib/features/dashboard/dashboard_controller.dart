@@ -612,6 +612,51 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  ActionResult prepareKisManualBuyTicketFromSymbol(
+    String symbol, {
+    int? gateLevel,
+  }) {
+    final normalizedSymbol = symbol.trim().toUpperCase();
+    if (normalizedSymbol.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'Enter a KIS symbol before preparing a ticket.',
+      );
+    }
+
+    selectedOrderMarket = PortfolioMarket.kr;
+    orderTicketSymbol = normalizedSymbol;
+    orderTicketSide = 'buy';
+    if (orderTicketQty <= 0 || parsedOrderTicketQty == null) {
+      orderTicketQty = 1;
+      orderTicketQtyInput = '1';
+    }
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata = {
+      'source': 'single_symbol_trading',
+      'source_type': 'manual_buy_ticket_prefill',
+      'symbol': normalizedSymbol,
+      if (gateLevel != null) 'gate_level': gateLevel,
+      'manual_confirm_required': true,
+      'auto_buy_enabled': false,
+      'scheduler_real_order_enabled': false,
+      'real_order_submit_allowed': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
+    notifyListeners();
+    return const ActionResult(
+      success: true,
+      message:
+          'Manual buy ticket prepared. Validate and confirm in Manual Order before submit.',
+    );
+  }
+
   ActionResult prepareKisManualSellFromPosition(PositionSummary position) {
     final symbol = position.symbol.trim();
     final qty = position.qty.floor();

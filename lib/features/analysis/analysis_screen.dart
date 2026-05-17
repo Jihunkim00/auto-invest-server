@@ -3,14 +3,20 @@ import 'package:flutter/material.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/candidate.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../dashboard/widgets/manual_trading_run_section.dart';
 import 'widgets/analysis_metrics_section.dart';
 import 'widgets/candidate_card.dart';
 import 'widgets/final_candidate_section.dart';
 
 class AnalysisScreen extends StatelessWidget {
-  const AnalysisScreen({super.key, required this.controller});
+  const AnalysisScreen({
+    super.key,
+    required this.controller,
+    this.onOpenManualOrder,
+  });
 
   final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +41,11 @@ class AnalysisScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _DecisionSummaryCard(controller: controller),
+              const SizedBox(height: 12),
+              ManualTradingRunSection(
+                controller: controller,
+                onOpenManualOrder: onOpenManualOrder,
+              ),
               const SizedBox(height: 12),
               if (!hasDisplayRun)
                 const SectionCard(

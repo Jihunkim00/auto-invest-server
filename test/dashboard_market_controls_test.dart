@@ -275,6 +275,7 @@ void main() {
     expect(find.text('Watchlist Symbols'), findsOneWidget);
     expect(find.text('Start Scan'), findsOneWidget);
     expect(find.text('Refresh'), findsOneWidget);
+    expect(find.text('Run Single Symbol'), findsNothing);
     expect(find.text('Validate'), findsNothing);
     expect(find.text('Submit'), findsNothing);
     expect(find.text('Live Submit'), findsNothing);
@@ -291,6 +292,7 @@ void main() {
     expect(find.text('Start Scan'), findsOneWidget);
     expect(find.text('Refresh'), findsOneWidget);
     expect(find.text('Run KIS Preview'), findsNothing);
+    expect(find.text('Run Single Symbol'), findsNothing);
 
     await tester.tap(find.text('Start Scan'));
     await tester.pumpAndSettle();

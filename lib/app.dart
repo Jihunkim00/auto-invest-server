@@ -54,7 +54,10 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
               onOpenManualOrder: () => _selectTab(3),
             ),
             ManualOrderScreen(controller: _controller),
-            AnalysisScreen(controller: _controller),
+            AnalysisScreen(
+              controller: _controller,
+              onOpenManualOrder: () => _selectTab(3),
+            ),
             LogsScreen(controller: _controller),
             SettingsScreen(controller: _controller),
             TestLabScreen(controller: _controller),
