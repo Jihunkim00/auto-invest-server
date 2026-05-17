@@ -95,6 +95,12 @@ class ManualTradingRunResult {
     final run = _asMap(json['run']);
     final order = _asMap(payload['order']);
     final risk = _asMap(payload['risk']);
+    final signal = _asMap(payload['signal']);
+    final scores = _asMap(payload['scores']);
+    final signalScores = _asMap(signal['scores']);
+    final gptContextMap = _asMap(
+      json['gpt_context'] ?? payload['gpt_context'] ?? signal['gpt_context'],
+    );
     final indicators = _parseIndicatorPayload(
       payload['indicator_payload'] ?? json['indicator_payload'],
     );
@@ -116,14 +122,22 @@ class ManualTradingRunResult {
       gateLevel: _intValue(json['gate_level'] ?? payload['gate_level']),
       gateProfileName: _nullableString(
           json['gate_profile_name'] ?? payload['gate_profile_name']),
-      action: _stringValue(payload['action'] ?? json['action'],
+      action: _stringValue(
+          payload['action'] ?? signal['action'] ?? json['action'],
           fallback: 'unknown'),
-      reason: _stringValue(payload['reason'] ?? json['reason'] ?? run['reason'],
+      reason: _stringValue(
+          payload['reason'] ??
+              signal['reason'] ??
+              json['reason'] ??
+              run['reason'],
           fallback: ''),
-      quantReason:
-          _nullableString(json['quant_reason'] ?? payload['quant_reason']),
-      aiReason: _nullableString(json['ai_reason'] ?? payload['ai_reason']),
-      signalId: _nullableString(json['signal_id'] ?? payload['signal_id']),
+      quantReason: _nullableString(json['quant_reason'] ??
+          payload['quant_reason'] ??
+          signal['quant_reason']),
+      aiReason: _nullableString(
+          json['ai_reason'] ?? payload['ai_reason'] ?? signal['ai_reason']),
+      signalId: _nullableString(
+          json['signal_id'] ?? payload['signal_id'] ?? signal['signal_id']),
       relatedOrderId: relatedOrderId,
       orderId: orderId,
       riskApproved: riskApproved,
@@ -138,27 +152,63 @@ class ManualTradingRunResult {
           fallback: 'unknown'),
       runResult: _nullableString(run['result'] ?? json['result']),
       runReason: _nullableString(run['reason'] ?? json['reason']),
-      signalStatus:
-          _nullableString(json['signal_status'] ?? payload['signal_status']),
-      buyScore: _doubleValue(json['buy_score'] ?? payload['buy_score']),
-      sellScore: _doubleValue(json['sell_score'] ?? payload['sell_score']),
-      confidence: _doubleValue(json['confidence'] ?? payload['confidence']),
+      signalStatus: _nullableString(json['signal_status'] ??
+          payload['signal_status'] ??
+          signal['status']),
+      buyScore: _doubleValue(json['buy_score'] ??
+          payload['buy_score'] ??
+          scores['buy_score'] ??
+          signalScores['buy_score']),
+      sellScore: _doubleValue(json['sell_score'] ??
+          payload['sell_score'] ??
+          scores['sell_score'] ??
+          signalScores['sell_score']),
+      confidence: _doubleValue(json['confidence'] ??
+          payload['confidence'] ??
+          scores['confidence'] ??
+          signalScores['confidence'] ??
+          signal['confidence']),
       regimeConfidence: _doubleValue(
         json['regime_confidence'] ??
             payload['regime_confidence'] ??
             payload['gpt_market_confidence'],
       ),
-      quantBuyScore:
-          _doubleValue(json['quant_buy_score'] ?? payload['quant_buy_score']),
-      quantSellScore:
-          _doubleValue(json['quant_sell_score'] ?? payload['quant_sell_score']),
-      aiBuyScore: _doubleValue(json['ai_buy_score'] ?? payload['ai_buy_score']),
-      aiSellScore:
-          _doubleValue(json['ai_sell_score'] ?? payload['ai_sell_score']),
-      finalBuyScore:
-          _doubleValue(json['final_buy_score'] ?? payload['final_buy_score']),
-      finalSellScore:
-          _doubleValue(json['final_sell_score'] ?? payload['final_sell_score']),
+      quantBuyScore: _doubleValue(json['quant_buy_score'] ??
+          payload['quant_buy_score'] ??
+          scores['quant_buy_score'] ??
+          signalScores['quant_buy_score'] ??
+          signal['quant_buy_score']),
+      quantSellScore: _doubleValue(json['quant_sell_score'] ??
+          payload['quant_sell_score'] ??
+          scores['quant_sell_score'] ??
+          signalScores['quant_sell_score'] ??
+          signal['quant_sell_score']),
+      aiBuyScore: _doubleValue(json['ai_buy_score'] ??
+          payload['ai_buy_score'] ??
+          scores['ai_buy_score'] ??
+          scores['gpt_buy_score'] ??
+          signalScores['ai_buy_score'] ??
+          signalScores['gpt_buy_score'] ??
+          gptContextMap['gpt_buy_score'] ??
+          signal['ai_buy_score']),
+      aiSellScore: _doubleValue(json['ai_sell_score'] ??
+          payload['ai_sell_score'] ??
+          scores['ai_sell_score'] ??
+          scores['gpt_sell_score'] ??
+          signalScores['ai_sell_score'] ??
+          signalScores['gpt_sell_score'] ??
+          gptContextMap['gpt_sell_score'] ??
+          signal['ai_sell_score']),
+      finalBuyScore: _doubleValue(json['final_buy_score'] ??
+          payload['final_buy_score'] ??
+          scores['final_buy_score'] ??
+          signalScores['final_buy_score'] ??
+          signal['final_buy_score']),
+      finalSellScore: _doubleValue(json['final_sell_score'] ??
+          payload['final_sell_score'] ??
+          scores['final_sell_score'] ??
+          signalScores['final_sell_score'] ??
+          signal['final_sell_score']),
       riskFlags: _stringList(json['risk_flags'] ?? payload['risk_flags']),
       gatingNotes: _stringList(json['gating_notes'] ?? payload['gating_notes']),
       indicatorPayload: indicators.map,
@@ -168,25 +218,26 @@ class ManualTradingRunResult {
       hardBlocked:
           _boolValue(json['hard_blocked'] ?? payload['hard_blocked']) ?? false,
       createdAt: _nullableString(json['created_at'] ?? payload['created_at']),
-      gptContext: GptRiskContext.fromJson(
-        json['gpt_context'] ?? payload['gpt_context'],
-      ),
+      gptContext: GptRiskContext.fromJson(gptContextMap),
     );
   }
 
   static Map<String, dynamic> _asMap(Object? value) {
     if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
     return <String, dynamic>{};
   }
 
   static String _stringValue(Object? value, {required String fallback}) {
-    final stringValue = value?.toString();
-    if (stringValue == null || stringValue.isEmpty) return fallback;
+    final stringValue = value?.toString().trim();
+    if (stringValue == null || stringValue.isEmpty || stringValue == 'null') {
+      return fallback;
+    }
     return stringValue;
   }
 
   static String? _nullableString(Object? value) {
-    final stringValue = value?.toString();
+    final stringValue = value?.toString().trim();
     if (stringValue == null || stringValue.isEmpty || stringValue == 'null') {
       return null;
     }
@@ -195,12 +246,16 @@ class ManualTradingRunResult {
 
   static int _intValue(Object? value) {
     if (value is num) return value.toInt();
-    return int.tryParse(value?.toString() ?? '') ?? 0;
+    final text = value?.toString().trim().replaceAll(',', '');
+    if (text == null || text.isEmpty || text == 'null') return 0;
+    return int.tryParse(text) ?? double.tryParse(text)?.toInt() ?? 0;
   }
 
   static double? _doubleValue(Object? value) {
     if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '');
+    final text = value?.toString().trim().replaceAll(',', '');
+    if (text == null || text.isEmpty || text == 'null') return null;
+    return double.tryParse(text);
   }
 
   static bool? _boolValue(Object? value) {

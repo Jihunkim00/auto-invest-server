@@ -409,7 +409,8 @@ void main() {
 
   testWidgets('Watchlist Start Scan shows Alpaca summary and no order created',
       (tester) async {
-    final api = _FakeApiClient(runWatchlistDelay: const Duration(milliseconds: 50));
+    final api =
+        _FakeApiClient(runWatchlistDelay: const Duration(milliseconds: 50));
     final controller = DashboardController(api, autoload: false)
       ..usWatchlist = _usWatchlist
       ..krWatchlist = _krWatchlist;
@@ -435,6 +436,162 @@ void main() {
     expect(find.text('not ready'), findsNWidgets(2));
 
     controller.dispose();
+  });
+
+  testWidgets('Watchlist Start Scan renders realistic result summary in place',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 1800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        aiBuyScore: 68,
+        aiSellScore: 21,
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(api.lastProvider, 'alpaca');
+    expect(find.text('AAPL'), findsWidgets);
+    expect(find.text('RUN RESULT'), findsOneWidget);
+    expect(find.text('blocked'), findsWidgets);
+    expect(find.text('SCORE'), findsWidgets);
+    expect(find.text('74'), findsWidgets);
+    expect(find.text('CONFIDENCE'), findsWidgets);
+    expect(find.text('0.81'), findsOneWidget);
+    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('68'), findsOneWidget);
+    expect(find.text('GPT/AI SELL'), findsOneWidget);
+    expect(find.text('21'), findsOneWidget);
+    expect(find.text('No order created'), findsOneWidget);
+    expect(find.textContaining('market_closed'), findsWidgets);
+    expect(find.text('Advanced Details'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist skipped result renders no-order and block reason',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        result: 'skipped',
+        blockReason: 'risk_gate_blocked',
+        aiBuyScore: 63,
+        aiSellScore: 19,
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('skipped'), findsWidgets);
+    expect(find.text('No order created'), findsOneWidget);
+    expect(find.textContaining('risk_gate_blocked'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist no-candidate result still shows skipped summary',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _noCandidateWatchlistPayload(),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No top candidate'), findsOneWidget);
+    expect(find.text('No order created'), findsOneWidget);
+    expect(find.textContaining('all_candidates_blocked'), findsWidgets);
+    expect(
+        find.text('No top candidate yet. Start a scan to rank the watchlist.'),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist GPT score fallback is explicit when absent',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        aiBuyScore: null,
+        aiSellScore: null,
+        buyScore: null,
+        sellScore: null,
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('GPT/AI SELL'), findsOneWidget);
+    expect(find.text('No GPT score returned'), findsNWidgets(2));
+
+    controller.dispose();
+  });
+
+  test('WatchlistRunResult parses final_best_candidate map and list fallback',
+      () {
+    final fromMap = WatchlistRunResult.fromJson(
+      _realisticWatchlistPayload(aiBuyScore: 68, aiSellScore: 21),
+    );
+
+    expect(fromMap.finalBestCandidate, 'AAPL');
+    expect(fromMap.finalRankedCandidates.single.finalEntryScore, 74);
+    expect(fromMap.finalRankedCandidates.single.aiBuyScore, 68);
+    expect(fromMap.finalRankedCandidates.single.softEntryAllowed, isFalse);
+    expect(fromMap.finalRankedCandidates.single.noOrderReason,
+        'risk gate blocked order creation');
+
+    final fromList = WatchlistRunResult.fromJson({
+      ..._realisticWatchlistPayload(aiBuyScore: 64, aiSellScore: 18),
+      'final_ranked_candidates': null,
+      'final_best_candidate': [
+        _realisticCandidatePayload(aiBuyScore: 64, aiSellScore: 18),
+      ],
+    });
+
+    expect(fromList.finalBestCandidate, 'AAPL');
+    expect(fromList.finalRankedCandidates, hasLength(1));
+    expect(fromList.finalRankedCandidates.single.finalEntryScore, 74);
+    expect(fromList.finalRankedCandidates.single.aiSellScore, 18);
   });
 
   testWidgets('Watchlist Refresh reloads watchlist and latest run summary',
@@ -925,6 +1082,7 @@ bool _filledButtonEnabled(WidgetTester tester, String label) {
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.scoredPreview = false,
+    this.watchlistPayload,
     this.syncOpenCount,
     this.orders = const [],
     this.refreshedOrders,
@@ -948,6 +1106,7 @@ class _FakeApiClient extends ApiClient {
   });
 
   final bool scoredPreview;
+  final Map<String, dynamic>? watchlistPayload;
   final int? syncOpenCount;
   final List<KisManualOrderResult> orders;
   final List<KisManualOrderResult>? refreshedOrders;
@@ -1147,6 +1306,10 @@ class _FakeApiClient extends ApiClient {
   }) async {
     lastProvider = provider;
     lastGateLevel = gateLevel;
+
+    if (watchlistPayload != null) {
+      return WatchlistRunResult.fromJson(watchlistPayload!);
+    }
 
     if (provider.trim().toLowerCase() == 'kis') {
       return runKisWatchlistPreview(gateLevel: gateLevel);
@@ -1387,6 +1550,95 @@ const _krWatchlist = MarketWatchlist(
     WatchlistSymbol(symbol: '005930', name: _samsungName, market: 'KOSPI'),
   ],
 );
+
+Map<String, dynamic> _realisticCandidatePayload({
+  String result = 'blocked',
+  String blockReason = 'market_closed',
+  double? aiBuyScore,
+  double? aiSellScore,
+  double? buyScore,
+  double? sellScore,
+}) {
+  return {
+    'symbol': 'AAPL',
+    'action': 'hold',
+    'action_hint': 'watch',
+    'entry_ready': false,
+    'trade_allowed': false,
+    'soft_entry_allowed': false,
+    'block_reason': blockReason,
+    'reason': 'Entry blocked by $blockReason',
+    'final_entry_score': '74',
+    'final_score': 74,
+    'final_buy_score': 72,
+    'final_sell_score': 18,
+    'buy_score': buyScore,
+    'sell_score': sellScore,
+    'ai_buy_score': aiBuyScore,
+    'ai_sell_score': aiSellScore,
+    'quant_buy_score': 70,
+    'quant_sell_score': 16,
+    'confidence': '0.81',
+    'order_id': null,
+    'result': result,
+    'status': result,
+    'skip_reason': blockReason,
+    'no_order_reason': 'risk gate blocked order creation',
+  };
+}
+
+Map<String, dynamic> _realisticWatchlistPayload({
+  String result = 'blocked',
+  String blockReason = 'market_closed',
+  double? aiBuyScore,
+  double? aiSellScore,
+  double? buyScore,
+  double? sellScore,
+}) {
+  final candidate = _realisticCandidatePayload(
+    result: result,
+    blockReason: blockReason,
+    aiBuyScore: aiBuyScore,
+    aiSellScore: aiSellScore,
+    buyScore: buyScore,
+    sellScore: sellScore,
+  );
+
+  return {
+    'configured_symbol_count': 2,
+    'analyzed_symbol_count': 2,
+    'quant_candidates_count': 1,
+    'researched_candidates_count': 1,
+    'best_score': '74',
+    'should_trade': false,
+    'final_entry_ready': false,
+    'final_action_hint': 'watch',
+    'result': result,
+    'reason': blockReason,
+    'order_id': null,
+    'final_best_candidate': candidate,
+    'final_ranked_candidates': [candidate],
+  };
+}
+
+Map<String, dynamic> _noCandidateWatchlistPayload() {
+  return {
+    'configured_symbol_count': 2,
+    'analyzed_symbol_count': 2,
+    'quant_candidates_count': 0,
+    'researched_candidates_count': 0,
+    'best_score': null,
+    'should_trade': false,
+    'final_entry_ready': false,
+    'final_action_hint': 'watch',
+    'result': 'skipped',
+    'reason': 'all_candidates_blocked',
+    'trigger_block_reason': 'all_candidates_blocked',
+    'order_id': null,
+    'final_best_candidate': null,
+    'final_ranked_candidates': [],
+  };
+}
 
 KisManualOrderResult _kisOrder({
   required int orderId,

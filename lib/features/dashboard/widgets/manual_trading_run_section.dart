@@ -576,26 +576,29 @@ class _ScoreBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = <_MetricValue>[
-      _MetricValue('Quant Score', result.quantBuyScore ?? result.buyScore),
-      _MetricValue('AI Score', result.aiBuyScore),
-      _MetricValue('Final Score', result.finalBuyScore ?? result.buyScore),
-      _MetricValue('Buy Score', result.buyScore),
-      _MetricValue('Sell Score', result.sellScore),
-      _MetricValue('Final Buy', result.finalBuyScore),
-      _MetricValue('Final Sell', result.finalSellScore),
-      _MetricValue('Quant Buy', result.quantBuyScore),
-      _MetricValue('Quant Sell', result.quantSellScore),
-      _MetricValue('AI Buy', result.aiBuyScore),
-      _MetricValue('AI Sell', result.aiSellScore),
-      _MetricValue('Confidence', result.confidence),
-      _MetricValue('Regime Conf.', result.regimeConfidence),
+      _MetricValue('Quant Buy', _formatNullable(result.quantBuyScore)),
+      _MetricValue('Quant Sell', _formatNullable(result.quantSellScore)),
+      _MetricValue('GPT/AI Buy',
+          _formatNullable(result.aiBuyScore ?? result.gptContext.gptBuyScore)),
+      _MetricValue(
+          'GPT/AI Sell',
+          _formatNullable(
+              result.aiSellScore ?? result.gptContext.gptSellScore)),
+      _MetricValue('Final Buy', _formatNullable(result.finalBuyScore)),
+      _MetricValue('Final Sell', _formatNullable(result.finalSellScore)),
+      _MetricValue('Buy Score', _formatNullable(result.buyScore)),
+      _MetricValue('Sell Score', _formatNullable(result.sellScore)),
+      _MetricValue('Confidence', _formatNullable(result.confidence)),
+      _MetricValue('Regime Conf.', _formatNullable(result.regimeConfidence)),
+      _MetricValue('Action', result.action.toUpperCase()),
+      _MetricValue('Reason', _textOrDash(result.reason)),
     ];
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: metrics
-          .map((metric) => _MiniMetricCard(
-              label: metric.label, value: _formatNullable(metric.value)))
+          .map((metric) =>
+              _MiniMetricCard(label: metric.label, value: metric.value))
           .toList(),
     );
   }
@@ -819,7 +822,7 @@ class _MetricValue {
   const _MetricValue(this.label, this.value);
 
   final String label;
-  final double? value;
+  final String value;
 }
 
 class _ResultRow extends StatelessWidget {
@@ -843,6 +846,11 @@ class _ResultRow extends StatelessWidget {
 }
 
 String _formatNullable(double? value) {
-  if (value == null) return 'n/a';
+  if (value == null) return '--';
   return value.toStringAsFixed(2);
+}
+
+String _textOrDash(String value) {
+  final text = value.trim();
+  return text.isEmpty || text == 'null' ? '--' : text;
 }
