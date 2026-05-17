@@ -15,6 +15,7 @@ import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
+import '../../../models/watchlist_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class WatchlistSection extends StatelessWidget {
@@ -124,6 +125,8 @@ class WatchlistSection extends StatelessWidget {
         ],
         const SizedBox(height: 12),
         _TopCandidateCard(
+          result: controller.runResult,
+          hasLatestRunResult: controller.hasLatestRunResult,
           candidate: topCandidate,
           isKr: isKr,
           onPrepareBuyTicket: topCandidate == null || !isKr
@@ -234,11 +237,15 @@ class _GateSelector extends StatelessWidget {
 
 class _TopCandidateCard extends StatelessWidget {
   const _TopCandidateCard({
+    required this.result,
+    required this.hasLatestRunResult,
     required this.candidate,
     required this.isKr,
     this.onPrepareBuyTicket,
   });
 
+  final WatchlistRunResult result;
+  final bool hasLatestRunResult;
   final Candidate? candidate;
   final bool isKr;
   final VoidCallback? onPrepareBuyTicket;
@@ -247,19 +254,57 @@ class _TopCandidateCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final candidate = this.candidate;
     if (candidate == null) {
+      final orderSummary = result.orderId == null
+          ? 'No order created'
+          : 'Order ${result.orderId}';
+      final runReason = result.reason.isNotEmpty
+          ? result.reason
+          : result.triggerBlockReason;
+      final summary = hasLatestRunResult
+          ? 'Run result: ${_notAvailable(result.result)} · $orderSummary · ${_notAvailable(runReason)}'
+          : 'No top candidate yet. Start a scan to rank the watchlist.';
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: _panelDecoration(),
-        child: const _StateLine(
-          text: 'No top candidate yet. Start a scan to rank the watchlist.',
-        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Watchlist Run Summary',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          _StateLine(text: summary),
+          if (hasLatestRunResult) ...[
+            const SizedBox(height: 8),
+            const _StateLine(
+              text:
+                  'Safety note: Watchlist scan is advisory; no live order is submitted from this panel.',
+            ),
+          ],
+        ]),
       );
     }
-    final blockReason = candidate.blockReason ??
-        (candidate.blockReasons.isEmpty
-            ? 'No block reason'
-            : candidate.blockReasons.join(', '));
+    final blockReason = _firstText([
+      candidate.blockReason,
+      candidate.blockReasons.isEmpty ? null : candidate.blockReasons.join(', '),
+      candidate.skipReason,
+      candidate.noOrderReason,
+      result.triggerBlockReason,
+      result.reason,
+    ]);
+    final primaryScore = candidate.finalEntryScore ??
+        candidate.finalScore ??
+        candidate.finalBuyScore ??
+        candidate.buyScore ??
+        (candidate.score == null ? null : candidate.score!.toDouble()) ??
+        result.bestScore;
+    final runStatus = _firstText([
+      candidate.result,
+      candidate.status,
+      result.result,
+    ]);
+    final orderText = candidate.orderId ??
+        candidate.relatedOrderId ??
+        result.orderId ??
+        'No order created';
     final nextAction = candidate.entryReady
         ? (isKr
             ? 'Prepare a manual buy ticket, then validate on Manual Order.'
@@ -289,19 +334,33 @@ class _TopCandidateCard extends StatelessWidget {
         ],
         const SizedBox(height: 10),
         Wrap(spacing: 14, runSpacing: 8, children: [
-          _ResultPair(
-              label: 'score',
-              value: candidate.score == null
-                  ? 'not calculated'
-                  : candidate.score.toString()),
+          _ResultPair(label: 'run result', value: _notAvailable(runStatus)),
+          _ResultPair(label: 'entry score', value: _score(primaryScore)),
           _ResultPair(label: 'confidence', value: _score(candidate.confidence)),
+          _ResultPair(
+            label: 'GPT/AI Buy',
+            value: _gptCandidateScore(candidate.aiBuyScore ?? candidate.buyScore),
+          ),
+          _ResultPair(
+            label: 'GPT/AI Sell',
+            value: _gptCandidateScore(candidate.aiSellScore ?? candidate.sellScore),
+          ),
+          _ResultPair(label: 'final buy', value: _score(candidate.finalBuyScore)),
+          _ResultPair(label: 'final sell', value: _score(candidate.finalSellScore)),
           _ResultPair(
               label: 'readiness',
               value: candidate.entryReady ? 'entry ready' : 'not ready'),
+          _ResultPair(label: 'action hint', value: candidate.actionHint),
+          _ResultPair(label: 'order', value: orderText),
           _ResultPair(label: 'next action', value: nextAction),
         ]),
         const SizedBox(height: 8),
-        _StateLine(text: 'Block reason: $blockReason'),
+        _StateLine(text: 'Block reason: ${_notAvailable(blockReason)}'),
+        const SizedBox(height: 8),
+        const _StateLine(
+          text:
+              'Safety note: Watchlist scan is advisory; no live order is submitted from this panel.',
+        ),
         if (onPrepareBuyTicket != null) ...[
           const SizedBox(height: 12),
           OutlinedButton.icon(
@@ -3092,8 +3151,26 @@ class _CountPill extends StatelessWidget {
 }
 
 String _score(double? value) {
-  if (value == null) return 'n/a';
+  if (value == null) return '--';
   return value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 1);
+}
+
+String _gptCandidateScore(double? value) {
+  if (value == null) return 'No GPT score returned';
+  return _score(value);
+}
+
+String _firstText(List<String?> values) {
+  for (final value in values) {
+    final text = value?.trim();
+    if (text != null && text.isNotEmpty && text != 'null') return text;
+  }
+  return '';
+}
+
+String _notAvailable(String value) {
+  final text = value.trim();
+  return text.isEmpty || text == 'null' ? 'Not available' : text;
 }
 
 String _boolText(bool value) => value ? 'true' : 'false';

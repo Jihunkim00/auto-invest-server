@@ -576,18 +576,18 @@ class _ScoreBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = <_MetricValue>[
-      _MetricValue('Quant Score', result.quantBuyScore ?? result.buyScore),
-      _MetricValue('AI Score', result.aiBuyScore),
-      _MetricValue('Final Score', result.finalBuyScore ?? result.buyScore),
-      _MetricValue('Buy Score', result.buyScore),
-      _MetricValue('Sell Score', result.sellScore),
-      _MetricValue('Final Buy', result.finalBuyScore),
-      _MetricValue('Final Sell', result.finalSellScore),
       _MetricValue('Quant Buy', result.quantBuyScore),
       _MetricValue('Quant Sell', result.quantSellScore),
-      _MetricValue('AI Buy', result.aiBuyScore),
-      _MetricValue('AI Sell', result.aiSellScore),
+      _MetricValue('GPT/AI Buy', result.aiBuyScore),
+      _MetricValue('GPT/AI Sell', result.aiSellScore),
+      _MetricValue('Final Buy', result.finalBuyScore),
+      _MetricValue('Final Sell', result.finalSellScore),
       _MetricValue('Confidence', result.confidence),
+      _MetricValue('Action', null, textValue: result.action.toUpperCase()),
+      _MetricValue('Reason', null,
+          textValue: result.reason.isEmpty ? 'Not available' : result.reason),
+      _MetricValue('Buy Score', result.buyScore),
+      _MetricValue('Sell Score', result.sellScore),
       _MetricValue('Regime Conf.', result.regimeConfidence),
     ];
     return Wrap(
@@ -595,7 +595,8 @@ class _ScoreBreakdown extends StatelessWidget {
       runSpacing: 8,
       children: metrics
           .map((metric) => _MiniMetricCard(
-              label: metric.label, value: _formatNullable(metric.value)))
+              label: metric.label,
+              value: metric.textValue ?? _formatNullable(metric.value)))
           .toList(),
     );
   }
@@ -816,10 +817,11 @@ class _ChipList extends StatelessWidget {
 }
 
 class _MetricValue {
-  const _MetricValue(this.label, this.value);
+  const _MetricValue(this.label, this.value, {this.textValue});
 
   final String label;
   final double? value;
+  final String? textValue;
 }
 
 class _ResultRow extends StatelessWidget {
@@ -843,6 +845,6 @@ class _ResultRow extends StatelessWidget {
 }
 
 String _formatNullable(double? value) {
-  if (value == null) return 'n/a';
+  if (value == null) return '--';
   return value.toStringAsFixed(2);
 }

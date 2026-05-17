@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/analysis/analysis_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/features/dashboard/widgets/manual_trading_run_section.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/manual_trading_run_result.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -56,9 +57,9 @@ void main() {
     expect(find.text('skipped'), findsWidgets);
     expect(find.text('Why No Trade?'), findsOneWidget);
     expect(find.text('Score Breakdown'), findsOneWidget);
-    expect(find.text('QUANT SCORE'), findsOneWidget);
-    expect(find.text('AI SCORE'), findsOneWidget);
-    expect(find.text('FINAL SCORE'), findsOneWidget);
+    expect(find.text('QUANT BUY'), findsOneWidget);
+    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('FINAL BUY'), findsOneWidget);
     expect(find.text('No order created.'), findsOneWidget);
 
     controller.dispose();
@@ -131,6 +132,80 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('Analysis score breakdown renders realistic payload values',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(realisticScores: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await tester.pumpWidget(_wrap(controller));
+    await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
+    await tester.tap(find.text('Run Single Symbol'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Score Breakdown'), findsOneWidget);
+    expect(find.text('QUANT BUY'), findsOneWidget);
+    expect(find.text('66.00'), findsOneWidget);
+    expect(find.text('QUANT SELL'), findsOneWidget);
+    expect(find.text('14.00'), findsOneWidget);
+    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('71.00'), findsOneWidget);
+    expect(find.text('GPT/AI SELL'), findsOneWidget);
+    expect(find.text('22.00'), findsOneWidget);
+    expect(find.text('FINAL BUY'), findsOneWidget);
+    expect(find.text('69.00'), findsOneWidget);
+    expect(find.text('FINAL SELL'), findsOneWidget);
+    expect(find.text('18.00'), findsOneWidget);
+    expect(find.text('CONFIDENCE'), findsOneWidget);
+    expect(find.text('0.77'), findsOneWidget);
+    expect(find.text('N/A'), findsNothing);
+    expect(find.text('Advanced Details'), findsOneWidget);
+    expect(find.text('Indicator Details'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Analysis score breakdown uses explicit fallback only for nulls',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false);
+    controller.manualRunResult = ManualTradingRunResult.fromJson({
+      'symbol': 'AAPL',
+      'gate_level': 2,
+      'action': 'hold',
+      'result': 'skipped',
+      'reason': 'No actionable edge',
+      'quant_buy_score': 61,
+      'ai_buy_score': null,
+      'final_buy_score': 60,
+      'confidence': null,
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: ManualTradingRunSection(controller: controller),
+        ),
+      ),
+    ));
+
+    expect(find.text('QUANT BUY'), findsOneWidget);
+    expect(find.text('61.00'), findsOneWidget);
+    expect(find.text('FINAL BUY'), findsOneWidget);
+    expect(find.text('60.00'), findsOneWidget);
+    expect(find.text('--'), findsWidgets);
+    expect(find.text('N/A'), findsNothing);
+
+    controller.dispose();
+  });
+
 }
 
 Widget _wrap(
@@ -149,6 +224,9 @@ Widget _wrap(
 }
 
 class _AnalysisFakeApi extends ApiClient {
+  _AnalysisFakeApi({this.realisticScores = false});
+
+  final bool realisticScores;
   int singleRunCalls = 0;
   int validationCalls = 0;
   int submitCalls = 0;
@@ -163,6 +241,29 @@ class _AnalysisFakeApi extends ApiClient {
     singleRunCalls += 1;
     lastSingleRunSymbol = symbol;
     lastSingleRunGateLevel = gateLevel;
+    if (realisticScores) {
+      return ManualTradingRunResult.fromJson({
+        'symbol': symbol,
+        'gate_level': gateLevel,
+        'response_payload': {
+          'symbol': symbol,
+          'action': 'hold',
+          'reason': 'Scores available but entry gate blocked',
+          'signal_status': 'skipped',
+          'scores': {
+            'quant_buy_score': '66',
+            'quant_sell_score': 14,
+            'ai_buy_score': 71,
+            'ai_sell_score': '22',
+            'final_buy_score': 69,
+            'final_sell_score': 18,
+            'confidence': '0.77',
+          },
+          'indicator_payload': {'rsi': 55.4},
+        },
+        'result': 'skipped',
+      });
+    }
     return ManualTradingRunResult.fromJson({
       'symbol': symbol,
       'gate_level': gateLevel,
