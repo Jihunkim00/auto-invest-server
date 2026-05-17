@@ -8,6 +8,8 @@ EXIT_PREFLIGHT_SOURCE = "kis_live_exit_preflight"
 MANUAL_EXIT_SOURCE_TYPE = "manual_confirm_exit"
 EXIT_SHADOW_SOURCE = "kis_exit_shadow_decision"
 EXIT_SHADOW_SOURCE_TYPE = "dry_run_sell_simulation"
+LIMITED_AUTO_SELL_SOURCE = "kis_limited_auto_sell"
+LIMITED_AUTO_SELL_SOURCE_TYPE = "guarded_stop_loss_exit"
 
 _STRING_KEYS = {
     "source",
@@ -17,6 +19,9 @@ _STRING_KEYS = {
     "preflight_checked_at",
     "shadow_decision_run_key",
     "shadow_decision_checked_at",
+    "limited_auto_sell_checked_at",
+    "queue_id",
+    "queue_review_status",
     "checked_at",
     "exit_trigger",
     "trigger_source",
@@ -28,12 +33,24 @@ _FLOAT_KEYS = {
     "current_value",
     "current_price",
     "suggested_quantity",
+    "quantity",
+    "notional",
+    "max_notional_pct",
 }
 _BOOL_KEYS = {
     "manual_confirm_required",
+    "auto_buy_enabled",
     "auto_sell_enabled",
     "scheduler_real_order_enabled",
     "real_order_submit_allowed",
+    "limited_auto_sell_enabled",
+    "stop_loss_auto_sell_enabled",
+    "take_profit_auto_sell_enabled",
+    "manual_review_auto_sell_enabled",
+    "queue_review_required",
+    "limited_auto_sell_real_order_submitted",
+    "limited_auto_sell_broker_submit_called",
+    "limited_auto_sell_manual_submit_called",
     "preflight_real_order_submitted",
     "preflight_broker_submit_called",
     "preflight_manual_submit_called",
@@ -78,12 +95,24 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
     if result.get("source") == EXIT_SHADOW_SOURCE:
         result.setdefault("source_type", EXIT_SHADOW_SOURCE_TYPE)
         result.setdefault("manual_confirm_required", True)
+        result.setdefault("auto_buy_enabled", False)
         result.setdefault("auto_sell_enabled", False)
         result.setdefault("scheduler_real_order_enabled", False)
         result.setdefault("real_order_submit_allowed", False)
         result.setdefault("shadow_real_order_submitted", False)
         result.setdefault("shadow_broker_submit_called", False)
         result.setdefault("shadow_manual_submit_called", False)
+    if result.get("source") == LIMITED_AUTO_SELL_SOURCE:
+        result.setdefault("source_type", LIMITED_AUTO_SELL_SOURCE_TYPE)
+        result.setdefault("manual_confirm_required", False)
+        result.setdefault("auto_buy_enabled", False)
+        result.setdefault("scheduler_real_order_enabled", False)
+        result.setdefault("real_order_submit_allowed", True)
+        result.setdefault("limited_auto_sell_enabled", True)
+        result.setdefault("stop_loss_auto_sell_enabled", True)
+        result.setdefault("take_profit_auto_sell_enabled", False)
+        result.setdefault("manual_review_auto_sell_enabled", False)
+        result.setdefault("limited_auto_sell_manual_submit_called", False)
 
     return sanitize_kis_payload(result) if result else {}
 
@@ -107,9 +136,25 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "exit_trigger": data.get("exit_trigger"),
         "exit_trigger_source": data.get("trigger_source"),
         "manual_confirm_required": data.get("manual_confirm_required"),
+        "auto_buy_enabled": data.get("auto_buy_enabled"),
         "auto_sell_enabled": data.get("auto_sell_enabled"),
         "scheduler_real_order_enabled": data.get("scheduler_real_order_enabled"),
         "real_order_submit_allowed": data.get("real_order_submit_allowed"),
+        "limited_auto_sell_enabled": data.get("limited_auto_sell_enabled"),
+        "stop_loss_auto_sell_enabled": data.get("stop_loss_auto_sell_enabled"),
+        "take_profit_auto_sell_enabled": data.get("take_profit_auto_sell_enabled"),
+        "manual_review_auto_sell_enabled": data.get("manual_review_auto_sell_enabled"),
+        "queue_review_required": data.get("queue_review_required"),
+        "queue_review_status": data.get("queue_review_status"),
+        "limited_auto_sell_real_order_submitted": data.get(
+            "limited_auto_sell_real_order_submitted"
+        ),
+        "limited_auto_sell_broker_submit_called": data.get(
+            "limited_auto_sell_broker_submit_called"
+        ),
+        "limited_auto_sell_manual_submit_called": data.get(
+            "limited_auto_sell_manual_submit_called"
+        ),
         "preflight_real_order_submitted": data.get("preflight_real_order_submitted"),
         "preflight_broker_submit_called": data.get("preflight_broker_submit_called"),
         "preflight_manual_submit_called": data.get("preflight_manual_submit_called"),
@@ -136,11 +181,33 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             "trigger_source": payload.get("exit_trigger_source")
             or payload.get("trigger_source"),
             "manual_confirm_required": payload.get("manual_confirm_required"),
+            "auto_buy_enabled": payload.get("auto_buy_enabled"),
             "auto_sell_enabled": payload.get("auto_sell_enabled"),
             "scheduler_real_order_enabled": payload.get(
                 "scheduler_real_order_enabled"
             ),
             "real_order_submit_allowed": payload.get("real_order_submit_allowed"),
+            "limited_auto_sell_enabled": payload.get("limited_auto_sell_enabled"),
+            "stop_loss_auto_sell_enabled": payload.get(
+                "stop_loss_auto_sell_enabled"
+            ),
+            "take_profit_auto_sell_enabled": payload.get(
+                "take_profit_auto_sell_enabled"
+            ),
+            "manual_review_auto_sell_enabled": payload.get(
+                "manual_review_auto_sell_enabled"
+            ),
+            "queue_review_required": payload.get("queue_review_required"),
+            "queue_review_status": payload.get("queue_review_status"),
+            "limited_auto_sell_real_order_submitted": payload.get(
+                "limited_auto_sell_real_order_submitted"
+            ),
+            "limited_auto_sell_broker_submit_called": payload.get(
+                "limited_auto_sell_broker_submit_called"
+            ),
+            "limited_auto_sell_manual_submit_called": payload.get(
+                "limited_auto_sell_manual_submit_called"
+            ),
             "preflight_real_order_submitted": payload.get(
                 "preflight_real_order_submitted"
             ),

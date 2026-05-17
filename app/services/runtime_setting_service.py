@@ -34,6 +34,15 @@ class RuntimeSettingService:
             "kis_live_auto_requires_manual_confirm": True,
             "kis_live_auto_max_orders_per_day": 1,
             "kis_live_auto_max_notional_pct": 0.03,
+            "kis_limited_auto_sell_enabled": False,
+            "kis_limited_auto_sell_stop_loss_enabled": False,
+            "kis_limited_auto_sell_take_profit_enabled": False,
+            "kis_limited_auto_sell_requires_queue_review": True,
+            "kis_limited_auto_sell_max_orders_per_day": 1,
+            "kis_limited_auto_sell_max_notional_pct": 0.03,
+            "kis_limited_auto_sell_min_shadow_occurrences": 1,
+            "kis_limited_auto_sell_allow_manual_review_trigger": False,
+            "kis_limited_auto_sell_allow_take_profit_trigger": False,
         }
 
     def get_or_create(self, db: Session) -> RuntimeSetting:
@@ -75,6 +84,33 @@ class RuntimeSettingService:
             ),
             "kis_live_auto_max_notional_pct": float(
                 row.kis_live_auto_max_notional_pct
+            ),
+            "kis_limited_auto_sell_enabled": bool(
+                row.kis_limited_auto_sell_enabled
+            ),
+            "kis_limited_auto_sell_stop_loss_enabled": bool(
+                row.kis_limited_auto_sell_stop_loss_enabled
+            ),
+            "kis_limited_auto_sell_take_profit_enabled": bool(
+                row.kis_limited_auto_sell_take_profit_enabled
+            ),
+            "kis_limited_auto_sell_requires_queue_review": bool(
+                row.kis_limited_auto_sell_requires_queue_review
+            ),
+            "kis_limited_auto_sell_max_orders_per_day": int(
+                row.kis_limited_auto_sell_max_orders_per_day
+            ),
+            "kis_limited_auto_sell_max_notional_pct": float(
+                row.kis_limited_auto_sell_max_notional_pct
+            ),
+            "kis_limited_auto_sell_min_shadow_occurrences": int(
+                row.kis_limited_auto_sell_min_shadow_occurrences
+            ),
+            "kis_limited_auto_sell_allow_manual_review_trigger": bool(
+                row.kis_limited_auto_sell_allow_manual_review_trigger
+            ),
+            "kis_limited_auto_sell_allow_take_profit_trigger": bool(
+                row.kis_limited_auto_sell_allow_take_profit_trigger
             ),
             "updated_at": row.updated_at,
         }
@@ -166,6 +202,15 @@ class RuntimeSettingService:
             "kis_live_auto_requires_manual_confirm",
             "kis_live_auto_max_orders_per_day",
             "kis_live_auto_max_notional_pct",
+            "kis_limited_auto_sell_enabled",
+            "kis_limited_auto_sell_stop_loss_enabled",
+            "kis_limited_auto_sell_take_profit_enabled",
+            "kis_limited_auto_sell_requires_queue_review",
+            "kis_limited_auto_sell_max_orders_per_day",
+            "kis_limited_auto_sell_max_notional_pct",
+            "kis_limited_auto_sell_min_shadow_occurrences",
+            "kis_limited_auto_sell_allow_manual_review_trigger",
+            "kis_limited_auto_sell_allow_take_profit_trigger",
         ):
             if key not in payload:
                 continue

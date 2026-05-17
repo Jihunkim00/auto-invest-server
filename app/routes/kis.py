@@ -33,6 +33,7 @@ from app.services.kis_shadow_exit_review_service import KisShadowExitReviewServi
 from app.services.kis_shadow_exit_review_queue_service import (
     KisShadowExitReviewQueueService,
 )
+from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -472,6 +473,13 @@ def dismiss_kis_exit_shadow_queue_item(
         queue_id=queue_id,
         operator_note=payload.note_value() if payload is not None else None,
     )
+
+
+@router.post("/limited-auto-sell/run-once")
+def run_kis_limited_auto_sell_once(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisLimitedAutoSellService(client)
+    return service.run_once(db)
 
 
 def _client(db: Session) -> KisClient:

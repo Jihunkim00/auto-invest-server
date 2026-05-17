@@ -118,13 +118,22 @@ class TradingLogItem {
         source,
         sourceType,
       );
+  bool get isKisLimitedAutoSell => _isKisLimitedAutoSell(
+        provider,
+        market,
+        mode,
+        triggerSource,
+        source,
+      );
   bool get isKisManualLive =>
       isKis &&
       !isKisPreview &&
       !isKisDryRunAuto &&
       !isKisPreflight &&
-      !isKisExitShadow;
+      !isKisExitShadow &&
+      !isKisLimitedAutoSell;
   String get sourceLabel {
+    if (isKisLimitedAutoSell) return 'KIS LIMITED AUTO SELL';
     if (isKisExitShadow) return 'KIS SHADOW EXIT';
     return _sourceLabel(
       provider: provider,
@@ -172,6 +181,22 @@ class TradingLogItem {
       _addUnique(labels, 'NO BROKER SUBMIT');
       _addUnique(labels, 'NO MANUAL SUBMIT');
       _addUnique(labels, 'LIVE AUTO SELL DISABLED');
+    }
+    if (isKisLimitedAutoSell) {
+      _addUnique(labels, 'KIS LIMITED AUTO SELL');
+      _addUnique(labels, 'SELL ONLY');
+      if ((exitTrigger ?? '').toLowerCase() == 'stop_loss') {
+        _addUnique(labels, 'STOP LOSS');
+      }
+      _addUnique(labels, 'AUTO BUY DISABLED');
+      _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
+      if (manualSubmitCalled == false) {
+        _addUnique(labels, 'MANUAL SUBMIT FALSE');
+      }
+      if (realOrderSubmitted != true || brokerSubmitCalled != true) {
+        _addUnique(labels, 'BLOCKED');
+        _addUnique(labels, 'NO BROKER SUBMIT');
+      }
     }
     if (manualConfirmRequired == true) {
       _addUnique(labels, 'MANUAL CONFIRMATION REQUIRED');
@@ -361,18 +386,33 @@ class OrderLogItem {
       );
   bool get isKisPreflight =>
       _isKisPreflight(provider, market, mode, triggerSource, result);
-  bool get isKisManualLive =>
-      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
-  String get sourceLabel => _sourceLabel(
-        provider: provider,
-        market: market,
-        mode: mode,
-        triggerSource: triggerSource,
-        result: result.isEmpty ? internalStatus : result,
-        simulated:
-            simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
-        previewOnly: previewOnly,
+  bool get isKisLimitedAutoSell => _isKisLimitedAutoSell(
+        provider,
+        market,
+        mode,
+        triggerSource,
+        source,
       );
+  bool get isKisManualLive =>
+      isKis &&
+      !isKisPreview &&
+      !isKisDryRunAuto &&
+      !isKisPreflight &&
+      !isKisLimitedAutoSell;
+  String get sourceLabel {
+    if (isKisLimitedAutoSell) return 'KIS LIMITED AUTO SELL';
+    return _sourceLabel(
+      provider: provider,
+      market: market,
+      mode: mode,
+      triggerSource: triggerSource,
+      result: result.isEmpty ? internalStatus : result,
+      simulated:
+          simulated || internalStatus.toUpperCase() == 'DRY_RUN_SIMULATED',
+      previewOnly: previewOnly,
+    );
+  }
+
   bool get isFromExitPreflight => source == 'kis_live_exit_preflight';
   List<String> get safetyBadges {
     final labels = _safetyBadges(
@@ -395,6 +435,22 @@ class OrderLogItem {
           brokerSubmitCalled != true &&
           manualSubmitCalled != true) {
         _addUnique(labels, 'PREFLIGHT ONLY');
+        _addUnique(labels, 'NO BROKER SUBMIT');
+      }
+    }
+    if (isKisLimitedAutoSell) {
+      _addUnique(labels, 'KIS LIMITED AUTO SELL');
+      _addUnique(labels, 'SELL ONLY');
+      if ((exitTrigger ?? '').toLowerCase() == 'stop_loss') {
+        _addUnique(labels, 'STOP LOSS');
+      }
+      _addUnique(labels, 'AUTO BUY DISABLED');
+      _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
+      if (manualSubmitCalled == false) {
+        _addUnique(labels, 'MANUAL SUBMIT FALSE');
+      }
+      if (realOrderSubmitted != true || brokerSubmitCalled != true) {
+        _addUnique(labels, 'BLOCKED');
         _addUnique(labels, 'NO BROKER SUBMIT');
       }
     }
@@ -553,8 +609,14 @@ class SignalLogItem {
       );
   bool get isKisPreflight =>
       _isKisPreflight(provider, market, mode, triggerSource, result);
+  bool get isKisLimitedAutoSell =>
+      _isKisLimitedAutoSell(provider, market, mode, triggerSource, '');
   bool get isKisManualLive =>
-      isKis && !isKisPreview && !isKisDryRunAuto && !isKisPreflight;
+      isKis &&
+      !isKisPreview &&
+      !isKisDryRunAuto &&
+      !isKisPreflight &&
+      !isKisLimitedAutoSell;
   String get sourceLabel => _sourceLabel(
         provider: provider,
         market: market,
@@ -796,6 +858,19 @@ bool _isKisExitShadow(
       sourceType == 'dry_run_sell_simulation';
 }
 
+bool _isKisLimitedAutoSell(
+  String provider,
+  String market,
+  String mode,
+  String triggerSource,
+  String source,
+) {
+  if (!_isKis(provider, market, mode, triggerSource)) return false;
+  final hint = '$mode $triggerSource $source'.toLowerCase();
+  return hint.contains('limited_auto_sell') ||
+      source == 'kis_limited_auto_sell';
+}
+
 String _sourceLabel({
   required String provider,
   required String market,
@@ -813,6 +888,9 @@ String _sourceLabel({
   }
   if (_isKisPreflight(provider, market, mode, triggerSource, result)) {
     return 'KIS EXIT PREFLIGHT';
+  }
+  if (_isKisLimitedAutoSell(provider, market, mode, triggerSource, '')) {
+    return 'KIS LIMITED AUTO SELL';
   }
   if (_isKisPreview(
       provider, market, mode, triggerSource, result, previewOnly)) {

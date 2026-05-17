@@ -7,6 +7,7 @@ import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
@@ -539,6 +540,12 @@ class ApiClient {
     return KisShadowExitReviewQueueAction.fromJson(payload);
   }
 
+  Future<KisLimitedAutoSell> runKisLimitedAutoSellOnce() async {
+    final payload =
+        await _postJsonBody('/kis/limited-auto-sell/run-once', const {});
+    return KisLimitedAutoSell.fromJson(payload);
+  }
+
   Future<WatchlistRunResult> runWatchlistForProvider({
     required String provider,
     required int gateLevel,
@@ -575,6 +582,24 @@ class ApiClient {
             _readInt(j['kis_live_auto_max_orders_per_day'], 1),
         kisLiveAutoMaxNotionalPct:
             _readNullableDouble(j['kis_live_auto_max_notional_pct']) ?? 0.03,
+        kisLimitedAutoSellEnabled: j['kis_limited_auto_sell_enabled'] == true,
+        kisLimitedAutoSellStopLossEnabled:
+            j['kis_limited_auto_sell_stop_loss_enabled'] == true,
+        kisLimitedAutoSellTakeProfitEnabled:
+            j['kis_limited_auto_sell_take_profit_enabled'] == true,
+        kisLimitedAutoSellRequiresQueueReview:
+            j['kis_limited_auto_sell_requires_queue_review'] != false,
+        kisLimitedAutoSellMaxOrdersPerDay:
+            _readInt(j['kis_limited_auto_sell_max_orders_per_day'], 1),
+        kisLimitedAutoSellMaxNotionalPct:
+            _readNullableDouble(j['kis_limited_auto_sell_max_notional_pct']) ??
+                0.03,
+        kisLimitedAutoSellMinShadowOccurrences:
+            _readInt(j['kis_limited_auto_sell_min_shadow_occurrences'], 1),
+        kisLimitedAutoSellAllowManualReviewTrigger:
+            j['kis_limited_auto_sell_allow_manual_review_trigger'] == true,
+        kisLimitedAutoSellAllowTakeProfitTrigger:
+            j['kis_limited_auto_sell_allow_take_profit_trigger'] == true,
       );
     } catch (_) {
       return const OpsSettings(

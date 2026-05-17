@@ -34,6 +34,15 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_live_auto_requires_manual_confirm: bool | None = None
     kis_live_auto_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
     kis_live_auto_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    kis_limited_auto_sell_enabled: bool | None = None
+    kis_limited_auto_sell_stop_loss_enabled: bool | None = None
+    kis_limited_auto_sell_take_profit_enabled: bool | None = None
+    kis_limited_auto_sell_requires_queue_review: bool | None = None
+    kis_limited_auto_sell_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
+    kis_limited_auto_sell_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    kis_limited_auto_sell_min_shadow_occurrences: int | None = Field(default=None, ge=0, le=50)
+    kis_limited_auto_sell_allow_manual_review_trigger: bool | None = None
+    kis_limited_auto_sell_allow_take_profit_trigger: bool | None = None
 
 
 class RunNowRequest(BaseModel):

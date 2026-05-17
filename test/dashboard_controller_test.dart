@@ -4,6 +4,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
+import 'package:auto_invest_dashboard/models/kis_limited_auto_sell.dart';
 import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
@@ -503,6 +504,42 @@ void main() {
 
     controller.dispose();
   });
+
+  test('KIS limited auto sell run stores guarded result without manual calls',
+      () async {
+    final api = _FakeApiClient(limitedAutoSell: _limitedAutoSell());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisLimitedAutoSellOnce();
+
+    expect(result.success, isTrue);
+    expect(api.runKisLimitedAutoSellCalls, 1);
+    expect(controller.kisLimitedAutoSellLoading, isFalse);
+    expect(
+        controller.latestKisLimitedAutoSellResult?.mode, 'limited_auto_sell');
+    expect(
+        controller.latestKisLimitedAutoSellResult?.realOrderSubmitted, isFalse);
+    expect(
+        controller.latestKisLimitedAutoSellResult?.manualSubmitCalled, isFalse);
+    expect(api.validationCalls, 0);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
+  });
+
+  test('KIS limited auto sell run stores error and clears loading', () async {
+    final api = _FakeApiClient(throwLimitedAutoSell: true);
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisLimitedAutoSellOnce();
+
+    expect(result.success, isFalse);
+    expect(api.runKisLimitedAutoSellCalls, 1);
+    expect(controller.kisLimitedAutoSellLoading, isFalse);
+    expect(controller.kisLimitedAutoSellError, contains('limited failed'));
+
+    controller.dispose();
+  });
 }
 
 DashboardController _readyKisController({
@@ -637,6 +674,28 @@ KisShadowExitReviewQueue _shadowExitReviewQueue() {
   });
 }
 
+KisLimitedAutoSell _limitedAutoSell() {
+  return KisLimitedAutoSell.fromJson({
+    'status': 'ok',
+    'mode': 'limited_auto_sell',
+    'result': 'blocked',
+    'action': 'hold',
+    'reason': 'limited_auto_sell_disabled',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'auto_buy_enabled': false,
+    'auto_sell_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'checks': {'kis_limited_auto_sell_enabled': false},
+    'safety': {
+      'max_orders_per_day': 1,
+      'max_notional_pct': 0.03,
+      'stop_loss_only': true,
+    },
+  });
+}
+
 Map<String, dynamic> _queueActionJson({required String status, String? note}) {
   return {
     'status': 'ok',
@@ -683,6 +742,8 @@ class _FakeApiClient extends ApiClient {
     this.throwShadowExitReview = false,
     this.shadowExitReviewQueue,
     this.throwShadowExitReviewQueue = false,
+    this.limitedAutoSell,
+    this.throwLimitedAutoSell = false,
   });
 
   final WatchlistRunResult? latest;
@@ -703,6 +764,8 @@ class _FakeApiClient extends ApiClient {
   final bool throwShadowExitReview;
   final KisShadowExitReviewQueue? shadowExitReviewQueue;
   final bool throwShadowExitReviewQueue;
+  final KisLimitedAutoSell? limitedAutoSell;
+  final bool throwLimitedAutoSell;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
@@ -712,6 +775,7 @@ class _FakeApiClient extends ApiClient {
   int fetchKisShadowExitReviewQueueCalls = 0;
   int markKisShadowExitQueueItemReviewedCalls = 0;
   int dismissKisShadowExitQueueItemCalls = 0;
+  int runKisLimitedAutoSellCalls = 0;
   String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
@@ -844,6 +908,17 @@ class _FakeApiClient extends ApiClient {
       status: 'dismissed',
       note: note,
     ));
+  }
+
+  @override
+  Future<KisLimitedAutoSell> runKisLimitedAutoSellOnce() async {
+    runKisLimitedAutoSellCalls += 1;
+    if (throwLimitedAutoSell) {
+      throw const ApiRequestException(
+        'HTTP 503: {"message":"limited failed"}',
+      );
+    }
+    return limitedAutoSell ?? _limitedAutoSell();
   }
 
   @override

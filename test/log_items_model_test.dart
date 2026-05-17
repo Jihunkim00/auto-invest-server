@@ -186,6 +186,86 @@ void main() {
     expect(item.currency, 'KRW');
   });
 
+  test('OrderLogItem labels KIS limited auto sell distinctly', () {
+    final item = OrderLogItem.fromJson({
+      'id': 40,
+      'order_id': 40,
+      'provider': 'kis',
+      'broker': 'kis',
+      'market': 'KR',
+      'mode': 'limited_auto_sell',
+      'source': 'kis_limited_auto_sell',
+      'source_type': 'guarded_stop_loss_exit',
+      'exit_trigger': 'stop_loss',
+      'exit_trigger_source': 'cost_basis_pl_pct',
+      'symbol': '005930',
+      'side': 'sell',
+      'qty': 1,
+      'internal_status': 'SUBMITTED',
+      'broker_order_status': 'submitted',
+      'kis_odno': 'AUTO123',
+      'created_at': '2026-05-08T00:04:00',
+      'updated_at': '2026-05-08T00:05:00',
+      'real_order_submitted': true,
+      'broker_submit_called': true,
+      'manual_submit_called': false,
+      'auto_buy_enabled': false,
+      'scheduler_real_order_enabled': false,
+    });
+
+    expect(item.sourceLabel, 'KIS LIMITED AUTO SELL');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS LIMITED AUTO SELL',
+        'SELL ONLY',
+        'STOP LOSS',
+        'AUTO BUY DISABLED',
+        'SCHEDULER REAL ORDERS DISABLED',
+        'MANUAL SUBMIT FALSE',
+        'REAL ORDER SUBMITTED',
+      ]),
+    );
+  });
+
+  test('TradingLogItem labels blocked limited auto sell as no submit', () {
+    final item = TradingLogItem.fromJson({
+      'id': 41,
+      'run_key': 'limited-auto-sell-blocked',
+      'provider': 'kis',
+      'market': 'KR',
+      'mode': 'limited_auto_sell',
+      'source': 'kis_limited_auto_sell',
+      'trigger_source': 'kis_limited_auto_sell',
+      'symbol': '005930',
+      'action': 'hold',
+      'result': 'blocked',
+      'reason': 'queue_review_required',
+      'created_at': '2026-05-08T00:04:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'exit_trigger': 'stop_loss',
+    });
+
+    expect(item.sourceLabel, 'KIS LIMITED AUTO SELL');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS LIMITED AUTO SELL',
+        'SELL ONLY',
+        'STOP LOSS',
+        'BLOCKED',
+        'NO BROKER SUBMIT',
+        'MANUAL SUBMIT FALSE',
+        'AUTO BUY DISABLED',
+      ]),
+    );
+  });
+
   test('OrderLogItem exposes exit preflight manual sell lifecycle fields', () {
     final item = OrderLogItem.fromJson({
       'id': 32,

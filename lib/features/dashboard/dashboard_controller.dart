@@ -6,6 +6,7 @@ import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
@@ -129,6 +130,9 @@ class DashboardController extends ChangeNotifier {
   bool kisShadowExitReviewQueueLoading = false;
   KisShadowExitReviewQueue? latestKisShadowExitReviewQueue;
   String? kisShadowExitReviewQueueError;
+  bool kisLimitedAutoSellLoading = false;
+  KisLimitedAutoSell? latestKisLimitedAutoSellResult;
+  String? kisLimitedAutoSellError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -1331,6 +1335,37 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisShadowExitReviewQueueLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisLimitedAutoSellOnce() async {
+    if (kisLimitedAutoSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto sell already in progress.',
+      );
+    }
+
+    kisLimitedAutoSellLoading = true;
+    kisLimitedAutoSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisLimitedAutoSellOnce();
+      latestKisLimitedAutoSellResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS limited auto sell completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoSellError!),
+      );
+    } finally {
+      kisLimitedAutoSellLoading = false;
       notifyListeners();
     }
   }

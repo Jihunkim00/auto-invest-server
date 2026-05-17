@@ -80,6 +80,16 @@ The local SQLite database file is `auto_invest.db` by default.
 
 Database initialization is handled on startup by `app.db.init_db.init_db()`.
 
+## KIS safety lifecycle
+
+- Readiness: `/kis/auto/readiness` and `/kis/auto/preflight-once` report gate state only.
+- Exit preflight: `/kis/live-exit/preflight-once` evaluates held-position exits without submitting and keeps manual confirmation required.
+- Manual live sell: `/kis/orders/manual-submit` and `/kis/orders/submit-manual` remain the explicit live order paths and require `confirm_live`.
+- Shadow exit: `/kis/exit-shadow/run-once` records dry-run sell decisions only.
+- Shadow review: `/kis/exit-shadow/review` aggregates historical shadow decision quality read-only.
+- Review queue: `/kis/exit-shadow/review-queue` plus mark-reviewed/dismiss endpoints only update local operator state.
+- Limited auto sell: `/kis/limited-auto-sell/run-once` is disabled by default, SELL-only, stop-loss-only by default, audited, capped, and blocked unless every runtime, position, queue-review, duplicate-order, market/session, notional, and daily-limit gate passes. KIS auto buy and scheduler real orders remain disabled.
+
 ## Testing
 
 Run tests with:

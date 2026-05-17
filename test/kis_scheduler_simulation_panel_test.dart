@@ -95,7 +95,16 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
-    expect(find.text('KIS Scheduler Simulation'), findsOneWidget);
+    final schedulerCard =
+        find.byKey(const Key('kis_scheduler_simulation_card'));
+    expect(schedulerCard, findsOneWidget);
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('KIS Scheduler Simulation'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('KIS Live Exit Manual Confirm'), findsOneWidget);
     expect(find.text('EXIT PREFLIGHT ONLY'), findsOneWidget);
     expect(find.text('MANUAL CONFIRM SELL'), findsOneWidget);
@@ -104,18 +113,78 @@ void main() {
     expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsWidgets);
     expect(find.text('LIVE AUTO REMAINS DISABLED'), findsOneWidget);
     expect(find.text('Run Exit Preflight'), findsOneWidget);
-    expect(find.text('DISABLED BY DEFAULT'), findsOneWidget);
-    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
-    expect(find.text('REAL ORDER SCHEDULER DISABLED'), findsOneWidget);
-    expect(find.text('real_orders_allowed=false'), findsOneWidget);
-    expect(find.text('ENABLED'), findsOneWidget);
-    expect(find.text('DRY_RUN'), findsWidgets);
-    expect(find.text('ALLOW_REAL_ORDERS'), findsOneWidget);
-    expect(find.text('REAL_ORDERS_ALLOWED'), findsOneWidget);
-    expect(find.text('REAL_ORDER_SCHEDULER_ENABLED'), findsOneWidget);
-    expect(find.text('RUNTIME_SCHEDULER_ENABLED'), findsOneWidget);
-    expect(find.text('RUNTIME_DRY_RUN'), findsOneWidget);
-    expect(find.text('KILL_SWITCH'), findsWidgets);
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('DISABLED BY DEFAULT'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: schedulerCard, matching: find.text('DRY-RUN ONLY')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('REAL ORDER SCHEDULER DISABLED'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('real_orders_allowed=false'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: schedulerCard, matching: find.text('ENABLED')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: schedulerCard, matching: find.text('DRY_RUN')),
+      findsWidgets,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('ALLOW_REAL_ORDERS'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('REAL_ORDERS_ALLOWED'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('REAL_ORDER_SCHEDULER_ENABLED'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('RUNTIME_SCHEDULER_ENABLED'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: schedulerCard,
+        matching: find.text('RUNTIME_DRY_RUN'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: schedulerCard, matching: find.text('KILL_SWITCH')),
+      findsOneWidget,
+    );
     expect(find.text('Submit Live KIS Order'), findsNothing);
 
     controller.dispose();

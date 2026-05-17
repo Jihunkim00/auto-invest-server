@@ -149,6 +149,15 @@ def _create_runtime_settings_table_if_missing():
                     kis_live_auto_requires_manual_confirm BOOLEAN NOT NULL DEFAULT 1,
                     kis_live_auto_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     kis_live_auto_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    kis_limited_auto_sell_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_limited_auto_sell_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_limited_auto_sell_take_profit_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_limited_auto_sell_requires_queue_review BOOLEAN NOT NULL DEFAULT 1,
+                    kis_limited_auto_sell_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    kis_limited_auto_sell_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    kis_limited_auto_sell_min_shadow_occurrences INTEGER NOT NULL DEFAULT 1,
+                    kis_limited_auto_sell_allow_manual_review_trigger BOOLEAN NOT NULL DEFAULT 0,
+                    kis_limited_auto_sell_allow_take_profit_trigger BOOLEAN NOT NULL DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -321,6 +330,15 @@ def init_db():
         "kis_live_auto_requires_manual_confirm": "BOOLEAN DEFAULT 1",
         "kis_live_auto_max_orders_per_day": "INTEGER DEFAULT 1",
         "kis_live_auto_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "kis_limited_auto_sell_enabled": "BOOLEAN DEFAULT 0",
+        "kis_limited_auto_sell_stop_loss_enabled": "BOOLEAN DEFAULT 0",
+        "kis_limited_auto_sell_take_profit_enabled": "BOOLEAN DEFAULT 0",
+        "kis_limited_auto_sell_requires_queue_review": "BOOLEAN DEFAULT 1",
+        "kis_limited_auto_sell_max_orders_per_day": "INTEGER DEFAULT 1",
+        "kis_limited_auto_sell_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "kis_limited_auto_sell_min_shadow_occurrences": "INTEGER DEFAULT 1",
+        "kis_limited_auto_sell_allow_manual_review_trigger": "BOOLEAN DEFAULT 0",
+        "kis_limited_auto_sell_allow_take_profit_trigger": "BOOLEAN DEFAULT 0",
     }
 
     trade_run_log_columns = {

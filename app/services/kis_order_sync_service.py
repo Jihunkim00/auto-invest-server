@@ -327,6 +327,9 @@ def summarize_kis_orders(
 
 
 def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) -> dict[str, Any]:
+    request_payload = _parse_json_object(order.request_payload)
+    response_payload = _parse_json_object(order.response_payload)
+    mode = str(response_payload.get("mode") or request_payload.get("mode") or "manual_live")
     requested_qty = order.requested_qty
     if requested_qty is None:
         requested_qty = order.qty
@@ -342,7 +345,7 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "order_id": order.id,
         "broker": order.broker,
         "market": order.market or "KR",
-        "mode": "manual_live",
+        "mode": mode,
         "symbol": order.symbol,
         "side": order.side,
         "order_type": order.order_type,
@@ -659,6 +662,18 @@ def _attempt_by_label(
         if attempt.get("label") == label:
             return attempt
     return None
+
+
+def _parse_json_object(raw_value: str | None) -> dict[str, Any]:
+    if not raw_value:
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return {}
+    return {}
 
 
 def _exception_payload(exc: Exception) -> dict[str, Any]:

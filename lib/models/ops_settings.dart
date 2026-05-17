@@ -16,6 +16,15 @@ class OpsSettings {
     this.kisLiveAutoRequiresManualConfirm = true,
     this.kisLiveAutoMaxOrdersPerDay = 1,
     this.kisLiveAutoMaxNotionalPct = 0.03,
+    this.kisLimitedAutoSellEnabled = false,
+    this.kisLimitedAutoSellStopLossEnabled = false,
+    this.kisLimitedAutoSellTakeProfitEnabled = false,
+    this.kisLimitedAutoSellRequiresQueueReview = true,
+    this.kisLimitedAutoSellMaxOrdersPerDay = 1,
+    this.kisLimitedAutoSellMaxNotionalPct = 0.03,
+    this.kisLimitedAutoSellMinShadowOccurrences = 1,
+    this.kisLimitedAutoSellAllowManualReviewTrigger = false,
+    this.kisLimitedAutoSellAllowTakeProfitTrigger = false,
   });
 
   final bool schedulerEnabled;
@@ -34,6 +43,15 @@ class OpsSettings {
   final bool kisLiveAutoRequiresManualConfirm;
   final int kisLiveAutoMaxOrdersPerDay;
   final double kisLiveAutoMaxNotionalPct;
+  final bool kisLimitedAutoSellEnabled;
+  final bool kisLimitedAutoSellStopLossEnabled;
+  final bool kisLimitedAutoSellTakeProfitEnabled;
+  final bool kisLimitedAutoSellRequiresQueueReview;
+  final int kisLimitedAutoSellMaxOrdersPerDay;
+  final double kisLimitedAutoSellMaxNotionalPct;
+  final int kisLimitedAutoSellMinShadowOccurrences;
+  final bool kisLimitedAutoSellAllowManualReviewTrigger;
+  final bool kisLimitedAutoSellAllowTakeProfitTrigger;
 
   OpsSettings copyWith({
     bool? schedulerEnabled,
@@ -52,6 +70,15 @@ class OpsSettings {
     bool? kisLiveAutoRequiresManualConfirm,
     int? kisLiveAutoMaxOrdersPerDay,
     double? kisLiveAutoMaxNotionalPct,
+    bool? kisLimitedAutoSellEnabled,
+    bool? kisLimitedAutoSellStopLossEnabled,
+    bool? kisLimitedAutoSellTakeProfitEnabled,
+    bool? kisLimitedAutoSellRequiresQueueReview,
+    int? kisLimitedAutoSellMaxOrdersPerDay,
+    double? kisLimitedAutoSellMaxNotionalPct,
+    int? kisLimitedAutoSellMinShadowOccurrences,
+    bool? kisLimitedAutoSellAllowManualReviewTrigger,
+    bool? kisLimitedAutoSellAllowTakeProfitTrigger,
   }) {
     return OpsSettings(
       schedulerEnabled: schedulerEnabled ?? this.schedulerEnabled,
@@ -75,6 +102,29 @@ class OpsSettings {
           kisLiveAutoMaxOrdersPerDay ?? this.kisLiveAutoMaxOrdersPerDay,
       kisLiveAutoMaxNotionalPct:
           kisLiveAutoMaxNotionalPct ?? this.kisLiveAutoMaxNotionalPct,
+      kisLimitedAutoSellEnabled:
+          kisLimitedAutoSellEnabled ?? this.kisLimitedAutoSellEnabled,
+      kisLimitedAutoSellStopLossEnabled: kisLimitedAutoSellStopLossEnabled ??
+          this.kisLimitedAutoSellStopLossEnabled,
+      kisLimitedAutoSellTakeProfitEnabled:
+          kisLimitedAutoSellTakeProfitEnabled ??
+              this.kisLimitedAutoSellTakeProfitEnabled,
+      kisLimitedAutoSellRequiresQueueReview:
+          kisLimitedAutoSellRequiresQueueReview ??
+              this.kisLimitedAutoSellRequiresQueueReview,
+      kisLimitedAutoSellMaxOrdersPerDay: kisLimitedAutoSellMaxOrdersPerDay ??
+          this.kisLimitedAutoSellMaxOrdersPerDay,
+      kisLimitedAutoSellMaxNotionalPct: kisLimitedAutoSellMaxNotionalPct ??
+          this.kisLimitedAutoSellMaxNotionalPct,
+      kisLimitedAutoSellMinShadowOccurrences:
+          kisLimitedAutoSellMinShadowOccurrences ??
+              this.kisLimitedAutoSellMinShadowOccurrences,
+      kisLimitedAutoSellAllowManualReviewTrigger:
+          kisLimitedAutoSellAllowManualReviewTrigger ??
+              this.kisLimitedAutoSellAllowManualReviewTrigger,
+      kisLimitedAutoSellAllowTakeProfitTrigger:
+          kisLimitedAutoSellAllowTakeProfitTrigger ??
+              this.kisLimitedAutoSellAllowTakeProfitTrigger,
     );
   }
 }
