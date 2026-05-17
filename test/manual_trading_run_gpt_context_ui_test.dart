@@ -48,6 +48,12 @@ void main() {
       ),
     ));
 
+    expect(find.text('Score Breakdown'), findsOneWidget);
+    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('58.00'), findsOneWidget);
+    expect(find.text('GPT/AI SELL'), findsOneWidget);
+    expect(find.text('54.00'), findsOneWidget);
+    expect(find.text('GPT Risk Context'), findsNothing);
     expect(find.text('Advanced Details'), findsOneWidget);
     await tester.ensureVisible(find.text('Advanced Details'));
     await tester.tap(find.text('Advanced Details'));

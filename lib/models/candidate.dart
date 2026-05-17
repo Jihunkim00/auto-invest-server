@@ -18,11 +18,22 @@ class Candidate {
     this.quantSellScore,
     this.aiBuyScore,
     this.aiSellScore,
+    this.finalEntryScore,
+    this.finalScore,
+    this.buyScore,
+    this.sellScore,
     this.finalBuyScore,
     this.finalSellScore,
     this.confidence,
     this.action = 'hold',
+    this.result,
+    this.status,
+    this.skipReason,
+    this.noOrderReason,
+    this.orderId,
+    this.relatedOrderId,
     this.tradeAllowed,
+    this.softEntryAllowed,
     this.approvedByRisk,
     this.riskFlags = const [],
     this.gatingNotes = const [],
@@ -53,11 +64,22 @@ class Candidate {
   final double? quantSellScore;
   final double? aiBuyScore;
   final double? aiSellScore;
+  final double? finalEntryScore;
+  final double? finalScore;
+  final double? buyScore;
+  final double? sellScore;
   final double? finalBuyScore;
   final double? finalSellScore;
   final double? confidence;
   final String action;
+  final String? result;
+  final String? status;
+  final String? skipReason;
+  final String? noOrderReason;
+  final String? orderId;
+  final String? relatedOrderId;
   final bool? tradeAllowed;
+  final bool? softEntryAllowed;
   final bool? approvedByRisk;
   final List<String> riskFlags;
   final List<String> gatingNotes;
@@ -76,6 +98,10 @@ class Candidate {
       quantSellScore != null ||
       aiBuyScore != null ||
       aiSellScore != null ||
+      finalEntryScore != null ||
+      finalScore != null ||
+      buyScore != null ||
+      sellScore != null ||
       finalBuyScore != null ||
       finalSellScore != null ||
       confidence != null;
@@ -122,13 +148,28 @@ class Candidate {
           Map<String, dynamic>.from((json['indicator_payload'] as Map?) ?? {}),
       quantBuyScore: _readNullableDouble(json['quant_buy_score']),
       quantSellScore: _readNullableDouble(json['quant_sell_score']),
-      aiBuyScore: _readNullableDouble(json['ai_buy_score']),
-      aiSellScore: _readNullableDouble(json['ai_sell_score']),
+      aiBuyScore:
+          _readNullableDouble(json['ai_buy_score'] ?? json['gpt_buy_score']) ??
+              gptContext.gptBuyScore,
+      aiSellScore:
+          _readNullableDouble(json['ai_sell_score'] ?? json['gpt_sell_score']) ??
+              gptContext.gptSellScore,
+      finalEntryScore: _readNullableDouble(json['final_entry_score']),
+      finalScore: _readNullableDouble(json['final_score']),
+      buyScore: _readNullableDouble(json['buy_score']),
+      sellScore: _readNullableDouble(json['sell_score']),
       finalBuyScore: _readNullableDouble(json['final_buy_score']),
       finalSellScore: _readNullableDouble(json['final_sell_score']),
       confidence: _readNullableDouble(json['confidence']),
       action: json['action']?.toString() ?? 'hold',
+      result: _readNullableString(json['result']),
+      status: _readNullableString(json['status']),
+      skipReason: _readNullableString(json['skip_reason']),
+      noOrderReason: _readNullableString(json['no_order_reason']),
+      orderId: _readNullableString(json['order_id']),
+      relatedOrderId: _readNullableString(json['related_order_id']),
       tradeAllowed: _readNullableBool(json['trade_allowed']),
+      softEntryAllowed: _readNullableBool(json['soft_entry_allowed']),
       approvedByRisk: _readNullableBool(json['approved_by_risk']),
       riskFlags: riskFlags,
       gatingNotes: gatingNotes,
@@ -149,6 +190,12 @@ class Candidate {
       blockReasons: _readStringList(json['block_reasons']),
     );
   }
+}
+
+String? _readNullableString(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text;
 }
 
 String? _readMapString(Object? value, String key) {

@@ -85,16 +85,30 @@ class WatchlistRunResult {
       return <String>[];
     }
 
+    Map<String, dynamic>? parseMap(Object? raw) {
+      if (raw is Map<String, dynamic>) return raw;
+      if (raw is Map) return Map<String, dynamic>.from(raw);
+      return null;
+    }
+
+    Candidate? parseCandidate(Object? raw,
+        {String scoreKey = 'score', String noteKey = 'note'}) {
+      final map = parseMap(raw);
+      if (map == null) return null;
+      return Candidate.fromJson(map, scoreKey: scoreKey, noteKey: noteKey);
+    }
+
     List<Candidate> parseCandidates(Object? raw,
         {String scoreKey = 'score', String noteKey = 'note'}) {
       if (raw is List) {
         return raw
-            .whereType<Map<String, dynamic>>()
-            .map((item) =>
-                Candidate.fromJson(item, scoreKey: scoreKey, noteKey: noteKey))
+            .map((item) => parseCandidate(item,
+                scoreKey: scoreKey, noteKey: noteKey))
+            .whereType<Candidate>()
             .toList();
       }
-      return <Candidate>[];
+      final single = parseCandidate(raw, scoreKey: scoreKey, noteKey: noteKey);
+      return single == null ? <Candidate>[] : <Candidate>[single];
     }
 
     double? parseNullableDouble(Object? raw) {
@@ -114,9 +128,29 @@ class WatchlistRunResult {
       if (raw == null) return null;
       if (raw is num) return raw.toInt();
       final text = raw.toString().trim();
-      if (text.isEmpty) return null;
-      return int.tryParse(text);
+      if (text.isEmpty || text == 'null') return null;
+      return int.tryParse(text) ?? double.tryParse(text)?.toInt();
     }
+
+    String? parseNullableString(Object? raw) {
+      final text = raw?.toString().trim();
+      if (text == null || text.isEmpty || text == 'null') return null;
+      return text;
+    }
+
+    final finalBestCandidate = parseCandidate(json['final_best_candidate'],
+        scoreKey: 'final_entry_score', noteKey: 'reason');
+    final finalRankedCandidates = parseCandidates(
+        json['final_ranked_candidates'] ?? json['candidates'],
+        scoreKey: 'final_entry_score',
+        noteKey: 'reason');
+    final researchedCandidates = parseCandidates(json['researched_candidates'],
+        scoreKey: 'final_entry_score', noteKey: 'reason');
+    final effectiveFinalRankedCandidates = finalRankedCandidates.isNotEmpty
+        ? finalRankedCandidates
+        : finalBestCandidate == null
+            ? <Candidate>[]
+            : <Candidate>[finalBestCandidate];
 
     return WatchlistRunResult(
       configuredSymbolCount: parseInt(json['configured_symbol_count']),
@@ -140,33 +174,31 @@ class WatchlistRunResult {
       shouldTrade: json['should_trade'] == true,
       triggeredSymbol: json['triggered_symbol']?.toString(),
       triggerBlockReason: json['trigger_block_reason']?.toString() ?? '',
-      finalEntryReady: json['final_entry_ready'] == true ||
-          (json['final_best_candidate']
-                  as Map<String, dynamic>?)?['entry_ready'] ==
-              true,
-      finalActionHint: (json['final_best_candidate']
-                  as Map<String, dynamic>?)?['action_hint']
-              ?.toString() ??
+      finalEntryReady:
+          json['final_entry_ready'] == true || finalBestCandidate?.entryReady == true,
+      finalActionHint: finalBestCandidate?.actionHint ??
           json['final_action_hint']?.toString() ??
           'watch',
       action: tradeResult?['action']?.toString() ??
           json['action']?.toString() ??
           '',
-      orderId:
-          tradeResult?['order_id']?.toString() ?? json['order_id']?.toString(),
+      orderId: parseNullableString(tradeResult?['order_id']) ??
+          parseNullableString(json['order_id']),
       topQuantCandidates: parseCandidates(json['top_quant_candidates'],
           scoreKey: 'quant_score', noteKey: 'quant_reason'),
-      researchedCandidates: parseCandidates(json['researched_candidates'],
-          scoreKey: 'final_entry_score', noteKey: 'reason'),
-      finalRankedCandidates: parseCandidates(json['final_ranked_candidates'],
-          scoreKey: 'final_entry_score', noteKey: 'reason'),
+      researchedCandidates: researchedCandidates,
+      finalRankedCandidates: effectiveFinalRankedCandidates,
       result: run?['result']?.toString() ??
+          tradeResult?['result']?.toString() ??
+          tradeResult?['status']?.toString() ??
           tradeResult?['action']?.toString() ??
           json['result']?.toString() ??
+          json['status']?.toString() ??
           '',
       reason: run?['reason']?.toString() ??
           tradeResult?['reason']?.toString() ??
           json['reason']?.toString() ??
+          finalBestCandidate?.reason ??
           '',
       triggerSource: run?['trigger_source']?.toString() ??
           json['trigger_source']?.toString() ??
