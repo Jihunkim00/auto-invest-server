@@ -5,7 +5,9 @@ import '../../core/network/api_error_formatter.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_limited_auto_buy.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
@@ -13,6 +15,7 @@ import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
+import '../../models/kis_scheduler_live.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -133,6 +136,15 @@ class DashboardController extends ChangeNotifier {
   bool kisLimitedAutoSellLoading = false;
   KisLimitedAutoSell? latestKisLimitedAutoSellResult;
   String? kisLimitedAutoSellError;
+  bool kisBuyShadowLoading = false;
+  KisBuyShadowDecision? latestKisBuyShadowDecision;
+  String? kisBuyShadowError;
+  bool kisLimitedAutoBuyLoading = false;
+  KisLimitedAutoBuy? latestKisLimitedAutoBuyResult;
+  String? kisLimitedAutoBuyError;
+  bool kisSchedulerLiveLoading = false;
+  KisSchedulerLiveResult? latestKisSchedulerLiveResult;
+  String? kisSchedulerLiveError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -1366,6 +1378,101 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisLimitedAutoSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisBuyShadowOnce() async {
+    if (kisBuyShadowLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS buy shadow decision already in progress.',
+      );
+    }
+
+    kisBuyShadowLoading = true;
+    kisBuyShadowError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisBuyShadowOnce();
+      latestKisBuyShadowDecision = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message:
+            'KIS buy shadow decision completed: ${result.decision} (${result.reason}).',
+      );
+    } catch (e) {
+      kisBuyShadowError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisBuyShadowError!),
+      );
+    } finally {
+      kisBuyShadowLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisLimitedAutoBuyOnce() async {
+    if (kisLimitedAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto buy already in progress.',
+      );
+    }
+
+    kisLimitedAutoBuyLoading = true;
+    kisLimitedAutoBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisLimitedAutoBuyOnce();
+      latestKisLimitedAutoBuyResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS limited auto buy completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoBuyError!),
+      );
+    } finally {
+      kisLimitedAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisSchedulerLiveOnce() async {
+    if (kisSchedulerLiveLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler live run already in progress.',
+      );
+    }
+
+    kisSchedulerLiveLoading = true;
+    kisSchedulerLiveError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisSchedulerLiveOnce();
+      latestKisSchedulerLiveResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await refreshKisSchedulerStatus(silent: true);
+      return ActionResult(
+        success: true,
+        message: 'KIS scheduler live run completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisSchedulerLiveError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerLiveError!),
+      );
+    } finally {
+      kisSchedulerLiveLoading = false;
       notifyListeners();
     }
   }

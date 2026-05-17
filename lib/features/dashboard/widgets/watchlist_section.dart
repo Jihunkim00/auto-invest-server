@@ -5,12 +5,15 @@ import '../../../core/widgets/section_card.dart';
 import '../../../models/candidate.dart';
 import '../../../models/kis_auto_readiness.dart';
 import '../../../models/kis_auto_simulator_result.dart';
+import '../../../models/kis_buy_shadow_decision.dart';
 import '../../../models/kis_exit_shadow_decision.dart';
+import '../../../models/kis_limited_auto_buy.dart';
 import '../../../models/kis_limited_auto_sell.dart';
 import '../../../models/kis_shadow_exit_review.dart';
 import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
+import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
 import '../../dashboard/dashboard_controller.dart';
 
@@ -125,6 +128,12 @@ class WatchlistSection extends StatelessWidget {
           _KisShadowExitReviewQueueCard(controller: controller),
           const SizedBox(height: 12),
           _KisLimitedAutoSellCard(controller: controller),
+          const SizedBox(height: 12),
+          _KisLimitedAutoBuyCard(controller: controller),
+          const SizedBox(height: 12),
+          _KisSchedulerLiveAutomationCard(controller: controller),
+          const SizedBox(height: 12),
+          _KisBuyShadowDecisionCard(controller: controller),
           const SizedBox(height: 12),
           _KisLiveExitPreflightCard(controller: controller),
         ],
@@ -1155,6 +1164,564 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
   }
 }
 
+class _KisLimitedAutoBuyCard extends StatelessWidget {
+  const _KisLimitedAutoBuyCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final result = controller.latestKisLimitedAutoBuyResult;
+    return Container(
+      key: const Key('kis_limited_auto_buy_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.add_shopping_cart_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Limited Auto Buy',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'BUY ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'DISABLED BY DEFAULT', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'NO AUTO BUY UNLESS ENABLED',
+              color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'RISK GATED', color: Colors.white70),
+          _SoftBadge(text: 'POSITION CAPPED', color: Colors.orangeAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'limited auto buy',
+              value: _boolText(settings.kisLimitedAutoBuyEnabled)),
+          _ResultPair(
+              label: 'min score',
+              value: _score(settings.kisLimitedAutoBuyMinFinalScore)),
+          _ResultPair(
+              label: 'min confidence',
+              value: _score(settings.kisLimitedAutoBuyMinConfidence)),
+          _ResultPair(
+              label: 'max orders/day',
+              value: settings.kisLimitedAutoBuyMaxOrdersPerDay.toString()),
+          _ResultPair(
+              label: 'max notional pct',
+              value: _formatPercentValue(
+                  settings.kisLimitedAutoBuyMaxNotionalPct * 100)),
+          _ResultPair(
+              label: 'max positions',
+              value: settings.kisLimitedAutoBuyMaxPositions.toString()),
+          _ResultPair(
+              label: 'block position exists',
+              value:
+                  _boolText(settings.kisLimitedAutoBuyBlockIfPositionExists)),
+          _ResultPair(
+              label: 'block open order',
+              value:
+                  _boolText(settings.kisLimitedAutoBuyBlockIfOpenOrderExists)),
+          _ResultPair(
+              label: 'no new entry after',
+              value: settings.kisLimitedAutoBuyNoNewEntryAfter),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisLimitedAutoBuyLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.runKisLimitedAutoBuyOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisLimitedAutoBuyLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.play_arrow),
+          label: Text(controller.kisLimitedAutoBuyLoading
+              ? 'Running limited auto buy...'
+              : 'Run Limited Auto Buy Once'),
+        ),
+        if (controller.kisLimitedAutoBuyError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisLimitedAutoBuyError!),
+              color: Colors.redAccent),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No limited auto buy run yet. Default backend state blocks execution.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisLimitedAutoBuyResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuyResultPanel extends StatelessWidget {
+  const _KisLimitedAutoBuyResultPanel({required this.result});
+
+  final KisLimitedAutoBuy result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (result.submitted) ...[
+        _StateLine(
+          text:
+              'LIVE BUY SUBMITTED: order ${result.orderId ?? 'n/a'} / ODNO ${result.kisOdno ?? result.brokerOrderId ?? 'n/a'}',
+          color: Colors.redAccent,
+        ),
+        const SizedBox(height: 10),
+      ],
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
+        _ResultPair(
+            label: 'quantity', value: result.quantity?.toString() ?? 'n/a'),
+        _ResultPair(
+            label: 'notional', value: _formatReviewKrwOrDash(result.notional)),
+        _ResultPair(label: 'final score', value: _score(result.finalScore)),
+        _ResultPair(label: 'confidence', value: _score(result.confidence)),
+        _ResultPair(
+            label: 'real_order_submitted',
+            value: _boolText(result.realOrderSubmitted)),
+        _ResultPair(
+            label: 'broker_submit_called',
+            value: _boolText(result.brokerSubmitCalled)),
+        _ResultPair(
+            label: 'manual_submit_called',
+            value: _boolText(result.manualSubmitCalled)),
+        if (result.orderId != null)
+          _ResultPair(label: 'order id', value: result.orderId.toString()),
+        if (result.kisOdno != null)
+          _ResultPair(label: 'ODNO', value: result.kisOdno!),
+      ]),
+      if (result.blockedBy.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'blocked_by: ${_joinList(result.blockedBy)}'),
+      ],
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text:
+              "limited_auto_buy_enabled=${_nullableBoolText(result.nullableCheck('kis_limited_auto_buy_enabled'))}",
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              "shadow_review_required=${_nullableBoolText(result.nullableCheck('shadow_review_required'))}",
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'auto_buy_enabled=${_boolText(result.autoBuyEnabled)}',
+          color: Colors.orangeAccent,
+        ),
+        _SoftBadge(
+          text:
+              'scheduler_real_order_enabled=${_boolText(result.schedulerRealOrderEnabled)}',
+          color: Colors.orangeAccent,
+        ),
+      ]),
+    ]);
+  }
+}
+
+class _KisSchedulerLiveAutomationCard extends StatelessWidget {
+  const _KisSchedulerLiveAutomationCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final result = controller.latestKisSchedulerLiveResult;
+    return Container(
+      key: const Key('kis_scheduler_live_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.event_repeat_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Live Automation',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'DISABLED BY DEFAULT', color: Colors.amberAccent),
+          _SoftBadge(text: 'REAL ORDERS GATED', color: Colors.redAccent),
+          _SoftBadge(text: 'BUY/SELL LIMITED', color: Colors.greenAccent),
+          _SoftBadge(text: 'MAX DAILY ORDERS', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'KILL SWITCH PROTECTED', color: Colors.orangeAccent),
+          _SoftBadge(text: 'DRY RUN BLOCKS LIVE', color: Colors.white70),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'scheduler live',
+              value: _boolText(settings.kisSchedulerLiveEnabled)),
+          _ResultPair(
+              label: 'allow real orders',
+              value: _boolText(settings.kisSchedulerAllowRealOrders)),
+          _ResultPair(
+              label: 'allow limited buy',
+              value: _boolText(settings.kisSchedulerAllowLimitedAutoBuy)),
+          _ResultPair(
+              label: 'allow limited sell',
+              value: _boolText(settings.kisSchedulerAllowLimitedAutoSell)),
+          _ResultPair(
+              label: 'max live orders/day',
+              value: settings.kisSchedulerMaxLiveOrdersPerDay.toString()),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisSchedulerLiveLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.runKisSchedulerLiveOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisSchedulerLiveLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.play_arrow),
+          label: Text(controller.kisSchedulerLiveLoading
+              ? 'Running scheduler live...'
+              : 'Run Scheduler Live Once'),
+        ),
+        if (controller.kisSchedulerLiveError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisSchedulerLiveError!),
+              color: Colors.redAccent),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No scheduler live run yet. Default backend state blocks real orders.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisSchedulerLiveResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerLiveResultPanel extends StatelessWidget {
+  const _KisSchedulerLiveResultPanel({required this.result});
+
+  final KisSchedulerLiveResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (result.submitted) ...[
+        _StateLine(
+          text:
+              'KIS SCHEDULER LIVE SUBMITTED: order ${result.orderId ?? 'n/a'}',
+          color: Colors.redAccent,
+        ),
+        const SizedBox(height: 10),
+      ],
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(
+            label: 'real_order_submitted',
+            value: _boolText(result.realOrderSubmitted)),
+        _ResultPair(
+            label: 'broker_submit_called',
+            value: _boolText(result.brokerSubmitCalled)),
+        _ResultPair(
+            label: 'manual_submit_called',
+            value: _boolText(result.manualSubmitCalled)),
+        _ResultPair(
+            label: 'scheduler_real_order_enabled',
+            value: _boolText(result.schedulerRealOrderEnabled)),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text:
+              "scheduler_live_enabled=${_nullableBoolText(result.nullableCheck('kis_scheduler_live_enabled'))}",
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              "allow_real_orders=${_nullableBoolText(result.nullableCheck('kis_scheduler_allow_real_orders'))}",
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              "allow_limited_buy=${_nullableBoolText(result.nullableCheck('kis_scheduler_allow_limited_auto_buy'))}",
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text:
+              "allow_limited_sell=${_nullableBoolText(result.nullableCheck('kis_scheduler_allow_limited_auto_sell'))}",
+          color: Colors.lightBlueAccent,
+        ),
+      ]),
+      if (result.sellResult.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+            text:
+                'sell_result: ${result.sellResult['result'] ?? 'n/a'} / ${result.sellResult['reason'] ?? 'n/a'}'),
+      ],
+      if (result.buyResult.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+            text:
+                'buy_result: ${result.buyResult['result'] ?? 'n/a'} / ${result.buyResult['reason'] ?? 'n/a'}'),
+      ],
+    ]);
+  }
+}
+
+class _KisBuyShadowDecisionCard extends StatelessWidget {
+  const _KisBuyShadowDecisionCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final result = controller.latestKisBuyShadowDecision;
+    return Container(
+      key: const Key('kis_buy_shadow_decision_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.manage_search_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Buy Shadow Decision',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'SHADOW BUY ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO MANUAL SUBMIT', color: Colors.greenAccent),
+          _SoftBadge(text: 'LIVE AUTO BUY DISABLED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+          _SoftBadge(text: 'RISK GATED', color: Colors.white70),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'shadow buy',
+              value: _boolText(settings.kisLimitedAutoBuyShadowEnabled)),
+          _ResultPair(
+              label: 'live auto buy',
+              value: _boolText(settings.kisLimitedAutoBuyEnabled)),
+          _ResultPair(
+              label: 'requires review',
+              value: _boolText(settings.kisLimitedAutoBuyRequiresShadowReview)),
+          _ResultPair(
+              label: 'max orders/day',
+              value: settings.kisLimitedAutoBuyMaxOrdersPerDay.toString()),
+          _ResultPair(
+              label: 'max notional pct',
+              value: _formatPercentValue(
+                  settings.kisLimitedAutoBuyMaxNotionalPct * 100)),
+          _ResultPair(
+              label: 'min score',
+              value: _score(settings.kisLimitedAutoBuyMinFinalScore)),
+          _ResultPair(
+              label: 'min confidence',
+              value: _score(settings.kisLimitedAutoBuyMinConfidence)),
+          _ResultPair(
+              label: 'max positions',
+              value: settings.kisLimitedAutoBuyMaxPositions.toString()),
+          _ResultPair(
+              label: 'no new entry after',
+              value: settings.kisLimitedAutoBuyNoNewEntryAfter),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: controller.kisBuyShadowLoading
+              ? null
+              : () async {
+                  final actionResult = await controller.runKisBuyShadowOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisBuyShadowLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.play_arrow),
+          label: Text(controller.kisBuyShadowLoading
+              ? 'Running buy shadow...'
+              : 'Run Buy Shadow Once'),
+        ),
+        if (controller.kisBuyShadowError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+              text: _primaryLine(controller.kisBuyShadowError!),
+              color: Colors.redAccent),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No buy shadow decision run yet. This card never submits KIS buy orders.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisBuyShadowDecisionPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisBuyShadowDecisionPanel extends StatelessWidget {
+  const _KisBuyShadowDecisionPanel({required this.result});
+
+  final KisBuyShadowDecision result;
+
+  @override
+  Widget build(BuildContext context) {
+    final candidate = result.candidate;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _StateLine(
+        text: candidate == null
+            ? '${_buyShadowDecisionLabel(result.decision)}. ${result.reason}'
+            : '${_buyShadowDecisionLabel(result.decision)}. ${candidate.symbol} is shadow-only; no buy order is submitted.',
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(
+            label: 'decision', value: _buyShadowDecisionLabel(result.decision)),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(label: 'symbol', value: candidate?.symbol ?? 'n/a'),
+        _ResultPair(label: 'final score', value: _score(candidate?.finalScore)),
+        _ResultPair(label: 'confidence', value: _score(candidate?.confidence)),
+        _ResultPair(label: 'quant score', value: _score(candidate?.quantScore)),
+        _ResultPair(
+            label: 'GPT buy score', value: _score(candidate?.gptBuyScore)),
+        _ResultPair(
+            label: 'current price',
+            value: _formatReviewKrwOrDash(candidate?.currentPrice)),
+        _ResultPair(
+            label: 'suggested notional',
+            value: _formatReviewKrwOrDash(candidate?.suggestedNotional)),
+        _ResultPair(
+            label: 'suggested qty',
+            value: candidate?.suggestedQuantity?.toString() ?? 'n/a'),
+        _ResultPair(
+            label: 'real_order_submitted',
+            value: _boolText(result.realOrderSubmitted)),
+        _ResultPair(
+            label: 'broker_submit_called',
+            value: _boolText(result.brokerSubmitCalled)),
+        _ResultPair(
+            label: 'manual_submit_called',
+            value: _boolText(result.manualSubmitCalled)),
+        if (result.createdAt != null)
+          _ResultPair(
+              label: 'created_at',
+              value: formatTimestampWithKst(result.createdAt)),
+      ]),
+      if (result.failedChecks.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'failed_checks: ${_joinList(result.failedChecks)}'),
+      ],
+      if (candidate?.riskFlags.isNotEmpty == true ||
+          result.riskFlags.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+            text:
+                'risk_flags: ${_joinList(candidate?.riskFlags ?? result.riskFlags)}'),
+      ],
+      if (candidate?.gatingNotes.isNotEmpty == true ||
+          result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+            text:
+                'gating_notes: ${_joinList(candidate?.gatingNotes ?? result.gatingNotes)}'),
+      ],
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'auto_buy_enabled=${_boolText(result.autoBuyEnabled)}',
+          color: Colors.orangeAccent,
+        ),
+        _SoftBadge(
+          text: 'auto_sell_enabled=${_boolText(result.autoSellEnabled)}',
+          color: Colors.orangeAccent,
+        ),
+        _SoftBadge(
+          text:
+              'scheduler_real_order_enabled=${_boolText(result.schedulerRealOrderEnabled)}',
+          color: Colors.orangeAccent,
+        ),
+      ]),
+    ]);
+  }
+}
+
 class _KisExitShadowDecisionPanel extends StatelessWidget {
   const _KisExitShadowDecisionPanel({
     required this.result,
@@ -1795,6 +2362,26 @@ class _KisSchedulerStatusGrid extends StatelessWidget {
         label: 'kill_switch',
         value: _nullableBoolText(status.killSwitch),
       ),
+      _ResultPair(
+        label: 'live_scheduler_ready',
+        value: _nullableBoolText(status.liveSchedulerReady),
+      ),
+      _ResultPair(
+        label: 'scheduler_live_enabled',
+        value: _nullableBoolText(status.kisSchedulerLiveEnabled),
+      ),
+      _ResultPair(
+        label: 'allow_limited_auto_buy',
+        value: _nullableBoolText(status.kisSchedulerAllowLimitedAutoBuy),
+      ),
+      _ResultPair(
+        label: 'allow_limited_auto_sell',
+        value: _nullableBoolText(status.kisSchedulerAllowLimitedAutoSell),
+      ),
+      _ResultPair(
+        label: 'max_live_orders/day',
+        value: status.kisSchedulerMaxLiveOrdersPerDay?.toString() ?? 'n/a',
+      ),
     ]);
   }
 }
@@ -2319,6 +2906,13 @@ String _shadowDecisionLabel(String value) {
   final normalized = value.trim().toLowerCase();
   if (normalized == 'would_sell') return 'WOULD SELL';
   if (normalized == 'manual_review') return 'MANUAL REVIEW';
+  return 'HOLD';
+}
+
+String _buyShadowDecisionLabel(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'would_buy') return 'WOULD BUY';
+  if (normalized == 'blocked') return 'BLOCKED';
   return 'HOLD';
 }
 

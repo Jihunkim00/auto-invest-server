@@ -43,6 +43,27 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_sell_min_shadow_occurrences: int | None = Field(default=None, ge=0, le=50)
     kis_limited_auto_sell_allow_manual_review_trigger: bool | None = None
     kis_limited_auto_sell_allow_take_profit_trigger: bool | None = None
+    kis_limited_auto_buy_enabled: bool | None = None
+    kis_limited_auto_buy_shadow_enabled: bool | None = None
+    kis_limited_auto_buy_requires_shadow_review: bool | None = None
+    kis_limited_auto_buy_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
+    kis_limited_auto_buy_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    kis_limited_auto_buy_min_final_score: float | None = Field(default=None, ge=0, le=100)
+    kis_limited_auto_buy_min_confidence: float | None = Field(default=None, ge=0, le=1)
+    kis_limited_auto_buy_max_positions: int | None = Field(default=None, ge=0, le=100)
+    kis_limited_auto_buy_block_if_position_exists: bool | None = None
+    kis_limited_auto_buy_block_if_open_order_exists: bool | None = None
+    kis_limited_auto_buy_allow_reentry_same_day: bool | None = None
+    kis_limited_auto_buy_require_market_open: bool | None = None
+    kis_limited_auto_buy_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    kis_limited_auto_buy_allow_gpt_hard_block: bool | None = None
+    kis_scheduler_live_enabled: bool | None = None
+    kis_scheduler_allow_real_orders: bool | None = None
+    kis_scheduler_allow_limited_auto_buy: bool | None = None
+    kis_scheduler_allow_limited_auto_sell: bool | None = None
+    kis_scheduler_max_live_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    kis_scheduler_live_requires_dry_run_false: bool | None = None
+    kis_scheduler_live_respect_kill_switch: bool | None = None
 
 
 class RunNowRequest(BaseModel):

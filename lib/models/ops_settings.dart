@@ -25,6 +25,27 @@ class OpsSettings {
     this.kisLimitedAutoSellMinShadowOccurrences = 1,
     this.kisLimitedAutoSellAllowManualReviewTrigger = false,
     this.kisLimitedAutoSellAllowTakeProfitTrigger = false,
+    this.kisLimitedAutoBuyEnabled = false,
+    this.kisLimitedAutoBuyShadowEnabled = true,
+    this.kisLimitedAutoBuyRequiresShadowReview = true,
+    this.kisLimitedAutoBuyMaxOrdersPerDay = 1,
+    this.kisLimitedAutoBuyMaxNotionalPct = 0.03,
+    this.kisLimitedAutoBuyMinFinalScore = 75,
+    this.kisLimitedAutoBuyMinConfidence = 0.70,
+    this.kisLimitedAutoBuyMaxPositions = 3,
+    this.kisLimitedAutoBuyBlockIfPositionExists = true,
+    this.kisLimitedAutoBuyBlockIfOpenOrderExists = true,
+    this.kisLimitedAutoBuyAllowReentrySameDay = false,
+    this.kisLimitedAutoBuyRequireMarketOpen = true,
+    this.kisLimitedAutoBuyNoNewEntryAfter = '14:50',
+    this.kisLimitedAutoBuyAllowGptHardBlock = false,
+    this.kisSchedulerLiveEnabled = false,
+    this.kisSchedulerAllowRealOrders = false,
+    this.kisSchedulerAllowLimitedAutoBuy = false,
+    this.kisSchedulerAllowLimitedAutoSell = false,
+    this.kisSchedulerMaxLiveOrdersPerDay = 2,
+    this.kisSchedulerLiveRequiresDryRunFalse = true,
+    this.kisSchedulerLiveRespectKillSwitch = true,
   });
 
   final bool schedulerEnabled;
@@ -52,6 +73,27 @@ class OpsSettings {
   final int kisLimitedAutoSellMinShadowOccurrences;
   final bool kisLimitedAutoSellAllowManualReviewTrigger;
   final bool kisLimitedAutoSellAllowTakeProfitTrigger;
+  final bool kisLimitedAutoBuyEnabled;
+  final bool kisLimitedAutoBuyShadowEnabled;
+  final bool kisLimitedAutoBuyRequiresShadowReview;
+  final int kisLimitedAutoBuyMaxOrdersPerDay;
+  final double kisLimitedAutoBuyMaxNotionalPct;
+  final double kisLimitedAutoBuyMinFinalScore;
+  final double kisLimitedAutoBuyMinConfidence;
+  final int kisLimitedAutoBuyMaxPositions;
+  final bool kisLimitedAutoBuyBlockIfPositionExists;
+  final bool kisLimitedAutoBuyBlockIfOpenOrderExists;
+  final bool kisLimitedAutoBuyAllowReentrySameDay;
+  final bool kisLimitedAutoBuyRequireMarketOpen;
+  final String kisLimitedAutoBuyNoNewEntryAfter;
+  final bool kisLimitedAutoBuyAllowGptHardBlock;
+  final bool kisSchedulerLiveEnabled;
+  final bool kisSchedulerAllowRealOrders;
+  final bool kisSchedulerAllowLimitedAutoBuy;
+  final bool kisSchedulerAllowLimitedAutoSell;
+  final int kisSchedulerMaxLiveOrdersPerDay;
+  final bool kisSchedulerLiveRequiresDryRunFalse;
+  final bool kisSchedulerLiveRespectKillSwitch;
 
   OpsSettings copyWith({
     bool? schedulerEnabled,
@@ -79,6 +121,27 @@ class OpsSettings {
     int? kisLimitedAutoSellMinShadowOccurrences,
     bool? kisLimitedAutoSellAllowManualReviewTrigger,
     bool? kisLimitedAutoSellAllowTakeProfitTrigger,
+    bool? kisLimitedAutoBuyEnabled,
+    bool? kisLimitedAutoBuyShadowEnabled,
+    bool? kisLimitedAutoBuyRequiresShadowReview,
+    int? kisLimitedAutoBuyMaxOrdersPerDay,
+    double? kisLimitedAutoBuyMaxNotionalPct,
+    double? kisLimitedAutoBuyMinFinalScore,
+    double? kisLimitedAutoBuyMinConfidence,
+    int? kisLimitedAutoBuyMaxPositions,
+    bool? kisLimitedAutoBuyBlockIfPositionExists,
+    bool? kisLimitedAutoBuyBlockIfOpenOrderExists,
+    bool? kisLimitedAutoBuyAllowReentrySameDay,
+    bool? kisLimitedAutoBuyRequireMarketOpen,
+    String? kisLimitedAutoBuyNoNewEntryAfter,
+    bool? kisLimitedAutoBuyAllowGptHardBlock,
+    bool? kisSchedulerLiveEnabled,
+    bool? kisSchedulerAllowRealOrders,
+    bool? kisSchedulerAllowLimitedAutoBuy,
+    bool? kisSchedulerAllowLimitedAutoSell,
+    int? kisSchedulerMaxLiveOrdersPerDay,
+    bool? kisSchedulerLiveRequiresDryRunFalse,
+    bool? kisSchedulerLiveRespectKillSwitch,
   }) {
     return OpsSettings(
       schedulerEnabled: schedulerEnabled ?? this.schedulerEnabled,
@@ -125,6 +188,53 @@ class OpsSettings {
       kisLimitedAutoSellAllowTakeProfitTrigger:
           kisLimitedAutoSellAllowTakeProfitTrigger ??
               this.kisLimitedAutoSellAllowTakeProfitTrigger,
+      kisLimitedAutoBuyEnabled:
+          kisLimitedAutoBuyEnabled ?? this.kisLimitedAutoBuyEnabled,
+      kisLimitedAutoBuyShadowEnabled:
+          kisLimitedAutoBuyShadowEnabled ?? this.kisLimitedAutoBuyShadowEnabled,
+      kisLimitedAutoBuyRequiresShadowReview:
+          kisLimitedAutoBuyRequiresShadowReview ??
+              this.kisLimitedAutoBuyRequiresShadowReview,
+      kisLimitedAutoBuyMaxOrdersPerDay: kisLimitedAutoBuyMaxOrdersPerDay ??
+          this.kisLimitedAutoBuyMaxOrdersPerDay,
+      kisLimitedAutoBuyMaxNotionalPct: kisLimitedAutoBuyMaxNotionalPct ??
+          this.kisLimitedAutoBuyMaxNotionalPct,
+      kisLimitedAutoBuyMinFinalScore:
+          kisLimitedAutoBuyMinFinalScore ?? this.kisLimitedAutoBuyMinFinalScore,
+      kisLimitedAutoBuyMinConfidence:
+          kisLimitedAutoBuyMinConfidence ?? this.kisLimitedAutoBuyMinConfidence,
+      kisLimitedAutoBuyMaxPositions:
+          kisLimitedAutoBuyMaxPositions ?? this.kisLimitedAutoBuyMaxPositions,
+      kisLimitedAutoBuyBlockIfPositionExists:
+          kisLimitedAutoBuyBlockIfPositionExists ??
+              this.kisLimitedAutoBuyBlockIfPositionExists,
+      kisLimitedAutoBuyBlockIfOpenOrderExists:
+          kisLimitedAutoBuyBlockIfOpenOrderExists ??
+              this.kisLimitedAutoBuyBlockIfOpenOrderExists,
+      kisLimitedAutoBuyAllowReentrySameDay:
+          kisLimitedAutoBuyAllowReentrySameDay ??
+              this.kisLimitedAutoBuyAllowReentrySameDay,
+      kisLimitedAutoBuyRequireMarketOpen: kisLimitedAutoBuyRequireMarketOpen ??
+          this.kisLimitedAutoBuyRequireMarketOpen,
+      kisLimitedAutoBuyNoNewEntryAfter: kisLimitedAutoBuyNoNewEntryAfter ??
+          this.kisLimitedAutoBuyNoNewEntryAfter,
+      kisLimitedAutoBuyAllowGptHardBlock: kisLimitedAutoBuyAllowGptHardBlock ??
+          this.kisLimitedAutoBuyAllowGptHardBlock,
+      kisSchedulerLiveEnabled:
+          kisSchedulerLiveEnabled ?? this.kisSchedulerLiveEnabled,
+      kisSchedulerAllowRealOrders:
+          kisSchedulerAllowRealOrders ?? this.kisSchedulerAllowRealOrders,
+      kisSchedulerAllowLimitedAutoBuy: kisSchedulerAllowLimitedAutoBuy ??
+          this.kisSchedulerAllowLimitedAutoBuy,
+      kisSchedulerAllowLimitedAutoSell: kisSchedulerAllowLimitedAutoSell ??
+          this.kisSchedulerAllowLimitedAutoSell,
+      kisSchedulerMaxLiveOrdersPerDay: kisSchedulerMaxLiveOrdersPerDay ??
+          this.kisSchedulerMaxLiveOrdersPerDay,
+      kisSchedulerLiveRequiresDryRunFalse:
+          kisSchedulerLiveRequiresDryRunFalse ??
+              this.kisSchedulerLiveRequiresDryRunFalse,
+      kisSchedulerLiveRespectKillSwitch: kisSchedulerLiveRespectKillSwitch ??
+          this.kisSchedulerLiveRespectKillSwitch,
     );
   }
 }

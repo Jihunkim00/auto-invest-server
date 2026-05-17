@@ -6,12 +6,15 @@ import '../config/app_config.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
+import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
+import '../../models/kis_limited_auto_buy.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_simulation.dart';
+import '../../models/kis_scheduler_live.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
@@ -546,6 +549,23 @@ class ApiClient {
     return KisLimitedAutoSell.fromJson(payload);
   }
 
+  Future<KisBuyShadowDecision> runKisBuyShadowOnce() async {
+    final payload = await _postJsonBody('/kis/buy-shadow/run-once', const {});
+    return KisBuyShadowDecision.fromJson(payload);
+  }
+
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+    final payload =
+        await _postJsonBody('/kis/limited-auto-buy/run-once', const {});
+    return KisLimitedAutoBuy.fromJson(payload);
+  }
+
+  Future<KisSchedulerLiveResult> runKisSchedulerLiveOnce() async {
+    final payload =
+        await _postJsonBody('/kis/scheduler/run-live-once', const {});
+    return KisSchedulerLiveResult.fromJson(payload);
+  }
+
   Future<WatchlistRunResult> runWatchlistForProvider({
     required String provider,
     required int gateLevel,
@@ -600,6 +620,50 @@ class ApiClient {
             j['kis_limited_auto_sell_allow_manual_review_trigger'] == true,
         kisLimitedAutoSellAllowTakeProfitTrigger:
             j['kis_limited_auto_sell_allow_take_profit_trigger'] == true,
+        kisLimitedAutoBuyEnabled: j['kis_limited_auto_buy_enabled'] == true,
+        kisLimitedAutoBuyShadowEnabled:
+            j['kis_limited_auto_buy_shadow_enabled'] != false,
+        kisLimitedAutoBuyRequiresShadowReview:
+            j['kis_limited_auto_buy_requires_shadow_review'] != false,
+        kisLimitedAutoBuyMaxOrdersPerDay:
+            _readInt(j['kis_limited_auto_buy_max_orders_per_day'], 1),
+        kisLimitedAutoBuyMaxNotionalPct:
+            _readNullableDouble(j['kis_limited_auto_buy_max_notional_pct']) ??
+                0.03,
+        kisLimitedAutoBuyMinFinalScore:
+            _readNullableDouble(j['kis_limited_auto_buy_min_final_score']) ??
+                75,
+        kisLimitedAutoBuyMinConfidence:
+            _readNullableDouble(j['kis_limited_auto_buy_min_confidence']) ??
+                0.70,
+        kisLimitedAutoBuyMaxPositions:
+            _readInt(j['kis_limited_auto_buy_max_positions'], 3),
+        kisLimitedAutoBuyBlockIfPositionExists:
+            j['kis_limited_auto_buy_block_if_position_exists'] != false,
+        kisLimitedAutoBuyBlockIfOpenOrderExists:
+            j['kis_limited_auto_buy_block_if_open_order_exists'] != false,
+        kisLimitedAutoBuyAllowReentrySameDay:
+            j['kis_limited_auto_buy_allow_reentry_same_day'] == true,
+        kisLimitedAutoBuyRequireMarketOpen:
+            j['kis_limited_auto_buy_require_market_open'] != false,
+        kisLimitedAutoBuyNoNewEntryAfter:
+            (j['kis_limited_auto_buy_no_new_entry_after'] ?? '14:50')
+                .toString(),
+        kisLimitedAutoBuyAllowGptHardBlock:
+            j['kis_limited_auto_buy_allow_gpt_hard_block'] == true,
+        kisSchedulerLiveEnabled: j['kis_scheduler_live_enabled'] == true,
+        kisSchedulerAllowRealOrders:
+            j['kis_scheduler_allow_real_orders'] == true,
+        kisSchedulerAllowLimitedAutoBuy:
+            j['kis_scheduler_allow_limited_auto_buy'] == true,
+        kisSchedulerAllowLimitedAutoSell:
+            j['kis_scheduler_allow_limited_auto_sell'] == true,
+        kisSchedulerMaxLiveOrdersPerDay:
+            _readInt(j['kis_scheduler_max_live_orders_per_day'], 2),
+        kisSchedulerLiveRequiresDryRunFalse:
+            j['kis_scheduler_live_requires_dry_run_false'] != false,
+        kisSchedulerLiveRespectKillSwitch:
+            j['kis_scheduler_live_respect_kill_switch'] != false,
       );
     } catch (_) {
       return const OpsSettings(

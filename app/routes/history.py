@@ -484,6 +484,14 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
     provider = _infer_provider(mode=None, trigger_source=row.trigger_source)
     market = _infer_market(provider)
     simulated = provider == "kis" and str(row.signal_status or "").lower() == "simulated"
+    buy_shadow = (
+        provider == "kis"
+        and str(row.trigger_source or "").lower() == "kis_buy_shadow"
+    )
+    limited_auto_buy = (
+        provider == "kis"
+        and str(row.trigger_source or "").lower() == "kis_limited_auto_buy"
+    )
     gpt_context = None
     if row.market_analysis_id is not None:
         analysis = db.get(MarketAnalysis, row.market_analysis_id)
@@ -494,7 +502,11 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
         "run_key": None,
         "provider": provider,
         "market": market,
-        "mode": "kis_dry_run_auto" if simulated else "signal",
+        "mode": (
+            "shadow_buy_dry_run"
+            if buy_shadow
+            else ("limited_auto_buy" if limited_auto_buy else ("kis_dry_run_auto" if simulated else "signal"))
+        ),
         "trigger_source": row.trigger_source,
         "symbol": row.symbol,
         "action": row.action,
@@ -510,12 +522,12 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
         "order_id": row.related_order_id,
         "gate_level": row.gate_level,
         "created_at": row.created_at,
-        "dry_run": True if simulated else None,
-        "simulated": simulated,
-        "preview_only": False,
-        "real_order_submitted": False if simulated else None,
-        "broker_submit_called": False if simulated else None,
-        "manual_submit_called": False if simulated else None,
+        "dry_run": True if simulated or buy_shadow else None,
+        "simulated": simulated or buy_shadow,
+        "preview_only": buy_shadow,
+        "real_order_submitted": False if simulated or buy_shadow else (row.related_order_id is not None if limited_auto_buy else None),
+        "broker_submit_called": False if simulated or buy_shadow else (row.related_order_id is not None if limited_auto_buy else None),
+        "manual_submit_called": False if simulated or buy_shadow or limited_auto_buy else None,
         "risk_flags": _parse_json_array(row.risk_flags),
         "gating_notes": _parse_json_array(row.gating_notes),
         "gpt_context": gpt_context,

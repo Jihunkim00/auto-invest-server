@@ -15,6 +15,11 @@ class KisSchedulerSimulationStatus {
     this.runtimeSchedulerEnabled,
     this.runtimeDryRun,
     this.killSwitch,
+    this.kisSchedulerLiveEnabled,
+    this.kisSchedulerAllowLimitedAutoBuy,
+    this.kisSchedulerAllowLimitedAutoSell,
+    this.kisSchedulerMaxLiveOrdersPerDay,
+    this.liveSchedulerReady,
   });
 
   factory KisSchedulerSimulationStatus.fromJson(Map<String, dynamic> json) {
@@ -44,6 +49,14 @@ class KisSchedulerSimulationStatus {
       runtimeSchedulerEnabled: _boolValue(json['runtime_scheduler_enabled']),
       runtimeDryRun: _boolValue(json['runtime_dry_run']),
       killSwitch: _boolValue(json['kill_switch']),
+      kisSchedulerLiveEnabled: _boolValue(json['kis_scheduler_live_enabled']),
+      kisSchedulerAllowLimitedAutoBuy:
+          _boolValue(json['kis_scheduler_allow_limited_auto_buy']),
+      kisSchedulerAllowLimitedAutoSell:
+          _boolValue(json['kis_scheduler_allow_limited_auto_sell']),
+      kisSchedulerMaxLiveOrdersPerDay:
+          _nullableInt(json['kis_scheduler_max_live_orders_per_day']),
+      liveSchedulerReady: _boolValue(json['live_scheduler_ready']),
       realOrderSubmitted: _boolValue(json['real_order_submitted'] ??
               safety?['real_order_submitted']) ??
           false,
@@ -70,6 +83,11 @@ class KisSchedulerSimulationStatus {
       runtimeSchedulerEnabled: false,
       runtimeDryRun: true,
       killSwitch: false,
+      kisSchedulerLiveEnabled: false,
+      kisSchedulerAllowLimitedAutoBuy: false,
+      kisSchedulerAllowLimitedAutoSell: false,
+      kisSchedulerMaxLiveOrdersPerDay: 2,
+      liveSchedulerReady: false,
       realOrderSubmitted: false,
       brokerSubmitCalled: false,
       manualSubmitCalled: false,
@@ -88,6 +106,11 @@ class KisSchedulerSimulationStatus {
   final bool? runtimeSchedulerEnabled;
   final bool? runtimeDryRun;
   final bool? killSwitch;
+  final bool? kisSchedulerLiveEnabled;
+  final bool? kisSchedulerAllowLimitedAutoBuy;
+  final bool? kisSchedulerAllowLimitedAutoSell;
+  final int? kisSchedulerMaxLiveOrdersPerDay;
+  final bool? liveSchedulerReady;
   final bool realOrderSubmitted;
   final bool brokerSubmitCalled;
   final bool manualSubmitCalled;

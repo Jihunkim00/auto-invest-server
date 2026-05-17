@@ -10,6 +10,8 @@ EXIT_SHADOW_SOURCE = "kis_exit_shadow_decision"
 EXIT_SHADOW_SOURCE_TYPE = "dry_run_sell_simulation"
 LIMITED_AUTO_SELL_SOURCE = "kis_limited_auto_sell"
 LIMITED_AUTO_SELL_SOURCE_TYPE = "guarded_stop_loss_exit"
+LIMITED_AUTO_BUY_SOURCE = "kis_limited_auto_buy"
+LIMITED_AUTO_BUY_SOURCE_TYPE = "guarded_entry"
 
 _STRING_KEYS = {
     "source",
@@ -20,8 +22,11 @@ _STRING_KEYS = {
     "shadow_decision_run_key",
     "shadow_decision_checked_at",
     "limited_auto_sell_checked_at",
+    "limited_auto_buy_checked_at",
+    "scheduler_live_checked_at",
     "queue_id",
     "queue_review_status",
+    "shadow_review_status",
     "checked_at",
     "exit_trigger",
     "trigger_source",
@@ -36,6 +41,10 @@ _FLOAT_KEYS = {
     "quantity",
     "notional",
     "max_notional_pct",
+    "final_score",
+    "confidence",
+    "quant_score",
+    "gpt_buy_score",
 }
 _BOOL_KEYS = {
     "manual_confirm_required",
@@ -51,6 +60,14 @@ _BOOL_KEYS = {
     "limited_auto_sell_real_order_submitted",
     "limited_auto_sell_broker_submit_called",
     "limited_auto_sell_manual_submit_called",
+    "limited_auto_buy_enabled",
+    "limited_auto_buy_real_order_submitted",
+    "limited_auto_buy_broker_submit_called",
+    "limited_auto_buy_manual_submit_called",
+    "scheduler_live_enabled",
+    "scheduler_live_real_order_submitted",
+    "scheduler_live_broker_submit_called",
+    "scheduler_live_manual_submit_called",
     "preflight_real_order_submitted",
     "preflight_broker_submit_called",
     "preflight_manual_submit_called",
@@ -113,6 +130,14 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         result.setdefault("take_profit_auto_sell_enabled", False)
         result.setdefault("manual_review_auto_sell_enabled", False)
         result.setdefault("limited_auto_sell_manual_submit_called", False)
+    if result.get("source") == LIMITED_AUTO_BUY_SOURCE:
+        result.setdefault("source_type", LIMITED_AUTO_BUY_SOURCE_TYPE)
+        result.setdefault("manual_confirm_required", False)
+        result.setdefault("auto_buy_enabled", True)
+        result.setdefault("auto_sell_enabled", False)
+        result.setdefault("real_order_submit_allowed", True)
+        result.setdefault("limited_auto_buy_enabled", True)
+        result.setdefault("limited_auto_buy_manual_submit_called", False)
 
     return sanitize_kis_payload(result) if result else {}
 
@@ -154,6 +179,26 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         ),
         "limited_auto_sell_manual_submit_called": data.get(
             "limited_auto_sell_manual_submit_called"
+        ),
+        "limited_auto_buy_enabled": data.get("limited_auto_buy_enabled"),
+        "limited_auto_buy_real_order_submitted": data.get(
+            "limited_auto_buy_real_order_submitted"
+        ),
+        "limited_auto_buy_broker_submit_called": data.get(
+            "limited_auto_buy_broker_submit_called"
+        ),
+        "limited_auto_buy_manual_submit_called": data.get(
+            "limited_auto_buy_manual_submit_called"
+        ),
+        "scheduler_live_enabled": data.get("scheduler_live_enabled"),
+        "scheduler_live_real_order_submitted": data.get(
+            "scheduler_live_real_order_submitted"
+        ),
+        "scheduler_live_broker_submit_called": data.get(
+            "scheduler_live_broker_submit_called"
+        ),
+        "scheduler_live_manual_submit_called": data.get(
+            "scheduler_live_manual_submit_called"
         ),
         "preflight_real_order_submitted": data.get("preflight_real_order_submitted"),
         "preflight_broker_submit_called": data.get("preflight_broker_submit_called"),
@@ -207,6 +252,26 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             ),
             "limited_auto_sell_manual_submit_called": payload.get(
                 "limited_auto_sell_manual_submit_called"
+            ),
+            "limited_auto_buy_enabled": payload.get("limited_auto_buy_enabled"),
+            "limited_auto_buy_real_order_submitted": payload.get(
+                "limited_auto_buy_real_order_submitted"
+            ),
+            "limited_auto_buy_broker_submit_called": payload.get(
+                "limited_auto_buy_broker_submit_called"
+            ),
+            "limited_auto_buy_manual_submit_called": payload.get(
+                "limited_auto_buy_manual_submit_called"
+            ),
+            "scheduler_live_enabled": payload.get("scheduler_live_enabled"),
+            "scheduler_live_real_order_submitted": payload.get(
+                "scheduler_live_real_order_submitted"
+            ),
+            "scheduler_live_broker_submit_called": payload.get(
+                "scheduler_live_broker_submit_called"
+            ),
+            "scheduler_live_manual_submit_called": payload.get(
+                "scheduler_live_manual_submit_called"
             ),
             "preflight_real_order_submitted": payload.get(
                 "preflight_real_order_submitted"

@@ -4,10 +4,13 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
+import 'package:auto_invest_dashboard/models/kis_buy_shadow_decision.dart';
+import 'package:auto_invest_dashboard/models/kis_limited_auto_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_limited_auto_sell.dart';
 import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_live.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review_queue.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -540,6 +543,81 @@ void main() {
 
     controller.dispose();
   });
+
+  test('KIS buy shadow run stores result without manual calls', () async {
+    final api = _FakeApiClient(buyShadow: _buyShadow());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisBuyShadowOnce();
+
+    expect(result.success, isTrue);
+    expect(api.runKisBuyShadowCalls, 1);
+    expect(controller.kisBuyShadowLoading, isFalse);
+    expect(controller.latestKisBuyShadowDecision?.mode, 'shadow_buy_dry_run');
+    expect(controller.latestKisBuyShadowDecision?.realOrderSubmitted, isFalse);
+    expect(controller.latestKisBuyShadowDecision?.manualSubmitCalled, isFalse);
+    expect(api.validationCalls, 0);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
+  });
+
+  test('KIS buy shadow run stores error and clears loading', () async {
+    final api = _FakeApiClient(throwBuyShadow: true);
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisBuyShadowOnce();
+
+    expect(result.success, isFalse);
+    expect(api.runKisBuyShadowCalls, 1);
+    expect(controller.kisBuyShadowLoading, isFalse);
+    expect(controller.kisBuyShadowError, contains('buy shadow failed'));
+
+    controller.dispose();
+  });
+
+  test('KIS limited auto buy run stores guarded result without manual calls',
+      () async {
+    final api = _FakeApiClient(limitedAutoBuy: _limitedAutoBuy());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisLimitedAutoBuyOnce();
+
+    expect(result.success, isTrue);
+    expect(api.runKisLimitedAutoBuyCalls, 1);
+    expect(controller.kisLimitedAutoBuyLoading, isFalse);
+    expect(controller.latestKisLimitedAutoBuyResult?.mode, 'limited_auto_buy');
+    expect(
+        controller.latestKisLimitedAutoBuyResult?.realOrderSubmitted, isFalse);
+    expect(
+        controller.latestKisLimitedAutoBuyResult?.manualSubmitCalled, isFalse);
+    expect(api.validationCalls, 0);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
+  });
+
+  test('KIS scheduler live run stores guarded result without manual calls',
+      () async {
+    final api = _FakeApiClient(schedulerLive: _schedulerLive());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisSchedulerLiveOnce();
+
+    expect(result.success, isTrue);
+    expect(api.runKisSchedulerLiveCalls, 1);
+    expect(controller.kisSchedulerLiveLoading, isFalse);
+    expect(controller.latestKisSchedulerLiveResult?.mode,
+        'kis_scheduler_live_once');
+    expect(
+        controller.latestKisSchedulerLiveResult?.realOrderSubmitted, isFalse);
+    expect(
+        controller.latestKisSchedulerLiveResult?.manualSubmitCalled, isFalse);
+    expect(api.validationCalls, 0);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
+  });
 }
 
 DashboardController _readyKisController({
@@ -696,6 +774,75 @@ KisLimitedAutoSell _limitedAutoSell() {
   });
 }
 
+KisBuyShadowDecision _buyShadow() {
+  return KisBuyShadowDecision.fromJson({
+    'status': 'ok',
+    'mode': 'shadow_buy_dry_run',
+    'decision': 'would_buy',
+    'action': 'buy',
+    'reason': 'Shadow buy candidate only. No broker submit.',
+    'symbol': '005930',
+    'candidate': {
+      'symbol': '005930',
+      'final_score': 82.5,
+      'confidence': 0.76,
+      'quant_score': 78,
+      'gpt_buy_score': 65,
+      'current_price': 72000,
+      'suggested_notional': 288000,
+      'suggested_quantity': 4,
+      'risk_flags': ['shadow_buy_only'],
+      'gating_notes': ['no_broker_submit'],
+      'audit_metadata': {'source': 'kis_buy_shadow_decision'},
+    },
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'auto_buy_enabled': false,
+    'auto_sell_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'checks': {'kis_limited_auto_buy_shadow_enabled': true},
+    'safety': {'read_only': true},
+  });
+}
+
+KisLimitedAutoBuy _limitedAutoBuy() {
+  return KisLimitedAutoBuy.fromJson({
+    'status': 'ok',
+    'mode': 'limited_auto_buy',
+    'result': 'blocked',
+    'action': 'hold',
+    'reason': 'limited_auto_buy_disabled',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'auto_buy_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'checks': {'kis_limited_auto_buy_enabled': false},
+    'safety': {
+      'max_orders_per_day': 1,
+      'max_notional_pct': 0.03,
+      'max_positions': 3,
+    },
+  });
+}
+
+KisSchedulerLiveResult _schedulerLive() {
+  return KisSchedulerLiveResult.fromJson({
+    'status': 'ok',
+    'mode': 'kis_scheduler_live_once',
+    'result': 'blocked',
+    'action': 'hold',
+    'reason': 'kis_scheduler_live_disabled',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'scheduler_real_order_enabled': false,
+    'checks': {'kis_scheduler_live_enabled': false},
+    'safety': {'max_live_orders_per_day': 2},
+  });
+}
+
 Map<String, dynamic> _queueActionJson({required String status, String? note}) {
   return {
     'status': 'ok',
@@ -744,6 +891,10 @@ class _FakeApiClient extends ApiClient {
     this.throwShadowExitReviewQueue = false,
     this.limitedAutoSell,
     this.throwLimitedAutoSell = false,
+    this.buyShadow,
+    this.throwBuyShadow = false,
+    this.limitedAutoBuy,
+    this.schedulerLive,
   });
 
   final WatchlistRunResult? latest;
@@ -766,6 +917,10 @@ class _FakeApiClient extends ApiClient {
   final bool throwShadowExitReviewQueue;
   final KisLimitedAutoSell? limitedAutoSell;
   final bool throwLimitedAutoSell;
+  final KisBuyShadowDecision? buyShadow;
+  final bool throwBuyShadow;
+  final KisLimitedAutoBuy? limitedAutoBuy;
+  final KisSchedulerLiveResult? schedulerLive;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
@@ -776,6 +931,9 @@ class _FakeApiClient extends ApiClient {
   int markKisShadowExitQueueItemReviewedCalls = 0;
   int dismissKisShadowExitQueueItemCalls = 0;
   int runKisLimitedAutoSellCalls = 0;
+  int runKisBuyShadowCalls = 0;
+  int runKisLimitedAutoBuyCalls = 0;
+  int runKisSchedulerLiveCalls = 0;
   String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
@@ -919,6 +1077,29 @@ class _FakeApiClient extends ApiClient {
       );
     }
     return limitedAutoSell ?? _limitedAutoSell();
+  }
+
+  @override
+  Future<KisBuyShadowDecision> runKisBuyShadowOnce() async {
+    runKisBuyShadowCalls += 1;
+    if (throwBuyShadow) {
+      throw const ApiRequestException(
+        'HTTP 503: {"message":"buy shadow failed"}',
+      );
+    }
+    return buyShadow ?? _buyShadow();
+  }
+
+  @override
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+    runKisLimitedAutoBuyCalls += 1;
+    return limitedAutoBuy ?? _limitedAutoBuy();
+  }
+
+  @override
+  Future<KisSchedulerLiveResult> runKisSchedulerLiveOnce() async {
+    runKisSchedulerLiveCalls += 1;
+    return schedulerLive ?? _schedulerLive();
   }
 
   @override

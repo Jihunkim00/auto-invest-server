@@ -46,6 +46,30 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             bool(kr_profile.get("enabled_for_trading", False)),
         ]
     )
+    kis_scheduler_live_enabled = bool(
+        runtime.get("kis_scheduler_live_enabled", False)
+    )
+    kis_scheduler_runtime_allow_real_orders = bool(
+        runtime.get("kis_scheduler_allow_real_orders", False)
+    )
+    kis_scheduler_allow_limited_auto_buy = bool(
+        runtime.get("kis_scheduler_allow_limited_auto_buy", False)
+    )
+    kis_scheduler_allow_limited_auto_sell = bool(
+        runtime.get("kis_scheduler_allow_limited_auto_sell", False)
+    )
+    live_scheduler_ready = all(
+        [
+            kis_scheduler_live_enabled,
+            kis_scheduler_runtime_allow_real_orders,
+            bool(getattr(settings, "kis_real_order_enabled", False)),
+            bool(getattr(settings, "kis_enabled", False)),
+            bool(runtime.get("dry_run", True)) is False,
+            bool(runtime.get("kill_switch", False)) is False,
+            kis_scheduler_allow_limited_auto_buy
+            or kis_scheduler_allow_limited_auto_sell,
+        ]
+    )
 
     return {
         "runtime_scheduler_enabled": bool(runtime.get("scheduler_enabled", False)),
@@ -64,6 +88,14 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "kis_scheduler_enabled": kr_scheduler_enabled,
             "kis_scheduler_dry_run": kr_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kr_scheduler_allow_real_orders,
+            "kis_scheduler_live_enabled": kis_scheduler_live_enabled,
+            "kis_scheduler_runtime_allow_real_orders": kis_scheduler_runtime_allow_real_orders,
+            "kis_scheduler_allow_limited_auto_buy": kis_scheduler_allow_limited_auto_buy,
+            "kis_scheduler_allow_limited_auto_sell": kis_scheduler_allow_limited_auto_sell,
+            "kis_scheduler_max_live_orders_per_day": int(
+                runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+            ),
+            "live_scheduler_ready": live_scheduler_ready,
             "configured_live_order_prereqs_met": kr_live_order_prereqs_met,
             "dry_run_validation_scheduler_enabled": False,
             "real_orders_allowed": False,

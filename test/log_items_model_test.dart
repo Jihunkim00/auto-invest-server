@@ -266,6 +266,115 @@ void main() {
     );
   });
 
+  test('OrderLogItem labels KIS limited auto buy distinctly', () {
+    final item = OrderLogItem.fromJson({
+      'id': 43,
+      'order_id': 43,
+      'provider': 'kis',
+      'broker': 'kis',
+      'market': 'KR',
+      'mode': 'limited_auto_buy',
+      'source': 'kis_limited_auto_buy',
+      'source_type': 'guarded_entry',
+      'symbol': '005930',
+      'side': 'buy',
+      'qty': 3,
+      'notional': 216000,
+      'internal_status': 'SUBMITTED',
+      'broker_order_status': 'submitted',
+      'kis_odno': 'BUY123',
+      'created_at': '2026-05-08T00:04:00',
+      'updated_at': '2026-05-08T00:05:00',
+      'real_order_submitted': true,
+      'broker_submit_called': true,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+    });
+
+    expect(item.sourceLabel, 'KIS LIMITED AUTO BUY');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS LIMITED AUTO BUY',
+        'BUY',
+        'GUARDED ENTRY',
+        'MANUAL SUBMIT FALSE',
+        'REAL ORDER SUBMITTED',
+      ]),
+    );
+  });
+
+  test('TradingLogItem labels KIS scheduler live distinctly', () {
+    final item = TradingLogItem.fromJson({
+      'id': 44,
+      'run_key': 'scheduler-live',
+      'provider': 'kis',
+      'market': 'KR',
+      'mode': 'kis_scheduler_live_once',
+      'trigger_source': 'kis_scheduler_live',
+      'symbol': 'WATCHLIST',
+      'action': 'hold',
+      'result': 'blocked',
+      'reason': 'kis_scheduler_live_disabled',
+      'created_at': '2026-05-08T00:04:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+    });
+
+    expect(item.sourceLabel, 'KIS SCHEDULER LIVE');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS SCHEDULER LIVE',
+        'BLOCKED',
+        'NO SUBMIT',
+        'SCHEDULER REAL ORDERS DISABLED',
+      ]),
+    );
+  });
+
+  test('TradingLogItem labels KIS buy shadow distinctly', () {
+    final item = TradingLogItem.fromJson({
+      'id': 42,
+      'run_key': 'buy-shadow',
+      'provider': 'kis',
+      'market': 'KR',
+      'mode': 'shadow_buy_dry_run',
+      'source': 'kis_buy_shadow_decision',
+      'source_type': 'dry_run_buy_simulation',
+      'trigger_source': 'kis_buy_shadow',
+      'symbol': '005930',
+      'action': 'buy',
+      'result': 'would_buy',
+      'reason': 'Shadow buy candidate only. No broker submit.',
+      'created_at': '2026-05-08T00:04:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'risk_flags': ['shadow_buy_only'],
+      'gating_notes': ['live_auto_buy_disabled'],
+    });
+
+    expect(item.sourceLabel, 'KIS BUY SHADOW');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS BUY SHADOW',
+        'DRY RUN',
+        'WOULD BUY',
+        'NO BROKER SUBMIT',
+        'NO MANUAL SUBMIT',
+        'LIVE AUTO BUY DISABLED',
+      ]),
+    );
+  });
+
   test('OrderLogItem exposes exit preflight manual sell lifecycle fields', () {
     final item = OrderLogItem.fromJson({
       'id': 32,

@@ -101,11 +101,25 @@ def get_signal_logs(
 
     rows = query.order_by(SignalLog.created_at.desc()).limit(limit).all()
 
-    return [
-        {
+    items = []
+    for row in rows:
+        buy_shadow = str(row.trigger_source or "").lower() == "kis_buy_shadow"
+        limited_auto_buy = (
+            str(row.trigger_source or "").lower() == "kis_limited_auto_buy"
+        )
+        kis_signal = buy_shadow or str(row.trigger_source or "").lower().startswith("kis_")
+        items.append(
+            {
             "id": row.id,
+            "provider": "kis" if kis_signal else "alpaca",
+            "market": "KR" if kis_signal else "US",
+            "mode": "shadow_buy_dry_run"
+            if buy_shadow
+            else ("limited_auto_buy" if limited_auto_buy else "signal"),
+            "trigger_source": row.trigger_source,
             "symbol": row.symbol,
             "action": row.action,
+            "result": row.signal_status,
             "buy_score": row.buy_score,
             "sell_score": row.sell_score,
             "confidence": row.confidence,
@@ -130,7 +144,13 @@ def get_signal_logs(
             "hard_blocked": bool(row.hard_blocked),
             "gating_notes": _parse_json_array(row.gating_notes),
             "related_order_id": row.related_order_id,
+            "dry_run": True if buy_shadow else None,
+            "simulated": buy_shadow,
+            "preview_only": buy_shadow,
+            "real_order_submitted": False if buy_shadow else (row.related_order_id is not None if limited_auto_buy else None),
+            "broker_submit_called": False if buy_shadow else (row.related_order_id is not None if limited_auto_buy else None),
+            "manual_submit_called": False if buy_shadow or limited_auto_buy else None,
             "created_at": row.created_at,
         }
-        for row in rows
-    ]
+        )
+    return items

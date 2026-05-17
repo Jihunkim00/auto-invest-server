@@ -43,6 +43,27 @@ class RuntimeSettingService:
             "kis_limited_auto_sell_min_shadow_occurrences": 1,
             "kis_limited_auto_sell_allow_manual_review_trigger": False,
             "kis_limited_auto_sell_allow_take_profit_trigger": False,
+            "kis_limited_auto_buy_enabled": False,
+            "kis_limited_auto_buy_shadow_enabled": True,
+            "kis_limited_auto_buy_requires_shadow_review": True,
+            "kis_limited_auto_buy_max_orders_per_day": 1,
+            "kis_limited_auto_buy_max_notional_pct": 0.03,
+            "kis_limited_auto_buy_min_final_score": 75.0,
+            "kis_limited_auto_buy_min_confidence": 0.70,
+            "kis_limited_auto_buy_max_positions": 3,
+            "kis_limited_auto_buy_block_if_position_exists": True,
+            "kis_limited_auto_buy_block_if_open_order_exists": True,
+            "kis_limited_auto_buy_allow_reentry_same_day": False,
+            "kis_limited_auto_buy_require_market_open": True,
+            "kis_limited_auto_buy_no_new_entry_after": "14:50",
+            "kis_limited_auto_buy_allow_gpt_hard_block": False,
+            "kis_scheduler_live_enabled": False,
+            "kis_scheduler_allow_real_orders": False,
+            "kis_scheduler_allow_limited_auto_buy": False,
+            "kis_scheduler_allow_limited_auto_sell": False,
+            "kis_scheduler_max_live_orders_per_day": 2,
+            "kis_scheduler_live_requires_dry_run_false": True,
+            "kis_scheduler_live_respect_kill_switch": True,
         }
 
     def get_or_create(self, db: Session) -> RuntimeSetting:
@@ -112,6 +133,65 @@ class RuntimeSettingService:
             "kis_limited_auto_sell_allow_take_profit_trigger": bool(
                 row.kis_limited_auto_sell_allow_take_profit_trigger
             ),
+            "kis_limited_auto_buy_enabled": bool(row.kis_limited_auto_buy_enabled),
+            "kis_limited_auto_buy_shadow_enabled": bool(
+                row.kis_limited_auto_buy_shadow_enabled
+            ),
+            "kis_limited_auto_buy_requires_shadow_review": bool(
+                row.kis_limited_auto_buy_requires_shadow_review
+            ),
+            "kis_limited_auto_buy_max_orders_per_day": int(
+                row.kis_limited_auto_buy_max_orders_per_day
+            ),
+            "kis_limited_auto_buy_max_notional_pct": float(
+                row.kis_limited_auto_buy_max_notional_pct
+            ),
+            "kis_limited_auto_buy_min_final_score": float(
+                row.kis_limited_auto_buy_min_final_score
+            ),
+            "kis_limited_auto_buy_min_confidence": float(
+                row.kis_limited_auto_buy_min_confidence
+            ),
+            "kis_limited_auto_buy_max_positions": int(
+                row.kis_limited_auto_buy_max_positions
+            ),
+            "kis_limited_auto_buy_block_if_position_exists": bool(
+                row.kis_limited_auto_buy_block_if_position_exists
+            ),
+            "kis_limited_auto_buy_block_if_open_order_exists": bool(
+                row.kis_limited_auto_buy_block_if_open_order_exists
+            ),
+            "kis_limited_auto_buy_allow_reentry_same_day": bool(
+                row.kis_limited_auto_buy_allow_reentry_same_day
+            ),
+            "kis_limited_auto_buy_require_market_open": bool(
+                row.kis_limited_auto_buy_require_market_open
+            ),
+            "kis_limited_auto_buy_no_new_entry_after": str(
+                row.kis_limited_auto_buy_no_new_entry_after or "14:50"
+            ),
+            "kis_limited_auto_buy_allow_gpt_hard_block": bool(
+                row.kis_limited_auto_buy_allow_gpt_hard_block
+            ),
+            "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
+            "kis_scheduler_allow_real_orders": bool(
+                row.kis_scheduler_allow_real_orders
+            ),
+            "kis_scheduler_allow_limited_auto_buy": bool(
+                row.kis_scheduler_allow_limited_auto_buy
+            ),
+            "kis_scheduler_allow_limited_auto_sell": bool(
+                row.kis_scheduler_allow_limited_auto_sell
+            ),
+            "kis_scheduler_max_live_orders_per_day": int(
+                row.kis_scheduler_max_live_orders_per_day
+            ),
+            "kis_scheduler_live_requires_dry_run_false": bool(
+                row.kis_scheduler_live_requires_dry_run_false
+            ),
+            "kis_scheduler_live_respect_kill_switch": bool(
+                row.kis_scheduler_live_respect_kill_switch
+            ),
             "updated_at": row.updated_at,
         }
         settings["trade_limits"] = self._trade_limits(settings)
@@ -121,7 +201,7 @@ class RuntimeSettingService:
         settings["kis_scheduler_dry_run"] = bool(
             getattr(self.settings, "kis_scheduler_dry_run", True)
         )
-        settings["kis_scheduler_allow_real_orders"] = bool(
+        settings["kis_scheduler_configured_allow_real_orders"] = bool(
             getattr(self.settings, "kis_scheduler_allow_real_orders", False)
         )
         return settings
@@ -211,6 +291,27 @@ class RuntimeSettingService:
             "kis_limited_auto_sell_min_shadow_occurrences",
             "kis_limited_auto_sell_allow_manual_review_trigger",
             "kis_limited_auto_sell_allow_take_profit_trigger",
+            "kis_limited_auto_buy_enabled",
+            "kis_limited_auto_buy_shadow_enabled",
+            "kis_limited_auto_buy_requires_shadow_review",
+            "kis_limited_auto_buy_max_orders_per_day",
+            "kis_limited_auto_buy_max_notional_pct",
+            "kis_limited_auto_buy_min_final_score",
+            "kis_limited_auto_buy_min_confidence",
+            "kis_limited_auto_buy_max_positions",
+            "kis_limited_auto_buy_block_if_position_exists",
+            "kis_limited_auto_buy_block_if_open_order_exists",
+            "kis_limited_auto_buy_allow_reentry_same_day",
+            "kis_limited_auto_buy_require_market_open",
+            "kis_limited_auto_buy_no_new_entry_after",
+            "kis_limited_auto_buy_allow_gpt_hard_block",
+            "kis_scheduler_live_enabled",
+            "kis_scheduler_allow_real_orders",
+            "kis_scheduler_allow_limited_auto_buy",
+            "kis_scheduler_allow_limited_auto_sell",
+            "kis_scheduler_max_live_orders_per_day",
+            "kis_scheduler_live_requires_dry_run_false",
+            "kis_scheduler_live_respect_kill_switch",
         ):
             if key not in payload:
                 continue

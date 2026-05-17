@@ -77,6 +77,19 @@ class KisSchedulerSimulationService:
             "runtime_scheduler_enabled": bool(runtime.get("scheduler_enabled", False)),
             "runtime_dry_run": bool(runtime.get("dry_run", True)),
             "kill_switch": bool(runtime.get("kill_switch", False)),
+            "kis_scheduler_live_enabled": bool(
+                runtime.get("kis_scheduler_live_enabled", False)
+            ),
+            "kis_scheduler_allow_limited_auto_buy": bool(
+                runtime.get("kis_scheduler_allow_limited_auto_buy", False)
+            ),
+            "kis_scheduler_allow_limited_auto_sell": bool(
+                runtime.get("kis_scheduler_allow_limited_auto_sell", False)
+            ),
+            "kis_scheduler_max_live_orders_per_day": int(
+                runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+            ),
+            "live_scheduler_ready": False,
             "trigger_source": SCHEDULER_TRIGGER_SOURCE,
             "portfolio_trigger_source": SCHEDULER_PORTFOLIO_TRIGGER_SOURCE,
             "market_session": market_session,

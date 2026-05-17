@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
+from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_run_service import WatchlistRunService
@@ -101,6 +102,11 @@ class SchedulerService:
                 scheduler_slot=slot_name,
                 require_enabled=True,
             )
+            if settings.get("kis_scheduler_live_enabled", False):
+                KisSchedulerLiveService(kis_client).run_once(
+                    db,
+                    gate_level=DEFAULT_GATE_LEVEL,
+                )
         finally:
             db.close()
 

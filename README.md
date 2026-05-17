@@ -89,6 +89,9 @@ Database initialization is handled on startup by `app.db.init_db.init_db()`.
 - Shadow review: `/kis/exit-shadow/review` aggregates historical shadow decision quality read-only.
 - Review queue: `/kis/exit-shadow/review-queue` plus mark-reviewed/dismiss endpoints only update local operator state.
 - Limited auto sell: `/kis/limited-auto-sell/run-once` is disabled by default, SELL-only, stop-loss-only by default, audited, capped, and blocked unless every runtime, position, queue-review, duplicate-order, market/session, notional, and daily-limit gate passes. KIS auto buy and scheduler real orders remain disabled.
+- Buy shadow: `/kis/buy-shadow/run-once` prepares a future buy-side decision as dry-run/shadow only, with no KIS buy submit, no manual submit, and live auto buy still disabled.
+- Limited auto buy: `/kis/limited-auto-buy/run-once` is disabled by default, BUY-only, audited, capped, and blocked unless live auto buy plus all score, confidence, cash, position, duplicate-order, market/session, notional, daily-limit, and optional shadow-review gates pass.
+- Scheduler live automation: `/kis/scheduler/run-live-once` is disabled by default and can only orchestrate the guarded limited auto sell/buy services when scheduler live, real-order, side-specific, dry-run, kill-switch, and daily-order gates are explicitly enabled.
 
 ## Testing
 

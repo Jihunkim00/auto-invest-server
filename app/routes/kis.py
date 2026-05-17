@@ -34,6 +34,9 @@ from app.services.kis_shadow_exit_review_queue_service import (
     KisShadowExitReviewQueueService,
 )
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
+from app.services.kis_buy_shadow_decision_service import KisBuyShadowDecisionService
+from app.services.kis_limited_auto_buy_service import KisLimitedAutoBuyService
+from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -238,7 +241,9 @@ def list_recent_kis_orders(
 def get_kis_scheduler_status(db: Session = Depends(get_db)):
     client = _client(db)
     service = KisSchedulerSimulationService(client)
-    return service.status(db)
+    payload = service.status(db)
+    payload["live"] = KisSchedulerLiveService(client).status(db)
+    return payload
 
 
 @router.get("/orders/summary")
@@ -480,6 +485,36 @@ def run_kis_limited_auto_sell_once(db: Session = Depends(get_db)):
     client = _client(db)
     service = KisLimitedAutoSellService(client)
     return service.run_once(db)
+
+
+@router.post("/limited-auto-buy/run-once")
+def run_kis_limited_auto_buy_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisLimitedAutoBuyService(client)
+    return service.run_once(db, gate_level=gate_level)
+
+
+@router.post("/scheduler/run-live-once")
+def run_kis_scheduler_live_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisSchedulerLiveService(client)
+    return service.run_once(db, gate_level=gate_level)
+
+
+@router.post("/buy-shadow/run-once")
+def run_kis_buy_shadow_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisBuyShadowDecisionService(client)
+    return service.run_once(db, gate_level=gate_level)
 
 
 def _client(db: Session) -> KisClient:
