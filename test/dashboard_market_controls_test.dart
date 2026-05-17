@@ -17,7 +17,6 @@ import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 const _samsungName = '\uC0BC\uC131\uC804\uC790';
-const _krLabel = '005930 - $_samsungName - KOSPI';
 
 void main() {
   testWidgets('KR order ticket is dry-run only and validates preview',
@@ -260,7 +259,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('watchlist defaults to US and KR preview run is enabled',
+  testWidgets('watchlist stays focused on scan and refresh actions',
       (tester) async {
     final api = _FakeApiClient();
     final controller = DashboardController(api, autoload: false)
@@ -272,22 +271,28 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    expect(find.text('US Watchlist / Alpaca'), findsOneWidget);
-    expect(find.text('AAPL'), findsOneWidget);
-    expect(find.text('Run Alpaca Watchlist'), findsOneWidget);
+    expect(find.text('US new-buy scan / Alpaca'), findsOneWidget);
+    expect(find.text('Watchlist Symbols'), findsOneWidget);
+    expect(find.text('Start Scan'), findsOneWidget);
+    expect(find.text('Refresh'), findsOneWidget);
+    expect(find.text('Validate'), findsNothing);
+    expect(find.text('Submit'), findsNothing);
+    expect(find.text('Live Submit'), findsNothing);
+    expect(find.text('Scheduler Enable'), findsNothing);
 
     controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    expect(find.text('KR Watchlist / KIS'), findsOneWidget);
-    expect(find.text(_krLabel), findsOneWidget);
+    expect(find.text('KR new-buy scan / KIS'), findsOneWidget);
+    expect(find.text('Watchlist Symbols'), findsOneWidget);
     expect(find.text('PREVIEW ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
     expect(find.text('NO AUTO ORDER'), findsOneWidget);
-    expect(find.text('Run KIS Preview'), findsOneWidget);
-    expect(find.text('Run Alpaca Watchlist'), findsNothing);
+    expect(find.text('Start Scan'), findsOneWidget);
+    expect(find.text('Refresh'), findsOneWidget);
+    expect(find.text('Run KIS Preview'), findsNothing);
 
-    await tester.tap(find.text('Run KIS Preview'));
+    await tester.tap(find.text('Start Scan'));
     await tester.pumpAndSettle();
 
     expect(api.previewCalls, 1);
@@ -304,7 +309,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KR preview displays grounded scores and indicators',
+  testWidgets('KR scan displays a readable top candidate summary',
       (tester) async {
     final api = _FakeApiClient(scoredPreview: true);
     final controller = DashboardController(api, autoload: false)
@@ -319,7 +324,7 @@ void main() {
     controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Run KIS Preview'));
+    await tester.tap(find.text('Start Scan'));
     await tester.pumpAndSettle();
 
     expect(find.text('PREVIEW ONLY'), findsWidgets);
@@ -335,11 +340,11 @@ void main() {
     expect(candidate.aiBuyScore, 70);
     expect(candidate.finalBuyScore, 64);
     expect(candidate.confidence, 0.72);
-    expect(find.text('KIS GPT Advisory Context'), findsOneWidget);
-    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
-    expect(find.text('AI_BUY_SCORE'), findsOneWidget);
-    expect(find.text('70'), findsWidgets);
-    expect(find.text('gpt_reason: KR 정량 참고용'), findsOneWidget);
+    expect(find.text('Prepare Buy Ticket'), findsOneWidget);
+    expect(find.text('not ready'), findsOneWidget);
+    expect(find.text('0.7'), findsOneWidget);
+    expect(find.text('KIS GPT Advisory Context'), findsNothing);
+    expect(find.text('AI_BUY_SCORE'), findsNothing);
     expect(find.textContaining('GPT approved'), findsNothing);
     expect(
         candidate.indicatorPayload.keys,
@@ -357,6 +362,69 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Prepare Buy Ticket only prefills Manual Order state',
+      (tester) async {
+    final api = _FakeApiClient(scoredPreview: true);
+    var openedManualOrder = false;
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(
+        controller: controller,
+        onOpenManualOrder: () => openedManualOrder = true,
+      ),
+    ));
+
+    controller.setProvider(SelectedProvider.kis);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Prepare Buy Ticket'));
+    await tester.pumpAndSettle();
+
+    expect(openedManualOrder, isTrue);
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'buy');
+    expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+    expect(
+        controller.orderTicketSourceMetadata?['source'], 'watchlist_candidate');
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('Test Lab exposes advanced checks outside Watchlist',
+      (tester) async {
+    final controller = DashboardController(_FakeApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => TestLabSection(controller: controller),
+    ));
+
+    expect(find.text('Run Buy Shadow'), findsOneWidget);
+    expect(find.text('Run Exit Shadow'), findsOneWidget);
+    expect(find.text('Run Scheduler Dry-run'), findsOneWidget);
+    expect(find.text('Run KIS Preview'), findsOneWidget);
+    expect(find.text('Run Limited Auto Buy Check'), findsOneWidget);
+    expect(find.text('Run Limited Auto Sell Check'), findsOneWidget);
+    expect(find.text('Run Scheduler Live Guarded Check'), findsOneWidget);
+    expect(find.text('Refresh Readiness'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('Live Submit'), findsNothing);
+
+    controller.dispose();
+  });
+
   testWidgets('KIS Auto Simulator runs dry-run auto and shows last result',
       (tester) async {
     final api = _FakeApiClient();
@@ -366,7 +434,7 @@ void main() {
 
     await tester.pumpWidget(_wrap(
       controller,
-      () => WatchlistSection(controller: controller),
+      () => TestLabSection(controller: controller),
     ));
 
     controller.setProvider(SelectedProvider.kis);

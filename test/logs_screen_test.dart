@@ -32,6 +32,9 @@ void main() {
     expect(find.text('PREVIEW ONLY'), findsOneWidget);
     expect(find.text('SIMULATED'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('Activity Timeline'), findsOneWidget);
+    expect(find.text('preview_only=true'), findsNothing);
+    await _expandAdvancedDetails(tester);
     expect(find.text('preview_only=true'), findsOneWidget);
     expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('broker_submit_called=false'), findsWidgets);
@@ -40,6 +43,7 @@ void main() {
 
     await tester.tap(find.text('Orders').last);
     await tester.pumpAndSettle();
+    await _expandAdvancedDetails(tester);
 
     expect(find.text('\u20A99,801'), findsOneWidget);
     expect(find.text('\u20A972,000'), findsOneWidget);
@@ -60,6 +64,7 @@ void main() {
 
     await tester.tap(find.text('Signals').last);
     await tester.pumpAndSettle();
+    await _expandAdvancedDetails(tester);
 
     expect(find.text('05-08 00:05 (KST 09:05)'), findsOneWidget);
 
@@ -141,6 +146,7 @@ void main() {
     await _pumpLogs(tester, controller);
     await tester.tap(find.text('Orders').last);
     await tester.pumpAndSettle();
+    await _expandAdvancedDetails(tester);
 
     expect(find.text('005930 - SELL'), findsWidgets);
     expect(find.text('KIS MANUAL LIVE'), findsOneWidget);
@@ -212,6 +218,7 @@ void main() {
     );
 
     await _pumpLogs(tester, controller);
+    await _expandAdvancedDetails(tester);
 
     expect(find.text('KIS SHADOW EXIT'), findsOneWidget);
     expect(find.text('SHADOW EXIT'), findsOneWidget);
@@ -262,6 +269,7 @@ void main() {
     );
 
     await _pumpLogs(tester, controller);
+    await _expandAdvancedDetails(tester);
 
     expect(find.text('Event Risk high'), findsOneWidget);
     expect(find.text('Entry penalty'), findsOneWidget);
@@ -315,6 +323,7 @@ void main() {
     expect(find.text('44'), findsWidgets);
     expect(find.text('\u20A99,801'), findsOneWidget);
     expect(find.text(r'$9,801.00'), findsNothing);
+    await _expandAdvancedDetails(tester);
     expect(find.text('real_order_submitted=false'), findsWidgets);
     expect(find.text('broker_submit_called=false'), findsWidgets);
     expect(find.text('manual_submit_called=false'), findsWidgets);
@@ -584,6 +593,16 @@ Future<void> _pumpLogs(
     home: Scaffold(body: LogsScreen(controller: controller)),
   ));
   await tester.pumpAndSettle();
+}
+
+Future<void> _expandAdvancedDetails(WidgetTester tester) async {
+  final details = find.text('Advanced Details');
+  final count = details.evaluate().length;
+  for (var index = 0; index < count; index += 1) {
+    await tester.ensureVisible(details.at(index));
+    await tester.tap(details.at(index));
+    await tester.pumpAndSettle();
+  }
 }
 
 String _todayUtcTimestamp({required int kstHour, int minute = 0}) {

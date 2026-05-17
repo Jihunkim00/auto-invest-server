@@ -120,6 +120,11 @@ class _LogsScreenState extends State<LogsScreen> {
               onRetry: _loading ? null : _loadLogs,
             ),
             const SizedBox(height: 14),
+            const Text(
+              'Activity Timeline',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 8),
             SegmentedButton<int>(
               segments: const [
                 ButtonSegment(value: 0, label: Text('Runs')),
@@ -1038,74 +1043,13 @@ class _RunHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [run.sourceLabel, ...run.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(
-              label: 'Time',
-              value: formatTimestampWithKst(run.createdAt),
+            Text(
+              _runTimelineSentence(run),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            _DetailRow(label: 'Gate', value: _formatGate(run.gateLevel)),
-            _DetailRow(label: 'Action', value: _fallback(run.action, 'hold')),
-            _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
-            _DetailRow(label: 'Reason', value: _fallback(run.reason, 'none')),
-            if (run.exitTrigger != null)
-              _DetailRow(label: 'Trigger', value: run.exitTrigger!),
-            if (run.exitTriggerSource != null)
-              _DetailRow(label: 'Trigger src', value: run.exitTriggerSource!),
-            if (run.suggestedQuantity != null)
-              _DetailRow(
-                  label: 'Suggested qty',
-                  value: _numberLabel(run.suggestedQuantity)),
-            if (run.currentPrice != null)
-              _DetailRow(
-                label: 'Current price',
-                value: _moneyLabel(
-                  run.currentPrice,
-                  provider: run.provider,
-                  market: run.market,
-                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
-                ),
-              ),
-            if (run.costBasis != null)
-              _DetailRow(
-                label: 'Cost basis',
-                value: _moneyLabel(
-                  run.costBasis,
-                  provider: run.provider,
-                  market: run.market,
-                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
-                ),
-              ),
-            if (run.unrealizedPl != null)
-              _DetailRow(
-                label: 'Unrealized P/L',
-                value: _moneyLabel(
-                  run.unrealizedPl,
-                  provider: run.provider,
-                  market: run.market,
-                  currency: run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
-                ),
-              ),
-            if (run.unrealizedPlPct != null)
-              _DetailRow(
-                label: 'Unrealized P/L %',
-                value: _percentFromDecimal(run.unrealizedPlPct),
-              ),
-            if (run.gptContext.hasDetails)
-              _GptLogContextBlock(context: run.gptContext),
-            _DetailRow(label: 'Order ID', value: run.orderLabel),
-            if (run.signalId != null)
-              _DetailRow(label: 'Signal ID', value: run.signalId!),
-            ..._safetyFlagRows(
-              previewOnly: run.isKisPreview ? run.previewOnly : null,
-              realOrderSubmitted: run.realOrderSubmitted,
-              brokerSubmitCalled: run.brokerSubmitCalled,
-              manualSubmitCalled: run.manualSubmitCalled,
-              forceDryRunAutoFlags: run.isKisDryRunAuto,
-              forcePreviewFlags: run.isKisPreview,
-            ),
-            if (run.riskFlags.isNotEmpty)
-              _DetailRow(label: 'Risk flags', value: run.riskFlags.join(', ')),
-            if (run.gatingNotes.isNotEmpty)
-              _DetailRow(label: 'Gates', value: _compactText(run.gatingNotes)),
             if (blocked)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
@@ -1114,6 +1058,91 @@ class _RunHistoryCard extends StatelessWidget {
                   style: TextStyle(color: Colors.white70),
                 ),
               ),
+            const SizedBox(height: 4),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              initiallyExpanded: false,
+              title: const Text('Advanced Details'),
+              children: [
+                _DetailRow(
+                  label: 'Time',
+                  value: formatTimestampWithKst(run.createdAt),
+                ),
+                _DetailRow(label: 'Gate', value: _formatGate(run.gateLevel)),
+                _DetailRow(
+                    label: 'Action', value: _fallback(run.action, 'hold')),
+                _DetailRow(label: 'Result', value: _fallback(run.result, '-')),
+                _DetailRow(
+                    label: 'Reason', value: _fallback(run.reason, 'none')),
+                if (run.exitTrigger != null)
+                  _DetailRow(label: 'Trigger', value: run.exitTrigger!),
+                if (run.exitTriggerSource != null)
+                  _DetailRow(
+                      label: 'Trigger src', value: run.exitTriggerSource!),
+                if (run.suggestedQuantity != null)
+                  _DetailRow(
+                      label: 'Suggested qty',
+                      value: _numberLabel(run.suggestedQuantity)),
+                if (run.currentPrice != null)
+                  _DetailRow(
+                    label: 'Current price',
+                    value: _moneyLabel(
+                      run.currentPrice,
+                      provider: run.provider,
+                      market: run.market,
+                      currency:
+                          run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                    ),
+                  ),
+                if (run.costBasis != null)
+                  _DetailRow(
+                    label: 'Cost basis',
+                    value: _moneyLabel(
+                      run.costBasis,
+                      provider: run.provider,
+                      market: run.market,
+                      currency:
+                          run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                    ),
+                  ),
+                if (run.unrealizedPl != null)
+                  _DetailRow(
+                    label: 'Unrealized P/L',
+                    value: _moneyLabel(
+                      run.unrealizedPl,
+                      provider: run.provider,
+                      market: run.market,
+                      currency:
+                          run.market.toUpperCase() == 'KR' ? 'KRW' : 'USD',
+                    ),
+                  ),
+                if (run.unrealizedPlPct != null)
+                  _DetailRow(
+                    label: 'Unrealized P/L %',
+                    value: _percentFromDecimal(run.unrealizedPlPct),
+                  ),
+                if (run.gptContext.hasDetails)
+                  _GptLogContextBlock(context: run.gptContext),
+                _DetailRow(label: 'Order ID', value: run.orderLabel),
+                if (run.signalId != null)
+                  _DetailRow(label: 'Signal ID', value: run.signalId!),
+                ..._safetyFlagRows(
+                  previewOnly: run.isKisPreview ? run.previewOnly : null,
+                  realOrderSubmitted: run.realOrderSubmitted,
+                  brokerSubmitCalled: run.brokerSubmitCalled,
+                  manualSubmitCalled: run.manualSubmitCalled,
+                  forceDryRunAutoFlags: run.isKisDryRunAuto,
+                  forcePreviewFlags: run.isKisPreview,
+                ),
+                if (run.riskFlags.isNotEmpty)
+                  _DetailRow(
+                      label: 'Risk flags', value: run.riskFlags.join(', ')),
+                if (run.gatingNotes.isNotEmpty)
+                  _DetailRow(
+                      label: 'Gates', value: _compactText(run.gatingNotes)),
+              ],
+            ),
           ],
         ),
       ),
@@ -1148,82 +1177,102 @@ class _OrderHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [order.sourceLabel, ...order.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(
-                label: 'Time', value: formatTimestampWithKst(order.createdAt)),
-            _DetailRow(
-                label: 'Action', value: _fallback(order.action, order.side)),
-            _DetailRow(
-                label: 'Result',
-                value: _fallback(order.result, order.internalStatus)),
-            _DetailRow(label: 'Reason', value: _fallback(order.reason, 'none')),
-            if (order.gptContext.hasDetails)
-              _GptLogContextBlock(context: order.gptContext),
-            _DetailRow(label: 'Qty', value: _numberLabel(order.qty)),
-            _DetailRow(
-              label: 'Notional',
-              value: _moneyLabel(
-                order.notional,
-                provider: order.provider,
-                market: order.market,
-                currency: order.currency,
+            Text(
+              _orderTimelineSentence(order),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            _DetailRow(
-                label: 'Order ID', value: '${order.orderId ?? order.id}'),
-            _DetailRow(label: 'Broker ID', value: order.orderLabel),
-            if (order.isFromExitPreflight)
-              const _DetailRow(
-                  label: 'Source', value: 'Prepared from exit preflight'),
-            if (order.exitTrigger != null)
-              _DetailRow(label: 'Trigger', value: order.exitTrigger!),
-            if (order.exitTriggerSource != null)
-              _DetailRow(label: 'Trigger src', value: order.exitTriggerSource!),
-            if (order.filledQuantity != null)
-              _DetailRow(
-                  label: 'Filled qty',
-                  value: _numberLabel(order.filledQuantity)),
-            if (order.remainingQuantity != null)
-              _DetailRow(
-                  label: 'Remaining',
-                  value: _numberLabel(order.remainingQuantity)),
-            if (order.averageFillPrice != null)
-              _DetailRow(
-                label: 'Avg fill',
-                value: _moneyLabel(
-                  order.averageFillPrice,
-                  provider: order.provider,
-                  market: order.market,
-                  currency: order.currency,
+            const SizedBox(height: 4),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              initiallyExpanded: false,
+              title: const Text('Advanced Details'),
+              children: [
+                _DetailRow(
+                    label: 'Time',
+                    value: formatTimestampWithKst(order.createdAt)),
+                _DetailRow(
+                    label: 'Action',
+                    value: _fallback(order.action, order.side)),
+                _DetailRow(
+                    label: 'Result',
+                    value: _fallback(order.result, order.internalStatus)),
+                _DetailRow(
+                    label: 'Reason', value: _fallback(order.reason, 'none')),
+                if (order.gptContext.hasDetails)
+                  _GptLogContextBlock(context: order.gptContext),
+                _DetailRow(label: 'Qty', value: _numberLabel(order.qty)),
+                _DetailRow(
+                  label: 'Notional',
+                  value: _moneyLabel(
+                    order.notional,
+                    provider: order.provider,
+                    market: order.market,
+                    currency: order.currency,
+                  ),
                 ),
-              ),
-            if (order.rejectedReason != null)
-              _DetailRow(label: 'Rejected', value: order.rejectedReason!),
-            if (order.lastSyncedAt != null)
-              _DetailRow(
-                  label: 'Last sync',
-                  value: formatTimestampWithKst(order.lastSyncedAt!)),
-            if (order.signalId != null)
-              _DetailRow(label: 'Signal ID', value: order.signalId!),
-            if (order.brokerOrderStatus != null)
-              _DetailRow(label: 'Broker', value: order.brokerOrderStatus!),
-            _DetailRow(label: 'Internal', value: order.internalStatus),
-            _DetailRow(
-                label: 'Updated',
-                value: formatTimestampWithKst(order.updatedAt)),
-            ..._safetyFlagRows(
-              previewOnly: order.isKisPreview ? order.previewOnly : null,
-              realOrderSubmitted: order.realOrderSubmitted,
-              brokerSubmitCalled: order.brokerSubmitCalled,
-              manualSubmitCalled: order.manualSubmitCalled,
-              forceDryRunAutoFlags: order.isKisDryRunAuto,
-              forcePreviewFlags: order.isKisPreview,
+                _DetailRow(
+                    label: 'Order ID', value: '${order.orderId ?? order.id}'),
+                _DetailRow(label: 'Broker ID', value: order.orderLabel),
+                if (order.isFromExitPreflight)
+                  const _DetailRow(
+                      label: 'Source', value: 'Prepared from exit preflight'),
+                if (order.exitTrigger != null)
+                  _DetailRow(label: 'Trigger', value: order.exitTrigger!),
+                if (order.exitTriggerSource != null)
+                  _DetailRow(
+                      label: 'Trigger src', value: order.exitTriggerSource!),
+                if (order.filledQuantity != null)
+                  _DetailRow(
+                      label: 'Filled qty',
+                      value: _numberLabel(order.filledQuantity)),
+                if (order.remainingQuantity != null)
+                  _DetailRow(
+                      label: 'Remaining',
+                      value: _numberLabel(order.remainingQuantity)),
+                if (order.averageFillPrice != null)
+                  _DetailRow(
+                    label: 'Avg fill',
+                    value: _moneyLabel(
+                      order.averageFillPrice,
+                      provider: order.provider,
+                      market: order.market,
+                      currency: order.currency,
+                    ),
+                  ),
+                if (order.rejectedReason != null)
+                  _DetailRow(label: 'Rejected', value: order.rejectedReason!),
+                if (order.lastSyncedAt != null)
+                  _DetailRow(
+                      label: 'Last sync',
+                      value: formatTimestampWithKst(order.lastSyncedAt!)),
+                if (order.signalId != null)
+                  _DetailRow(label: 'Signal ID', value: order.signalId!),
+                if (order.brokerOrderStatus != null)
+                  _DetailRow(label: 'Broker', value: order.brokerOrderStatus!),
+                _DetailRow(label: 'Internal', value: order.internalStatus),
+                _DetailRow(
+                    label: 'Updated',
+                    value: formatTimestampWithKst(order.updatedAt)),
+                ..._safetyFlagRows(
+                  previewOnly: order.isKisPreview ? order.previewOnly : null,
+                  realOrderSubmitted: order.realOrderSubmitted,
+                  brokerSubmitCalled: order.brokerSubmitCalled,
+                  manualSubmitCalled: order.manualSubmitCalled,
+                  forceDryRunAutoFlags: order.isKisDryRunAuto,
+                  forcePreviewFlags: order.isKisPreview,
+                ),
+                if (order.riskFlags.isNotEmpty)
+                  _DetailRow(
+                      label: 'Risk flags', value: order.riskFlags.join(', ')),
+                if (order.gatingNotes.isNotEmpty)
+                  _DetailRow(
+                      label: 'Gates', value: _compactText(order.gatingNotes)),
+              ],
             ),
-            if (order.riskFlags.isNotEmpty)
-              _DetailRow(
-                  label: 'Risk flags', value: order.riskFlags.join(', ')),
-            if (order.gatingNotes.isNotEmpty)
-              _DetailRow(
-                  label: 'Gates', value: _compactText(order.gatingNotes)),
           ],
         ),
       ),
@@ -1257,38 +1306,56 @@ class _SignalHistoryCard extends StatelessWidget {
             const SizedBox(height: 8),
             _BadgeWrap(labels: [signal.sourceLabel, ...signal.safetyBadges]),
             const SizedBox(height: 10),
-            _DetailRow(
-                label: 'Time', value: formatTimestampWithKst(signal.createdAt)),
-            _DetailRow(
-                label: 'Action', value: _fallback(signal.action, 'hold')),
-            _DetailRow(
-                label: 'Result',
-                value: _fallback(signal.result, signal.signalStatus)),
-            _DetailRow(
-                label: 'Reason', value: _fallback(signal.reason, 'none')),
-            if (signal.gptContext.hasDetails)
-              _GptLogContextBlock(context: signal.gptContext),
-            _DetailRow(
-                label: 'Buy score', value: _numberLabel(signal.buyScore)),
-            _DetailRow(
-                label: 'Sell score', value: _numberLabel(signal.sellScore)),
-            _DetailRow(
-                label: 'Confidence', value: _numberLabel(signal.confidence)),
-            _DetailRow(label: 'Order ID', value: signal.orderLabel),
-            ..._safetyFlagRows(
-              previewOnly: signal.isKisPreview ? signal.previewOnly : null,
-              realOrderSubmitted: signal.realOrderSubmitted,
-              brokerSubmitCalled: signal.brokerSubmitCalled,
-              manualSubmitCalled: signal.manualSubmitCalled,
-              forceDryRunAutoFlags: signal.isKisDryRunAuto,
-              forcePreviewFlags: signal.isKisPreview,
+            Text(
+              _signalTimelineSentence(signal),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+              ),
             ),
-            if (signal.riskFlags.isNotEmpty)
-              _DetailRow(
-                  label: 'Risk flags', value: signal.riskFlags.join(', ')),
-            if (signal.gatingNotes.isNotEmpty)
-              _DetailRow(
-                  label: 'Gates', value: _compactText(signal.gatingNotes)),
+            const SizedBox(height: 4),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              initiallyExpanded: false,
+              title: const Text('Advanced Details'),
+              children: [
+                _DetailRow(
+                    label: 'Time',
+                    value: formatTimestampWithKst(signal.createdAt)),
+                _DetailRow(
+                    label: 'Action', value: _fallback(signal.action, 'hold')),
+                _DetailRow(
+                    label: 'Result',
+                    value: _fallback(signal.result, signal.signalStatus)),
+                _DetailRow(
+                    label: 'Reason', value: _fallback(signal.reason, 'none')),
+                if (signal.gptContext.hasDetails)
+                  _GptLogContextBlock(context: signal.gptContext),
+                _DetailRow(
+                    label: 'Buy score', value: _numberLabel(signal.buyScore)),
+                _DetailRow(
+                    label: 'Sell score', value: _numberLabel(signal.sellScore)),
+                _DetailRow(
+                    label: 'Confidence',
+                    value: _numberLabel(signal.confidence)),
+                _DetailRow(label: 'Order ID', value: signal.orderLabel),
+                ..._safetyFlagRows(
+                  previewOnly: signal.isKisPreview ? signal.previewOnly : null,
+                  realOrderSubmitted: signal.realOrderSubmitted,
+                  brokerSubmitCalled: signal.brokerSubmitCalled,
+                  manualSubmitCalled: signal.manualSubmitCalled,
+                  forceDryRunAutoFlags: signal.isKisDryRunAuto,
+                  forcePreviewFlags: signal.isKisPreview,
+                ),
+                if (signal.riskFlags.isNotEmpty)
+                  _DetailRow(
+                      label: 'Risk flags', value: signal.riskFlags.join(', ')),
+                if (signal.gatingNotes.isNotEmpty)
+                  _DetailRow(
+                      label: 'Gates', value: _compactText(signal.gatingNotes)),
+              ],
+            ),
           ],
         ),
       ),
@@ -1599,6 +1666,61 @@ class _StatePanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String _runTimelineSentence(TradingLogItem run) {
+  if (run.isKisBuyShadow) {
+    return 'KIS buy shadow scan completed. No order submitted.';
+  }
+  if (run.isKisExitShadow) {
+    return 'KIS exit shadow scan completed. No order submitted.';
+  }
+  if (run.isKisLimitedAutoBuy && run.realOrderSubmitted != true) {
+    return 'Limited auto buy check was blocked by safety gate.';
+  }
+  if (run.isKisLimitedAutoSell && run.realOrderSubmitted != true) {
+    return 'Limited auto sell check was blocked by safety gate.';
+  }
+  if (run.isKisSchedulerLive && run.realOrderSubmitted != true) {
+    return 'Scheduler live guarded check completed. No order submitted.';
+  }
+  if (run.isKisPreview) {
+    return 'KIS buy preview completed. No order submitted.';
+  }
+  if (run.hasOrder) {
+    return '${run.symbol} ${_fallback(run.action, 'trade')} run created order ${run.orderLabel}.';
+  }
+  return '${run.symbol} ${_fallback(run.action, 'hold')} run completed. No order submitted.';
+}
+
+String _orderTimelineSentence(OrderLogItem order) {
+  if (order.isFromExitPreflight) {
+    return 'Manual sell ticket was prepared from exit review.';
+  }
+  if (order.isKisBuyShadow) {
+    return 'KIS buy shadow order record stayed in dry-run mode.';
+  }
+  if ((order.isKisLimitedAutoBuy || order.isKisLimitedAutoSell) &&
+      order.realOrderSubmitted != true) {
+    return '${order.sourceLabel} was blocked before broker submit.';
+  }
+  if (order.realOrderSubmitted == true) {
+    return 'Manual ${order.side.toLowerCase()} order was submitted and is ${order.statusLabel}.';
+  }
+  return '${order.symbol} ${order.side.toLowerCase()} order record is ${order.statusLabel}.';
+}
+
+String _signalTimelineSentence(SignalLogItem signal) {
+  if (signal.isKisBuyShadow) {
+    return 'KIS buy shadow signal recorded. No order submitted.';
+  }
+  if (signal.isKisDryRunAuto || signal.isKisPreview) {
+    return '${signal.sourceLabel} signal completed without broker submit.';
+  }
+  if (signal.realOrderSubmitted == true) {
+    return '${signal.symbol} signal produced order ${signal.orderLabel}.';
+  }
+  return '${signal.symbol} signal ended as ${signal.statusLine}. No order submitted.';
 }
 
 String _formatGate(int gateLevel) {

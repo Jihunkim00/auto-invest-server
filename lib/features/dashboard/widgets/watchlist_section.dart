@@ -18,23 +18,32 @@ import '../../../models/market_watchlist.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class WatchlistSection extends StatelessWidget {
-  const WatchlistSection({super.key, required this.controller});
+  const WatchlistSection({
+    super.key,
+    required this.controller,
+    this.onOpenManualOrder,
+  });
 
   final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
 
   @override
   Widget build(BuildContext context) {
     final isKr = controller.selectedProvider == SelectedProvider.kis;
     final watchlist = isKr ? controller.krWatchlist : controller.usWatchlist;
-    final title = isKr ? 'KR Watchlist / KIS' : 'US Watchlist / Alpaca';
+    final title = isKr ? 'KR new-buy scan / KIS' : 'US new-buy scan / Alpaca';
+    final topCandidate = controller.hasLatestRunResult &&
+            controller.runResult.finalRankedCandidates.isNotEmpty
+        ? controller.runResult.finalRankedCandidates.first
+        : null;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.format_list_bulleted, size: 20),
+          const Icon(Icons.manage_search_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('Watchlist',
+            child: Text('New Buy Candidates',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           _CountPill(text: '${watchlist.count} symbols'),
@@ -53,93 +62,348 @@ class WatchlistSection extends StatelessWidget {
           ],
         ]),
         const SizedBox(height: 12),
-        SegmentedButton<int>(
-          segments: const [
-            ButtonSegment(value: 1, label: Text('Gate 1')),
-            ButtonSegment(value: 2, label: Text('Gate 2')),
-            ButtonSegment(value: 3, label: Text('Gate 3')),
-            ButtonSegment(value: 4, label: Text('Gate 4')),
-          ],
-          selected: {controller.selectedGateLevel},
-          onSelectionChanged: (selection) =>
-              controller.setSelectedGateLevel(selection.first),
-        ),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          FilledButton.icon(
+            onPressed: controller.runOnceLoading
+                ? null
+                : () async {
+                    final result = await controller.runOnce();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result.message),
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.runOnceLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.play_arrow),
+            label:
+                Text(controller.runOnceLoading ? 'Scanning...' : 'Start Scan'),
+          ),
+          OutlinedButton.icon(
+            onPressed: controller.watchlistLoading
+                ? null
+                : () async {
+                    await controller.loadMarketWatchlists();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Watchlist refreshed.'),
+                      backgroundColor: Colors.green,
+                    ));
+                  },
+            icon: controller.watchlistLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh),
+            label:
+                Text(controller.watchlistLoading ? 'Refreshing...' : 'Refresh'),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        _GateSelector(controller: controller),
         const SizedBox(height: 12),
         if (controller.watchlistLoading)
-          const LinearProgressIndicator(minHeight: 2)
-        else if (watchlist.symbols.isEmpty)
-          _StateLine(
-              text: isKr
-                  ? 'No KR watchlist symbols available'
-                  : 'No US watchlist symbols available')
-        else
-          _WatchlistSymbols(watchlist: watchlist, isKr: isKr),
+          const LinearProgressIndicator(minHeight: 2),
         if (controller.watchlistError != null) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           _StateLine(text: controller.watchlistError!, color: Colors.redAccent),
         ],
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: controller.runOnceLoading
-              ? null
-              : () async {
-                  final result = await controller.runOnce();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(result.message),
-                    backgroundColor:
-                        result.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-          icon: controller.runOnceLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : Icon(isKr ? Icons.preview_outlined : Icons.play_arrow),
-          label: Text(controller.runOnceLoading
-              ? (isKr
-                  ? 'Running KIS preview...'
-                  : 'Running Alpaca watchlist...')
-              : (isKr ? 'Run KIS Preview' : 'Run Alpaca Watchlist')),
-        ),
-        if (isKr &&
-            controller.hasLatestRunResult &&
-            controller.runResult.finalRankedCandidates.isNotEmpty &&
-            _isKisPreviewCandidate(
-                controller.runResult.finalRankedCandidates.first)) ...[
+        if (watchlist.symbols.isEmpty && !controller.watchlistLoading) ...[
           const SizedBox(height: 12),
-          _KisPreviewAdvisoryPanel(
-            candidate: controller.runResult.finalRankedCandidates.first,
+          _StateLine(
+            text: isKr
+                ? 'No KR watchlist symbols available'
+                : 'No US watchlist symbols available',
           ),
         ],
-        if (isKr) ...[
+        const SizedBox(height: 12),
+        _TopCandidateCard(
+          candidate: topCandidate,
+          isKr: isKr,
+          onPrepareBuyTicket: topCandidate == null || !isKr
+              ? null
+              : () {
+                  controller.useKrCandidateInOrderTicket(topCandidate);
+                  onOpenManualOrder?.call();
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text(
+                        'Manual buy ticket prepared. Validate in Manual Order before submit.'),
+                    backgroundColor: Colors.green,
+                  ));
+                },
+        ),
+        const SizedBox(height: 12),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Watchlist Symbols'),
+          children: [
+            if (watchlist.symbols.isEmpty)
+              const _StateLine(text: 'No symbols loaded yet.')
+            else
+              _WatchlistSymbols(watchlist: watchlist, isKr: isKr),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
+class TestLabSection extends StatelessWidget {
+  const TestLabSection({super.key, required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      SectionCard(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.science_outlined, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Advanced Diagnostics',
+                  style: Theme.of(context).textTheme.titleMedium),
+            ),
+          ]),
+          const SizedBox(height: 8),
+          const Wrap(spacing: 8, runSpacing: 8, children: [
+            _SoftBadge(text: 'TEST', color: Colors.lightBlueAccent),
+            _SoftBadge(text: 'SHADOW', color: Colors.greenAccent),
+            _SoftBadge(text: 'DRY-RUN', color: Colors.amberAccent),
+            _SoftBadge(text: 'READINESS ONLY', color: Colors.white70),
+            _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          ]),
           const SizedBox(height: 12),
-          _KisLiveAutoReadinessCard(controller: controller),
+          _TestLabActions(controller: controller),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      _KisLiveAutoReadinessCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisBuyShadowDecisionCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisExitShadowDecisionCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerSimulationPanel(controller: controller),
+      const SizedBox(height: 12),
+      _KisAutoSimulatorPanel(controller: controller),
+      const SizedBox(height: 12),
+      _KisLimitedAutoBuyCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisLimitedAutoSellCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerLiveAutomationCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisLiveExitPreflightCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisShadowExitReviewCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisShadowExitReviewQueueCard(controller: controller),
+    ]);
+  }
+}
+
+class _GateSelector extends StatelessWidget {
+  const _GateSelector({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<int>(
+      segments: const [
+        ButtonSegment(value: 1, label: Text('Gate 1')),
+        ButtonSegment(value: 2, label: Text('Gate 2')),
+        ButtonSegment(value: 3, label: Text('Gate 3')),
+        ButtonSegment(value: 4, label: Text('Gate 4')),
+      ],
+      selected: {controller.selectedGateLevel},
+      onSelectionChanged: (selection) =>
+          controller.setSelectedGateLevel(selection.first),
+    );
+  }
+}
+
+class _TopCandidateCard extends StatelessWidget {
+  const _TopCandidateCard({
+    required this.candidate,
+    required this.isKr,
+    this.onPrepareBuyTicket,
+  });
+
+  final Candidate? candidate;
+  final bool isKr;
+  final VoidCallback? onPrepareBuyTicket;
+
+  @override
+  Widget build(BuildContext context) {
+    final candidate = this.candidate;
+    if (candidate == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: _panelDecoration(),
+        child: const _StateLine(
+          text: 'No top candidate yet. Start a scan to rank the watchlist.',
+        ),
+      );
+    }
+    final blockReason = candidate.blockReason ??
+        (candidate.blockReasons.isEmpty
+            ? 'No block reason'
+            : candidate.blockReasons.join(', '));
+    final nextAction = candidate.entryReady
+        ? (isKr
+            ? 'Prepare a manual buy ticket, then validate on Manual Order.'
+            : 'Review candidate before any trading action.')
+        : 'Review block reason before preparing a ticket.';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+              candidate.symbol,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+          ),
+          _SoftBadge(
+            text: candidate.entryReady ? 'READY' : 'BLOCKED',
+            color:
+                candidate.entryReady ? Colors.greenAccent : Colors.amberAccent,
+          ),
+        ]),
+        if (candidate.name.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(candidate.name, style: const TextStyle(color: Colors.white70)),
+        ],
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'score',
+              value: candidate.score == null
+                  ? 'not calculated'
+                  : candidate.score.toString()),
+          _ResultPair(label: 'confidence', value: _score(candidate.confidence)),
+          _ResultPair(
+              label: 'readiness',
+              value: candidate.entryReady ? 'entry ready' : 'not ready'),
+          _ResultPair(label: 'next action', value: nextAction),
+        ]),
+        const SizedBox(height: 8),
+        _StateLine(text: 'Block reason: $blockReason'),
+        if (onPrepareBuyTicket != null) ...[
           const SizedBox(height: 12),
-          _KisAutoSimulatorPanel(controller: controller),
-          const SizedBox(height: 12),
-          _KisSchedulerSimulationPanel(controller: controller),
-          const SizedBox(height: 12),
-          _KisExitShadowDecisionCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisShadowExitReviewCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisShadowExitReviewQueueCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisLimitedAutoSellCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisLimitedAutoBuyCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisSchedulerLiveAutomationCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisBuyShadowDecisionCard(controller: controller),
-          const SizedBox(height: 12),
-          _KisLiveExitPreflightCard(controller: controller),
+          OutlinedButton.icon(
+            onPressed: onPrepareBuyTicket,
+            icon: const Icon(Icons.input, size: 18),
+            label: const Text('Prepare Buy Ticket'),
+          ),
         ],
       ]),
     );
   }
+}
+
+class _TestLabActions extends StatelessWidget {
+  const _TestLabActions({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final actions = [
+      _LabAction(
+        label: 'Run Buy Shadow',
+        loading: controller.kisBuyShadowLoading,
+        run: controller.runKisBuyShadowOnce,
+      ),
+      _LabAction(
+        label: 'Run Exit Shadow',
+        loading: controller.kisExitShadowLoading,
+        run: controller.runKisExitShadowOnce,
+      ),
+      _LabAction(
+        label: 'Run Scheduler Dry-run',
+        loading: controller.kisSchedulerRunLoading,
+        run: controller.runKisSchedulerDryRunOnce,
+      ),
+      _LabAction(
+        label: 'Run KIS Preview',
+        loading: controller.krWatchlistPreviewLoading,
+        run: controller.runKrWatchlistPreview,
+      ),
+      _LabAction(
+        label: 'Run Limited Auto Buy Check',
+        loading: controller.kisLimitedAutoBuyLoading,
+        run: controller.runKisLimitedAutoBuyOnce,
+      ),
+      _LabAction(
+        label: 'Run Limited Auto Sell Check',
+        loading: controller.kisLimitedAutoSellLoading,
+        run: controller.runKisLimitedAutoSellOnce,
+      ),
+      _LabAction(
+        label: 'Run Scheduler Live Guarded Check',
+        loading: controller.kisSchedulerLiveLoading,
+        run: controller.runKisSchedulerLiveOnce,
+      ),
+      _LabAction(
+        label: 'Refresh Readiness',
+        loading: controller.kisAutoReadinessLoading,
+        run: controller.refreshKisAutoReadiness,
+      ),
+    ];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final action in actions)
+          OutlinedButton.icon(
+            onPressed: action.loading
+                ? null
+                : () async {
+                    final result = await action.run();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result.message),
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
+                    ));
+                  },
+            icon: action.loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.play_arrow, size: 18),
+            label: Text(action.loading ? 'Running...' : action.label),
+          ),
+      ],
+    );
+  }
+}
+
+class _LabAction {
+  const _LabAction({
+    required this.label,
+    required this.loading,
+    required this.run,
+  });
+
+  final String label;
+  final bool loading;
+  final Future<ActionResult> Function() run;
 }
 
 class _KisLiveAutoReadinessCard extends StatelessWidget {
@@ -2478,6 +2742,7 @@ class _KisSchedulerResultPanel extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _KisPreviewAdvisoryPanel extends StatelessWidget {
   const _KisPreviewAdvisoryPanel({required this.candidate});
 
@@ -2795,6 +3060,14 @@ class _SoftBadge extends StatelessWidget {
   }
 }
 
+BoxDecoration _panelDecoration() {
+  return BoxDecoration(
+    color: Colors.black.withValues(alpha: 0.18),
+    borderRadius: BorderRadius.circular(8),
+    border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+  );
+}
+
 class _CountPill extends StatelessWidget {
   const _CountPill({required this.text});
 
@@ -2945,6 +3218,7 @@ String _joinList(List<String> values) {
   return items.isEmpty ? 'n/a' : items.join(', ');
 }
 
+// ignore: unused_element
 bool _isKisPreviewCandidate(Candidate candidate) {
   final market = candidate.market.trim().toUpperCase();
   return candidate.currency.trim().toUpperCase() == 'KRW' ||

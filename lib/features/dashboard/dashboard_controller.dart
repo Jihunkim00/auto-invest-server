@@ -588,8 +588,73 @@ class DashboardController extends ChangeNotifier {
     }
     orderValidationResult = null;
     orderValidationError = null;
-    orderTicketSourceMetadata = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata = {
+      'source': 'watchlist_candidate',
+      'source_type': 'manual_buy_ticket_prefill',
+      'symbol': candidate.symbol.trim(),
+      'score': candidate.score,
+      'entry_ready': candidate.entryReady,
+      'action_hint': candidate.actionHint,
+      'block_reason': candidate.blockReason,
+      'risk_flags': candidate.riskFlags,
+      'gating_notes': candidate.gatingNotes,
+      'manual_confirm_required': true,
+      'auto_buy_enabled': false,
+      'scheduler_real_order_enabled': false,
+      'real_order_submit_allowed': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
     notifyListeners();
+  }
+
+  ActionResult prepareKisManualSellFromPosition(PositionSummary position) {
+    final symbol = position.symbol.trim();
+    final qty = position.qty.floor();
+    if (symbol.isEmpty || qty < 1) {
+      return const ActionResult(
+        success: false,
+        message: 'Position is missing a sell symbol or whole-share quantity.',
+      );
+    }
+
+    selectedOrderMarket = PortfolioMarket.kr;
+    orderTicketSymbol = symbol;
+    orderTicketSide = 'sell';
+    orderTicketQty = qty;
+    orderTicketQtyInput = qty.toString();
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata = {
+      'source': 'portfolio_position',
+      'source_type': 'manual_sell_ticket_prefill',
+      'symbol': symbol,
+      'suggested_quantity': qty,
+      'current_price': position.currentPrice,
+      'cost_basis': position.costBasis,
+      'unrealized_pl': position.unrealizedPl,
+      'unrealized_pl_pct': position.unrealizedPlpc,
+      'manual_confirm_required': true,
+      'auto_sell_enabled': false,
+      'scheduler_real_order_enabled': false,
+      'real_order_submit_allowed': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
+    notifyListeners();
+    return const ActionResult(
+      success: true,
+      message:
+          'Manual sell ticket prepared from portfolio. Validate and confirm before submit.',
+    );
   }
 
   ActionResult prepareKisManualSellFromExitCandidate(

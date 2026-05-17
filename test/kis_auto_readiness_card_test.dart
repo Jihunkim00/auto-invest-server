@@ -64,7 +64,7 @@ void main() {
     await tester.pumpWidget(_wrap(controller));
 
     expect(find.text('KIS Live Auto Readiness'), findsOneWidget);
-    expect(find.text('READINESS ONLY'), findsOneWidget);
+    expect(find.text('READINESS ONLY'), findsWidgets);
     expect(find.text('LIVE AUTO DISABLED'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.text('MANUAL CONFIRM REQUIRED'), findsOneWidget);
@@ -127,7 +127,7 @@ Widget _wrap(DashboardController controller) {
       body: SingleChildScrollView(
         child: AnimatedBuilder(
           animation: controller,
-          builder: (context, _) => WatchlistSection(controller: controller),
+          builder: (context, _) => TestLabSection(controller: controller),
         ),
       ),
     ),
