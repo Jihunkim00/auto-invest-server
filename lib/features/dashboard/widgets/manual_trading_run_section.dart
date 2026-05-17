@@ -576,31 +576,57 @@ class _ScoreBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = <_MetricValue>[
-      _MetricValue('Quant Buy', _formatNullable(result.quantBuyScore)),
-      _MetricValue('Quant Sell', _formatNullable(result.quantSellScore)),
-      _MetricValue('GPT/AI Buy',
-          _formatNullable(result.aiBuyScore ?? result.gptContext.gptBuyScore)),
-      _MetricValue(
-          'GPT/AI Sell',
-          _formatNullable(
-              result.aiSellScore ?? result.gptContext.gptSellScore)),
-      _MetricValue('Final Buy', _formatNullable(result.finalBuyScore)),
-      _MetricValue('Final Sell', _formatNullable(result.finalSellScore)),
       _MetricValue('Buy Score', _formatNullable(result.buyScore)),
       _MetricValue('Sell Score', _formatNullable(result.sellScore)),
+      _MetricValue('Final Buy', _formatNullable(result.finalBuyScore)),
+      _MetricValue('Final Sell', _formatNullable(result.finalSellScore)),
       _MetricValue('Confidence', _formatNullable(result.confidence)),
-      _MetricValue('Regime Conf.', _formatNullable(result.regimeConfidence)),
+      _MetricValue('AI Buy', _formatNullable(result.aiBuyScore)),
+      _MetricValue('AI Sell', _formatNullable(result.aiSellScore)),
+      _MetricValue(
+        'GPT Numeric Buy',
+        _formatGptNumericScore(result.gptContext.gptBuyScore),
+      ),
+      _MetricValue(
+        'GPT Numeric Sell',
+        _formatGptNumericScore(result.gptContext.gptSellScore),
+      ),
       _MetricValue('Action', result.action.toUpperCase()),
       _MetricValue('Reason', _textOrDash(result.reason)),
+      _MetricValue('Hard block', result.hardBlocked ? 'true' : 'false'),
     ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: metrics
-          .map((metric) =>
-              _MiniMetricCard(label: metric.label, value: metric.value))
-          .toList(),
-    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (result.scoreDetailsNotReturned) ...[
+        const Text('Score details not returned in run response',
+            style: TextStyle(
+                color: Colors.orangeAccent, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+      ],
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: metrics
+            .map((metric) =>
+                _MiniMetricCard(label: metric.label, value: metric.value))
+            .toList(),
+      ),
+      if (result.hardBlockReason != null) ...[
+        const SizedBox(height: 8),
+        _ResultRow('hard_block_reason', result.hardBlockReason!),
+      ],
+      if (result.gptContext.reason?.isNotEmpty == true) ...[
+        const SizedBox(height: 8),
+        _ResultRow('GPT Advisory Reason', result.gptContext.reason!),
+      ],
+      if (result.riskFlags.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _ChipList(label: 'Risk flags', items: result.riskFlags),
+      ],
+      if (result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _ChipList(label: 'Gating notes', items: result.gatingNotes),
+      ],
+    ]);
   }
 }
 
@@ -848,6 +874,11 @@ class _ResultRow extends StatelessWidget {
 String _formatNullable(double? value) {
   if (value == null) return '--';
   return value.toStringAsFixed(2);
+}
+
+String _formatGptNumericScore(double? value) {
+  if (value == null) return 'No numeric GPT score returned';
+  return _formatNullable(value);
 }
 
 String _textOrDash(String value) {

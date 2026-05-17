@@ -57,8 +57,7 @@ void main() {
     expect(find.text('skipped'), findsWidgets);
     expect(find.text('Why No Trade?'), findsOneWidget);
     expect(find.text('Score Breakdown'), findsOneWidget);
-    expect(find.text('QUANT BUY'), findsOneWidget);
-    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('AI BUY'), findsOneWidget);
     expect(find.text('FINAL BUY'), findsOneWidget);
     expect(find.text('No order created.'), findsOneWidget);
 
@@ -151,13 +150,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Score Breakdown'), findsOneWidget);
-    expect(find.text('QUANT BUY'), findsOneWidget);
-    expect(find.text('66.00'), findsOneWidget);
-    expect(find.text('QUANT SELL'), findsOneWidget);
-    expect(find.text('14.00'), findsOneWidget);
-    expect(find.text('GPT/AI BUY'), findsOneWidget);
+    expect(find.text('BUY SCORE'), findsOneWidget);
+    expect(find.text('65.00'), findsOneWidget);
+    expect(find.text('SELL SCORE'), findsOneWidget);
+    expect(find.text('12.00'), findsOneWidget);
+    expect(find.text('AI BUY'), findsOneWidget);
     expect(find.text('71.00'), findsOneWidget);
-    expect(find.text('GPT/AI SELL'), findsOneWidget);
+    expect(find.text('AI SELL'), findsOneWidget);
     expect(find.text('22.00'), findsOneWidget);
     expect(find.text('FINAL BUY'), findsOneWidget);
     expect(find.text('69.00'), findsOneWidget);
@@ -174,6 +173,68 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Single Symbol score breakdown enriches from matching signal id',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(signalIdOnly: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await tester.pumpWidget(_wrap(controller));
+    await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
+    await tester.tap(find.text('Run Single Symbol'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(api.signalFetchCalls, 1);
+    expect(find.text('BUY SCORE'), findsOneWidget);
+    expect(find.text('62.00'), findsOneWidget);
+    expect(find.text('SELL SCORE'), findsOneWidget);
+    expect(find.text('13.00'), findsOneWidget);
+    expect(find.text('FINAL BUY'), findsOneWidget);
+    expect(find.text('67.00'), findsOneWidget);
+    expect(find.text('FINAL SELL'), findsOneWidget);
+    expect(find.text('11.00'), findsOneWidget);
+    expect(find.text('CONFIDENCE'), findsOneWidget);
+    expect(find.text('0.74'), findsOneWidget);
+    expect(find.text('score_threshold_not_met'), findsWidgets);
+    expect(find.text('recent signal reason'), findsWidgets);
+    expect(find.text('N/A'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Single Symbol immediate-only fallback is explicit',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(signalIdOnly: true, failSignalFetch: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await tester.pumpWidget(_wrap(controller));
+    await tester.tap(find.text('Run Single Symbol'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Score details not returned in run response'),
+        findsOneWidget);
+    expect(find.text('No numeric GPT score returned'), findsNWidgets(2));
+    expect(find.text('GPT Advisory Reason'), findsOneWidget);
+    expect(find.text('Immediate GPT context says risk is elevated.'),
+        findsOneWidget);
+    expect(find.text('N/A'), findsNothing);
+
+    controller.dispose();
+  });
+
   testWidgets('Analysis score breakdown uses explicit fallback only for nulls',
       (tester) async {
     final controller = DashboardController(ApiClient(), autoload: false);
@@ -183,7 +244,7 @@ void main() {
       'action': 'hold',
       'result': 'skipped',
       'reason': 'No actionable edge',
-      'quant_buy_score': 61,
+      'buy_score': 61,
       'ai_buy_score': null,
       'final_buy_score': 60,
       'confidence': null,
@@ -198,7 +259,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('QUANT BUY'), findsOneWidget);
+    expect(find.text('BUY SCORE'), findsOneWidget);
     expect(find.text('61.00'), findsOneWidget);
     expect(find.text('FINAL BUY'), findsOneWidget);
     expect(find.text('60.00'), findsOneWidget);
@@ -225,12 +286,19 @@ Widget _wrap(
 }
 
 class _AnalysisFakeApi extends ApiClient {
-  _AnalysisFakeApi({this.realisticScores = false});
+  _AnalysisFakeApi({
+    this.realisticScores = false,
+    this.signalIdOnly = false,
+    this.failSignalFetch = false,
+  });
 
   final bool realisticScores;
+  final bool signalIdOnly;
+  final bool failSignalFetch;
   int singleRunCalls = 0;
   int validationCalls = 0;
   int submitCalls = 0;
+  int signalFetchCalls = 0;
   String? lastSingleRunSymbol;
   int? lastSingleRunGateLevel;
 
@@ -242,6 +310,22 @@ class _AnalysisFakeApi extends ApiClient {
     singleRunCalls += 1;
     lastSingleRunSymbol = symbol;
     lastSingleRunGateLevel = gateLevel;
+    if (signalIdOnly) {
+      return ManualTradingRunResult.fromJson({
+        'symbol': symbol,
+        'gate_level': gateLevel,
+        'signal_id': 42,
+        'action': 'hold',
+        'result': 'skipped',
+        'reason': 'Immediate response omitted score details',
+        'hard_block_reason': 'market_closed',
+        'gpt_context': {
+          'reason': 'Immediate GPT context says risk is elevated.',
+          'gpt_buy_score': null,
+          'gpt_sell_score': null,
+        },
+      });
+    }
     if (realisticScores) {
       return ManualTradingRunResult.fromJson({
         'symbol': symbol,
@@ -252,6 +336,8 @@ class _AnalysisFakeApi extends ApiClient {
           'reason': 'Scores available but entry gate blocked',
           'signal_status': 'skipped',
           'scores': {
+            'buy_score': 65,
+            'sell_score': 12,
             'quant_buy_score': '66',
             'quant_sell_score': 14,
             'ai_buy_score': 71,
@@ -280,6 +366,37 @@ class _AnalysisFakeApi extends ApiClient {
       'final_buy_score': 60,
       'confidence': 0.62,
     });
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchRecentSignalPayloads({
+    int limit = 20,
+  }) async {
+    signalFetchCalls += 1;
+    if (failSignalFetch) {
+      throw const ApiRequestException('signals unavailable');
+    }
+    return [
+      {
+        'id': 42,
+        'symbol': 'AAPL',
+        'action': 'hold',
+        'signal_status': 'skipped',
+        'buy_score': 62,
+        'sell_score': 13,
+        'final_buy_score': 67,
+        'final_sell_score': 11,
+        'confidence': 0.74,
+        'reason': 'recent signal reason',
+        'risk_flags': ['hold_signal'],
+        'gating_notes': ['score_threshold_not_met'],
+        'gpt_context': {
+          'reason': 'recent signal reason',
+          'gpt_buy_score': null,
+          'gpt_sell_score': null,
+        },
+      },
+    ];
   }
 
   @override

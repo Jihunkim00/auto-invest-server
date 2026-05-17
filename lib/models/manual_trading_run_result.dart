@@ -40,6 +40,7 @@ class ManualTradingRunResult {
     required this.hardBlocked,
     required this.createdAt,
     this.gptContext = GptRiskContext.empty,
+    this.scoreDetailsNotReturned = false,
   });
 
   final String symbol;
@@ -78,10 +79,21 @@ class ManualTradingRunResult {
   final bool hardBlocked;
   final String? createdAt;
   final GptRiskContext gptContext;
+  final bool scoreDetailsNotReturned;
 
   bool get isHold => action.toLowerCase() == 'hold';
   bool get noOrderCreated => orderId == null && relatedOrderId == null;
   bool get riskAllowed => riskApproved == true || approvedByRisk == true;
+  bool get hasScoreDetails =>
+      buyScore != null ||
+      sellScore != null ||
+      confidence != null ||
+      quantBuyScore != null ||
+      quantSellScore != null ||
+      aiBuyScore != null ||
+      aiSellScore != null ||
+      finalBuyScore != null ||
+      finalSellScore != null;
   String get displayStatus => signalStatus ?? runResult ?? result;
   String get displayOrderId => orderId ?? relatedOrderId ?? 'No order created';
   String get gateLabel {
@@ -136,8 +148,10 @@ class ManualTradingRunResult {
           signal['quant_reason']),
       aiReason: _nullableString(
           json['ai_reason'] ?? payload['ai_reason'] ?? signal['ai_reason']),
-      signalId: _nullableString(
-          json['signal_id'] ?? payload['signal_id'] ?? signal['signal_id']),
+      signalId: _nullableString(json['signal_id'] ??
+          payload['signal_id'] ??
+          signal['signal_id'] ??
+          signal['id']),
       relatedOrderId: relatedOrderId,
       orderId: orderId,
       riskApproved: riskApproved,
@@ -186,18 +200,12 @@ class ManualTradingRunResult {
       aiBuyScore: _doubleValue(json['ai_buy_score'] ??
           payload['ai_buy_score'] ??
           scores['ai_buy_score'] ??
-          scores['gpt_buy_score'] ??
           signalScores['ai_buy_score'] ??
-          signalScores['gpt_buy_score'] ??
-          gptContextMap['gpt_buy_score'] ??
           signal['ai_buy_score']),
       aiSellScore: _doubleValue(json['ai_sell_score'] ??
           payload['ai_sell_score'] ??
           scores['ai_sell_score'] ??
-          scores['gpt_sell_score'] ??
           signalScores['ai_sell_score'] ??
-          signalScores['gpt_sell_score'] ??
-          gptContextMap['gpt_sell_score'] ??
           signal['ai_sell_score']),
       finalBuyScore: _doubleValue(json['final_buy_score'] ??
           payload['final_buy_score'] ??
@@ -219,6 +227,114 @@ class ManualTradingRunResult {
           _boolValue(json['hard_blocked'] ?? payload['hard_blocked']) ?? false,
       createdAt: _nullableString(json['created_at'] ?? payload['created_at']),
       gptContext: GptRiskContext.fromJson(gptContextMap),
+    );
+  }
+
+  ManualTradingRunResult mergeSignalPayload(Map<String, dynamic> signal) {
+    final signalMap = _asMap(signal['signal']);
+    final scores = _asMap(signal['scores']);
+    final mergedSignal = signalMap.isEmpty ? signal : signalMap;
+    final mergedScores = scores.isEmpty ? signal : scores;
+    final signalGptContext = GptRiskContext.fromJson(
+      signal['gpt_context'] ?? mergedSignal['gpt_context'],
+    );
+
+    return ManualTradingRunResult(
+      symbol: symbol,
+      gateLevel: gateLevel,
+      gateProfileName: gateProfileName,
+      action: _stringValue(mergedSignal['action'] ?? signal['action'],
+          fallback: action),
+      reason: _stringValue(mergedSignal['reason'] ?? signal['reason'] ?? reason,
+          fallback: reason),
+      quantReason: _nullableString(
+              mergedSignal['quant_reason'] ?? signal['quant_reason']) ??
+          quantReason,
+      aiReason:
+          _nullableString(mergedSignal['ai_reason'] ?? signal['ai_reason']) ??
+              aiReason,
+      signalId: signalId,
+      relatedOrderId: relatedOrderId ??
+          _nullableString(signal['related_order_id'] ?? signal['order_id']),
+      orderId: orderId,
+      riskApproved: riskApproved,
+      approvedByRisk: approvedByRisk,
+      brokerStatus: brokerStatus,
+      internalStatus: internalStatus,
+      result: _stringValue(signal['result'], fallback: result),
+      runResult: runResult,
+      runReason: runReason,
+      signalStatus:
+          _nullableString(signal['signal_status'] ?? signal['status']) ??
+              signalStatus,
+      buyScore: buyScore ?? _doubleValue(mergedScores['buy_score']),
+      sellScore: sellScore ?? _doubleValue(mergedScores['sell_score']),
+      confidence: confidence ?? _doubleValue(mergedScores['confidence']),
+      regimeConfidence: regimeConfidence,
+      quantBuyScore:
+          quantBuyScore ?? _doubleValue(mergedScores['quant_buy_score']),
+      quantSellScore:
+          quantSellScore ?? _doubleValue(mergedScores['quant_sell_score']),
+      aiBuyScore: aiBuyScore ?? _doubleValue(mergedScores['ai_buy_score']),
+      aiSellScore: aiSellScore ?? _doubleValue(mergedScores['ai_sell_score']),
+      finalBuyScore:
+          finalBuyScore ?? _doubleValue(mergedScores['final_buy_score']),
+      finalSellScore:
+          finalSellScore ?? _doubleValue(mergedScores['final_sell_score']),
+      riskFlags:
+          _dedupeStringList(riskFlags + _stringList(signal['risk_flags'])),
+      gatingNotes:
+          _dedupeStringList(gatingNotes + _stringList(signal['gating_notes'])),
+      indicatorPayload: indicatorPayload,
+      rawIndicatorPayload: rawIndicatorPayload,
+      hardBlockReason:
+          hardBlockReason ?? _nullableString(signal['hard_block_reason']),
+      hardBlocked: hardBlocked || (_boolValue(signal['hard_blocked']) ?? false),
+      createdAt: createdAt,
+      gptContext: gptContext.hasDetails ? gptContext : signalGptContext,
+      scoreDetailsNotReturned: false,
+    );
+  }
+
+  ManualTradingRunResult markScoreDetailsNotReturned() {
+    return ManualTradingRunResult(
+      symbol: symbol,
+      gateLevel: gateLevel,
+      gateProfileName: gateProfileName,
+      action: action,
+      reason: reason,
+      quantReason: quantReason,
+      aiReason: aiReason,
+      signalId: signalId,
+      relatedOrderId: relatedOrderId,
+      orderId: orderId,
+      riskApproved: riskApproved,
+      approvedByRisk: approvedByRisk,
+      brokerStatus: brokerStatus,
+      internalStatus: internalStatus,
+      result: result,
+      runResult: runResult,
+      runReason: runReason,
+      signalStatus: signalStatus,
+      buyScore: buyScore,
+      sellScore: sellScore,
+      confidence: confidence,
+      regimeConfidence: regimeConfidence,
+      quantBuyScore: quantBuyScore,
+      quantSellScore: quantSellScore,
+      aiBuyScore: aiBuyScore,
+      aiSellScore: aiSellScore,
+      finalBuyScore: finalBuyScore,
+      finalSellScore: finalSellScore,
+      riskFlags: riskFlags,
+      gatingNotes: gatingNotes,
+      indicatorPayload: indicatorPayload,
+      rawIndicatorPayload: rawIndicatorPayload,
+      hardBlockReason: hardBlockReason,
+      hardBlocked: hardBlocked,
+      createdAt: createdAt,
+      gptContext: gptContext,
+      scoreDetailsNotReturned: true,
     );
   }
 
@@ -261,9 +377,14 @@ class ManualTradingRunResult {
   static bool? _boolValue(Object? value) {
     if (value is bool) return value;
     if (value == null) return null;
-    final normalized = value.toString().toLowerCase();
-    if (normalized == 'true') return true;
-    if (normalized == 'false') return false;
+    if (value is num) return value != 0;
+    final normalized = value.toString().trim().toLowerCase();
+    if (normalized == 'true' || normalized == '1' || normalized == 'yes') {
+      return true;
+    }
+    if (normalized == 'false' || normalized == '0' || normalized == 'no') {
+      return false;
+    }
     return null;
   }
 
@@ -283,6 +404,17 @@ class ManualTradingRunResult {
           .toList();
     }
     return <String>[];
+  }
+
+  static List<String> _dedupeStringList(List<String> values) {
+    final result = <String>[];
+    for (final value in values) {
+      final text = value.trim();
+      if (text.isNotEmpty && !result.contains(text)) {
+        result.add(text);
+      }
+    }
+    return result;
   }
 
   static _ParsedIndicatorPayload _parseIndicatorPayload(Object? value) {

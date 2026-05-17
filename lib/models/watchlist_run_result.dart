@@ -133,14 +133,17 @@ class WatchlistRunResult {
           parseNullableBool(json['tie_breaker_applied']) ?? false,
       finalCandidateSelectionReason:
           parseNullableString(json['final_candidate_selection_reason']) ?? '',
-      bestScore: parseNullableDouble(json['best_score']),
+      bestScore: parseNullableDouble(json['best_score']) ??
+          effectiveBestCandidate?.entryScore ??
+          effectiveBestCandidate?.finalEntryScore,
       finalScoreGap: parseNullableDouble(json['final_score_gap']),
       minEntryScore: parseNullableInt(json['min_entry_score']),
       minScoreGap: parseNullableInt(json['min_score_gap']),
       shouldTrade: parseNullableBool(json['should_trade']) ?? false,
       triggeredSymbol: parseNullableString(json['triggered_symbol']),
-      triggerBlockReason:
-          parseNullableString(json['trigger_block_reason']) ?? '',
+      triggerBlockReason: parseNullableString(json['trigger_block_reason']) ??
+          effectiveBestCandidate?.blockReason ??
+          '',
       finalEntryReady: parseNullableBool(json['final_entry_ready']) == true ||
           effectiveBestCandidate?.entryReady == true,
       finalActionHint: effectiveBestCandidate?.actionHint ??
@@ -173,6 +176,7 @@ class WatchlistRunResult {
         parseNullableString(json['reason']),
         effectiveBestCandidate?.noOrderReason,
         effectiveBestCandidate?.skipReason,
+        effectiveBestCandidate?.blockReason,
         effectiveBestCandidate?.reason,
       ]),
       triggerSource: parseNullableString(run?['trigger_source']) ??

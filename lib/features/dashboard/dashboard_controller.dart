@@ -350,8 +350,9 @@ class DashboardController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final result = await apiClient.runTradingOnce(
+      final immediateResult = await apiClient.runTradingOnce(
           symbol: normalizedSymbol, gateLevel: gateLevel);
+      final result = await _enrichManualRunResult(immediateResult);
       manualRunResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
       await _refreshPortfolioSummaries();
@@ -367,6 +368,29 @@ class DashboardController extends ChangeNotifier {
       manualRunLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<ManualTradingRunResult> _enrichManualRunResult(
+    ManualTradingRunResult result,
+  ) async {
+    final signalId = result.signalId?.trim();
+    if (signalId == null || signalId.isEmpty) return result;
+
+    try {
+      final signals = await apiClient.fetchRecentSignalPayloads(limit: 50);
+      for (final signal in signals) {
+        if (_signalMatchesId(signal, signalId)) {
+          return result.mergeSignalPayload(signal);
+        }
+      }
+    } catch (_) {
+      // The immediate run response is still useful; only score enrichment failed.
+    }
+
+    if (!result.hasScoreDetails) {
+      return result.markScoreDetailsNotReturned();
+    }
+    return result;
   }
 
   Future<ActionResult> toggleScheduler(bool v) async {
@@ -1902,6 +1926,21 @@ String _submittedMessage(KisManualOrderResult order) {
   final status = _kisTerminalLabel(order);
   final odno = order.kisOdno == null ? '' : ' / ODNO ${order.kisOdno}';
   return 'Live KIS order ${order.orderId}$odno: $status.';
+}
+
+bool _signalMatchesId(Map<String, dynamic> signal, String expectedSignalId) {
+  final normalizedExpected = expectedSignalId.trim();
+  final candidates = [
+    signal['id'],
+    signal['signal_id'],
+    if (signal['signal'] is Map) (signal['signal'] as Map)['id'],
+    if (signal['signal'] is Map) (signal['signal'] as Map)['signal_id'],
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate?.toString().trim() == normalizedExpected) return true;
+  }
+  return false;
 }
 
 String _kisTerminalLabel(KisManualOrderResult order) {

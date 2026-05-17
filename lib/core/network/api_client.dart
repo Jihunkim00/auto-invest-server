@@ -853,6 +853,23 @@ class ApiClient {
     }
   }
 
+  Future<List<Map<String, dynamic>>> fetchRecentSignalPayloads({
+    int limit = 20,
+  }) async {
+    try {
+      final j = await _getJson('/signals/recent?limit=$limit');
+      final items = j['items'] as List<dynamic>? ?? [];
+      return items
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } on http.ClientException {
+      return const [];
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend signals response: $e');
+    }
+  }
+
   Future<LogsSummary> fetchLogsSummary() async {
     try {
       final j = await _getJson('/logs/summary');
