@@ -3,14 +3,21 @@ import 'package:flutter/material.dart';
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
-import '../../models/portfolio_summary.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
+import 'widgets/portfolio_snapshot_section.dart';
 
 class DashboardScreen extends StatelessWidget {
-  const DashboardScreen({super.key, required this.controller});
+  const DashboardScreen({
+    super.key,
+    required this.controller,
+    this.onOpenManualOrder,
+    this.onReviewPosition,
+  });
 
   final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
+  final VoidCallback? onReviewPosition;
 
   @override
   Widget build(BuildContext context) {
@@ -29,13 +36,18 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 const Text(
-                  'Safety, next action, and recent activity at a glance.',
+                  'Safety, portfolio overview, and recent activity at a glance.',
                   style: TextStyle(color: Colors.white70),
                 ),
                 const SizedBox(height: 14),
                 _SafetySummary(controller: controller),
                 const SizedBox(height: 12),
-                _PortfolioSummaryCard(controller: controller),
+                PortfolioSnapshotSection(
+                  controller: controller,
+                  managementMode: true,
+                  onOpenManualOrder: onOpenManualOrder,
+                  onReviewPosition: onReviewPosition,
+                ),
                 const SizedBox(height: 12),
                 _NextActionCard(controller: controller),
                 const SizedBox(height: 12),
@@ -108,101 +120,6 @@ class _SafetySummary extends StatelessWidget {
                 : Colors.white70,
           ),
         ]),
-      ]),
-    );
-  }
-}
-
-class _PortfolioSummaryCard extends StatelessWidget {
-  const _PortfolioSummaryCard({required this.controller});
-
-  final DashboardController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final us = controller.usPortfolioSummary;
-    final kr = controller.krPortfolioSummary;
-    return SectionCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Icon(Icons.account_balance_wallet_outlined, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Portfolio Summary',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-          ),
-        ]),
-        const SizedBox(height: 12),
-        LayoutBuilder(builder: (context, constraints) {
-          final vertical = constraints.maxWidth < 640;
-          final items = [
-            _PortfolioMarketSummary(label: 'US', summary: us),
-            _PortfolioMarketSummary(label: 'KR', summary: kr),
-          ];
-          if (vertical) {
-            return Column(
-              children: [
-                for (final item in items) ...[
-                  item,
-                  if (item != items.last) const SizedBox(height: 8),
-                ],
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: items[0]),
-              const SizedBox(width: 8),
-              Expanded(child: items[1]),
-            ],
-          );
-        }),
-      ]),
-    );
-  }
-}
-
-class _PortfolioMarketSummary extends StatelessWidget {
-  const _PortfolioMarketSummary({required this.label, required this.summary});
-
-  final String label;
-  final PortfolioSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final plColor = summary.totalUnrealizedPl > 0
-        ? Colors.greenAccent
-        : summary.totalUnrealizedPl < 0
-            ? Colors.redAccent
-            : Colors.white70;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label,
-            style: const TextStyle(
-                color: Colors.white70, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        _DataLine(
-          label: 'Value',
-          value: _money(summary.totalMarketValue, summary.currency),
-        ),
-        _DataLine(
-          label: 'P/L',
-          value:
-              _money(summary.totalUnrealizedPl, summary.currency, signed: true),
-          color: plColor,
-        ),
-        _DataLine(
-          label: 'Held',
-          value: '${summary.positionsCount}',
-        ),
       ]),
     );
   }
@@ -364,12 +281,3 @@ String _nextAction(DashboardController controller) {
   return 'Review ${run.finalBestCandidate} in Manual Order before any submit.';
 }
 
-String _money(double value, String currency, {bool signed = false}) {
-  final normalizedCurrency = currency.isEmpty ? 'USD' : currency;
-  final decimals = normalizedCurrency == 'KRW' ? 0 : 2;
-  final sign = signed && value > 0 ? '+' : '';
-  final amount = decimals == 0
-      ? value.round().toString()
-      : value.toStringAsFixed(decimals);
-  return '$normalizedCurrency $sign$amount';
-}

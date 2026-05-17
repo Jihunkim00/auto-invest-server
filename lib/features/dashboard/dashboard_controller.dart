@@ -783,6 +783,35 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshWatchlist() async {
+    watchlistLoading = true;
+    watchlistError = null;
+    notifyListeners();
+    try {
+      await loadMarketWatchlists();
+      if (watchlistError != null) {
+        return ActionResult(success: false, message: watchlistError!);
+      }
+
+      try {
+        final latestRun = await apiClient.fetchLatestWatchlistRunResult();
+        if (latestRun != null) {
+          runResult = latestRun;
+          hasLatestRunResult = true;
+          showingOfflineFallback = false;
+        }
+      } catch (e) {
+        watchlistError = 'Latest watchlist run unavailable: $e';
+        return ActionResult(success: false, message: watchlistError!);
+      }
+
+      return const ActionResult(success: true, message: 'Watchlist refreshed.');
+    } finally {
+      watchlistLoading = false;
+      notifyListeners();
+    }
+  }
+
   KisManualOrderSafetyStatus kisSafetyStatusFromSettings() {
     return KisManualOrderSafetyStatus(
       runtimeDryRun: settings.dryRun,

@@ -15,6 +15,7 @@ import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
+import '../../../models/watchlist_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class WatchlistSection extends StatelessWidget {
@@ -88,11 +89,12 @@ class WatchlistSection extends StatelessWidget {
             onPressed: controller.watchlistLoading
                 ? null
                 : () async {
-                    await controller.loadMarketWatchlists();
+                    final result = await controller.refreshWatchlist();
                     if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text('Watchlist refreshed.'),
-                      backgroundColor: Colors.green,
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(result.message),
+                      backgroundColor:
+                          result.success ? Colors.green : Colors.redAccent,
                     ));
                   },
             icon: controller.watchlistLoading
@@ -108,6 +110,18 @@ class WatchlistSection extends StatelessWidget {
         const SizedBox(height: 12),
         _GateSelector(controller: controller),
         const SizedBox(height: 12),
+        if (controller.error != null) ...[
+          _StateLine(text: controller.error!, color: Colors.redAccent),
+          const SizedBox(height: 12),
+        ],
+        if (controller.hasLatestRunResult || controller.showingOfflineFallback) ...[
+          _WatchlistRunResultSummary(
+            runResult: controller.runResult,
+            candidate: topCandidate,
+            isKr: isKr,
+          ),
+          const SizedBox(height: 12),
+        ],
         if (controller.watchlistLoading)
           const LinearProgressIndicator(minHeight: 2),
         if (controller.watchlistError != null) ...[
@@ -150,6 +164,125 @@ class WatchlistSection extends StatelessWidget {
               _WatchlistSymbols(watchlist: watchlist, isKr: isKr),
           ],
         ),
+      ]),
+    );
+  }
+}
+
+class _WatchlistRunResultSummary extends StatelessWidget {
+  const _WatchlistRunResultSummary({
+    required this.runResult,
+    required this.candidate,
+    required this.isKr,
+  });
+
+  final WatchlistRunResult runResult;
+  final Candidate? candidate;
+  final bool isKr;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = runResult.result.isNotEmpty
+        ? runResult.result
+        : runResult.action.isNotEmpty
+            ? runResult.action
+            : 'run completed';
+    final reason = runResult.reason.isNotEmpty
+        ? runResult.reason
+        : candidate?.reason.isNotEmpty == true
+            ? candidate!.reason
+            : 'No additional reason.';
+    final orderStatus = runResult.orderId == null
+        ? 'No order created'
+        : 'Order ID ${runResult.orderId}';
+    final topSymbol = candidate?.symbol.isNotEmpty == true
+        ? candidate!.symbol
+        : runResult.finalBestCandidate.isNotEmpty
+            ? runResult.finalBestCandidate
+            : 'No top candidate';
+    final score = candidate?.finalBuyScore != null
+        ? _displayNumber(candidate!.finalBuyScore)
+        : candidate?.score?.toString() ??
+            runResult.bestScore?.toStringAsFixed(2) ??
+            '--';
+    final confidence = _displayNumber(candidate?.confidence);
+    final readiness = candidate != null
+        ? (candidate!.entryReady ? 'ready' : 'not ready')
+        : runResult.finalEntryReady
+            ? 'ready'
+            : 'not ready';
+    final nextAction = candidate?.entryReady == true
+        ? 'Candidate is ready for review.'
+        : candidate != null
+            ? 'Review block reason before any order action.'
+            : 'Run a watchlist scan for candidate ranking.';
+    final blockReason = candidate?.blockReason?.trim().isNotEmpty == true
+        ? candidate!.blockReason!
+        : candidate?.blockReasons.isNotEmpty == true
+            ? candidate!.blockReasons.join(', ')
+            : runResult.triggerBlockReason.isNotEmpty
+                ? runResult.triggerBlockReason
+                : '--';
+    final aiBuyScore = _displayNumber(
+      candidate?.aiBuyScore ?? candidate?.gptContext.gptBuyScore,
+    );
+    final aiSellScore = _displayNumber(
+      candidate?.aiSellScore ?? candidate?.gptContext.gptSellScore,
+    );
+    final gptSummary = candidate?.gptReason.trim().isNotEmpty == true
+        ? candidate!.gptReason
+        : candidate?.gptContext.reason?.trim().isNotEmpty == true
+            ? candidate!.gptContext.reason!
+            : '--';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.list_alt_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Watchlist run summary',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(
+            text: status.toUpperCase(),
+            color: status.contains('skip') || status.contains('hold')
+                ? Colors.amberAccent
+                : Colors.lightBlueAccent,
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'Top candidate', value: topSymbol),
+          _ResultPair(label: 'Order status', value: orderStatus),
+          _ResultPair(label: 'Score', value: score),
+          _ResultPair(label: 'Confidence', value: confidence),
+          _ResultPair(label: 'Readiness', value: readiness),
+          _ResultPair(label: 'Next action', value: nextAction),
+          _ResultPair(label: 'Block reason', value: blockReason),
+          _ResultPair(label: 'GPT buy', value: aiBuyScore),
+          _ResultPair(label: 'GPT sell', value: aiSellScore),
+        ]),
+        const SizedBox(height: 10),
+        _StateLine(text: 'Reason: $reason'),
+        const SizedBox(height: 10),
+        _StateLine(
+          text: isKr
+              ? 'KR preview results are read-only and do not submit live orders.'
+              : 'US watchlist scan uses Alpaca paper mode; no live submit from Watchlist.',
+          color: Colors.white70,
+        ),
+        if (gptSummary != '--') ...[
+          const SizedBox(height: 10),
+          _StateLine(text: 'GPT advisory: $gptSummary'),
+        ],
       ]),
     );
   }
@@ -3092,8 +3225,13 @@ class _CountPill extends StatelessWidget {
 }
 
 String _score(double? value) {
-  if (value == null) return 'n/a';
+  if (value == null) return '--';
   return value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 1);
+}
+
+String _displayNumber(double? value) {
+  if (value == null) return '--';
+  return value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 2);
 }
 
 String _boolText(bool value) => value ? 'true' : 'false';

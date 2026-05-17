@@ -13,14 +13,20 @@ import 'features/logs/logs_screen.dart';
 import 'features/settings/settings_screen.dart';
 
 class AutoInvestApp extends StatefulWidget {
-  const AutoInvestApp({super.key});
+  const AutoInvestApp({
+    super.key,
+    this.controller,
+  });
+
+  final DashboardController? controller;
 
   @override
   State<AutoInvestApp> createState() => _AutoInvestAppState();
 }
 
 class _AutoInvestAppState extends State<AutoInvestApp> {
-  final DashboardController _controller = DashboardController(ApiClient());
+  late final DashboardController _controller =
+      widget.controller ?? DashboardController(ApiClient());
   int _index = 0;
 
   void _selectTab(int index) {
@@ -43,24 +49,28 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
         body: IndexedStack(
           index: _index,
           children: [
-            DashboardScreen(controller: _controller),
-            PortfolioScreen(
+            DashboardScreen(
               controller: _controller,
-              onOpenManualOrder: () => _selectTab(3),
-              onOpenAnalysis: () => _selectTab(4),
+              onOpenManualOrder: () => _selectTab(2),
+              onReviewPosition: () => _selectTab(3),
             ),
             WatchlistScreen(
               controller: _controller,
-              onOpenManualOrder: () => _selectTab(3),
+              onOpenManualOrder: () => _selectTab(2),
             ),
             ManualOrderScreen(controller: _controller),
             AnalysisScreen(
               controller: _controller,
-              onOpenManualOrder: () => _selectTab(3),
+              onOpenManualOrder: () => _selectTab(2),
             ),
             LogsScreen(controller: _controller),
             SettingsScreen(controller: _controller),
             TestLabScreen(controller: _controller),
+            PortfolioScreen(
+              controller: _controller,
+              onOpenManualOrder: () => _selectTab(2),
+              onOpenAnalysis: () => _selectTab(3),
+            ),
           ],
         ),
         bottomNavigationBar: NavigationBar(
@@ -71,10 +81,6 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                 icon: Icon(Icons.home_outlined),
                 selectedIcon: Icon(Icons.home),
                 label: 'Home'),
-            NavigationDestination(
-                icon: Icon(Icons.account_balance_wallet_outlined),
-                selectedIcon: Icon(Icons.account_balance_wallet),
-                label: 'Portfolio'),
             NavigationDestination(
                 icon: Icon(Icons.manage_search_outlined),
                 selectedIcon: Icon(Icons.manage_search),

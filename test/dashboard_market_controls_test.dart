@@ -343,7 +343,7 @@ void main() {
     expect(candidate.finalBuyScore, 64);
     expect(candidate.confidence, 0.72);
     expect(find.text('Prepare Buy Ticket'), findsOneWidget);
-    expect(find.text('not ready'), findsOneWidget);
+    expect(find.text('not ready'), findsNWidgets(2));
     expect(find.text('0.7'), findsOneWidget);
     expect(find.text('KIS GPT Advisory Context'), findsNothing);
     expect(find.text('AI_BUY_SCORE'), findsNothing);
@@ -385,6 +385,11 @@ void main() {
 
     await tester.tap(find.text('Start Scan'));
     await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('Prepare Buy Ticket'),
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
     await tester.tap(find.text('Prepare Buy Ticket'));
     await tester.pumpAndSettle();
 
@@ -398,6 +403,58 @@ void main() {
         controller.orderTicketSourceMetadata?['source'], 'watchlist_candidate');
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist Start Scan shows Alpaca summary and no order created',
+      (tester) async {
+    final api = _FakeApiClient(runWatchlistDelay: const Duration(milliseconds: 50));
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pump(const Duration(milliseconds: 10));
+
+    expect(find.text('Scanning...'), findsOneWidget);
+    await tester.pumpAndSettle();
+
+    expect(api.lastProvider, 'alpaca');
+    expect(find.text('WMT'), findsWidgets);
+    expect(find.text('No order created'), findsOneWidget);
+    expect(find.text('SKIPPED'), findsOneWidget);
+    expect(find.text('SCORE'), findsWidgets);
+    expect(find.text('CONFIDENCE'), findsWidgets);
+    expect(find.text('READINESS'), findsWidgets);
+    expect(find.text('not ready'), findsNWidgets(2));
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist Refresh reloads watchlist and latest run summary',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Refresh'));
+    await tester.pumpAndSettle();
+
+    expect(api.refreshLatestCalls, 1);
+    expect(find.text('WMT'), findsWidgets);
+    expect(find.text('Watchlist refreshed.'), findsOneWidget);
 
     controller.dispose();
   });
@@ -878,6 +935,7 @@ class _FakeApiClient extends ApiClient {
     this.summary = KisOrderSummary.empty,
     this.throwCancel = false,
     this.dryRunAutoDelay = Duration.zero,
+    this.runWatchlistDelay = Duration.zero,
     this.safetyStatus = const KisManualOrderSafetyStatus(
       runtimeDryRun: false,
       killSwitch: false,
@@ -900,6 +958,7 @@ class _FakeApiClient extends ApiClient {
   final KisOrderSummary summary;
   final bool throwCancel;
   final Duration dryRunAutoDelay;
+  final Duration runWatchlistDelay;
   final KisManualOrderSafetyStatus safetyStatus;
   int validationCalls = 0;
   int submitCalls = 0;
@@ -918,6 +977,7 @@ class _FakeApiClient extends ApiClient {
   int? lastGateLevel;
   int? lastKisGateLevel;
   int? lastDryRunGateLevel;
+  int refreshLatestCalls = 0;
 
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
@@ -1096,7 +1156,18 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<WatchlistRunResult> runWatchlistOnce() async => getMockRunResult();
+  Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async {
+    refreshLatestCalls += 1;
+    return getMockRunResult();
+  }
+
+  @override
+  Future<WatchlistRunResult> runWatchlistOnce() async {
+    if (runWatchlistDelay > Duration.zero) {
+      await Future<void>.delayed(runWatchlistDelay);
+    }
+    return getMockRunResult();
+  }
 
   @override
   Future<WatchlistRunResult> runKisWatchlistPreview({

@@ -20,7 +20,7 @@ class WatchlistScreen extends StatelessWidget {
       builder: (context, _) {
         return SafeArea(
           child: RefreshIndicator(
-            onRefresh: controller.loadMarketWatchlists,
+            onRefresh: controller.refreshWatchlist,
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
