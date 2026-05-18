@@ -55,9 +55,9 @@ void main() {
     expect(find.text('54.00'), findsOneWidget);
     expect(find.text('GPT Advisory Reason'), findsOneWidget);
     expect(find.text('GPT Risk Context'), findsNothing);
-    expect(find.text('Advanced Details'), findsOneWidget);
-    await tester.ensureVisible(find.text('Advanced Details'));
-    await tester.tap(find.text('Advanced Details'));
+    expect(find.text('Run Details'), findsOneWidget);
+    await tester.ensureVisible(find.text('Run Details'));
+    await tester.tap(find.text('Run Details'));
     await tester.pumpAndSettle();
 
     expect(find.text('GPT Risk Context'), findsOneWidget);

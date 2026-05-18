@@ -151,7 +151,7 @@ class WatchlistSection extends StatelessWidget {
         if (controller.hasLatestRunResult ||
             controller.showingOfflineFallback) ...[
           const SizedBox(height: 12),
-          _WatchlistAdvancedDetails(runResult: controller.runResult),
+              _WatchlistAdvancedDetails(runResult: controller.runResult),
         ],
         const SizedBox(height: 12),
         ExpansionTile(
@@ -425,37 +425,127 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final candidates =
+        _candidatePreviewList(runResult).take(5).toList(growable: false);
+    final top = candidates.isEmpty ? null : candidates.first;
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
-      title: const Text('Watchlist Advanced Details'),
-      subtitle: const Text('Raw candidate lists and scan metrics.'),
+      title: const Text('Analysis Details'),
+      subtitle: const Text('Readable score, advisory, and risk details.'),
       children: [
-        _StateLine(
-          text: 'configured_symbol_count=${runResult.configuredSymbolCount}\n'
-              'analyzed_symbol_count=${runResult.analyzedSymbolCount}\n'
-              'quant_candidates_count=${runResult.quantCandidatesCount}\n'
-              'researched_candidates_count=${runResult.researchedCandidatesCount}\n'
-              'final_best_candidate=${runResult.finalBestCandidate}\n'
-              'trigger_block_reason=${runResult.triggerBlockReason}',
+        _ReadableDetailGroup(
+          title: 'Score Details',
+          pairs: [
+            _ResultPair(
+                label: 'Primary Score',
+                value: presentation.compactScore(_candidatePrimaryScore(top))),
+            _ResultPair(
+                label: 'Threshold',
+                value: presentation.compactScore(runResult.minEntryScore)),
+            _ResultPair(
+                label: 'Confidence',
+                value: presentation.compactScore(top?.confidence)),
+            _ResultPair(
+                label: 'Quant Buy',
+                value: presentation.compactScore(top?.quantBuyScore)),
+            _ResultPair(
+                label: 'Quant Sell',
+                value: presentation.compactScore(top?.quantSellScore)),
+            _ResultPair(
+                label: 'AI Buy',
+                value: presentation.compactScore(top?.aiBuyScore)),
+            _ResultPair(
+                label: 'AI Sell',
+                value: presentation.compactScore(top?.aiSellScore)),
+            _ResultPair(
+                label: 'GPT Buy',
+                value: presentation.compactScore(top?.gptBuyScore)),
+            _ResultPair(
+                label: 'GPT Sell',
+                value: presentation.compactScore(top?.gptSellScore)),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _ReadableDetailGroup(
+          title: 'Advisory Details',
+          lines: [
+            presentation.displayText(
+              _gptAdvisoryReason(top),
+              fallback: 'GPT advisory unavailable',
+            ),
+            if (runResult.finalCandidateSelectionReason.isNotEmpty)
+              runResult.finalCandidateSelectionReason,
+          ],
+        ),
+        const SizedBox(height: 10),
+        _ReadableDetailGroup(
+          title: 'Risk / Block Details',
+          lines: [
+            presentation.translateReason(
+              presentation.firstText([
+                top?.blockReason,
+                top?.noOrderReason,
+                top?.skipReason,
+                runResult.triggerBlockReason,
+                runResult.reason,
+              ]),
+              entryPenalty: top?.entryPenalty ?? top?.gptContext.entryPenalty,
+            ),
+            ..._candidateRiskNotes(top),
+          ],
         ),
         const SizedBox(height: 10),
         _AdvancedCandidateList(
-          title: 'Top Quant Candidates',
-          candidates: runResult.topQuantCandidates,
+          title: 'Candidate Details',
+          candidates: candidates,
         ),
-        const SizedBox(height: 10),
-        _AdvancedCandidateList(
-          title: 'Researched Candidates',
-          candidates: runResult.researchedCandidates,
-        ),
-        const SizedBox(height: 10),
-        _AdvancedCandidateList(
-          title: 'Final Ranked Candidates',
-          candidates: runResult.finalRankedCandidates,
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Developer Raw Payload'),
+          children: [
+            _StateLine(
+              text: 'configured_symbol_count=${runResult.configuredSymbolCount}\n'
+                  'analyzed_symbol_count=${runResult.analyzedSymbolCount}\n'
+                  'quant_candidates_count=${runResult.quantCandidatesCount}\n'
+                  'researched_candidates_count=${runResult.researchedCandidatesCount}\n'
+                  'final_best_candidate=${runResult.finalBestCandidate}\n'
+                  'trigger_block_reason=${runResult.triggerBlockReason}\n'
+                  'top_quant_candidates=${runResult.topQuantCandidates}\n'
+                  'researched_candidates=${runResult.researchedCandidates}\n'
+                  'final_ranked_candidates=${runResult.finalRankedCandidates}',
+            ),
+          ],
         ),
       ],
     );
+  }
+}
+
+class _ReadableDetailGroup extends StatelessWidget {
+  const _ReadableDetailGroup({
+    required this.title,
+    this.pairs = const <Widget>[],
+    this.lines = const <String>[],
+  });
+
+  final String title;
+  final List<Widget> pairs;
+  final List<String> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (pairs.isNotEmpty) Wrap(spacing: 14, runSpacing: 8, children: pairs),
+      for (final line in lines.where((line) => line.trim().isNotEmpty))
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text('- $line', style: const TextStyle(color: Colors.white70)),
+        ),
+    ]);
   }
 }
 
@@ -478,31 +568,34 @@ class _AdvancedCandidateList extends StatelessWidget {
         if (candidates.isEmpty)
           const _StateLine(text: 'No candidates.')
         else
-          for (var i = 0; i < candidates.length; i += 1)
+          for (final candidate in candidates)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: _StateLine(
-                text: _advancedCandidateText(i, candidates[i]),
-              ),
+              child: Wrap(spacing: 14, runSpacing: 8, children: [
+                _ResultPair(label: 'Symbol', value: candidate.symbol),
+                _ResultPair(
+                    label: 'Score',
+                    value:
+                        presentation.compactScore(_candidateEntryScore(candidate))),
+                _ResultPair(
+                    label: 'Status',
+                    value: _candidateStatusLabel(candidate, isKr: false)),
+                _ResultPair(
+                    label: 'Reason',
+                    value: presentation.translateReason(
+                      _firstText([
+                        candidate.noOrderReason,
+                        candidate.skipReason,
+                        candidate.blockReason,
+                        candidate.reason,
+                      ]),
+                      entryPenalty: candidate.entryPenalty ??
+                          candidate.gptContext.entryPenalty,
+                    )),
+              ]),
             ),
       ],
     );
-  }
-
-  String _advancedCandidateText(int index, Candidate candidate) {
-    return '#${index + 1} ${candidate.symbol}\n'
-        'entry_score=${_displayNumber(_candidateEntryScore(candidate))}, '
-        'quant_score=${_displayNumber(_candidateQuantScore(candidate))}, '
-        'ai_buy_score=${_displayNumber(candidate.aiBuyScore)}, '
-        'ai_sell_score=${_displayNumber(candidate.aiSellScore)}, '
-        'confidence=${_displayNumber(candidate.confidence)}\n'
-        'action_hint=${candidate.actionHint}, '
-        'entry_ready=${candidate.entryReady}, '
-        'trade_allowed=${candidate.tradeAllowed}, '
-        'entry_penalty=${candidate.entryPenalty ?? candidate.gptContext.entryPenalty ?? 'n/a'}\n'
-        'block_reason=${candidate.blockReason ?? 'n/a'}, '
-        'risk_flags=${_joinList(candidate.riskFlags)}, '
-        'gating_notes=${_joinList(candidate.gatingNotes)}';
   }
 }
 
@@ -532,6 +625,11 @@ class TestLabSection extends StatelessWidget {
             _SoftBadge(text: 'READINESS ONLY', color: Colors.white70),
             _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
           ]),
+          const SizedBox(height: 8),
+          const Text(
+            'KIS Manual Live Order, KIS Guarded Check, shadow runs, scheduler dry-runs, previews, and raw diagnostics live here.',
+            style: TextStyle(color: Colors.white70),
+          ),
           const SizedBox(height: 12),
           _TestLabActions(controller: controller),
         ]),
@@ -3566,7 +3664,8 @@ String _candidateNextAction(Candidate candidate, {required bool isKr}) {
       : 'Review again next scan';
 }
 
-List<String> _candidateRiskNotes(Candidate candidate) {
+List<String> _candidateRiskNotes(Candidate? candidate) {
+  if (candidate == null) return const [];
   final notes = <String>[];
   for (final value in [
     ...candidate.riskFlags,

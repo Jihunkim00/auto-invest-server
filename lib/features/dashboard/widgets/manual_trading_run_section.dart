@@ -64,7 +64,7 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
           const Icon(Icons.play_circle_outline, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('Alpaca Paper Single Symbol Run',
+            child: Text('Alpaca Analyze & Paper Buy',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           const _SafetyBadge(text: 'ALPACA PAPER'),
@@ -136,10 +136,6 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
           onPressed: controller.manualRunLoading || symbol.isEmpty
               ? null
               : () async {
-                  final confirmed = await _showConfirmDialog(
-                      context, symbol, controller.selectedGateLevel);
-                  if (!confirmed || !context.mounted) return;
-
                   final result = await controller.runTradingOnce(
                       symbol: symbol, gateLevel: controller.selectedGateLevel);
                   if (!context.mounted) return;
@@ -156,8 +152,8 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
                   child: CircularProgressIndicator(strokeWidth: 2.0))
               : const Icon(Icons.play_arrow),
           label: Text(controller.manualRunLoading
-              ? 'Running single symbol...'
-              : 'Run Single Symbol'),
+              ? 'Analyzing...'
+              : 'Analyze & Paper Buy'),
         ),
         if (controller.manualRunLoading) ...[
           const SizedBox(height: 10),
@@ -182,92 +178,16 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
 
   String get _normalizedSymbol => _symbolController.text.trim().toUpperCase();
 
-  Future<bool> _showConfirmDialog(
-      BuildContext context, String symbol, int gateLevel) async {
-    final settings = widget.controller.settings;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Confirm Manual Trading Run'),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'This will run trading logic for one selected symbol only.\n'
-                  'The risk engine will still decide whether an order is allowed.\n'
-                  'No order is guaranteed.\n'
-                  'Continue?',
-                ),
-                const SizedBox(height: 14),
-                _ConfirmRow(label: 'symbol', value: symbol),
-                _ConfirmRow(label: 'gate_level', value: gateLevel.toString()),
-                _ConfirmRow(label: 'broker mode', value: settings.brokerMode),
-                _ConfirmRow(
-                    label: 'dry_run', value: settings.dryRun.toString()),
-                _ConfirmRow(
-                    label: 'kill_switch',
-                    value: settings.killSwitch.toString()),
-                if (settings.dryRun || settings.killSwitch) ...[
-                  const SizedBox(height: 10),
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    if (settings.dryRun)
-                      const _SafetyBadge(
-                          text: 'Dry Run - broker order will be blocked.'),
-                    if (settings.killSwitch)
-                      const _SafetyBadge(
-                          text: 'Kill Switch Active - order blocked.',
-                          alert: true),
-                  ]),
-                ],
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel')),
-            FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Continue')),
-          ],
-        );
-      },
-    );
-    return confirmed == true;
-  }
-}
-
-class _ConfirmRow extends StatelessWidget {
-  const _ConfirmRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(children: [
-        SizedBox(
-            width: 92,
-            child: Text(label, style: const TextStyle(color: Colors.white70))),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(fontWeight: FontWeight.w700))),
-      ]),
-    );
-  }
 }
 
 class _SafetyBadge extends StatelessWidget {
-  const _SafetyBadge({required this.text, this.alert = false});
+  const _SafetyBadge({required this.text});
 
   final String text;
-  final bool alert;
 
   @override
   Widget build(BuildContext context) {
-    final color = alert ? Colors.redAccent : Colors.orangeAccent;
+    const color = Colors.orangeAccent;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
@@ -298,7 +218,7 @@ class ManualTradingRunResultPanel extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Result Summary',
+        const Text('Decision Summary',
             style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         _DecisionSummary(result: result),
@@ -311,7 +231,7 @@ class ManualTradingRunResultPanel extends StatelessWidget {
           child: _ScoreBreakdown(result: result),
         ),
         _ResultExpansion(
-          title: 'Advanced Details',
+          title: 'Run Details',
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _ReasonDetails(result: result),
@@ -333,6 +253,11 @@ class ManualTradingRunResultPanel extends StatelessWidget {
               const SizedBox(height: 6),
               _IndicatorDetails(result: result),
             ],
+            const SizedBox(height: 10),
+            _ResultExpansion(
+              title: 'Developer Raw Payload',
+              child: _DeveloperRawPayload(result: result),
+            ),
           ]),
         ),
       ]),
@@ -364,19 +289,19 @@ class _DecisionSummary extends StatelessWidget {
         ),
       ]),
       const SizedBox(height: 10),
-      _ResultRow('symbol', result.symbol),
-      _ResultRow('action', result.action.toLowerCase()),
-      _ResultRow('signal status', result.displayStatus),
-      _ResultRow('approved_by_risk',
-          (result.approvedByRisk ?? result.riskApproved ?? false).toString()),
-      _ResultRow('order', result.displayOrderId),
-      _ResultRow('gate', result.gateLabel),
-      if (result.createdAt != null) _ResultRow('created_at', result.createdAt!),
-      if (result.signalId != null) _ResultRow('signal_id', result.signalId!),
+      _ResultRow('Symbol', result.symbol),
+      _ResultRow('Decision', result.action.toUpperCase()),
+      _ResultRow('Result', result.displayStatus),
+      _ResultRow('Risk approved',
+          (result.approvedByRisk ?? result.riskApproved ?? false) ? 'Yes' : 'No'),
+      _ResultRow('Order', result.displayOrderId),
+      _ResultRow('Gate', result.gateLabel),
+      if (result.createdAt != null) _ResultRow('Created at', result.createdAt!),
+      if (result.signalId != null) _ResultRow('Signal ID', result.signalId!),
       if (result.brokerStatus != null)
-        _ResultRow('broker_status', result.brokerStatus!),
+        _ResultRow('Broker status', result.brokerStatus!),
       if (result.internalStatus != null)
-        _ResultRow('internal_status', result.internalStatus!),
+        _ResultRow('Internal status', result.internalStatus!),
     ]);
   }
 
@@ -456,11 +381,15 @@ class _WhyNoTradeSection extends StatelessWidget {
           ),
         if (result.gatingNotes.isNotEmpty) ...[
           const SizedBox(height: 6),
-          _ChipList(label: 'Gating notes', items: result.gatingNotes),
+          _ChipList(
+              label: 'Gating notes',
+              items: result.gatingNotes.map(_translateReason).toList()),
         ],
         if (result.riskFlags.isNotEmpty) ...[
           const SizedBox(height: 6),
-          _ChipList(label: 'Risk flags', items: result.riskFlags),
+          _ChipList(
+              label: 'Risk flags',
+              items: result.riskFlags.map(_translateReason).toList()),
         ],
       ]),
     );
@@ -491,8 +420,8 @@ class _ScoreBreakdown extends StatelessWidget {
         _formatGptNumericScore(result.gptContext.gptSellScore),
       ),
       _MetricValue('Action', result.action.toUpperCase()),
-      _MetricValue('Reason', _textOrDash(result.reason)),
-      _MetricValue('Hard block', result.hardBlocked ? 'true' : 'false'),
+      _MetricValue('Reason', _textOrDash(_translateReason(result.reason))),
+      _MetricValue('Hard block', result.hardBlocked ? 'Yes' : 'No'),
     ];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (result.scoreDetailsNotReturned) ...[
@@ -511,7 +440,8 @@ class _ScoreBreakdown extends StatelessWidget {
       ),
       if (result.hardBlockReason != null) ...[
         const SizedBox(height: 8),
-        _ResultRow('hard_block_reason', result.hardBlockReason!),
+        _ResultRow(
+            'Hard block reason', _translateReason(result.hardBlockReason!)),
       ],
       if (result.gptContext.reason?.isNotEmpty == true) ...[
         const SizedBox(height: 8),
@@ -519,11 +449,15 @@ class _ScoreBreakdown extends StatelessWidget {
       ],
       if (result.riskFlags.isNotEmpty) ...[
         const SizedBox(height: 8),
-        _ChipList(label: 'Risk flags', items: result.riskFlags),
+        _ChipList(
+            label: 'Risk flags',
+            items: result.riskFlags.map(_translateReason).toList()),
       ],
       if (result.gatingNotes.isNotEmpty) ...[
         const SizedBox(height: 8),
-        _ChipList(label: 'Gating notes', items: result.gatingNotes),
+        _ChipList(
+            label: 'Gating notes',
+            items: result.gatingNotes.map(_translateReason).toList()),
       ],
     ]);
   }
@@ -537,12 +471,14 @@ class _ReasonDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _ResultRow('reason', result.reason.isEmpty ? 'none' : result.reason),
-      _ResultRow('quant_reason', result.quantReason ?? 'none'),
-      _ResultRow('ai_reason', result.aiReason ?? 'none'),
-      if (result.runReason != null) _ResultRow('run.reason', result.runReason!),
+      _ResultRow('Main reason',
+          result.reason.isEmpty ? 'No reason returned' : _translateReason(result.reason)),
+      _ResultRow('Quant reason', result.quantReason ?? 'No quant reason returned'),
+      _ResultRow('AI reason', result.aiReason ?? 'No AI reason returned'),
+      if (result.runReason != null)
+        _ResultRow('Run reason', _translateReason(result.runReason!)),
       if (result.hardBlockReason != null)
-        _ResultRow('hard_block', result.hardBlockReason!),
+        _ResultRow('Hard block', _translateReason(result.hardBlockReason!)),
     ]);
   }
 }
@@ -556,7 +492,10 @@ class _IndicatorDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final indicators = result.indicatorPayload;
     if (indicators.isEmpty && result.rawIndicatorPayload != null) {
-      return SelectableText(result.rawIndicatorPayload!);
+      return const Text(
+        'Indicator payload returned only as raw data. Open Developer Raw Payload for the raw value.',
+        style: TextStyle(color: Colors.white70),
+      );
     }
 
     final rows = <_ResultRow>[
@@ -587,6 +526,29 @@ class _IndicatorDetails extends StatelessWidget {
     if (percent)
       return _ResultRow(key, '${(numericValue * 100).toStringAsFixed(2)}%');
     return _ResultRow(key, numericValue.toStringAsFixed(decimals));
+  }
+}
+
+class _DeveloperRawPayload extends StatelessWidget {
+  const _DeveloperRawPayload({required this.result});
+
+  final ManualTradingRunResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return SelectableText(
+      'symbol=${result.symbol}\n'
+      'gate_level=${result.gateLevel}\n'
+      'action=${result.action}\n'
+      'result=${result.result}\n'
+      'signal_status=${result.signalStatus}\n'
+      'risk_flags=${result.riskFlags}\n'
+      'gating_notes=${result.gatingNotes}\n'
+      'indicator_payload=${result.indicatorPayload}\n'
+      'raw_indicator_payload=${result.rawIndicatorPayload}\n'
+      'gpt_context=${result.gptContext}',
+      style: const TextStyle(color: Colors.white60),
+    );
   }
 }
 
@@ -738,4 +700,22 @@ String _formatGptNumericScore(double? value) {
 String _textOrDash(String value) {
   final text = value.trim();
   return text.isEmpty || text == 'null' ? '--' : text;
+}
+
+String _translateReason(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'score_threshold_not_met') {
+    return 'Score below entry threshold';
+  }
+  if (normalized == 'hard_blocked') return 'Entry blocked by risk context';
+  if (normalized == 'gpt_hard_block_new_buy') {
+    return 'GPT/risk context blocks new buy entries';
+  }
+  if (normalized == 'market_closed') return 'Market is closed';
+  if (normalized == 'dry_run') return 'Dry-run mode';
+  if (normalized == 'kill_switch_enabled') return 'Kill switch is ON';
+  if (normalized == 'buy_entry_not_allowed_now') {
+    return 'New buy entries are not allowed now';
+  }
+  return value;
 }

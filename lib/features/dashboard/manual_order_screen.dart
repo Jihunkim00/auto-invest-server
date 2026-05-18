@@ -1,14 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/widgets/section_card.dart';
-import '../../models/candidate.dart';
-import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
-import '../../models/watchlist_run_result.dart';
 import 'dashboard_controller.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/manual_trading_run_section.dart';
-import 'widgets/order_ticket_section.dart';
 import 'widgets/result_presentation_helpers.dart' as presentation;
 
 class TradingScreen extends StatelessWidget {
@@ -21,6 +17,7 @@ class TradingScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final isKis = controller.selectedProvider == SelectedProvider.kis;
         return SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(16),
@@ -36,26 +33,16 @@ class TradingScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 6),
               Text(
-                controller.selectedProvider == SelectedProvider.kis
-                    ? 'KIS guarded run once and manual live ticket controls.'
-                    : 'Alpaca paper single-symbol run and KIS manual controls.',
+                isKis
+                    ? 'Selected broker: KIS live. Analyze the selected KR symbol only.'
+                    : 'Selected broker: Alpaca paper. Analyze and paper-buy one US symbol.',
                 style: const TextStyle(color: Colors.white70),
               ),
-              const SizedBox(height: 6),
               const SizedBox(height: 12),
-              if (controller.selectedProvider == SelectedProvider.kis) ...[
-                _KisGuardedTradingRunSection(controller: controller),
-                const SizedBox(height: 12),
-                OrderTicketSection(controller: controller),
-                const SizedBox(height: 12),
+              if (isKis)
+                _KisAnalyzeAndBuyCard(controller: controller)
+              else
                 ManualTradingRunSection(controller: controller),
-              ] else ...[
-                ManualTradingRunSection(controller: controller),
-                const SizedBox(height: 12),
-                _KisGuardedTradingRunSection(controller: controller),
-                const SizedBox(height: 12),
-                OrderTicketSection(controller: controller),
-              ],
             ],
           ),
         );
@@ -75,435 +62,93 @@ class ManualOrderScreen extends StatelessWidget {
   }
 }
 
-class _KisGuardedTradingRunSection extends StatefulWidget {
-  const _KisGuardedTradingRunSection({required this.controller});
+class _KisAnalyzeAndBuyCard extends StatefulWidget {
+  const _KisAnalyzeAndBuyCard({required this.controller});
 
   final DashboardController controller;
 
   @override
-  State<_KisGuardedTradingRunSection> createState() =>
-      _KisGuardedTradingRunSectionState();
+  State<_KisAnalyzeAndBuyCard> createState() => _KisAnalyzeAndBuyCardState();
 }
 
-class _KisGuardedTradingRunSectionState
-    extends State<_KisGuardedTradingRunSection> {
+class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
   late final TextEditingController _symbolController;
+  late final TextEditingController _qtyController;
 
   @override
   void initState() {
     super.initState();
     _symbolController =
         TextEditingController(text: widget.controller.kisGuardedRunSymbol);
+    _qtyController = TextEditingController(text: '1');
   }
 
   @override
   void dispose() {
     _symbolController.dispose();
+    _qtyController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    _syncSymbol(controller);
-    final preview = controller.krWatchlistPreview;
-    final checkResult = controller.latestKisBuyShadowDecision;
-    final liveResult = controller.latestKisLimitedAutoBuyResult;
+    final symbol = _symbolController.text.trim().toUpperCase();
+    final qty = int.tryParse(_qtyController.text.trim());
+    final canRequest = symbol.isNotEmpty &&
+        qty != null &&
+        qty > 0 &&
+        controller.kisGuardedRunConfirmation &&
+        !controller.kisLimitedAutoBuyLoading;
+    final result = controller.latestKisLimitedAutoBuyResult;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.security_outlined, size: 20),
+          const Icon(Icons.verified_user_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Guarded Trading',
+            child: Text('KIS Analyze & Buy',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
-          const _SoftBadge(text: 'KIS GUARDED', color: Colors.redAccent),
+          const _SoftBadge(text: 'KIS LIVE', color: Colors.redAccent),
         ]),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _symbolController,
+          decoration: const InputDecoration(
+            labelText: 'KR Symbol',
+            hintText: '005930',
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: TextInputType.number,
+          onChanged: controller.setKisGuardedRunSymbol,
+        ),
         const SizedBox(height: 10),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _SoftBadge(
-              text: 'Manual click required', color: Colors.lightBlueAccent),
-          _SoftBadge(text: 'Check and live split', color: Colors.greenAccent),
-          _SoftBadge(text: 'No scheduler enable', color: Colors.amberAccent),
-        ]),
-        const SizedBox(height: 12),
-        _KisGuardedInputs(
-          controller: controller,
-          symbolController: _symbolController,
+        TextField(
+          controller: _qtyController,
+          decoration: const InputDecoration(
+            labelText: 'Quantity',
+            border: OutlineInputBorder(),
+          ),
+          keyboardType: TextInputType.number,
+          onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 12),
-        _KisAnalysisPreviewCard(
-          controller: controller,
-          result: preview,
-        ),
-        const SizedBox(height: 12),
-        _KisGuardedSafetyStatus(controller: controller),
-        const SizedBox(height: 12),
-        _KisGuardedCheckCard(
-          controller: controller,
-          result: checkResult,
-        ),
-        const SizedBox(height: 12),
-        _KisLiveGuardedRunCard(
-          controller: controller,
-          result: liveResult,
-          onConfirmRun: () => _confirmKisGuardedRun(context),
-        ),
-      ]),
-    );
-  }
-
-  void _syncSymbol(DashboardController controller) {
-    final symbol = controller.kisGuardedRunSymbol;
-    if (_symbolController.text == symbol) return;
-    _symbolController.value = TextEditingValue(
-      text: symbol,
-      selection: TextSelection.collapsed(offset: symbol.length),
-    );
-  }
-
-  Future<bool> _confirmKisGuardedRun(BuildContext context) async {
-    final controller = widget.controller;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Run Once'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'This may place a real KIS buy order if backend risk gates approve it.\n'
-              'Broker account funds may be used.',
-            ),
-            const SizedBox(height: 14),
-            _DialogRow(label: 'Symbol', value: controller.kisGuardedRunSymbol),
-            _DialogRow(
-                label: 'Gate', value: 'Gate ${controller.selectedGateLevel}'),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(value: 1, label: Text('Gate 1')),
+            ButtonSegment(value: 2, label: Text('Gate 2')),
+            ButtonSegment(value: 3, label: Text('Gate 3')),
+            ButtonSegment(value: 4, label: Text('Gate 4')),
           ],
+          selected: {controller.selectedGateLevel},
+          onSelectionChanged: (selection) {
+            controller.setSelectedGateLevel(selection.first);
+            controller.setKisGuardedRunConfirmation(false);
+          },
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Confirm Run Once'),
-          ),
-        ],
-      ),
-    );
-    return confirmed == true;
-  }
-}
-
-class _KisGuardedInputs extends StatelessWidget {
-  const _KisGuardedInputs({
-    required this.controller,
-    required this.symbolController,
-  });
-
-  final DashboardController controller;
-  final TextEditingController symbolController;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TextField(
-        controller: symbolController,
-        decoration: const InputDecoration(
-          labelText: 'KR symbol',
-          hintText: '005930',
-          border: OutlineInputBorder(),
-        ),
-        keyboardType: TextInputType.number,
-        onChanged: controller.setKisGuardedRunSymbol,
-      ),
-      const SizedBox(height: 12),
-      SegmentedButton<int>(
-        segments: const [
-          ButtonSegment(value: 1, label: Text('Gate 1')),
-          ButtonSegment(value: 2, label: Text('Gate 2')),
-          ButtonSegment(value: 3, label: Text('Gate 3')),
-          ButtonSegment(value: 4, label: Text('Gate 4')),
-        ],
-        selected: {controller.selectedGateLevel},
-        onSelectionChanged: (selection) {
-          controller.setSelectedGateLevel(selection.first);
-          controller.setKisGuardedRunConfirmation(false);
-        },
-      ),
-    ]);
-  }
-}
-
-class _KisAnalysisPreviewCard extends StatelessWidget {
-  const _KisAnalysisPreviewCard({
-    required this.controller,
-    required this.result,
-  });
-
-  final DashboardController controller;
-  final WatchlistRunResult? result;
-
-  @override
-  Widget build(BuildContext context) {
-    final candidate = result == null ? null : _topWatchlistCandidate(result!);
-    return _ResultPanel(
-      title: 'KIS Analysis Preview',
-      icon: Icons.manage_search_outlined,
-      badges: const [
-        _SoftBadge(text: 'PREVIEW ONLY', color: Colors.lightBlueAccent),
-        _SoftBadge(text: 'NO REAL ORDER', color: Colors.orangeAccent),
-      ],
-      children: [
-        FilledButton.icon(
-          onPressed: controller.krWatchlistPreviewLoading
-              ? null
-              : () async {
-                  final actionResult = await controller.runKrWatchlistPreview();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(actionResult.message),
-                    backgroundColor:
-                        actionResult.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-          icon: controller.krWatchlistPreviewLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.refresh),
-          label: Text(controller.krWatchlistPreviewLoading
-              ? 'Refreshing analysis...'
-              : 'Refresh KIS Analysis'),
-        ),
-        if (controller.krWatchlistPreviewError != null) ...[
-          const SizedBox(height: 10),
-          _StateLine(
-            text: controller.krWatchlistPreviewError!,
-            color: Colors.redAccent,
-          ),
-        ],
-        const SizedBox(height: 10),
-        if (result == null)
-          const _StateLine(
-            text: 'No KIS analysis preview loaded yet.',
-          )
-        else ...[
-          _DataGrid(pairs: [
-            _DataPairData(
-              label: 'Top candidate',
-              value: candidate?.symbol ?? result!.finalBestCandidate,
-            ),
-            _DataPairData(
-              label: 'Score',
-              value:
-                  presentation.displayScore(_candidatePrimaryScore(candidate)),
-            ),
-            _DataPairData(
-              label: 'Confidence',
-              value: presentation.displayScore(candidate?.confidence,
-                  fallback: 'Confidence not returned'),
-            ),
-            _DataPairData(
-              label: 'Quant Buy',
-              value: presentation.displayScore(candidate?.quantBuyScore),
-            ),
-            _DataPairData(
-              label: 'Quant Sell',
-              value: presentation.displayScore(candidate?.quantSellScore),
-            ),
-            _DataPairData(
-              label: 'AI Buy',
-              value: presentation.displayScore(candidate?.aiBuyScore),
-            ),
-            _DataPairData(
-              label: 'AI Sell',
-              value: presentation.displayScore(candidate?.aiSellScore),
-            ),
-            _DataPairData(
-              label: 'Block reason',
-              value: presentation.translateReason(
-                candidate?.blockReason ?? result!.triggerBlockReason,
-                entryPenalty: candidate?.entryPenalty ??
-                    candidate?.gptContext.entryPenalty,
-              ),
-            ),
-            const _DataPairData(
-              label: 'Order',
-              value: 'Preview only, no real order',
-            ),
-          ]),
-          const SizedBox(height: 10),
-          _StateLine(
-            text:
-                'GPT Advisory: ${presentation.displayText(_candidateAdvisory(candidate), fallback: 'GPT advisory unavailable')}',
-          ),
-          const SizedBox(height: 8),
-          _StateLine(text: _candidateNextAction(candidate, isKis: true)),
-          const SizedBox(height: 8),
-          _AdvancedText(
-            title: 'Advanced Details',
-            text: 'configured_symbol_count=${result!.configuredSymbolCount}\n'
-                'analyzed_symbol_count=${result!.analyzedSymbolCount}\n'
-                'final_best_candidate=${result!.finalBestCandidate}\n'
-                'reason=${result!.reason}\n'
-                'candidate=${_candidateDebugText(candidate)}',
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _KisGuardedCheckCard extends StatelessWidget {
-  const _KisGuardedCheckCard({
-    required this.controller,
-    required this.result,
-  });
-
-  final DashboardController controller;
-  final KisBuyShadowDecision? result;
-
-  @override
-  Widget build(BuildContext context) {
-    final loaded = result;
-    return _ResultPanel(
-      title: 'KIS Guarded Check Result',
-      icon: Icons.fact_check_outlined,
-      badges: const [
-        _SoftBadge(text: 'CHECK ONLY', color: Colors.lightBlueAccent),
-        _SoftBadge(text: 'NO REAL ORDER', color: Colors.greenAccent),
-        _SoftBadge(text: 'SAFE TO TEST', color: Colors.amberAccent),
-      ],
-      children: [
-        FilledButton.icon(
-          onPressed: controller.kisBuyShadowLoading
-              ? null
-              : () async {
-                  final actionResult = await controller.runKisGuardedCheck();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(actionResult.message),
-                    backgroundColor:
-                        actionResult.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-          icon: controller.kisBuyShadowLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.play_arrow),
-          label: Text(controller.kisBuyShadowLoading
-              ? 'Running check...'
-              : 'Run KIS Guarded Check'),
-        ),
-        if (controller.kisBuyShadowError != null) ...[
-          const SizedBox(height: 10),
-          _StateLine(
-            text: controller.kisBuyShadowError!,
-            color: Colors.redAccent,
-          ),
-        ],
-        const SizedBox(height: 10),
-        if (loaded == null)
-          const _StateLine(text: 'No guarded check result yet.')
-        else ...[
-          _DataGrid(pairs: [
-            const _DataPairData(label: 'Check', value: 'Check only result'),
-            _DataPairData(
-                label: 'Result', value: _resultLabel(loaded.decision)),
-            _DataPairData(
-              label: 'Reason',
-              value: presentation.translateReason(loaded.reason),
-            ),
-            const _DataPairData(label: 'Order', value: 'No order created'),
-            _DataPairData(
-              label: 'real_order_submitted',
-              value: presentation.boolStatus(loaded.realOrderSubmitted),
-            ),
-            _DataPairData(
-              label: 'broker_submit_called',
-              value: presentation.boolStatus(loaded.brokerSubmitCalled),
-            ),
-            _DataPairData(
-              label: 'manual_submit_called',
-              value: presentation.boolStatus(loaded.manualSubmitCalled),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          if (loaded.candidate == null) ...[
-            const _StateLine(text: 'This check did not return AI analysis.'),
-            const SizedBox(height: 8),
-            const _StateLine(
-              text: 'Refresh KIS Analysis to view candidate scores.',
-            ),
-          ] else
-            _DataGrid(pairs: [
-              _DataPairData(
-                  label: 'Candidate', value: loaded.candidate!.symbol),
-              _DataPairData(
-                  label: 'Score',
-                  value:
-                      presentation.displayScore(loaded.candidate!.finalScore)),
-              _DataPairData(
-                  label: 'Confidence',
-                  value:
-                      presentation.displayScore(loaded.candidate!.confidence)),
-              _DataPairData(
-                  label: 'Quant',
-                  value:
-                      presentation.displayScore(loaded.candidate!.quantScore)),
-              _DataPairData(
-                  label: 'AI/GPT',
-                  value:
-                      presentation.displayScore(loaded.candidate!.gptBuyScore)),
-            ]),
-          const SizedBox(height: 8),
-          _AdvancedText(
-            title: 'Advanced Details',
-            text: 'mode=${loaded.mode}\n'
-                'status=${loaded.status}\n'
-                'checks=${loaded.checks}\n'
-                'safety=${loaded.safety}\n'
-                'risk_flags=${loaded.riskFlags}\n'
-                'gating_notes=${loaded.gatingNotes}\n'
-                'failed_checks=${loaded.failedChecks}',
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _KisLiveGuardedRunCard extends StatelessWidget {
-  const _KisLiveGuardedRunCard({
-    required this.controller,
-    required this.result,
-    required this.onConfirmRun,
-  });
-
-  final DashboardController controller;
-  final KisLimitedAutoBuy? result;
-  final Future<bool> Function() onConfirmRun;
-
-  @override
-  Widget build(BuildContext context) {
-    final loaded = result;
-    return _ResultPanel(
-      title: 'KIS Live Guarded Run Result',
-      icon: Icons.verified_user_outlined,
-      badges: const [
-        _SoftBadge(text: 'LIVE GUARDED RUN', color: Colors.redAccent),
-        _SoftBadge(text: 'ONE SHOT', color: Colors.lightBlueAccent),
-      ],
-      children: [
+        const SizedBox(height: 12),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
@@ -512,17 +157,20 @@ class _KisLiveGuardedRunCard extends StatelessWidget {
               ? null
               : (value) =>
                   controller.setKisGuardedRunConfirmation(value == true),
-          title: const Text(
-            'I understand this may place a real KIS order if all backend risk gates approve it.',
-          ),
+          title: const Text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'),
         ),
         FilledButton.icon(
-          onPressed: controller.canRunKisGuardedTradingOnce
+          onPressed: canRequest
               ? () async {
-                  final confirmed = await onConfirmRun();
+                  final confirmed =
+                      await _confirmKisLiveRun(context, symbol, qty);
                   if (!confirmed || !context.mounted) return;
                   final actionResult =
-                      await controller.runKisGuardedTradingOnce();
+                      await controller.runKisAnalyzeAndBuySelectedSymbol(
+                    symbol: symbol,
+                    quantity: qty,
+                    gateLevel: controller.selectedGateLevel,
+                  );
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                     content: Text(actionResult.message),
@@ -538,102 +186,86 @@ class _KisLiveGuardedRunCard extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.play_arrow),
           label: Text(controller.kisLimitedAutoBuyLoading
-              ? 'Running live guarded...'
-              : 'Run KIS Live Guarded Once'),
+              ? 'Analyzing...'
+              : 'Analyze & Buy KIS'),
         ),
-        if (!controller.canRunKisGuardedTradingOnce) ...[
+        if (!canRequest) ...[
           const SizedBox(height: 8),
-          _StateLine(text: controller.kisGuardedRunBlockedMessage()),
+          _ReasonBanner(
+            text: controller.kisGuardedRunConfirmation
+                ? 'Enter a KR symbol and quantity.'
+                : 'Confirm that a real KIS order may be submitted.',
+          ),
         ],
         if (controller.kisLimitedAutoBuyError != null) ...[
           const SizedBox(height: 10),
-          _StateLine(
+          _ReasonBanner(
             text: controller.kisLimitedAutoBuyError!,
             color: Colors.redAccent,
           ),
         ],
-        const SizedBox(height: 10),
-        if (loaded == null)
-          const _StateLine(text: 'No live guarded run result yet.')
-        else
-          _KisGuardedResultSummary(result: loaded),
-      ],
-    );
-  }
-}
-
-class _KisGuardedSafetyStatus extends StatelessWidget {
-  const _KisGuardedSafetyStatus({required this.controller});
-
-  final DashboardController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = controller.kisSafetyStatus;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          const Expanded(
-            child: Text('KIS SAFETY GATE SUMMARY',
-                style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800)),
+        if (result != null) ...[
+          const SizedBox(height: 12),
+          _KisResultPanel(
+            result: result,
+            selectedSymbol: symbol,
           ),
-          IconButton(
-            tooltip: 'Refresh KIS safety status',
-            onPressed: controller.kisSafetyStatusLoading
-                ? null
-                : () => controller.refreshKisSafetyStatus(),
-            icon: controller.kisSafetyStatusLoading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.refresh, size: 18),
-          ),
-        ]),
-        Wrap(spacing: 14, runSpacing: 8, children: [
-          _DataPair(
-              label: 'dry_run', value: status.runtimeDryRun ? 'ON' : 'OFF'),
-          _DataPair(
-              label: 'kill_switch', value: status.killSwitch ? 'ON' : 'OFF'),
-          _DataPair(label: 'kis_enabled', value: status.kisEnabled.toString()),
-          _DataPair(
-              label: 'kis_real_order_enabled',
-              value: status.kisRealOrderEnabled.toString()),
-          _DataPair(label: 'market_open', value: status.marketOpen.toString()),
-          _DataPair(
-              label: 'entry_allowed_now',
-              value: status.entryAllowedNow.toString()),
-          _DataPair(
-              label: 'selected_symbol', value: controller.kisGuardedRunSymbol),
-          _DataPair(
-              label: 'manual_confirmation_required',
-              value: controller.kisGuardedRunConfirmation
-                  ? 'checked'
-                  : 'required'),
-        ]),
+        ],
       ]),
     );
   }
+
+  Future<bool> _confirmKisLiveRun(
+      BuildContext context, String symbol, int qty) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm KIS Order'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('실제 KIS 주문이 제출될 수 있습니다.'),
+            const SizedBox(height: 12),
+            _DialogRow(label: '종목', value: symbol),
+            _DialogRow(label: '수량/금액', value: qty.toString()),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
 }
 
-class _KisGuardedResultSummary extends StatelessWidget {
-  const _KisGuardedResultSummary({required this.result});
+class _KisResultPanel extends StatelessWidget {
+  const _KisResultPanel({
+    required this.result,
+    required this.selectedSymbol,
+  });
 
   final KisLimitedAutoBuy result;
+  final String selectedSymbol;
 
   @override
   Widget build(BuildContext context) {
-    final orderStatus = _liveOrderStatus(result);
+    final mismatch = presentation.selectedSymbolMismatch(
+      selectedSymbol: selectedSymbol,
+      returnedSymbol: result.symbol,
+    );
+    final reason = presentation.translateReason(_mainReason(result));
+    final safety = presentation.safetyLine(result.safety);
+    final hasScore = result.finalScore != null || result.confidence != null;
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -646,100 +278,144 @@ class _KisGuardedResultSummary extends StatelessWidget {
         const Text('Decision Summary',
             style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
+        if (mismatch != null) ...[
+          _ReasonBanner(text: mismatch, color: Colors.redAccent),
+          const SizedBox(height: 10),
+        ],
         _DataGrid(pairs: [
-          _DataPairData(label: 'Action', value: result.action.toUpperCase()),
-          _DataPairData(label: 'Result', value: _resultLabel(result.result)),
+          _DataPairData(label: 'Symbol', value: selectedSymbol),
           _DataPairData(
-              label: 'Reason',
-              value: presentation.translateReason(result.reason)),
-          _DataPairData(
-              label: 'Symbol', value: result.symbol ?? 'Not selected'),
-          _DataPairData(
-              label: 'Final score',
-              value: presentation.displayScore(result.finalScore)),
-          _DataPairData(
-              label: 'Confidence',
-              value: presentation.displayScore(result.confidence,
-                  fallback: 'Confidence not returned')),
-          _DataPairData(label: 'Order', value: orderStatus),
-          _DataPairData(
-              label: 'Real order submitted',
-              value: presentation.boolStatus(result.realOrderSubmitted)),
-          _DataPairData(
-              label: 'Broker submit called',
-              value: presentation.boolStatus(result.brokerSubmitCalled)),
-          _DataPairData(
-              label: 'Manual submit called',
-              value: presentation.boolStatus(result.manualSubmitCalled)),
+              label: 'Decision', value: _decisionLabel(result).toUpperCase()),
+          _DataPairData(label: 'Result', value: _resultLabel(result)),
+          _DataPairData(label: 'Next Action', value: _nextAction(result)),
+        ]),
+        const SizedBox(height: 12),
+        const Text('Score / Analysis Summary',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        if (!hasScore)
+          const _ReasonBanner(
+            text:
+                'Analysis score was not returned by this run. This run was blocked before full analysis. Use Watchlist for candidate discovery.',
+          )
+        else
+          _DataGrid(pairs: [
+            _DataPairData(
+                label: 'Primary score',
+                value: presentation.displayScore(result.finalScore)),
+            _DataPairData(
+                label: 'Confidence',
+                value: presentation.displayScore(result.confidence,
+                    fallback: 'Confidence not returned')),
+          ]),
+        const SizedBox(height: 12),
+        const Text('Order Result',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(label: 'Order', value: presentation.orderStatusLabel(
+            realOrderSubmitted: result.realOrderSubmitted,
+            orderId: result.orderId?.toString(),
+            kisOdno: result.kisOdno,
+            result: result.result,
+            safety: result.safety,
+          )),
           _DataPairData(
               label: 'Order ID', value: result.orderId?.toString() ?? '--'),
           _DataPairData(label: 'KIS ODNO', value: result.kisOdno ?? '--'),
+          _DataPairData(
+              label: 'Qty', value: result.quantity?.toString() ?? '--'),
         ]),
-        if (result.blockedBy.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          _StateLine(
-              text: 'Risk flags: ${result.blockedBy.take(3).join(', ')}'),
-        ],
-        if (result.failedChecks.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          _StateLine(
-              text: 'Gating notes: ${result.failedChecks.take(3).join(', ')}'),
-        ],
+        const SizedBox(height: 12),
+        _ReasonBanner(text: reason, color: Colors.amberAccent),
         const SizedBox(height: 8),
-        _StateLine(text: _liveNextAction(result)),
+        _ReasonBanner(text: safety, color: Colors.lightBlueAccent),
         const SizedBox(height: 8),
-        _AdvancedText(
-          title: 'Advanced Details',
-          text: 'mode=${result.mode}\n'
-              'status=${result.status}\n'
-              'checks=${result.checks}\n'
-              'safety=${result.safety}\n'
-              'audit_metadata=${result.auditMetadata}\n'
-              'blocked_by=${result.blockedBy}\n'
-              'failed_checks=${result.failedChecks}',
-        ),
+        _ReadableDetails(result: result),
       ]),
     );
   }
 }
 
-class _ResultPanel extends StatelessWidget {
-  const _ResultPanel({
-    required this.title,
-    required this.icon,
-    required this.badges,
-    required this.children,
-  });
+class _ReadableDetails extends StatelessWidget {
+  const _ReadableDetails({required this.result});
 
-  final String title;
-  final IconData icon;
-  final List<Widget> badges;
-  final List<Widget> children;
+  final KisLimitedAutoBuy result;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(icon, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(title, style: Theme.of(context).textTheme.titleSmall),
-          ),
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: const Text('Run Details'),
+      subtitle: const Text('Readable analysis, safety, and order details.'),
+      children: [
+        _DataGrid(pairs: [
+          _DataPairData(label: 'Action', value: result.action.toUpperCase()),
+          _DataPairData(label: 'Result', value: _resultLabel(result)),
+          _DataPairData(
+              label: 'Real order submitted',
+              value: result.realOrderSubmitted ? 'Yes' : 'No'),
+          _DataPairData(
+              label: 'Broker submit called',
+              value: result.brokerSubmitCalled ? 'Yes' : 'No'),
+          _DataPairData(
+              label: 'Manual submit called',
+              value: result.manualSubmitCalled ? 'Yes' : 'No'),
         ]),
         const SizedBox(height: 8),
-        Wrap(spacing: 8, runSpacing: 8, children: badges),
-        const SizedBox(height: 12),
-        ...children,
-      ]),
+        if (result.blockedBy.isNotEmpty)
+          _BulletList(
+            title: 'Risk / Block Details',
+            items: result.blockedBy
+                .take(5)
+                .map(presentation.translateReason)
+                .toList(),
+          ),
+        if (result.failedChecks.isNotEmpty)
+          _BulletList(
+            title: 'Gating Notes',
+            items: result.failedChecks
+                .take(5)
+                .map(presentation.translateReason)
+                .toList(),
+          ),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Developer Raw Payload'),
+          children: [
+            _ReasonBanner(
+              text: 'checks=${result.checks}\n'
+                  'safety=${result.safety}\n'
+                  'audit_metadata=${result.auditMetadata}',
+            ),
+          ],
+        ),
+      ],
     );
+  }
+}
+
+class _BulletList extends StatelessWidget {
+  const _BulletList({required this.title, required this.items});
+
+  final String title;
+  final List<String> items;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+      const SizedBox(height: 6),
+      for (final item in items)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text('- $item', style: const TextStyle(color: Colors.white70)),
+        ),
+      const SizedBox(height: 8),
+    ]);
   }
 }
 
@@ -768,19 +444,54 @@ class _DataPairData {
   final String value;
 }
 
-class _AdvancedText extends StatelessWidget {
-  const _AdvancedText({required this.title, required this.text});
+class _DataPair extends StatelessWidget {
+  const _DataPair({required this.label, required this.value});
 
-  final String title;
-  final String text;
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: EdgeInsets.zero,
-      title: Text(title),
-      children: [_StateLine(text: text)],
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 112, maxWidth: 220),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label.toUpperCase(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+                fontWeight: FontWeight.w700)),
+        const SizedBox(height: 3),
+        Text(value,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+}
+
+class _ReasonBanner extends StatelessWidget {
+  const _ReasonBanner({required this.text, this.color = Colors.white60});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Text(text, style: TextStyle(color: color)),
     );
   }
 }
@@ -807,58 +518,6 @@ class _DialogRow extends StatelessWidget {
   }
 }
 
-class _DataPair extends StatelessWidget {
-  const _DataPair({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 112, maxWidth: 190),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label.toUpperCase(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 10,
-                fontWeight: FontWeight.w700)),
-        const SizedBox(height: 3),
-        Text(value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w700)),
-      ]),
-    );
-  }
-}
-
-class _StateLine extends StatelessWidget {
-  const _StateLine({required this.text, this.color = Colors.white60});
-
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Text(text, style: TextStyle(color: color)),
-    );
-  }
-}
-
 class _SoftBadge extends StatelessWidget {
   const _SoftBadge({required this.text, required this.color});
 
@@ -881,85 +540,44 @@ class _SoftBadge extends StatelessWidget {
   }
 }
 
-Candidate? _topWatchlistCandidate(WatchlistRunResult result) {
-  if (result.finalRankedCandidates.isNotEmpty) {
-    return result.finalRankedCandidates.first;
+String _mainReason(KisLimitedAutoBuy result) {
+  if (result.reason.trim().isNotEmpty) return result.reason;
+  if (result.blockedBy.isNotEmpty) return result.blockedBy.first;
+  if (result.failedChecks.isNotEmpty) return result.failedChecks.first;
+  if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
+    return 'dry_run';
   }
-  if (result.researchedCandidates.isNotEmpty) {
-    return result.researchedCandidates.first;
+  return 'Backend risk gate blocked this order';
+}
+
+String _decisionLabel(KisLimitedAutoBuy result) {
+  final action = result.action.trim().toLowerCase();
+  final resultText = result.result.trim().toLowerCase();
+  if (resultText.contains('preview')) return 'PREVIEW ONLY';
+  if (resultText.contains('block') || result.blockedBy.isNotEmpty) {
+    return 'BLOCKED';
   }
-  if (result.topQuantCandidates.isNotEmpty) {
-    return result.topQuantCandidates.first;
+  if (action == 'buy') return 'BUY';
+  return 'HOLD';
+}
+
+String _resultLabel(KisLimitedAutoBuy result) {
+  final normalized = result.result.trim().toLowerCase();
+  if (result.realOrderSubmitted || normalized == 'submitted') {
+    return 'executed';
   }
-  return null;
+  if (normalized.contains('dry')) return 'dry-run';
+  if (normalized.contains('reject')) return 'rejected';
+  if (normalized.contains('block')) return 'blocked';
+  if (normalized.contains('skip')) return 'skipped';
+  if (normalized.isEmpty) return 'blocked';
+  return normalized;
 }
 
-double? _candidatePrimaryScore(Candidate? candidate) {
-  return candidate?.finalEntryScore ??
-      candidate?.entryScore ??
-      candidate?.finalBuyScore ??
-      candidate?.finalScore ??
-      (candidate?.score == null ? null : candidate!.score!.toDouble());
-}
-
-String _candidateAdvisory(Candidate? candidate) {
-  return presentation.firstText([
-    candidate?.gptContext.reason,
-    candidate?.marketResearchReason,
-    candidate?.gptReason,
-    candidate?.reason,
-  ]);
-}
-
-String _candidateNextAction(Candidate? candidate, {required bool isKis}) {
-  if (candidate == null) return 'Next Action: refresh analysis.';
-  if (candidate.previewOnly == true || isKis) {
-    return candidate.entryReady
-        ? 'Next Action: prepare a manual ticket in Trading if you want to review it.'
-        : 'Next Action: keep on watchlist or refresh analysis.';
+String _nextAction(KisLimitedAutoBuy result) {
+  if (result.realOrderSubmitted) return 'Monitor and sync order status';
+  if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
+    return 'Dry-run mode: no real order submitted';
   }
-  return candidate.entryReady
-      ? 'Next Action: review risk gates before any order action.'
-      : 'Next Action: review again at the next scan.';
-}
-
-String _candidateDebugText(Candidate? candidate) {
-  if (candidate == null) return 'No candidate payload';
-  return 'symbol=${candidate.symbol}, '
-      'final_entry_score=${candidate.finalEntryScore}, '
-      'entry_score=${candidate.entryScore}, '
-      'final_buy_score=${candidate.finalBuyScore}, '
-      'confidence=${candidate.confidence}, '
-      'risk_flags=${candidate.riskFlags}, '
-      'gating_notes=${candidate.gatingNotes}, '
-      'gpt_context=${candidate.gptContext}';
-}
-
-String _resultLabel(String value) {
-  final normalized = value.trim().toLowerCase();
-  if (normalized == 'would_buy') return 'Would buy';
-  if (normalized == 'blocked') return 'Blocked';
-  if (normalized == 'skipped') return 'Skipped';
-  if (normalized == 'preview_only') return 'Preview only';
-  if (normalized == 'dry_run') return 'Dry-run';
-  if (normalized == 'submitted') return 'Executed';
-  if (normalized.isEmpty) return 'Not available';
-  return value;
-}
-
-String _liveOrderStatus(KisLimitedAutoBuy result) {
-  if (result.realOrderSubmitted) return 'Real order submitted';
-  if (result.result.toLowerCase().contains('reject')) return 'Rejected';
-  if (result.orderId != null) return 'Order ID ${result.orderId}';
-  if (result.safetyFlag('preview_only')) return 'Preview only';
-  return 'No order created';
-}
-
-String _liveNextAction(KisLimitedAutoBuy result) {
-  if (result.realOrderSubmitted)
-    return 'Next Action: monitor and sync order status.';
-  if (result.reason.isNotEmpty) {
-    return 'Next Action: ${presentation.translateReason(result.reason)}.';
-  }
-  return 'Next Action: review safety gates before another run.';
+  return presentation.translateReason(_mainReason(result));
 }

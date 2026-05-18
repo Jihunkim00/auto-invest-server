@@ -1646,6 +1646,29 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> runKisAnalyzeAndBuySelectedSymbol({
+    required String symbol,
+    required int quantity,
+    required int gateLevel,
+  }) async {
+    kisLimitedAutoBuyLoading = true;
+    kisLimitedAutoBuyError = null;
+    notifyListeners();
+    try {
+      // Existing KIS live-capable run-once endpoint is watchlist/candidate based
+      // and does not accept a selected symbol or quantity. Trading must not show
+      // a watchlist top candidate as if it analyzed the operator's symbol.
+      latestKisLimitedAutoBuyResult = null;
+      kisLimitedAutoBuyError =
+          'Symbol-specific KIS Analyze & Buy endpoint is not available. '
+          'Use Watchlist for candidate discovery.';
+      return ActionResult(success: false, message: kisLimitedAutoBuyError!);
+    } finally {
+      kisLimitedAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runKisGuardedTradingOnce() async {
     await refreshKisSafetyStatus(silent: true);
 

@@ -39,7 +39,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Trading exposes KIS guarded and manual safety checks',
+  testWidgets('Trading exposes only KIS Analyze & Buy for KIS selection',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -72,22 +72,15 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(find.text('KIS Guarded Trading'), findsOneWidget);
-    expect(find.text('KIS Analysis Preview'), findsOneWidget);
-    expect(find.text('KIS Guarded Check Result'), findsOneWidget);
-    expect(find.text('KIS Live Guarded Run Result'), findsOneWidget);
-    expect(find.text('KIS Live Manual Order'), findsOneWidget);
-    expect(
-        find.text(
-            'I understand this may place a real KIS order if all backend risk gates approve it.'),
-        findsOneWidget);
-    expect(find.text('I understand this is a real KIS order'), findsOneWidget);
-    expect(find.text('Run KIS Guarded Check'), findsOneWidget);
-    expect(find.text('Run KIS Live Guarded Once'), findsOneWidget);
-    expect(find.text('Submit Live KIS Order'), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Run KIS Guarded Check'), isTrue);
-    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isFalse);
-    expect(_filledButtonEnabled(tester, 'Submit Live KIS Order'), isFalse);
+    expect(find.text('KIS Analyze & Buy'), findsOneWidget);
+    expect(find.text('KIS Guarded Trading'), findsNothing);
+    expect(find.text('KIS Analysis Preview'), findsNothing);
+    expect(find.text('KIS Guarded Check Result'), findsNothing);
+    expect(find.text('KIS Live Guarded Run Result'), findsNothing);
+    expect(find.text('KIS Live Manual Order'), findsNothing);
+    expect(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'), findsOneWidget);
+    expect(find.text('Analyze & Buy KIS'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
@@ -96,7 +89,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS guarded check runs without live confirmation',
+  testWidgets('KIS Analyze & Buy requires checkbox before final dialog',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
     tester.view.devicePixelRatio = 1.0;
@@ -109,31 +102,19 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(_filledButtonEnabled(tester, 'Run KIS Guarded Check'), isTrue);
-    expect(
-      find.text(
-          'I understand this may place a real KIS order if all backend risk gates approve it.'),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.text('Run KIS Guarded Check'));
+    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
+    expect(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'), findsOneWidget);
+    await tester.tap(find.text('Analyze & Buy KIS'));
     await tester.pumpAndSettle();
 
-    expect(api.kisBuyShadowCalls, 1);
-    expect(find.text('Check only result'), findsOneWidget);
-    expect(find.text('No order created'), findsOneWidget);
-    expect(find.text('This check did not return AI analysis.'), findsOneWidget);
-    expect(find.text('Refresh KIS Analysis to view candidate scores.'),
-        findsOneWidget);
-    expect(find.text('REAL_ORDER_SUBMITTED'), findsOneWidget);
-    expect(find.text('BROKER_SUBMIT_CALLED'), findsOneWidget);
-    expect(find.text('MANUAL_SUBMIT_CALLED'), findsOneWidget);
-    expect(find.text('false'), findsWidgets);
+    expect(api.kisBuyShadowCalls, 0);
+    expect(api.kisLimitedAutoBuyCalls, 0);
+    expect(find.text('Confirm KIS Order'), findsNothing);
 
     controller.dispose();
   });
 
-  testWidgets('KIS live guarded run uses one checkbox and final dialog',
+  testWidgets('KIS Analyze & Buy uses one checkbox and final dialog',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
     tester.view.devicePixelRatio = 1.0;
@@ -155,16 +136,15 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isFalse);
-    await tester.tap(find.text(
-        'I understand this may place a real KIS order if all backend risk gates approve it.'));
+    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
+    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
     await tester.pumpAndSettle();
 
-    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isTrue);
-    await tester.tap(find.text('Run KIS Live Guarded Once'));
+    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isTrue);
+    await tester.tap(find.text('Analyze & Buy KIS'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Run Once'), findsWidgets);
+    expect(find.text('Confirm KIS Order'), findsWidgets);
     expect(api.kisLimitedAutoBuyCalls, 0);
 
     controller.dispose();
@@ -182,9 +162,7 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
-    await tester.tap(find.text('Run Single Symbol'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.tap(find.text('Analyze & Paper Buy'));
     await tester.pumpAndSettle();
 
     expect(find.text('Score Breakdown'), findsOneWidget);
@@ -205,7 +183,7 @@ void main() {
     expect(find.text('ACTION'), findsOneWidget);
     expect(find.text('REASON'), findsOneWidget);
     expect(find.text('N/A'), findsNothing);
-    expect(find.text('Advanced Details'), findsOneWidget);
+    expect(find.text('Run Details'), findsOneWidget);
     expect(find.text('Indicator Details'), findsNothing);
 
     controller.dispose();
@@ -223,9 +201,7 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
-    await tester.tap(find.text('Run Single Symbol'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.tap(find.text('Analyze & Paper Buy'));
     await tester.pumpAndSettle();
 
     expect(api.signalFetchCalls, 1);
@@ -239,7 +215,7 @@ void main() {
     expect(find.text('11.00'), findsOneWidget);
     expect(find.text('CONFIDENCE'), findsOneWidget);
     expect(find.text('0.74'), findsOneWidget);
-    expect(find.text('score_threshold_not_met'), findsWidgets);
+    expect(find.text('Score below entry threshold'), findsWidgets);
     expect(find.text('recent signal reason'), findsWidgets);
     expect(find.text('N/A'), findsNothing);
 
@@ -257,9 +233,7 @@ void main() {
     final controller = DashboardController(api, autoload: false);
 
     await tester.pumpWidget(_wrapTrading(controller));
-    await tester.tap(find.text('Run Single Symbol'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+    await tester.tap(find.text('Analyze & Paper Buy'));
     await tester.pumpAndSettle();
 
     expect(find.text('Score details not returned in run response'),

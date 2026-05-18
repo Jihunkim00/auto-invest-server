@@ -486,7 +486,7 @@ void main() {
     expect(find.textContaining('hard_blocked'), findsNothing);
     expect(find.text('Entry blocked by GPT/risk context'), findsWidgets);
     expect(find.text('999'), findsNothing);
-    expect(find.text('Watchlist Advanced Details'), findsOneWidget);
+    expect(find.text('Analysis Details'), findsOneWidget);
 
     controller.dispose();
   });

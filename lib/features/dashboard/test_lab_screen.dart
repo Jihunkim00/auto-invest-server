@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'dashboard_controller.dart';
 import 'widgets/broker_context_controls.dart';
+import 'widgets/order_ticket_section.dart';
 import 'widgets/watchlist_section.dart';
 
 class TestLabScreen extends StatelessWidget {
@@ -34,6 +35,8 @@ class TestLabScreen extends StatelessWidget {
                     : 'Alpaca paper and watchlist diagnostics remain non-live here.',
                 style: const TextStyle(color: Colors.white70),
               ),
+              const SizedBox(height: 12),
+              OrderTicketSection(controller: controller),
               const SizedBox(height: 12),
               TestLabSection(controller: controller),
             ],
