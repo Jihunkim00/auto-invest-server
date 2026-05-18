@@ -343,8 +343,8 @@ void main() {
     expect(candidate.finalBuyScore, 64);
     expect(candidate.confidence, 0.72);
     expect(find.text('Prepare Buy Ticket'), findsOneWidget);
-    expect(find.text('not ready'), findsWidgets);
-    expect(find.text('0.7'), findsOneWidget);
+    expect(find.text('Not ready'), findsWidgets);
+    expect(find.text('0.72'), findsWidgets);
     expect(find.text('KIS GPT Advisory Context'), findsNothing);
     expect(find.text('AI_BUY_SCORE'), findsNothing);
     expect(find.textContaining('GPT approved'), findsNothing);
@@ -428,12 +428,12 @@ void main() {
 
     expect(api.lastProvider, 'alpaca');
     expect(find.text('WMT'), findsWidgets);
-    expect(find.text('No order created'), findsOneWidget);
+    expect(find.text('No order created'), findsWidgets);
     expect(find.text('SKIPPED'), findsOneWidget);
-    expect(find.text('ENTRY SCORE'), findsWidgets);
+    expect(find.text('PRIMARY SCORE'), findsWidgets);
     expect(find.text('CONFIDENCE'), findsWidgets);
     expect(find.text('READINESS'), findsWidgets);
-    expect(find.text('not ready'), findsWidgets);
+    expect(find.text('Not ready'), findsWidgets);
 
     controller.dispose();
   });
@@ -470,11 +470,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.lastProvider, 'alpaca');
-    expect(find.text('Latest Watchlist Scan'), findsOneWidget);
+    expect(find.text('Latest Scan Summary'), findsOneWidget);
     expect(find.text('LRCX'), findsWidgets);
-    expect(find.text('RUN RESULT'), findsOneWidget);
-    expect(find.text('blocked'), findsWidgets);
-    expect(find.text('ENTRY SCORE'), findsWidgets);
+    expect(find.text('RESULT'), findsWidgets);
+    expect(find.text('Blocked'), findsWidgets);
+    expect(find.text('PRIMARY SCORE'), findsWidgets);
     expect(find.text('72'), findsWidgets);
     expect(find.text('CONFIDENCE'), findsWidgets);
     expect(find.text('0.81'), findsOneWidget);
@@ -482,7 +482,7 @@ void main() {
     expect(find.text('AI BUY'), findsWidgets);
     expect(find.text('AI SELL'), findsWidgets);
     expect(find.text('21'), findsWidgets);
-    expect(find.text('No order created'), findsOneWidget);
+    expect(find.text('No order created'), findsWidgets);
     expect(find.textContaining('hard_blocked'), findsNothing);
     expect(find.text('Entry blocked by GPT/risk context'), findsWidgets);
     expect(find.text('999'), findsNothing);
@@ -513,9 +513,9 @@ void main() {
     await tester.tap(find.text('Start Scan'));
     await tester.pumpAndSettle();
 
-    expect(find.text('skipped'), findsWidgets);
-    expect(find.text('No order created'), findsOneWidget);
-    expect(find.textContaining('risk_gate_blocked'), findsWidgets);
+    expect(find.text('Skipped'), findsWidgets);
+    expect(find.text('No order created'), findsWidgets);
+    expect(find.text('Safety gate blocked'), findsWidgets);
 
     controller.dispose();
   });
@@ -564,8 +564,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('No top candidate'), findsOneWidget);
-    expect(find.text('No order created'), findsOneWidget);
-    expect(find.textContaining('all_candidates_blocked'), findsWidgets);
+    expect(find.text('No order created'), findsWidgets);
+    expect(find.text('Safety gate blocked'), findsWidgets);
     expect(
         find.text('No top candidate yet. Start a scan to rank the watchlist.'),
         findsOneWidget);
@@ -597,8 +597,8 @@ void main() {
 
     expect(find.text('AI BUY'), findsWidgets);
     expect(find.text('AI SELL'), findsWidgets);
-    expect(find.text('GPT NUMERIC BUY'), findsOneWidget);
-    expect(find.text('GPT NUMERIC SELL'), findsOneWidget);
+    expect(find.text('GPT BUY'), findsOneWidget);
+    expect(find.text('GPT SELL'), findsOneWidget);
     expect(find.text('No numeric GPT score returned'), findsNWidgets(2));
 
     controller.dispose();

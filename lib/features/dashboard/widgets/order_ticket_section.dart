@@ -261,22 +261,9 @@ class _KrOrderTicket extends StatelessWidget {
         onChanged: controller.kisManualSubmitLoading
             ? null
             : (value) => controller.setKisLiveConfirmation(value == true),
-        title: const Text('Confirm real KIS live order'),
-        subtitle: const Text(
-          'Manual-only lane; scheduler and AI auto trading do not submit KIS orders.',
-        ),
-      ),
-      CheckboxListTile(
-        contentPadding: EdgeInsets.zero,
-        controlAffinity: ListTileControlAffinity.leading,
-        value: controller.kisManualExtraSafety,
-        onChanged: controller.kisManualSubmitLoading ||
-                controller.orderValidationResult?.validatedForSubmission != true
-            ? null
-            : (value) => controller.setKisManualExtraSafety(value == true),
         title: const Text('I understand this is a real KIS order'),
         subtitle: const Text(
-          'Enabled only after validation succeeds for the current ticket.',
+          'Manual-only lane; final confirmation is still required before submit.',
         ),
       ),
       const SizedBox(height: 8),
@@ -547,9 +534,6 @@ class _PreSubmitChecklist extends StatelessWidget {
       _ChecklistItem(
           label: 'confirm_live checked',
           passed: controller.kisLiveConfirmation),
-      _ChecklistItem(
-          label: 'extra real-order safety checked',
-          passed: controller.kisManualExtraSafety),
       _ChecklistItem(
           label: 'runtime dry_run is OFF', passed: !status.runtimeDryRun),
       _ChecklistItem(label: 'kill_switch is OFF', passed: !status.killSwitch),

@@ -6,6 +6,9 @@ import 'package:auto_invest_dashboard/features/analysis/analysis_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/manual_trading_run_section.dart';
+import 'package:auto_invest_dashboard/models/kis_buy_shadow_decision.dart';
+import 'package:auto_invest_dashboard/models/kis_limited_auto_buy.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/manual_trading_run_result.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
@@ -69,19 +72,100 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(find.text('KIS Guarded Trading Run Once'), findsOneWidget);
+    expect(find.text('KIS Guarded Trading'), findsOneWidget);
+    expect(find.text('KIS Analysis Preview'), findsOneWidget);
+    expect(find.text('KIS Guarded Check Result'), findsOneWidget);
+    expect(find.text('KIS Live Guarded Run Result'), findsOneWidget);
     expect(find.text('KIS Live Manual Order'), findsOneWidget);
-    expect(find.text('I understand this may place a real KIS buy order'),
+    expect(
+        find.text(
+            'I understand this may place a real KIS order if all backend risk gates approve it.'),
         findsOneWidget);
     expect(find.text('I understand this is a real KIS order'), findsOneWidget);
-    expect(find.text('Analyze & Run Once'), findsOneWidget);
+    expect(find.text('Run KIS Guarded Check'), findsOneWidget);
+    expect(find.text('Run KIS Live Guarded Once'), findsOneWidget);
     expect(find.text('Submit Live KIS Order'), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Analyze & Run Once'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Run KIS Guarded Check'), isTrue);
+    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isFalse);
     expect(_filledButtonEnabled(tester, 'Submit Live KIS Order'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
     expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS guarded check runs without live confirmation',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi();
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+
+    expect(_filledButtonEnabled(tester, 'Run KIS Guarded Check'), isTrue);
+    expect(
+      find.text(
+          'I understand this may place a real KIS order if all backend risk gates approve it.'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Run KIS Guarded Check'));
+    await tester.pumpAndSettle();
+
+    expect(api.kisBuyShadowCalls, 1);
+    expect(find.text('Check only result'), findsOneWidget);
+    expect(find.text('No order created'), findsOneWidget);
+    expect(find.text('This check did not return AI analysis.'), findsOneWidget);
+    expect(find.text('Refresh KIS Analysis to view candidate scores.'),
+        findsOneWidget);
+    expect(find.text('REAL_ORDER_SUBMITTED'), findsOneWidget);
+    expect(find.text('BROKER_SUBMIT_CALLED'), findsOneWidget);
+    expect(find.text('MANUAL_SUBMIT_CALLED'), findsOneWidget);
+    expect(find.text('false'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS live guarded run uses one checkbox and final dialog',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi();
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..kisSafetyStatus = const KisManualOrderSafetyStatus(
+        runtimeDryRun: false,
+        killSwitch: false,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      );
+
+    await tester.pumpWidget(_wrapTrading(controller));
+
+    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isFalse);
+    await tester.tap(find.text(
+        'I understand this may place a real KIS order if all backend risk gates approve it.'));
+    await tester.pumpAndSettle();
+
+    expect(_filledButtonEnabled(tester, 'Run KIS Live Guarded Once'), isTrue);
+    await tester.tap(find.text('Run KIS Live Guarded Once'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm Run Once'), findsWidgets);
+    expect(api.kisLimitedAutoBuyCalls, 0);
 
     controller.dispose();
   });
@@ -276,6 +360,8 @@ class _AnalysisFakeApi extends ApiClient {
   int validationCalls = 0;
   int submitCalls = 0;
   int signalFetchCalls = 0;
+  int kisBuyShadowCalls = 0;
+  int kisLimitedAutoBuyCalls = 0;
   String? lastSingleRunSymbol;
   int? lastSingleRunGateLevel;
 
@@ -406,6 +492,45 @@ class _AnalysisFakeApi extends ApiClient {
       'internal_status': 'SUBMITTED',
       'created_at': '2026-05-17T00:00:00',
       'updated_at': '2026-05-17T00:00:00',
+    });
+  }
+
+  @override
+  Future<KisBuyShadowDecision> runKisBuyShadowOnce() async {
+    kisBuyShadowCalls += 1;
+    return KisBuyShadowDecision.fromJson({
+      'status': 'ok',
+      'mode': 'shadow_buy_dry_run',
+      'decision': 'blocked',
+      'action': 'hold',
+      'reason': 'market_closed',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'checks': {'market_open': false},
+      'safety': {
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      },
+    });
+  }
+
+  @override
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
+    kisLimitedAutoBuyCalls += 1;
+    return KisLimitedAutoBuy.fromJson({
+      'status': 'ok',
+      'mode': 'limited_auto_buy',
+      'result': 'blocked',
+      'action': 'hold',
+      'reason': 'market_closed',
+      'symbol': '005930',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'checks': {'market_open': false},
+      'safety': {'preview_only': false},
     });
   }
 }

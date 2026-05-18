@@ -297,15 +297,6 @@ void main() {
     controller.dispose();
   });
 
-  test('KIS live submit requires extra safety confirmation', () {
-    final controller = _readyKisController()..kisManualExtraSafety = false;
-
-    expect(controller.canSubmitLiveKisOrder, isFalse);
-    expect(controller.kisSubmitBlockedMessage(),
-        'Confirm the extra KIS safety checkbox.');
-    controller.dispose();
-  });
-
   test('KR preview candidate can fill dry-run order ticket without validation',
       () {
     final api = _FakeApiClient(validationResult: _validationResult());
@@ -643,7 +634,6 @@ DashboardController _readyKisController({
     ..setOrderTicketQty(validation.qty)
     ..orderValidationResult = validation
     ..kisLiveConfirmation = true
-    ..kisManualExtraSafety = true
     ..kisSafetyStatus = safetyStatus ?? _safetyStatus();
 }
 

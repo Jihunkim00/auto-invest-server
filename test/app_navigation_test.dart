@@ -51,7 +51,7 @@ void main() {
 
     await tester.tap(find.text('Trading'));
     await tester.pumpAndSettle();
-    expect(find.text('KIS Guarded Trading Run Once'), findsOneWidget);
+    expect(find.text('KIS Guarded Trading'), findsOneWidget);
     expect(find.text('KIS / KR'), findsWidgets);
 
     await tester.tap(find.text('Settings'));

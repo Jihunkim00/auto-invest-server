@@ -159,9 +159,7 @@ class DashboardController extends ChangeNotifier {
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
   bool kisLiveConfirmation = false;
-  bool kisManualExtraSafety = false;
   bool kisGuardedRunConfirmation = false;
-  bool kisGuardedRunExtraSafety = false;
   String kisGuardedRunSymbol = '005930';
   bool kisManualSubmitLoading = false;
   bool kisOrderSyncLoading = false;
@@ -217,7 +215,6 @@ class DashboardController extends ChangeNotifier {
         qtyMatches &&
         sideMatches &&
         kisLiveConfirmation &&
-        kisManualExtraSafety &&
         !kisSafetyStatus.runtimeDryRun &&
         !kisSafetyStatus.killSwitch &&
         kisSafetyStatus.kisEnabled &&
@@ -230,8 +227,7 @@ class DashboardController extends ChangeNotifier {
     return kisGuardedRunSymbol.trim().isNotEmpty &&
         !kisLimitedAutoBuyLoading &&
         kisRuntimeLiveSubmitGatesOpen &&
-        kisGuardedRunConfirmation &&
-        kisGuardedRunExtraSafety;
+        kisGuardedRunConfirmation;
   }
 
   bool get kisRuntimeLiveSubmitGatesOpen {
@@ -574,9 +570,7 @@ class DashboardController extends ChangeNotifier {
     manualRunResult = null;
     krWatchlistPreview = null;
     kisGuardedRunConfirmation = false;
-    kisGuardedRunExtraSafety = false;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     if (provider == SelectedProvider.kis) {
       refreshKisOrderMonitoring(silent: true);
     }
@@ -627,15 +621,9 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setKisManualExtraSafety(bool value) {
-    kisManualExtraSafety = value;
-    notifyListeners();
-  }
-
   void setKisGuardedRunSymbol(String value) {
     kisGuardedRunSymbol = value.trim().toUpperCase();
     kisGuardedRunConfirmation = false;
-    kisGuardedRunExtraSafety = false;
     latestKisLimitedAutoBuyResult = null;
     kisLimitedAutoBuyError = null;
     notifyListeners();
@@ -643,11 +631,6 @@ class DashboardController extends ChangeNotifier {
 
   void setKisGuardedRunConfirmation(bool value) {
     kisGuardedRunConfirmation = value;
-    notifyListeners();
-  }
-
-  void setKisGuardedRunExtraSafety(bool value) {
-    kisGuardedRunExtraSafety = value;
     notifyListeners();
   }
 
@@ -662,7 +645,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -708,7 +690,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -750,7 +731,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -799,7 +779,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata =
@@ -833,7 +812,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata =
@@ -1631,6 +1609,10 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> runKisGuardedCheck() {
+    return runKisBuyShadowOnce();
+  }
+
   Future<ActionResult> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     if (kisLimitedAutoBuyLoading) {
       return const ActionResult(
@@ -1679,7 +1661,6 @@ class DashboardController extends ChangeNotifier {
     );
     if (result.success) {
       kisGuardedRunConfirmation = false;
-      kisGuardedRunExtraSafety = false;
       notifyListeners();
     }
     return result;
@@ -1878,7 +1859,6 @@ class DashboardController extends ChangeNotifier {
     }
 
     if (!kisLiveConfirmation) return 'Confirm live KIS order first.';
-    if (!kisManualExtraSafety) return 'Confirm the extra KIS safety checkbox.';
     if (kisSafetyStatus.runtimeDryRun) {
       return 'Live submit blocked: dry-run is ON';
     }
@@ -1915,9 +1895,6 @@ class DashboardController extends ChangeNotifier {
     }
     if (!kisGuardedRunConfirmation) {
       return 'Confirm live KIS guarded run first.';
-    }
-    if (!kisGuardedRunExtraSafety) {
-      return 'Confirm the extra guarded KIS safety checkbox.';
     }
     return 'KIS guarded run is blocked by the checklist.';
   }
@@ -1988,7 +1965,6 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
-    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
   }
