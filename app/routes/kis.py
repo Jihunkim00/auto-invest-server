@@ -37,6 +37,10 @@ from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_buy_shadow_decision_service import KisBuyShadowDecisionService
 from app.services.kis_limited_auto_buy_service import KisLimitedAutoBuyService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
+from app.services.kis_single_symbol_trading_service import (
+    KisSingleSymbolTradingRequest,
+    KisSingleSymbolTradingService,
+)
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -310,6 +314,23 @@ def preview_kis_watchlist(
             record_run=True,
             trigger_source="manual_kis_preview",
         )
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/trading/run-once")
+def run_kis_single_symbol_trading_once(
+    payload: KisSingleSymbolTradingRequest,
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisSingleSymbolTradingService(client)
+    try:
+        return service.run_once(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:

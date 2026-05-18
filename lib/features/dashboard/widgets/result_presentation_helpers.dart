@@ -75,6 +75,30 @@ String translateReason(Object? value, {num? entryPenalty}) {
   if (normalized == 'kill_switch_enabled') {
     return 'Kill switch is ON';
   }
+  if (normalized == 'confirm_live_required') {
+    return 'Live confirmation is required before submit';
+  }
+  if (normalized == 'kis_real_order_disabled') {
+    return 'KIS real order disabled';
+  }
+  if (normalized == 'kis_disabled') {
+    return 'KIS trading disabled';
+  }
+  if (normalized == 'quantity_or_amount_required') {
+    return 'Quantity or amount is required';
+  }
+  if (normalized == 'symbol_mismatch') {
+    return 'Returned candidate does not match selected symbol';
+  }
+  if (normalized == 'dry_run_mode') {
+    return 'Dry-run mode: no real order submitted';
+  }
+  if (normalized == 'backend_risk_gate_blocked') {
+    return 'Backend risk gate blocked this order';
+  }
+  if (normalized == 'order_validation_failed') {
+    return 'Order validation failed';
+  }
   if (normalized.contains('gpt_entry_penalty=999')) {
     return 'New buy blocked by GPT/risk context';
   }

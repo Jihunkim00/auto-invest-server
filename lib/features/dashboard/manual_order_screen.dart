@@ -1,7 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../core/widgets/section_card.dart';
-import '../../models/kis_limited_auto_buy.dart';
+import '../../models/kis_single_symbol_trading_result.dart';
 import 'dashboard_controller.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/manual_trading_run_section.dart';
@@ -99,8 +101,8 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         qty != null &&
         qty > 0 &&
         controller.kisGuardedRunConfirmation &&
-        !controller.kisLimitedAutoBuyLoading;
-    final result = controller.latestKisLimitedAutoBuyResult;
+        !controller.kisSingleSymbolTradingLoading;
+    final result = controller.latestKisSingleSymbolTradingResult;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -153,7 +155,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           value: controller.kisGuardedRunConfirmation,
-          onChanged: controller.kisLimitedAutoBuyLoading
+          onChanged: controller.kisSingleSymbolTradingLoading
               ? null
               : (value) =>
                   controller.setKisGuardedRunConfirmation(value == true),
@@ -170,6 +172,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                     symbol: symbol,
                     quantity: qty,
                     gateLevel: controller.selectedGateLevel,
+                    confirmLive: controller.kisGuardedRunConfirmation,
                   );
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -179,13 +182,13 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                   ));
                 }
               : null,
-          icon: controller.kisLimitedAutoBuyLoading
+          icon: controller.kisSingleSymbolTradingLoading
               ? const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.play_arrow),
-          label: Text(controller.kisLimitedAutoBuyLoading
+          label: Text(controller.kisSingleSymbolTradingLoading
               ? 'Analyzing...'
               : 'Analyze & Buy KIS'),
         ),
@@ -197,10 +200,10 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                 : 'Confirm that a real KIS order may be submitted.',
           ),
         ],
-        if (controller.kisLimitedAutoBuyError != null) ...[
+        if (controller.kisSingleSymbolTradingError != null) ...[
           const SizedBox(height: 10),
           _ReasonBanner(
-            text: controller.kisLimitedAutoBuyError!,
+            text: controller.kisSingleSymbolTradingError!,
             color: Colors.redAccent,
           ),
         ],
@@ -253,18 +256,18 @@ class _KisResultPanel extends StatelessWidget {
     required this.selectedSymbol,
   });
 
-  final KisLimitedAutoBuy result;
+  final KisSingleSymbolTradingResult result;
   final String selectedSymbol;
 
   @override
   Widget build(BuildContext context) {
     final mismatch = presentation.selectedSymbolMismatch(
       selectedSymbol: selectedSymbol,
-      returnedSymbol: result.symbol,
+      returnedSymbol: result.analyzedSymbol ?? result.returnedSymbol,
     );
     final reason = presentation.translateReason(_mainReason(result));
     final safety = presentation.safetyLine(result.safety);
-    final hasScore = result.finalScore != null || result.confidence != null;
+    final hasScore = result.hasScoreDetails;
 
     return Container(
       width: double.infinity,
@@ -302,24 +305,56 @@ class _KisResultPanel extends StatelessWidget {
           _DataGrid(pairs: [
             _DataPairData(
                 label: 'Primary score',
-                value: presentation.displayScore(result.finalScore)),
+                value: presentation.displayScore(result.primaryScore)),
+            _DataPairData(
+                label: 'Final Buy',
+                value: presentation.displayScore(result.finalBuyScore)),
+            _DataPairData(
+                label: 'Final Sell',
+                value: presentation.displayScore(result.finalSellScore)),
             _DataPairData(
                 label: 'Confidence',
                 value: presentation.displayScore(result.confidence,
                     fallback: 'Confidence not returned')),
+            _DataPairData(
+                label: 'Quant Buy',
+                value: presentation.displayScore(result.quantBuyScore)),
+            _DataPairData(
+                label: 'Quant Sell',
+                value: presentation.displayScore(result.quantSellScore)),
+            _DataPairData(
+                label: 'AI Buy',
+                value: presentation.displayScore(result.aiBuyScore)),
+            _DataPairData(
+                label: 'AI Sell',
+                value: presentation.displayScore(result.aiSellScore)),
+            _DataPairData(
+                label: 'GPT Buy',
+                value: presentation.displayScore(result.gptBuyScore,
+                    fallback: 'GPT score not returned')),
+            _DataPairData(
+                label: 'GPT Sell',
+                value: presentation.displayScore(result.gptSellScore,
+                    fallback: 'GPT score not returned')),
           ]),
+        if (result.gptReason != null) ...[
+          const SizedBox(height: 8),
+          _ReasonBanner(text: result.gptReason!),
+        ],
         const SizedBox(height: 12),
         const Text('Order Result',
             style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         _DataGrid(pairs: [
-          _DataPairData(label: 'Order', value: presentation.orderStatusLabel(
-            realOrderSubmitted: result.realOrderSubmitted,
-            orderId: result.orderId?.toString(),
-            kisOdno: result.kisOdno,
-            result: result.result,
-            safety: result.safety,
-          )),
+          _DataPairData(
+              label: 'Order',
+              value: presentation.orderStatusLabel(
+                realOrderSubmitted: result.realOrderSubmitted,
+                orderId: result.orderId?.toString(),
+                kisOdno: result.kisOdno,
+                result: result.result,
+                safety: result.safety,
+              )),
           _DataPairData(
               label: 'Order ID', value: result.orderId?.toString() ?? '--'),
           _DataPairData(label: 'KIS ODNO', value: result.kisOdno ?? '--'),
@@ -340,7 +375,7 @@ class _KisResultPanel extends StatelessWidget {
 class _ReadableDetails extends StatelessWidget {
   const _ReadableDetails({required this.result});
 
-  final KisLimitedAutoBuy result;
+  final KisSingleSymbolTradingResult result;
 
   @override
   Widget build(BuildContext context) {
@@ -364,18 +399,34 @@ class _ReadableDetails extends StatelessWidget {
               value: result.manualSubmitCalled ? 'Yes' : 'No'),
         ]),
         const SizedBox(height: 8),
-        if (result.blockedBy.isNotEmpty)
+        _DataGrid(pairs: [
+          _DataPairData(
+              label: 'Primary score',
+              value: presentation.displayScore(result.primaryScore)),
+          _DataPairData(
+              label: 'Final Buy',
+              value: presentation.displayScore(result.finalBuyScore)),
+          _DataPairData(
+              label: 'Final Sell',
+              value: presentation.displayScore(result.finalSellScore)),
+          _DataPairData(
+              label: 'Confidence',
+              value: presentation.displayScore(result.confidence,
+                  fallback: 'Confidence not returned')),
+        ]),
+        const SizedBox(height: 8),
+        if (result.riskFlags.isNotEmpty)
           _BulletList(
             title: 'Risk / Block Details',
-            items: result.blockedBy
+            items: result.riskFlags
                 .take(5)
                 .map(presentation.translateReason)
                 .toList(),
           ),
-        if (result.failedChecks.isNotEmpty)
+        if (result.gatingNotes.isNotEmpty)
           _BulletList(
             title: 'Gating Notes',
-            items: result.failedChecks
+            items: result.gatingNotes
                 .take(5)
                 .map(presentation.translateReason)
                 .toList(),
@@ -386,9 +437,8 @@ class _ReadableDetails extends StatelessWidget {
           title: const Text('Developer Raw Payload'),
           children: [
             _ReasonBanner(
-              text: 'checks=${result.checks}\n'
-                  'safety=${result.safety}\n'
-                  'audit_metadata=${result.auditMetadata}',
+              text:
+                  const JsonEncoder.withIndent('  ').convert(result.rawPayload),
             ),
           ],
         ),
@@ -540,28 +590,30 @@ class _SoftBadge extends StatelessWidget {
   }
 }
 
-String _mainReason(KisLimitedAutoBuy result) {
+String _mainReason(KisSingleSymbolTradingResult result) {
   if (result.reason.trim().isNotEmpty) return result.reason;
-  if (result.blockedBy.isNotEmpty) return result.blockedBy.first;
-  if (result.failedChecks.isNotEmpty) return result.failedChecks.first;
+  if (result.blockReason != null) return result.blockReason!;
+  if (result.noOrderReason != null) return result.noOrderReason!;
+  if (result.riskFlags.isNotEmpty) return result.riskFlags.first;
+  if (result.gatingNotes.isNotEmpty) return result.gatingNotes.first;
   if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
     return 'dry_run';
   }
   return 'Backend risk gate blocked this order';
 }
 
-String _decisionLabel(KisLimitedAutoBuy result) {
+String _decisionLabel(KisSingleSymbolTradingResult result) {
   final action = result.action.trim().toLowerCase();
   final resultText = result.result.trim().toLowerCase();
   if (resultText.contains('preview')) return 'PREVIEW ONLY';
-  if (resultText.contains('block') || result.blockedBy.isNotEmpty) {
+  if (resultText.contains('block') || result.blockReason != null) {
     return 'BLOCKED';
   }
   if (action == 'buy') return 'BUY';
   return 'HOLD';
 }
 
-String _resultLabel(KisLimitedAutoBuy result) {
+String _resultLabel(KisSingleSymbolTradingResult result) {
   final normalized = result.result.trim().toLowerCase();
   if (result.realOrderSubmitted || normalized == 'submitted') {
     return 'executed';
@@ -574,7 +626,7 @@ String _resultLabel(KisLimitedAutoBuy result) {
   return normalized;
 }
 
-String _nextAction(KisLimitedAutoBuy result) {
+String _nextAction(KisSingleSymbolTradingResult result) {
   if (result.realOrderSubmitted) return 'Monitor and sync order status';
   if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
     return 'Dry-run mode: no real order submitted';

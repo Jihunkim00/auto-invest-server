@@ -10,9 +10,12 @@ import 'package:auto_invest_dashboard/models/kis_buy_shadow_decision.dart';
 import 'package:auto_invest_dashboard/models/kis_limited_auto_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
+import 'package:auto_invest_dashboard/models/kis_single_symbol_trading_result.dart';
 import 'package:auto_invest_dashboard/models/manual_trading_run_result.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
+import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
+import 'package:auto_invest_dashboard/models/trading_run.dart';
 
 void main() {
   testWidgets('Analysis is read-only and sends execution to Trading',
@@ -102,6 +105,7 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
+    expect(find.byType(CheckboxListTile), findsOneWidget);
     expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
     expect(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'), findsOneWidget);
     await tester.tap(find.text('Analyze & Buy KIS'));
@@ -109,6 +113,7 @@ void main() {
 
     expect(api.kisBuyShadowCalls, 0);
     expect(api.kisLimitedAutoBuyCalls, 0);
+    expect(api.kisSingleSymbolCalls, 0);
     expect(find.text('Confirm KIS Order'), findsNothing);
 
     controller.dispose();
@@ -146,6 +151,113 @@ void main() {
 
     expect(find.text('Confirm KIS Order'), findsWidgets);
     expect(api.kisLimitedAutoBuyCalls, 0);
+    expect(api.kisSingleSymbolCalls, 0);
+
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+
+    expect(api.kisSingleSymbolCalls, 1);
+    expect(api.lastKisSingleSymbol, '005930');
+    expect(api.lastKisSingleQuantity, 1);
+    expect(api.lastKisSingleConfirmLive, isTrue);
+    expect(find.text('Decision Summary'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze & Buy renders dry-run and score-missing results',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson({
+        'status': 'ok',
+        'mode': 'kis_single_symbol_analyze_buy',
+        'symbol': '005930',
+        'requested_symbol': '005930',
+        'analyzed_symbol': '005930',
+        'symbol_match': true,
+        'action': 'buy',
+        'result': 'dry_run',
+        'reason': 'dry_run_mode',
+        'quantity': 1,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        'dry_run': true,
+        'safety': {'dry_run': true},
+      }),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Analyze & Buy KIS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dry-run, no real order'), findsWidgets);
+    expect(find.textContaining('Analysis score was not returned by this run'),
+        findsOneWidget);
+    expect(find.text('N/A'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze & Buy warns when returned symbol mismatches',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson({
+        'status': 'ok',
+        'mode': 'kis_single_symbol_analyze_buy',
+        'symbol': '005380',
+        'requested_symbol': '005380',
+        'analyzed_symbol': '005930',
+        'returned_symbol': '005930',
+        'symbol_match': false,
+        'action': 'hold',
+        'result': 'blocked',
+        'reason': 'symbol_mismatch',
+        'quantity': 1,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        'safety': {'dry_run': false},
+      }),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await tester.enterText(
+        find.widgetWithText(TextField, 'KR Symbol'), '005380');
+    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Analyze & Buy KIS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+
+    expect(api.lastKisSingleSymbol, '005380');
+    expect(
+      find.text(
+        'Returned candidate does not match selected symbol. Selected: 005380, Returned: 005930',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Returned candidate does not match selected symbol'),
+        findsWidgets);
 
     controller.dispose();
   });
@@ -325,19 +437,26 @@ class _AnalysisFakeApi extends ApiClient {
     this.realisticScores = false,
     this.signalIdOnly = false,
     this.failSignalFetch = false,
-  });
+    KisSingleSymbolTradingResult? kisSingleResult,
+  }) : kisSingleResult = kisSingleResult ?? _kisSingleResult();
 
   final bool realisticScores;
   final bool signalIdOnly;
   final bool failSignalFetch;
+  KisSingleSymbolTradingResult kisSingleResult;
   int singleRunCalls = 0;
   int validationCalls = 0;
   int submitCalls = 0;
   int signalFetchCalls = 0;
   int kisBuyShadowCalls = 0;
   int kisLimitedAutoBuyCalls = 0;
+  int kisSingleSymbolCalls = 0;
   String? lastSingleRunSymbol;
   int? lastSingleRunGateLevel;
+  String? lastKisSingleSymbol;
+  int? lastKisSingleGateLevel;
+  int? lastKisSingleQuantity;
+  bool? lastKisSingleConfirmLive;
 
   @override
   Future<ManualTradingRunResult> runTradingOnce({
@@ -507,6 +626,68 @@ class _AnalysisFakeApi extends ApiClient {
       'safety': {'preview_only': false},
     });
   }
+
+  @override
+  Future<KisSingleSymbolTradingResult> runKisSingleSymbolAnalyzeBuy({
+    required String symbol,
+    int? gateLevel,
+    int? quantity,
+    double? amount,
+    required bool confirmLive,
+  }) async {
+    kisSingleSymbolCalls += 1;
+    lastKisSingleSymbol = symbol;
+    lastKisSingleGateLevel = gateLevel;
+    lastKisSingleQuantity = quantity;
+    lastKisSingleConfirmLive = confirmLive;
+    return kisSingleResult;
+  }
+
+  @override
+  Future<List<TradingRun>> getRecentTradingRuns() async => const [];
+
+  @override
+  Future<PortfolioSummary> fetchPortfolioSummary() async =>
+      PortfolioSummary.empty();
+
+  @override
+  Future<PortfolioSummary> fetchUsPortfolioSummary() async =>
+      PortfolioSummary.empty();
+
+  @override
+  Future<PortfolioSummary> fetchKrPortfolioSummary() async =>
+      PortfolioSummary.empty(currency: 'KRW');
+}
+
+KisSingleSymbolTradingResult _kisSingleResult() {
+  return KisSingleSymbolTradingResult.fromJson({
+    'status': 'ok',
+    'mode': 'kis_single_symbol_analyze_buy',
+    'symbol': '005930',
+    'requested_symbol': '005930',
+    'analyzed_symbol': '005930',
+    'symbol_match': true,
+    'action': 'buy',
+    'result': 'dry_run',
+    'reason': 'dry_run_mode',
+    'quantity': 1,
+    'primary_score': 82,
+    'final_buy_score': 82,
+    'final_sell_score': 8,
+    'quant_buy_score': 80,
+    'quant_sell_score': 10,
+    'ai_buy_score': 84,
+    'ai_sell_score': 7,
+    'gpt_buy_score': 84,
+    'gpt_sell_score': 7,
+    'confidence': 0.8,
+    'gpt_reason': 'single symbol advisory',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'dry_run': true,
+    'safety': {'dry_run': true},
+  });
 }
 
 OrderValidationResult _validationResult() {

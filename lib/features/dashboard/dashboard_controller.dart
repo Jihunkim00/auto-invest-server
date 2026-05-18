@@ -9,6 +9,7 @@ import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
 import '../../models/kis_limited_auto_sell.dart';
+import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
@@ -142,6 +143,9 @@ class DashboardController extends ChangeNotifier {
   bool kisLimitedAutoBuyLoading = false;
   KisLimitedAutoBuy? latestKisLimitedAutoBuyResult;
   String? kisLimitedAutoBuyError;
+  bool kisSingleSymbolTradingLoading = false;
+  KisSingleSymbolTradingResult? latestKisSingleSymbolTradingResult;
+  String? kisSingleSymbolTradingError;
   bool kisSchedulerLiveLoading = false;
   KisSchedulerLiveResult? latestKisSchedulerLiveResult;
   String? kisSchedulerLiveError;
@@ -569,6 +573,8 @@ class DashboardController extends ChangeNotifier {
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
+    latestKisSingleSymbolTradingResult = null;
+    kisSingleSymbolTradingError = null;
     kisGuardedRunConfirmation = false;
     kisLiveConfirmation = false;
     if (provider == SelectedProvider.kis) {
@@ -626,6 +632,8 @@ class DashboardController extends ChangeNotifier {
     kisGuardedRunConfirmation = false;
     latestKisLimitedAutoBuyResult = null;
     kisLimitedAutoBuyError = null;
+    latestKisSingleSymbolTradingResult = null;
+    kisSingleSymbolTradingError = null;
     notifyListeners();
   }
 
@@ -1650,21 +1658,61 @@ class DashboardController extends ChangeNotifier {
     required String symbol,
     required int quantity,
     required int gateLevel,
+    bool confirmLive = true,
   }) async {
-    kisLimitedAutoBuyLoading = true;
-    kisLimitedAutoBuyError = null;
+    return runKisSingleSymbolAnalyzeBuy(
+      symbol: symbol,
+      quantity: quantity,
+      gateLevel: gateLevel,
+      confirmLive: confirmLive,
+    );
+  }
+
+  Future<ActionResult> runKisSingleSymbolAnalyzeBuy({
+    required String symbol,
+    required int quantity,
+    required int gateLevel,
+    required bool confirmLive,
+  }) async {
+    if (kisSingleSymbolTradingLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS Analyze & Buy already in progress.',
+      );
+    }
+
+    final normalizedSymbol = symbol.trim().toUpperCase();
+    kisSingleSymbolTradingLoading = true;
+    kisSingleSymbolTradingError = null;
+    latestKisSingleSymbolTradingResult = null;
     notifyListeners();
     try {
-      // Existing KIS live-capable run-once endpoint is watchlist/candidate based
-      // and does not accept a selected symbol or quantity. Trading must not show
-      // a watchlist top candidate as if it analyzed the operator's symbol.
-      latestKisLimitedAutoBuyResult = null;
-      kisLimitedAutoBuyError =
-          'Symbol-specific KIS Analyze & Buy endpoint is not available. '
-          'Use Watchlist for candidate discovery.';
-      return ActionResult(success: false, message: kisLimitedAutoBuyError!);
+      final result = await apiClient.runKisSingleSymbolAnalyzeBuy(
+        symbol: normalizedSymbol,
+        gateLevel: gateLevel,
+        quantity: quantity,
+        confirmLive: confirmLive,
+      );
+      latestKisSingleSymbolTradingResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshPortfolioSummaries();
+      if (result.realOrderSubmitted || result.orderId != null) {
+        await refreshKisOrderMonitoring(silent: true);
+      }
+      final resultText =
+          result.result.trim().isEmpty ? 'blocked' : result.result.trim();
+      return ActionResult(
+        success: true,
+        message: 'KIS Analyze & Buy completed: $resultText.',
+      );
+    } catch (e) {
+      kisSingleSymbolTradingError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSingleSymbolTradingError!),
+      );
     } finally {
-      kisLimitedAutoBuyLoading = false;
+      kisSingleSymbolTradingLoading = false;
       notifyListeners();
     }
   }
