@@ -34,6 +34,51 @@ void main() {
     expect(result.mode, 'limited_auto_buy');
   });
 
+  test('runKisSingleSymbolAnalyzeBuy calls selected symbol endpoint', () async {
+    late http.Request captured;
+    final client = ApiClient(
+      client: MockClient((request) async {
+        captured = request;
+        return http.Response(
+          jsonEncode({
+            'status': 'ok',
+            'mode': 'kis_single_symbol_analyze_buy',
+            'symbol': '005380',
+            'requested_symbol': '005380',
+            'analyzed_symbol': '005380',
+            'symbol_match': true,
+            'result': 'dry_run',
+            'action': 'buy',
+            'reason': 'dry_run_mode',
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'dry_run': true,
+            'safety': {'dry_run': true},
+          }),
+          200,
+        );
+      }),
+    );
+
+    final result = await client.runKisSingleSymbolAnalyzeBuy(
+      symbol: '005380',
+      gateLevel: 4,
+      quantity: 1,
+      confirmLive: true,
+    );
+    final body = jsonDecode(captured.body) as Map<String, dynamic>;
+
+    expect(captured.method, 'POST');
+    expect(captured.url.path, '/kis/trading/run-once');
+    expect(body['symbol'], '005380');
+    expect(body['gate_level'], 4);
+    expect(body['quantity'], 1);
+    expect(body['confirm_live'], isTrue);
+    expect(result.requestedSymbol, '005380');
+    expect(result.symbolMatch, isTrue);
+  });
+
   testWidgets('limited auto buy card shows guarded disabled state',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 4200);
@@ -148,7 +193,7 @@ class _FakeLimitedAutoBuyApi extends ApiClient {
   int submitCalls = 0;
 
   @override
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     runCalls += 1;
     return result;
   }

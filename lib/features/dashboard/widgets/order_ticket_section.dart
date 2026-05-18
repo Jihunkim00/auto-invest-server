@@ -261,9 +261,9 @@ class _KrOrderTicket extends StatelessWidget {
         onChanged: controller.kisManualSubmitLoading
             ? null
             : (value) => controller.setKisLiveConfirmation(value == true),
-        title: const Text('Confirm real KIS live order'),
+        title: const Text('I understand this is a real KIS order'),
         subtitle: const Text(
-          'Manual-only lane; scheduler and AI auto trading do not submit KIS orders.',
+          'Manual-only lane; final confirmation is still required before submit.',
         ),
       ),
       const SizedBox(height: 8),
@@ -274,6 +274,11 @@ class _KrOrderTicket extends StatelessWidget {
           onPressed: !controller.canSubmitLiveKisOrder
               ? null
               : () async {
+                  final confirmed = await _confirmSubmitKisOrder(context,
+                      symbol: controller.orderTicketSymbol,
+                      side: controller.orderTicketSide,
+                      qty: controller.parsedOrderTicketQty ?? 0);
+                  if (!confirmed || !context.mounted) return;
                   final result = await controller.submitKisManualOrder();
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1265,4 +1270,65 @@ Future<bool> _confirmCancelKisOrder(BuildContext context) async {
     ),
   );
   return confirmed == true;
+}
+
+Future<bool> _confirmSubmitKisOrder(
+  BuildContext context, {
+  required String symbol,
+  required String side,
+  required int qty,
+}) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Confirm Submit'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'This is a real KIS live order.\n'
+            'Broker account funds may be used.',
+          ),
+          const SizedBox(height: 14),
+          _ConfirmRow(label: 'Symbol', value: symbol),
+          _ConfirmRow(label: 'Side', value: side.toUpperCase()),
+          _ConfirmRow(label: 'Quantity', value: qty.toString()),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Confirm Submit'),
+        ),
+      ],
+    ),
+  );
+  return confirmed == true;
+}
+
+class _ConfirmRow extends StatelessWidget {
+  const _ConfirmRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(children: [
+        SizedBox(
+            width: 86,
+            child: Text(label, style: const TextStyle(color: Colors.white70))),
+        Expanded(
+            child: Text(value,
+                style: const TextStyle(fontWeight: FontWeight.w700))),
+      ]),
+    );
+  }
 }

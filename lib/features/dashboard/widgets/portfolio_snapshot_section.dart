@@ -46,22 +46,6 @@ class PortfolioSnapshotSection extends StatelessWidget {
                   '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending'),
         ]),
         const SizedBox(height: 12),
-        SegmentedButton<PortfolioMarket>(
-          segments: const [
-            ButtonSegment(
-                value: PortfolioMarket.us,
-                label: Text('US / Alpaca'),
-                icon: Icon(Icons.public, size: 16)),
-            ButtonSegment(
-                value: PortfolioMarket.kr,
-                label: Text('KR / KIS'),
-                icon: Icon(Icons.account_balance, size: 16)),
-          ],
-          selected: {selectedMarket},
-          onSelectionChanged: (selection) =>
-              controller.selectPortfolioMarket(selection.first),
-        ),
-        const SizedBox(height: 10),
         Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -70,6 +54,10 @@ class PortfolioSnapshotSection extends StatelessWidget {
               Text(marketTitle,
                   style: const TextStyle(
                       color: Colors.white70, fontWeight: FontWeight.w800)),
+              _SoftBadge(
+                text: isKr ? 'GLOBAL: KIS / KR' : 'GLOBAL: ALPACA / US',
+                color: isKr ? Colors.redAccent : Colors.lightBlueAccent,
+              ),
               if (isKr) ...[
                 const _SoftBadge(
                     text: 'READ-ONLY', color: Colors.lightBlueAccent),

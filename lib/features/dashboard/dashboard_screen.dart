@@ -5,6 +5,7 @@ import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
+import 'widgets/broker_context_controls.dart';
 import 'widgets/portfolio_snapshot_section.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -30,14 +31,25 @@ class DashboardScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text(
-                  'Home',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Home',
+                        style: TextStyle(
+                            fontSize: 28, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    GlobalBrokerSelector(controller: controller),
+                  ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'Safety, portfolio overview, and recent activity at a glance.',
-                  style: TextStyle(color: Colors.white70),
+                Text(
+                  controller.selectedProvider == SelectedProvider.kis
+                      ? 'KIS account, manual live safety, and recent KR activity.'
+                      : 'Alpaca paper portfolio, watchlist status, and recent US activity.',
+                  style: const TextStyle(color: Colors.white70),
                 ),
                 const SizedBox(height: 14),
                 _SafetySummary(controller: controller),
@@ -77,6 +89,7 @@ class _SafetySummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = controller.settings;
     final safety = controller.kisSafetyStatus;
+    final isKis = controller.selectedProvider == SelectedProvider.kis;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -84,7 +97,7 @@ class _SafetySummary extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Safety Summary',
+              isKis ? 'KIS Safety Summary' : 'Alpaca Safety Summary',
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
@@ -97,6 +110,10 @@ class _SafetySummary extends StatelessWidget {
         const SizedBox(height: 12),
         Wrap(spacing: 8, runSpacing: 8, children: [
           _SafetyPill(
+            text: isKis ? 'KIS live manual context' : 'Alpaca paper context',
+            color: isKis ? Colors.redAccent : Colors.lightBlueAccent,
+          ),
+          _SafetyPill(
             text: settings.dryRun ? 'Dry run ON' : 'Dry run OFF',
             color: settings.dryRun ? Colors.lightBlueAccent : Colors.redAccent,
           ),
@@ -104,21 +121,37 @@ class _SafetySummary extends StatelessWidget {
             text: settings.killSwitch ? 'Kill switch ON' : 'Kill switch OFF',
             color: settings.killSwitch ? Colors.redAccent : Colors.greenAccent,
           ),
-          _SafetyPill(
-            text: safety.kisRealOrderEnabled
-                ? 'KIS real orders allowed'
-                : 'KIS real orders disabled',
-            color:
-                safety.kisRealOrderEnabled ? Colors.redAccent : Colors.white70,
-          ),
-          _SafetyPill(
-            text: controller.schedulerStatus.kr.realOrdersAllowed
-                ? 'KR scheduler real orders allowed'
-                : 'KR scheduler real orders disabled',
-            color: controller.schedulerStatus.kr.realOrdersAllowed
-                ? Colors.redAccent
-                : Colors.white70,
-          ),
+          if (isKis) ...[
+            _SafetyPill(
+              text: safety.kisEnabled ? 'KIS enabled' : 'KIS disabled',
+              color: safety.kisEnabled ? Colors.greenAccent : Colors.white70,
+            ),
+            _SafetyPill(
+              text: safety.kisRealOrderEnabled
+                  ? 'KIS real orders allowed'
+                  : 'KIS real orders disabled',
+              color: safety.kisRealOrderEnabled
+                  ? Colors.redAccent
+                  : Colors.white70,
+            ),
+            _SafetyPill(
+              text: safety.marketOpen ? 'KR market open' : 'KR market closed',
+              color: safety.marketOpen ? Colors.greenAccent : Colors.white70,
+            ),
+          ] else ...[
+            _SafetyPill(
+              text: 'Paper trading',
+              color: Colors.greenAccent,
+            ),
+            _SafetyPill(
+              text: controller.schedulerStatus.us.enabledForScheduler
+                  ? 'US scheduler enabled'
+                  : 'US scheduler disabled',
+              color: controller.schedulerStatus.us.enabledForScheduler
+                  ? Colors.greenAccent
+                  : Colors.white70,
+            ),
+          ],
         ]),
       ]),
     );
@@ -278,6 +311,5 @@ String _nextAction(DashboardController controller) {
     return 'Kill switch is ON. Keep trading halted.';
   if (run.finalBestCandidate.isEmpty) return 'Run a watchlist scan.';
   if (!run.finalEntryReady) return 'Review the block reason before any ticket.';
-  return 'Review ${run.finalBestCandidate} in Manual Order before any submit.';
+  return 'Review ${run.finalBestCandidate} in Trading before any submit.';
 }
-

@@ -10,6 +10,7 @@ import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
 import '../../models/kis_limited_auto_sell.dart';
+import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
@@ -554,10 +555,32 @@ class ApiClient {
     return KisBuyShadowDecision.fromJson(payload);
   }
 
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
-    final payload =
-        await _postJsonBody('/kis/limited-auto-buy/run-once', const {});
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
+    final path = gateLevel == null
+        ? '/kis/limited-auto-buy/run-once'
+        : '/kis/limited-auto-buy/run-once?gate_level=$gateLevel';
+    final payload = await _postJsonBody(path, const {});
     return KisLimitedAutoBuy.fromJson(payload);
+  }
+
+  Future<KisSingleSymbolTradingResult> runKisSingleSymbolAnalyzeBuy({
+    required String symbol,
+    int? gateLevel,
+    int? quantity,
+    double? amount,
+    required bool confirmLive,
+  }) async {
+    final body = {
+      'symbol': symbol.trim(),
+      if (gateLevel != null) 'gate_level': gateLevel,
+      if (quantity != null) 'quantity': quantity,
+      if (amount != null) 'amount': amount,
+      'confirm_live': confirmLive,
+      'trigger_source': 'manual_kis_single_symbol',
+      'mode': 'kis_single_symbol_analyze_buy',
+    };
+    final payload = await _postJsonBody('/kis/trading/run-once', body);
+    return KisSingleSymbolTradingResult.fromJson(payload);
   }
 
   Future<KisSchedulerLiveResult> runKisSchedulerLiveOnce() async {
@@ -848,6 +871,23 @@ class ApiClient {
           .toList();
     } on http.ClientException {
       return mockSignalLogs;
+    } on FormatException catch (e) {
+      throw ApiRequestException('Invalid backend signals response: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchRecentSignalPayloads({
+    int limit = 20,
+  }) async {
+    try {
+      final j = await _getJson('/signals/recent?limit=$limit');
+      final items = j['items'] as List<dynamic>? ?? [];
+      return items
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    } on http.ClientException {
+      return const [];
     } on FormatException catch (e) {
       throw ApiRequestException('Invalid backend signals response: $e');
     }

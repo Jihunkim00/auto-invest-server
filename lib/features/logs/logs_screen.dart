@@ -8,6 +8,7 @@ import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../dashboard/widgets/broker_context_controls.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.controller});
@@ -89,12 +90,21 @@ class _LogsScreenState extends State<LogsScreen> {
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),
+                BrokerContextBadge(controller: widget.controller),
+                const SizedBox(width: 8),
                 IconButton(
                   tooltip: 'Refresh logs',
                   onPressed: _loading ? null : _loadLogs,
                   icon: const Icon(Icons.refresh),
                 ),
               ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              widget.controller.selectedProvider == SelectedProvider.kis
+                  ? 'Showing KIS / KR activity first.'
+                  : 'Showing Alpaca / US activity first.',
+              style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 12),
             _SummaryStrip(summary: _summary),
@@ -153,8 +163,11 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   List<Widget> _sectionWidgets() {
+    final runs = _filteredRuns();
+    final orders = _filteredOrders();
+    final signals = _filteredSignals();
     if (_section == 0) {
-      if (_runs.isEmpty) {
+      if (runs.isEmpty) {
         return const [
           _StatePanel(
             icon: Icons.receipt_long_outlined,
@@ -163,11 +176,11 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
         ];
       }
-      return _runs.map((run) => _RunHistoryCard(run: run)).toList();
+      return runs.map((run) => _RunHistoryCard(run: run)).toList();
     }
 
     if (_section == 1) {
-      if (_orders.isEmpty) {
+      if (orders.isEmpty) {
         return const [
           _StatePanel(
             icon: Icons.inventory_2_outlined,
@@ -177,10 +190,10 @@ class _LogsScreenState extends State<LogsScreen> {
           ),
         ];
       }
-      return _orders.map((order) => _OrderHistoryCard(order: order)).toList();
+      return orders.map((order) => _OrderHistoryCard(order: order)).toList();
     }
 
-    if (_signals.isEmpty) {
+    if (signals.isEmpty) {
       return const [
         _StatePanel(
           icon: Icons.query_stats_outlined,
@@ -189,9 +202,33 @@ class _LogsScreenState extends State<LogsScreen> {
         ),
       ];
     }
-    return _signals
-        .map((signal) => _SignalHistoryCard(signal: signal))
-        .toList();
+    return signals.map((signal) => _SignalHistoryCard(signal: signal)).toList();
+  }
+
+  List<TradingLogItem> _filteredRuns() {
+    final isKis = widget.controller.selectedProvider == SelectedProvider.kis;
+    final items = [..._runs];
+    items.sort((a, b) => _selectedFirst(a.isKis == isKis, b.isKis == isKis));
+    return items;
+  }
+
+  List<OrderLogItem> _filteredOrders() {
+    final isKis = widget.controller.selectedProvider == SelectedProvider.kis;
+    final items = [..._orders];
+    items.sort((a, b) => _selectedFirst(a.isKis == isKis, b.isKis == isKis));
+    return items;
+  }
+
+  List<SignalLogItem> _filteredSignals() {
+    final isKis = widget.controller.selectedProvider == SelectedProvider.kis;
+    final items = [..._signals];
+    items.sort((a, b) => _selectedFirst(a.isKis == isKis, b.isKis == isKis));
+    return items;
+  }
+
+  int _selectedFirst(bool aSelected, bool bSelected) {
+    if (aSelected == bSelected) return 0;
+    return aSelected ? -1 : 1;
   }
 }
 

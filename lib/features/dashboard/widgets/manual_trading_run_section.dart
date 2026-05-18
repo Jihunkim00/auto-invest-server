@@ -36,11 +36,8 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
     'ARM',
     'SHOP',
   ];
-  static const _fallbackKrSymbols = <String>['005930', '000660', '035420'];
 
   late final TextEditingController _symbolController;
-  PortfolioMarket _market = PortfolioMarket.us;
-  String? _lastPreparedKisSymbol;
 
   @override
   void initState() {
@@ -58,38 +55,27 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final symbol = _normalizedSymbol;
-    final symbols = _symbolsForMarket(controller);
+    final symbols = _usSymbols;
     final dropdownValue = symbols.contains(symbol) ? symbol : null;
-    final isKis = _market == PortfolioMarket.kr;
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.play_circle_outline, size: 20),
           const SizedBox(width: 8),
-          Text('Single Symbol Trading',
-              style: Theme.of(context).textTheme.titleMedium),
+          Expanded(
+            child: Text('Alpaca Analyze & Paper Buy',
+                style: Theme.of(context).textTheme.titleMedium),
+          ),
+          const _SafetyBadge(text: 'ALPACA PAPER'),
         ]),
         const SizedBox(height: 12),
-        SegmentedButton<PortfolioMarket>(
-          segments: const [
-            ButtonSegment(
-              value: PortfolioMarket.us,
-              label: Text('Alpaca Paper / US'),
-              icon: Icon(Icons.public, size: 16),
-            ),
-            ButtonSegment(
-              value: PortfolioMarket.kr,
-              label: Text('KIS / KR'),
-              icon: Icon(Icons.account_balance, size: 16),
-            ),
-          ],
-          selected: {_market},
-          onSelectionChanged: (selection) =>
-              _setMarket(selection.first, controller),
-        ),
-        const SizedBox(height: 10),
-        _ModeHelp(isKis: isKis),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SafetyBadge(text: 'Paper trading only'),
+          _SafetyBadge(text: 'Uses existing risk engine'),
+          _SafetyBadge(text: 'HOLD is normal'),
+          _SafetyBadge(text: 'No KIS live order here'),
+        ]),
         const SizedBox(height: 12),
         LayoutBuilder(builder: (context, constraints) {
           final vertical = constraints.maxWidth < 520;
@@ -146,58 +132,30 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
               controller.setSelectedGateLevel(selection.first),
         ),
         const SizedBox(height: 12),
-        isKis
-            ? FilledButton.icon(
-                onPressed: symbol.isEmpty
-                    ? null
-                    : () {
-                        final result =
-                            controller.prepareKisManualBuyTicketFromSymbol(
-                          symbol,
-                          gateLevel: controller.selectedGateLevel,
-                        );
-                        if (result.success) {
-                          setState(() => _lastPreparedKisSymbol = symbol);
-                          widget.onOpenManualOrder?.call();
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(result.message),
-                          backgroundColor:
-                              result.success ? Colors.green : Colors.redAccent,
-                        ));
-                      },
-                icon: const Icon(Icons.input),
-                label: const Text('Prepare Buy Ticket'),
-              )
-            : FilledButton.icon(
-                onPressed: controller.manualRunLoading || symbol.isEmpty
-                    ? null
-                    : () async {
-                        final confirmed = await _showConfirmDialog(
-                            context, symbol, controller.selectedGateLevel);
-                        if (!confirmed || !context.mounted) return;
-
-                        final result = await controller.runTradingOnce(
-                            symbol: symbol,
-                            gateLevel: controller.selectedGateLevel);
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(result.message),
-                          backgroundColor:
-                              result.success ? Colors.green : Colors.redAccent,
-                        ));
-                      },
-                icon: controller.manualRunLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2.0))
-                    : const Icon(Icons.play_arrow),
-                label: Text(controller.manualRunLoading
-                    ? 'Running single symbol...'
-                    : 'Run Single Symbol'),
-              ),
-        if (!isKis && controller.manualRunLoading) ...[
+        FilledButton.icon(
+          onPressed: controller.manualRunLoading || symbol.isEmpty
+              ? null
+              : () async {
+                  final result = await controller.runTradingOnce(
+                      symbol: symbol, gateLevel: controller.selectedGateLevel);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(result.message),
+                    backgroundColor:
+                        result.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.manualRunLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2.0))
+              : const Icon(Icons.play_arrow),
+          label: Text(controller.manualRunLoading
+              ? 'Analyzing...'
+              : 'Analyze & Paper Buy'),
+        ),
+        if (controller.manualRunLoading) ...[
           const SizedBox(height: 10),
           Row(children: [
             const SizedBox(
@@ -210,19 +168,9 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
                     'Running trading check for ${controller.manualRunSymbol ?? symbol}...')),
           ]),
         ],
-        if (!isKis && controller.manualRunResult != null) ...[
+        if (controller.manualRunResult != null) ...[
           const SizedBox(height: 12),
-          _ManualRunResultPanel(result: controller.manualRunResult!),
-        ],
-        if (isKis &&
-            _lastPreparedKisSymbol != null &&
-            controller.orderTicketSourceMetadata?['source'] ==
-                'single_symbol_trading') ...[
-          const SizedBox(height: 12),
-          _KisPreparedTicketPanel(
-            symbol: _lastPreparedKisSymbol!,
-            gateLevel: controller.selectedGateLevel,
-          ),
+          ManualTradingRunResultPanel(result: controller.manualRunResult!),
         ],
       ]),
     );
@@ -230,145 +178,16 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
 
   String get _normalizedSymbol => _symbolController.text.trim().toUpperCase();
 
-  List<String> _symbolsForMarket(DashboardController controller) {
-    if (_market == PortfolioMarket.us) return _usSymbols;
-    final symbols = controller.krWatchlist.symbols
-        .map((item) => item.symbol.trim().toUpperCase())
-        .where((symbol) => symbol.isNotEmpty)
-        .toList();
-    if (symbols.isEmpty) return _fallbackKrSymbols;
-    for (final symbol in _fallbackKrSymbols) {
-      if (!symbols.contains(symbol)) symbols.add(symbol);
-    }
-    return symbols;
-  }
-
-  void _setMarket(PortfolioMarket market, DashboardController controller) {
-    if (_market == market) return;
-    setState(() {
-      _market = market;
-      final nextSymbol = _symbolsForMarket(controller).first;
-      _symbolController.value = TextEditingValue(
-        text: nextSymbol,
-        selection: TextSelection.collapsed(offset: nextSymbol.length),
-      );
-    });
-  }
-
-  Future<bool> _showConfirmDialog(
-      BuildContext context, String symbol, int gateLevel) async {
-    final settings = widget.controller.settings;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Confirm Manual Trading Run'),
-          content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'This will run trading logic for one selected symbol only.\n'
-                  'The risk engine will still decide whether an order is allowed.\n'
-                  'No order is guaranteed.\n'
-                  'Continue?',
-                ),
-                const SizedBox(height: 14),
-                _ConfirmRow(label: 'symbol', value: symbol),
-                _ConfirmRow(label: 'gate_level', value: gateLevel.toString()),
-                _ConfirmRow(label: 'broker mode', value: settings.brokerMode),
-                _ConfirmRow(
-                    label: 'dry_run', value: settings.dryRun.toString()),
-                _ConfirmRow(
-                    label: 'kill_switch',
-                    value: settings.killSwitch.toString()),
-                if (settings.dryRun || settings.killSwitch) ...[
-                  const SizedBox(height: 10),
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    if (settings.dryRun)
-                      const _SafetyBadge(
-                          text: 'Dry Run - broker order will be blocked.'),
-                    if (settings.killSwitch)
-                      const _SafetyBadge(
-                          text: 'Kill Switch Active - order blocked.',
-                          alert: true),
-                  ]),
-                ],
-              ]),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel')),
-            FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Continue')),
-          ],
-        );
-      },
-    );
-    return confirmed == true;
-  }
-}
-
-class _ModeHelp extends StatelessWidget {
-  const _ModeHelp({required this.isKis});
-
-  final bool isKis;
-
-  @override
-  Widget build(BuildContext context) {
-    final labels = isKis
-        ? const [
-            'Manual Order only',
-            'No KIS live submit here',
-            'confirm_live remains unchecked',
-          ]
-        : const [
-            'Uses existing risk engine',
-            'Paper order may be created if risk-approved',
-            'HOLD is normal',
-          ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final label in labels) _SafetyBadge(text: label),
-      ],
-    );
-  }
-}
-
-class _ConfirmRow extends StatelessWidget {
-  const _ConfirmRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(children: [
-        SizedBox(
-            width: 92,
-            child: Text(label, style: const TextStyle(color: Colors.white70))),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(fontWeight: FontWeight.w700))),
-      ]),
-    );
-  }
 }
 
 class _SafetyBadge extends StatelessWidget {
-  const _SafetyBadge({required this.text, this.alert = false});
+  const _SafetyBadge({required this.text});
 
   final String text;
-  final bool alert;
 
   @override
   Widget build(BuildContext context) {
-    final color = alert ? Colors.redAccent : Colors.orangeAccent;
+    const color = Colors.orangeAccent;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
@@ -383,8 +202,8 @@ class _SafetyBadge extends StatelessWidget {
   }
 }
 
-class _ManualRunResultPanel extends StatelessWidget {
-  const _ManualRunResultPanel({required this.result});
+class ManualTradingRunResultPanel extends StatelessWidget {
+  const ManualTradingRunResultPanel({super.key, required this.result});
 
   final ManualTradingRunResult result;
 
@@ -399,7 +218,7 @@ class _ManualRunResultPanel extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Result Summary',
+        const Text('Decision Summary',
             style: TextStyle(fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         _DecisionSummary(result: result),
@@ -412,7 +231,7 @@ class _ManualRunResultPanel extends StatelessWidget {
           child: _ScoreBreakdown(result: result),
         ),
         _ResultExpansion(
-          title: 'Advanced Details',
+          title: 'Run Details',
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _ReasonDetails(result: result),
@@ -434,6 +253,11 @@ class _ManualRunResultPanel extends StatelessWidget {
               const SizedBox(height: 6),
               _IndicatorDetails(result: result),
             ],
+            const SizedBox(height: 10),
+            _ResultExpansion(
+              title: 'Developer Raw Payload',
+              child: _DeveloperRawPayload(result: result),
+            ),
           ]),
         ),
       ]),
@@ -465,19 +289,19 @@ class _DecisionSummary extends StatelessWidget {
         ),
       ]),
       const SizedBox(height: 10),
-      _ResultRow('symbol', result.symbol),
-      _ResultRow('action', result.action.toLowerCase()),
-      _ResultRow('signal status', result.displayStatus),
-      _ResultRow('approved_by_risk',
-          (result.approvedByRisk ?? result.riskApproved ?? false).toString()),
-      _ResultRow('order', result.displayOrderId),
-      _ResultRow('gate', result.gateLabel),
-      if (result.createdAt != null) _ResultRow('created_at', result.createdAt!),
-      if (result.signalId != null) _ResultRow('signal_id', result.signalId!),
+      _ResultRow('Symbol', result.symbol),
+      _ResultRow('Decision', result.action.toUpperCase()),
+      _ResultRow('Result', result.displayStatus),
+      _ResultRow('Risk approved',
+          (result.approvedByRisk ?? result.riskApproved ?? false) ? 'Yes' : 'No'),
+      _ResultRow('Order', result.displayOrderId),
+      _ResultRow('Gate', result.gateLabel),
+      if (result.createdAt != null) _ResultRow('Created at', result.createdAt!),
+      if (result.signalId != null) _ResultRow('Signal ID', result.signalId!),
       if (result.brokerStatus != null)
-        _ResultRow('broker_status', result.brokerStatus!),
+        _ResultRow('Broker status', result.brokerStatus!),
       if (result.internalStatus != null)
-        _ResultRow('internal_status', result.internalStatus!),
+        _ResultRow('Internal status', result.internalStatus!),
     ]);
   }
 
@@ -557,11 +381,15 @@ class _WhyNoTradeSection extends StatelessWidget {
           ),
         if (result.gatingNotes.isNotEmpty) ...[
           const SizedBox(height: 6),
-          _ChipList(label: 'Gating notes', items: result.gatingNotes),
+          _ChipList(
+              label: 'Gating notes',
+              items: result.gatingNotes.map(_translateReason).toList()),
         ],
         if (result.riskFlags.isNotEmpty) ...[
           const SizedBox(height: 6),
-          _ChipList(label: 'Risk flags', items: result.riskFlags),
+          _ChipList(
+              label: 'Risk flags',
+              items: result.riskFlags.map(_translateReason).toList()),
         ],
       ]),
     );
@@ -576,73 +404,62 @@ class _ScoreBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = <_MetricValue>[
-      _MetricValue('Quant Score', result.quantBuyScore ?? result.buyScore),
-      _MetricValue('AI Score', result.aiBuyScore),
-      _MetricValue('Final Score', result.finalBuyScore ?? result.buyScore),
-      _MetricValue('Buy Score', result.buyScore),
-      _MetricValue('Sell Score', result.sellScore),
-      _MetricValue('Final Buy', result.finalBuyScore),
-      _MetricValue('Final Sell', result.finalSellScore),
-      _MetricValue('Quant Buy', result.quantBuyScore),
-      _MetricValue('Quant Sell', result.quantSellScore),
-      _MetricValue('AI Buy', result.aiBuyScore),
-      _MetricValue('AI Sell', result.aiSellScore),
-      _MetricValue('Confidence', result.confidence),
-      _MetricValue('Regime Conf.', result.regimeConfidence),
-    ];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: metrics
-          .map((metric) => _MiniMetricCard(
-              label: metric.label, value: _formatNullable(metric.value)))
-          .toList(),
-    );
-  }
-}
-
-class _KisPreparedTicketPanel extends StatelessWidget {
-  const _KisPreparedTicketPanel({
-    required this.symbol,
-    required this.gateLevel,
-  });
-
-  final String symbol;
-  final int gateLevel;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.20),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      _MetricValue('Buy Score', _formatNullable(result.buyScore)),
+      _MetricValue('Sell Score', _formatNullable(result.sellScore)),
+      _MetricValue('Final Buy', _formatNullable(result.finalBuyScore)),
+      _MetricValue('Final Sell', _formatNullable(result.finalSellScore)),
+      _MetricValue('Confidence', _formatNullable(result.confidence)),
+      _MetricValue('AI Buy', _formatNullable(result.aiBuyScore)),
+      _MetricValue('AI Sell', _formatNullable(result.aiSellScore)),
+      _MetricValue(
+        'GPT Numeric Buy',
+        _formatGptNumericScore(result.gptContext.gptBuyScore),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Result Summary',
-            style: TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 10),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _DecisionBadge(text: 'BUY TICKET', color: Colors.lightBlueAccent),
-          _DecisionBadge(text: 'MANUAL REVIEW', color: Colors.amberAccent),
-          _DecisionBadge(text: 'NO SUBMIT', color: Colors.greenAccent),
-        ]),
-        const SizedBox(height: 10),
-        _ResultRow('symbol', symbol),
-        const _ResultRow('action', 'buy'),
-        const _ResultRow('signal status', 'manual_review'),
-        const _ResultRow('approved_by_risk', 'false'),
-        const _ResultRow('order', 'No order created'),
-        _ResultRow('gate', 'Gate $gateLevel'),
+      _MetricValue(
+        'GPT Numeric Sell',
+        _formatGptNumericScore(result.gptContext.gptSellScore),
+      ),
+      _MetricValue('Action', result.action.toUpperCase()),
+      _MetricValue('Reason', _textOrDash(_translateReason(result.reason))),
+      _MetricValue('Hard block', result.hardBlocked ? 'Yes' : 'No'),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (result.scoreDetailsNotReturned) ...[
+        const Text('Score details not returned in run response',
+            style: TextStyle(
+                color: Colors.orangeAccent, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        const Text(
-          'KIS live submit is only available from Manual Order after validation and an explicit confirm_live check.',
-          style: TextStyle(color: Colors.white70),
-        ),
-      ]),
-    );
+      ],
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: metrics
+            .map((metric) =>
+                _MiniMetricCard(label: metric.label, value: metric.value))
+            .toList(),
+      ),
+      if (result.hardBlockReason != null) ...[
+        const SizedBox(height: 8),
+        _ResultRow(
+            'Hard block reason', _translateReason(result.hardBlockReason!)),
+      ],
+      if (result.gptContext.reason?.isNotEmpty == true) ...[
+        const SizedBox(height: 8),
+        _ResultRow('GPT Advisory Reason', result.gptContext.reason!),
+      ],
+      if (result.riskFlags.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _ChipList(
+            label: 'Risk flags',
+            items: result.riskFlags.map(_translateReason).toList()),
+      ],
+      if (result.gatingNotes.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _ChipList(
+            label: 'Gating notes',
+            items: result.gatingNotes.map(_translateReason).toList()),
+      ],
+    ]);
   }
 }
 
@@ -654,12 +471,14 @@ class _ReasonDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _ResultRow('reason', result.reason.isEmpty ? 'none' : result.reason),
-      _ResultRow('quant_reason', result.quantReason ?? 'none'),
-      _ResultRow('ai_reason', result.aiReason ?? 'none'),
-      if (result.runReason != null) _ResultRow('run.reason', result.runReason!),
+      _ResultRow('Main reason',
+          result.reason.isEmpty ? 'No reason returned' : _translateReason(result.reason)),
+      _ResultRow('Quant reason', result.quantReason ?? 'No quant reason returned'),
+      _ResultRow('AI reason', result.aiReason ?? 'No AI reason returned'),
+      if (result.runReason != null)
+        _ResultRow('Run reason', _translateReason(result.runReason!)),
       if (result.hardBlockReason != null)
-        _ResultRow('hard_block', result.hardBlockReason!),
+        _ResultRow('Hard block', _translateReason(result.hardBlockReason!)),
     ]);
   }
 }
@@ -673,7 +492,10 @@ class _IndicatorDetails extends StatelessWidget {
   Widget build(BuildContext context) {
     final indicators = result.indicatorPayload;
     if (indicators.isEmpty && result.rawIndicatorPayload != null) {
-      return SelectableText(result.rawIndicatorPayload!);
+      return const Text(
+        'Indicator payload returned only as raw data. Open Developer Raw Payload for the raw value.',
+        style: TextStyle(color: Colors.white70),
+      );
     }
 
     final rows = <_ResultRow>[
@@ -704,6 +526,29 @@ class _IndicatorDetails extends StatelessWidget {
     if (percent)
       return _ResultRow(key, '${(numericValue * 100).toStringAsFixed(2)}%');
     return _ResultRow(key, numericValue.toStringAsFixed(decimals));
+  }
+}
+
+class _DeveloperRawPayload extends StatelessWidget {
+  const _DeveloperRawPayload({required this.result});
+
+  final ManualTradingRunResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return SelectableText(
+      'symbol=${result.symbol}\n'
+      'gate_level=${result.gateLevel}\n'
+      'action=${result.action}\n'
+      'result=${result.result}\n'
+      'signal_status=${result.signalStatus}\n'
+      'risk_flags=${result.riskFlags}\n'
+      'gating_notes=${result.gatingNotes}\n'
+      'indicator_payload=${result.indicatorPayload}\n'
+      'raw_indicator_payload=${result.rawIndicatorPayload}\n'
+      'gpt_context=${result.gptContext}',
+      style: const TextStyle(color: Colors.white60),
+    );
   }
 }
 
@@ -819,7 +664,7 @@ class _MetricValue {
   const _MetricValue(this.label, this.value);
 
   final String label;
-  final double? value;
+  final String value;
 }
 
 class _ResultRow extends StatelessWidget {
@@ -843,6 +688,34 @@ class _ResultRow extends StatelessWidget {
 }
 
 String _formatNullable(double? value) {
-  if (value == null) return 'n/a';
+  if (value == null) return '--';
   return value.toStringAsFixed(2);
+}
+
+String _formatGptNumericScore(double? value) {
+  if (value == null) return 'No numeric GPT score returned';
+  return _formatNullable(value);
+}
+
+String _textOrDash(String value) {
+  final text = value.trim();
+  return text.isEmpty || text == 'null' ? '--' : text;
+}
+
+String _translateReason(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'score_threshold_not_met') {
+    return 'Score below entry threshold';
+  }
+  if (normalized == 'hard_blocked') return 'Entry blocked by risk context';
+  if (normalized == 'gpt_hard_block_new_buy') {
+    return 'GPT/risk context blocks new buy entries';
+  }
+  if (normalized == 'market_closed') return 'Market is closed';
+  if (normalized == 'dry_run') return 'Dry-run mode';
+  if (normalized == 'kill_switch_enabled') return 'Kill switch is ON';
+  if (normalized == 'buy_entry_not_allowed_now') {
+    return 'New buy entries are not allowed now';
+  }
+  return value;
 }

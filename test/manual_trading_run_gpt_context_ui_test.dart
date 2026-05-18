@@ -48,9 +48,16 @@ void main() {
       ),
     ));
 
-    expect(find.text('Advanced Details'), findsOneWidget);
-    await tester.ensureVisible(find.text('Advanced Details'));
-    await tester.tap(find.text('Advanced Details'));
+    expect(find.text('Score Breakdown'), findsOneWidget);
+    expect(find.text('GPT NUMERIC BUY'), findsOneWidget);
+    expect(find.text('58.00'), findsOneWidget);
+    expect(find.text('GPT NUMERIC SELL'), findsOneWidget);
+    expect(find.text('54.00'), findsOneWidget);
+    expect(find.text('GPT Advisory Reason'), findsOneWidget);
+    expect(find.text('GPT Risk Context'), findsNothing);
+    expect(find.text('Run Details'), findsOneWidget);
+    await tester.ensureVisible(find.text('Run Details'));
+    await tester.tap(find.text('Run Details'));
     await tester.pumpAndSettle();
 
     expect(find.text('GPT Risk Context'), findsOneWidget);
@@ -60,6 +67,6 @@ void main() {
     expect(find.text('Market Risk'), findsOneWidget);
     expect(find.text('risk_off'), findsOneWidget);
     expect(find.text('New Buy Blocked'), findsOneWidget);
-    expect(find.text('External risk is elevated.'), findsOneWidget);
+    expect(find.text('External risk is elevated.'), findsWidgets);
   });
 }

@@ -6,7 +6,6 @@ import 'features/analysis/analysis_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/dashboard/manual_order_screen.dart';
-import 'features/dashboard/portfolio_screen.dart';
 import 'features/dashboard/test_lab_screen.dart';
 import 'features/dashboard/watchlist_screen.dart';
 import 'features/logs/logs_screen.dart';
@@ -51,26 +50,18 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
           children: [
             DashboardScreen(
               controller: _controller,
-              onOpenManualOrder: () => _selectTab(2),
-              onReviewPosition: () => _selectTab(3),
+              onOpenManualOrder: () => _selectTab(3),
+              onReviewPosition: () => _selectTab(2),
             ),
             WatchlistScreen(
               controller: _controller,
-              onOpenManualOrder: () => _selectTab(2),
+              onOpenManualOrder: () => _selectTab(3),
             ),
-            ManualOrderScreen(controller: _controller),
-            AnalysisScreen(
-              controller: _controller,
-              onOpenManualOrder: () => _selectTab(2),
-            ),
+            AnalysisScreen(controller: _controller),
+            TradingScreen(controller: _controller),
             LogsScreen(controller: _controller),
             SettingsScreen(controller: _controller),
             TestLabScreen(controller: _controller),
-            PortfolioScreen(
-              controller: _controller,
-              onOpenManualOrder: () => _selectTab(2),
-              onOpenAnalysis: () => _selectTab(3),
-            ),
           ],
         ),
         bottomNavigationBar: NavigationBar(
@@ -86,13 +77,13 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                 selectedIcon: Icon(Icons.manage_search),
                 label: 'Watchlist'),
             NavigationDestination(
-                icon: Icon(Icons.request_quote_outlined),
-                selectedIcon: Icon(Icons.request_quote),
-                label: 'Manual'),
-            NavigationDestination(
                 icon: Icon(Icons.analytics_outlined),
                 selectedIcon: Icon(Icons.analytics),
                 label: 'Analysis'),
+            NavigationDestination(
+                icon: Icon(Icons.swap_horiz_outlined),
+                selectedIcon: Icon(Icons.swap_horiz),
+                label: 'Trading'),
             NavigationDestination(
                 icon: Icon(Icons.receipt_long_outlined),
                 selectedIcon: Icon(Icons.receipt_long),

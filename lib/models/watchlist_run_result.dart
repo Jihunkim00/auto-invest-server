@@ -60,117 +60,196 @@ class WatchlistRunResult {
   final String triggerSource;
 
   factory WatchlistRunResult.fromJson(Map<String, dynamic> json) {
-    final run = json['run'] as Map<String, dynamic>?;
-    final tradeResult = json['trade_result'] as Map<String, dynamic>?;
-
-    String stringifySymbolField(Object? value) {
-      if (value is Map<String, dynamic>) {
-        return value['symbol']?.toString() ?? '';
-      }
-      return value?.toString() ?? '';
-    }
-
-    List<String> parseCandidateSymbolList(Object? raw) {
-      if (raw is List) {
-        return raw
-            .map((item) {
-              if (item is Map<String, dynamic>) {
-                return item['symbol']?.toString() ?? '';
-              }
-              return item?.toString() ?? '';
-            })
-            .where((item) => item.isNotEmpty)
-            .toList();
-      }
-      return <String>[];
-    }
+    final run = parseMap(json['run']);
+    final tradeResult = parseMap(json['trade_result']);
 
     List<Candidate> parseCandidates(Object? raw,
         {String scoreKey = 'score', String noteKey = 'note'}) {
       if (raw is List) {
         return raw
-            .whereType<Map<String, dynamic>>()
             .map((item) =>
-                Candidate.fromJson(item, scoreKey: scoreKey, noteKey: noteKey))
+                parseCandidate(item, scoreKey: scoreKey, noteKey: noteKey))
+            .whereType<Candidate>()
             .toList();
       }
-      return <Candidate>[];
+      final single = parseCandidate(raw, scoreKey: scoreKey, noteKey: noteKey);
+      return single == null ? <Candidate>[] : <Candidate>[single];
     }
 
-    double? parseNullableDouble(Object? raw) {
-      if (raw == null) return null;
-      if (raw is num) return raw.toDouble();
-      final text = raw.toString().trim();
-      if (text.isEmpty) return null;
-      return double.tryParse(text);
+    String stringifySymbolField(Object? value) {
+      final parsed = parseCandidates(value,
+          scoreKey: 'final_entry_score', noteKey: 'reason');
+      if (parsed.isNotEmpty && parsed.first.symbol.isNotEmpty) {
+        return parsed.first.symbol;
+      }
+      return parseNullableString(value) ?? '';
     }
 
-    int parseInt(Object? raw, {int fallback = 0}) {
-      if (raw is num) return raw.toInt();
-      return int.tryParse(raw?.toString() ?? '') ?? fallback;
+    List<String> parseCandidateSymbolList(Object? raw) {
+      if (raw is List) {
+        return raw
+            .map(stringifySymbolField)
+            .where((item) => item.isNotEmpty)
+            .toList();
+      }
+      final symbol = stringifySymbolField(raw);
+      return symbol.isEmpty ? <String>[] : <String>[symbol];
     }
 
-    int? parseNullableInt(Object? raw) {
-      if (raw == null) return null;
-      if (raw is num) return raw.toInt();
-      final text = raw.toString().trim();
-      if (text.isEmpty) return null;
-      return int.tryParse(text);
-    }
+    final finalBestCandidates = parseCandidates(json['final_best_candidate'],
+        scoreKey: 'final_entry_score', noteKey: 'reason');
+    final finalBestCandidate =
+        finalBestCandidates.isEmpty ? null : finalBestCandidates.first;
+    final finalRankedCandidates = parseCandidates(
+        json['final_ranked_candidates'] ?? json['candidates'],
+        scoreKey: 'final_entry_score',
+        noteKey: 'reason');
+    final effectiveFinalRankedCandidates = finalRankedCandidates.isNotEmpty
+        ? finalRankedCandidates
+        : finalBestCandidates;
+    final effectiveBestCandidate = finalBestCandidate ??
+        (effectiveFinalRankedCandidates.isEmpty
+            ? null
+            : effectiveFinalRankedCandidates.first);
+    final researchedCandidates = parseCandidates(json['researched_candidates'],
+        scoreKey: 'final_entry_score', noteKey: 'reason');
 
     return WatchlistRunResult(
       configuredSymbolCount: parseInt(json['configured_symbol_count']),
       analyzedSymbolCount: parseInt(json['analyzed_symbol_count']),
       quantCandidatesCount: parseInt(json['quant_candidates_count']),
       researchedCandidatesCount: parseInt(json['researched_candidates_count']),
-      finalBestCandidate: stringifySymbolField(json['final_best_candidate']),
+      finalBestCandidate: _firstText([
+        effectiveBestCandidate?.symbol,
+        stringifySymbolField(json['final_best_candidate']),
+      ]),
       secondFinalCandidate:
           stringifySymbolField(json['second_final_candidate']),
       tiedFinalCandidates:
           parseCandidateSymbolList(json['tied_final_candidates']),
       nearTiedCandidates:
           parseCandidateSymbolList(json['near_tied_candidates']),
-      tieBreakerApplied: json['tie_breaker_applied'] == true,
+      tieBreakerApplied:
+          parseNullableBool(json['tie_breaker_applied']) ?? false,
       finalCandidateSelectionReason:
-          json['final_candidate_selection_reason']?.toString() ?? '',
-      bestScore: parseNullableDouble(json['best_score']),
+          parseNullableString(json['final_candidate_selection_reason']) ?? '',
+      bestScore: parseNullableDouble(json['best_score']) ??
+          effectiveBestCandidate?.entryScore ??
+          effectiveBestCandidate?.finalEntryScore,
       finalScoreGap: parseNullableDouble(json['final_score_gap']),
       minEntryScore: parseNullableInt(json['min_entry_score']),
       minScoreGap: parseNullableInt(json['min_score_gap']),
-      shouldTrade: json['should_trade'] == true,
-      triggeredSymbol: json['triggered_symbol']?.toString(),
-      triggerBlockReason: json['trigger_block_reason']?.toString() ?? '',
-      finalEntryReady: json['final_entry_ready'] == true ||
-          (json['final_best_candidate']
-                  as Map<String, dynamic>?)?['entry_ready'] ==
-              true,
-      finalActionHint: (json['final_best_candidate']
-                  as Map<String, dynamic>?)?['action_hint']
-              ?.toString() ??
-          json['final_action_hint']?.toString() ??
-          'watch',
-      action: tradeResult?['action']?.toString() ??
-          json['action']?.toString() ??
+      shouldTrade: parseNullableBool(json['should_trade']) ?? false,
+      triggeredSymbol: parseNullableString(json['triggered_symbol']),
+      triggerBlockReason: parseNullableString(json['trigger_block_reason']) ??
+          effectiveBestCandidate?.blockReason ??
           '',
-      orderId:
-          tradeResult?['order_id']?.toString() ?? json['order_id']?.toString(),
+      finalEntryReady: parseNullableBool(json['final_entry_ready']) == true ||
+          effectiveBestCandidate?.entryReady == true,
+      finalActionHint: effectiveBestCandidate?.actionHint ??
+          parseNullableString(json['final_action_hint']) ??
+          'watch',
+      action: parseNullableString(tradeResult?['action']) ??
+          parseNullableString(json['action']) ??
+          '',
+      orderId: parseNullableString(tradeResult?['order_id']) ??
+          parseNullableString(json['order_id']) ??
+          effectiveBestCandidate?.orderId ??
+          effectiveBestCandidate?.relatedOrderId,
       topQuantCandidates: parseCandidates(json['top_quant_candidates'],
           scoreKey: 'quant_score', noteKey: 'quant_reason'),
-      researchedCandidates: parseCandidates(json['researched_candidates'],
-          scoreKey: 'final_entry_score', noteKey: 'reason'),
-      finalRankedCandidates: parseCandidates(json['final_ranked_candidates'],
-          scoreKey: 'final_entry_score', noteKey: 'reason'),
-      result: run?['result']?.toString() ??
-          tradeResult?['action']?.toString() ??
-          json['result']?.toString() ??
-          '',
-      reason: run?['reason']?.toString() ??
-          tradeResult?['reason']?.toString() ??
-          json['reason']?.toString() ??
-          '',
-      triggerSource: run?['trigger_source']?.toString() ??
-          json['trigger_source']?.toString() ??
+      researchedCandidates: researchedCandidates,
+      finalRankedCandidates: effectiveFinalRankedCandidates,
+      result: _firstText([
+        parseNullableString(run?['result']),
+        parseNullableString(tradeResult?['result']),
+        parseNullableString(tradeResult?['status']),
+        parseNullableString(tradeResult?['action']),
+        parseNullableString(json['result']),
+        parseNullableString(json['status']),
+        effectiveBestCandidate?.result,
+        effectiveBestCandidate?.status,
+      ]),
+      reason: _firstText([
+        parseNullableString(run?['reason']),
+        parseNullableString(tradeResult?['reason']),
+        parseNullableString(json['reason']),
+        effectiveBestCandidate?.noOrderReason,
+        effectiveBestCandidate?.skipReason,
+        effectiveBestCandidate?.blockReason,
+        effectiveBestCandidate?.reason,
+      ]),
+      triggerSource: parseNullableString(run?['trigger_source']) ??
+          parseNullableString(json['trigger_source']) ??
           'manual',
     );
   }
+}
+
+Map<String, dynamic>? parseMap(Object? raw) {
+  if (raw is Map<String, dynamic>) return raw;
+  if (raw is Map) return Map<String, dynamic>.from(raw);
+  return null;
+}
+
+Candidate? parseCandidate(Object? raw,
+    {String scoreKey = 'score', String noteKey = 'note'}) {
+  if (raw is List) {
+    for (final item in raw) {
+      final candidate =
+          parseCandidate(item, scoreKey: scoreKey, noteKey: noteKey);
+      if (candidate != null) return candidate;
+    }
+    return null;
+  }
+  final map = parseMap(raw);
+  if (map == null) return null;
+  return Candidate.fromJson(map, scoreKey: scoreKey, noteKey: noteKey);
+}
+
+double? parseNullableDouble(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num) return raw.toDouble();
+  final text = raw.toString().trim().replaceAll(',', '');
+  if (text.isEmpty || text == 'null') return null;
+  return double.tryParse(text);
+}
+
+int parseInt(Object? raw, {int fallback = 0}) {
+  if (raw is num) return raw.toInt();
+  final text = raw?.toString().trim().replaceAll(',', '');
+  if (text == null || text.isEmpty || text == 'null') return fallback;
+  return int.tryParse(text) ?? double.tryParse(text)?.toInt() ?? fallback;
+}
+
+int? parseNullableInt(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num) return raw.toInt();
+  final text = raw.toString().trim().replaceAll(',', '');
+  if (text.isEmpty || text == 'null') return null;
+  return int.tryParse(text) ?? double.tryParse(text)?.toInt();
+}
+
+String? parseNullableString(Object? raw) {
+  final text = raw?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text;
+}
+
+bool? parseNullableBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
+}
+
+String _firstText(List<String?> values) {
+  for (final value in values) {
+    final text = value?.trim();
+    if (text != null && text.isNotEmpty && text != 'null') return text;
+  }
+  return '';
 }

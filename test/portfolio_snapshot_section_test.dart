@@ -18,7 +18,8 @@ void main() {
     expect(find.text('₩1,200,000'), findsNothing);
     expect(find.text('+25.00%'), findsOneWidget);
 
-    await tester.tap(find.text('KR / KIS'));
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
     await tester.pumpAndSettle();
 
     expect(find.text('KR Portfolio / KIS Read-only'), findsOneWidget);
@@ -38,7 +39,8 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krSmallProfitSummary);
 
-    await tester.tap(find.text('KR / KIS'));
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
     await tester.pumpAndSettle();
 
     expect(find.text('₩9,867'), findsWidgets);
@@ -55,7 +57,8 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krNegativeProfitSummary);
 
-    await tester.tap(find.text('KR / KIS'));
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
     await tester.pumpAndSettle();
 
     expect(find.text('-₩200'), findsWidgets);
@@ -70,7 +73,8 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krMissingCostSummary);
 
-    await tester.tap(find.text('KR / KIS'));
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
     await tester.pumpAndSettle();
 
     expect(find.text('₩9,867'), findsWidgets);

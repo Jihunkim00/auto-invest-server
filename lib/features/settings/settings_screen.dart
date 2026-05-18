@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/widgets/confirm_action_dialog.dart';
 import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
+import '../dashboard/widgets/broker_context_controls.dart';
 import 'widgets/operation_toggle_card.dart';
 import 'widgets/safety_settings_section.dart';
 
@@ -21,8 +22,21 @@ class SettingsScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const Text('Settings',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Expanded(
+                  child: Text('Settings',
+                      style:
+                          TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
+                ),
+                BrokerContextBadge(controller: controller),
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                controller.selectedProvider == SelectedProvider.kis
+                    ? 'KIS safety and manual live status.'
+                    : 'Alpaca paper and common safety status.',
+                style: const TextStyle(color: Colors.white70),
+              ),
               const SizedBox(height: 10),
               const _SectionTitle('Safety Mode'),
               OperationToggleCard(
@@ -147,6 +161,7 @@ class _ReadOnlyPermissionsCard extends StatelessWidget {
     final settings = controller.settings;
     final safety = controller.kisSafetyStatus;
     final scheduler = controller.schedulerStatus.kr;
+    final isKis = controller.selectedProvider == SelectedProvider.kis;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -154,44 +169,67 @@ class _ReadOnlyPermissionsCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Read-only permission flags',
+              isKis
+                  ? 'KIS read-only permission flags'
+                  : 'Alpaca paper permission flags',
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
           const _ReadOnlyBadge(),
         ]),
         const SizedBox(height: 10),
-        _PermissionLine(
-          label: 'KIS real order',
-          value: safety.kisRealOrderEnabled ? 'Allowed by runtime' : 'Disabled',
-          alert: safety.kisRealOrderEnabled,
-        ),
-        _PermissionLine(
-          label: 'KIS live auto buy',
-          value: settings.kisLiveAutoBuyEnabled ? 'Enabled' : 'Disabled',
-          alert: settings.kisLiveAutoBuyEnabled,
-        ),
-        _PermissionLine(
-          label: 'KIS live auto sell',
-          value: settings.kisLiveAutoSellEnabled ? 'Enabled' : 'Disabled',
-          alert: settings.kisLiveAutoSellEnabled,
-        ),
-        _PermissionLine(
-          label: 'Scheduler real orders',
-          value: scheduler.realOrdersAllowed ||
-                  settings.kisSchedulerAllowRealOrders
-              ? 'Allowed'
-              : 'Disabled',
-          alert: scheduler.realOrdersAllowed ||
-              settings.kisSchedulerAllowRealOrders,
-        ),
-        _PermissionLine(
-          label: 'Manual confirmation',
-          value: settings.kisLiveAutoRequiresManualConfirm
-              ? 'Required'
-              : 'Not required',
-          alert: !settings.kisLiveAutoRequiresManualConfirm,
-        ),
+        if (isKis) ...[
+          _PermissionLine(
+            label: 'KIS real order',
+            value:
+                safety.kisRealOrderEnabled ? 'Allowed by runtime' : 'Disabled',
+            alert: safety.kisRealOrderEnabled,
+          ),
+          _PermissionLine(
+            label: 'KIS live auto buy',
+            value: settings.kisLiveAutoBuyEnabled ? 'Enabled' : 'Disabled',
+            alert: settings.kisLiveAutoBuyEnabled,
+          ),
+          _PermissionLine(
+            label: 'KIS live auto sell',
+            value: settings.kisLiveAutoSellEnabled ? 'Enabled' : 'Disabled',
+            alert: settings.kisLiveAutoSellEnabled,
+          ),
+          _PermissionLine(
+            label: 'Scheduler real orders',
+            value: scheduler.realOrdersAllowed ||
+                    settings.kisSchedulerAllowRealOrders
+                ? 'Allowed'
+                : 'Disabled',
+            alert: scheduler.realOrdersAllowed ||
+                settings.kisSchedulerAllowRealOrders,
+          ),
+          _PermissionLine(
+            label: 'Manual confirmation',
+            value: settings.kisLiveAutoRequiresManualConfirm
+                ? 'Required'
+                : 'Not required',
+            alert: !settings.kisLiveAutoRequiresManualConfirm,
+          ),
+        ] else ...[
+          _PermissionLine(
+            label: 'Alpaca mode',
+            value: 'Paper trading',
+            alert: false,
+          ),
+          _PermissionLine(
+            label: 'Broker mode',
+            value: settings.brokerMode,
+            alert: false,
+          ),
+          _PermissionLine(
+            label: 'US scheduler',
+            value: controller.schedulerStatus.us.enabledForScheduler
+                ? 'Enabled for checks'
+                : 'Disabled',
+            alert: false,
+          ),
+        ],
       ]),
     );
   }

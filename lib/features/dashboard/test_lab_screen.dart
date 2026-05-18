@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'dashboard_controller.dart';
+import 'widgets/broker_context_controls.dart';
+import 'widgets/order_ticket_section.dart';
 import 'widgets/watchlist_section.dart';
 
 class TestLabScreen extends StatelessWidget {
@@ -17,15 +19,24 @@ class TestLabScreen extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const Text(
-                'Test Lab',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-              ),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Expanded(
+                  child: Text(
+                    'Test Lab',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                BrokerContextBadge(controller: controller),
+              ]),
               const SizedBox(height: 6),
-              const Text(
-                'Advanced checks, shadow runs, dry-runs, and readiness diagnostics.',
-                style: TextStyle(color: Colors.white70),
+              Text(
+                controller.selectedProvider == SelectedProvider.kis
+                    ? 'KIS shadow, dry-run, preview, and readiness diagnostics.'
+                    : 'Alpaca paper and watchlist diagnostics remain non-live here.',
+                style: const TextStyle(color: Colors.white70),
               ),
+              const SizedBox(height: 12),
+              OrderTicketSection(controller: controller),
               const SizedBox(height: 12),
               TestLabSection(controller: controller),
             ],

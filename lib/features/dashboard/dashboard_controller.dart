@@ -9,6 +9,7 @@ import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
 import '../../models/kis_limited_auto_sell.dart';
+import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
@@ -142,6 +143,9 @@ class DashboardController extends ChangeNotifier {
   bool kisLimitedAutoBuyLoading = false;
   KisLimitedAutoBuy? latestKisLimitedAutoBuyResult;
   String? kisLimitedAutoBuyError;
+  bool kisSingleSymbolTradingLoading = false;
+  KisSingleSymbolTradingResult? latestKisSingleSymbolTradingResult;
+  String? kisSingleSymbolTradingError;
   bool kisSchedulerLiveLoading = false;
   KisSchedulerLiveResult? latestKisSchedulerLiveResult;
   String? kisSchedulerLiveError;
@@ -159,6 +163,8 @@ class DashboardController extends ChangeNotifier {
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
   bool kisLiveConfirmation = false;
+  bool kisGuardedRunConfirmation = false;
+  String kisGuardedRunSymbol = '005930';
   bool kisManualSubmitLoading = false;
   bool kisOrderSyncLoading = false;
   bool kisOrderCancelLoading = false;
@@ -221,6 +227,13 @@ class DashboardController extends ChangeNotifier {
         kisSafetyStatus.entryAllowedNow;
   }
 
+  bool get canRunKisGuardedTradingOnce {
+    return kisGuardedRunSymbol.trim().isNotEmpty &&
+        !kisLimitedAutoBuyLoading &&
+        kisRuntimeLiveSubmitGatesOpen &&
+        kisGuardedRunConfirmation;
+  }
+
   bool get kisRuntimeLiveSubmitGatesOpen {
     return !kisSafetyStatus.runtimeDryRun &&
         !kisSafetyStatus.killSwitch &&
@@ -229,6 +242,14 @@ class DashboardController extends ChangeNotifier {
         kisSafetyStatus.marketOpen &&
         kisSafetyStatus.entryAllowedNow;
   }
+
+  bool get isKisSelected => selectedProvider == SelectedProvider.kis;
+
+  String get selectedProviderCode => isKisSelected ? 'kis' : 'alpaca';
+
+  String get selectedMarketCode => isKisSelected ? 'KR' : 'US';
+
+  String get selectedBrokerLabel => isKisSelected ? 'KIS / KR' : 'Alpaca / US';
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -350,8 +371,9 @@ class DashboardController extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final result = await apiClient.runTradingOnce(
+      final immediateResult = await apiClient.runTradingOnce(
           symbol: normalizedSymbol, gateLevel: gateLevel);
+      final result = await _enrichManualRunResult(immediateResult);
       manualRunResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
       await _refreshPortfolioSummaries();
@@ -367,6 +389,29 @@ class DashboardController extends ChangeNotifier {
       manualRunLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<ManualTradingRunResult> _enrichManualRunResult(
+    ManualTradingRunResult result,
+  ) async {
+    final signalId = result.signalId?.trim();
+    if (signalId == null || signalId.isEmpty) return result;
+
+    try {
+      final signals = await apiClient.fetchRecentSignalPayloads(limit: 50);
+      for (final signal in signals) {
+        if (_signalMatchesId(signal, signalId)) {
+          return result.mergeSignalPayload(signal);
+        }
+      }
+    } catch (_) {
+      // The immediate run response is still useful; only score enrichment failed.
+    }
+
+    if (!result.hasScoreDetails) {
+      return result.markScoreDetailsNotReturned();
+    }
+    return result;
   }
 
   Future<ActionResult> toggleScheduler(bool v) async {
@@ -528,6 +573,10 @@ class DashboardController extends ChangeNotifier {
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
+    latestKisSingleSymbolTradingResult = null;
+    kisSingleSymbolTradingError = null;
+    kisGuardedRunConfirmation = false;
+    kisLiveConfirmation = false;
     if (provider == SelectedProvider.kis) {
       refreshKisOrderMonitoring(silent: true);
     }
@@ -575,6 +624,21 @@ class DashboardController extends ChangeNotifier {
 
   void setKisLiveConfirmation(bool value) {
     kisLiveConfirmation = value;
+    notifyListeners();
+  }
+
+  void setKisGuardedRunSymbol(String value) {
+    kisGuardedRunSymbol = value.trim().toUpperCase();
+    kisGuardedRunConfirmation = false;
+    latestKisLimitedAutoBuyResult = null;
+    kisLimitedAutoBuyError = null;
+    latestKisSingleSymbolTradingResult = null;
+    kisSingleSymbolTradingError = null;
+    notifyListeners();
+  }
+
+  void setKisGuardedRunConfirmation(bool value) {
+    kisGuardedRunConfirmation = value;
     notifyListeners();
   }
 
@@ -653,7 +717,7 @@ class DashboardController extends ChangeNotifier {
     return const ActionResult(
       success: true,
       message:
-          'Manual buy ticket prepared. Validate and confirm in Manual Order before submit.',
+          'Manual buy ticket prepared. Validate and confirm in Trading before submit.',
     );
   }
 
@@ -1553,7 +1617,11 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<ActionResult> runKisLimitedAutoBuyOnce() async {
+  Future<ActionResult> runKisGuardedCheck() {
+    return runKisBuyShadowOnce();
+  }
+
+  Future<ActionResult> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     if (kisLimitedAutoBuyLoading) {
       return const ActionResult(
         success: false,
@@ -1565,7 +1633,9 @@ class DashboardController extends ChangeNotifier {
     kisLimitedAutoBuyError = null;
     notifyListeners();
     try {
-      final result = await apiClient.runKisLimitedAutoBuyOnce();
+      final result = await apiClient.runKisLimitedAutoBuyOnce(
+        gateLevel: gateLevel,
+      );
       latestKisLimitedAutoBuyResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
       return ActionResult(
@@ -1582,6 +1652,89 @@ class DashboardController extends ChangeNotifier {
       kisLimitedAutoBuyLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<ActionResult> runKisAnalyzeAndBuySelectedSymbol({
+    required String symbol,
+    required int quantity,
+    required int gateLevel,
+    bool confirmLive = true,
+  }) async {
+    return runKisSingleSymbolAnalyzeBuy(
+      symbol: symbol,
+      quantity: quantity,
+      gateLevel: gateLevel,
+      confirmLive: confirmLive,
+    );
+  }
+
+  Future<ActionResult> runKisSingleSymbolAnalyzeBuy({
+    required String symbol,
+    required int quantity,
+    required int gateLevel,
+    required bool confirmLive,
+  }) async {
+    if (kisSingleSymbolTradingLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS Analyze & Buy already in progress.',
+      );
+    }
+
+    final normalizedSymbol = symbol.trim().toUpperCase();
+    kisSingleSymbolTradingLoading = true;
+    kisSingleSymbolTradingError = null;
+    latestKisSingleSymbolTradingResult = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisSingleSymbolAnalyzeBuy(
+        symbol: normalizedSymbol,
+        gateLevel: gateLevel,
+        quantity: quantity,
+        confirmLive: confirmLive,
+      );
+      latestKisSingleSymbolTradingResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshPortfolioSummaries();
+      if (result.realOrderSubmitted || result.orderId != null) {
+        await refreshKisOrderMonitoring(silent: true);
+      }
+      final resultText =
+          result.result.trim().isEmpty ? 'blocked' : result.result.trim();
+      return ActionResult(
+        success: true,
+        message: 'KIS Analyze & Buy completed: $resultText.',
+      );
+    } catch (e) {
+      kisSingleSymbolTradingError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSingleSymbolTradingError!),
+      );
+    } finally {
+      kisSingleSymbolTradingLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisGuardedTradingOnce() async {
+    await refreshKisSafetyStatus(silent: true);
+
+    if (!canRunKisGuardedTradingOnce) {
+      return ActionResult(
+        success: false,
+        message: kisGuardedRunBlockedMessage(),
+      );
+    }
+
+    final result = await runKisLimitedAutoBuyOnce(
+      gateLevel: selectedGateLevel,
+    );
+    if (result.success) {
+      kisGuardedRunConfirmation = false;
+      notifyListeners();
+    }
+    return result;
   }
 
   Future<ActionResult> runKisSchedulerLiveOnce() async {
@@ -1804,6 +1957,19 @@ class DashboardController extends ChangeNotifier {
     return kisSubmitBlockedMessageForRuntimeStatus();
   }
 
+  String kisGuardedRunBlockedMessage() {
+    if (kisGuardedRunSymbol.trim().isEmpty) {
+      return 'Enter a KIS symbol before running guarded trading.';
+    }
+    if (!kisRuntimeLiveSubmitGatesOpen) {
+      return kisSubmitBlockedMessageForRuntimeStatus();
+    }
+    if (!kisGuardedRunConfirmation) {
+      return 'Confirm live KIS guarded run first.';
+    }
+    return 'KIS guarded run is blocked by the checklist.';
+  }
+
   String kisSubmitBlockedMessageForRuntimeStatus() {
     if (kisSafetyStatus.runtimeDryRun) {
       return 'Live submit blocked: dry-run is ON';
@@ -1866,11 +2032,12 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _clearOrderTicketSourceMetadata() {
-    if (orderTicketSourceMetadata == null) return;
     orderTicketSourceMetadata = null;
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
   }
 }
 
@@ -1902,6 +2069,21 @@ String _submittedMessage(KisManualOrderResult order) {
   final status = _kisTerminalLabel(order);
   final odno = order.kisOdno == null ? '' : ' / ODNO ${order.kisOdno}';
   return 'Live KIS order ${order.orderId}$odno: $status.';
+}
+
+bool _signalMatchesId(Map<String, dynamic> signal, String expectedSignalId) {
+  final normalizedExpected = expectedSignalId.trim();
+  final candidates = [
+    signal['id'],
+    signal['signal_id'],
+    if (signal['signal'] is Map) (signal['signal'] as Map)['id'],
+    if (signal['signal'] is Map) (signal['signal'] as Map)['signal_id'],
+  ];
+
+  for (final candidate in candidates) {
+    if (candidate?.toString().trim() == normalizedExpected) return true;
+  }
+  return false;
 }
 
 String _kisTerminalLabel(KisManualOrderResult order) {

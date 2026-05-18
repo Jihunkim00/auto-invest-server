@@ -13,6 +13,7 @@ import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_live.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review_queue.dart';
+import 'package:auto_invest_dashboard/models/kis_single_symbol_trading_result.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
@@ -202,7 +203,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -211,7 +212,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -220,7 +221,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -597,6 +598,34 @@ void main() {
     controller.dispose();
   });
 
+  test(
+      'KIS single-symbol Analyze & Buy passes selected symbol and confirm flag',
+      () async {
+    final api = _FakeApiClient(kisSingle: _kisSingleResult());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisSingleSymbolAnalyzeBuy(
+      symbol: '005380',
+      quantity: 2,
+      gateLevel: 4,
+      confirmLive: true,
+    );
+
+    expect(result.success, isTrue);
+    expect(api.runKisSingleCalls, 1);
+    expect(api.lastKisSingleSymbol, '005380');
+    expect(api.lastKisSingleQuantity, 2);
+    expect(api.lastKisSingleGateLevel, 4);
+    expect(api.lastKisSingleConfirmLive, isTrue);
+    expect(controller.kisSingleSymbolTradingLoading, isFalse);
+    expect(controller.latestKisSingleSymbolTradingResult?.requestedSymbol,
+        '005380');
+    expect(controller.latestKisSingleSymbolTradingResult?.realOrderSubmitted,
+        isFalse);
+
+    controller.dispose();
+  });
+
   test('KIS scheduler live run stores guarded result without manual calls',
       () async {
     final api = _FakeApiClient(schedulerLive: _schedulerLive());
@@ -827,6 +856,32 @@ KisLimitedAutoBuy _limitedAutoBuy() {
   });
 }
 
+KisSingleSymbolTradingResult _kisSingleResult({String symbol = '005380'}) {
+  return KisSingleSymbolTradingResult.fromJson({
+    'status': 'ok',
+    'mode': 'kis_single_symbol_analyze_buy',
+    'provider': 'kis',
+    'market': 'KR',
+    'symbol': symbol,
+    'requested_symbol': symbol,
+    'analyzed_symbol': symbol,
+    'symbol_match': true,
+    'result': 'dry_run',
+    'action': 'buy',
+    'reason': 'dry_run_mode',
+    'quantity': 1,
+    'primary_score': 82,
+    'final_buy_score': 82,
+    'final_sell_score': 9,
+    'confidence': 0.8,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'dry_run': true,
+    'safety': {'dry_run': true},
+  });
+}
+
 KisSchedulerLiveResult _schedulerLive() {
   return KisSchedulerLiveResult.fromJson({
     'status': 'ok',
@@ -894,6 +949,7 @@ class _FakeApiClient extends ApiClient {
     this.buyShadow,
     this.throwBuyShadow = false,
     this.limitedAutoBuy,
+    this.kisSingle,
     this.schedulerLive,
   });
 
@@ -920,6 +976,7 @@ class _FakeApiClient extends ApiClient {
   final KisBuyShadowDecision? buyShadow;
   final bool throwBuyShadow;
   final KisLimitedAutoBuy? limitedAutoBuy;
+  final KisSingleSymbolTradingResult? kisSingle;
   final KisSchedulerLiveResult? schedulerLive;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
@@ -933,6 +990,7 @@ class _FakeApiClient extends ApiClient {
   int runKisLimitedAutoSellCalls = 0;
   int runKisBuyShadowCalls = 0;
   int runKisLimitedAutoBuyCalls = 0;
+  int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
   String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
@@ -940,6 +998,10 @@ class _FakeApiClient extends ApiClient {
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
+  String? lastKisSingleSymbol;
+  int? lastKisSingleGateLevel;
+  int? lastKisSingleQuantity;
+  bool? lastKisSingleConfirmLive;
 
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
@@ -1091,9 +1153,25 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     runKisLimitedAutoBuyCalls += 1;
     return limitedAutoBuy ?? _limitedAutoBuy();
+  }
+
+  @override
+  Future<KisSingleSymbolTradingResult> runKisSingleSymbolAnalyzeBuy({
+    required String symbol,
+    int? gateLevel,
+    int? quantity,
+    double? amount,
+    required bool confirmLive,
+  }) async {
+    runKisSingleCalls += 1;
+    lastKisSingleSymbol = symbol;
+    lastKisSingleGateLevel = gateLevel;
+    lastKisSingleQuantity = quantity;
+    lastKisSingleConfirmLive = confirmLive;
+    return kisSingle ?? _kisSingleResult(symbol: symbol);
   }
 
   @override
