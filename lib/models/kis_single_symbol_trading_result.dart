@@ -27,6 +27,7 @@ class KisSingleSymbolTradingResult {
     this.currentPrice,
     this.primaryScore,
     this.finalEntryScore,
+    this.buyScore,
     this.finalBuyScore,
     this.finalSellScore,
     this.quantBuyScore,
@@ -45,6 +46,10 @@ class KisSingleSymbolTradingResult {
     this.orderStatus,
     this.rejectionReason,
     this.createdAt,
+    this.indicatorStatus,
+    this.indicatorBarCount,
+    this.indicatorPayload = const {},
+    this.effectiveMinEntryScore,
     this.riskFlags = const [],
     this.gatingNotes = const [],
   });
@@ -52,6 +57,10 @@ class KisSingleSymbolTradingResult {
   factory KisSingleSymbolTradingResult.fromJson(Map<String, dynamic> json) {
     final payload = Map<String, dynamic>.from(json);
     final safety = _dynamicMap(json['safety_summary'] ?? json['safety']);
+    final analysis = _dynamicMap(json['analysis']);
+    final readiness = _dynamicMap(json['readiness']);
+    final riskFlags = _stringList(json['risk_flags']);
+    final gatingNotes = _stringList(json['gating_notes']);
     return KisSingleSymbolTradingResult(
       status: _stringValue(json['status'], fallback: 'ok'),
       mode:
@@ -70,28 +79,52 @@ class KisSingleSymbolTradingResult {
       quantity: _nullableInt(json['quantity'] ?? json['qty']),
       amount: _nullableDouble(json['amount']),
       notional: _nullableDouble(json['notional']),
-      currentPrice: _nullableDouble(json['current_price']),
-      primaryScore:
-          _nullableDouble(json['primary_score'] ?? json['final_score']),
-      finalEntryScore:
-          _nullableDouble(json['final_entry_score'] ?? json['final_score']),
-      finalBuyScore:
-          _nullableDouble(json['final_buy_score'] ?? json['final_score']),
-      finalSellScore: _nullableDouble(json['final_sell_score']),
-      quantBuyScore:
-          _nullableDouble(json['quant_buy_score'] ?? json['quant_score']),
-      quantSellScore: _nullableDouble(json['quant_sell_score']),
-      aiBuyScore: _nullableDouble(json['ai_buy_score']),
-      aiSellScore: _nullableDouble(json['ai_sell_score']),
-      gptBuyScore: _nullableDouble(json['gpt_buy_score']),
-      gptSellScore: _nullableDouble(json['gpt_sell_score']),
-      confidence: _nullableDouble(json['confidence']),
+      currentPrice:
+          _nullableDouble(json['current_price'] ?? analysis['current_price']),
+      primaryScore: _nullableDouble(json['primary_score'] ??
+          json['final_score'] ??
+          analysis['final_buy_score'] ??
+          analysis['final_entry_score'] ??
+          analysis['score']),
+      finalEntryScore: _nullableDouble(json['final_entry_score'] ??
+          json['final_score'] ??
+          analysis['final_entry_score'] ??
+          analysis['score']),
+      buyScore: _nullableDouble(json['buy_score'] ?? analysis['buy_score']),
+      finalBuyScore: _nullableDouble(json['final_buy_score'] ??
+          json['final_score'] ??
+          analysis['final_buy_score'] ??
+          analysis['score']),
+      finalSellScore: _nullableDouble(
+          json['final_sell_score'] ?? analysis['final_sell_score']),
+      quantBuyScore: _nullableDouble(json['quant_buy_score'] ??
+          json['quant_score'] ??
+          analysis['quant_buy_score'] ??
+          analysis['quant_score']),
+      quantSellScore: _nullableDouble(
+          json['quant_sell_score'] ?? analysis['quant_sell_score']),
+      aiBuyScore:
+          _nullableDouble(json['ai_buy_score'] ?? analysis['ai_buy_score']),
+      aiSellScore:
+          _nullableDouble(json['ai_sell_score'] ?? analysis['ai_sell_score']),
+      gptBuyScore:
+          _nullableDouble(json['gpt_buy_score'] ?? analysis['gpt_buy_score']),
+      gptSellScore:
+          _nullableDouble(json['gpt_sell_score'] ?? analysis['gpt_sell_score']),
+      confidence: _nullableDouble(json['confidence'] ?? analysis['confidence']),
       gptReason: _nullableString(
-        json['gpt_reason'] ?? _dynamicMap(json['gpt_context'])['reason'],
+        json['gpt_reason'] ??
+            analysis['gpt_reason'] ??
+            _dynamicMap(json['gpt_context'])['reason'],
       ),
-      riskFlags: _stringList(json['risk_flags']),
-      gatingNotes: _stringList(json['gating_notes']),
-      blockReason: _nullableString(json['block_reason']),
+      riskFlags: riskFlags.isNotEmpty
+          ? riskFlags
+          : _stringList(analysis['risk_flags']),
+      gatingNotes: gatingNotes.isNotEmpty
+          ? gatingNotes
+          : _stringList(analysis['gating_notes']),
+      blockReason:
+          _nullableString(json['block_reason'] ?? analysis['block_reason']),
       noOrderReason: _nullableString(json['no_order_reason']),
       orderId: _nullableInt(json['order_id']),
       brokerOrderId: _nullableString(json['broker_order_id']),
@@ -105,6 +138,16 @@ class KisSingleSymbolTradingResult {
       checks: _dynamicMap(json['checks']),
       safety: safety,
       auditMetadata: _dynamicMap(json['audit_metadata']),
+      indicatorStatus: _nullableString(
+          json['indicator_status'] ?? analysis['indicator_status']),
+      indicatorBarCount: _nullableInt(
+          json['indicator_bar_count'] ?? analysis['indicator_bar_count']),
+      indicatorPayload: _dynamicMap(
+          json['indicator_payload'] ?? analysis['indicator_payload']),
+      effectiveMinEntryScore: _nullableDouble(
+        json['effective_min_entry_score'] ??
+            readiness['effective_min_entry_score'],
+      ),
       createdAt: _nullableString(json['created_at']),
       rawPayload: payload,
     );
@@ -129,6 +172,7 @@ class KisSingleSymbolTradingResult {
   final double? currentPrice;
   final double? primaryScore;
   final double? finalEntryScore;
+  final double? buyScore;
   final double? finalBuyScore;
   final double? finalSellScore;
   final double? quantBuyScore;
@@ -155,11 +199,16 @@ class KisSingleSymbolTradingResult {
   final Map<String, dynamic> checks;
   final Map<String, dynamic> safety;
   final Map<String, dynamic> auditMetadata;
+  final String? indicatorStatus;
+  final int? indicatorBarCount;
+  final Map<String, dynamic> indicatorPayload;
+  final double? effectiveMinEntryScore;
   final String? createdAt;
   final Map<String, dynamic> rawPayload;
 
   bool get hasScoreDetails =>
       primaryScore != null ||
+      buyScore != null ||
       finalBuyScore != null ||
       finalSellScore != null ||
       quantBuyScore != null ||

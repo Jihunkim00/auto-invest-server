@@ -202,9 +202,9 @@ void main() {
     await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Dry-run, no real order'), findsWidgets);
-    expect(find.textContaining('Analysis score was not returned by this run'),
-        findsOneWidget);
+    expect(find.text('Dry-run'), findsWidgets);
+    expect(find.text('Analysis unavailable'), findsOneWidget);
+    expect(find.text('KIS OHLCV data was not available'), findsWidgets);
     expect(find.text('N/A'), findsNothing);
 
     controller.dispose();
@@ -256,8 +256,223 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Returned candidate does not match selected symbol'),
+    expect(
+      find.textContaining('Returned candidate does not match selected symbol'),
+      findsWidgets,
+    );
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze & Buy normalizes completed low-score analysis',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson(
+        _kisCompletedAnalysisPayload(
+          symbol: '091810',
+          finalBuyScore: 12.0,
+          finalSellScore: 56.75,
+          currentPrice: 856,
+          reason: 'buy_entry_not_allowed_now',
+          noOrderReason: 'buy_entry_not_allowed_now',
+          riskFlags: const [
+            'below_EMA20',
+            'below_EMA50',
+            'below_VWAP',
+            'oversold_RSI',
+            'negative_momentum',
+            'weak_recent_return',
+            'near_close_no_new_entry',
+            'KR_trading_disabled',
+          ],
+          indicatorPayload: const {
+            'price': 856,
+            'close': 856,
+            'ema20': 924.110654,
+            'ema50': 1011.321289,
+            'rsi': 20.982143,
+            'vwap': 1078.523265,
+            'volume_ratio': 0.708535,
+            'momentum': -0.059341,
+            'recent_return': -0.14656,
+          },
+          validationWarnings: const [
+            'after_no_new_entry_time',
+            'near_close',
+          ],
+          entryAllowedNow: false,
+          nearClose: true,
+        ),
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await _submitKisAnalyzeBuy(tester, symbol: '091810');
+
+    expect(find.text('Analysis Status'), findsOneWidget);
+    expect(find.text('Analysis completed'), findsOneWidget);
+    expect(find.text('Analysis unavailable'), findsNothing);
+    expect(find.text('Data unavailable'), findsNothing);
+    expect(find.text('Score vs Threshold'), findsOneWidget);
+    expect(find.text('BUY SCORE'), findsOneWidget);
+    expect(find.text('12.0'), findsOneWidget);
+    expect(find.text('REQUIRED SCORE'), findsOneWidget);
+    expect(find.text('65'), findsOneWidget);
+    expect(find.text('Score below entry threshold'), findsWidgets);
+    expect(find.textContaining('New buy entries are not allowed now'),
         findsWidgets);
+    expect(find.textContaining('New buy entries are blocked after 15:00'),
+        findsWidgets);
+    expect(find.textContaining('KR_trading_disabled'), findsNothing);
+    expect(find.text('Developer Raw Payload'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze & Buy uses one card structure across KR symbols',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final payloads = [
+      _kisCompletedAnalysisPayload(
+        symbol: '005380',
+        finalBuyScore: 42.25,
+        finalSellScore: 28,
+        currentPrice: 241000,
+        reason: 'score_threshold_not_met',
+        noOrderReason: 'score_threshold_not_met',
+        riskFlags: const ['overbought_RSI', 'chase_risk'],
+        indicatorPayload: const {
+          'price': 241000,
+          'close': 241000,
+          'ema20': 220000,
+          'ema50': 214000,
+          'vwap': 226000,
+          'rsi': 76.4,
+          'volume_ratio': 1.34,
+          'momentum': 0.041,
+          'recent_return': 0.082,
+        },
+      ),
+      _kisCompletedAnalysisPayload(
+        symbol: '005930',
+        finalBuyScore: 68,
+        finalSellScore: 18,
+        currentPrice: 72000,
+        reason: 'hold_signal',
+        noOrderReason: 'hold_signal',
+        riskFlags: const [],
+        indicatorPayload: const {
+          'price': 72000,
+          'close': 72000,
+          'ema20': 71000,
+          'ema50': 70500,
+          'vwap': 71500,
+          'rsi': 54,
+          'volume_ratio': 1.02,
+          'momentum': 0.006,
+          'recent_return': 0.012,
+        },
+      ),
+      _kisCompletedAnalysisPayload(
+        symbol: '091810',
+        finalBuyScore: 12,
+        finalSellScore: 56.75,
+        currentPrice: 856,
+        reason: 'buy_entry_not_allowed_now',
+        noOrderReason: 'buy_entry_not_allowed_now',
+        riskFlags: const ['below_EMA20', 'below_EMA50', 'below_VWAP'],
+        indicatorPayload: const {
+          'price': 856,
+          'close': 856,
+          'ema20': 924.110654,
+          'ema50': 1011.321289,
+          'vwap': 1078.523265,
+          'rsi': 20.982143,
+          'volume_ratio': 0.708535,
+          'momentum': -0.059341,
+          'recent_return': -0.14656,
+        },
+      ),
+    ];
+
+    for (final payload in payloads) {
+      final symbol = payload['symbol']!.toString();
+      final api = _AnalysisFakeApi(
+        kisSingleResult: KisSingleSymbolTradingResult.fromJson(payload),
+      );
+      final controller = DashboardController(api, autoload: false)
+        ..selectedProvider = SelectedProvider.kis;
+
+      await tester.pumpWidget(_wrapTrading(controller));
+      await _submitKisAnalyzeBuy(tester, symbol: symbol);
+
+      _expectKisNormalizedSections();
+      expect(find.text('Analysis completed'), findsOneWidget);
+      expect(find.text('BUY SCORE'), findsOneWidget);
+      expect(find.text('REQUIRED SCORE'), findsOneWidget);
+      expect(find.text('Developer Raw Payload'), findsOneWidget);
+
+      controller.dispose();
+    }
+  });
+
+  testWidgets('KIS Analyze & Buy keeps raw reason inside raw payload',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson(
+        _kisCompletedAnalysisPayload(
+          symbol: '091810',
+          finalBuyScore: 12,
+          finalSellScore: 56.75,
+          currentPrice: 856,
+          reason: 'buy_entry_not_allowed_now',
+          noOrderReason: 'buy_entry_not_allowed_now',
+          riskFlags: const ['KR_trading_disabled'],
+          indicatorPayload: const {
+            'price': 856,
+            'close': 856,
+            'ema20': 924.110654,
+            'ema50': 1011.321289,
+            'vwap': 1078.523265,
+            'rsi': 20.982143,
+            'volume_ratio': 0.708535,
+            'momentum': -0.059341,
+            'recent_return': -0.14656,
+          },
+        ),
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await _submitKisAnalyzeBuy(tester, symbol: '091810');
+
+    expect(find.textContaining('New buy entries are currently not allowed'),
+        findsWidgets);
+    expect(find.textContaining('KR_trading_disabled'), findsNothing);
+
+    await tester.ensureVisible(find.text('Developer Raw Payload'));
+    await tester.tap(find.text('Developer Raw Payload'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('KR_trading_disabled'), findsOneWidget);
 
     controller.dispose();
   });
@@ -430,6 +645,32 @@ bool _filledButtonEnabled(WidgetTester tester, String label) {
         .first,
   );
   return button.onPressed != null;
+}
+
+Future<void> _submitKisAnalyzeBuy(
+  WidgetTester tester, {
+  String symbol = '005930',
+}) async {
+  await tester.enterText(find.widgetWithText(TextField, 'KR Symbol'), symbol);
+  await tester.tap(find.byType(CheckboxListTile));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Analyze & Buy KIS'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.descendant(
+    of: find.byType(AlertDialog),
+    matching: find.byType(FilledButton),
+  ));
+  await tester.pumpAndSettle();
+}
+
+void _expectKisNormalizedSections() {
+  expect(find.text('Analysis Status'), findsOneWidget);
+  expect(find.text('Decision Summary'), findsOneWidget);
+  expect(find.text('Score vs Threshold'), findsOneWidget);
+  expect(find.text('Main Reason'), findsOneWidget);
+  expect(find.text('Technical Snapshot'), findsOneWidget);
+  expect(find.text('Why No Order?'), findsOneWidget);
+  expect(find.text('Developer Raw Payload'), findsOneWidget);
 }
 
 class _AnalysisFakeApi extends ApiClient {
@@ -688,6 +929,88 @@ KisSingleSymbolTradingResult _kisSingleResult() {
     'dry_run': true,
     'safety': {'dry_run': true},
   });
+}
+
+Map<String, dynamic> _kisCompletedAnalysisPayload({
+  required String symbol,
+  required double finalBuyScore,
+  required double finalSellScore,
+  required double currentPrice,
+  required String reason,
+  required String noOrderReason,
+  required List<String> riskFlags,
+  required Map<String, dynamic> indicatorPayload,
+  List<String> validationWarnings = const [],
+  bool entryAllowedNow = true,
+  bool nearClose = false,
+}) {
+  return {
+    'status': 'ok',
+    'mode': 'kis_single_symbol_analyze_buy',
+    'symbol': symbol,
+    'requested_symbol': symbol,
+    'analyzed_symbol': symbol,
+    'returned_symbol': symbol,
+    'symbol_match': true,
+    'action': 'hold',
+    'result':
+        noOrderReason == 'buy_entry_not_allowed_now' ? 'blocked' : 'skipped',
+    'reason': reason,
+    'quantity': 1,
+    'current_price': currentPrice,
+    'primary_score': finalBuyScore,
+    'final_entry_score': finalBuyScore,
+    'final_buy_score': finalBuyScore,
+    'final_sell_score': finalSellScore,
+    'confidence': 0.77,
+    'gpt_reason': 'ì ë ì§í mojibake fallback should not render',
+    'risk_flags': riskFlags,
+    'gating_notes': const ['KIS OHLCV indicators were used for quant scoring.'],
+    'block_reason': noOrderReason,
+    'no_order_reason': noOrderReason,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'dry_run': false,
+    'order_status': 'No order created',
+    'safety': {
+      'dry_run': false,
+      'runtime_dry_run': false,
+      'entry_allowed_now': entryAllowedNow,
+    },
+    'analysis': {
+      'symbol': symbol,
+      'market': 'KR',
+      'currency': 'KRW',
+      'current_price': currentPrice,
+      'score': finalBuyScore,
+      'final_entry_score': finalBuyScore,
+      'indicator_status': 'ok',
+      'indicator_payload': indicatorPayload,
+      'indicator_bar_count': 100,
+      'final_buy_score': finalBuyScore,
+      'final_sell_score': finalSellScore,
+      'confidence': 0.77,
+      'risk_flags': riskFlags,
+      'gating_notes': const [
+        'KIS OHLCV indicators were used for quant scoring.',
+      ],
+      'reason':
+          'EMA20<=EMA50 down/range; price below EMA20/EMA50/VWAP; RSI context',
+    },
+    'readiness': {
+      'block_reason':
+          finalBuyScore < 65 ? 'score_threshold_not_met' : noOrderReason,
+      'effective_min_entry_score': 65.0,
+    },
+    'validation': {
+      'warnings': validationWarnings,
+    },
+    'market_session': {
+      'is_entry_allowed_now': entryAllowedNow,
+      'is_near_close': nearClose,
+    },
+  };
 }
 
 OrderValidationResult _validationResult() {

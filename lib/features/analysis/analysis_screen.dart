@@ -287,12 +287,16 @@ String _friendlyReason(String? value, {num? entryPenalty}) {
   if (normalized == 'hold_signal') return 'HOLD signal, no order created';
   if (normalized == 'market_closed') return 'Market is closed';
   if (normalized == 'kr_trading_disabled') {
-    return 'KR trading disabled / preview only';
+    return 'KR preview only / trading disabled';
   }
   if (normalized == 'preview_only') return 'Preview only, no real order';
   if (normalized == 'buy_entry_not_allowed_now') {
     return 'New buy entries are not allowed now';
   }
+  if (normalized == 'after_no_new_entry_time') {
+    return 'New buy entries are blocked after 15:00';
+  }
+  if (normalized == 'near_close') return 'Market is near close';
   if (normalized == 'dry_run_must_be_false') {
     return 'Dry-run is ON, live order blocked';
   }

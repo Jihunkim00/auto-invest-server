@@ -20,15 +20,38 @@ String firstText(List<String?> values, {String fallback = ''}) {
   return fallback;
 }
 
-String translateReason(Object? value, {num? entryPenalty}) {
+String translateReason(Object? value,
+    {num? entryPenalty, bool singleSymbolContext = false}) {
   if (entryPenalty != null && entryPenalty >= 900) {
     return 'Entry blocked by GPT/risk context';
   }
   final text = displayText(value, fallback: '');
   if (text.isEmpty) return 'Not available';
+  final parts = text.split(',').map((part) => part.trim()).toList();
+  if (parts.length > 1 && parts.every(_looksLikeReasonCode)) {
+    return parts
+        .map((part) => translateReason(
+              part,
+              entryPenalty: entryPenalty,
+              singleSymbolContext: singleSymbolContext,
+            ))
+        .join(', ');
+  }
   final normalized = text.toLowerCase();
   if (normalized == 'score_threshold_not_met') {
     return 'Score below entry threshold';
+  }
+  if (normalized == 'after_no_new_entry_time') {
+    return 'New buy entries are blocked after 15:00';
+  }
+  if (normalized == 'near_close') {
+    return 'Market is near close';
+  }
+  if (normalized == 'near_close_no_new_entry') {
+    return 'New buy entries are blocked near close';
+  }
+  if (normalized == 'insufficient_data') {
+    return 'KIS OHLCV data was not available';
   }
   if (normalized == 'hard_blocked') {
     return 'Entry blocked by risk context';
@@ -37,7 +60,9 @@ String translateReason(Object? value, {num? entryPenalty}) {
     return 'GPT/risk context blocks new buy entries';
   }
   if (normalized == 'kr_trading_disabled') {
-    return 'KR trading disabled / preview only';
+    return singleSymbolContext
+        ? 'New buy entries are currently not allowed'
+        : 'KR preview only / trading disabled';
   }
   if (normalized == 'market_closed') {
     return 'Market is closed';
@@ -72,6 +97,42 @@ String translateReason(Object? value, {num? entryPenalty}) {
   if (normalized == 'buy_entry_not_allowed_now') {
     return 'New buy entries are not allowed now';
   }
+  if (normalized == 'below_ema20') {
+    return 'Price below EMA20';
+  }
+  if (normalized == 'below_ema50') {
+    return 'Price below EMA50';
+  }
+  if (normalized == 'below_vwap') {
+    return 'Price below VWAP';
+  }
+  if (normalized == 'above_ema20') {
+    return 'Price above EMA20';
+  }
+  if (normalized == 'above_ema50') {
+    return 'Price above EMA50';
+  }
+  if (normalized == 'above_vwap') {
+    return 'Price above VWAP';
+  }
+  if (normalized == 'overbought_rsi') {
+    return 'RSI overbought';
+  }
+  if (normalized == 'oversold_rsi') {
+    return 'RSI oversold';
+  }
+  if (normalized == 'negative_momentum') {
+    return 'Momentum negative';
+  }
+  if (normalized == 'weak_recent_return') {
+    return 'Recent return weak';
+  }
+  if (normalized == 'possible_mean_reversion_only') {
+    return 'Possible mean reversion only';
+  }
+  if (normalized == 'chase_risk') {
+    return 'Overbought setup: chase risk';
+  }
   if (normalized == 'kill_switch_enabled') {
     return 'Kill switch is ON';
   }
@@ -103,6 +164,11 @@ String translateReason(Object? value, {num? entryPenalty}) {
     return 'New buy blocked by GPT/risk context';
   }
   return text;
+}
+
+bool _looksLikeReasonCode(String value) {
+  if (value.isEmpty) return false;
+  return RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value);
 }
 
 String boolStatus(bool value) => value ? 'true' : 'false';

@@ -265,9 +265,10 @@ class _KisResultPanel extends StatelessWidget {
       selectedSymbol: selectedSymbol,
       returnedSymbol: result.analyzedSymbol ?? result.returnedSymbol,
     );
-    final reason = presentation.translateReason(_mainReason(result));
-    final safety = presentation.safetyLine(result.safety);
-    final hasScore = result.hasScoreDetails;
+    final analysisStatus = _analysisStatus(result);
+    final order = _orderLabel(result);
+    final mainReason = _mainReason(result);
+    final secondaryBlockers = _secondaryBlockers(result, mainReason);
 
     return Container(
       width: double.infinity,
@@ -278,6 +279,14 @@ class _KisResultPanel extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Analysis Status',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _ReasonBanner(
+          text: analysisStatus,
+          color: _analysisStatusColor(analysisStatus),
+        ),
+        const SizedBox(height: 12),
         const Text('Decision Summary',
             style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
@@ -290,147 +299,68 @@ class _KisResultPanel extends StatelessWidget {
           _DataPairData(
               label: 'Decision', value: _decisionLabel(result).toUpperCase()),
           _DataPairData(label: 'Result', value: _resultLabel(result)),
-          _DataPairData(label: 'Next Action', value: _nextAction(result)),
+          _DataPairData(label: 'Order', value: order),
         ]),
         const SizedBox(height: 12),
-        const Text('Score / Analysis Summary',
-            style: TextStyle(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        if (!hasScore)
-          const _ReasonBanner(
-            text:
-                'Analysis score was not returned by this run. This run was blocked before full analysis. Use Watchlist for candidate discovery.',
-          )
-        else
-          _DataGrid(pairs: [
-            _DataPairData(
-                label: 'Primary score',
-                value: presentation.displayScore(result.primaryScore)),
-            _DataPairData(
-                label: 'Final Buy',
-                value: presentation.displayScore(result.finalBuyScore)),
-            _DataPairData(
-                label: 'Final Sell',
-                value: presentation.displayScore(result.finalSellScore)),
-            _DataPairData(
-                label: 'Confidence',
-                value: presentation.displayScore(result.confidence,
-                    fallback: 'Confidence not returned')),
-            _DataPairData(
-                label: 'Quant Buy',
-                value: presentation.displayScore(result.quantBuyScore)),
-            _DataPairData(
-                label: 'Quant Sell',
-                value: presentation.displayScore(result.quantSellScore)),
-            _DataPairData(
-                label: 'AI Buy',
-                value: presentation.displayScore(result.aiBuyScore)),
-            _DataPairData(
-                label: 'AI Sell',
-                value: presentation.displayScore(result.aiSellScore)),
-            _DataPairData(
-                label: 'GPT Buy',
-                value: presentation.displayScore(result.gptBuyScore,
-                    fallback: 'GPT score not returned')),
-            _DataPairData(
-                label: 'GPT Sell',
-                value: presentation.displayScore(result.gptSellScore,
-                    fallback: 'GPT score not returned')),
-          ]),
-        if (result.gptReason != null) ...[
-          const SizedBox(height: 8),
-          _ReasonBanner(text: result.gptReason!),
-        ],
-        const SizedBox(height: 12),
-        const Text('Order Result',
+        const Text('Score vs Threshold',
             style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         _DataGrid(pairs: [
           _DataPairData(
-              label: 'Order',
-              value: presentation.orderStatusLabel(
-                realOrderSubmitted: result.realOrderSubmitted,
-                orderId: result.orderId?.toString(),
-                kisOdno: result.kisOdno,
-                result: result.result,
-                safety: result.safety,
-              )),
+              label: 'Buy Score',
+              value: _displaySignalScore(result.finalBuyScore)),
           _DataPairData(
-              label: 'Order ID', value: result.orderId?.toString() ?? '--'),
-          _DataPairData(label: 'KIS ODNO', value: result.kisOdno ?? '--'),
+              label: 'Required Score',
+              value: presentation.displayScore(result.effectiveMinEntryScore,
+                  fallback: 'Threshold not returned')),
           _DataPairData(
-              label: 'Qty', value: result.quantity?.toString() ?? '--'),
-        ]),
-        const SizedBox(height: 12),
-        _ReasonBanner(text: reason, color: Colors.amberAccent),
-        const SizedBox(height: 8),
-        _ReasonBanner(text: safety, color: Colors.lightBlueAccent),
-        const SizedBox(height: 8),
-        _ReadableDetails(result: result),
-      ]),
-    );
-  }
-}
-
-class _ReadableDetails extends StatelessWidget {
-  const _ReadableDetails({required this.result});
-
-  final KisSingleSymbolTradingResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: EdgeInsets.zero,
-      title: const Text('Run Details'),
-      subtitle: const Text('Readable analysis, safety, and order details.'),
-      children: [
-        _DataGrid(pairs: [
-          _DataPairData(label: 'Action', value: result.action.toUpperCase()),
-          _DataPairData(label: 'Result', value: _resultLabel(result)),
-          _DataPairData(
-              label: 'Real order submitted',
-              value: result.realOrderSubmitted ? 'Yes' : 'No'),
-          _DataPairData(
-              label: 'Broker submit called',
-              value: result.brokerSubmitCalled ? 'Yes' : 'No'),
-          _DataPairData(
-              label: 'Manual submit called',
-              value: result.manualSubmitCalled ? 'Yes' : 'No'),
-        ]),
-        const SizedBox(height: 8),
-        _DataGrid(pairs: [
-          _DataPairData(
-              label: 'Primary score',
-              value: presentation.displayScore(result.primaryScore)),
-          _DataPairData(
-              label: 'Final Buy',
-              value: presentation.displayScore(result.finalBuyScore)),
-          _DataPairData(
-              label: 'Final Sell',
-              value: presentation.displayScore(result.finalSellScore)),
+              label: 'Sell Score',
+              value: _displaySignalScore(result.finalSellScore)),
           _DataPairData(
               label: 'Confidence',
               value: presentation.displayScore(result.confidence,
                   fallback: 'Confidence not returned')),
         ]),
+        const SizedBox(height: 12),
+        const Text('Main Reason',
+            style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
-        if (result.riskFlags.isNotEmpty)
-          _BulletList(
-            title: 'Risk / Block Details',
-            items: result.riskFlags
-                .take(5)
-                .map(presentation.translateReason)
-                .toList(),
-          ),
-        if (result.gatingNotes.isNotEmpty)
-          _BulletList(
-            title: 'Gating Notes',
-            items: result.gatingNotes
-                .take(5)
-                .map(presentation.translateReason)
-                .toList(),
-          ),
+        _ReasonBanner(text: mainReason, color: Colors.amberAccent),
+        const SizedBox(height: 12),
+        const Text('Technical Snapshot',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(
+              label: 'Current price',
+              value: presentation.displayScore(result.currentPrice,
+                  fallback: 'Price not returned')),
+          _DataPairData(
+              label: 'EMA20 relation', value: _emaRelation(result, 20)),
+          _DataPairData(
+              label: 'EMA50 relation', value: _emaRelation(result, 50)),
+          _DataPairData(label: 'VWAP relation', value: _vwapRelation(result)),
+          _DataPairData(label: 'RSI', value: _rsiLabel(result)),
+          _DataPairData(label: 'Momentum', value: _momentumLabel(result)),
+          _DataPairData(
+              label: 'Volume ratio', value: _volumeRatioLabel(result)),
+          _DataPairData(
+              label: 'Recent return', value: _recentReturnLabel(result)),
+        ]),
+        const SizedBox(height: 12),
+        const Text('Why No Order?',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(label: 'Order', value: order),
+          _DataPairData(label: 'Main blocker', value: mainReason),
+          _DataPairData(label: 'Next action', value: _nextAction(result)),
+        ]),
+        if (secondaryBlockers.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _BulletList(title: 'Secondary blockers', items: secondaryBlockers),
+        ],
+        const SizedBox(height: 8),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
@@ -442,7 +372,7 @@ class _ReadableDetails extends StatelessWidget {
             ),
           ],
         ),
-      ],
+      ]),
     );
   }
 }
@@ -591,25 +521,39 @@ class _SoftBadge extends StatelessWidget {
 }
 
 String _mainReason(KisSingleSymbolTradingResult result) {
-  if (result.reason.trim().isNotEmpty) return result.reason;
-  if (result.blockReason != null) return result.blockReason!;
-  if (result.noOrderReason != null) return result.noOrderReason!;
-  if (result.riskFlags.isNotEmpty) return result.riskFlags.first;
-  if (result.gatingNotes.isNotEmpty) return result.gatingNotes.first;
+  if (_analysisUnavailableBecauseData(result)) {
+    return presentation.translateReason(
+      'insufficient_data',
+      singleSymbolContext: true,
+    );
+  }
+  final buyScore = result.finalBuyScore;
+  final requiredScore = result.effectiveMinEntryScore;
+  if (buyScore != null && requiredScore != null && buyScore < requiredScore) {
+    return presentation.translateReason(
+      'score_threshold_not_met',
+      singleSymbolContext: true,
+    );
+  }
+  final technicalReason = _technicalMainReason(result);
+  if (technicalReason != null) return technicalReason;
+  for (final reason in _reasonCandidates(result)) {
+    final translated = _translateSingleSymbolReason(reason);
+    if (_isReadableSummaryText(translated)) return translated;
+  }
   if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
-    return 'dry_run';
+    return presentation.translateReason('dry_run', singleSymbolContext: true);
   }
   return 'Backend risk gate blocked this order';
 }
 
 String _decisionLabel(KisSingleSymbolTradingResult result) {
   final action = result.action.trim().toLowerCase();
-  final resultText = result.result.trim().toLowerCase();
-  if (resultText.contains('preview')) return 'PREVIEW ONLY';
-  if (resultText.contains('block') || result.blockReason != null) {
-    return 'BLOCKED';
-  }
   if (action == 'buy') return 'BUY';
+  if (action == 'hold') return 'HOLD';
+  if (_analysisStatus(result) == 'Blocked before analysis') return 'BLOCKED';
+  final resultText = result.result.trim().toLowerCase();
+  if (resultText.contains('block')) return 'BLOCKED';
   return 'HOLD';
 }
 
@@ -631,5 +575,326 @@ String _nextAction(KisSingleSymbolTradingResult result) {
   if (result.safetyFlag('runtime_dry_run') || result.safetyFlag('dry_run')) {
     return 'Dry-run mode: no real order submitted';
   }
-  return presentation.translateReason(_mainReason(result));
+  if (_analysisUnavailableBecauseData(result)) {
+    return 'Refresh KIS OHLCV data and run analysis again';
+  }
+  if (result.finalBuyScore != null &&
+      result.effectiveMinEntryScore != null &&
+      result.finalBuyScore! < result.effectiveMinEntryScore!) {
+    return 'Wait for setup to improve before submitting a buy';
+  }
+  return _mainReason(result);
+}
+
+String _analysisStatus(KisSingleSymbolTradingResult result) {
+  final indicatorStatus = result.indicatorStatus?.trim().toLowerCase() ?? '';
+  if (indicatorStatus == 'ok' || result.finalBuyScore != null) {
+    return 'Analysis completed';
+  }
+  if (_blockedBeforeAnalysis(result)) return 'Blocked before analysis';
+  if (_analysisUnavailableBecauseData(result)) return 'Analysis unavailable';
+  return 'Analysis unavailable';
+}
+
+Color _analysisStatusColor(String status) {
+  if (status == 'Analysis completed') return Colors.greenAccent;
+  if (status == 'Blocked before analysis') return Colors.amberAccent;
+  return Colors.redAccent;
+}
+
+bool _analysisUnavailableBecauseData(KisSingleSymbolTradingResult result) {
+  final indicatorStatus = result.indicatorStatus?.trim().toLowerCase() ?? '';
+  return result.buyScore == null &&
+      result.finalBuyScore == null &&
+      result.confidence == null &&
+      _indicatorMissingOrError(indicatorStatus);
+}
+
+bool _indicatorMissingOrError(String status) {
+  return status.isEmpty ||
+      status == 'missing' ||
+      status == 'error' ||
+      status == 'insufficient_data' ||
+      status == 'price_only';
+}
+
+bool _blockedBeforeAnalysis(KisSingleSymbolTradingResult result) {
+  if (result.finalBuyScore != null || result.confidence != null) return false;
+  final codes = _reasonCandidates(result).map((item) => item.toLowerCase());
+  return codes.any((code) =>
+      code == 'market_closed' ||
+      code == 'after_no_new_entry_time' ||
+      code == 'near_close' ||
+      code == 'buy_entry_not_allowed_now' ||
+      code == 'kill_switch_enabled' ||
+      code == 'kis_disabled' ||
+      code == 'kis_real_order_disabled' ||
+      code == 'confirm_live_required');
+}
+
+String _orderLabel(KisSingleSymbolTradingResult result) {
+  final normalized = result.result.trim().toLowerCase();
+  if (result.realOrderSubmitted || normalized == 'submitted') {
+    return 'Real order submitted';
+  }
+  if (normalized.contains('dry') ||
+      result.safetyFlag('runtime_dry_run') ||
+      result.safetyFlag('dry_run')) {
+    return 'Dry-run';
+  }
+  return 'No order created';
+}
+
+List<String> _secondaryBlockers(
+  KisSingleSymbolTradingResult result,
+  String mainReason,
+) {
+  final blockers = <String>[];
+  for (final reason in _reasonCandidates(result)) {
+    final translated = _translateSingleSymbolReason(reason);
+    if (!_isReadableSummaryText(translated)) continue;
+    if (translated == mainReason || blockers.contains(translated)) continue;
+    blockers.add(translated);
+    if (blockers.length >= 5) break;
+  }
+  return blockers;
+}
+
+List<String> _reasonCandidates(KisSingleSymbolTradingResult result) {
+  final values = <String?>[
+    _nestedString(result.rawPayload, const ['readiness', 'block_reason']),
+    result.noOrderReason,
+    result.blockReason,
+    result.reason,
+    ..._nestedStringList(result.rawPayload, const ['validation', 'warnings']),
+  ];
+  final marketSession = _nestedMap(result.rawPayload, const ['market_session']);
+  if (marketSession['is_near_close'] == true) values.add('near_close');
+  if (marketSession['is_entry_allowed_now'] == false) {
+    values.add('after_no_new_entry_time');
+  }
+  values.addAll(result.riskFlags);
+  values.addAll(result.gatingNotes);
+  return values
+      .map((value) => value?.trim() ?? '')
+      .where((value) => value.isNotEmpty && value != 'null')
+      .toList(growable: false);
+}
+
+String _translateSingleSymbolReason(String reason) {
+  final translated = presentation.translateReason(
+    reason,
+    singleSymbolContext: true,
+  );
+  if (_looksLikeRawReasonCode(translated))
+    return _humanizeReasonCode(translated);
+  return translated;
+}
+
+bool _looksLikeRawReasonCode(String value) {
+  return RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(value);
+}
+
+String _humanizeReasonCode(String value) {
+  final words = value
+      .replaceAll('-', '_')
+      .split('_')
+      .where((part) => part.isNotEmpty)
+      .map((part) => part.toLowerCase())
+      .toList();
+  if (words.isEmpty) return value;
+  final text = words.join(' ');
+  return text[0].toUpperCase() + text.substring(1);
+}
+
+bool _isReadableSummaryText(String value) {
+  final text = value.trim();
+  if (text.isEmpty || text == 'Not available') return false;
+  final hasReplacementOrControl = text.runes
+      .any((code) => code == 0xfffd || (code >= 0x80 && code <= 0x9f));
+  final hasMojibakeMarkers =
+      RegExp(r'[\u00c2\u00c3\u00ea\u00eb\u00ec]').hasMatch(text);
+  return !hasReplacementOrControl && !hasMojibakeMarkers;
+}
+
+String? _technicalMainReason(KisSingleSymbolTradingResult result) {
+  final below = [
+    if (_isBelow(result, 'ema20', 'below_EMA20')) 'EMA20',
+    if (_isBelow(result, 'ema50', 'below_EMA50')) 'EMA50',
+    if (_isBelow(result, 'vwap', 'below_VWAP')) 'VWAP',
+  ];
+  if (below.length >= 2) {
+    return 'Weak setup: price below ${below.join(' / ')}';
+  }
+  final rsi = _numberValue(result.indicatorPayload['rsi']);
+  final hasOverboughtFlag =
+      result.riskFlags.any((flag) => flag.toLowerCase() == 'overbought_rsi');
+  if ((rsi != null && rsi >= 70) || hasOverboughtFlag) {
+    return 'Overbought setup: chase risk';
+  }
+  return null;
+}
+
+bool _isBelow(KisSingleSymbolTradingResult result, String key, String flag) {
+  final price = _snapshotPrice(result);
+  final value = _numberValue(result.indicatorPayload[key]);
+  if (price != null && value != null) return price < value;
+  return result.riskFlags
+      .any((item) => item.toLowerCase() == flag.toLowerCase());
+}
+
+String _emaRelation(KisSingleSymbolTradingResult result, int period) {
+  return _priceRelation(result, 'ema$period', 'EMA$period');
+}
+
+String _vwapRelation(KisSingleSymbolTradingResult result) {
+  return _priceRelation(result, 'vwap', 'VWAP');
+}
+
+String _priceRelation(
+  KisSingleSymbolTradingResult result,
+  String key,
+  String label,
+) {
+  final price = _snapshotPrice(result);
+  final value = _numberValue(result.indicatorPayload[key]);
+  if (price != null && value != null) {
+    return price >= value ? 'Price above $label' : 'Price below $label';
+  }
+  final normalized = label.toLowerCase();
+  if (result.riskFlags
+      .any((flag) => flag.toLowerCase() == 'below_$normalized')) {
+    return 'Price below $label';
+  }
+  if (result.riskFlags
+      .any((flag) => flag.toLowerCase() == 'above_$normalized')) {
+    return 'Price above $label';
+  }
+  return 'Indicator not returned';
+}
+
+String _rsiLabel(KisSingleSymbolTradingResult result) {
+  final rsi = _numberValue(result.indicatorPayload['rsi']);
+  if (rsi == null) {
+    if (result.riskFlags.any((flag) => flag.toLowerCase() == 'oversold_rsi')) {
+      return 'RSI oversold';
+    }
+    if (result.riskFlags
+        .any((flag) => flag.toLowerCase() == 'overbought_rsi')) {
+      return 'RSI overbought';
+    }
+    return 'Indicator not returned';
+  }
+  final suffix = ' (${_formatDecimal(rsi)})';
+  if (rsi <= 30) return 'RSI oversold$suffix';
+  if (rsi >= 70) return 'RSI overbought$suffix';
+  return 'RSI neutral$suffix';
+}
+
+String _momentumLabel(KisSingleSymbolTradingResult result) {
+  final momentum = _numberValue(result.indicatorPayload['momentum'] ??
+      result.indicatorPayload['short_momentum']);
+  if (momentum == null) {
+    if (result.riskFlags
+        .any((flag) => flag.toLowerCase() == 'negative_momentum')) {
+      return 'Momentum negative';
+    }
+    return 'Indicator not returned';
+  }
+  if (momentum < 0) return 'Momentum negative (${_formatPercent(momentum)})';
+  if (momentum > 0) return 'Momentum positive (${_formatPercent(momentum)})';
+  return 'Momentum flat';
+}
+
+String _volumeRatioLabel(KisSingleSymbolTradingResult result) {
+  final volumeRatio = _numberValue(result.indicatorPayload['volume_ratio']);
+  if (volumeRatio == null) return 'Indicator not returned';
+  final formatted = '${_formatDecimal(volumeRatio)}x';
+  if (volumeRatio < 0.8) return 'Volume weak ($formatted)';
+  if (volumeRatio > 1.2) return 'Volume strong ($formatted)';
+  return 'Volume normal ($formatted)';
+}
+
+String _recentReturnLabel(KisSingleSymbolTradingResult result) {
+  final recentReturn = _numberValue(result.indicatorPayload['recent_return']);
+  if (recentReturn == null) {
+    if (result.riskFlags
+        .any((flag) => flag.toLowerCase() == 'weak_recent_return')) {
+      return 'Recent return weak';
+    }
+    return 'Indicator not returned';
+  }
+  if (recentReturn < 0)
+    return 'Recent return weak (${_formatPercent(recentReturn)})';
+  if (recentReturn > 0) {
+    return 'Recent return positive (${_formatPercent(recentReturn)})';
+  }
+  return 'Recent return flat';
+}
+
+double? _snapshotPrice(KisSingleSymbolTradingResult result) {
+  return result.currentPrice ??
+      _numberValue(result.indicatorPayload['price']) ??
+      _numberValue(result.indicatorPayload['close']);
+}
+
+double? _numberValue(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  final text = value.toString().trim().replaceAll(',', '');
+  if (text.isEmpty || text == 'null') return null;
+  return double.tryParse(text);
+}
+
+String _formatDecimal(double value) {
+  return value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 2);
+}
+
+String _displaySignalScore(num? value,
+    {String fallback = 'Score not returned'}) {
+  if (value == null) return fallback;
+  final numeric = value.toDouble();
+  return numeric.toStringAsFixed(numeric.truncateToDouble() == numeric ? 1 : 2);
+}
+
+String _formatPercent(double value) {
+  return '${(value * 100).toStringAsFixed(2)}%';
+}
+
+Map<String, dynamic> _nestedMap(
+  Map<String, dynamic> source,
+  List<String> path,
+) {
+  Object? current = source;
+  for (final key in path) {
+    if (current is! Map) return const {};
+    current = current[key];
+  }
+  if (current is Map<String, dynamic>) return current;
+  if (current is Map) return Map<String, dynamic>.from(current);
+  return const {};
+}
+
+String? _nestedString(Map<String, dynamic> source, List<String> path) {
+  Object? current = source;
+  for (final key in path) {
+    if (current is! Map) return null;
+    current = current[key];
+  }
+  final text = current?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text;
+}
+
+List<String> _nestedStringList(Map<String, dynamic> source, List<String> path) {
+  Object? current = source;
+  for (final key in path) {
+    if (current is! Map) return const [];
+    current = current[key];
+  }
+  if (current is! List) return const [];
+  return current
+      .map((item) => item.toString().trim())
+      .where((item) => item.isNotEmpty && item != 'null')
+      .toList(growable: false);
 }
