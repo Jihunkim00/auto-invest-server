@@ -483,10 +483,10 @@ void main() {
     expect(find.text('AI SELL'), findsWidgets);
     expect(find.text('21'), findsWidgets);
     expect(find.text('No order created'), findsOneWidget);
-    expect(find.textContaining('hard_blocked'), findsWidgets);
+    expect(find.textContaining('hard_blocked'), findsNothing);
     expect(find.text('Entry blocked by GPT/risk context'), findsWidgets);
     expect(find.text('999'), findsNothing);
-    expect(find.text('Advanced Details'), findsNothing);
+    expect(find.text('Watchlist Advanced Details'), findsOneWidget);
 
     controller.dispose();
   });
@@ -541,7 +541,7 @@ void main() {
     expect(find.text('NVDA'), findsWidgets);
     expect(find.text('AAPL'), findsWidgets);
     expect(find.text('MSFT'), findsWidgets);
-    expect(find.textContaining('score_threshold_not_met'), findsWidgets);
+    expect(find.text('Score below entry threshold'), findsWidgets);
 
     controller.dispose();
   });

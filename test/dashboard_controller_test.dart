@@ -202,7 +202,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -211,7 +211,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -220,7 +220,7 @@ void main() {
 
     expect(controller.canSubmitLiveKisOrder, isFalse);
     expect(controller.kisSubmitBlockedMessage(),
-        'Current order input changed after validation. Validate again.');
+        'Run a successful validation first.');
     controller.dispose();
   });
 
@@ -294,6 +294,15 @@ void main() {
     final controller = _readyKisController();
 
     expect(controller.canSubmitLiveKisOrder, isTrue);
+    controller.dispose();
+  });
+
+  test('KIS live submit requires extra safety confirmation', () {
+    final controller = _readyKisController()..kisManualExtraSafety = false;
+
+    expect(controller.canSubmitLiveKisOrder, isFalse);
+    expect(controller.kisSubmitBlockedMessage(),
+        'Confirm the extra KIS safety checkbox.');
     controller.dispose();
   });
 
@@ -634,6 +643,7 @@ DashboardController _readyKisController({
     ..setOrderTicketQty(validation.qty)
     ..orderValidationResult = validation
     ..kisLiveConfirmation = true
+    ..kisManualExtraSafety = true
     ..kisSafetyStatus = safetyStatus ?? _safetyStatus();
 }
 
@@ -1091,7 +1101,7 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     runKisLimitedAutoBuyCalls += 1;
     return limitedAutoBuy ?? _limitedAutoBuy();
   }

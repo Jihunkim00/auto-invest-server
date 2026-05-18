@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'dashboard_controller.dart';
+import 'widgets/broker_context_controls.dart';
 import 'widgets/watchlist_section.dart';
 
 class WatchlistScreen extends StatelessWidget {
@@ -24,14 +25,22 @@ class WatchlistScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                const Text(
-                  'Watchlist',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-                ),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Expanded(
+                    child: Text(
+                      'Watchlist',
+                      style:
+                          TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  BrokerContextBadge(controller: controller),
+                ]),
                 const SizedBox(height: 6),
-                const Text(
-                  'Find the next new-buy candidate. Manual order review happens elsewhere.',
-                  style: TextStyle(color: Colors.white70),
+                Text(
+                  controller.selectedProvider == SelectedProvider.kis
+                      ? 'KIS preview-only candidate exploration. No live submit from Watchlist.'
+                      : 'Alpaca paper candidate exploration and scan summary.',
+                  style: const TextStyle(color: Colors.white70),
                 ),
                 const SizedBox(height: 12),
                 WatchlistSection(

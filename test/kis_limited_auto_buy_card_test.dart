@@ -148,7 +148,7 @@ class _FakeLimitedAutoBuyApi extends ApiClient {
   int submitCalls = 0;
 
   @override
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     runCalls += 1;
     return result;
   }

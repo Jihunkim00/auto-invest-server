@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/analysis/analysis_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/manual_trading_run_section.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/manual_trading_run_result.dart';
@@ -11,7 +12,7 @@ import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 
 void main() {
-  testWidgets('Analysis restores Single Symbol Trading for Alpaca Paper',
+  testWidgets('Analysis is read-only and sends execution to Trading',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -23,48 +24,19 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
-    expect(find.text('Single Symbol Trading'), findsOneWidget);
-    expect(find.text('Alpaca Paper / US'), findsOneWidget);
-    expect(find.text('KIS / KR'), findsOneWidget);
-    expect(find.text('Symbol selector'), findsOneWidget);
-    expect(find.text('Symbol'), findsOneWidget);
-    expect(find.text('Gate 1'), findsOneWidget);
-    expect(find.text('Gate 2'), findsOneWidget);
-    expect(find.text('Gate 3'), findsOneWidget);
-    expect(find.text('Gate 4'), findsOneWidget);
-    expect(find.text('Run Single Symbol'), findsOneWidget);
-    expect(find.text('Uses existing risk engine'), findsOneWidget);
-    expect(find.text('Paper order may be created if risk-approved'),
+    expect(find.text('Decision Summary'), findsOneWidget);
+    expect(find.text('No single-symbol decision yet. Run one from Trading.'),
         findsOneWidget);
-    expect(find.text('HOLD is normal'), findsOneWidget);
-
-    await tester.ensureVisible(find.text('Gate 3'));
-    await tester.tap(find.text('Gate 3'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'msft');
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Run Single Symbol'));
-    await tester.tap(find.text('Run Single Symbol'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
-    await tester.pumpAndSettle();
-
-    expect(api.singleRunCalls, 1);
-    expect(api.lastSingleRunSymbol, 'MSFT');
-    expect(api.lastSingleRunGateLevel, 3);
-    expect(find.text('Result Summary'), findsOneWidget);
-    expect(find.text('HOLD'), findsWidgets);
-    expect(find.text('skipped'), findsWidgets);
-    expect(find.text('Why No Trade?'), findsOneWidget);
-    expect(find.text('Score Breakdown'), findsOneWidget);
-    expect(find.text('AI BUY'), findsOneWidget);
-    expect(find.text('FINAL BUY'), findsOneWidget);
-    expect(find.text('No order created.'), findsOneWidget);
+    expect(find.text('Run Single Symbol'), findsNothing);
+    expect(find.text('KIS Guarded Trading Run Once'), findsNothing);
+    expect(find.text('Submit Live KIS Order'), findsNothing);
+    expect(find.text('Watchlist Advanced Details'), findsNothing);
+    expect(api.singleRunCalls, 0);
 
     controller.dispose();
   });
 
-  testWidgets('KIS single symbol path only prepares Manual Order ticket',
+  testWidgets('Trading exposes KIS guarded and manual safety checks',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -72,7 +44,6 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _AnalysisFakeApi();
-    var openedManualOrder = false;
     final controller = DashboardController(api, autoload: false)
       ..krWatchlist = const MarketWatchlist(
         market: 'KR',
@@ -88,46 +59,29 @@ void main() {
           ),
         ],
       )
+      ..selectedProvider = SelectedProvider.kis
+      ..selectedPortfolioMarket = PortfolioMarket.kr
+      ..selectedWatchlistMarket = PortfolioMarket.kr
+      ..selectedOrderMarket = PortfolioMarket.kr
       ..kisLiveConfirmation = true
       ..orderValidationResult = _validationResult()
       ..orderValidationError = 'old validation';
 
-    await tester.pumpWidget(_wrap(
-      controller,
-      onOpenManualOrder: () => openedManualOrder = true,
-    ));
+    await tester.pumpWidget(_wrapTrading(controller));
 
-    await tester.tap(find.text('KIS / KR'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Prepare Buy Ticket'), findsOneWidget);
-    expect(find.text('Manual Order only'), findsOneWidget);
-    expect(find.text('No KIS live submit here'), findsOneWidget);
-    expect(find.text('confirm_live remains unchecked'), findsOneWidget);
-    expect(find.text('Submit Live KIS Order'), findsNothing);
-    expect(find.text('Run Single Symbol'), findsNothing);
-
-    await tester.enterText(find.widgetWithText(TextField, 'Symbol'), '005930');
-    await tester.ensureVisible(find.text('Prepare Buy Ticket'));
-    await tester.tap(find.text('Prepare Buy Ticket'));
-    await tester.pumpAndSettle();
-
-    expect(openedManualOrder, isTrue);
+    expect(find.text('KIS Guarded Trading Run Once'), findsOneWidget);
+    expect(find.text('KIS Live Manual Order'), findsOneWidget);
+    expect(find.text('I understand this may place a real KIS buy order'),
+        findsOneWidget);
+    expect(find.text('I understand this is a real KIS order'), findsOneWidget);
+    expect(find.text('Analyze & Run Once'), findsOneWidget);
+    expect(find.text('Submit Live KIS Order'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Analyze & Run Once'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Submit Live KIS Order'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
     expect(controller.selectedOrderMarket, PortfolioMarket.kr);
-    expect(controller.orderTicketSymbol, '005930');
-    expect(controller.orderTicketSide, 'buy');
-    expect(controller.kisLiveConfirmation, isFalse);
-    expect(controller.orderValidationResult, isNull);
-    expect(controller.orderValidationError, isNull);
-    expect(
-      controller.orderTicketSourceMetadata?['source'],
-      'single_symbol_trading',
-    );
-    expect(find.text('Result Summary'), findsOneWidget);
-    expect(find.text('No order created'), findsOneWidget);
 
     controller.dispose();
   });
@@ -142,7 +96,7 @@ void main() {
     final api = _AnalysisFakeApi(realisticScores: true);
     final controller = DashboardController(api, autoload: false);
 
-    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
     await tester.tap(find.text('Run Single Symbol'));
     await tester.pumpAndSettle();
@@ -183,7 +137,7 @@ void main() {
     final api = _AnalysisFakeApi(signalIdOnly: true);
     final controller = DashboardController(api, autoload: false);
 
-    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
     await tester.tap(find.text('Run Single Symbol'));
     await tester.pumpAndSettle();
@@ -218,7 +172,7 @@ void main() {
     final api = _AnalysisFakeApi(signalIdOnly: true, failSignalFetch: true);
     final controller = DashboardController(api, autoload: false);
 
-    await tester.pumpWidget(_wrap(controller));
+    await tester.pumpWidget(_wrapTrading(controller));
     await tester.tap(find.text('Run Single Symbol'));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
@@ -283,6 +237,29 @@ Widget _wrap(
       ),
     ),
   );
+}
+
+Widget _wrapTrading(DashboardController controller) {
+  return MaterialApp(
+    theme: ThemeData.dark(),
+    home: Scaffold(
+      body: TradingScreen(controller: controller),
+    ),
+  );
+}
+
+bool _filledButtonEnabled(WidgetTester tester, String label) {
+  final button = tester.widget<ButtonStyleButton>(
+    find
+        .ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is ButtonStyleButton,
+          ),
+        )
+        .first,
+  );
+  return button.onPressed != null;
 }
 
 class _AnalysisFakeApi extends ApiClient {

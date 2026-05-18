@@ -150,11 +150,16 @@ class WatchlistSection extends StatelessWidget {
                   onOpenManualOrder?.call();
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                     content: Text(
-                        'Manual buy ticket prepared. Validate in Manual Order before submit.'),
+                        'Manual buy ticket prepared. Validate in Trading before submit.'),
                     backgroundColor: Colors.green,
                   ));
                 },
         ),
+        if (controller.hasLatestRunResult ||
+            controller.showingOfflineFallback) ...[
+          const SizedBox(height: 12),
+          _WatchlistAdvancedDetails(runResult: controller.runResult),
+        ],
         const SizedBox(height: 12),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -196,13 +201,18 @@ class _WatchlistRunResultSummary extends StatelessWidget {
       runResult.action,
       'run completed',
     ]);
-    final reason = _firstText([
-      runResult.reason,
-      candidate?.noOrderReason,
-      candidate?.skipReason,
-      candidate?.reason,
-      'No additional reason.',
-    ]);
+    final entryPenalty =
+        candidate?.entryPenalty ?? candidate?.gptContext.entryPenalty;
+    final reason = _operatorReason(
+      _firstText([
+        runResult.reason,
+        candidate?.noOrderReason,
+        candidate?.skipReason,
+        candidate?.reason,
+        'No additional reason.',
+      ]),
+      entryPenalty: entryPenalty,
+    );
     final orderId =
         candidate?.orderId ?? candidate?.relatedOrderId ?? runResult.orderId;
     final orderStatus =
@@ -225,22 +235,28 @@ class _WatchlistRunResultSummary extends StatelessWidget {
         : candidate != null
             ? 'Review block reason before any order action.'
             : 'Run a watchlist scan for candidate ranking.';
-    final blockReason = _notAvailable(_firstText([
-      candidate?.blockReason,
-      candidate?.blockReasons.isNotEmpty == true
-          ? candidate!.blockReasons.join(', ')
-          : null,
-      candidate?.skipReason,
-      candidate?.noOrderReason,
-      runResult.triggerBlockReason,
-      runResult.reason,
-    ]));
-    final noOrderReason = _notAvailable(_firstText([
-      candidate?.noOrderReason,
-      candidate?.skipReason,
-      runResult.reason,
-      runResult.triggerBlockReason,
-    ]));
+    final blockReason = _operatorReason(
+      _firstText([
+        candidate?.blockReason,
+        candidate?.blockReasons.isNotEmpty == true
+            ? candidate!.blockReasons.join(', ')
+            : null,
+        candidate?.skipReason,
+        candidate?.noOrderReason,
+        runResult.triggerBlockReason,
+        runResult.reason,
+      ]),
+      entryPenalty: entryPenalty,
+    );
+    final noOrderReason = _operatorReason(
+      _firstText([
+        candidate?.noOrderReason,
+        candidate?.skipReason,
+        runResult.reason,
+        runResult.triggerBlockReason,
+      ]),
+      entryPenalty: entryPenalty,
+    );
     final entryStatus = _entryStatus(candidate);
     final gptSummary = _gptAdvisoryReason(candidate);
     final previewCandidates =
@@ -308,11 +324,10 @@ class _WatchlistRunResultSummary extends StatelessWidget {
               label: 'Trade allowed',
               value: _nullableBoolText(candidate?.tradeAllowed)),
           _ResultPair(
-              label: 'Hard blocked',
-              value: candidate?.hardBlocked == true ||
-                      candidate?.hardBlockNewBuy == true
-                  ? 'true'
-                  : 'false'),
+              label: 'Risk context',
+              value: _entryBlockedByGptOrRisk(candidate)
+                  ? 'Entry blocked by GPT/risk context'
+                  : 'No hard block'),
           _ResultPair(label: 'Block reason', value: blockReason),
           _ResultPair(label: 'No-order reason', value: noOrderReason),
           _ResultPair(
@@ -336,7 +351,9 @@ class _WatchlistRunResultSummary extends StatelessWidget {
         ],
         if (_hardBlockReason(candidate).isNotEmpty) ...[
           const SizedBox(height: 10),
-          _StateLine(text: 'Hard block reason: ${_hardBlockReason(candidate)}'),
+          _StateLine(
+              text:
+                  'Entry block reason: ${_operatorReason(_hardBlockReason(candidate), entryPenalty: entryPenalty)}'),
         ],
         if (previewCandidates.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -376,15 +393,107 @@ class _WatchlistCandidatePreview extends StatelessWidget {
             _ResultPair(label: 'Action hint', value: candidate.actionHint),
             _ResultPair(
                 label: 'Block reason',
-                value: _notAvailable(_firstText([
-                  candidate.blockReason,
-                  candidate.blockReasons.isEmpty
-                      ? null
-                      : candidate.blockReasons.join(', '),
-                ]))),
+                value: _operatorReason(
+                  _firstText([
+                    candidate.blockReason,
+                    candidate.blockReasons.isEmpty
+                        ? null
+                        : candidate.blockReasons.join(', '),
+                  ]),
+                  entryPenalty: candidate.entryPenalty ??
+                      candidate.gptContext.entryPenalty,
+                )),
           ]),
         ),
     ]);
+  }
+}
+
+class _WatchlistAdvancedDetails extends StatelessWidget {
+  const _WatchlistAdvancedDetails({required this.runResult});
+
+  final WatchlistRunResult runResult;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: const Text('Watchlist Advanced Details'),
+      subtitle: const Text('Raw candidate lists and scan metrics.'),
+      children: [
+        _StateLine(
+          text: 'configured_symbol_count=${runResult.configuredSymbolCount}\n'
+              'analyzed_symbol_count=${runResult.analyzedSymbolCount}\n'
+              'quant_candidates_count=${runResult.quantCandidatesCount}\n'
+              'researched_candidates_count=${runResult.researchedCandidatesCount}\n'
+              'final_best_candidate=${runResult.finalBestCandidate}\n'
+              'trigger_block_reason=${runResult.triggerBlockReason}',
+        ),
+        const SizedBox(height: 10),
+        _AdvancedCandidateList(
+          title: 'Top Quant Candidates',
+          candidates: runResult.topQuantCandidates,
+        ),
+        const SizedBox(height: 10),
+        _AdvancedCandidateList(
+          title: 'Researched Candidates',
+          candidates: runResult.researchedCandidates,
+        ),
+        const SizedBox(height: 10),
+        _AdvancedCandidateList(
+          title: 'Final Ranked Candidates',
+          candidates: runResult.finalRankedCandidates,
+        ),
+      ],
+    );
+  }
+}
+
+class _AdvancedCandidateList extends StatelessWidget {
+  const _AdvancedCandidateList({
+    required this.title,
+    required this.candidates,
+  });
+
+  final String title;
+  final List<Candidate> candidates;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: Text(title),
+      children: [
+        if (candidates.isEmpty)
+          const _StateLine(text: 'No candidates.')
+        else
+          for (var i = 0; i < candidates.length; i += 1)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _StateLine(
+                text: _advancedCandidateText(i, candidates[i]),
+              ),
+            ),
+      ],
+    );
+  }
+
+  String _advancedCandidateText(int index, Candidate candidate) {
+    return '#${index + 1} ${candidate.symbol}\n'
+        'entry_score=${_displayNumber(_candidateEntryScore(candidate))}, '
+        'quant_score=${_displayNumber(_candidateQuantScore(candidate))}, '
+        'ai_buy_score=${_displayNumber(candidate.aiBuyScore)}, '
+        'ai_sell_score=${_displayNumber(candidate.aiSellScore)}, '
+        'confidence=${_displayNumber(candidate.confidence)}\n'
+        'action_hint=${candidate.actionHint}, '
+        'entry_ready=${candidate.entryReady}, '
+        'trade_allowed=${candidate.tradeAllowed}, '
+        'entry_penalty=${candidate.entryPenalty ?? candidate.gptContext.entryPenalty ?? 'n/a'}\n'
+        'block_reason=${candidate.blockReason ?? 'n/a'}, '
+        'risk_flags=${_joinList(candidate.riskFlags)}, '
+        'gating_notes=${_joinList(candidate.gatingNotes)}';
   }
 }
 
@@ -489,14 +598,17 @@ class _TopCandidateCard extends StatelessWidget {
         ),
       );
     }
-    final blockReason = candidate.blockReason ??
-        (candidate.blockReasons.isEmpty
-            ? 'No block reason'
-            : candidate.blockReasons.join(', '));
+    final blockReason = _operatorReason(
+      candidate.blockReason ??
+          (candidate.blockReasons.isEmpty
+              ? 'No block reason'
+              : candidate.blockReasons.join(', ')),
+      entryPenalty: candidate.entryPenalty ?? candidate.gptContext.entryPenalty,
+    );
     final entryStatus = _entryStatus(candidate);
     final nextAction = candidate.entryReady
         ? (isKr
-            ? 'Prepare a manual buy ticket, then validate on Manual Order.'
+            ? 'Prepare a manual buy ticket, then validate on Trading.'
             : 'Review candidate before any trading action.')
         : 'Review block reason before preparing a ticket.';
     return Container(
@@ -3401,6 +3513,49 @@ String _firstText(List<String?> values) {
 String _notAvailable(String value) {
   final text = value.trim();
   return text.isEmpty || text == 'null' ? 'Not available' : text;
+}
+
+String _operatorReason(String value, {num? entryPenalty}) {
+  if (entryPenalty != null && entryPenalty >= 900) {
+    return 'Entry blocked by GPT/risk context';
+  }
+  final text = value.trim();
+  if (text.isEmpty || text == 'null') return 'Not available';
+  final normalized = text.toLowerCase();
+  if (normalized == 'hard_blocked') {
+    return 'Entry blocked by risk context';
+  }
+  if (normalized == 'gpt_hard_block_new_buy') {
+    return 'GPT/risk context blocks new buy entries';
+  }
+  if (normalized == 'score_threshold_not_met') {
+    return 'Score below entry threshold';
+  }
+  if (normalized == 'hold_signal') {
+    return 'HOLD signal, no order created';
+  }
+  if (normalized == 'market_closed') {
+    return 'Market is closed';
+  }
+  if (normalized == 'kr_trading_disabled') {
+    return 'KR trading disabled / preview only';
+  }
+  if (normalized == 'preview_only') {
+    return 'Preview only, no real order';
+  }
+  if (normalized == 'buy_entry_not_allowed_now') {
+    return 'New buy entries are not allowed now';
+  }
+  if (normalized == 'dry_run_must_be_false') {
+    return 'Dry-run is ON, live order blocked';
+  }
+  if (normalized == 'kill_switch_enabled') {
+    return 'Kill switch is ON';
+  }
+  if (normalized.contains('gpt_entry_penalty=999')) {
+    return 'New buy blocked by GPT/risk context';
+  }
+  return text;
 }
 
 String _boolText(bool value) => value ? 'true' : 'false';

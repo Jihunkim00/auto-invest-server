@@ -554,9 +554,11 @@ class ApiClient {
     return KisBuyShadowDecision.fromJson(payload);
   }
 
-  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce() async {
-    final payload =
-        await _postJsonBody('/kis/limited-auto-buy/run-once', const {});
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
+    final path = gateLevel == null
+        ? '/kis/limited-auto-buy/run-once'
+        : '/kis/limited-auto-buy/run-once?gate_level=$gateLevel';
+    final payload = await _postJsonBody(path, const {});
     return KisLimitedAutoBuy.fromJson(payload);
   }
 

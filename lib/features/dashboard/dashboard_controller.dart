@@ -159,6 +159,10 @@ class DashboardController extends ChangeNotifier {
   OrderValidationResult? orderValidationResult;
   String? orderValidationError;
   bool kisLiveConfirmation = false;
+  bool kisManualExtraSafety = false;
+  bool kisGuardedRunConfirmation = false;
+  bool kisGuardedRunExtraSafety = false;
+  String kisGuardedRunSymbol = '005930';
   bool kisManualSubmitLoading = false;
   bool kisOrderSyncLoading = false;
   bool kisOrderCancelLoading = false;
@@ -213,12 +217,21 @@ class DashboardController extends ChangeNotifier {
         qtyMatches &&
         sideMatches &&
         kisLiveConfirmation &&
+        kisManualExtraSafety &&
         !kisSafetyStatus.runtimeDryRun &&
         !kisSafetyStatus.killSwitch &&
         kisSafetyStatus.kisEnabled &&
         kisSafetyStatus.kisRealOrderEnabled &&
         kisSafetyStatus.marketOpen &&
         kisSafetyStatus.entryAllowedNow;
+  }
+
+  bool get canRunKisGuardedTradingOnce {
+    return kisGuardedRunSymbol.trim().isNotEmpty &&
+        !kisLimitedAutoBuyLoading &&
+        kisRuntimeLiveSubmitGatesOpen &&
+        kisGuardedRunConfirmation &&
+        kisGuardedRunExtraSafety;
   }
 
   bool get kisRuntimeLiveSubmitGatesOpen {
@@ -229,6 +242,14 @@ class DashboardController extends ChangeNotifier {
         kisSafetyStatus.marketOpen &&
         kisSafetyStatus.entryAllowedNow;
   }
+
+  bool get isKisSelected => selectedProvider == SelectedProvider.kis;
+
+  String get selectedProviderCode => isKisSelected ? 'kis' : 'alpaca';
+
+  String get selectedMarketCode => isKisSelected ? 'KR' : 'US';
+
+  String get selectedBrokerLabel => isKisSelected ? 'KIS / KR' : 'Alpaca / US';
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -552,6 +573,10 @@ class DashboardController extends ChangeNotifier {
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
+    kisGuardedRunConfirmation = false;
+    kisGuardedRunExtraSafety = false;
+    kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     if (provider == SelectedProvider.kis) {
       refreshKisOrderMonitoring(silent: true);
     }
@@ -602,6 +627,30 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setKisManualExtraSafety(bool value) {
+    kisManualExtraSafety = value;
+    notifyListeners();
+  }
+
+  void setKisGuardedRunSymbol(String value) {
+    kisGuardedRunSymbol = value.trim().toUpperCase();
+    kisGuardedRunConfirmation = false;
+    kisGuardedRunExtraSafety = false;
+    latestKisLimitedAutoBuyResult = null;
+    kisLimitedAutoBuyError = null;
+    notifyListeners();
+  }
+
+  void setKisGuardedRunConfirmation(bool value) {
+    kisGuardedRunConfirmation = value;
+    notifyListeners();
+  }
+
+  void setKisGuardedRunExtraSafety(bool value) {
+    kisGuardedRunExtraSafety = value;
+    notifyListeners();
+  }
+
   void useKrCandidateInOrderTicket(Candidate candidate) {
     selectedOrderMarket = PortfolioMarket.kr;
     orderTicketSymbol = candidate.symbol.trim();
@@ -613,6 +662,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -658,6 +708,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -677,7 +728,7 @@ class DashboardController extends ChangeNotifier {
     return const ActionResult(
       success: true,
       message:
-          'Manual buy ticket prepared. Validate and confirm in Manual Order before submit.',
+          'Manual buy ticket prepared. Validate and confirm in Trading before submit.',
     );
   }
 
@@ -699,6 +750,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
@@ -747,6 +799,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata =
@@ -780,6 +833,7 @@ class DashboardController extends ChangeNotifier {
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata =
@@ -1577,7 +1631,7 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<ActionResult> runKisLimitedAutoBuyOnce() async {
+  Future<ActionResult> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     if (kisLimitedAutoBuyLoading) {
       return const ActionResult(
         success: false,
@@ -1589,7 +1643,9 @@ class DashboardController extends ChangeNotifier {
     kisLimitedAutoBuyError = null;
     notifyListeners();
     try {
-      final result = await apiClient.runKisLimitedAutoBuyOnce();
+      final result = await apiClient.runKisLimitedAutoBuyOnce(
+        gateLevel: gateLevel,
+      );
       latestKisLimitedAutoBuyResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
       return ActionResult(
@@ -1606,6 +1662,27 @@ class DashboardController extends ChangeNotifier {
       kisLimitedAutoBuyLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<ActionResult> runKisGuardedTradingOnce() async {
+    await refreshKisSafetyStatus(silent: true);
+
+    if (!canRunKisGuardedTradingOnce) {
+      return ActionResult(
+        success: false,
+        message: kisGuardedRunBlockedMessage(),
+      );
+    }
+
+    final result = await runKisLimitedAutoBuyOnce(
+      gateLevel: selectedGateLevel,
+    );
+    if (result.success) {
+      kisGuardedRunConfirmation = false;
+      kisGuardedRunExtraSafety = false;
+      notifyListeners();
+    }
+    return result;
   }
 
   Future<ActionResult> runKisSchedulerLiveOnce() async {
@@ -1801,6 +1878,7 @@ class DashboardController extends ChangeNotifier {
     }
 
     if (!kisLiveConfirmation) return 'Confirm live KIS order first.';
+    if (!kisManualExtraSafety) return 'Confirm the extra KIS safety checkbox.';
     if (kisSafetyStatus.runtimeDryRun) {
       return 'Live submit blocked: dry-run is ON';
     }
@@ -1826,6 +1904,22 @@ class DashboardController extends ChangeNotifier {
       return 'Live submit available after validation + confirmation';
     }
     return kisSubmitBlockedMessageForRuntimeStatus();
+  }
+
+  String kisGuardedRunBlockedMessage() {
+    if (kisGuardedRunSymbol.trim().isEmpty) {
+      return 'Enter a KIS symbol before running guarded trading.';
+    }
+    if (!kisRuntimeLiveSubmitGatesOpen) {
+      return kisSubmitBlockedMessageForRuntimeStatus();
+    }
+    if (!kisGuardedRunConfirmation) {
+      return 'Confirm live KIS guarded run first.';
+    }
+    if (!kisGuardedRunExtraSafety) {
+      return 'Confirm the extra guarded KIS safety checkbox.';
+    }
+    return 'KIS guarded run is blocked by the checklist.';
   }
 
   String kisSubmitBlockedMessageForRuntimeStatus() {
@@ -1890,11 +1984,13 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _clearOrderTicketSourceMetadata() {
-    if (orderTicketSourceMetadata == null) return;
     orderTicketSourceMetadata = null;
     orderValidationResult = null;
     orderValidationError = null;
     kisLiveConfirmation = false;
+    kisManualExtraSafety = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
   }
 }
 
