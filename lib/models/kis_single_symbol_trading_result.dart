@@ -50,6 +50,10 @@ class KisSingleSymbolTradingResult {
     this.indicatorBarCount,
     this.indicatorPayload = const {},
     this.effectiveMinEntryScore,
+    this.estimatedOrderAmount,
+    this.availableCash,
+    this.validationBlockReasons = const [],
+    this.validationWarnings = const [],
     this.riskFlags = const [],
     this.gatingNotes = const [],
   });
@@ -59,6 +63,7 @@ class KisSingleSymbolTradingResult {
     final safety = _dynamicMap(json['safety_summary'] ?? json['safety']);
     final analysis = _dynamicMap(json['analysis']);
     final readiness = _dynamicMap(json['readiness']);
+    final validation = _dynamicMap(json['validation']);
     final riskFlags = _stringList(json['risk_flags']);
     final gatingNotes = _stringList(json['gating_notes']);
     return KisSingleSymbolTradingResult(
@@ -148,6 +153,19 @@ class KisSingleSymbolTradingResult {
         json['effective_min_entry_score'] ??
             readiness['effective_min_entry_score'],
       ),
+      estimatedOrderAmount: _nullableDouble(
+        json['estimated_amount'] ??
+            json['estimated_order_amount'] ??
+            validation['estimated_amount'],
+      ),
+      availableCash: _nullableDouble(
+        json['available_cash'] ?? validation['available_cash'],
+      ),
+      validationBlockReasons: _stringList(
+        json['validation_block_reasons'] ?? validation['block_reasons'],
+      ),
+      validationWarnings:
+          _stringList(json['validation_warnings'] ?? validation['warnings']),
       createdAt: _nullableString(json['created_at']),
       rawPayload: payload,
     );
@@ -203,6 +221,10 @@ class KisSingleSymbolTradingResult {
   final int? indicatorBarCount;
   final Map<String, dynamic> indicatorPayload;
   final double? effectiveMinEntryScore;
+  final double? estimatedOrderAmount;
+  final double? availableCash;
+  final List<String> validationBlockReasons;
+  final List<String> validationWarnings;
   final String? createdAt;
   final Map<String, dynamic> rawPayload;
 
@@ -220,6 +242,13 @@ class KisSingleSymbolTradingResult {
       confidence != null;
 
   bool safetyFlag(String key) => _boolValue(safety[key]) ?? false;
+
+  double? get cashShortfall {
+    final estimated = estimatedOrderAmount;
+    final cash = availableCash;
+    if (estimated == null || cash == null || cash >= estimated) return null;
+    return estimated - cash;
+  }
 }
 
 Map<String, dynamic> _dynamicMap(Object? value) {

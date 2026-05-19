@@ -42,12 +42,16 @@ def evaluate_entry_readiness(
     risk_flags: list[Any] | None = None,
     action: str | None = None,
     market_research_blocked: bool = False,
+    use_min_entry_score_floor: bool = True,
 ) -> dict[str, object]:
     profile = get_gate_profile(gate_level)
     notes = {str(note) for note in (gating_notes or [])}
     flags = {str(flag) for flag in (risk_flags or [])}
     normalized_action = str(action or "").strip().lower()
-    effective_min_entry = max(float(min_entry_score), float(profile.min_buy_score))
+    if use_min_entry_score_floor:
+        effective_min_entry = max(float(min_entry_score), float(profile.min_buy_score))
+    else:
+        effective_min_entry = float(profile.min_buy_score)
     buy_sell_spread = _safe_float(buy_score) - _safe_float(sell_score)
 
     soft_entry_allowed = bool(has_indicators) and not bool(hard_blocked)

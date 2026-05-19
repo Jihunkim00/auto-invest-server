@@ -297,10 +297,16 @@ String _friendlyReason(String? value, {num? entryPenalty}) {
     return 'New buy entries are blocked after 15:00';
   }
   if (normalized == 'near_close') return 'Market is near close';
+  if (normalized == 'insufficient_cash') {
+    return 'Available cash is below estimated order amount';
+  }
   if (normalized == 'dry_run_must_be_false') {
     return 'Dry-run is ON, live order blocked';
   }
   if (normalized == 'kill_switch_enabled') return 'Kill switch is ON';
+  if (normalized == 'confirm_live_required') {
+    return 'Confirm live order before submitting';
+  }
   if (normalized.contains('gpt_entry_penalty=999')) {
     return 'New buy blocked by GPT/risk context';
   }

@@ -16,6 +16,7 @@ import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/trading_run.dart';
+import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 void main() {
   testWidgets('Analysis is read-only and sends execution to Trading',
@@ -202,7 +203,7 @@ void main() {
     await tester.tap(find.text('확인'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Dry-run'), findsWidgets);
+    expect(find.textContaining('Dry-run'), findsWidgets);
     expect(find.text('Analysis unavailable'), findsOneWidget);
     expect(find.text('KIS OHLCV data was not available'), findsWidgets);
     expect(find.text('N/A'), findsNothing);
@@ -477,6 +478,114 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('KIS Analyze & Buy does not fall back to watchlist top candidate',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson(
+        _kisCompletedAnalysisPayload(
+          symbol: '091810',
+          finalBuyScore: 12,
+          finalSellScore: 56.75,
+          currentPrice: 856,
+          reason: 'score_threshold_not_met',
+          noOrderReason: 'score_threshold_not_met',
+          riskFlags: const [],
+          indicatorPayload: const {
+            'price': 856,
+            'close': 856,
+            'ema20': 924,
+            'ema50': 1011,
+            'vwap': 1078,
+            'rsi': 21,
+            'volume_ratio': 0.7,
+            'momentum': -0.05,
+            'recent_return': -0.14,
+          },
+        ),
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..runResult = WatchlistRunResult.fromJson({
+        'final_best_candidate': {
+          'symbol': '005930',
+          'final_entry_score': 90,
+          'final_buy_score': 90,
+          'entry_ready': true,
+          'action_hint': 'buy',
+        },
+        'final_ranked_candidates': [
+          {'symbol': '005930', 'final_entry_score': 90}
+        ],
+      });
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await _submitKisAnalyzeBuy(tester, symbol: '091810');
+
+    expect(api.lastKisSingleSymbol, '091810');
+    expect(find.text('091810'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze & Buy shows insufficient cash amounts',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi(
+      kisSingleResult: KisSingleSymbolTradingResult.fromJson(
+        _kisCompletedAnalysisPayload(
+          symbol: '005930',
+          finalBuyScore: 37,
+          finalSellScore: 21,
+          currentPrice: 56700,
+          reason: 'insufficient_cash',
+          noOrderReason: 'insufficient_cash',
+          riskFlags: const ['insufficient_cash'],
+          indicatorPayload: const {
+            'price': 56700,
+            'close': 56700,
+            'ema20': 54000,
+            'ema50': 53200,
+            'vwap': 54800,
+            'rsi': 73,
+            'volume_ratio': 1.2,
+            'momentum': -0.01,
+            'recent_return': 0.06,
+          },
+          validationBlockReasons: const ['insufficient_cash'],
+          estimatedAmount: 283500,
+          availableCash: 20168,
+        ),
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+    await _submitKisAnalyzeBuy(tester, symbol: '005930');
+
+    expect(find.text('Cash Check'), findsOneWidget);
+    expect(find.text('AVAILABLE CASH'), findsOneWidget);
+    expect(find.text('\u20A920,168'), findsOneWidget);
+    expect(find.text('ESTIMATED AMOUNT'), findsOneWidget);
+    expect(find.text('\u20A9283,500'), findsOneWidget);
+    expect(find.text('CASH SHORTFALL'), findsOneWidget);
+    expect(find.text('\u20A9263,332'), findsOneWidget);
+    expect(find.text('Available cash is below estimated order amount'),
+        findsWidgets);
+
+    controller.dispose();
+  });
+
   testWidgets('Analysis score breakdown renders realistic payload values',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
@@ -670,6 +779,7 @@ void _expectKisNormalizedSections() {
   expect(find.text('Main Reason'), findsOneWidget);
   expect(find.text('Technical Snapshot'), findsOneWidget);
   expect(find.text('Why No Order?'), findsOneWidget);
+  expect(find.text('Order Submission'), findsOneWidget);
   expect(find.text('Developer Raw Payload'), findsOneWidget);
 }
 
@@ -941,6 +1051,9 @@ Map<String, dynamic> _kisCompletedAnalysisPayload({
   required List<String> riskFlags,
   required Map<String, dynamic> indicatorPayload,
   List<String> validationWarnings = const [],
+  List<String> validationBlockReasons = const [],
+  double? estimatedAmount,
+  double? availableCash,
   bool entryAllowedNow = true,
   bool nearClose = false,
 }) {
@@ -1004,6 +1117,9 @@ Map<String, dynamic> _kisCompletedAnalysisPayload({
       'effective_min_entry_score': 65.0,
     },
     'validation': {
+      'estimated_amount': estimatedAmount,
+      'available_cash': availableCash,
+      'block_reasons': validationBlockReasons,
       'warnings': validationWarnings,
     },
     'market_session': {

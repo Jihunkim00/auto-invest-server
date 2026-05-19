@@ -71,6 +71,52 @@ def test_kr_watchlist_service_can_load_profile_symbols_without_analysis():
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in service.symbols)
 
 
+def test_watchlist_candidate_payload_includes_configured_company_name(monkeypatch):
+    service = WatchlistService(symbols=["AAPL"])
+    service.symbol_metadata = {
+        "AAPL": {
+            "name": "Apple Inc.",
+            "company_name": "Apple Inc.",
+            "market": "NASDAQ",
+        }
+    }
+    monkeypatch.setattr(
+        service.market_data_service,
+        "get_recent_bars",
+        lambda symbol: [{"close": 190}],
+    )
+    monkeypatch.setattr(
+        service.indicator_service,
+        "calculate",
+        lambda bars: {"close": 190, "rsi": 55},
+    )
+    monkeypatch.setattr(
+        service.quant_signal_service,
+        "score",
+        lambda indicators, gate_level=2: {
+            "quant_buy_score": 70,
+            "quant_sell_score": 10,
+            "quant_reason": "ok",
+            "quant_notes": [],
+        },
+    )
+    monkeypatch.setattr(
+        service.ai_signal_service,
+        "adjust",
+        lambda **kwargs: {
+            "ai_buy_score": 70,
+            "ai_sell_score": 10,
+            "ai_reason": "ok",
+        },
+    )
+
+    payload, _ = service._score_symbol("AAPL", gate_level=4)
+
+    assert payload["name"] == "Apple Inc."
+    assert payload["company_name"] == "Apple Inc."
+    assert payload["market"] == "NASDAQ"
+
+
 def test_kr_symbol_validation_accepts_005930():
     service = MarketProfileService()
 

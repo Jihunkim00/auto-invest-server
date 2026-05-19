@@ -310,6 +310,61 @@ def test_kis_single_symbol_success_uses_existing_manual_submit_path(
     assert db_session.query(SignalLog).one().related_order_id == order.id
 
 
+@pytest.mark.parametrize(
+    ("gate_level", "final_buy_score", "expected_threshold"),
+    [
+        (3, 62, 62.0),
+        (4, 56, 56.0),
+    ],
+)
+def test_kis_single_symbol_uses_gate_profile_threshold_without_watchlist_floor(
+    monkeypatch,
+    client,
+    db_session,
+    gate_level,
+    final_buy_score,
+    expected_threshold,
+):
+    _runtime(db_session, dry_run=True, kill_switch=False)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisWatchlistPreviewService._preview_symbol",
+        lambda self, raw, **kwargs: _analysis(
+            str(raw["symbol"]),
+            score=final_buy_score,
+            final_entry_score=final_buy_score,
+            final_buy_score=final_buy_score,
+            final_sell_score=0,
+            quant_buy_score=final_buy_score,
+            quant_sell_score=0,
+            ai_buy_score=final_buy_score,
+            ai_sell_score=0,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        lambda *args, **kwargs: pytest.fail("dry-run must not submit"),
+    )
+
+    response = client.post(
+        "/kis/trading/run-once",
+        json={
+            "symbol": "005930",
+            "gate_level": gate_level,
+            "quantity": 1,
+            "confirm_live": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"] == "dry_run"
+    assert body["reason"] == "dry_run_mode"
+    assert body["entry_ready"] is True
+    assert body["readiness"]["effective_min_entry_score"] == expected_threshold
+    assert body["final_buy_score"] == final_buy_score
+    assert body["broker_submit_called"] is False
+
+
 def test_kis_single_symbol_response_payload_does_not_expose_secrets(
     client,
     db_session,

@@ -9,11 +9,15 @@ class Candidate {
     required this.actionHint,
     required this.blockReason,
     this.name = '',
+    this.provider = '',
     this.market = '',
     this.currency = '',
     this.currentPrice,
     this.indicatorStatus = '',
+    this.indicatorBarCount,
     this.indicatorPayload = const {},
+    this.effectiveMinEntryScore,
+    this.buySellSpread,
     this.entryScore,
     this.quantScore,
     this.quantBuyScore,
@@ -66,11 +70,15 @@ class Candidate {
   final String actionHint;
   final String? blockReason;
   final String name;
+  final String provider;
   final String market;
   final String currency;
   final double? currentPrice;
   final String indicatorStatus;
+  final int? indicatorBarCount;
   final Map<String, dynamic> indicatorPayload;
+  final double? effectiveMinEntryScore;
+  final double? buySellSpread;
   final double? entryScore;
   final double? quantScore;
   final double? quantBuyScore;
@@ -156,6 +164,12 @@ class Candidate {
 
   factory Candidate.fromJson(Map<String, dynamic> json,
       {String scoreKey = 'score', String noteKey = 'note'}) {
+    final analysis = _readMap(json['analysis']);
+    final readiness = _readMap(json['readiness']);
+    final indicatorPayload = _readMap(json['indicator_payload'] ??
+        json['indicators'] ??
+        json['technical_snapshot'] ??
+        analysis['indicator_payload']);
     final score = _readNullableInt(json[scoreKey]);
     final gptContext = GptRiskContext.fromJson(json['gpt_context']);
     final riskFlags = _dedupeStringList(
@@ -171,13 +185,36 @@ class Candidate {
       entryReady: _readNullableBool(json['entry_ready']) ?? false,
       actionHint: _readNullableString(json['action_hint']) ?? 'watch',
       blockReason: _readNullableString(json['block_reason']),
-      name: json['name']?.toString() ?? '',
-      market: json['market']?.toString() ?? '',
-      currency: json['currency']?.toString() ?? '',
-      currentPrice: _readNullableDouble(json['current_price']),
-      indicatorStatus: json['indicator_status']?.toString() ?? '',
-      indicatorPayload:
-          Map<String, dynamic>.from((json['indicator_payload'] as Map?) ?? {}),
+      name: _firstString([
+        json['name'],
+        json['company_name'],
+        json['display_name'],
+        json['symbol_name'],
+        json['korean_name'],
+        json['asset_name'],
+        _readMap(json['asset'])['name'],
+        _readMap(json['profile'])['name'],
+      ]),
+      provider: _readNullableString(json['provider']) ?? '',
+      market: _readNullableString(json['market']) ?? '',
+      currency: _readNullableString(json['currency']) ?? '',
+      currentPrice: _readNullableDouble(json['current_price'] ??
+          json['price'] ??
+          analysis['current_price'] ??
+          indicatorPayload['current_price'] ??
+          indicatorPayload['price'] ??
+          indicatorPayload['close']),
+      indicatorStatus: _readNullableString(
+              json['indicator_status'] ?? analysis['indicator_status']) ??
+          '',
+      indicatorBarCount: _readNullableInt(
+          json['indicator_bar_count'] ?? analysis['indicator_bar_count']),
+      indicatorPayload: indicatorPayload,
+      effectiveMinEntryScore: _readNullableDouble(
+          json['effective_min_entry_score'] ??
+              readiness['effective_min_entry_score']),
+      buySellSpread: _readNullableDouble(
+          json['buy_sell_spread'] ?? readiness['buy_sell_spread']),
       entryScore:
           _readNullableDouble(json['entry_score'] ?? json['final_entry_score']),
       quantScore: _readNullableDouble(json['quant_score']),
@@ -238,6 +275,20 @@ class Candidate {
       blockReasons: _readStringList(json['block_reasons']),
     );
   }
+}
+
+Map<String, dynamic> _readMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return const {};
+}
+
+String _firstString(List<Object?> values) {
+  for (final value in values) {
+    final text = _readNullableString(value);
+    if (text != null) return text;
+  }
+  return '';
 }
 
 String? _readNullableString(Object? value) {

@@ -35,10 +35,11 @@ void main() {
     expect(find.text('Activity Timeline'), findsOneWidget);
     expect(find.text('preview_only=true'), findsNothing);
     await _expandAdvancedDetails(tester);
-    expect(find.text('preview_only=true'), findsOneWidget);
-    expect(find.text('real_order_submitted=false'), findsWidgets);
-    expect(find.text('broker_submit_called=false'), findsWidgets);
-    expect(find.text('manual_submit_called=false'), findsOneWidget);
+    expect(find.text('preview_only=true'), findsNothing);
+    expect(find.text('Preview only'), findsOneWidget);
+    expect(find.text('Real order submitted'), findsWidgets);
+    expect(find.text('Broker submit'), findsWidgets);
+    expect(find.text('Manual submit'), findsOneWidget);
     expect(find.text('05-08 00:00 (KST 09:00)'), findsOneWidget);
 
     await tester.tap(find.text('Orders').last);
@@ -56,9 +57,9 @@ void main() {
     expect(find.text('MANUAL ONLY'), findsOneWidget);
     expect(find.text('SIMULATED'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
-    expect(find.text('real_order_submitted=true'), findsOneWidget);
-    expect(find.text('broker_submit_called=true'), findsOneWidget);
-    expect(find.text('manual_submit_called=true'), findsOneWidget);
+    expect(find.text('Real order submitted'), findsWidgets);
+    expect(find.text('Broker submit'), findsWidgets);
+    expect(find.text('Manual submit'), findsWidgets);
     expect(find.text('05-08 00:03 (KST 09:03)'), findsOneWidget);
     expect(find.text('05-08 00:04 (KST 09:04)'), findsOneWidget);
 
@@ -67,6 +68,57 @@ void main() {
     await _expandAdvancedDetails(tester);
 
     expect(find.text('05-08 00:05 (KST 09:05)'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Logs screen renders KIS Analyze & Buy runs readably',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        orders: const [],
+        signals: const [],
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 25,
+            'run_key': 'kis-single-005930',
+            'provider': 'kis',
+            'market': 'KR',
+            'symbol': '005930',
+            'trigger_source': 'manual_kis_single_symbol',
+            'mode': 'kis_single_symbol_analyze_buy',
+            'source': 'kis_single_symbol_analyze_buy',
+            'action': 'hold',
+            'result': 'blocked',
+            'reason': 'buy_entry_not_allowed_now',
+            'final_buy_score': 37,
+            'effective_min_entry_score': 65,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'real_order_submitted': false,
+            'gating_notes': ['after_no_new_entry_time'],
+            'created_at': '2026-05-08T00:06:00',
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('KIS Analyze & Buy \u00B7 005930'), findsOneWidget);
+    expect(find.text('Blocked \u00B7 No order created'), findsOneWidget);
+    expect(find.text('Reason: New buy entries are blocked after 15:00'),
+        findsOneWidget);
+    expect(find.text('Buy Score: 37 / Required 65'), findsOneWidget);
+    expect(find.text('Broker submit: No'), findsOneWidget);
+    expect(find.textContaining('broker_submit_called=false'), findsNothing);
+    expect(find.textContaining('buy_entry_not_allowed_now'), findsNothing);
 
     controller.dispose();
   });
@@ -324,11 +376,11 @@ void main() {
     expect(find.text('\u20A99,801'), findsOneWidget);
     expect(find.text(r'$9,801.00'), findsNothing);
     await _expandAdvancedDetails(tester);
-    expect(find.text('real_order_submitted=false'), findsWidgets);
-    expect(find.text('broker_submit_called=false'), findsWidgets);
-    expect(find.text('manual_submit_called=false'), findsWidgets);
+    expect(find.text('Real order submitted'), findsWidgets);
+    expect(find.text('Broker submit'), findsWidgets);
+    expect(find.text('Manual submit'), findsWidgets);
     expect(find.text('real_orders_allowed=false'), findsWidgets);
-    expect(find.text('live_scheduler=disabled'), findsOneWidget);
+    expect(find.text('Live scheduler: Disabled'), findsOneWidget);
     expect(
       find.text(
           'Manual live records are separate from scheduler simulation records.'),
@@ -509,9 +561,10 @@ void main() {
     expect(find.text('real_orders_allowed=false'), findsWidgets);
     expect(find.text('live_scheduler_orders_enabled=false'), findsOneWidget);
     expect(find.text('recent simulation missing'), findsNothing);
-    expect(find.text('real_order_submitted=false'), findsWidgets);
-    expect(find.text('broker_submit_called=false'), findsWidgets);
-    expect(find.text('manual_submit_called=false'), findsWidgets);
+    expect(find.text('Real order submitted: No'), findsWidgets);
+    expect(find.text('Broker submit: No'), findsWidgets);
+    expect(find.text('Manual submit: No'), findsWidgets);
+    expect(find.textContaining('broker_submit_called=false'), findsNothing);
     expect(
         find.textContaining('latest simulation has no broker id / no kis_odno'),
         findsOneWidget);
