@@ -41,6 +41,15 @@ String translateReason(Object? value,
   if (normalized == 'score_threshold_not_met') {
     return 'Score below entry threshold';
   }
+  if (normalized == 'sell_pressure_too_high') {
+    return 'Sell pressure too high';
+  }
+  if (normalized == 'buy_sell_spread_too_weak') {
+    return 'Buy-sell spread too weak';
+  }
+  if (normalized == 'missing_indicators') {
+    return 'Indicator data unavailable';
+  }
   if (normalized == 'after_no_new_entry_time') {
     return 'New buy entries are blocked after 15:00';
   }
@@ -58,7 +67,10 @@ String translateReason(Object? value,
     return 'Available cash is below estimated order amount';
   }
   if (normalized == 'hard_blocked') {
-    return 'Entry blocked by risk context';
+    return 'Hard risk block';
+  }
+  if (normalized == 'market_research_blocked') {
+    return 'Market research block';
   }
   if (normalized == 'gpt_hard_block_new_buy') {
     return 'GPT/risk context blocks new buy entries';

@@ -539,9 +539,89 @@ void main() {
 
     expect(find.text('Top Watchlist Candidates'), findsOneWidget);
     expect(find.text('NVDA'), findsWidgets);
-    expect(find.text('AAPL'), findsWidgets);
-    expect(find.text('MSFT'), findsWidgets);
+    expect(find.textContaining('AAPL'), findsWidgets);
+    expect(find.textContaining('MSFT'), findsWidgets);
     expect(find.text('Score below entry threshold'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist candidate expands company and technical details',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        symbol: '005930',
+        name: 'Samsung Electronics',
+        blockReason: 'buy_sell_spread_too_weak',
+        entryScore: 58,
+        quantBuyScore: 58,
+        quantSellScore: 18,
+        aiBuyScore: 60,
+        aiSellScore: 20,
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('005930 · Samsung Electronics'), findsWidgets);
+    expect(find.textContaining('Watch · Buy 58 / Required 65 · Sell 18'),
+        findsOneWidget);
+    expect(find.text('Blocked: Buy-sell spread too weak'), findsWidgets);
+
+    await tester.tap(find.text('005930 · Samsung Electronics').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Candidate Identity'), findsOneWidget);
+    expect(find.text('COMPANY'), findsOneWidget);
+    expect(find.text('Samsung Electronics'), findsWidgets);
+    expect(find.text('MARKET / PROVIDER'), findsOneWidget);
+    expect(find.text('KIS / KOSPI'), findsWidgets);
+    expect(find.text('Score Detail'), findsOneWidget);
+    expect(find.text('REQUIRED THRESHOLD'), findsOneWidget);
+    expect(find.text('Technical Snapshot'), findsOneWidget);
+    expect(find.text('EMA20'), findsOneWidget);
+    expect(find.text('VWAP'), findsOneWidget);
+    expect(find.text('RSI'), findsOneWidget);
+    expect(find.text('Advisory / Risk'), findsOneWidget);
+    expect(find.textContaining('Why not tradable: Buy-sell spread too weak'),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Watchlist candidate with symbol only shows company fallback',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(symbol: 'AAPL'),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Start Scan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AAPL · Unknown company'), findsWidgets);
 
     controller.dispose();
   });
@@ -1610,6 +1690,7 @@ const _krWatchlist = MarketWatchlist(
 
 Map<String, dynamic> _realisticCandidatePayload({
   String symbol = 'AAPL',
+  String? name,
   String result = 'blocked',
   String blockReason = 'market_closed',
   double entryScore = 74,
@@ -1625,6 +1706,11 @@ Map<String, dynamic> _realisticCandidatePayload({
 }) {
   return {
     'symbol': symbol,
+    if (name != null) 'company_name': name,
+    'provider': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'kis' : 'alpaca',
+    'market': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'KOSPI' : 'US',
+    'currency': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'KRW' : 'USD',
+    'current_price': RegExp(r'^\d{6}$').hasMatch(symbol) ? 72000 : 189.45,
     'action': 'hold',
     'action_hint': 'watch',
     'entry_ready': false,
@@ -1638,6 +1724,8 @@ Map<String, dynamic> _realisticCandidatePayload({
     'quant_score': quantScore,
     'final_buy_score': entryScore,
     'final_sell_score': 18,
+    'effective_min_entry_score': 65,
+    'buy_sell_spread': entryScore - 18,
     'buy_score': buyScore,
     'sell_score': sellScore,
     'ai_buy_score': aiBuyScore,
@@ -1645,6 +1733,19 @@ Map<String, dynamic> _realisticCandidatePayload({
     'quant_buy_score': quantBuyScore,
     'quant_sell_score': quantSellScore,
     'confidence': '0.81',
+    'indicator_status': 'ok',
+    'indicator_bar_count': 100,
+    'indicator_payload': {
+      'ema20': RegExp(r'^\d{6}$').hasMatch(symbol) ? 70000 : 181.2,
+      'ema50': RegExp(r'^\d{6}$').hasMatch(symbol) ? 68000 : 176.8,
+      'vwap': RegExp(r'^\d{6}$').hasMatch(symbol) ? 70500 : 184.1,
+      'rsi': 58.5,
+      'atr': RegExp(r'^\d{6}$').hasMatch(symbol) ? 1200 : 3.2,
+      'volume_ratio': 1.24,
+      'recent_return': 0.041,
+      'momentum': 0.018,
+      'price_position': 'above EMA20 and VWAP',
+    },
     'order_id': null,
     'result': result,
     'status': result,
@@ -1664,6 +1765,7 @@ Map<String, dynamic> _realisticCandidatePayload({
 
 Map<String, dynamic> _realisticWatchlistPayload({
   String symbol = 'AAPL',
+  String? name,
   String result = 'blocked',
   String blockReason = 'market_closed',
   double entryScore = 74,
@@ -1679,6 +1781,7 @@ Map<String, dynamic> _realisticWatchlistPayload({
 }) {
   final candidate = _realisticCandidatePayload(
     symbol: symbol,
+    name: name,
     result: result,
     blockReason: blockReason,
     entryScore: entryScore,

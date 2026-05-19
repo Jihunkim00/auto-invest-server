@@ -151,7 +151,10 @@ class WatchlistSection extends StatelessWidget {
         if (controller.hasLatestRunResult ||
             controller.showingOfflineFallback) ...[
           const SizedBox(height: 12),
-              _WatchlistAdvancedDetails(runResult: controller.runResult),
+          _WatchlistAdvancedDetails(
+            runResult: controller.runResult,
+            isKr: isKr,
+          ),
         ],
         const SizedBox(height: 12),
         ExpansionTile(
@@ -306,6 +309,7 @@ class _WatchlistRunResultSummary extends StatelessWidget {
           _WatchlistCandidatePreview(
             candidates: previewCandidates,
             isKr: isKr,
+            threshold: runResult.minEntryScore,
           ),
         ],
         if (noOrder) ...[
@@ -325,10 +329,12 @@ class _WatchlistCandidatePreview extends StatelessWidget {
   const _WatchlistCandidatePreview({
     required this.candidates,
     required this.isKr,
+    required this.threshold,
   });
 
   final List<Candidate> candidates;
   final bool isKr;
+  final int? threshold;
 
   @override
   Widget build(BuildContext context) {
@@ -338,42 +344,12 @@ class _WatchlistCandidatePreview extends StatelessWidget {
       const SizedBox(height: 8),
       for (final candidate in candidates)
         Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Wrap(spacing: 12, runSpacing: 6, children: [
-            _ResultPair(label: 'Symbol', value: candidate.symbol),
-            _ResultPair(
-                label: 'Score',
-                value: presentation
-                    .compactScore(_candidatePrimaryScore(candidate))),
-            _ResultPair(
-                label: 'Status',
-                value: _candidateStatusLabel(candidate, isKr: isKr)),
-            _ResultPair(
-                label: 'Reason',
-                value: presentation.translateReason(
-                  _firstText([
-                    candidate.noOrderReason,
-                    candidate.skipReason,
-                    candidate.blockReason,
-                    candidate.blockReasons.isEmpty
-                        ? null
-                        : candidate.blockReasons.join(', '),
-                    candidate.reason,
-                  ]),
-                  entryPenalty: candidate.entryPenalty ??
-                      candidate.gptContext.entryPenalty,
-                )),
-            _ResultPair(
-                label: 'Quant',
-                value:
-                    presentation.compactScore(_candidateQuantScore(candidate))),
-            _ResultPair(
-                label: 'AI',
-                value: presentation.compactScore(candidate.aiBuyScore)),
-            _ResultPair(
-                label: 'GPT',
-                value: presentation.compactScore(candidate.gptBuyScore)),
-          ]),
+          padding: const EdgeInsets.only(bottom: 8),
+          child: _ExpandableWatchlistCandidateCard(
+            candidate: candidate,
+            isKr: isKr,
+            threshold: threshold,
+          ),
         ),
     ]);
   }
@@ -419,9 +395,13 @@ class _WhyNoOrderCard extends StatelessWidget {
 }
 
 class _WatchlistAdvancedDetails extends StatelessWidget {
-  const _WatchlistAdvancedDetails({required this.runResult});
+  const _WatchlistAdvancedDetails({
+    required this.runResult,
+    required this.isKr,
+  });
 
   final WatchlistRunResult runResult;
+  final bool isKr;
 
   @override
   Widget build(BuildContext context) {
@@ -499,6 +479,8 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
         _AdvancedCandidateList(
           title: 'Candidate Details',
           candidates: candidates,
+          isKr: isKr,
+          threshold: runResult.minEntryScore,
         ),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -506,7 +488,8 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
           title: const Text('Developer Raw Payload'),
           children: [
             _StateLine(
-              text: 'configured_symbol_count=${runResult.configuredSymbolCount}\n'
+              text:
+                  'configured_symbol_count=${runResult.configuredSymbolCount}\n'
                   'analyzed_symbol_count=${runResult.analyzedSymbolCount}\n'
                   'quant_candidates_count=${runResult.quantCandidatesCount}\n'
                   'researched_candidates_count=${runResult.researchedCandidatesCount}\n'
@@ -553,10 +536,14 @@ class _AdvancedCandidateList extends StatelessWidget {
   const _AdvancedCandidateList({
     required this.title,
     required this.candidates,
+    required this.isKr,
+    required this.threshold,
   });
 
   final String title;
   final List<Candidate> candidates;
+  final bool isKr;
+  final int? threshold;
 
   @override
   Widget build(BuildContext context) {
@@ -571,30 +558,196 @@ class _AdvancedCandidateList extends StatelessWidget {
           for (final candidate in candidates)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
-              child: Wrap(spacing: 14, runSpacing: 8, children: [
-                _ResultPair(label: 'Symbol', value: candidate.symbol),
-                _ResultPair(
-                    label: 'Score',
-                    value:
-                        presentation.compactScore(_candidateEntryScore(candidate))),
-                _ResultPair(
-                    label: 'Status',
-                    value: _candidateStatusLabel(candidate, isKr: false)),
-                _ResultPair(
-                    label: 'Reason',
-                    value: presentation.translateReason(
-                      _firstText([
-                        candidate.noOrderReason,
-                        candidate.skipReason,
-                        candidate.blockReason,
-                        candidate.reason,
-                      ]),
-                      entryPenalty: candidate.entryPenalty ??
-                          candidate.gptContext.entryPenalty,
-                    )),
-              ]),
+              child: _ExpandableWatchlistCandidateCard(
+                candidate: candidate,
+                isKr: isKr,
+                threshold: threshold,
+              ),
             ),
       ],
+    );
+  }
+}
+
+class _ExpandableWatchlistCandidateCard extends StatelessWidget {
+  const _ExpandableWatchlistCandidateCard({
+    required this.candidate,
+    required this.isKr,
+    required this.threshold,
+  });
+
+  final Candidate candidate;
+  final bool isKr;
+  final int? threshold;
+
+  @override
+  Widget build(BuildContext context) {
+    final company = _candidateCompanyLabel(candidate);
+    final requiredScore = _candidateRequiredScore(candidate, threshold);
+    final reason = _candidateDisplayReason(candidate);
+    final actionStatus = _candidateActionStatus(candidate);
+    final tradability = _candidateTradability(candidate, isKr: isKr);
+    final riskNotes = _candidateTranslatedNotes(candidate.riskFlags);
+    final gatingNotes = _candidateTranslatedNotes(candidate.gatingNotes);
+    final blockNotes = _candidateTranslatedNotes([
+      ...candidate.blockReasons,
+      if (candidate.blockReason != null) candidate.blockReason!,
+      if (candidate.noOrderReason != null) candidate.noOrderReason!,
+      if (candidate.skipReason != null) candidate.skipReason!,
+    ]);
+
+    return Container(
+      decoration: _panelDecoration(),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        title: Text(
+          '${candidate.symbol} \u00B7 $company',
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 4),
+            Text(
+              '$actionStatus \u00B7 Buy ${presentation.compactScore(_candidateBuyScore(candidate))} / '
+              'Required ${presentation.compactScore(requiredScore)} \u00B7 '
+              'Sell ${presentation.compactScore(_candidateSellScore(candidate))}',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${tradability.label}: $reason',
+              style: TextStyle(color: tradability.color),
+            ),
+          ],
+        ),
+        children: [
+          _ReadableDetailGroup(
+            title: 'Candidate Identity',
+            pairs: [
+              _ResultPair(label: 'Symbol', value: candidate.symbol),
+              _ResultPair(label: 'Company', value: company),
+              _ResultPair(
+                  label: 'Market / Provider',
+                  value: _candidateMarketProviderLabel(candidate, isKr: isKr)),
+              _ResultPair(label: 'Action hint', value: actionStatus),
+              _ResultPair(
+                  label: 'Entry ready', value: _yesNo(candidate.entryReady)),
+              _ResultPair(
+                  label: 'Trade allowed',
+                  value: _nullableYesNo(candidate.tradeAllowed)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _ReadableDetailGroup(
+            title: 'Score Detail',
+            pairs: [
+              _ResultPair(
+                  label: 'Current price',
+                  value: _candidatePriceLabel(candidate)),
+              _ResultPair(
+                  label: 'Final buy score',
+                  value: presentation.compactScore(candidate.finalBuyScore)),
+              _ResultPair(
+                  label: 'Final sell score',
+                  value: presentation.compactScore(candidate.finalSellScore)),
+              _ResultPair(
+                  label: 'Quant buy score',
+                  value: presentation.compactScore(candidate.quantBuyScore)),
+              _ResultPair(
+                  label: 'Quant sell score',
+                  value: presentation.compactScore(candidate.quantSellScore)),
+              _ResultPair(
+                  label: 'AI buy score',
+                  value: presentation.compactScore(candidate.aiBuyScore)),
+              _ResultPair(
+                  label: 'AI sell score',
+                  value: presentation.compactScore(candidate.aiSellScore)),
+              _ResultPair(
+                  label: 'GPT buy score',
+                  value: presentation.compactScore(candidate.gptBuyScore)),
+              _ResultPair(
+                  label: 'GPT sell score',
+                  value: presentation.compactScore(candidate.gptSellScore)),
+              _ResultPair(
+                  label: 'Confidence',
+                  value: presentation.compactScore(candidate.confidence)),
+              _ResultPair(
+                  label: 'Required threshold',
+                  value: presentation.compactScore(requiredScore)),
+              _ResultPair(
+                  label: 'Buy-sell spread',
+                  value: presentation.compactScore(candidate.buySellSpread)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _ReadableDetailGroup(
+            title: 'Technical Snapshot',
+            pairs: [
+              _ResultPair(
+                  label: 'Indicator status',
+                  value: presentation.displayText(candidate.indicatorStatus,
+                      fallback: 'Indicator status unavailable')),
+              _ResultPair(
+                  label: 'Indicator bars',
+                  value: candidate.indicatorBarCount?.toString() ??
+                      'Bar count unavailable'),
+              _ResultPair(
+                  label: 'EMA20',
+                  value: _candidateIndicatorLabel(
+                      candidate, const ['ema20', 'ema_20'])),
+              _ResultPair(
+                  label: 'EMA50',
+                  value: _candidateIndicatorLabel(
+                      candidate, const ['ema50', 'ema_50'])),
+              _ResultPair(
+                  label: 'VWAP',
+                  value: _candidateIndicatorLabel(candidate, const ['vwap'])),
+              _ResultPair(
+                  label: 'RSI',
+                  value: _candidateIndicatorLabel(candidate, const ['rsi'])),
+              _ResultPair(
+                  label: 'ATR',
+                  value: _candidateIndicatorLabel(candidate, const ['atr'])),
+              _ResultPair(
+                  label: 'Volume ratio',
+                  value: _candidateIndicatorLabel(
+                      candidate, const ['volume_ratio', 'volumeRatio'])),
+              _ResultPair(
+                  label: 'Recent return',
+                  value: _candidateIndicatorLabel(
+                    candidate,
+                    const ['recent_return', 'recentReturn'],
+                    percentLike: true,
+                  )),
+              _ResultPair(
+                  label: 'Momentum',
+                  value: _candidateIndicatorLabel(
+                    candidate,
+                    const ['momentum'],
+                    percentLike: true,
+                  )),
+              _ResultPair(
+                  label: 'Price position',
+                  value: _candidateIndicatorLabel(
+                      candidate, const ['price_position', 'pricePosition'])),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _ReadableDetailGroup(
+            title: 'Advisory / Risk',
+            lines: [
+              'GPT/AI reason: ${presentation.displayText(_gptAdvisoryReason(candidate), fallback: 'GPT advisory unavailable')}',
+              'Why not tradable: $reason',
+              if (blockNotes.isNotEmpty) 'Blockers: ${blockNotes.join(' / ')}',
+              if (riskNotes.isNotEmpty) 'Risk flags: ${riskNotes.join(' / ')}',
+              if (gatingNotes.isNotEmpty)
+                'Gating notes: ${gatingNotes.join(' / ')}',
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -732,7 +885,7 @@ class _TopCandidateCard extends StatelessWidget {
         Row(children: [
           Expanded(
             child: Text(
-              candidate.symbol,
+              '${candidate.symbol} \u00B7 ${_candidateCompanyLabel(candidate)}',
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
           ),
@@ -741,10 +894,9 @@ class _TopCandidateCard extends StatelessWidget {
             color: statusColor,
           ),
         ]),
-        if (candidate.name.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(candidate.name, style: const TextStyle(color: Colors.white70)),
-        ],
+        const SizedBox(height: 2),
+        Text(_candidateMarketProviderLabel(candidate, isKr: isKr),
+            style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 10),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _ResultPair(
@@ -753,7 +905,8 @@ class _TopCandidateCard extends StatelessWidget {
                   presentation.displayScore(_candidatePrimaryScore(candidate))),
           _ResultPair(
               label: 'Threshold',
-              value: threshold == null ? 'Score not returned' : '$threshold'),
+              value: presentation
+                  .displayScore(_candidateRequiredScore(candidate, threshold))),
           _ResultPair(
               label: 'Confidence',
               value: presentation.displayScore(candidate.confidence,
@@ -3590,6 +3743,137 @@ double? _candidatePrimaryScore(Candidate? candidate) {
       (candidate?.score == null ? null : candidate!.score!.toDouble());
 }
 
+double? _candidateBuyScore(Candidate? candidate) {
+  return candidate?.finalBuyScore ??
+      candidate?.finalEntryScore ??
+      candidate?.entryScore ??
+      candidate?.buyScore ??
+      candidate?.finalScore ??
+      (candidate?.score == null ? null : candidate!.score!.toDouble());
+}
+
+double? _candidateSellScore(Candidate? candidate) {
+  return candidate?.finalSellScore ??
+      candidate?.sellScore ??
+      candidate?.quantSellScore ??
+      candidate?.aiSellScore;
+}
+
+double? _candidateRequiredScore(Candidate candidate, int? fallbackThreshold) {
+  return candidate.effectiveMinEntryScore ??
+      (fallbackThreshold == null ? null : fallbackThreshold.toDouble());
+}
+
+String _candidateCompanyLabel(Candidate candidate) {
+  final name = candidate.name.trim();
+  if (name.isEmpty || name.toLowerCase() == 'null') return 'Unknown company';
+  return name;
+}
+
+String _candidateMarketProviderLabel(
+  Candidate candidate, {
+  required bool isKr,
+}) {
+  final provider = presentation.displayText(
+    candidate.provider,
+    fallback: isKr ? 'KIS' : 'Alpaca',
+  );
+  final market = presentation.displayText(
+    candidate.market,
+    fallback: isKr ? 'KR' : 'US',
+  );
+  return '${_providerLabel(provider)} / $market';
+}
+
+String _providerLabel(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'kis') return 'KIS';
+  if (normalized == 'alpaca') return 'Alpaca';
+  return value;
+}
+
+String _candidateActionStatus(Candidate candidate) {
+  final hint = candidate.actionHint.trim();
+  if (candidate.entryReady) return 'Ready';
+  if (hint.isNotEmpty) return _titleCaseWords(hint.replaceAll('_', ' '));
+  final action = candidate.action.trim();
+  if (action.isNotEmpty) return _titleCaseWords(action.replaceAll('_', ' '));
+  return 'Watch';
+}
+
+({String label, Color color}) _candidateTradability(
+  Candidate candidate, {
+  required bool isKr,
+}) {
+  if (candidate.tradeAllowed == true) {
+    return (label: 'Tradable', color: Colors.greenAccent);
+  }
+  if (candidate.entryReady) {
+    return (
+      label: isKr ? 'Preview ready' : 'Ready',
+      color: Colors.greenAccent,
+    );
+  }
+  if (_entryBlockedByGptOrRisk(candidate)) {
+    return (label: 'Blocked', color: Colors.redAccent);
+  }
+  return (label: 'Blocked', color: Colors.amberAccent);
+}
+
+String _candidateDisplayReason(Candidate candidate) {
+  return presentation.translateReason(
+    _firstText([
+      candidate.blockReason,
+      candidate.blockReasons.isEmpty ? null : candidate.blockReasons.join(', '),
+      candidate.skipReason,
+      candidate.noOrderReason,
+      candidate.reason,
+    ]),
+    entryPenalty: candidate.entryPenalty ?? candidate.gptContext.entryPenalty,
+  );
+}
+
+List<String> _candidateTranslatedNotes(List<String> values) {
+  final result = <String>[];
+  for (final value in values) {
+    final translated = presentation.translateReason(value);
+    if (translated != 'Not available' && !result.contains(translated)) {
+      result.add(translated);
+    }
+  }
+  return result;
+}
+
+String _candidatePriceLabel(Candidate candidate) {
+  final value = candidate.currentPrice;
+  if (value == null) return 'Price unavailable';
+  final currency = candidate.currency.trim().toUpperCase();
+  if (currency == 'KRW' || RegExp(r'^\d{6}$').hasMatch(candidate.symbol)) {
+    return _formatKrw(value);
+  }
+  final decimals = value >= 100 ? 2 : 4;
+  return '\$${value.toStringAsFixed(decimals)}';
+}
+
+String _candidateIndicatorLabel(
+  Candidate candidate,
+  List<String> keys, {
+  bool percentLike = false,
+}) {
+  for (final key in keys) {
+    final value = candidate.indicatorPayload[key];
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty || text == 'null') continue;
+    final numeric = double.tryParse(text.replaceAll(',', ''));
+    if (numeric == null) return text;
+    if (percentLike && numeric.abs() < 1) {
+      return '${(numeric * 100).toStringAsFixed(2)}%';
+    }
+    return _displayNumber(numeric);
+  }
+  return 'Not available';
+}
+
 String _watchlistOrderStatus(String? orderId, {required bool isKr}) {
   if (orderId != null && orderId.trim().isNotEmpty) {
     return isKr ? 'KIS order reference $orderId' : 'Paper order created';
@@ -3719,19 +4003,6 @@ String _numericGptScoreLabel(double? value) {
   return _displayNumber(value);
 }
 
-double? _candidateEntryScore(Candidate? candidate) {
-  return candidate?.finalEntryScore ??
-      candidate?.entryScore ??
-      candidate?.finalScore ??
-      candidate?.finalBuyScore ??
-      candidate?.buyScore ??
-      (candidate?.score == null ? null : candidate!.score!.toDouble());
-}
-
-double? _candidateQuantScore(Candidate? candidate) {
-  return candidate?.quantScore ?? candidate?.quantBuyScore;
-}
-
 bool _entryBlockedByGptOrRisk(Candidate? candidate) {
   if (candidate == null) return false;
   final penalty = candidate.entryPenalty ?? candidate.gptContext.entryPenalty;
@@ -3762,6 +4033,27 @@ String _boolText(bool value) => value ? 'true' : 'false';
 String _nullableBoolText(bool? value) {
   if (value == null) return 'n/a';
   return _boolText(value);
+}
+
+String _yesNo(bool value) => value ? 'Yes' : 'No';
+
+String _nullableYesNo(bool? value) {
+  if (value == null) return 'Unknown';
+  return _yesNo(value);
+}
+
+String _titleCaseWords(String value) {
+  final words = value
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.trim().isNotEmpty)
+      .toList();
+  if (words.isEmpty) return value;
+  return words
+      .map((word) => word.length == 1
+          ? word.toUpperCase()
+          : '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}')
+      .join(' ');
 }
 
 String _qtyText(double? value) {

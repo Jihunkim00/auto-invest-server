@@ -82,6 +82,7 @@ class WatchlistService:
         self.indicator_service = indicator_service or IndicatorService()
         self.quant_signal_service = quant_signal_service or QuantSignalService()
         self.ai_signal_service = ai_signal_service or AISignalService()
+        self.symbol_metadata = self._load_symbol_metadata()
         self.symbols = symbols or self._load_symbols() or WATCHLIST_DEFAULT_SYMBOLS
         self.max_watchlist_size = int(getattr(self._settings, "max_watchlist_size", 50))
 
@@ -129,6 +130,65 @@ class WatchlistService:
                 valid_symbols.append(str(raw_symbol).upper())
         return valid_symbols or None
 
+    def _load_symbol_metadata(self) -> dict[str, dict[str, object]]:
+        settings = get_settings()
+        source_path = (
+            self.market_profile_service.get_watchlist_path(self.market)
+            if self.market
+            else settings.watchlist_config_path
+        )
+        config_path = Path(source_path)
+        if not config_path.is_absolute():
+            config_path = Path(__file__).resolve().parents[2] / config_path
+
+        if not config_path.exists():
+            return {}
+
+        try:
+            raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        symbols = None
+        if isinstance(raw, dict):
+            symbols = raw.get("symbols") or raw.get("watchlist")
+        elif isinstance(raw, list):
+            symbols = raw
+
+        if not isinstance(symbols, list):
+            return {}
+
+        metadata: dict[str, dict[str, object]] = {}
+        for item in symbols:
+            if not isinstance(item, dict) or not item.get("symbol"):
+                continue
+            raw_symbol = str(item["symbol"])
+            try:
+                symbol = (
+                    self.market_profile_service.normalize_symbol(raw_symbol, self.market)
+                    if self.market
+                    else raw_symbol.upper()
+                )
+            except Exception:
+                continue
+            name = _first_text(
+                item.get("name"),
+                item.get("company_name"),
+                item.get("display_name"),
+                item.get("symbol_name"),
+                item.get("korean_name"),
+                item.get("asset_name"),
+            )
+            row: dict[str, object] = {
+                "symbol": symbol,
+                "market": item.get("market") or self.market or "US",
+            }
+            if name:
+                row["name"] = name
+                row["company_name"] = name
+            metadata[symbol] = row
+        return metadata
+
     def _score_symbol(self, symbol: str, gate_level: int = DEFAULT_GATE_LEVEL) -> tuple[dict[str, object], dict[str, object]]:
         bars = self.market_data_service.get_recent_bars(symbol.upper())
         indicators = self.indicator_service.calculate(bars)
@@ -151,8 +211,12 @@ class WatchlistService:
             gating_notes=list(quant.get("quant_notes") or []),
         )
 
+        metadata = self.symbol_metadata.get(symbol.upper(), {})
         symbol_result = {
             "symbol": symbol.upper(),
+            "name": metadata.get("name"),
+            "company_name": metadata.get("company_name"),
+            "market": metadata.get("market") or self.market or "US",
             "entry_score": round(entry_score, 2),
             "should_trade": bool(readiness["entry_ready"]),
             "quant_score": quant["quant_buy_score"],
@@ -204,3 +268,11 @@ class WatchlistService:
             float(row.get("quant_sell_score", 100) or 100),
             str(row.get("symbol", "")),
         )
+
+
+def _first_text(*values: object) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and text.lower() != "null":
+            return text
+    return None

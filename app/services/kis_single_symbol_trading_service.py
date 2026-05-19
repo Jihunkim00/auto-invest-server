@@ -351,6 +351,7 @@ class KisSingleSymbolTradingService:
             # KIS preview analysis is read-only and reports action=hold by design.
             # This manual endpoint lets the score/risk gate decide entry readiness.
             action=None,
+            use_min_entry_score_floor=False,
         )
 
     def _quantity_from_request(
