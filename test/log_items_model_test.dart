@@ -60,6 +60,35 @@ void main() {
     expect(item.realOrderSubmitted, isFalse);
   });
 
+  test('TradingLogItem labels KIS single-symbol Analyze & Buy distinctly', () {
+    final item = TradingLogItem.fromJson({
+      'id': 14,
+      'run_key': 'kis-single-symbol',
+      'provider': 'kis',
+      'market': 'KR',
+      'symbol': '091810',
+      'trigger_source': 'manual_kis_single_symbol',
+      'mode': 'kis_single_symbol_analyze_buy',
+      'source': 'kis_single_symbol_analyze_buy',
+      'action': 'hold',
+      'result': 'blocked',
+      'reason': 'buy_entry_not_allowed_now',
+      'final_buy_score': 12,
+      'effective_min_entry_score': 65,
+      'gate_level': 4,
+      'created_at': '2026-05-08T00:01:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    });
+
+    expect(item.sourceLabel, 'KIS Analyze & Buy');
+    expect(item.isKisSingleSymbolAnalyzeBuy, isTrue);
+    expect(item.isKisManualLive, isFalse);
+    expect(item.finalBuyScore, 12);
+    expect(item.effectiveMinEntryScore, 65);
+  });
+
   test('TradingLogItem labels KIS exit preflight as preflight only', () {
     final item = TradingLogItem.fromJson({
       'id': 12,

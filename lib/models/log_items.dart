@@ -33,6 +33,8 @@ class TradingLogItem {
     this.costBasis,
     this.currentValue,
     this.currentPrice,
+    this.finalBuyScore,
+    this.effectiveMinEntryScore,
     this.unrealizedPl,
     this.unrealizedPlPct,
     this.filledQuantity,
@@ -79,6 +81,8 @@ class TradingLogItem {
   final double? costBasis;
   final double? currentValue;
   final double? currentPrice;
+  final double? finalBuyScore;
+  final double? effectiveMinEntryScore;
   final double? unrealizedPl;
   final double? unrealizedPlPct;
   final double? filledQuantity;
@@ -120,6 +124,14 @@ class TradingLogItem {
       );
   bool get isKisBuyShadow => _isKisBuyShadow(
       provider, market, mode, triggerSource, source, sourceType);
+  bool get isKisSingleSymbolAnalyzeBuy => _isKisSingleSymbolAnalyzeBuy(
+        provider,
+        market,
+        mode,
+        triggerSource,
+        source,
+        sourceType,
+      );
   bool get isKisLimitedAutoSell => _isKisLimitedAutoSell(
         provider,
         market,
@@ -143,11 +155,13 @@ class TradingLogItem {
       !isKisPreflight &&
       !isKisExitShadow &&
       !isKisBuyShadow &&
+      !isKisSingleSymbolAnalyzeBuy &&
       !isKisLimitedAutoSell &&
       !isKisLimitedAutoBuy &&
       !isKisSchedulerLive;
   String get sourceLabel {
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
+    if (isKisSingleSymbolAnalyzeBuy) return 'KIS Analyze & Buy';
     if (isKisSchedulerLive) return 'KIS SCHEDULER LIVE';
     if (isKisLimitedAutoBuy) return 'KIS LIMITED AUTO BUY';
     if (isKisLimitedAutoSell) return 'KIS LIMITED AUTO SELL';
@@ -302,6 +316,9 @@ class TradingLogItem {
       costBasis: _doubleValue(json['cost_basis']),
       currentValue: _doubleValue(json['current_value']),
       currentPrice: _doubleValue(json['current_price']),
+      finalBuyScore: _doubleValue(
+          json['final_buy_score'] ?? json['buy_score'] ?? json['score']),
+      effectiveMinEntryScore: _doubleValue(json['effective_min_entry_score']),
       unrealizedPl: _doubleValue(json['unrealized_pl']),
       unrealizedPlPct: _doubleValue(json['unrealized_pl_pct']),
       filledQuantity:
@@ -1012,6 +1029,21 @@ bool _isKisSchedulerLive(
   if (!_isKis(provider, market, mode, triggerSource)) return false;
   final hint = '$mode $triggerSource'.toLowerCase();
   return hint.contains('scheduler_live');
+}
+
+bool _isKisSingleSymbolAnalyzeBuy(
+  String provider,
+  String market,
+  String mode,
+  String triggerSource,
+  String source,
+  String? sourceType,
+) {
+  if (!_isKis(provider, market, mode, triggerSource)) return false;
+  final hint = '$mode $triggerSource $source ${sourceType ?? ''}'.toLowerCase();
+  return hint.contains('kis_single_symbol_analyze_buy') ||
+      hint.contains('manual_kis_single_symbol') ||
+      hint.contains('manual_guarded_single_symbol_buy');
 }
 
 bool _isKisBuyShadow(

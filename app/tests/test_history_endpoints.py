@@ -186,6 +186,52 @@ def test_recent_runs_preserves_kis_dry_run_safety_fields(client, db_session):
     assert item["gating_notes"] == ["Dry-run only."]
 
 
+def test_recent_runs_serializes_kis_single_symbol_scores(client, db_session):
+    db_session.add(
+        TradeRunLog(
+            run_key="kis-single-symbol",
+            trigger_source="manual_kis_single_symbol",
+            symbol="005930",
+            mode="kis_single_symbol_analyze_buy",
+            gate_level=4,
+            stage="done",
+            result="blocked",
+            reason="buy_entry_not_allowed_now",
+            signal_id=12,
+            order_id=None,
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "mode": "kis_single_symbol_analyze_buy",
+                    "source": "kis_single_symbol_analyze_buy",
+                    "action": "hold",
+                    "result": "blocked",
+                    "reason": "buy_entry_not_allowed_now",
+                    "final_buy_score": 37,
+                    "readiness": {"effective_min_entry_score": 65},
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/runs/recent")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["provider"] == "kis"
+    assert item["market"] == "KR"
+    assert item["mode"] == "kis_single_symbol_analyze_buy"
+    assert item["source"] == "kis_single_symbol_analyze_buy"
+    assert item["final_buy_score"] == 37
+    assert item["effective_min_entry_score"] == 65
+    assert item["broker_submit_called"] is False
+
+
 def test_recent_orders_preserves_kis_manual_live_safety_fields(client, db_session):
     db_session.add(
         OrderLog(

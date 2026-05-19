@@ -269,6 +269,7 @@ class _KisResultPanel extends StatelessWidget {
     final order = _orderLabel(result);
     final mainReason = _mainReason(result);
     final secondaryBlockers = _secondaryBlockers(result, mainReason);
+    final cashShortfall = result.cashShortfall;
 
     return Container(
       width: double.infinity,
@@ -326,6 +327,26 @@ class _KisResultPanel extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         _ReasonBanner(text: mainReason, color: Colors.amberAccent),
+        if (cashShortfall != null) ...[
+          const SizedBox(height: 12),
+          const Text('Cash Check',
+              style: TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          _DataGrid(pairs: [
+            _DataPairData(
+              label: 'Available cash',
+              value: _moneyLabel(result.availableCash),
+            ),
+            _DataPairData(
+              label: 'Estimated amount',
+              value: _moneyLabel(result.estimatedOrderAmount),
+            ),
+            _DataPairData(
+              label: 'Cash shortfall',
+              value: _moneyLabel(cashShortfall),
+            ),
+          ]),
+        ],
         const SizedBox(height: 12),
         const Text('Technical Snapshot',
             style: TextStyle(fontWeight: FontWeight.w800)),
@@ -360,6 +381,32 @@ class _KisResultPanel extends StatelessWidget {
           const SizedBox(height: 8),
           _BulletList(title: 'Secondary blockers', items: secondaryBlockers),
         ],
+        const SizedBox(height: 12),
+        const Text('Order Submission',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(
+            label: 'Real order submitted',
+            value: result.realOrderSubmitted ? 'Yes' : 'No',
+          ),
+          _DataPairData(
+            label: 'Broker submit called',
+            value: result.brokerSubmitCalled ? 'Yes' : 'No',
+          ),
+          _DataPairData(
+            label: 'Manual submit called',
+            value: result.manualSubmitCalled ? 'Yes' : 'No',
+          ),
+          _DataPairData(
+            label: 'Order ID',
+            value: result.orderId?.toString() ?? 'No order created',
+          ),
+          _DataPairData(
+            label: 'KIS ODNO',
+            value: result.kisOdno ?? 'No order created',
+          ),
+        ]),
         const SizedBox(height: 8),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -521,6 +568,13 @@ class _SoftBadge extends StatelessWidget {
 }
 
 String _mainReason(KisSingleSymbolTradingResult result) {
+  if (_hasReasonCode(result, 'insufficient_cash') ||
+      result.cashShortfall != null) {
+    return presentation.translateReason(
+      'insufficient_cash',
+      singleSymbolContext: true,
+    );
+  }
   if (_analysisUnavailableBecauseData(result)) {
     return presentation.translateReason(
       'insufficient_data',
@@ -640,7 +694,7 @@ String _orderLabel(KisSingleSymbolTradingResult result) {
   if (normalized.contains('dry') ||
       result.safetyFlag('runtime_dry_run') ||
       result.safetyFlag('dry_run')) {
-    return 'Dry-run';
+    return 'Dry-run, no real order';
   }
   return 'No order created';
 }
@@ -666,7 +720,11 @@ List<String> _reasonCandidates(KisSingleSymbolTradingResult result) {
     result.noOrderReason,
     result.blockReason,
     result.reason,
+    ...result.validationBlockReasons,
+    ...result.validationWarnings,
     ..._nestedStringList(result.rawPayload, const ['validation', 'warnings']),
+    ..._nestedStringList(
+        result.rawPayload, const ['validation', 'block_reasons']),
   ];
   final marketSession = _nestedMap(result.rawPayload, const ['market_session']);
   if (marketSession['is_near_close'] == true) values.add('near_close');
@@ -689,6 +747,13 @@ String _translateSingleSymbolReason(String reason) {
   if (_looksLikeRawReasonCode(translated))
     return _humanizeReasonCode(translated);
   return translated;
+}
+
+bool _hasReasonCode(KisSingleSymbolTradingResult result, String code) {
+  final normalizedCode = code.trim().toLowerCase();
+  return _reasonCandidates(result)
+      .map((reason) => reason.trim().toLowerCase())
+      .contains(normalizedCode);
 }
 
 bool _looksLikeRawReasonCode(String value) {
@@ -855,6 +920,29 @@ String _displaySignalScore(num? value,
   if (value == null) return fallback;
   final numeric = value.toDouble();
   return numeric.toStringAsFixed(numeric.truncateToDouble() == numeric ? 1 : 2);
+}
+
+String _moneyLabel(num? value) {
+  if (value == null) return 'Amount not returned';
+  final formatted = _groupedNumber(value.abs(), decimals: 0);
+  final sign = value < 0 ? '-' : '';
+  return '$sign\u20A9$formatted';
+}
+
+String _groupedNumber(num value, {required int decimals}) {
+  final fixed = value.toStringAsFixed(decimals);
+  final parts = fixed.split('.');
+  final whole = parts.first;
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i += 1) {
+    final remaining = whole.length - i;
+    buffer.write(whole[i]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  if (decimals == 0) return buffer.toString();
+  return '${buffer.toString()}.${parts.last}';
 }
 
 String _formatPercent(double value) {

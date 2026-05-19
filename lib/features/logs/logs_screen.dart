@@ -9,6 +9,7 @@ import '../../models/kis_scheduler_simulation.dart';
 import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
+import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.controller});
@@ -644,9 +645,9 @@ List<_ReadinessCheck> _readinessChecks({
       passed: summary.schedulerSubmitFlagsAllFalse,
       detail: summary.schedulerRuns.isEmpty
           ? 'latest submit flags unknown'
-          : 'real_order_submitted=${_boolLabel(summary.realOrderSubmitted)}, '
-              'broker_submit_called=${_boolLabel(summary.brokerSubmitCalled)}, '
-              'manual_submit_called=${_boolLabel(summary.schedulerManualSubmitCalled)}',
+          : 'Real order submitted: ${_yesNo(summary.realOrderSubmitted)}, '
+              'Broker submit: ${_yesNo(summary.brokerSubmitCalled)}, '
+              'Manual submit: ${_yesNo(summary.schedulerManualSubmitCalled)}',
     ),
     _ReadinessCheck(
       label: 'recent Logs/History records available',
@@ -740,22 +741,22 @@ class _KisSimulationSafetyBlock extends StatelessWidget {
     return Wrap(spacing: 14, runSpacing: 8, children: [
       _SafetyChip(
         label:
-            'real_order_submitted=${_boolLabel(summary.realOrderSubmitted || status.realOrderSubmitted)}',
+            'Real order submitted: ${_yesNo(summary.realOrderSubmitted || status.realOrderSubmitted)}',
       ),
       _SafetyChip(
         label:
-            'broker_submit_called=${_boolLabel(summary.brokerSubmitCalled || status.brokerSubmitCalled)}',
+            'Broker submit: ${_yesNo(summary.brokerSubmitCalled || status.brokerSubmitCalled)}',
       ),
       _SafetyChip(
         label:
-            'manual_submit_called=${_boolLabel(summary.schedulerManualSubmitCalled || status.manualSubmitCalled)}',
+            'Manual submit: ${_yesNo(summary.schedulerManualSubmitCalled || status.manualSubmitCalled)}',
       ),
       _SafetyChip(
-        label: 'real_orders_allowed=${_boolLabel(status.realOrdersAllowed)}',
+        label: 'Real orders allowed: ${_yesNo(status.realOrdersAllowed)}',
       ),
       _SafetyChip(
         label:
-            'live_scheduler=${status.realOrderSchedulerEnabled ? "enabled" : "disabled"}',
+            'Live scheduler: ${status.realOrderSchedulerEnabled ? "Enabled" : "Disabled"}',
       ),
     ]);
   }
@@ -1061,6 +1062,7 @@ class _RunHistoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final blocked = !run.hasOrder && run.result.toLowerCase() != 'executed';
+    final isKisAnalyzeBuy = run.isKisSingleSymbolAnalyzeBuy;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1068,9 +1070,12 @@ class _RunHistoryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _HistoryHeader(
-              title: '${run.symbol} - ${run.statusLine}',
-              subtitle:
-                  '${run.provider.toUpperCase()} / ${run.market.toUpperCase()} / ${run.triggerSource} / ${run.mode}',
+              title: isKisAnalyzeBuy
+                  ? 'KIS Analyze & Buy \u00B7 ${run.symbol}'
+                  : '${run.symbol} - ${run.statusLine}',
+              subtitle: isKisAnalyzeBuy
+                  ? '${_runResultLabel(run)} \u00B7 ${_runOrderLabel(run)}'
+                  : '${run.provider.toUpperCase()} / ${run.market.toUpperCase()} / ${run.triggerSource} / ${run.mode}',
               badge: StatusBadge(
                 text: run.result,
                 active: run.result.toLowerCase() == 'executed',
@@ -1087,6 +1092,23 @@ class _RunHistoryCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (isKisAnalyzeBuy) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Reason: ${_runDisplayReason(run)}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              if (run.finalBuyScore != null ||
+                  run.effectiveMinEntryScore != null)
+                Text(
+                  'Buy Score: ${_numberLabel(run.finalBuyScore)} / Required ${_numberLabel(run.effectiveMinEntryScore)}',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              Text(
+                'Broker submit: ${run.brokerSubmitCalled == true ? 'Yes' : 'No'}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ],
             if (blocked)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
@@ -1706,6 +1728,9 @@ class _StatePanel extends StatelessWidget {
 }
 
 String _runTimelineSentence(TradingLogItem run) {
+  if (run.isKisSingleSymbolAnalyzeBuy) {
+    return '${run.symbol} KIS Analyze & Buy completed. ${_runOrderLabel(run)}.';
+  }
   if (run.isKisBuyShadow) {
     return 'KIS buy shadow scan completed. No order submitted.';
   }
@@ -1728,6 +1753,40 @@ String _runTimelineSentence(TradingLogItem run) {
     return '${run.symbol} ${_fallback(run.action, 'trade')} run created order ${run.orderLabel}.';
   }
   return '${run.symbol} ${_fallback(run.action, 'hold')} run completed. No order submitted.';
+}
+
+String _runResultLabel(TradingLogItem run) {
+  final normalized = run.result.trim().toLowerCase();
+  if (run.realOrderSubmitted == true || normalized == 'executed') {
+    return 'Executed';
+  }
+  if (normalized.contains('dry')) return 'Dry-run';
+  if (normalized.contains('block')) return 'Blocked';
+  if (normalized.contains('skip')) return 'Skipped';
+  if (normalized.isEmpty) return 'Completed';
+  return normalized[0].toUpperCase() + normalized.substring(1);
+}
+
+String _runOrderLabel(TradingLogItem run) {
+  if (run.realOrderSubmitted == true) return 'Real order submitted';
+  if (run.result.toLowerCase().contains('dry') || run.dryRun == true) {
+    return 'Dry-run, no real order';
+  }
+  return 'No order created';
+}
+
+String _runDisplayReason(TradingLogItem run) {
+  final reason = presentation.translateReason(
+    run.reason,
+    singleSymbolContext: run.isKisSingleSymbolAnalyzeBuy,
+  );
+  if (reason == 'New buy entries are not allowed now' &&
+      run.gatingNotes.any((note) =>
+          note.toLowerCase() == 'after_no_new_entry_time' ||
+          note.toLowerCase() == 'near_close_no_new_entry')) {
+    return 'New buy entries are blocked after 15:00';
+  }
+  return reason;
 }
 
 String _orderTimelineSentence(OrderLogItem order) {
@@ -1848,32 +1907,34 @@ List<Widget> _safetyFlagRows({
   final rows = <Widget>[];
   if (forcePreviewFlags || previewOnly != null) {
     rows.add(_DetailRow(
-      label: 'Safety',
-      value: 'preview_only=${_boolLabel(previewOnly ?? true)}',
+      label: 'Preview only',
+      value: _yesNo(previewOnly ?? true),
     ));
   }
   if (forceDryRunAutoFlags || forcePreviewFlags || realOrderSubmitted != null) {
     rows.add(_DetailRow(
-      label: 'Safety',
-      value: 'real_order_submitted=${_boolLabel(realOrderSubmitted ?? false)}',
+      label: 'Real order submitted',
+      value: _yesNo(realOrderSubmitted ?? false),
     ));
   }
   if (forceDryRunAutoFlags || brokerSubmitCalled != null) {
     rows.add(_DetailRow(
-      label: 'Safety',
-      value: 'broker_submit_called=${_boolLabel(brokerSubmitCalled ?? false)}',
+      label: 'Broker submit',
+      value: _yesNo(brokerSubmitCalled ?? false),
     ));
   }
   if (forceDryRunAutoFlags || manualSubmitCalled != null) {
     rows.add(_DetailRow(
-      label: 'Safety',
-      value: 'manual_submit_called=${_boolLabel(manualSubmitCalled ?? false)}',
+      label: 'Manual submit',
+      value: _yesNo(manualSubmitCalled ?? false),
     ));
   }
   return rows;
 }
 
 String _boolLabel(bool value) => value ? 'true' : 'false';
+
+String _yesNo(bool value) => value ? 'Yes' : 'No';
 
 String _compactText(List<String> values) {
   final text = values.join(' | ');

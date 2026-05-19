@@ -155,6 +155,12 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     trade_result = response_payload.get("trade_result")
     if not isinstance(trade_result, dict):
         trade_result = {}
+    analysis_payload = response_payload.get("analysis")
+    if not isinstance(analysis_payload, dict):
+        analysis_payload = {}
+    readiness_payload = response_payload.get("readiness")
+    if not isinstance(readiness_payload, dict):
+        readiness_payload = {}
 
     provider = str(
         _first_present(
@@ -308,8 +314,22 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         ),
         "current_price": _first_present(
             response_payload.get("current_price"),
+            analysis_payload.get("current_price"),
             candidate_payload.get("current_price"),
             audit_metadata.get("current_price"),
+        ),
+        "final_buy_score": _first_present(
+            response_payload.get("final_buy_score"),
+            response_payload.get("final_score"),
+            analysis_payload.get("final_buy_score"),
+            analysis_payload.get("score"),
+            candidate_payload.get("final_buy_score"),
+            audit_metadata.get("final_score"),
+        ),
+        "effective_min_entry_score": _first_present(
+            response_payload.get("effective_min_entry_score"),
+            readiness_payload.get("effective_min_entry_score"),
+            candidate_payload.get("effective_min_entry_score"),
         ),
         "unrealized_pl": _first_present(
             response_payload.get("unrealized_pl"),
