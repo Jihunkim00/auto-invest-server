@@ -177,7 +177,6 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   }
 
   String get _normalizedSymbol => _symbolController.text.trim().toUpperCase();
-
 }
 
 class _SafetyBadge extends StatelessWidget {
@@ -292,8 +291,11 @@ class _DecisionSummary extends StatelessWidget {
       _ResultRow('Symbol', result.symbol),
       _ResultRow('Decision', result.action.toUpperCase()),
       _ResultRow('Result', result.displayStatus),
-      _ResultRow('Risk approved',
-          (result.approvedByRisk ?? result.riskApproved ?? false) ? 'Yes' : 'No'),
+      _ResultRow(
+          'Risk approved',
+          (result.approvedByRisk ?? result.riskApproved ?? false)
+              ? 'Yes'
+              : 'No'),
       _ResultRow('Order', result.displayOrderId),
       _ResultRow('Gate', result.gateLabel),
       if (result.createdAt != null) _ResultRow('Created at', result.createdAt!),
@@ -471,9 +473,13 @@ class _ReasonDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _ResultRow('Main reason',
-          result.reason.isEmpty ? 'No reason returned' : _translateReason(result.reason)),
-      _ResultRow('Quant reason', result.quantReason ?? 'No quant reason returned'),
+      _ResultRow(
+          'Main reason',
+          result.reason.isEmpty
+              ? 'No reason returned'
+              : _translateReason(result.reason)),
+      _ResultRow(
+          'Quant reason', result.quantReason ?? 'No quant reason returned'),
       _ResultRow('AI reason', result.aiReason ?? 'No AI reason returned'),
       if (result.runReason != null)
         _ResultRow('Run reason', _translateReason(result.runReason!)),

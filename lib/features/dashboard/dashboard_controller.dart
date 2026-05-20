@@ -1706,6 +1706,67 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshKisLimitedAutoSellStatus() async {
+    if (kisLimitedAutoSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto sell already in progress.',
+      );
+    }
+
+    kisLimitedAutoSellLoading = true;
+    kisLimitedAutoSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisLimitedAutoSellStatus();
+      latestKisLimitedAutoSellResult = result;
+      return ActionResult(
+        success: true,
+        message: 'KIS limited auto sell status refreshed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoSellError!),
+      );
+    } finally {
+      kisLimitedAutoSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisLimitedAutoSellPreflightOnce() async {
+    if (kisLimitedAutoSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto sell already in progress.',
+      );
+    }
+
+    kisLimitedAutoSellLoading = true;
+    kisLimitedAutoSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisLimitedAutoSellPreflightOnce();
+      latestKisLimitedAutoSellResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS stop-loss preflight completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoSellError!),
+      );
+    } finally {
+      kisLimitedAutoSellLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runKisBuyShadowOnce() async {
     if (kisBuyShadowLoading) {
       return const ActionResult(

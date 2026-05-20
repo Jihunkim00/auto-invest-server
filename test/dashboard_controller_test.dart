@@ -519,8 +519,8 @@ void main() {
     expect(result.success, isTrue);
     expect(api.runKisLimitedAutoSellCalls, 1);
     expect(controller.kisLimitedAutoSellLoading, isFalse);
-    expect(
-        controller.latestKisLimitedAutoSellResult?.mode, 'limited_auto_sell');
+    expect(controller.latestKisLimitedAutoSellResult?.mode,
+        'kis_limited_auto_stop_loss_run');
     expect(
         controller.latestKisLimitedAutoSellResult?.realOrderSubmitted, isFalse);
     expect(
@@ -784,21 +784,28 @@ KisShadowExitReviewQueue _shadowExitReviewQueue() {
 KisLimitedAutoSell _limitedAutoSell() {
   return KisLimitedAutoSell.fromJson({
     'status': 'ok',
-    'mode': 'limited_auto_sell',
+    'mode': 'kis_limited_auto_stop_loss_run',
     'result': 'blocked',
     'action': 'hold',
-    'reason': 'limited_auto_sell_disabled',
+    'reason': 'dry_run_true',
     'real_order_submitted': false,
     'broker_submit_called': false,
     'manual_submit_called': false,
     'auto_buy_enabled': false,
     'auto_sell_enabled': false,
     'scheduler_real_order_enabled': false,
-    'checks': {'kis_limited_auto_sell_enabled': false},
+    'live_auto_sell_enabled': false,
+    'stop_loss_auto_sell_enabled': false,
+    'take_profit_auto_sell_enabled': false,
+    'scheduler_real_orders_enabled': false,
+    'dry_run': true,
+    'kill_switch': false,
+    'block_reasons': ['dry_run_true'],
+    'checks': {'kis_limited_auto_stop_loss_enabled': false},
     'safety': {
       'max_orders_per_day': 1,
-      'max_notional_pct': 0.03,
       'stop_loss_only': true,
+      'take_profit_auto_sell_enabled': false,
     },
   });
 }

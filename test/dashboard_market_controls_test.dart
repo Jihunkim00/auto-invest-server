@@ -769,7 +769,7 @@ void main() {
     expect(find.text('Run Scheduler Dry-run'), findsOneWidget);
     expect(find.text('Run KIS Preview'), findsOneWidget);
     expect(find.text('Run Limited Auto Buy Check'), findsOneWidget);
-    expect(find.text('Run Limited Auto Sell Check'), findsOneWidget);
+    expect(find.text('Run Stop-Loss Preflight'), findsWidgets);
     expect(find.text('Run Scheduler Live Guarded Check'), findsOneWidget);
     expect(find.text('Refresh Readiness'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);

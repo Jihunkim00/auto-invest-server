@@ -195,6 +195,13 @@ class RuntimeSettingService:
             "updated_at": row.updated_at,
         }
         settings["trade_limits"] = self._trade_limits(settings)
+        settings["kis_limited_auto_sell_requires_valid_cost_basis"] = True
+        settings["kis_limited_auto_stop_loss_enabled"] = settings[
+            "kis_limited_auto_sell_stop_loss_enabled"
+        ]
+        settings["kis_limited_auto_take_profit_enabled"] = settings[
+            "kis_limited_auto_sell_take_profit_enabled"
+        ]
         settings["kis_scheduler_enabled"] = bool(
             getattr(self.settings, "kis_scheduler_enabled", False)
         )

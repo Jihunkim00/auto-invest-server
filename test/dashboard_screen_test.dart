@@ -99,7 +99,8 @@ void main() {
     expect(find.textContaining('Samsung Electronics'), findsOneWidget);
   });
 
-  testWidgets('Prepare Sell Ticket on Home portfolio pre-fills manual order only',
+  testWidgets(
+      'Prepare Sell Ticket on Home portfolio pre-fills manual order only',
       (tester) async {
     var openedManualOrder = false;
     final controller = DashboardController(FakeKisApiClient(), autoload: false)
@@ -146,7 +147,8 @@ void main() {
     expect(controller.kisLiveConfirmation, isFalse);
     expect(controller.orderValidationResult, isNull);
     expect(controller.orderValidationError, isNull);
-    expect(controller.orderTicketSourceMetadata?['source'], 'portfolio_position');
+    expect(
+        controller.orderTicketSourceMetadata?['source'], 'portfolio_position');
   });
 }
 

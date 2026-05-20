@@ -216,8 +216,16 @@ class TradingLogItem {
     if (isKisLimitedAutoSell) {
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL ONLY');
+      _addUnique(labels, 'READINESS ONLY');
+      if (sourceType == 'limited_auto_sell_preflight' ||
+          mode.toLowerCase().contains('preflight')) {
+        _addUnique(labels, 'STOP-LOSS PREFLIGHT');
+      }
       if ((exitTrigger ?? '').toLowerCase() == 'stop_loss') {
         _addUnique(labels, 'STOP LOSS');
+      }
+      if (realOrderSubmitted == true) {
+        _addUnique(labels, 'STOP-LOSS AUTO SELL');
       }
       _addUnique(labels, 'AUTO BUY DISABLED');
       _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
@@ -1020,7 +1028,8 @@ bool _isKisLimitedAutoSell(
   if (!_isKis(provider, market, mode, triggerSource)) return false;
   final hint = '$mode $triggerSource $source'.toLowerCase();
   return hint.contains('limited_auto_sell') ||
-      source == 'kis_limited_auto_sell';
+      source == 'kis_limited_auto_sell' ||
+      source == 'kis_limited_auto_stop_loss';
 }
 
 bool _isKisLimitedAutoBuy(

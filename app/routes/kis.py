@@ -551,6 +551,20 @@ def run_kis_limited_auto_sell_once(db: Session = Depends(get_db)):
     return service.run_once(db)
 
 
+@router.get("/limited-auto-sell/status")
+def get_kis_limited_auto_sell_status(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisLimitedAutoSellService(client)
+    return service.status(db)
+
+
+@router.post("/limited-auto-sell/preflight-once")
+def run_kis_limited_auto_sell_preflight_once(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisLimitedAutoSellService(client)
+    return service.preflight_once(db)
+
+
 @router.post("/limited-auto-buy/run-once")
 def run_kis_limited_auto_buy_once(
     gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
