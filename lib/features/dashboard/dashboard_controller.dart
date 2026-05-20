@@ -18,6 +18,7 @@ import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
 import '../../models/market_watchlist.dart';
+import '../../models/managed_position.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
 import '../../models/order_validation_result.dart';
@@ -97,6 +98,10 @@ class DashboardController extends ChangeNotifier {
   WatchlistRunResult runResult = _emptyRunResult;
   PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
   PortfolioSummary krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+  List<ManagedPosition> kisManagedPositions = const [];
+  bool kisManagedPositionsLoading = false;
+  String? kisManagedPositionsError;
+  ManualSellPreparation? latestManualSellPreparation;
   PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
   SelectedProvider selectedProvider = SelectedProvider.alpaca;
   int selectedGateLevel = 2;
@@ -203,6 +208,17 @@ class DashboardController extends ChangeNotifier {
   bool get hasPreparedKisExitSellTicket =>
       hasExitPreflightPreparedSellTicket || hasExitShadowPreparedSellTicket;
 
+  bool get currentOrderRequiresEntryWindow => orderTicketSide != 'sell';
+
+  bool get kisCurrentOrderRuntimeGatesOpen {
+    return !kisSafetyStatus.runtimeDryRun &&
+        !kisSafetyStatus.killSwitch &&
+        kisSafetyStatus.kisEnabled &&
+        kisSafetyStatus.kisRealOrderEnabled &&
+        kisSafetyStatus.marketOpen &&
+        (!currentOrderRequiresEntryWindow || kisSafetyStatus.entryAllowedNow);
+  }
+
   bool get canSubmitLiveKisOrder {
     final validation = orderValidationResult;
     if (validation == null) return false;
@@ -224,7 +240,7 @@ class DashboardController extends ChangeNotifier {
         kisSafetyStatus.kisEnabled &&
         kisSafetyStatus.kisRealOrderEnabled &&
         kisSafetyStatus.marketOpen &&
-        kisSafetyStatus.entryAllowedNow;
+        (!currentOrderRequiresEntryWindow || kisSafetyStatus.entryAllowedNow);
   }
 
   bool get canRunKisGuardedTradingOnce {
@@ -260,6 +276,15 @@ class DashboardController extends ChangeNotifier {
 
   bool get selectedPortfolioUnavailable =>
       selectedPortfolioMarket == PortfolioMarket.kr && krPortfolioUnavailable;
+
+  ManagedPosition? kisManagedPositionForSymbol(String symbol) {
+    final normalized = symbol.trim().toUpperCase();
+    for (final position in kisManagedPositions) {
+      if (position.symbol.toUpperCase() == normalized) return position;
+    }
+    return null;
+  }
+
   List<KisManualOrderResult> get visibleKisOrders {
     final filtered = kisOrders.where(_matchesKisOrderFilter).toList();
     filtered.sort((a, b) {
@@ -742,15 +767,41 @@ class DashboardController extends ChangeNotifier {
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
     orderTicketSourceMetadata = {
-      'source': 'portfolio_position',
-      'source_type': 'manual_sell_ticket_prefill',
+      'source': 'kis_portfolio_manual_sell',
+      'source_type': 'operator_confirmed_position_exit',
       'symbol': symbol,
+      if (position.name.isNotEmpty) 'company_name': position.name,
       'suggested_quantity': qty,
+      'quantity': qty,
       'current_price': position.currentPrice,
       'cost_basis': position.costBasis,
+      'current_value': position.marketValue,
       'unrealized_pl': position.unrealizedPl,
       'unrealized_pl_pct': position.unrealizedPlpc,
+      'exit_reason': 'operator_selected_position_exit',
+      'trigger_source': 'portfolio_snapshot',
+      'trigger_flags': {
+        'manual_review_required': true,
+      },
+      'position_snapshot': {
+        'symbol': symbol,
+        if (position.name.isNotEmpty) 'company_name': position.name,
+        'quantity': qty,
+        'current_price': position.currentPrice,
+        'cost_basis': position.costBasis,
+        'current_value': position.marketValue,
+        'unrealized_pl': position.unrealizedPl,
+        'unrealized_pl_pct': position.unrealizedPlpc,
+      },
+      'runtime_safety_snapshot': {
+        'dry_run': settings.dryRun,
+        'kill_switch': settings.killSwitch,
+        'kis_enabled': kisSafetyStatus.kisEnabled,
+        'kis_real_order_enabled': kisSafetyStatus.kisRealOrderEnabled,
+        'market_open': kisSafetyStatus.marketOpen,
+      },
       'manual_confirm_required': true,
+      'auto_buy_enabled': false,
       'auto_sell_enabled': false,
       'scheduler_real_order_enabled': false,
       'real_order_submit_allowed': false,
@@ -764,6 +815,75 @@ class DashboardController extends ChangeNotifier {
       message:
           'Manual sell ticket prepared from portfolio. Validate and confirm before submit.',
     );
+  }
+
+  Future<ActionResult> prepareKisManualSellFromManagedPosition(
+    ManagedPosition position,
+  ) async {
+    final symbol = position.symbol.trim();
+    if (symbol.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'Position is missing a sell symbol.',
+      );
+    }
+
+    try {
+      final preparation = await apiClient.prepareKisManualSell(symbol);
+      latestManualSellPreparation = preparation;
+      final qty = preparation.quantity.floor();
+      if (!preparation.canPrepare || qty < 1) {
+        notifyListeners();
+        return ActionResult(
+          success: false,
+          message: preparation.blockReasons.isEmpty
+              ? 'Manual sell cannot be prepared for this position.'
+              : 'Manual sell blocked: ${preparation.blockReasons.join(', ')}',
+        );
+      }
+
+      selectedOrderMarket = PortfolioMarket.kr;
+      orderTicketSymbol = preparation.symbol;
+      orderTicketSide = 'sell';
+      orderTicketQty = qty;
+      orderTicketQtyInput = qty.toString();
+      orderValidationResult = null;
+      orderValidationError = null;
+      kisLiveConfirmation = false;
+      kisManualOrderError = null;
+      kisManualOrderErrorRaw = null;
+      orderTicketSourceMetadata = preparation.sourceMetadata.isNotEmpty
+          ? preparation.sourceMetadata
+          : {
+              'source': 'kis_portfolio_manual_sell',
+              'source_type': 'operator_confirmed_position_exit',
+              'symbol': preparation.symbol,
+              'company_name': preparation.companyName,
+              'quantity': qty,
+              'suggested_quantity': qty,
+              'current_price': preparation.currentPrice,
+              'estimated_amount': preparation.estimatedAmount,
+              'exit_reason': preparation.exitReason,
+              'manual_confirm_required': true,
+              'auto_buy_enabled': false,
+              'auto_sell_enabled': false,
+              'scheduler_real_order_enabled': false,
+              'real_order_submit_allowed': false,
+              'real_order_submitted': false,
+              'broker_submit_called': false,
+              'manual_submit_called': false,
+            };
+      notifyListeners();
+      return ActionResult(
+        success: true,
+        message: preparation.canSubmit
+            ? 'Manual sell ticket prepared. Validate and confirm before submit.'
+            : 'Manual sell ticket prepared; backend safety may still block submit.',
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      return ActionResult(success: false, message: message);
+    }
   }
 
   ActionResult prepareKisManualSellFromExitCandidate(
@@ -1001,6 +1121,7 @@ class DashboardController extends ChangeNotifier {
       }
 
       await _refreshKisOrdersAfterAction();
+      await _refreshKrPortfolioSummary();
       return ActionResult(
         success: true,
         message: _submittedMessage(latestKisManualOrder ?? result),
@@ -1787,10 +1908,26 @@ class DashboardController extends ChangeNotifier {
       krPortfolioSummary = await apiClient.fetchKrPortfolioSummary();
       krPortfolioUnavailable = false;
       krPortfolioError = null;
+      await _refreshKisManagedPositions();
     } catch (_) {
       krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+      kisManagedPositions = const [];
       krPortfolioUnavailable = true;
       krPortfolioError = 'KIS account data unavailable';
+    }
+  }
+
+  Future<void> _refreshKisManagedPositions() async {
+    kisManagedPositionsLoading = true;
+    kisManagedPositionsError = null;
+    try {
+      kisManagedPositions = await apiClient.fetchKisManagedPositions();
+    } catch (e) {
+      kisManagedPositions = const [];
+      kisManagedPositionsError =
+          'KIS position management unavailable: ${ApiErrorFormatter.format(e.toString())}';
+    } finally {
+      kisManagedPositionsLoading = false;
     }
   }
 
@@ -1943,7 +2080,7 @@ class DashboardController extends ChangeNotifier {
       return 'Live submit blocked: KIS real orders disabled';
     }
     if (!kisSafetyStatus.marketOpen) return _marketClosedMessage();
-    if (!kisSafetyStatus.entryAllowedNow) {
+    if (currentOrderRequiresEntryWindow && !kisSafetyStatus.entryAllowedNow) {
       return _entryBlockedMessage();
     }
     if (!isOrderTicketInputValid) return 'Enter a valid symbol and quantity.';
@@ -1951,10 +2088,10 @@ class DashboardController extends ChangeNotifier {
   }
 
   String kisRuntimeLiveSubmitMessage() {
-    if (kisRuntimeLiveSubmitGatesOpen) {
+    if (kisCurrentOrderRuntimeGatesOpen) {
       return 'Live submit available after validation + confirmation';
     }
-    return kisSubmitBlockedMessageForRuntimeStatus();
+    return kisSubmitBlockedMessageForRuntimeStatus(forCurrentOrder: true);
   }
 
   String kisGuardedRunBlockedMessage() {
@@ -1970,7 +2107,8 @@ class DashboardController extends ChangeNotifier {
     return 'KIS guarded run is blocked by the checklist.';
   }
 
-  String kisSubmitBlockedMessageForRuntimeStatus() {
+  String kisSubmitBlockedMessageForRuntimeStatus(
+      {bool forCurrentOrder = false}) {
     if (kisSafetyStatus.runtimeDryRun) {
       return 'Live submit blocked: dry-run is ON';
     }
@@ -1984,7 +2122,11 @@ class DashboardController extends ChangeNotifier {
       return 'Live submit blocked: KIS real orders disabled';
     }
     if (!kisSafetyStatus.marketOpen) return _marketClosedMessage();
-    if (!kisSafetyStatus.entryAllowedNow) return _entryBlockedMessage();
+    final requiresEntryWindow =
+        forCurrentOrder ? currentOrderRequiresEntryWindow : true;
+    if (requiresEntryWindow && !kisSafetyStatus.entryAllowedNow) {
+      return _entryBlockedMessage();
+    }
     return 'Live submit blocked: runtime safety status unavailable';
   }
 

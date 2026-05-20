@@ -19,6 +19,7 @@ import '../../models/kis_scheduler_live.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
+import '../../models/managed_position.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/order_validation_result.dart';
@@ -221,6 +222,20 @@ class ApiClient {
       positions: positions,
       pendingOrders: pendingOrders,
     );
+  }
+
+  Future<List<ManagedPosition>> fetchKisManagedPositions() async {
+    final payload = await _getJsonNoCache('/kis/positions/manage');
+    return KisManagedPositions.fromJson(payload).positions;
+  }
+
+  Future<ManualSellPreparation> prepareKisManualSell(String symbol) async {
+    final normalized = symbol.trim();
+    final payload = await _postJsonBody(
+      '/kis/positions/$normalized/prepare-manual-sell',
+      const {},
+    );
+    return ManualSellPreparation.fromJson(payload);
   }
 
   Future<MarketWatchlist> fetchMarketWatchlist(String market) async {
@@ -1010,7 +1025,8 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
   final source = sourceMetadata['source'];
   final isExitPreflight = source == 'kis_live_exit_preflight';
   final isExitShadow = source == 'kis_exit_shadow_decision';
-  if (!isExitPreflight && !isExitShadow) {
+  final isPortfolioManualSell = source == 'kis_portfolio_manual_sell';
+  if (!isExitPreflight && !isExitShadow && !isPortfolioManualSell) {
     return const <String, dynamic>{};
   }
 
@@ -1026,6 +1042,9 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'checked_at',
     'exit_trigger',
     'trigger_source',
+    'symbol',
+    'company_name',
+    'exit_reason',
   };
   const numberKeys = {
     'unrealized_pl',
@@ -1034,12 +1053,18 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'current_value',
     'current_price',
     'suggested_quantity',
+    'quantity',
+    'estimated_amount',
   };
   const boolKeys = {
     'manual_confirm_required',
+    'auto_buy_enabled',
     'auto_sell_enabled',
     'scheduler_real_order_enabled',
     'real_order_submit_allowed',
+    'real_order_submitted',
+    'broker_submit_called',
+    'manual_submit_called',
     'preflight_real_order_submitted',
     'preflight_broker_submit_called',
     'preflight_manual_submit_called',
@@ -1065,16 +1090,40 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     final values = _auditStringList(sourceMetadata[key]);
     if (values.isNotEmpty) result[key] = values;
   }
+  for (final key in const {
+    'trigger_flags',
+    'position_snapshot',
+    'runtime_safety_snapshot',
+  }) {
+    final value = sourceMetadata[key];
+    if (value is Map) {
+      result[key] = Map<String, dynamic>.from(value.cast<String, dynamic>());
+    }
+  }
 
-  result['source'] =
-      isExitShadow ? 'kis_exit_shadow_decision' : 'kis_live_exit_preflight';
-  result['source_type'] =
-      isExitShadow ? 'dry_run_sell_simulation' : 'manual_confirm_exit';
+  result['source'] = isPortfolioManualSell
+      ? 'kis_portfolio_manual_sell'
+      : isExitShadow
+          ? 'kis_exit_shadow_decision'
+          : 'kis_live_exit_preflight';
+  result['source_type'] = isPortfolioManualSell
+      ? 'operator_confirmed_position_exit'
+      : isExitShadow
+          ? 'dry_run_sell_simulation'
+          : 'manual_confirm_exit';
   result['manual_confirm_required'] = true;
+  result['auto_buy_enabled'] = false;
   result['auto_sell_enabled'] = false;
   result['scheduler_real_order_enabled'] = false;
-  result['real_order_submit_allowed'] = false;
-  if (isExitShadow) {
+  result['real_order_submit_allowed'] = isPortfolioManualSell
+      ? (_auditBool(sourceMetadata['real_order_submit_allowed']) ?? false)
+      : false;
+  result['real_order_submitted'] = false;
+  result['broker_submit_called'] = false;
+  result['manual_submit_called'] = false;
+  if (isPortfolioManualSell) {
+    return result;
+  } else if (isExitShadow) {
     result['shadow_real_order_submitted'] = false;
     result['shadow_broker_submit_called'] = false;
     result['shadow_manual_submit_called'] = false;

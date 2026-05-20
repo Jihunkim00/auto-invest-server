@@ -41,6 +41,7 @@ from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
     KisSingleSymbolTradingService,
 )
+from app.services.kis_position_management_service import KisPositionManagementService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -186,6 +187,48 @@ def list_kis_open_orders(db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=502, detail={"message": str(exc), "details": exc.details}
         )
+
+
+@router.get("/positions/manage")
+def manage_kis_positions(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisPositionManagementService(client)
+    try:
+        return service.positions_manage(db)
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
+    except KisApiError as exc:
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/positions/{symbol}/prepare-manual-sell")
+def prepare_kis_position_manual_sell(symbol: str, db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisPositionManagementService(client)
+    try:
+        return service.prepare_manual_sell(db, symbol=symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
+    except KisApiError as exc:
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/orders/validate")

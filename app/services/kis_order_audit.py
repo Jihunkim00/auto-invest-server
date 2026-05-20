@@ -12,6 +12,8 @@ LIMITED_AUTO_SELL_SOURCE = "kis_limited_auto_sell"
 LIMITED_AUTO_SELL_SOURCE_TYPE = "guarded_stop_loss_exit"
 LIMITED_AUTO_BUY_SOURCE = "kis_limited_auto_buy"
 LIMITED_AUTO_BUY_SOURCE_TYPE = "guarded_entry"
+PORTFOLIO_MANUAL_SELL_SOURCE = "kis_portfolio_manual_sell"
+PORTFOLIO_MANUAL_SELL_SOURCE_TYPE = "operator_confirmed_position_exit"
 
 _STRING_KEYS = {
     "source",
@@ -30,6 +32,9 @@ _STRING_KEYS = {
     "checked_at",
     "exit_trigger",
     "trigger_source",
+    "symbol",
+    "company_name",
+    "exit_reason",
 }
 _FLOAT_KEYS = {
     "unrealized_pl",
@@ -39,6 +44,7 @@ _FLOAT_KEYS = {
     "current_price",
     "suggested_quantity",
     "quantity",
+    "estimated_amount",
     "notional",
     "max_notional_pct",
     "final_score",
@@ -74,8 +80,12 @@ _BOOL_KEYS = {
     "shadow_real_order_submitted",
     "shadow_broker_submit_called",
     "shadow_manual_submit_called",
+    "real_order_submitted",
+    "broker_submit_called",
+    "manual_submit_called",
 }
 _LIST_KEYS = {"risk_flags", "gating_notes"}
+_DICT_KEYS = {"trigger_flags", "position_snapshot", "runtime_safety_snapshot"}
 
 
 def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
@@ -99,6 +109,10 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         items = _string_list(value.get(key))
         if items:
             result[key] = items
+    for key in _DICT_KEYS:
+        item = value.get(key)
+        if isinstance(item, dict):
+            result[key] = sanitize_kis_payload(item)
 
     if result.get("source") == EXIT_PREFLIGHT_SOURCE:
         result.setdefault("source_type", MANUAL_EXIT_SOURCE_TYPE)
@@ -138,6 +152,15 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         result.setdefault("real_order_submit_allowed", True)
         result.setdefault("limited_auto_buy_enabled", True)
         result.setdefault("limited_auto_buy_manual_submit_called", False)
+    if result.get("source") == PORTFOLIO_MANUAL_SELL_SOURCE:
+        result.setdefault("source_type", PORTFOLIO_MANUAL_SELL_SOURCE_TYPE)
+        result.setdefault("manual_confirm_required", True)
+        result.setdefault("auto_buy_enabled", False)
+        result.setdefault("auto_sell_enabled", False)
+        result.setdefault("scheduler_real_order_enabled", False)
+        result.setdefault("real_order_submitted", False)
+        result.setdefault("broker_submit_called", False)
+        result.setdefault("manual_submit_called", False)
 
     return sanitize_kis_payload(result) if result else {}
 
@@ -206,6 +229,9 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "shadow_real_order_submitted": data.get("shadow_real_order_submitted"),
         "shadow_broker_submit_called": data.get("shadow_broker_submit_called"),
         "shadow_manual_submit_called": data.get("shadow_manual_submit_called"),
+        "real_order_submitted": data.get("real_order_submitted"),
+        "broker_submit_called": data.get("broker_submit_called"),
+        "manual_submit_called": data.get("manual_submit_called"),
         "risk_flags": data.get("risk_flags"),
         "gating_notes": data.get("gating_notes"),
         "source_metadata": data,
@@ -285,8 +311,17 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             "shadow_real_order_submitted": payload.get("shadow_real_order_submitted"),
             "shadow_broker_submit_called": payload.get("shadow_broker_submit_called"),
             "shadow_manual_submit_called": payload.get("shadow_manual_submit_called"),
+            "real_order_submitted": payload.get("real_order_submitted"),
+            "broker_submit_called": payload.get("broker_submit_called"),
+            "manual_submit_called": payload.get("manual_submit_called"),
             "risk_flags": payload.get("risk_flags"),
             "gating_notes": payload.get("gating_notes"),
+            "symbol": payload.get("symbol"),
+            "company_name": payload.get("company_name"),
+            "exit_reason": payload.get("exit_reason"),
+            "trigger_flags": payload.get("trigger_flags"),
+            "position_snapshot": payload.get("position_snapshot"),
+            "runtime_safety_snapshot": payload.get("runtime_safety_snapshot"),
         }
         values.append(source_fields)
     return merge_kis_order_source_metadata(*values)

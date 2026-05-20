@@ -471,6 +471,8 @@ class OrderLogItem {
       provider, market, mode, triggerSource, source, sourceType);
   bool get isKisSchedulerLive =>
       _isKisSchedulerLive(provider, market, mode, triggerSource);
+  bool get isPortfolioManualSell =>
+      source == 'kis_portfolio_manual_sell' && side.toLowerCase() == 'sell';
   bool get isKisManualLive =>
       isKis &&
       !isKisPreview &&
@@ -481,6 +483,7 @@ class OrderLogItem {
       !isKisLimitedAutoBuy &&
       !isKisSchedulerLive;
   String get sourceLabel {
+    if (isPortfolioManualSell) return 'KIS MANUAL SELL';
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
     if (isKisSchedulerLive) return 'KIS SCHEDULER LIVE';
     if (isKisLimitedAutoBuy) return 'KIS LIMITED AUTO BUY';
@@ -519,6 +522,18 @@ class OrderLogItem {
           brokerSubmitCalled != true &&
           manualSubmitCalled != true) {
         _addUnique(labels, 'PREFLIGHT ONLY');
+        _addUnique(labels, 'NO BROKER SUBMIT');
+      }
+    }
+    if (isPortfolioManualSell) {
+      _addUnique(labels, 'POSITION EXIT');
+      _addUnique(labels, 'SELL');
+      if (manualSubmitCalled == true) {
+        _addUnique(labels, 'MANUAL SUBMIT');
+      }
+      if (realOrderSubmitted == true || brokerSubmitCalled == true) {
+        _addUnique(labels, 'SELL SUBMITTED');
+      } else {
         _addUnique(labels, 'NO BROKER SUBMIT');
       }
     }

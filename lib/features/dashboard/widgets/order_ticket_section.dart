@@ -261,7 +261,9 @@ class _KrOrderTicket extends StatelessWidget {
         onChanged: controller.kisManualSubmitLoading
             ? null
             : (value) => controller.setKisLiveConfirmation(value == true),
-        title: const Text('I understand this is a real KIS order'),
+        title: Text(controller.orderTicketSide == 'sell'
+            ? 'I understand this may submit a real KIS sell order.'
+            : 'I understand this may submit a real KIS buy order.'),
         subtitle: const Text(
           'Manual-only lane; final confirmation is still required before submit.',
         ),
@@ -274,10 +276,10 @@ class _KrOrderTicket extends StatelessWidget {
           onPressed: !controller.canSubmitLiveKisOrder
               ? null
               : () async {
-                  final confirmed = await _confirmSubmitKisOrder(context,
-                      symbol: controller.orderTicketSymbol,
-                      side: controller.orderTicketSide,
-                      qty: controller.parsedOrderTicketQty ?? 0);
+                  final confirmed = await _confirmSubmitKisOrder(
+                    context,
+                    controller: controller,
+                  );
                   if (!confirmed || !context.mounted) return;
                   final result = await controller.submitKisManualOrder();
                   if (!context.mounted) return;
@@ -295,7 +297,9 @@ class _KrOrderTicket extends StatelessWidget {
               : const Icon(Icons.send_outlined),
           label: Text(controller.kisManualSubmitLoading
               ? 'Submitting...'
-              : 'Submit Live KIS Order'),
+              : controller.orderTicketSide == 'sell'
+                  ? 'Submit Manual Sell'
+                  : 'Submit Live KIS Order'),
         ),
         if (controller.latestKisManualOrder?.isSyncable == true &&
             controller.latestKisManualOrder?.isTerminal != true)
@@ -498,7 +502,7 @@ class _RuntimeSafetyStatusCard extends StatelessWidget {
         const SizedBox(height: 10),
         _StateLine(
           text: controller.kisRuntimeLiveSubmitMessage(),
-          color: controller.kisRuntimeLiveSubmitGatesOpen
+          color: controller.kisCurrentOrderRuntimeGatesOpen
               ? Colors.greenAccent
               : Colors.redAccent,
         ),
@@ -542,7 +546,12 @@ class _PreSubmitChecklist extends StatelessWidget {
           label: 'KIS real order enabled', passed: status.kisRealOrderEnabled),
       _ChecklistItem(label: 'market open', passed: status.marketOpen),
       _ChecklistItem(
-          label: 'market entry allowed', passed: status.entryAllowedNow),
+          label: controller.currentOrderRequiresEntryWindow
+              ? 'market entry allowed'
+              : 'sell session allowed',
+          passed: controller.currentOrderRequiresEntryWindow
+              ? status.entryAllowedNow
+              : status.marketOpen),
       _ChecklistItem(label: 'qty and symbol valid', passed: inputValid),
     ];
 
@@ -1274,10 +1283,15 @@ Future<bool> _confirmCancelKisOrder(BuildContext context) async {
 
 Future<bool> _confirmSubmitKisOrder(
   BuildContext context, {
-  required String symbol,
-  required String side,
-  required int qty,
+  required DashboardController controller,
 }) async {
+  final symbol = controller.orderTicketSymbol;
+  final side = controller.orderTicketSide;
+  final qty = controller.parsedOrderTicketQty ?? 0;
+  final validation = controller.orderValidationResult;
+  final estimated = validation?.estimatedAmount;
+  final reason = _orderReason(controller);
+  final company = _orderCompanyName(controller);
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
@@ -1291,9 +1305,27 @@ Future<bool> _confirmSubmitKisOrder(
             'Broker account funds may be used.',
           ),
           const SizedBox(height: 14),
-          _ConfirmRow(label: 'Symbol', value: symbol),
+          const _ConfirmRow(label: 'Provider', value: 'KIS'),
           _ConfirmRow(label: 'Side', value: side.toUpperCase()),
+          _ConfirmRow(
+              label: 'Symbol',
+              value: company.isEmpty ? symbol : '$symbol · $company'),
           _ConfirmRow(label: 'Quantity', value: qty.toString()),
+          _ConfirmRow(
+              label: 'Estimated notional',
+              value: estimated == null ? 'n/a' : _krw(estimated)),
+          _ConfirmRow(label: 'Reason', value: reason),
+          _ConfirmRow(
+              label: 'dry_run',
+              value: controller.kisSafetyStatus.runtimeDryRun ? 'ON' : 'OFF'),
+          _ConfirmRow(
+              label: 'kill_switch',
+              value: controller.kisSafetyStatus.killSwitch ? 'ON' : 'OFF'),
+          _ConfirmRow(
+              label: 'kis_real_order_enabled',
+              value: controller.kisSafetyStatus.kisRealOrderEnabled
+                  ? 'true'
+                  : 'false'),
         ],
       ),
       actions: [
@@ -1309,6 +1341,56 @@ Future<bool> _confirmSubmitKisOrder(
     ),
   );
   return confirmed == true;
+}
+
+String _orderCompanyName(DashboardController controller) {
+  final metadata = controller.orderTicketSourceMetadata ?? const {};
+  final direct = metadata['company_name'] ?? metadata['name'];
+  if (direct != null && direct.toString().trim().isNotEmpty) {
+    return direct.toString().trim();
+  }
+  final snapshot = metadata['position_snapshot'];
+  if (snapshot is Map) {
+    final value = snapshot['company_name'] ?? snapshot['name'];
+    if (value != null && value.toString().trim().isNotEmpty) {
+      return value.toString().trim();
+    }
+  }
+  return controller
+          .kisManagedPositionForSymbol(controller.orderTicketSymbol)
+          ?.companyName ??
+      '';
+}
+
+String _orderReason(DashboardController controller) {
+  final metadata = controller.orderTicketSourceMetadata ?? const {};
+  final reason = metadata['exit_reason'] ?? metadata['reason'];
+  if (reason != null && reason.toString().trim().isNotEmpty) {
+    return _humanReason(reason.toString());
+  }
+  final managed =
+      controller.kisManagedPositionForSymbol(controller.orderTicketSymbol);
+  if (managed != null) return managed.humanReason;
+  return controller.orderTicketSide == 'sell'
+      ? 'Operator-confirmed position exit'
+      : 'Operator-confirmed manual order';
+}
+
+String _humanReason(String value) {
+  switch (value) {
+    case 'stop_loss_triggered':
+      return 'Stop-loss threshold reached';
+    case 'take_profit_triggered':
+      return 'Take-profit threshold reached';
+    case 'weak_trend_triggered':
+      return 'Weak trend detected';
+    case 'sell_pressure_triggered':
+      return 'Sell pressure is elevated';
+    case 'operator_selected_position_exit':
+      return 'Operator-selected position exit';
+    default:
+      return value.replaceAll('_', ' ');
+  }
 }
 
 class _ConfirmRow extends StatelessWidget {

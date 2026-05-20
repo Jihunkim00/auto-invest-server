@@ -215,6 +215,34 @@ void main() {
     expect(item.currency, 'KRW');
   });
 
+  test('OrderLogItem labels portfolio manual sell as position exit', () {
+    final item = OrderLogItem.fromJson({
+      'id': 31,
+      'order_id': 31,
+      'provider': 'kis',
+      'broker': 'kis',
+      'market': 'KR',
+      'mode': 'manual_live',
+      'source': 'kis_portfolio_manual_sell',
+      'source_type': 'operator_confirmed_position_exit',
+      'symbol': '005930',
+      'side': 'sell',
+      'qty': 2,
+      'internal_status': 'REJECTED_BY_SAFETY_GATE',
+      'broker_order_status': null,
+      'created_at': '2026-05-08T00:02:00',
+      'updated_at': '2026-05-08T00:03:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'manual_confirm_required': true,
+    });
+
+    expect(item.sourceLabel, 'KIS MANUAL SELL');
+    expect(item.safetyBadges, containsAll(['POSITION EXIT', 'SELL']));
+    expect(item.safetyBadges, contains('NO BROKER SUBMIT'));
+  });
+
   test('OrderLogItem labels KIS limited auto sell distinctly', () {
     final item = OrderLogItem.fromJson({
       'id': 40,

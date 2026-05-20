@@ -1,9 +1,11 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
 import '../../../models/portfolio_summary.dart';
+import '../../../models/managed_position.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class PortfolioSnapshotSection extends StatelessWidget {
@@ -107,6 +109,14 @@ class PortfolioSnapshotSection extends StatelessWidget {
         }),
         const SizedBox(height: 16),
         const _SubsectionTitle('Current Holdings'),
+        if (isKr && controller.kisManagedPositionsLoading) ...[
+          const SizedBox(height: 6),
+          const _StateNote(text: 'Loading KIS position management...'),
+        ],
+        if (isKr && controller.kisManagedPositionsError != null) ...[
+          const SizedBox(height: 6),
+          _StateNote(text: controller.kisManagedPositionsError!),
+        ],
         const SizedBox(height: 8),
         if (summary.positions.isEmpty)
           _EmptyLine(text: noPositionsText)
@@ -116,6 +126,9 @@ class PortfolioSnapshotSection extends StatelessWidget {
               _PositionTile(
                 controller: controller,
                 position: position,
+                managedPosition: isKr
+                    ? controller.kisManagedPositionForSymbol(position.symbol)
+                    : null,
                 currency: summary.currency,
                 isKr: isKr,
                 managementMode: managementMode,
@@ -200,6 +213,7 @@ class _PositionTile extends StatelessWidget {
   const _PositionTile({
     required this.controller,
     required this.position,
+    this.managedPosition,
     required this.currency,
     required this.isKr,
     required this.managementMode,
@@ -209,6 +223,7 @@ class _PositionTile extends StatelessWidget {
 
   final DashboardController controller;
   final PositionSummary position;
+  final ManagedPosition? managedPosition;
   final String currency;
   final bool isKr;
   final bool managementMode;
@@ -217,103 +232,256 @@ class _PositionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final plColor = _valueColor(position.unrealizedPl);
-    final status = _positionStatus(position, isKr: isKr);
-    final reason = _positionStatusReason(position, isKr: isKr);
+    final unrealizedPl = managedPosition?.unrealizedPl ?? position.unrealizedPl;
+    final plColor = _valueColor(unrealizedPl);
+    final status =
+        managedPosition?.statusLabel ?? _positionStatus(position, isKr: isKr);
+    final reason = managedPosition?.humanReason ??
+        _positionStatusReason(position, isKr: isKr);
+    final company = _companyLabel(position, managedPosition);
+    final canPrepareManualSell = isKr &&
+        managementMode &&
+        managedPosition != null &&
+        !managedPosition!.isHold &&
+        managedPosition!.canPrepareManualSell;
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(position.symbol,
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: ValueKey('portfolio-position-card-${position.symbol}'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          title: Row(children: [
+            Expanded(
+              child: Text('${position.symbol} · $company',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.w800)),
-              if (position.name.isNotEmpty) ...[
-                const SizedBox(height: 2),
-                Text(position.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600)),
-              ],
+            ),
+            const SizedBox(width: 8),
+            _SoftBadge(text: status, color: _positionStatusColor(status)),
+          ]),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Wrap(spacing: 8, runSpacing: 6, children: [
+              _SoftBadge(
+                  text: position.side.toUpperCase(), color: Colors.white70),
+              _SoftBadge(
+                  text: 'Qty ${_quantity(position.qty)}',
+                  color: Colors.white70),
+              _DataPair(
+                  label: 'Current Value',
+                  value: _money(
+                      managedPosition?.currentValue ?? position.marketValue,
+                      currency: currency)),
+              _DataPair(
+                  label: 'P/L',
+                  value: _money(unrealizedPl, currency: currency, signed: true),
+                  color: plColor),
+              _DataPair(
+                  label: 'Profit',
+                  value: _percentOrDash(
+                      managedPosition?.unrealizedPlPct ??
+                          _positionProfitPercent(position, isKr: isKr),
+                      signed: true),
+                  color: plColor),
+              _DataPair(label: 'Main reason', value: reason),
             ]),
           ),
-          const SizedBox(width: 8),
-          _SoftBadge(text: status, color: _positionStatusColor(status)),
-          const SizedBox(width: 8),
-          _SoftBadge(text: position.side.toUpperCase(), color: Colors.white70),
-          const SizedBox(width: 8),
-          Text('Qty ${_quantity(position.qty)}',
-              style: const TextStyle(
-                  color: Colors.white70, fontWeight: FontWeight.w700)),
-        ]),
-        const SizedBox(height: 10),
-        Wrap(spacing: 14, runSpacing: 8, children: [
-          _DataPair(
-              label: 'Avg Buy / Share',
-              value: _money(position.avgEntryPrice, currency: currency)),
-          _DataPair(
-              label: 'Current / Share',
-              value: position.currentPrice == null
-                  ? 'n/a'
-                  : _money(position.currentPrice!, currency: currency)),
-          _DataPair(
-              label: 'Cost',
-              value: _money(position.costBasis, currency: currency)),
-          _DataPair(
-              label: 'Current Value',
-              value: _money(position.marketValue, currency: currency)),
-          _DataPair(
-              label: 'P/L',
-              value: _money(position.unrealizedPl,
-                  currency: currency, signed: true),
-              color: plColor),
-          _DataPair(
-              label: 'Profit',
-              value: _percentOrDash(
-                  _positionProfitPercent(position, isKr: isKr),
-                  signed: true),
-              color: plColor),
-          _DataPair(label: 'Status reason', value: reason),
-        ]),
-        if (managementMode) ...[
-          const SizedBox(height: 12),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            OutlinedButton.icon(
-              onPressed: onReviewPosition,
-              icon: const Icon(Icons.rate_review_outlined, size: 18),
-              label: const Text('Review'),
+          children: [
+            _PositionDetail(
+              position: position,
+              managedPosition: managedPosition,
+              currency: currency,
+              isKr: isKr,
             ),
-            if (isKr)
-              OutlinedButton.icon(
-                onPressed: () {
-                  final result =
-                      controller.prepareKisManualSellFromPosition(position);
-                  if (result.success) onOpenManualOrder?.call();
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(result.message),
-                    backgroundColor:
-                        result.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-                icon: const Icon(Icons.request_quote_outlined, size: 18),
-                label: const Text('Prepare Sell Ticket'),
-              ),
-          ]),
-        ],
-      ]),
+            if (managementMode) ...[
+              const SizedBox(height: 12),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                OutlinedButton.icon(
+                  onPressed: onReviewPosition,
+                  icon: const Icon(Icons.rate_review_outlined, size: 18),
+                  label: const Text('Review'),
+                ),
+                if (canPrepareManualSell)
+                  OutlinedButton.icon(
+                    key: ValueKey('prepare-manual-sell-${position.symbol}'),
+                    onPressed: () async {
+                      final result = await controller
+                          .prepareKisManualSellFromManagedPosition(
+                              managedPosition!);
+                      if (result.success) onOpenManualOrder?.call();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.redAccent,
+                      ));
+                    },
+                    icon: const Icon(Icons.request_quote_outlined, size: 18),
+                    label: const Text('Prepare Manual Sell'),
+                  )
+                else if (isKr && managementMode && managedPosition == null)
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      final result =
+                          controller.prepareKisManualSellFromPosition(position);
+                      if (result.success) onOpenManualOrder?.call();
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.redAccent,
+                      ));
+                    },
+                    icon: const Icon(Icons.request_quote_outlined, size: 18),
+                    label: const Text('Prepare Manual Sell'),
+                  ),
+              ]),
+            ],
+          ],
+        ),
+      ),
     );
+  }
+}
+
+class _PositionDetail extends StatelessWidget {
+  const _PositionDetail({
+    required this.position,
+    required this.managedPosition,
+    required this.currency,
+    required this.isKr,
+  });
+
+  final PositionSummary position;
+  final ManagedPosition? managedPosition;
+  final String currency;
+  final bool isKr;
+
+  @override
+  Widget build(BuildContext context) {
+    final managed = managedPosition;
+    final technical = managed?.technicalSnapshot ?? const <String, dynamic>{};
+    final flags = managed == null
+        ? const <String>[]
+        : [
+            if (managed.stopLossTriggered) 'Stop loss',
+            if (managed.takeProfitTriggered) 'Take profit',
+            if (managed.weakTrendTriggered) 'Weak trend',
+            if (managed.sellPressureTriggered) 'Sell pressure',
+            if (managed.manualReviewRequired) 'Manual review',
+          ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _DataPair(
+            label: 'Avg Buy / Share',
+            value: _money(managed?.averagePrice ?? position.avgEntryPrice,
+                currency: currency)),
+        _DataPair(
+            label: 'Current / Share',
+            value: _nullableMoney(
+                managed?.currentPrice ?? position.currentPrice,
+                currency: currency)),
+        _DataPair(
+            label: 'Cost',
+            value: _nullableMoney(managed?.costBasis ?? position.costBasis,
+                currency: currency)),
+        _DataPair(
+            label: 'Current Value',
+            value: _nullableMoney(managed?.currentValue ?? position.marketValue,
+                currency: currency)),
+        _DataPair(
+            label: 'P/L',
+            value: _nullableMoney(
+                managed?.unrealizedPl ?? position.unrealizedPl,
+                currency: currency,
+                signed: true),
+            color: _valueColor(managed?.unrealizedPl ?? position.unrealizedPl)),
+        _DataPair(
+            label: 'Profit',
+            value: _percentOrDash(
+                managed?.unrealizedPlPct ??
+                    _positionProfitPercent(position, isKr: isKr),
+                signed: true),
+            color: _valueColor(managed?.unrealizedPl ?? position.unrealizedPl)),
+        _DataPair(
+            label: 'Sell Score', value: _numberOrDash(managed?.finalSellScore)),
+        _DataPair(
+            label: 'Buy Score', value: _numberOrDash(managed?.finalBuyScore)),
+        _DataPair(
+            label: 'Quant Sell', value: _numberOrDash(managed?.quantSellScore)),
+        _DataPair(
+            label: 'Quant Buy', value: _numberOrDash(managed?.quantBuyScore)),
+        _DataPair(label: 'AI Sell', value: _numberOrDash(managed?.aiSellScore)),
+        _DataPair(label: 'AI Buy', value: _numberOrDash(managed?.aiBuyScore)),
+        _DataPair(
+            label: 'Confidence',
+            value: managed?.confidence == null
+                ? 'n/a'
+                : _percent(managed!.confidence!)),
+        _DataPair(
+            label: 'Indicator',
+            value: _technicalText(technical, 'indicator_status')),
+        _DataPair(
+            label: 'Bars',
+            value: _technicalText(technical, 'indicator_bar_count')),
+      ]),
+      const SizedBox(height: 12),
+      const _SubsectionTitle('Technical Snapshot'),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _DataPair(
+            label: 'EMA20',
+            value:
+                '${_technicalNumber(technical, 'ema20')} (${_technicalText(technical, 'price_vs_ema20')})'),
+        _DataPair(
+            label: 'EMA50',
+            value:
+                '${_technicalNumber(technical, 'ema50')} (${_technicalText(technical, 'price_vs_ema50')})'),
+        _DataPair(
+            label: 'VWAP',
+            value:
+                '${_technicalNumber(technical, 'vwap')} (${_technicalText(technical, 'price_vs_vwap')})'),
+        _DataPair(label: 'RSI', value: _technicalNumber(technical, 'rsi')),
+        _DataPair(label: 'ATR', value: _technicalNumber(technical, 'atr')),
+        _DataPair(
+            label: 'Volume ratio',
+            value: _technicalNumber(technical, 'volume_ratio')),
+        _DataPair(
+            label: 'Momentum', value: _technicalPercent(technical, 'momentum')),
+        _DataPair(
+            label: 'Recent return',
+            value: _technicalPercent(technical, 'recent_return')),
+      ]),
+      const SizedBox(height: 12),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        if (flags.isEmpty)
+          const _SoftBadge(
+              text: 'No exit trigger', color: Colors.lightBlueAccent)
+        else
+          for (final flag in flags)
+            _SoftBadge(text: flag, color: Colors.amberAccent),
+        for (final reason in managed?.blockReasons ?? const <String>[])
+          _SoftBadge(text: _cleanStatus(reason), color: Colors.redAccent),
+      ]),
+      if (managed?.latestManualSellOrder != null) ...[
+        const SizedBox(height: 12),
+        _StateNote(
+            text: 'Latest manual sell order is available in KIS Orders.'),
+      ],
+      if (managed != null) ...[
+        const SizedBox(height: 12),
+        _DeveloperPayload(payload: managed.rawPayload),
+      ],
+    ]);
   }
 }
 
@@ -460,6 +628,53 @@ class _EmptyLine extends StatelessWidget {
   }
 }
 
+class _StateNote extends StatelessWidget {
+  const _StateNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(text,
+        style: const TextStyle(color: Colors.white60, fontSize: 12));
+  }
+}
+
+class _DeveloperPayload extends StatelessWidget {
+  const _DeveloperPayload({required this.payload});
+
+  final Map<String, dynamic> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: EdgeInsets.zero,
+      title: const Text('Developer Raw Payload',
+          style: TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w800)),
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+          ),
+          child: SelectableText(
+            const JsonEncoder.withIndent('  ').convert(payload),
+            style: const TextStyle(
+                color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _SoftBadge extends StatelessWidget {
   const _SoftBadge({required this.text, required this.color});
 
@@ -505,10 +720,22 @@ class _CountPill extends StatelessWidget {
   }
 }
 
+String _companyLabel(PositionSummary position, ManagedPosition? managed) {
+  final value = managed?.companyName ?? position.name;
+  if (value.trim().isEmpty) return 'Unknown company';
+  return value.trim();
+}
+
 Color _valueColor(double value) {
   if (value > 0) return Colors.greenAccent;
   if (value < 0) return Colors.redAccent;
   return Colors.white70;
+}
+
+String _nullableMoney(double? value,
+    {required String currency, bool signed = false}) {
+  if (value == null) return 'n/a';
+  return _money(value, currency: currency, signed: signed);
 }
 
 String _money(double value, {required String currency, bool signed = false}) {
@@ -565,6 +792,36 @@ String _percentOrDash(double? value, {bool signed = false}) {
   return _percent(value, signed: signed);
 }
 
+String _numberOrDash(double? value) {
+  if (value == null) return 'n/a';
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(2);
+}
+
+String _technicalText(Map<String, dynamic> payload, String key) {
+  final value = payload[key];
+  if (value == null || value.toString().trim().isEmpty) return 'n/a';
+  return value.toString();
+}
+
+String _technicalNumber(Map<String, dynamic> payload, String key) {
+  final value = _asNullableDouble(payload[key]);
+  return _numberOrDash(value);
+}
+
+String _technicalPercent(Map<String, dynamic> payload, String key) {
+  final value = _asNullableDouble(payload[key]);
+  return value == null ? 'n/a' : _percent(value, signed: true);
+}
+
+double? _asNullableDouble(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  final text = value.toString().trim().replaceAll(',', '');
+  if (text.isEmpty) return null;
+  return double.tryParse(text);
+}
+
 double? _portfolioProfitPercent(
   PortfolioSummary summary, {
   required bool isKr,
@@ -591,10 +848,10 @@ double? _positionProfitPercent(
 
 String _positionStatus(PositionSummary position, {required bool isKr}) {
   final profit = _positionProfitPercent(position, isKr: isKr);
-  if (profit == null) return 'MANUAL REVIEW';
-  if (profit <= -0.07) return 'STOP-LOSS WATCH';
+  if (profit == null) return 'REVIEW SELL';
+  if (profit <= -0.07) return 'SELL READY';
   if (profit <= -0.03) return 'REVIEW SELL';
-  if (profit >= 0.10) return 'TAKE-PROFIT WATCH';
+  if (profit >= 0.10) return 'SELL READY';
   return 'HOLD';
 }
 
@@ -609,13 +866,10 @@ String _positionStatusReason(PositionSummary position, {required bool isKr}) {
 
 Color _positionStatusColor(String status) {
   switch (status) {
-    case 'STOP-LOSS WATCH':
+    case 'SELL READY':
       return Colors.redAccent;
     case 'REVIEW SELL':
-    case 'MANUAL REVIEW':
       return Colors.amberAccent;
-    case 'TAKE-PROFIT WATCH':
-      return Colors.greenAccent;
     default:
       return Colors.lightBlueAccent;
   }

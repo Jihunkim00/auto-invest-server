@@ -9,6 +9,8 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
+import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 
 void main() {
   test('manual validation request includes safe exit preflight metadata',
@@ -95,6 +97,34 @@ void main() {
     expect(captured.toString(), isNot(contains('access_token')));
   });
 
+  test('manual validation request includes safe portfolio sell metadata',
+      () async {
+    late Map<String, dynamic> captured;
+    final client = ApiClient(
+      client: MockClient((request) async {
+        captured = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode(_validationResponse()), 200);
+      }),
+    );
+
+    await client.validateKisOrder(
+      symbol: '005930',
+      side: 'sell',
+      qty: 2,
+      sourceMetadata: _portfolioSourceMetadata(),
+    );
+
+    final metadata = captured['source_metadata'] as Map<String, dynamic>;
+    expect(metadata['source'], 'kis_portfolio_manual_sell');
+    expect(metadata['source_type'], 'operator_confirmed_position_exit');
+    expect(metadata['company_name'], 'Samsung Electronics');
+    expect(metadata['trigger_flags']['manual_review_required'], isTrue);
+    expect(metadata['position_snapshot']['symbol'], '005930');
+    expect(metadata['auto_sell_enabled'], isFalse);
+    expect(captured.toString(), isNot(contains('appsecret')));
+    expect(captured.toString(), isNot(contains('access_token')));
+  });
+
   testWidgets('prepared manual sell ticket shows audit guardrails',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
@@ -136,6 +166,63 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('portfolio manual sell uses one checkbox and final dialog detail',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = DashboardController(_NoopApiClient(), autoload: false)
+      ..kisSafetyStatus = const KisManualOrderSafetyStatus(
+        runtimeDryRun: false,
+        killSwitch: false,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: false,
+        noNewEntryAfter: '15:00',
+      )
+      ..orderTicketSymbol = '005930'
+      ..orderTicketSide = 'sell'
+      ..orderTicketQty = 2
+      ..orderTicketQtyInput = '2'
+      ..kisLiveConfirmation = true
+      ..orderTicketSourceMetadata = _portfolioSourceMetadata()
+      ..orderValidationResult = OrderValidationResult.fromJson({
+        ..._validationResponse(),
+        'source': 'kis_portfolio_manual_sell',
+        'source_type': 'operator_confirmed_position_exit',
+        'source_metadata': _portfolioSourceMetadata(),
+      });
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: OrderTicketSection(controller: controller)),
+    ));
+
+    expect(
+      find.text('I understand this may submit a real KIS sell order.'),
+      findsOneWidget,
+    );
+    expect(find.text('Submit Manual Sell'), findsOneWidget);
+    expect(controller.canSubmitLiveKisOrder, isTrue);
+
+    await tester.tap(find.text('Submit Manual Sell'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm Submit'), findsWidgets);
+    expect(find.text('KIS'), findsOneWidget);
+    expect(find.text('SELL'), findsWidgets);
+    expect(find.textContaining('Samsung Electronics'), findsWidgets);
+    expect(find.text('2'), findsWidgets);
+    expect(find.text('Operator-selected position exit'), findsOneWidget);
+    expect(find.text('OFF'), findsWidgets);
+    expect(find.text('true'), findsWidgets);
+
+    controller.dispose();
+  });
 }
 
 Map<String, dynamic> _sourceMetadata() {
@@ -172,6 +259,39 @@ Map<String, dynamic> _shadowSourceMetadata() {
     'shadow_real_order_submitted': false,
     'shadow_broker_submit_called': false,
     'shadow_manual_submit_called': false,
+    'appsecret': 'must-not-send',
+    'access_token': 'must-not-send',
+  };
+}
+
+Map<String, dynamic> _portfolioSourceMetadata() {
+  return {
+    'source': 'kis_portfolio_manual_sell',
+    'source_type': 'operator_confirmed_position_exit',
+    'symbol': '005930',
+    'company_name': 'Samsung Electronics',
+    'suggested_quantity': 2,
+    'quantity': 2,
+    'current_price': 72000,
+    'estimated_amount': 144000,
+    'exit_reason': 'operator_selected_position_exit',
+    'trigger_flags': {'manual_review_required': true},
+    'position_snapshot': {
+      'symbol': '005930',
+      'company_name': 'Samsung Electronics',
+      'quantity': 2,
+    },
+    'runtime_safety_snapshot': {
+      'dry_run': false,
+      'kill_switch': false,
+      'kis_real_order_enabled': true,
+    },
+    'risk_flags': ['manual_review_required'],
+    'gating_notes': ['manual_confirm_required'],
+    'manual_confirm_required': true,
+    'auto_sell_enabled': false,
+    'scheduler_real_order_enabled': false,
+    'real_order_submit_allowed': false,
     'appsecret': 'must-not-send',
     'access_token': 'must-not-send',
   };
