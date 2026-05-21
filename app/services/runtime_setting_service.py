@@ -274,6 +274,10 @@ class RuntimeSettingService:
 
     def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         row = self.get_or_create(db)
+        if "kis_limited_auto_take_profit_enabled" in payload:
+            payload["kis_limited_auto_sell_take_profit_enabled"] = payload[
+                "kis_limited_auto_take_profit_enabled"
+            ]
 
         for key in (
             "bot_enabled",

@@ -358,30 +358,33 @@ def test_run_once_kill_switch_blocks(db_session):
     assert result["real_order_submitted"] is False
 
 
-def test_run_once_does_not_respond_to_take_profit_trigger(monkeypatch, db_session):
+def test_run_once_take_profit_candidate_blocks_when_disabled(monkeypatch, db_session):
     _enable_runtime(db_session)
     monkeypatch.setattr(
         "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
-        lambda *args, **kwargs: pytest.fail("take-profit run must not validate"),
+        lambda *args, **kwargs: pytest.fail("disabled take-profit must not validate"),
     )
     monkeypatch.setattr(
         "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
-        lambda *args, **kwargs: pytest.fail("take-profit run must not submit"),
+        lambda *args, **kwargs: pytest.fail("disabled take-profit must not submit"),
     )
     service = _service(client=_FakeClient(positions=[_take_profit_position()]))
 
     result = service.run_once(db_session)
 
     assert result["result"] == "blocked"
-    assert result["reason"] == "take_profit_execution_disabled"
-    assert result["primary_block_reason"] == "take_profit_execution_disabled"
-    assert result["action"] == "review_sell"
+    assert result["reason"] == "take_profit_auto_sell_disabled"
+    assert result["primary_block_reason"] == "take_profit_auto_sell_disabled"
+    assert result["action"] == "blocked_sell"
     assert result["source"] == "kis_limited_auto_take_profit"
-    assert result["source_type"] == "take_profit_readiness_only"
+    assert result["source_type"] == "guarded_take_profit_auto_sell"
+    assert result["mode"] == "kis_limited_auto_take_profit_run"
+    assert result["take_profit_auto_sell_enabled"] is False
     assert result["take_profit_execution_enabled"] is False
     assert result["take_profit_non_actionable"] is True
     assert result["final_candidate"]["take_profit_triggered"] is True
     assert result["final_candidate"]["stop_loss_triggered"] is False
+    assert "take_profit_auto_sell_disabled" in result["block_reasons"]
     assert result["validation_status"] == "not_called"
     assert result["real_order_submitted"] is False
     assert result["broker_submit_called"] is False
@@ -389,11 +392,355 @@ def test_run_once_does_not_respond_to_take_profit_trigger(monkeypatch, db_sessio
     assert db_session.query(OrderLog).count() == 0
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("dry_run", True, "dry_run_enabled"),
+        ("kill_switch", True, "kill_switch_enabled"),
+        ("kis_live_auto_sell_enabled", False, "kis_live_auto_sell_disabled"),
+    ],
+)
+def test_run_once_take_profit_runtime_gates_block_without_validation_or_submit(
+    monkeypatch,
+    db_session,
+    field,
+    value,
+    reason,
+):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+        **{field: value},
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("runtime-blocked take-profit must not validate"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("runtime-blocked take-profit must not submit"),
+    )
+    service = _service(client=_FakeClient(positions=[_take_profit_position()]))
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == reason
+    assert result["primary_block_reason"] == reason
+    assert result["source"] == "kis_limited_auto_take_profit"
+    assert result["source_type"] == "guarded_take_profit_auto_sell"
+    assert result["take_profit_auto_sell_enabled"] is True
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_take_profit_blocks_when_kis_real_order_disabled(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("KIS-real-order blocked take-profit must not validate"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("KIS-real-order blocked take-profit must not submit"),
+    )
+    service = _service(
+        client=_FakeClient(
+            settings=_settings(kis_real_order_enabled=False),
+            positions=[_take_profit_position()],
+        )
+    )
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "kis_real_order_disabled"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_take_profit_missing_cost_basis_blocks(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("invalid cost basis must not validate"),
+    )
+    service = _service(client=_FakeClient(positions=[_missing_cost_basis_position()]))
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "invalid_cost_basis"
+    assert result["primary_block_reason"] == "invalid_cost_basis"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_take_profit_threshold_not_met_blocks(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("below-threshold take-profit must not validate"),
+    )
+    service = _service(
+        client=_FakeClient(
+            positions=[
+                _take_profit_position(
+                    current_price=102_000,
+                    current_value=102_000,
+                    market_value=102_000,
+                    unrealized_pl=2_000,
+                    unrealized_plpc=2.0,
+                )
+            ]
+        )
+    )
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "take_profit_threshold_not_met"
+    assert result["primary_block_reason"] == "take_profit_threshold_not_met"
+    assert result["take_profit_triggered"] is False
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+
+
+def test_run_once_take_profit_duplicate_open_sell_blocks(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("duplicate take-profit must not validate"),
+    )
+    service = _service(
+        client=_FakeClient(
+            positions=[_take_profit_position()],
+            open_orders=[{"symbol": "005930", "side": "sell"}],
+        )
+    )
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "duplicate_open_sell_order"
+    assert result["final_candidate"]["duplicate_open_sell_order"] is True
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_take_profit_daily_limit_blocks(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    _seed_limited_auto_sell_order(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("daily-limited take-profit must not validate"),
+    )
+    service = _service(client=_FakeClient(positions=[_take_profit_position()]))
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "daily_auto_sell_limit_reached"
+    assert result["primary_block_reason"] == "daily_auto_sell_limit_reached"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["validation_status"] == "not_called"
+    assert db_session.query(OrderLog).count() == 1
+
+
+def test_run_once_take_profit_validation_failure_blocks_before_manual_submit(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    validation_calls = []
+
+    def fake_validate(self, request, *, now=None):
+        validation_calls.append(request)
+        metadata = request.source_metadata
+        assert request.side == "sell"
+        assert metadata["source"] == "kis_limited_auto_take_profit"
+        assert metadata["source_type"] == "guarded_take_profit_auto_sell"
+        assert metadata["mode"] == "kis_limited_auto_take_profit_run"
+        assert metadata["take_profit_triggered"] is True
+        assert metadata["stop_loss_triggered"] is False
+        return _FakeValidationResult(
+            validated=False,
+            block_reasons=["validation_failed_for_test"],
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.record_kis_order_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("manual submit must not run after take-profit validation failure"),
+    )
+    service = _service(client=_FakeClient(positions=[_take_profit_position()]))
+
+    result = service.run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert result["result"] == "blocked"
+    assert result["action"] == "blocked_sell"
+    assert result["reason"] == "validation_failed"
+    assert "validation_failed_for_test" in result["block_reasons"]
+    assert result["validation_status"] == "blocked"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+
+
+def test_run_once_take_profit_all_gates_true_submits_through_guarded_path(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
+    validation_calls = []
+    manual_calls = []
+
+    def fake_validate(self, request, *, now=None):
+        validation_calls.append(request)
+        metadata = request.source_metadata
+        assert metadata["source"] == "kis_limited_auto_take_profit"
+        assert metadata["source_type"] == "guarded_take_profit_auto_sell"
+        assert metadata["mode"] == "kis_limited_auto_take_profit_run"
+        assert metadata["trigger_source"] == "limited_auto_sell_run_once"
+        assert metadata["symbol"] == "005930"
+        assert metadata["quantity"] == 1
+        assert metadata["current_price"] == 103_000
+        assert metadata["cost_basis"] == 100_000
+        assert metadata["current_value"] == 103_000
+        assert metadata["unrealized_pl"] == 3_000
+        assert metadata["unrealized_pl_pct"] == pytest.approx(0.03)
+        assert metadata["take_profit_threshold_pct"] == pytest.approx(3.0)
+        assert metadata["take_profit_triggered"] is True
+        assert metadata["stop_loss_triggered"] is False
+        assert metadata["take_profit_actionable"] is True
+        assert metadata["runtime_safety_snapshot"]["kis_limited_auto_take_profit_enabled"] is True
+        return _FakeValidationResult(validated=True)
+
+    def fake_submit_manual(self, db, request, *, now=None):
+        manual_calls.append(request)
+        metadata = request.source_metadata
+        assert request.side == "sell"
+        assert request.dry_run is False
+        assert request.confirm_live is True
+        assert request.confirmation == "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
+        assert metadata["source"] == "kis_limited_auto_take_profit"
+        assert metadata["source_type"] == "guarded_take_profit_auto_sell"
+        assert metadata["mode"] == "kis_limited_auto_take_profit_run"
+        assert metadata["real_order_submit_allowed"] is True
+        assert metadata["validation_summary"]["validation_status"] == "passed"
+        return 200, {
+            "real_order_submitted": True,
+            "broker_submit_called": True,
+            "manual_submit_called": True,
+            "order_id": 789,
+            "order_log_id": 789,
+            "broker_order_id": "TP789",
+            "kis_odno": "TP789",
+            "broker_status": "submitted",
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.record_kis_order_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit_manual,
+    )
+    service = _service(client=_FakeClient(positions=[_take_profit_position()]))
+
+    result = service.run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert len(manual_calls) == 1
+    assert result["result"] == "submitted"
+    assert result["action"] == "sell"
+    assert result["side"] == "sell"
+    assert result["trigger"] == "take_profit"
+    assert result["source"] == "kis_limited_auto_take_profit"
+    assert result["source_type"] == "guarded_take_profit_auto_sell"
+    assert result["mode"] == "kis_limited_auto_take_profit_run"
+    assert result["reason"] == "take_profit_auto_sell_submitted"
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result["manual_submit_called"] is True
+    assert result["order_id"] == 789
+    assert result["broker_order_id"] == "TP789"
+    assert result["kis_odno"] == "TP789"
+    assert result["validation_status"] == "passed"
+    assert result["source_metadata"]["real_order_submitted"] is True
+    assert result["source_metadata"]["broker_submit_called"] is True
+    assert result["source_metadata"]["manual_submit_called"] is True
+    assert result["source_metadata"]["validation_summary"]["validation_status"] == "passed"
+    assert db_session.query(SignalLog).count() == 1
+    assert (
+        db_session.query(TradeRunLog)
+        .filter(TradeRunLog.mode == "kis_limited_auto_take_profit_run")
+        .count()
+        == 1
+    )
+
+
 def test_run_once_prioritizes_stop_loss_when_take_profit_flag_also_present(
     monkeypatch,
     db_session,
 ):
-    _enable_runtime(db_session)
+    _enable_runtime(
+        db_session,
+        kis_limited_auto_sell_take_profit_enabled=True,
+    )
     validation_calls = []
     manual_calls = []
 
@@ -745,14 +1092,16 @@ def _stop_loss_position(**overrides):
     return payload
 
 
-def _take_profit_position():
-    return _stop_loss_position(
+def _take_profit_position(**overrides):
+    payload = _stop_loss_position(
         current_price=103_000,
         current_value=103_000,
         market_value=103_000,
         unrealized_pl=3_000,
         unrealized_plpc=3.0,
     )
+    payload.update(overrides)
+    return payload
 
 
 def _missing_cost_basis_position():

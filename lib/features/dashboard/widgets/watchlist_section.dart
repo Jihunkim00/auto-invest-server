@@ -1922,13 +1922,11 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
           const _SoftBadge(
               text: 'STOP-LOSS EXECUTION', color: Colors.lightBlueAccent),
           const _SoftBadge(
-              text: 'TAKE-PROFIT READINESS ONLY',
+              text: 'TAKE-PROFIT GUARDED EXECUTION',
               color: Colors.lightBlueAccent),
           const _SoftBadge(
-              text: 'TAKE-PROFIT EXECUTION DISABLED',
-              color: Colors.amberAccent),
+              text: 'TAKE-PROFIT DEFAULT OFF', color: Colors.amberAccent),
           const _SoftBadge(text: 'GUARDED EXECUTION', color: Colors.white70),
-          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
           const _SoftBadge(
               text: 'AUTO BUY DISABLED', color: Colors.orangeAccent),
           const _SoftBadge(
@@ -1989,6 +1987,10 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
           _ResultPair(
               label: 'real_order_submit_allowed',
               value: _boolText(result?.realOrderSubmitAllowed ?? false)),
+          if (result != null)
+            _ResultPair(
+                label: 'supported triggers',
+                value: _limitedAutoSellSupportedTriggerLabel(result)),
         ]),
         const SizedBox(height: 12),
         if (blockReasons.isNotEmpty) ...[
@@ -2112,6 +2114,7 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         _ResultPair(label: 'action', value: result.action),
         _ResultPair(label: 'reason', value: result.reason),
         _ResultPair(label: 'mode', value: result.mode),
+        _ResultPair(label: 'trigger', value: result.trigger ?? 'n/a'),
         _ResultPair(
             label: 'candidate_count', value: result.candidateCount.toString()),
         _ResultPair(label: 'symbol', value: symbol),
@@ -2181,6 +2184,11 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         const SizedBox(height: 8),
         _StateLine(text: 'primary_block_reason: ${result.primaryBlockReason}'),
       ],
+      if (result.primaryBlockReason == 'take_profit_auto_sell_disabled' ||
+          result.reason == 'take_profit_auto_sell_disabled') ...[
+        const SizedBox(height: 8),
+        const _StateLine(text: 'Take-profit auto sell disabled'),
+      ],
       if (result.blockReasons.isNotEmpty) ...[
         const SizedBox(height: 8),
         _StateLine(text: 'block_reasons: ${_joinList(result.blockReasons)}'),
@@ -2196,9 +2204,10 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
               color: label == 'BROKER SUBMIT CALLED'
                   ? Colors.redAccent
                   : label == 'STOP-LOSS EXECUTION' ||
-                          label == 'TAKE-PROFIT READINESS ONLY'
+                          label == 'TAKE-PROFIT GUARDED EXECUTION'
                       ? Colors.lightBlueAccent
-                      : label.contains('DISABLED') || label == 'DEFAULT OFF'
+                      : label.contains('DISABLED') ||
+                              label == 'TAKE-PROFIT DEFAULT OFF'
                           ? Colors.amberAccent
                           : Colors.white70,
             ),
@@ -2273,7 +2282,7 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
               label: 'stop-loss threshold',
               value: _formatThresholdPct(candidate.stopLossThresholdPct)),
           _ResultPair(
-              label: 'take-profit',
+              label: 'take-profit threshold',
               value: _formatThresholdPct(candidate.takeProfitThresholdPct)),
           _ResultPair(
               label: 'status', value: _autoSellStatusLabel(candidate.status)),
@@ -2295,10 +2304,13 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
         ),
         if (candidate.takeProfitTriggered) ...[
           const SizedBox(height: 8),
-          const _StateLine(
-            text:
-                'Take-profit: Readiness only. Execution disabled. No broker submit.',
-          ),
+          if (candidate.takeProfitActionable)
+            const _StateLine(text: 'Guarded execution eligible')
+          else ...[
+            const _StateLine(text: 'Take-profit execution disabled'),
+            const SizedBox(height: 4),
+            const _StateLine(text: 'Readiness only'),
+          ],
         ],
         const SizedBox(height: 8),
         _StateLine(
@@ -4353,10 +4365,9 @@ List<String> _limitedAutoSellLabels(KisLimitedAutoSell result) {
   }
 
   add('STOP-LOSS EXECUTION');
-  add('TAKE-PROFIT READINESS ONLY');
-  add('TAKE-PROFIT EXECUTION DISABLED');
+  add('TAKE-PROFIT GUARDED EXECUTION');
+  add('TAKE-PROFIT DEFAULT OFF');
   add('GUARDED EXECUTION');
-  add('DEFAULT OFF');
   add('AUTO BUY DISABLED');
   add('SCHEDULER REAL ORDERS DISABLED');
   add(brokerBadge);
@@ -4364,6 +4375,20 @@ List<String> _limitedAutoSellLabels(KisLimitedAutoSell result) {
     add(label);
   }
   return labels;
+}
+
+String _limitedAutoSellSupportedTriggerLabel(KisLimitedAutoSell result) {
+  final value = result.rawPayload['supported_triggers'];
+  if (value is! Map) return 'n/a';
+  String modeFor(String trigger) {
+    final item = value[trigger];
+    if (item is Map && item['mode'] != null) {
+      return item['mode'].toString();
+    }
+    return 'unknown';
+  }
+
+  return 'stop_loss: ${modeFor('stop_loss')} / take_profit: ${modeFor('take_profit')}';
 }
 
 String _limitedAutoSellDailyLimitLabel(KisLimitedAutoSell result) {

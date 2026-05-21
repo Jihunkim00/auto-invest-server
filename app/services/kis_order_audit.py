@@ -12,6 +12,7 @@ LIMITED_AUTO_SELL_SOURCE = "kis_limited_auto_sell"
 LIMITED_AUTO_SELL_SOURCE_TYPE = "guarded_stop_loss_exit"
 LIMITED_AUTO_TAKE_PROFIT_SOURCE = "kis_limited_auto_take_profit"
 LIMITED_AUTO_TAKE_PROFIT_SOURCE_TYPE = "take_profit_readiness_only"
+LIMITED_AUTO_TAKE_PROFIT_GUARDED_SOURCE_TYPE = "guarded_take_profit_auto_sell"
 LIMITED_AUTO_BUY_SOURCE = "kis_limited_auto_buy"
 LIMITED_AUTO_BUY_SOURCE_TYPE = "guarded_entry"
 PORTFOLIO_MANUAL_SELL_SOURCE = "kis_portfolio_manual_sell"
@@ -45,6 +46,8 @@ _FLOAT_KEYS = {
     "cost_basis",
     "current_value",
     "current_price",
+    "take_profit_threshold_pct",
+    "stop_loss_threshold_pct",
     "suggested_quantity",
     "quantity",
     "estimated_amount",
@@ -67,6 +70,7 @@ _BOOL_KEYS = {
     "take_profit_readiness_enabled",
     "take_profit_readiness_only",
     "take_profit_actionable",
+    "take_profit_execution_enabled",
     "take_profit_execution_disabled",
     "manual_review_auto_sell_enabled",
     "queue_review_required",
@@ -92,7 +96,15 @@ _BOOL_KEYS = {
     "manual_submit_called",
 }
 _LIST_KEYS = {"risk_flags", "gating_notes"}
-_DICT_KEYS = {"trigger_flags", "position_snapshot", "runtime_safety_snapshot"}
+_DICT_KEYS = {
+    "trigger_flags",
+    "position_snapshot",
+    "runtime_safety_snapshot",
+    "market_session_snapshot",
+    "duplicate_order_check",
+    "daily_limit",
+    "validation_summary",
+}
 
 
 def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
@@ -153,18 +165,20 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         result.setdefault("limited_auto_sell_manual_submit_called", False)
     if result.get("source") == LIMITED_AUTO_TAKE_PROFIT_SOURCE:
         result.setdefault("source_type", LIMITED_AUTO_TAKE_PROFIT_SOURCE_TYPE)
+        guarded = result.get("source_type") == LIMITED_AUTO_TAKE_PROFIT_GUARDED_SOURCE_TYPE
         result.setdefault("manual_confirm_required", False)
         result.setdefault("auto_buy_enabled", False)
-        result.setdefault("auto_sell_enabled", False)
+        result.setdefault("auto_sell_enabled", guarded)
         result.setdefault("scheduler_real_order_enabled", False)
-        result.setdefault("real_order_submit_allowed", False)
-        result.setdefault("limited_auto_sell_enabled", False)
+        result.setdefault("real_order_submit_allowed", guarded)
+        result.setdefault("limited_auto_sell_enabled", guarded)
         result.setdefault("stop_loss_auto_sell_enabled", False)
-        result.setdefault("take_profit_auto_sell_enabled", False)
+        result.setdefault("take_profit_auto_sell_enabled", guarded)
         result.setdefault("take_profit_readiness_enabled", True)
-        result.setdefault("take_profit_readiness_only", True)
-        result.setdefault("take_profit_actionable", False)
-        result.setdefault("take_profit_execution_disabled", True)
+        result.setdefault("take_profit_readiness_only", not guarded)
+        result.setdefault("take_profit_actionable", guarded)
+        result.setdefault("take_profit_execution_enabled", guarded)
+        result.setdefault("take_profit_execution_disabled", not guarded)
         result.setdefault("manual_review_auto_sell_enabled", False)
         result.setdefault("limited_auto_sell_real_order_submitted", False)
         result.setdefault("limited_auto_sell_broker_submit_called", False)
@@ -219,6 +233,9 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "take_profit_readiness_enabled": data.get("take_profit_readiness_enabled"),
         "take_profit_readiness_only": data.get("take_profit_readiness_only"),
         "take_profit_actionable": data.get("take_profit_actionable"),
+        "take_profit_execution_enabled": data.get(
+            "take_profit_execution_enabled"
+        ),
         "take_profit_execution_disabled": data.get(
             "take_profit_execution_disabled"
         ),
@@ -303,6 +320,9 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
                 "take_profit_readiness_only"
             ),
             "take_profit_actionable": payload.get("take_profit_actionable"),
+            "take_profit_execution_enabled": payload.get(
+                "take_profit_execution_enabled"
+            ),
             "take_profit_execution_disabled": payload.get(
                 "take_profit_execution_disabled"
             ),
@@ -360,6 +380,8 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             "symbol": payload.get("symbol"),
             "company_name": payload.get("company_name"),
             "exit_reason": payload.get("exit_reason"),
+            "take_profit_threshold_pct": payload.get("take_profit_threshold_pct"),
+            "stop_loss_threshold_pct": payload.get("stop_loss_threshold_pct"),
             "trigger_flags": payload.get("trigger_flags"),
             "position_snapshot": payload.get("position_snapshot"),
             "runtime_safety_snapshot": payload.get("runtime_safety_snapshot"),
