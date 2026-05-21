@@ -44,10 +44,13 @@ class RuntimeSettingService:
             "kis_limited_auto_sell_allow_manual_review_trigger": False,
             "kis_limited_auto_sell_allow_take_profit_trigger": False,
             "kis_limited_auto_buy_enabled": False,
+            "kis_limited_auto_buy_readiness_enabled": True,
             "kis_limited_auto_buy_shadow_enabled": True,
             "kis_limited_auto_buy_requires_shadow_review": True,
             "kis_limited_auto_buy_max_orders_per_day": 1,
             "kis_limited_auto_buy_max_notional_pct": 0.03,
+            "kis_limited_auto_buy_min_cash_buffer_krw": 0.0,
+            "kis_limited_auto_buy_requires_existing_sell_guards": True,
             "kis_limited_auto_buy_min_final_score": 75.0,
             "kis_limited_auto_buy_min_confidence": 0.70,
             "kis_limited_auto_buy_max_positions": 3,
@@ -134,6 +137,9 @@ class RuntimeSettingService:
                 row.kis_limited_auto_sell_allow_take_profit_trigger
             ),
             "kis_limited_auto_buy_enabled": bool(row.kis_limited_auto_buy_enabled),
+            "kis_limited_auto_buy_readiness_enabled": bool(
+                row.kis_limited_auto_buy_readiness_enabled
+            ),
             "kis_limited_auto_buy_shadow_enabled": bool(
                 row.kis_limited_auto_buy_shadow_enabled
             ),
@@ -145,6 +151,12 @@ class RuntimeSettingService:
             ),
             "kis_limited_auto_buy_max_notional_pct": float(
                 row.kis_limited_auto_buy_max_notional_pct
+            ),
+            "kis_limited_auto_buy_min_cash_buffer_krw": float(
+                row.kis_limited_auto_buy_min_cash_buffer_krw
+            ),
+            "kis_limited_auto_buy_requires_existing_sell_guards": bool(
+                row.kis_limited_auto_buy_requires_existing_sell_guards
             ),
             "kis_limited_auto_buy_min_final_score": float(
                 row.kis_limited_auto_buy_min_final_score
@@ -309,10 +321,13 @@ class RuntimeSettingService:
             "kis_limited_auto_sell_allow_manual_review_trigger",
             "kis_limited_auto_sell_allow_take_profit_trigger",
             "kis_limited_auto_buy_enabled",
+            "kis_limited_auto_buy_readiness_enabled",
             "kis_limited_auto_buy_shadow_enabled",
             "kis_limited_auto_buy_requires_shadow_review",
             "kis_limited_auto_buy_max_orders_per_day",
             "kis_limited_auto_buy_max_notional_pct",
+            "kis_limited_auto_buy_min_cash_buffer_krw",
+            "kis_limited_auto_buy_requires_existing_sell_guards",
             "kis_limited_auto_buy_min_final_score",
             "kis_limited_auto_buy_min_confidence",
             "kis_limited_auto_buy_max_positions",

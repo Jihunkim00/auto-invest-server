@@ -1803,6 +1803,75 @@ class DashboardController extends ChangeNotifier {
     return runKisBuyShadowOnce();
   }
 
+  Future<ActionResult> refreshKisLimitedAutoBuyStatus({
+    int? gateLevel,
+  }) async {
+    if (kisLimitedAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto buy already in progress.',
+      );
+    }
+
+    kisLimitedAutoBuyLoading = true;
+    kisLimitedAutoBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisLimitedAutoBuyStatus(
+        gateLevel: gateLevel,
+      );
+      latestKisLimitedAutoBuyResult = result;
+      return ActionResult(
+        success: true,
+        message: 'KIS buy readiness status: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoBuyError!),
+      );
+    } finally {
+      kisLimitedAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisLimitedAutoBuyPreflightOnce({
+    int? gateLevel,
+  }) async {
+    if (kisLimitedAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited auto buy already in progress.',
+      );
+    }
+
+    kisLimitedAutoBuyLoading = true;
+    kisLimitedAutoBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisLimitedAutoBuyPreflightOnce(
+        gateLevel: gateLevel,
+      );
+      latestKisLimitedAutoBuyResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      return ActionResult(
+        success: true,
+        message: 'KIS buy preflight completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisLimitedAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoBuyError!),
+      );
+    } finally {
+      kisLimitedAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     if (kisLimitedAutoBuyLoading) {
       return const ActionResult(
@@ -1822,7 +1891,7 @@ class DashboardController extends ChangeNotifier {
       recentRuns = await apiClient.getRecentTradingRuns();
       return ActionResult(
         success: true,
-        message: 'KIS limited auto buy completed: ${result.reason}.',
+        message: 'KIS limited buy readiness completed: ${result.reason}.',
       );
     } catch (e) {
       kisLimitedAutoBuyError = ApiErrorFormatter.format(e.toString());

@@ -583,6 +583,26 @@ class ApiClient {
     return KisBuyShadowDecision.fromJson(payload);
   }
 
+  Future<KisLimitedAutoBuy> fetchKisLimitedAutoBuyStatus({
+    int? gateLevel,
+  }) async {
+    final path = gateLevel == null
+        ? '/kis/limited-auto-buy/status'
+        : '/kis/limited-auto-buy/status?gate_level=$gateLevel';
+    final payload = await _getJsonNoCache(path);
+    return KisLimitedAutoBuy.fromJson(payload);
+  }
+
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyPreflightOnce({
+    int? gateLevel,
+  }) async {
+    final path = gateLevel == null
+        ? '/kis/limited-auto-buy/preflight-once'
+        : '/kis/limited-auto-buy/preflight-once?gate_level=$gateLevel';
+    final payload = await _postJsonBody(path, const {});
+    return KisLimitedAutoBuy.fromJson(payload);
+  }
+
   Future<KisLimitedAutoBuy> runKisLimitedAutoBuyOnce({int? gateLevel}) async {
     final path = gateLevel == null
         ? '/kis/limited-auto-buy/run-once'
@@ -672,6 +692,8 @@ class ApiClient {
         kisLimitedAutoSellAllowTakeProfitTrigger:
             j['kis_limited_auto_sell_allow_take_profit_trigger'] == true,
         kisLimitedAutoBuyEnabled: j['kis_limited_auto_buy_enabled'] == true,
+        kisLimitedAutoBuyReadinessEnabled:
+            j['kis_limited_auto_buy_readiness_enabled'] != false,
         kisLimitedAutoBuyShadowEnabled:
             j['kis_limited_auto_buy_shadow_enabled'] != false,
         kisLimitedAutoBuyRequiresShadowReview:
@@ -681,6 +703,11 @@ class ApiClient {
         kisLimitedAutoBuyMaxNotionalPct:
             _readNullableDouble(j['kis_limited_auto_buy_max_notional_pct']) ??
                 0.03,
+        kisLimitedAutoBuyMinCashBufferKrw: _readNullableDouble(
+                j['kis_limited_auto_buy_min_cash_buffer_krw']) ??
+            0,
+        kisLimitedAutoBuyRequiresExistingSellGuards:
+            j['kis_limited_auto_buy_requires_existing_sell_guards'] != false,
         kisLimitedAutoBuyMinFinalScore:
             _readNullableDouble(j['kis_limited_auto_buy_min_final_score']) ??
                 75,

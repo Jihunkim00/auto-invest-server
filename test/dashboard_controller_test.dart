@@ -587,7 +587,8 @@ void main() {
     expect(result.success, isTrue);
     expect(api.runKisLimitedAutoBuyCalls, 1);
     expect(controller.kisLimitedAutoBuyLoading, isFalse);
-    expect(controller.latestKisLimitedAutoBuyResult?.mode, 'limited_auto_buy');
+    expect(controller.latestKisLimitedAutoBuyResult?.mode,
+        'kis_limited_auto_buy_run');
     expect(
         controller.latestKisLimitedAutoBuyResult?.realOrderSubmitted, isFalse);
     expect(
@@ -842,25 +843,63 @@ KisBuyShadowDecision _buyShadow() {
   });
 }
 
-KisLimitedAutoBuy _limitedAutoBuy() {
+KisLimitedAutoBuy _limitedAutoBuy({String mode = 'kis_limited_auto_buy_run'}) {
   return KisLimitedAutoBuy.fromJson({
     'status': 'ok',
-    'mode': 'limited_auto_buy',
-    'result': 'blocked',
-    'action': 'hold',
-    'reason': 'limited_auto_buy_disabled',
+    'mode': mode,
+    'source': 'kis_limited_auto_buy',
+    'source_type': 'buy_readiness_only',
+    'result': 'readiness_only',
+    'action': 'buy_ready',
+    'reason': 'buy_readiness_only',
+    'primary_block_reason': 'auto_buy_execution_disabled',
+    'symbol': '005930',
+    'quantity': 4,
+    'estimated_notional': 288000,
+    'final_buy_score': 82.5,
+    'final_sell_score': 12,
+    'confidence': 0.76,
+    'required_buy_score': 75,
     'real_order_submitted': false,
     'broker_submit_called': false,
     'manual_submit_called': false,
+    'validation_called': false,
     'auto_buy_enabled': false,
-    'scheduler_real_order_enabled': false,
+    'live_auto_buy_enabled': false,
+    'limited_auto_buy_enabled': false,
+    'buy_readiness_enabled': true,
+    'scheduler_real_orders_enabled': false,
+    'block_reasons': ['auto_buy_execution_disabled'],
+    'final_candidate': _limitedAutoBuyCandidate(),
+    'candidates': [_limitedAutoBuyCandidate()],
     'checks': {'kis_limited_auto_buy_enabled': false},
-    'safety': {
-      'max_orders_per_day': 1,
-      'max_notional_pct': 0.03,
-      'max_positions': 3,
-    },
+    'safety': {'buy_readiness_only': true, 'max_orders_per_day': 1},
   });
+}
+
+Map<String, dynamic> _limitedAutoBuyCandidate() {
+  return {
+    'symbol': '005930',
+    'company_name': 'Samsung Electronics',
+    'status': 'BUY READY',
+    'current_price': 72000,
+    'available_cash': 3000000,
+    'estimated_notional': 288000,
+    'suggested_quantity': 4,
+    'final_buy_score': 82.5,
+    'final_sell_score': 12,
+    'confidence': 0.76,
+    'required_buy_score': 75,
+    'buy_sell_spread': 70.5,
+    'entry_ready': true,
+    'trade_allowed': false,
+    'buy_readiness_only': true,
+    'buy_actionable': false,
+    'cash_sufficient': true,
+    'market_session_allowed': true,
+    'block_reasons': [],
+    'technical_snapshot': {'EMA20': 70500, 'RSI': 57.5},
+  };
 }
 
 KisSingleSymbolTradingResult _kisSingleResult({String symbol = '005380'}) {
@@ -996,6 +1035,8 @@ class _FakeApiClient extends ApiClient {
   int dismissKisShadowExitQueueItemCalls = 0;
   int runKisLimitedAutoSellCalls = 0;
   int runKisBuyShadowCalls = 0;
+  int fetchKisLimitedAutoBuyStatusCalls = 0;
+  int runKisLimitedAutoBuyPreflightCalls = 0;
   int runKisLimitedAutoBuyCalls = 0;
   int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
@@ -1157,6 +1198,23 @@ class _FakeApiClient extends ApiClient {
       );
     }
     return buyShadow ?? _buyShadow();
+  }
+
+  @override
+  Future<KisLimitedAutoBuy> fetchKisLimitedAutoBuyStatus(
+      {int? gateLevel}) async {
+    fetchKisLimitedAutoBuyStatusCalls += 1;
+    return limitedAutoBuy ??
+        _limitedAutoBuy(mode: 'kis_limited_auto_buy_status');
+  }
+
+  @override
+  Future<KisLimitedAutoBuy> runKisLimitedAutoBuyPreflightOnce({
+    int? gateLevel,
+  }) async {
+    runKisLimitedAutoBuyPreflightCalls += 1;
+    return limitedAutoBuy ??
+        _limitedAutoBuy(mode: 'kis_limited_auto_buy_preflight');
   }
 
   @override
