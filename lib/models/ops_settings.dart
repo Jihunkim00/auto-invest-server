@@ -26,10 +26,13 @@ class OpsSettings {
     this.kisLimitedAutoSellAllowManualReviewTrigger = false,
     this.kisLimitedAutoSellAllowTakeProfitTrigger = false,
     this.kisLimitedAutoBuyEnabled = false,
+    this.kisLimitedAutoBuyReadinessEnabled = true,
     this.kisLimitedAutoBuyShadowEnabled = true,
     this.kisLimitedAutoBuyRequiresShadowReview = true,
     this.kisLimitedAutoBuyMaxOrdersPerDay = 1,
     this.kisLimitedAutoBuyMaxNotionalPct = 0.03,
+    this.kisLimitedAutoBuyMinCashBufferKrw = 0,
+    this.kisLimitedAutoBuyRequiresExistingSellGuards = true,
     this.kisLimitedAutoBuyMinFinalScore = 75,
     this.kisLimitedAutoBuyMinConfidence = 0.70,
     this.kisLimitedAutoBuyMaxPositions = 3,
@@ -74,10 +77,13 @@ class OpsSettings {
   final bool kisLimitedAutoSellAllowManualReviewTrigger;
   final bool kisLimitedAutoSellAllowTakeProfitTrigger;
   final bool kisLimitedAutoBuyEnabled;
+  final bool kisLimitedAutoBuyReadinessEnabled;
   final bool kisLimitedAutoBuyShadowEnabled;
   final bool kisLimitedAutoBuyRequiresShadowReview;
   final int kisLimitedAutoBuyMaxOrdersPerDay;
   final double kisLimitedAutoBuyMaxNotionalPct;
+  final double kisLimitedAutoBuyMinCashBufferKrw;
+  final bool kisLimitedAutoBuyRequiresExistingSellGuards;
   final double kisLimitedAutoBuyMinFinalScore;
   final double kisLimitedAutoBuyMinConfidence;
   final int kisLimitedAutoBuyMaxPositions;
@@ -122,10 +128,13 @@ class OpsSettings {
     bool? kisLimitedAutoSellAllowManualReviewTrigger,
     bool? kisLimitedAutoSellAllowTakeProfitTrigger,
     bool? kisLimitedAutoBuyEnabled,
+    bool? kisLimitedAutoBuyReadinessEnabled,
     bool? kisLimitedAutoBuyShadowEnabled,
     bool? kisLimitedAutoBuyRequiresShadowReview,
     int? kisLimitedAutoBuyMaxOrdersPerDay,
     double? kisLimitedAutoBuyMaxNotionalPct,
+    double? kisLimitedAutoBuyMinCashBufferKrw,
+    bool? kisLimitedAutoBuyRequiresExistingSellGuards,
     double? kisLimitedAutoBuyMinFinalScore,
     double? kisLimitedAutoBuyMinConfidence,
     int? kisLimitedAutoBuyMaxPositions,
@@ -190,6 +199,8 @@ class OpsSettings {
               this.kisLimitedAutoSellAllowTakeProfitTrigger,
       kisLimitedAutoBuyEnabled:
           kisLimitedAutoBuyEnabled ?? this.kisLimitedAutoBuyEnabled,
+      kisLimitedAutoBuyReadinessEnabled: kisLimitedAutoBuyReadinessEnabled ??
+          this.kisLimitedAutoBuyReadinessEnabled,
       kisLimitedAutoBuyShadowEnabled:
           kisLimitedAutoBuyShadowEnabled ?? this.kisLimitedAutoBuyShadowEnabled,
       kisLimitedAutoBuyRequiresShadowReview:
@@ -199,6 +210,11 @@ class OpsSettings {
           this.kisLimitedAutoBuyMaxOrdersPerDay,
       kisLimitedAutoBuyMaxNotionalPct: kisLimitedAutoBuyMaxNotionalPct ??
           this.kisLimitedAutoBuyMaxNotionalPct,
+      kisLimitedAutoBuyMinCashBufferKrw: kisLimitedAutoBuyMinCashBufferKrw ??
+          this.kisLimitedAutoBuyMinCashBufferKrw,
+      kisLimitedAutoBuyRequiresExistingSellGuards:
+          kisLimitedAutoBuyRequiresExistingSellGuards ??
+              this.kisLimitedAutoBuyRequiresExistingSellGuards,
       kisLimitedAutoBuyMinFinalScore:
           kisLimitedAutoBuyMinFinalScore ?? this.kisLimitedAutoBuyMinFinalScore,
       kisLimitedAutoBuyMinConfidence:

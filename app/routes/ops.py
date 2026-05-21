@@ -45,10 +45,13 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_sell_allow_manual_review_trigger: bool | None = None
     kis_limited_auto_sell_allow_take_profit_trigger: bool | None = None
     kis_limited_auto_buy_enabled: bool | None = None
+    kis_limited_auto_buy_readiness_enabled: bool | None = None
     kis_limited_auto_buy_shadow_enabled: bool | None = None
     kis_limited_auto_buy_requires_shadow_review: bool | None = None
     kis_limited_auto_buy_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
     kis_limited_auto_buy_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    kis_limited_auto_buy_min_cash_buffer_krw: float | None = Field(default=None, ge=0)
+    kis_limited_auto_buy_requires_existing_sell_guards: bool | None = None
     kis_limited_auto_buy_min_final_score: float | None = Field(default=None, ge=0, le=100)
     kis_limited_auto_buy_min_confidence: float | None = Field(default=None, ge=0, le=1)
     kis_limited_auto_buy_max_positions: int | None = Field(default=None, ge=0, le=100)

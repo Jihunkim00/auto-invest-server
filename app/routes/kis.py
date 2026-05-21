@@ -575,6 +575,26 @@ def run_kis_limited_auto_buy_once(
     return service.run_once(db, gate_level=gate_level)
 
 
+@router.get("/limited-auto-buy/status")
+def get_kis_limited_auto_buy_status(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisLimitedAutoBuyService(client)
+    return service.status(db, gate_level=gate_level)
+
+
+@router.post("/limited-auto-buy/preflight-once")
+def run_kis_limited_auto_buy_preflight_once(
+    gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisLimitedAutoBuyService(client)
+    return service.preflight_once(db, gate_level=gate_level)
+
+
 @router.post("/scheduler/run-live-once")
 def run_kis_scheduler_live_once(
     gate_level: int = Query(default=DEFAULT_GATE_LEVEL, ge=1, le=4),

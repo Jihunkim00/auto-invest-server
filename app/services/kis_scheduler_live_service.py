@@ -355,8 +355,10 @@ def _daily_scheduler_live_order_count(db: Session, *, now_utc: datetime) -> int:
         .filter(OrderLog.internal_status.in_(["SUBMITTED", "ACCEPTED", "PENDING", "PARTIALLY_FILLED", "FILLED"]))
         .filter(
             OrderLog.request_payload.like(f"%{LIMITED_AUTO_BUY_MODE}%")
+            | OrderLog.request_payload.like("%limited_auto_buy%")
             | OrderLog.request_payload.like(f"%{LIMITED_AUTO_SELL_MODE}%")
             | OrderLog.response_payload.like(f"%{LIMITED_AUTO_BUY_MODE}%")
+            | OrderLog.response_payload.like("%limited_auto_buy%")
             | OrderLog.response_payload.like(f"%{LIMITED_AUTO_SELL_MODE}%")
         )
         .count()
