@@ -37,6 +37,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_sell_enabled: bool | None = None
     kis_limited_auto_sell_stop_loss_enabled: bool | None = None
     kis_limited_auto_sell_take_profit_enabled: bool | None = None
+    kis_limited_auto_take_profit_enabled: bool | None = None
     kis_limited_auto_sell_requires_queue_review: bool | None = None
     kis_limited_auto_sell_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
     kis_limited_auto_sell_max_notional_pct: float | None = Field(default=None, gt=0, le=1)

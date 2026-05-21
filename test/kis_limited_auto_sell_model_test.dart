@@ -156,4 +156,57 @@ void main() {
     expect(result.finalCandidate?.takeProfitReadinessOnly, isTrue);
     expect(result.realOrderSubmitted, isFalse);
   });
+
+  test('parses guarded take-profit submitted response', () {
+    final result = KisLimitedAutoSell.fromJson({
+      'status': 'ok',
+      'mode': 'kis_limited_auto_take_profit_run',
+      'source': 'kis_limited_auto_take_profit',
+      'source_type': 'guarded_take_profit_auto_sell',
+      'result': 'submitted',
+      'action': 'sell',
+      'reason': 'take_profit_auto_sell_submitted',
+      'symbol': '005930',
+      'quantity': 1,
+      'trigger': 'take_profit',
+      'order_id': 88,
+      'broker_order_id': 'TPBRK888',
+      'kis_odno': 'TPODNO888',
+      'take_profit_auto_sell_enabled': true,
+      'take_profit_readiness_enabled': true,
+      'take_profit_execution_enabled': true,
+      'take_profit_non_actionable': false,
+      'take_profit_actionable': true,
+      'take_profit_readiness_only': false,
+      'take_profit_execution_disabled': false,
+      'real_order_submitted': true,
+      'broker_submit_called': true,
+      'manual_submit_called': true,
+      'final_candidate': {
+        'symbol': '005930',
+        'company_name': 'Samsung Electronics',
+        'quantity': 1,
+        'unrealized_pl': 3000,
+        'unrealized_pl_pct': 0.03,
+        'take_profit_triggered': true,
+        'take_profit_actionable': true,
+        'take_profit_execution_disabled': false,
+        'status': 'TAKE_PROFIT_READY',
+      },
+      'candidates': const [],
+    });
+
+    expect(result.submitted, isTrue);
+    expect(result.source, 'kis_limited_auto_take_profit');
+    expect(result.sourceType, 'guarded_take_profit_auto_sell');
+    expect(result.mode, 'kis_limited_auto_take_profit_run');
+    expect(result.trigger, 'take_profit');
+    expect(result.takeProfitAutoSellEnabled, isTrue);
+    expect(result.takeProfitExecutionEnabled, isTrue);
+    expect(result.takeProfitNonActionable, isFalse);
+    expect(result.takeProfitActionable, isTrue);
+    expect(result.brokerSubmitActuallyCalled, isTrue);
+    expect(result.kisOdno, 'TPODNO888');
+    expect(result.finalCandidate?.takeProfitActionable, isTrue);
+  });
 }

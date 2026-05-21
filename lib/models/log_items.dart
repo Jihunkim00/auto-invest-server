@@ -214,13 +214,21 @@ class TradingLogItem {
       _addUnique(labels, 'LIVE AUTO SELL DISABLED');
     }
     if (isKisLimitedAutoSell) {
-      final takeProfitReadiness = source == 'kis_limited_auto_take_profit' ||
+      final takeProfit = source == 'kis_limited_auto_take_profit' ||
+          mode.toLowerCase().contains('take_profit') ||
+          sourceType == 'guarded_take_profit_auto_sell' ||
           sourceType == 'take_profit_readiness_only' ||
           (exitTrigger ?? '').toLowerCase() == 'take_profit';
+      final guardedTakeProfit =
+          takeProfit && sourceType == 'guarded_take_profit_auto_sell';
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
-      if (takeProfitReadiness) {
+      if (guardedTakeProfit) {
+        _addUnique(labels, 'TAKE-PROFIT AUTO SELL');
+        _addUnique(labels, 'GUARDED TAKE-PROFIT EXIT');
+        _addUnique(labels, 'GUARDED EXECUTION');
+      } else if (takeProfit) {
         _addUnique(labels, 'TAKE-PROFIT READINESS');
         _addUnique(labels, 'READINESS ONLY');
         _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
@@ -556,13 +564,21 @@ class OrderLogItem {
       }
     }
     if (isKisLimitedAutoSell) {
-      final takeProfitReadiness = source == 'kis_limited_auto_take_profit' ||
+      final takeProfit = source == 'kis_limited_auto_take_profit' ||
+          mode.toLowerCase().contains('take_profit') ||
+          sourceType == 'guarded_take_profit_auto_sell' ||
           sourceType == 'take_profit_readiness_only' ||
           (exitTrigger ?? '').toLowerCase() == 'take_profit';
+      final guardedTakeProfit =
+          takeProfit && sourceType == 'guarded_take_profit_auto_sell';
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
-      if (takeProfitReadiness) {
+      if (guardedTakeProfit) {
+        _addUnique(labels, 'TAKE-PROFIT AUTO SELL');
+        _addUnique(labels, 'GUARDED TAKE-PROFIT EXIT');
+        _addUnique(labels, 'GUARDED EXECUTION');
+      } else if (takeProfit) {
         _addUnique(labels, 'TAKE-PROFIT READINESS');
         _addUnique(labels, 'READINESS ONLY');
         _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
@@ -827,9 +843,16 @@ class SignalLogItem {
     if (isKisLimitedAutoSell) {
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
-      if (mode.toLowerCase().contains('take_profit') ||
+      final takeProfit = mode.toLowerCase().contains('take_profit') ||
           triggerSource.toLowerCase().contains('take_profit') ||
-          result.toLowerCase().contains('readiness')) {
+          result.toLowerCase().contains('readiness');
+      final guardedTakeProfit =
+          takeProfit && mode.toLowerCase().contains('take_profit_run');
+      if (guardedTakeProfit) {
+        _addUnique(labels, 'TAKE-PROFIT AUTO SELL');
+        _addUnique(labels, 'GUARDED TAKE-PROFIT EXIT');
+        _addUnique(labels, 'GUARDED EXECUTION');
+      } else if (takeProfit) {
         _addUnique(labels, 'TAKE-PROFIT READINESS');
         _addUnique(labels, 'READINESS ONLY');
         _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
@@ -1081,6 +1104,7 @@ bool _isKisLimitedAutoSell(
   if (!_isKis(provider, market, mode, triggerSource)) return false;
   final hint = '$mode $triggerSource $source'.toLowerCase();
   return hint.contains('limited_auto_sell') ||
+      hint.contains('limited_auto_take_profit') ||
       source == 'kis_limited_auto_sell' ||
       source == 'kis_limited_auto_stop_loss' ||
       source == 'kis_limited_auto_take_profit';

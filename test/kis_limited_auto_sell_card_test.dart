@@ -92,14 +92,14 @@ void main() {
     expect(
       find.descendant(
         of: limitedAutoSellCard,
-        matching: find.text('TAKE-PROFIT READINESS ONLY'),
+        matching: find.text('TAKE-PROFIT GUARDED EXECUTION'),
       ),
       findsOneWidget,
     );
     expect(
       find.descendant(
         of: limitedAutoSellCard,
-        matching: find.text('TAKE-PROFIT EXECUTION DISABLED'),
+        matching: find.text('TAKE-PROFIT DEFAULT OFF'),
       ),
       findsOneWidget,
     );
@@ -114,13 +114,6 @@ void main() {
       find.descendant(
         of: limitedAutoSellCard,
         matching: find.text('SCHEDULER REAL ORDERS DISABLED'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.descendant(
-        of: limitedAutoSellCard,
-        matching: find.text('DEFAULT OFF'),
       ),
       findsOneWidget,
     );
@@ -225,7 +218,7 @@ void main() {
     expect(find.text('2.00%'), findsWidgets);
     expect(find.textContaining('preflight_read_only_no_submit'), findsWidgets);
     expect(find.textContaining('stop_loss=true'), findsWidgets);
-    expect(find.text('TAKE-PROFIT READINESS ONLY'), findsWidgets);
+    expect(find.text('TAKE-PROFIT GUARDED EXECUTION'), findsWidgets);
     expect(find.text('Developer Raw Payload'), findsOneWidget);
     expect(find.textContaining('"raw_marker"'), findsNothing);
 
@@ -257,6 +250,15 @@ void main() {
     expect(find.textContaining('kis_live_auto_sell_disabled'), findsWidgets);
     expect(find.text('TAKE_PROFIT_EXECUTION_ENABLED'), findsOneWidget);
     expect(find.text('false'), findsWidgets);
+
+    // Do not require raw payload keys to be visible in the operator UI.
+    expect(find.text('supported triggers'), findsNothing);
+
+    // Assert the operator-facing trigger information instead.
+    expect(find.textContaining('STOP-LOSS'), findsWidgets);
+    expect(find.textContaining('TAKE-PROFIT'), findsWidgets);
+    expect(find.textContaining('GUARDED'), findsWidgets);
+    expect(find.textContaining('READINESS'), findsWidgets);
 
     controller.dispose();
   });
@@ -290,7 +292,7 @@ void main() {
     expect(find.text('TAKE-PROFIT READY'), findsWidgets);
     expect(find.text('TAKE PROFIT READY'), findsWidgets);
     expect(find.textContaining('Readiness only'), findsWidgets);
-    expect(find.textContaining('Execution disabled'), findsWidgets);
+    expect(find.textContaining('Take-profit execution disabled'), findsWidgets);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.textContaining('take_profit_execution_disabled'), findsWidgets);
     expect(find.textContaining('"raw_marker"'), findsNothing);
@@ -324,7 +326,8 @@ void main() {
 
     expect(api.runCalls, 1);
     expect(find.text('blocked'), findsWidgets);
-    expect(find.textContaining('take_profit_execution_disabled'), findsWidgets);
+    expect(find.textContaining('take_profit_auto_sell_disabled'), findsWidgets);
+    expect(find.text('Take-profit auto sell disabled'), findsWidgets);
     expect(find.text('TAKE-PROFIT READY'), findsWidgets);
     expect(find.text('REAL_ORDER_SUBMITTED'), findsOneWidget);
     expect(find.text('false'), findsWidgets);
@@ -374,6 +377,42 @@ void main() {
       findsNothing,
     );
     expect(find.text('passed'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('submitted take-profit result shows trigger and KIS order ids',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeLimitedAutoSellApi(
+      runResult: KisLimitedAutoSell.fromJson(
+          _limitedAutoSellTakeProfitSubmittedJson()),
+    );
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+    final limitedAutoSellCard =
+        find.byKey(const Key('kis_limited_auto_sell_card'));
+    final runButton = find.descendant(
+      of: limitedAutoSellCard,
+      matching: find.text('Run Limited Auto Sell Once'),
+    );
+    await tester.ensureVisible(runButton);
+    await tester.tap(runButton);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('LIVE SELL SUBMITTED'), findsOneWidget);
+    expect(find.text('submitted'), findsWidgets);
+    expect(find.text('take_profit'), findsWidgets);
+    expect(find.text('BROKER SUBMIT CALLED'), findsWidgets);
+    expect(find.text('ORDER ID'), findsOneWidget);
+    expect(find.text('88'), findsOneWidget);
+    expect(find.text('KIS ODNO'), findsOneWidget);
+    expect(find.text('TPODNO888'), findsWidgets);
 
     controller.dispose();
   });
@@ -521,12 +560,12 @@ Map<String, dynamic> _limitedAutoSellStatusJson() {
     'validation_status': 'not_called',
     'readiness_labels': [
       'STOP-LOSS EXECUTION',
-      'TAKE-PROFIT READINESS ONLY',
-      'TAKE-PROFIT EXECUTION DISABLED',
+      'TAKE-PROFIT GUARDED EXECUTION',
+      'TAKE-PROFIT DEFAULT OFF',
       'GUARDED EXECUTION',
-      'DEFAULT OFF',
       'AUTO BUY DISABLED',
       'SCHEDULER REAL ORDERS DISABLED',
+      'TAKE-PROFIT AUTO SELL DISABLED',
       'NO BROKER SUBMIT',
     ],
     'safety': {
@@ -545,6 +584,10 @@ Map<String, dynamic> _limitedAutoSellStatusJson() {
       'dry_run': true,
       'kis_live_auto_sell_enabled': false,
       'kis_limited_auto_stop_loss_enabled': false,
+    },
+    'supported_triggers': {
+      'stop_loss': {'mode': 'guarded_execution'},
+      'take_profit': {'mode': 'readiness_only'},
     },
   };
 }
@@ -660,12 +703,12 @@ Map<String, dynamic> _limitedAutoSellPreflightJson() {
     'validation_status': 'not_called_read_only',
     'readiness_labels': [
       'STOP-LOSS EXECUTION',
-      'TAKE-PROFIT READINESS ONLY',
-      'TAKE-PROFIT EXECUTION DISABLED',
+      'TAKE-PROFIT GUARDED EXECUTION',
+      'TAKE-PROFIT DEFAULT OFF',
       'GUARDED EXECUTION',
-      'DEFAULT OFF',
       'AUTO BUY DISABLED',
       'SCHEDULER REAL ORDERS DISABLED',
+      'TAKE-PROFIT AUTO SELL DISABLED',
       'NO BROKER SUBMIT',
       'READ-ONLY',
     ],
@@ -722,12 +765,12 @@ Map<String, dynamic> _limitedAutoSellSubmittedJson() {
   payload['validation_status'] = 'passed';
   payload['readiness_labels'] = [
     'STOP-LOSS EXECUTION',
-    'TAKE-PROFIT READINESS ONLY',
-    'TAKE-PROFIT EXECUTION DISABLED',
+    'TAKE-PROFIT GUARDED EXECUTION',
+    'TAKE-PROFIT DEFAULT OFF',
     'GUARDED EXECUTION',
-    'DEFAULT OFF',
     'AUTO BUY DISABLED',
     'SCHEDULER REAL ORDERS DISABLED',
+    'TAKE-PROFIT AUTO SELL DISABLED',
     'BROKER SUBMIT CALLED',
   ];
   payload['daily_limit'] = {
@@ -811,14 +854,86 @@ Map<String, dynamic> _limitedAutoSellTakeProfitPreflightJson() {
 
 Map<String, dynamic> _limitedAutoSellTakeProfitRunJson() {
   final payload = _limitedAutoSellTakeProfitPreflightJson();
-  payload['mode'] = 'kis_limited_auto_stop_loss_run';
+  payload['mode'] = 'kis_limited_auto_take_profit_run';
+  payload['source_type'] = 'guarded_take_profit_auto_sell';
   payload['result'] = 'blocked';
-  payload['reason'] = 'take_profit_execution_disabled';
-  payload['primary_block_reason'] = 'take_profit_execution_disabled';
+  payload['action'] = 'blocked_sell';
+  payload['reason'] = 'take_profit_auto_sell_disabled';
+  payload['primary_block_reason'] = 'take_profit_auto_sell_disabled';
   payload['block_reasons'] = [
-    'take_profit_execution_disabled',
+    'take_profit_auto_sell_disabled',
     'take_profit_readiness_only',
   ];
   payload['validation_status'] = 'not_called';
+  return payload;
+}
+
+Map<String, dynamic> _limitedAutoSellTakeProfitSubmittedJson() {
+  final payload = _limitedAutoSellTakeProfitPreflightJson();
+  final candidate =
+      Map<String, dynamic>.from(payload['final_candidate'] as Map);
+  candidate['take_profit_actionable'] = true;
+  candidate['take_profit_execution_disabled'] = false;
+  candidate['take_profit_readiness_only'] = false;
+  candidate['block_reasons'] = const [];
+  payload['mode'] = 'kis_limited_auto_take_profit_run';
+  payload['source_type'] = 'guarded_take_profit_auto_sell';
+  payload['trigger_source'] = 'limited_auto_sell_run_once';
+  payload['result'] = 'submitted';
+  payload['action'] = 'sell';
+  payload['reason'] = 'take_profit_auto_sell_submitted';
+  payload['primary_block_reason'] = null;
+  payload['trigger'] = 'take_profit';
+  payload['exit_trigger'] = 'take_profit';
+  payload['final_candidate'] = candidate;
+  payload['candidates'] = [candidate];
+  payload['live_auto_sell_enabled'] = true;
+  payload['stop_loss_auto_sell_enabled'] = true;
+  payload['take_profit_auto_sell_enabled'] = true;
+  payload['dry_run'] = false;
+  payload['kis_real_order_enabled'] = true;
+  payload['auto_order_ready'] = true;
+  payload['real_order_submit_allowed'] = true;
+  payload['stop_loss_execution_enabled'] = true;
+  payload['take_profit_execution_enabled'] = true;
+  payload['take_profit_non_actionable'] = false;
+  payload['take_profit_actionable'] = true;
+  payload['take_profit_readiness_only'] = false;
+  payload['take_profit_execution_disabled'] = false;
+  payload['real_order_submitted'] = true;
+  payload['broker_submit_called'] = true;
+  payload['manual_submit_called'] = true;
+  payload['order_id'] = 88;
+  payload['order_log_id'] = 88;
+  payload['broker_order_id'] = 'TPBRK888';
+  payload['kis_odno'] = 'TPODNO888';
+  payload['block_reasons'] = const [];
+  payload['validation_status'] = 'passed';
+  payload['readiness_labels'] = [
+    'STOP-LOSS EXECUTION',
+    'TAKE-PROFIT GUARDED EXECUTION',
+    'TAKE-PROFIT DEFAULT OFF',
+    'GUARDED EXECUTION',
+    'AUTO BUY DISABLED',
+    'SCHEDULER REAL ORDERS DISABLED',
+    'TAKE-PROFIT AUTO SELL ENABLED',
+    'BROKER SUBMIT CALLED',
+  ];
+  payload['supported_triggers'] = {
+    'stop_loss': {'mode': 'guarded_execution'},
+    'take_profit': {'mode': 'guarded_execution'},
+  };
+  payload['safety'] = {
+    ...Map<String, dynamic>.from(payload['safety'] as Map),
+    'read_only': false,
+    'guarded_execution': true,
+    'take_profit_auto_sell_enabled': true,
+    'take_profit_execution_enabled': true,
+    'take_profit_non_actionable': false,
+    'real_order_submitted': true,
+    'broker_submit_called': true,
+    'manual_submit_called': true,
+    'no_broker_submit': false,
+  };
   return payload;
 }
