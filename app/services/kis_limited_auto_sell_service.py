@@ -9,10 +9,9 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient, to_float
 from app.core.enums import InternalOrderStatus
-from app.db.models import KisShadowExitReviewQueueState, OrderLog, SignalLog, TradeRunLog
+from app.db.models import OrderLog, SignalLog, TradeRunLog
 from app.services.kis_dry_run_risk_service import (
     MARKET,
     OPEN_ORDER_STATUSES,
@@ -21,27 +20,39 @@ from app.services.kis_dry_run_risk_service import (
     position_exit_threshold_reasons,
     position_pl_diagnostics,
 )
-from app.services.kis_order_audit import (
-    LIMITED_AUTO_SELL_SOURCE,
-    LIMITED_AUTO_SELL_SOURCE_TYPE,
-    kis_order_source_fields,
+from app.services.kis_manual_order_service import (
+    KIS_MANUAL_CONFIRMATION_PHRASE,
+    KisManualOrderService,
+    KisManualOrderSubmitRequest,
 )
+from app.services.kis_order_audit import kis_order_source_fields
 from app.services.kis_order_sync_service import KisOrderSyncService, serialize_kis_order
+from app.services.kis_order_validation_service import (
+    KisOrderValidationRequest,
+    KisOrderValidationService,
+    record_kis_order_validation,
+)
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
-MODE = "limited_auto_sell"
-SOURCE = LIMITED_AUTO_SELL_SOURCE
-SOURCE_TYPE = LIMITED_AUTO_SELL_SOURCE_TYPE
+STATUS_MODE = "kis_limited_auto_stop_loss_status"
+PREFLIGHT_MODE = "kis_limited_auto_stop_loss_preflight"
+RUN_MODE = "kis_limited_auto_stop_loss_run"
+MODE = RUN_MODE
+SOURCE = "kis_limited_auto_stop_loss"
+PREFLIGHT_SOURCE_TYPE = "limited_auto_sell_preflight"
+RUN_SOURCE_TYPE = "guarded_stop_loss_auto_sell"
 TRIGGER_SOURCE = "kis_limited_auto_sell"
-SHADOW_MODE = "shadow_exit_dry_run"
-SHADOW_TRIGGER_SOURCE = "shadow_exit"
+RUN_TRIGGER_SOURCE = "limited_auto_sell_run_once"
 STOP_LOSS_TRIGGER = "stop_loss"
 TAKE_PROFIT_TRIGGER = "take_profit"
-MANUAL_REVIEW_TRIGGER = "manual_review"
 KR_TZ = ZoneInfo("Asia/Seoul")
+
+HOLD = "HOLD"
+REVIEW_SELL = "REVIEW_SELL"
+SELL_READY = "SELL_READY"
 
 SUBMITTED_STATUSES = {
     InternalOrderStatus.SUBMITTED.value,
@@ -53,36 +64,110 @@ SUBMITTED_STATUSES = {
 
 
 @dataclass(frozen=True)
+class _Context:
+    runtime: dict[str, Any]
+    settings: Any
+    market_session: dict[str, Any]
+    now_utc: datetime
+    created_at: str
+    live_auto_sell_enabled: bool
+    stop_loss_enabled: bool
+    take_profit_enabled: bool
+    scheduler_real_orders_configured: bool
+    scheduler_limited_auto_sell_configured: bool
+    live_auto_buy_configured: bool
+    sell_session_allowed: bool
+
+
+@dataclass(frozen=True)
 class _AutoSellCandidate:
     symbol: str
-    qty: int
+    name: str | None
+    quantity: int
     held_qty: float
-    current_price: float
-    notional: float
-    trigger: str
-    trigger_source: str
-    reason: str
+    current_price: float | None
+    average_price: float | None
+    cost_basis: float | None
+    current_value: float | None
+    unrealized_pl: float | None
+    unrealized_pl_pct: float | None
+    stop_loss_threshold_pct: float | None
+    take_profit_threshold_pct: float | None
+    stop_loss_triggered: bool
+    take_profit_triggered: bool
+    weak_trend_triggered: bool
+    sell_pressure_triggered: bool
+    status: str
+    exit_reason: str
     risk_flags: list[str]
     gating_notes: list[str]
+    block_reasons: list[str]
+    trigger_source: str
     diagnostics: dict[str, Any]
     position: dict[str, Any]
+    duplicate_open_sell_order: bool
+    latest_order: dict[str, Any] | None
 
 
 class KisLimitedAutoSellService:
-    """Guarded, disabled-by-default KIS SELL-only auto execution path."""
+    """Readiness and guarded run-once path for limited KIS stop-loss auto sell.
+
+    Status and preflight never submit orders. The run-once endpoint only reaches
+    the existing validation/manual-submit services after all explicit safety
+    gates pass.
+    """
 
     def __init__(
         self,
         client: KisClient,
         *,
-        broker: KisBroker | None = None,
+        broker: Any | None = None,
         runtime_settings: RuntimeSettingService | None = None,
         session_service: MarketSessionService | None = None,
     ):
         self.client = client
-        self.broker = broker or KisBroker(client)
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.session_service = session_service or MarketSessionService()
+        self._unused_legacy_broker = broker
+
+    def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
+        context = self._context(db, now=now)
+        block_reasons = _status_block_reasons(context)
+        daily_limit = self._daily_limit_state(db, context=context, symbol=None)
+        payload = _status_payload(
+            context=context,
+            block_reasons=block_reasons,
+            daily_limit=daily_limit,
+            result="blocked" if block_reasons else "ready",
+            reason=block_reasons[0] if block_reasons else "base_gates_ready",
+        )
+        return sanitize_kis_payload(payload)
+
+    def preflight_once(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        context = self._context(db, now=now)
+        account_state = self._fetch_account_state(db)
+        candidates = self._evaluate_candidates(db, account_state=account_state)
+        final_candidate = _select_final_candidate(candidates)
+        payload = self._decision_payload(
+            db,
+            context=context,
+            mode=PREFLIGHT_MODE,
+            source_type=PREFLIGHT_SOURCE_TYPE,
+            result=_preflight_result(final_candidate),
+            action=_action_for_candidate(final_candidate),
+            reason=_preflight_reason(final_candidate),
+            account_state=account_state,
+            candidates=candidates,
+            final_candidate=final_candidate,
+            block_reasons=_preflight_block_reasons(final_candidate),
+            read_only=True,
+        )
+        return sanitize_kis_payload(payload)
 
     def run_once(
         self,
@@ -90,229 +175,170 @@ class KisLimitedAutoSellService:
         *,
         now: datetime | None = None,
     ) -> dict[str, Any]:
+        context = self._context(db, now=now)
+        pre_account_blocks = _run_pre_account_block_reasons(context)
+        if pre_account_blocks:
+            payload = self._decision_payload(
+                db,
+                context=context,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                result="blocked",
+                action="hold",
+                reason=pre_account_blocks[0],
+                account_state=None,
+                candidates=[],
+                final_candidate=None,
+                block_reasons=pre_account_blocks,
+                read_only=False,
+            )
+            signal = self._record_signal(
+                db,
+                payload=payload,
+                candidate=None,
+                source_type=RUN_SOURCE_TYPE,
+            )
+            run = self._record_run(
+                db,
+                payload=payload,
+                candidate=None,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                signal_id=signal.id,
+                order_id=None,
+            )
+            payload["signal_id"] = signal.id
+            payload["run"] = _serialize_run(run)
+            return sanitize_kis_payload(payload)
+
+        account_state = self._fetch_account_state(db)
+        candidates = self._evaluate_candidates(db, account_state=account_state)
+        final_candidate = _select_final_candidate(candidates)
+        run_blocks = self._run_candidate_block_reasons(
+            db,
+            context=context,
+            account_state=account_state,
+            candidates=candidates,
+            final_candidate=final_candidate,
+        )
+        if run_blocks:
+            payload = self._decision_payload(
+                db,
+                context=context,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                result="blocked",
+                action=_run_blocked_action(final_candidate),
+                reason=run_blocks[0],
+                account_state=account_state,
+                candidates=candidates,
+                final_candidate=final_candidate,
+                block_reasons=run_blocks,
+                read_only=False,
+            )
+            signal = self._record_signal(
+                db,
+                payload=payload,
+                candidate=final_candidate,
+                source_type=RUN_SOURCE_TYPE,
+            )
+            run = self._record_run(
+                db,
+                payload=payload,
+                candidate=final_candidate,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                signal_id=signal.id,
+                order_id=None,
+            )
+            payload["signal_id"] = signal.id
+            payload["run"] = _serialize_run(run)
+            return sanitize_kis_payload(payload)
+
+        validation_block, validation_payload = self._validate_candidate(
+            db,
+            context=context,
+            candidate=final_candidate,
+        )
+        if validation_block:
+            payload = self._decision_payload(
+                db,
+                context=context,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                result="blocked",
+                action=_run_blocked_action(final_candidate),
+                reason=validation_block[0],
+                account_state=account_state,
+                candidates=candidates,
+                final_candidate=final_candidate,
+                block_reasons=validation_block,
+                read_only=False,
+                diagnostics_extra={"validation": validation_payload},
+            )
+            signal = self._record_signal(
+                db,
+                payload=payload,
+                candidate=final_candidate,
+                source_type=RUN_SOURCE_TYPE,
+            )
+            run = self._record_run(
+                db,
+                payload=payload,
+                candidate=final_candidate,
+                mode=RUN_MODE,
+                source_type=RUN_SOURCE_TYPE,
+                signal_id=signal.id,
+                order_id=None,
+            )
+            payload["signal_id"] = signal.id
+            payload["run"] = _serialize_run(run)
+            return sanitize_kis_payload(payload)
+
+        return self._submit_via_existing_manual_path(
+            db,
+            context=context,
+            account_state=account_state,
+            candidates=candidates,
+            final_candidate=final_candidate,
+            validation_payload=validation_payload,
+        )
+
+    def _context(self, db: Session, *, now: datetime | None) -> _Context:
         now_utc = _utc_now(now)
-        created_at = now_utc.isoformat()
         runtime = self.runtime_settings.get_settings(db)
         settings = self.client.settings
         market_session = self._market_session(now_utc)
-        checks = self._base_checks(runtime, settings, market_session)
-        safety = _safety(runtime)
-
-        preliminary_reason = _first_failed_preliminary_reason(checks)
-        if preliminary_reason:
-            return self._blocked(
-                db,
-                reason=preliminary_reason,
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                blocked_by=[preliminary_reason],
-            )
-
-        account_state = self._fetch_account_state(db)
-        checks.update(
-            {
-                "account_state_available": bool(account_state.get("fetch_success")),
-                "positions_available": bool(account_state.get("positions")),
-                "open_order_fetch_available": "open_orders_unavailable"
-                not in _warning_names(account_state),
-            }
-        )
-        if checks["account_state_available"] is not True:
-            return self._blocked(
-                db,
-                reason="broker_account_state_unavailable",
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                blocked_by=["broker_account_state_unavailable"],
-            )
-
-        candidate, candidate_block = self._select_candidate(
-            db,
-            runtime=runtime,
-            account_state=account_state,
-        )
-        if candidate is None:
-            reason = candidate_block or "no_stop_loss_candidate"
-            return self._blocked(
-                db,
-                reason=reason,
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                blocked_by=[reason],
-            )
-
-        limit_reason = self._trade_limit_reason(db, now_utc=now_utc, runtime=runtime)
-        if limit_reason:
-            return self._blocked(
-                db,
-                reason=limit_reason,
-                checks={**checks, "daily_limited_auto_sell_limit": False},
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                candidate=candidate,
-                blocked_by=[limit_reason],
-            )
-        checks["daily_limited_auto_sell_limit"] = True
-
-        duplicate_reason = self._duplicate_order_reason(
-            db,
-            candidate=candidate,
-            account_state=account_state,
-            now_utc=now_utc,
-            runtime=runtime,
-        )
-        if duplicate_reason:
-            return self._blocked(
-                db,
-                reason=duplicate_reason,
-                checks={**checks, "duplicate_order_check": False},
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                candidate=candidate,
-                blocked_by=[duplicate_reason],
-            )
-        checks["duplicate_order_check"] = True
-
-        queue_status = self._queue_review_status(db, candidate)
-        checks["queue_review_required"] = bool(
-            runtime.get("kis_limited_auto_sell_requires_queue_review", True)
-        )
-        checks["queue_item_reviewed"] = queue_status == "reviewed"
-        if checks["queue_review_required"] and queue_status != "reviewed":
-            return self._blocked(
-                db,
-                reason="queue_review_required",
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                candidate=candidate,
-                blocked_by=["queue_review_required"],
-                queue_review_status=queue_status,
-            )
-
-        shadow_count = self._shadow_occurrence_count(db, candidate)
-        min_occurrences = max(
-            0,
-            int(runtime.get("kis_limited_auto_sell_min_shadow_occurrences", 1) or 0),
-        )
-        checks["shadow_occurrence_count"] = shadow_count
-        checks["min_shadow_occurrences_met"] = shadow_count >= min_occurrences
-        if shadow_count < min_occurrences:
-            return self._blocked(
-                db,
-                reason="min_shadow_occurrences_not_met",
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                account_state=account_state,
-                candidate=candidate,
-                blocked_by=["min_shadow_occurrences_not_met"],
-                queue_review_status=queue_status,
-            )
-
-        try:
-            return self._submit_sell(
-                db,
-                candidate=candidate,
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                queue_review_status=queue_status,
-                shadow_occurrence_count=shadow_count,
-            )
-        except Exception as exc:
-            return self._submission_failed(
-                db,
-                candidate=candidate,
-                checks=checks,
-                safety=safety,
-                created_at=created_at,
-                runtime=runtime,
-                market_session=market_session,
-                queue_review_status=queue_status,
-                shadow_occurrence_count=shadow_count,
-                error=exc,
-            )
-
-    def _base_checks(
-        self,
-        runtime: dict[str, Any],
-        settings: Any,
-        market_session: dict[str, Any],
-    ) -> dict[str, Any]:
-        scheduler_real_orders = bool(
+        scheduler_real_orders_configured = bool(
             getattr(settings, "kis_scheduler_allow_real_orders", False)
             or getattr(settings, "kr_scheduler_allow_real_orders", False)
+            or runtime.get("kis_scheduler_allow_real_orders", False)
         )
+        scheduler_limited_auto_sell_configured = bool(
+            runtime.get("kis_scheduler_allow_limited_auto_sell", False)
+        )
+        live_auto_buy_configured = bool(runtime.get("kis_live_auto_buy_enabled", False))
         is_holiday = bool(market_session.get("is_holiday"))
         closure_reason = str(market_session.get("closure_reason") or "")
         if closure_reason.startswith("holiday_"):
             is_holiday = True
-        return {
-            "kis_limited_auto_sell_enabled": bool(
-                runtime.get("kis_limited_auto_sell_enabled", False)
-            ),
-            "kis_limited_auto_sell_stop_loss_enabled": bool(
-                runtime.get("kis_limited_auto_sell_stop_loss_enabled", False)
-            ),
-            "kis_limited_auto_sell_take_profit_enabled": bool(
-                runtime.get("kis_limited_auto_sell_take_profit_enabled", False)
-            ),
-            "kis_limited_auto_sell_requires_queue_review": bool(
-                runtime.get("kis_limited_auto_sell_requires_queue_review", True)
-            ),
-            "kis_limited_auto_sell_allow_manual_review_trigger": bool(
-                runtime.get("kis_limited_auto_sell_allow_manual_review_trigger", False)
-            ),
-            "kis_limited_auto_sell_allow_take_profit_trigger": bool(
-                runtime.get("kis_limited_auto_sell_allow_take_profit_trigger", False)
-            ),
-            "dry_run": bool(runtime.get("dry_run", True)),
-            "dry_run_false": bool(runtime.get("dry_run", True)) is False,
-            "kill_switch": bool(runtime.get("kill_switch", False)),
-            "kill_switch_false": bool(runtime.get("kill_switch", False)) is False,
-            "kis_enabled": bool(getattr(settings, "kis_enabled", False)),
-            "kis_real_order_enabled": bool(
-                getattr(settings, "kis_real_order_enabled", False)
-            ),
-            "kis_live_auto_enabled": bool(runtime.get("kis_live_auto_enabled", False)),
-            "kis_live_auto_sell_enabled": bool(
-                runtime.get("kis_live_auto_sell_enabled", False)
-            ),
-            "kis_live_auto_buy_enabled": bool(
-                runtime.get("kis_live_auto_buy_enabled", False)
-            ),
-            "auto_buy_enabled": False,
-            "scheduler_real_order_enabled": False,
-            "configured_scheduler_real_order_enabled": scheduler_real_orders,
-            "scheduler_real_orders_disabled": scheduler_real_orders is False,
-            "market_open": market_session.get("is_market_open") is True,
-            "today_not_holiday": not is_holiday,
-        }
+        sell_session_allowed = (
+            market_session.get("is_market_open") is True and not is_holiday
+        )
+        return _Context(
+            runtime=runtime,
+            settings=settings,
+            market_session=market_session,
+            now_utc=now_utc,
+            created_at=now_utc.isoformat(),
+            live_auto_sell_enabled=bool(runtime.get("kis_live_auto_sell_enabled", False)),
+            stop_loss_enabled=_stop_loss_enabled(runtime),
+            take_profit_enabled=_take_profit_enabled(runtime),
+            scheduler_real_orders_configured=scheduler_real_orders_configured,
+            scheduler_limited_auto_sell_configured=scheduler_limited_auto_sell_configured,
+            live_auto_buy_configured=live_auto_buy_configured,
+            sell_session_allowed=sell_session_allowed,
+        )
 
     def _market_session(self, now_utc: datetime) -> dict[str, Any]:
         try:
@@ -322,6 +348,7 @@ class KisLimitedAutoSellService:
                 "market": MARKET,
                 "is_market_open": False,
                 "is_entry_allowed_now": False,
+                "is_holiday": False,
                 "error": _safe_error(exc),
             }
 
@@ -354,9 +381,7 @@ class KisLimitedAutoSellService:
             ]
         except Exception as exc:
             state["fetch_success"] = False
-            state["warnings"].append(
-                f"open_orders_unavailable:{exc.__class__.__name__}"
-            )
+            state["warnings"].append(f"open_orders_unavailable:{exc.__class__.__name__}")
         try:
             rows = KisOrderSyncService.recent_orders(
                 db,
@@ -368,176 +393,202 @@ class KisLimitedAutoSellService:
             state["warnings"].append(f"recent_orders_unavailable:{exc.__class__.__name__}")
         return sanitize_kis_payload(state)
 
-    def _select_candidate(
+    def _evaluate_candidates(
         self,
         db: Session,
         *,
-        runtime: dict[str, Any],
         account_state: dict[str, Any],
-    ) -> tuple[_AutoSellCandidate | None, str | None]:
-        positions = _held_positions(account_state.get("positions"))
-        if not positions:
-            return None, "no_held_position"
-
-        blocks: list[str] = []
-        stop_loss_candidates: list[_AutoSellCandidate] = []
-        for position in positions:
-            symbol = _symbol(position)
-            if not symbol:
-                blocks.append("missing_symbol")
-                continue
-            held_qty = _safe_float_or_none(position.get("qty"))
-            current_price = _safe_float_or_none(position.get("current_price"))
-            diagnostics = position_pl_diagnostics(position)
-            flags = {flag.lower() for flag in _string_list(position.get("risk_flags"))}
-            if "manual_review_required" in flags:
-                blocks.append("manual_review_auto_sell_disabled")
-                continue
-            if held_qty is None or held_qty <= 0:
-                blocks.append("qty_not_positive")
-                continue
-            if current_price is None or current_price <= 0:
-                blocks.append("missing_current_price")
-                continue
-            if diagnostics.get("exit_trigger_source") != "cost_basis":
-                blocks.append("missing_cost_basis")
-                continue
-            threshold_reasons, diagnostics = position_exit_threshold_reasons(position)
-            if "stop_loss_triggered" in threshold_reasons:
-                qty = int(held_qty)
-                if qty <= 0:
-                    blocks.append("qty_not_positive")
-                    continue
-                if float(qty) > held_qty:
-                    blocks.append("quantity_exceeds_held_quantity")
-                    continue
-                notional = round(float(qty) * current_price, 2)
-                notional_reason = _notional_cap_reason(
-                    account_state,
-                    notional=notional,
-                    max_notional_pct=float(
-                        runtime.get("kis_limited_auto_sell_max_notional_pct", 0.03)
-                    ),
+    ) -> list[_AutoSellCandidate]:
+        candidates: list[_AutoSellCandidate] = []
+        for position in _held_positions(account_state.get("positions")):
+            candidates.append(
+                self._candidate_from_position(
+                    db,
+                    position,
+                    account_state=account_state,
                 )
-                if notional_reason:
-                    blocks.append(notional_reason)
-                    continue
-                stop_loss_candidates.append(
-                    _AutoSellCandidate(
-                        symbol=symbol,
-                        qty=qty,
-                        held_qty=held_qty,
-                        current_price=current_price,
-                        notional=notional,
-                        trigger=STOP_LOSS_TRIGGER,
-                        trigger_source="cost_basis_pl_pct",
-                        reason=(
-                            "Limited auto sell candidate: reliable cost-basis "
-                            "stop-loss threshold was reached."
-                        ),
-                        risk_flags=_dedupe(
-                            [
-                                "stop_loss_triggered",
-                                "limited_auto_sell",
-                                "sell_only",
-                            ]
-                        ),
-                        gating_notes=_dedupe(
-                            [
-                                "Limited auto sell is SELL-only.",
-                                "Stop-loss is the only default auto-submit trigger.",
-                                "No KIS auto buy or scheduler real order path is enabled.",
-                            ]
-                        ),
-                        diagnostics=diagnostics,
-                        position=position,
-                    )
-                )
-                continue
-            if "take_profit_triggered" in threshold_reasons:
-                if not bool(runtime.get("kis_limited_auto_sell_allow_take_profit_trigger", False)):
-                    blocks.append("take_profit_auto_sell_disabled")
-                continue
-            blocks.append("no_stop_loss_candidate")
-
-        if stop_loss_candidates:
-            stop_loss_candidates.sort(
-                key=lambda item: (
-                    abs(_safe_float(item.diagnostics.get("unrealized_pl"), 0.0)),
-                    item.notional,
-                ),
-                reverse=True,
             )
-            return stop_loss_candidates[0], None
-        return None, _first_priority_block(blocks)
+        return candidates
 
-    def _duplicate_order_reason(
+    def _candidate_from_position(
         self,
         db: Session,
+        position: dict[str, Any],
         *,
-        candidate: _AutoSellCandidate,
         account_state: dict[str, Any],
-        now_utc: datetime,
-        runtime: dict[str, Any],
-    ) -> str | None:
-        symbol = candidate.symbol.upper()
-        for order in _dict_list(account_state.get("open_orders")):
-            if _order_symbol(order) == symbol and _order_is_sell(order):
-                return "duplicate_open_order"
-        for order in _dict_list(account_state.get("recent_orders")):
-            if _order_symbol(order) != symbol:
-                continue
-            status = str(
-                order.get("internal_status")
-                or order.get("clear_status")
-                or order.get("status")
-                or ""
-            ).upper()
-            if status in OPEN_ORDER_STATUSES and _order_is_sell(order):
-                return "recent_open_sell_order"
-
-        open_row = (
-            db.query(OrderLog)
-            .filter(OrderLog.broker == PROVIDER)
-            .filter(OrderLog.symbol == symbol)
-            .filter(OrderLog.side == SELL)
-            .filter(OrderLog.internal_status.in_(sorted(OPEN_ORDER_STATUSES)))
-            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
-            .first()
+    ) -> _AutoSellCandidate:
+        symbol = _symbol(position) or ""
+        held_qty = _safe_float(position.get("qty"), 0.0)
+        quantity = int(held_qty) if held_qty > 0 else 0
+        current_price = _safe_float_or_none(position.get("current_price"))
+        average_price = _safe_float_or_none(position.get("avg_entry_price"))
+        threshold_reasons, diagnostics = position_exit_threshold_reasons(position)
+        stop_loss_triggered = "stop_loss_triggered" in threshold_reasons
+        take_profit_triggered = "take_profit_triggered" in threshold_reasons
+        cost_basis_valid = diagnostics.get("exit_trigger_source") == "cost_basis"
+        weak_trend = _weak_trend_triggered(position)
+        sell_pressure = _sell_pressure_triggered(position)
+        latest_order = _latest_related_sell_order(
+            db,
+            symbol=symbol,
+            account_state=account_state,
         )
-        if open_row is not None:
-            return "duplicate_open_order"
-
-        start_utc = _naive_utc(now_utc - timedelta(days=1))
-        recent_rows = (
-            db.query(OrderLog)
-            .filter(OrderLog.broker == PROVIDER)
-            .filter(OrderLog.symbol == symbol)
-            .filter(OrderLog.side == SELL)
-            .filter(OrderLog.created_at >= start_utc)
-            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
-            .limit(50)
-            .all()
+        duplicate_open_sell = _has_duplicate_open_sell(
+            db,
+            symbol=symbol,
+            account_state=account_state,
         )
-        for row in recent_rows:
-            if _order_mode(row) == MODE and str(row.internal_status or "").upper() in SUBMITTED_STATUSES:
-                return "recent_limited_auto_sell_exists"
-        return None
 
-    def _trade_limit_reason(
+        block_reasons: list[str] = []
+        risk_flags: list[str] = []
+        if quantity <= 0:
+            block_reasons.append("quantity_not_positive")
+        if current_price is None or current_price <= 0:
+            block_reasons.append("current_price_unavailable")
+        if not cost_basis_valid:
+            block_reasons.extend(["manual_review_required", "missing_cost_basis"])
+            risk_flags.extend(["manual_review_required", "insufficient_cost_basis"])
+        if duplicate_open_sell:
+            block_reasons.append("duplicate_open_sell_order")
+            risk_flags.append("duplicate_open_sell_order")
+        if take_profit_triggered:
+            block_reasons.append("take_profit_auto_sell_disabled")
+            risk_flags.append("take_profit_triggered")
+        if weak_trend:
+            risk_flags.append("weak_trend_triggered")
+        if sell_pressure:
+            risk_flags.append("sell_pressure_triggered")
+        if stop_loss_triggered:
+            risk_flags.append("stop_loss_triggered")
+
+        if stop_loss_triggered and cost_basis_valid and quantity > 0 and not duplicate_open_sell:
+            status = SELL_READY
+            exit_reason = "stop_loss_triggered"
+        elif (
+            stop_loss_triggered
+            or take_profit_triggered
+            or weak_trend
+            or sell_pressure
+            or not cost_basis_valid
+            or duplicate_open_sell
+        ):
+            status = REVIEW_SELL
+            exit_reason = _first_reason(
+                [
+                    "stop_loss_triggered" if stop_loss_triggered else "",
+                    "take_profit_triggered" if take_profit_triggered else "",
+                    "manual_review_required" if not cost_basis_valid else "",
+                    "duplicate_open_sell_order" if duplicate_open_sell else "",
+                    "weak_trend_triggered" if weak_trend else "",
+                    "sell_pressure_triggered" if sell_pressure else "",
+                ],
+                "manual_review_required",
+            )
+        else:
+            status = HOLD
+            exit_reason = "no_stop_loss_candidate"
+
+        gating_notes = _candidate_gating_notes(
+            status=status,
+            stop_loss_triggered=stop_loss_triggered,
+            take_profit_triggered=take_profit_triggered,
+            cost_basis_valid=cost_basis_valid,
+            duplicate_open_sell=duplicate_open_sell,
+        )
+        return _AutoSellCandidate(
+            symbol=symbol,
+            name=_name(position),
+            quantity=quantity,
+            held_qty=held_qty,
+            current_price=current_price,
+            average_price=average_price,
+            cost_basis=_safe_float_or_none(diagnostics.get("cost_basis")),
+            current_value=_safe_float_or_none(diagnostics.get("current_value")),
+            unrealized_pl=_safe_float_or_none(diagnostics.get("unrealized_pl")),
+            unrealized_pl_pct=(
+                _safe_float_or_none(diagnostics.get("unrealized_pl_pct"))
+                if cost_basis_valid
+                else None
+            ),
+            stop_loss_threshold_pct=_safe_float_or_none(
+                diagnostics.get("stop_loss_threshold_pct")
+            ),
+            take_profit_threshold_pct=_safe_float_or_none(
+                diagnostics.get("take_profit_threshold_pct")
+            ),
+            stop_loss_triggered=bool(stop_loss_triggered and cost_basis_valid),
+            take_profit_triggered=bool(take_profit_triggered and cost_basis_valid),
+            weak_trend_triggered=weak_trend,
+            sell_pressure_triggered=sell_pressure,
+            status=status,
+            exit_reason=exit_reason,
+            risk_flags=_dedupe(risk_flags),
+            gating_notes=gating_notes,
+            block_reasons=_dedupe(block_reasons),
+            trigger_source="cost_basis_pl_pct" if cost_basis_valid else "manual_review",
+            diagnostics=diagnostics,
+            position=position,
+            duplicate_open_sell_order=duplicate_open_sell,
+            latest_order=latest_order,
+        )
+
+    def _run_candidate_block_reasons(
         self,
         db: Session,
         *,
-        now_utc: datetime,
-        runtime: dict[str, Any],
-    ) -> str | None:
+        context: _Context,
+        account_state: dict[str, Any],
+        candidates: list[_AutoSellCandidate],
+        final_candidate: _AutoSellCandidate | None,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if account_state.get("fetch_success") is not True:
+            reasons.append("broker_account_state_unavailable")
+        if not candidates:
+            reasons.append("no_held_position")
+        if final_candidate is None:
+            reasons.append("no_stop_loss_candidate")
+            return _dedupe(reasons)
+        if final_candidate.stop_loss_triggered is not True:
+            if final_candidate.take_profit_triggered:
+                reasons.append("take_profit_auto_sell_disabled")
+            else:
+                reasons.append(final_candidate.exit_reason or "no_stop_loss_candidate")
+        if final_candidate.cost_basis is None or final_candidate.cost_basis <= 0:
+            reasons.extend(["manual_review_required", "missing_cost_basis"])
+        if final_candidate.current_price is None or final_candidate.current_price <= 0:
+            reasons.append("current_price_unavailable")
+        if final_candidate.unrealized_pl_pct is None:
+            reasons.extend(["manual_review_required", "missing_or_ambiguous_pl_basis"])
+        if final_candidate.status != SELL_READY and not final_candidate.block_reasons:
+            reasons.append(final_candidate.exit_reason or "candidate_not_sell_ready")
+        if final_candidate.quantity <= 0:
+            reasons.append("quantity_not_positive")
+        if not context.sell_session_allowed:
+            reasons.append("sell_session_not_allowed")
+        if final_candidate.duplicate_open_sell_order:
+            reasons.append("duplicate_open_sell_order")
+        daily_limit = self._daily_limit_state(
+            db, context=context, symbol=final_candidate.symbol
+        )
+        daily_reason = _daily_limit_block_reason(daily_limit)
+        if daily_reason:
+            reasons.append(daily_reason)
+        reasons.extend(final_candidate.block_reasons)
+        return _dedupe(reasons)
+
+    def _daily_limit_state(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        symbol: str | None,
+    ) -> dict[str, Any]:
         max_orders = max(
             0,
-            int(runtime.get("kis_limited_auto_sell_max_orders_per_day", 1) or 0),
+            int(context.runtime.get("kis_limited_auto_sell_max_orders_per_day", 1) or 0),
         )
-        if max_orders <= 0:
-            return "daily_limited_auto_sell_limit_reached"
-        start_utc, end_utc = _day_bounds_utc(now_utc)
+        start_utc, end_utc = _day_bounds_utc(context.now_utc)
         rows = (
             db.query(OrderLog)
             .filter(OrderLog.broker == PROVIDER)
@@ -546,333 +597,426 @@ class KisLimitedAutoSellService:
             .filter(OrderLog.created_at < end_utc)
             .all()
         )
-        count = sum(
-            1
-            for row in rows
-            if _order_mode(row) == MODE
-            and str(row.internal_status or "").upper() in SUBMITTED_STATUSES
-        )
-        if count >= max_orders:
-            return "daily_limited_auto_sell_limit_reached"
-        return None
-
-    def _queue_review_status(self, db: Session, candidate: _AutoSellCandidate) -> str:
-        row = (
-            db.query(KisShadowExitReviewQueueState)
-            .filter(
-                KisShadowExitReviewQueueState.queue_key
-                == _queue_key(candidate.symbol, candidate.trigger, candidate.trigger_source)
-            )
-            .first()
-        )
-        status = str(row.status if row is not None else "open").strip().lower()
-        if status in {"reviewed", "dismissed"}:
-            return status
-        return "open"
-
-    def _shadow_occurrence_count(self, db: Session, candidate: _AutoSellCandidate) -> int:
-        cutoff = _naive_utc(datetime.now(UTC) - timedelta(days=30))
-        rows = (
-            db.query(TradeRunLog)
-            .filter(TradeRunLog.created_at >= cutoff)
-            .filter(
-                (TradeRunLog.mode == SHADOW_MODE)
-                | (TradeRunLog.trigger_source == SHADOW_TRIGGER_SOURCE)
-            )
-            .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
-            .limit(500)
-            .all()
-        )
-        count = 0
+        total = 0
+        symbol_total = 0
+        normalized_symbol = str(symbol or "").upper()
         for row in rows:
-            payload = _parse_json_object(row.response_payload)
-            candidate_payload = _candidate_payload(payload)
-            symbol = _normalize_symbol(
-                candidate_payload.get("symbol") or payload.get("symbol") or row.symbol
-            )
-            trigger = str(
-                candidate_payload.get("trigger")
-                or payload.get("exit_trigger")
-                or ""
-            ).strip()
-            trigger_source = str(
-                candidate_payload.get("trigger_source")
-                or payload.get("exit_trigger_source")
-                or ""
-            ).strip()
-            decision = str(payload.get("decision") or payload.get("result") or row.result).strip()
-            if (
-                symbol == candidate.symbol
-                and trigger == candidate.trigger
-                and trigger_source == candidate.trigger_source
-                and decision in {"would_sell", "sell", "stop_loss"}
-            ):
-                count += 1
-        return count
+            if not _is_limited_auto_stop_loss_order(row):
+                continue
+            status = str(row.internal_status or "").upper()
+            if status not in SUBMITTED_STATUSES:
+                continue
+            total += 1
+            if normalized_symbol and str(row.symbol or "").upper() == normalized_symbol:
+                symbol_total += 1
+        return {
+            "max_orders_per_day": max_orders,
+            "submitted_count_today": total,
+            "symbol_submitted_count_today": symbol_total,
+            "daily_limit_remaining": max(0, max_orders - total),
+            "symbol_already_auto_sold_today": symbol_total > 0,
+            "daily_limit_reached": max_orders <= 0 or total >= max_orders,
+            "checked_symbol": normalized_symbol or None,
+        }
 
-    def _submit_sell(
+    def _validate_candidate(
         self,
         db: Session,
         *,
-        candidate: _AutoSellCandidate,
-        checks: dict[str, Any],
-        safety: dict[str, Any],
-        created_at: str,
-        runtime: dict[str, Any],
-        market_session: dict[str, Any],
-        queue_review_status: str,
-        shadow_occurrence_count: int,
-    ) -> dict[str, Any]:
-        audit_metadata = _audit_metadata(
-            candidate,
-            created_at=created_at,
-            runtime=runtime,
-            queue_review_status=queue_review_status,
-            shadow_occurrence_count=shadow_occurrence_count,
-            submitted=False,
-        )
-        order = self._create_order_log(
-            db,
-            candidate=candidate,
-            audit_metadata=audit_metadata,
-            internal_status=InternalOrderStatus.REQUESTED.value,
-            response_payload=None,
-        )
-        broker_response = self.broker.submit_market_sell(
-            symbol=candidate.symbol,
-            qty=candidate.qty,
-        )
-        broker_order_id = _extract_broker_order_id(broker_response)
-        broker_status = _extract_broker_status(broker_response)
-        submitted_audit = _audit_metadata(
-            candidate,
-            created_at=created_at,
-            runtime=runtime,
-            queue_review_status=queue_review_status,
-            shadow_occurrence_count=shadow_occurrence_count,
-            submitted=True,
-        )
-        payload = _base_payload(
-            result="submitted",
-            action=SELL,
-            reason=(
-                "Limited auto sell submitted for stop-loss after all "
-                "safety gates passed."
-            ),
-            checks=checks,
-            safety=safety,
-            created_at=created_at,
-            runtime=runtime,
-            market_session=market_session,
-            candidate=candidate,
-            blocked_by=[],
-            audit_metadata=submitted_audit,
-        )
-        payload.update(
-            {
-                "order_id": order.id,
-                "order_log_id": order.id,
-                "broker_order_id": broker_order_id,
-                "kis_odno": broker_order_id,
-                "broker_order_status": broker_status,
-                "broker_status": broker_status,
-                "real_order_submitted": True,
-                "broker_submit_called": True,
-                "manual_submit_called": False,
-                "auto_sell_enabled": True,
-                "queue_review_status": queue_review_status,
-                "shadow_occurrence_count": shadow_occurrence_count,
-            }
-        )
-        order.internal_status = InternalOrderStatus.SUBMITTED.value
-        order.broker_status = broker_status
-        order.broker_order_status = broker_status
-        order.broker_order_id = broker_order_id
-        order.kis_odno = broker_order_id
-        order.requested_qty = float(candidate.qty)
-        order.filled_qty = 0
-        order.remaining_qty = float(candidate.qty)
-        order.submitted_at = _naive_utc(datetime.now(UTC))
-        order.response_payload = _json(
-            {
-                **payload,
-                "kis_response": sanitize_kis_payload(broker_response),
-            }
-        )
-        db.commit()
-        db.refresh(order)
-        signal = self._record_signal(
-            db,
-            payload=payload,
-            candidate=candidate,
-            related_order_id=order.id,
-        )
-        run = self._record_run(
-            db,
-            payload=payload,
-            symbol=candidate.symbol,
-            signal_id=signal.id,
-            order_id=order.id,
-        )
-        payload["signal_id"] = signal.id
-        payload["run"] = _serialize_run(run)
-        return sanitize_kis_payload(payload)
-
-    def _submission_failed(
-        self,
-        db: Session,
-        *,
-        candidate: _AutoSellCandidate,
-        checks: dict[str, Any],
-        safety: dict[str, Any],
-        created_at: str,
-        runtime: dict[str, Any],
-        market_session: dict[str, Any],
-        queue_review_status: str,
-        shadow_occurrence_count: int,
-        error: Exception,
-    ) -> dict[str, Any]:
-        payload = _base_payload(
-            result="blocked",
-            action="hold",
-            reason="broker_submit_failed",
-            checks=checks,
-            safety=safety,
-            created_at=created_at,
-            runtime=runtime,
-            market_session=market_session,
-            candidate=candidate,
-            blocked_by=["broker_submit_failed"],
-            audit_metadata=_audit_metadata(
-                candidate,
-                created_at=created_at,
-                runtime=runtime,
-                queue_review_status=queue_review_status,
-                shadow_occurrence_count=shadow_occurrence_count,
-                submitted=False,
-            ),
-        )
-        payload.update(
-            {
-                "error": _safe_error(error),
-                "broker_submit_called": True,
-                "real_order_submitted": False,
-                "manual_submit_called": False,
-                "queue_review_status": queue_review_status,
-                "shadow_occurrence_count": shadow_occurrence_count,
-            }
-        )
-        signal = self._record_signal(db, payload=payload, candidate=candidate)
-        run = self._record_run(
-            db,
-            payload=payload,
-            symbol=candidate.symbol,
-            signal_id=signal.id,
-            order_id=None,
-        )
-        payload["signal_id"] = signal.id
-        payload["run"] = _serialize_run(run)
-        return sanitize_kis_payload(payload)
-
-    def _blocked(
-        self,
-        db: Session,
-        *,
-        reason: str,
-        checks: dict[str, Any],
-        safety: dict[str, Any],
-        created_at: str,
-        runtime: dict[str, Any],
-        market_session: dict[str, Any],
-        account_state: dict[str, Any] | None = None,
-        candidate: _AutoSellCandidate | None = None,
-        blocked_by: list[str] | None = None,
-        queue_review_status: str | None = None,
-    ) -> dict[str, Any]:
-        payload = _base_payload(
-            result="blocked",
-            action="hold",
-            reason=reason,
-            checks=checks,
-            safety=safety,
-            created_at=created_at,
-            runtime=runtime,
-            market_session=market_session,
-            candidate=candidate,
-            blocked_by=blocked_by or [reason],
-            audit_metadata=(
-                _audit_metadata(
-                    candidate,
-                    created_at=created_at,
-                    runtime=runtime,
-                    queue_review_status=queue_review_status or "not_checked",
-                    shadow_occurrence_count=None,
-                    submitted=False,
-                )
-                if candidate is not None
-                else None
-            ),
-        )
-        payload["account_state"] = _account_state_summary(account_state or {})
-        payload["queue_review_status"] = queue_review_status
-        signal = self._record_signal(db, payload=payload, candidate=candidate)
-        run = self._record_run(
-            db,
-            payload=payload,
-            symbol=candidate.symbol if candidate else "WATCHLIST",
-            signal_id=signal.id,
-            order_id=None,
-        )
-        payload["signal_id"] = signal.id
-        payload["run"] = _serialize_run(run)
-        return sanitize_kis_payload(payload)
-
-    def _create_order_log(
-        self,
-        db: Session,
-        *,
-        candidate: _AutoSellCandidate,
-        audit_metadata: dict[str, Any],
-        internal_status: str,
-        response_payload: dict[str, Any] | None,
-    ) -> OrderLog:
-        source_fields = kis_order_source_fields(audit_metadata)
-        row = OrderLog(
-            broker=PROVIDER,
+        context: _Context,
+        candidate: _AutoSellCandidate | None,
+    ) -> tuple[list[str] | None, dict[str, Any] | None]:
+        if candidate is None:
+            return ["no_stop_loss_candidate"], None
+        request = KisOrderValidationRequest(
             market=MARKET,
             symbol=candidate.symbol,
             side=SELL,
+            qty=candidate.quantity,
             order_type="market",
-            time_in_force="day",
-            qty=float(candidate.qty),
-            requested_qty=float(candidate.qty),
-            remaining_qty=float(candidate.qty),
-            notional=candidate.notional,
-            internal_status=internal_status,
-            extended_hours=False,
-            request_payload=_json(
-                {
-                    "provider": PROVIDER,
-                    "market": MARKET,
-                    "mode": MODE,
-                    "source": SOURCE,
-                    "source_type": SOURCE_TYPE,
-                    "symbol": candidate.symbol,
-                    "side": SELL,
-                    "qty": candidate.qty,
-                    "order_type": "market",
-                    "real_order_submitted": False,
-                    "broker_submit_called": False,
-                    "manual_submit_called": False,
-                    **source_fields,
-                }
+            dry_run=True,
+            reason="KIS limited auto stop-loss validation.",
+            source_metadata=_source_metadata(
+                context=context,
+                candidate=candidate,
+                source_type=RUN_SOURCE_TYPE,
+                real_order_submitted=False,
+                broker_submit_called=False,
+                manual_submit_called=False,
+                real_order_submit_allowed=False,
+                block_reasons=[],
+                daily_limit=self._daily_limit_state(
+                    db, context=context, symbol=candidate.symbol
+                ),
             ),
-            response_payload=_json(response_payload) if response_payload else None,
         )
-        db.add(row)
-        db.commit()
-        db.refresh(row)
-        return row
+        try:
+            validation = KisOrderValidationService(self.client).validate(
+                request,
+                now=context.now_utc,
+            )
+            record_kis_order_validation(db, request=request, result=validation)
+        except Exception as exc:
+            return ["backend_validation_failed"], {"error": _safe_error(exc)}
+        payload = validation.to_dict()
+        if not validation.validated_for_submission:
+            reasons = _string_list(payload.get("block_reasons"))
+            return reasons or ["backend_validation_failed"], payload
+        return None, payload
+
+    def _submit_via_existing_manual_path(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        account_state: dict[str, Any],
+        candidates: list[_AutoSellCandidate],
+        final_candidate: _AutoSellCandidate | None,
+        validation_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if final_candidate is None:
+            raise ValueError("final_candidate is required after validation")
+
+        source_metadata = _source_metadata(
+            context=context,
+            candidate=final_candidate,
+            source_type=RUN_SOURCE_TYPE,
+            real_order_submitted=False,
+            broker_submit_called=False,
+            manual_submit_called=False,
+            real_order_submit_allowed=True,
+            block_reasons=[],
+            daily_limit=self._daily_limit_state(
+                db, context=context, symbol=final_candidate.symbol
+            ),
+        )
+        confirmation_phrase = str(
+            getattr(context.settings, "kis_confirmation_phrase", None)
+            or KIS_MANUAL_CONFIRMATION_PHRASE
+        )
+        request = KisManualOrderSubmitRequest(
+            market=MARKET,
+            symbol=final_candidate.symbol,
+            side=SELL,
+            qty=final_candidate.quantity,
+            order_type="market",
+            dry_run=False,
+            confirm_live=True,
+            confirmation=confirmation_phrase,
+            reason="KIS limited auto stop-loss run.",
+            source_metadata=source_metadata,
+        )
+        status_code, manual_payload = KisManualOrderService(
+            self.client,
+            runtime_settings=self.runtime_settings,
+            session_service=self.session_service,
+        ).submit_manual(db, request, now=context.now_utc)
+        submitted = bool(manual_payload.get("real_order_submitted") is True)
+        block_reasons = [] if submitted else _string_list(manual_payload.get("block_reasons"))
+        reason = (
+            "stop_loss_auto_sell_submitted"
+            if submitted
+            else block_reasons[0] if block_reasons else "manual_submit_blocked"
+        )
+        payload = self._decision_payload(
+            db,
+            context=context,
+            mode=RUN_MODE,
+            source_type=RUN_SOURCE_TYPE,
+            result="submitted" if submitted else "blocked",
+            action="sell" if submitted else _run_blocked_action(final_candidate),
+            reason=reason,
+            account_state=account_state,
+            candidates=candidates,
+            final_candidate=final_candidate,
+            block_reasons=block_reasons,
+            read_only=False,
+            diagnostics_extra={
+                "validation": validation_payload,
+                "manual_submit_status_code": status_code,
+                "manual_submit_response": manual_payload,
+            },
+        )
+        payload.update(
+            {
+                "real_order_submitted": submitted,
+                "broker_submit_called": bool(manual_payload.get("broker_submit_called")),
+                "manual_submit_called": bool(manual_payload.get("manual_submit_called")),
+                "order_id": manual_payload.get("order_id")
+                or manual_payload.get("order_log_id"),
+                "order_log_id": manual_payload.get("order_log_id")
+                or manual_payload.get("order_id"),
+                "broker_order_id": manual_payload.get("broker_order_id"),
+                "broker_status": manual_payload.get("broker_status"),
+                "broker_order_status": manual_payload.get("broker_order_status")
+                or manual_payload.get("broker_status"),
+                "kis_odno": manual_payload.get("kis_odno"),
+            }
+        )
+        payload["source_metadata"] = _source_metadata(
+            context=context,
+            candidate=final_candidate,
+            source_type=RUN_SOURCE_TYPE,
+            real_order_submitted=submitted,
+            broker_submit_called=bool(manual_payload.get("broker_submit_called")),
+            manual_submit_called=bool(manual_payload.get("manual_submit_called")),
+            real_order_submit_allowed=submitted,
+            block_reasons=block_reasons,
+            daily_limit=self._daily_limit_state(
+                db, context=context, symbol=final_candidate.symbol
+            ),
+        )
+        payload["audit_metadata"] = payload["source_metadata"]
+        payload.update(kis_order_source_fields(payload["source_metadata"]))
+        payload["safety"] = {
+            **payload["safety"],
+            "real_order_submitted": submitted,
+            "broker_submit_called": bool(manual_payload.get("broker_submit_called")),
+            "manual_submit_called": bool(manual_payload.get("manual_submit_called")),
+            "no_broker_submit": not submitted,
+        }
+        signal = self._record_signal(
+            db,
+            payload=payload,
+            candidate=final_candidate,
+            source_type=RUN_SOURCE_TYPE,
+            related_order_id=payload.get("order_id") if submitted else None,
+        )
+        run = self._record_run(
+            db,
+            payload=payload,
+            candidate=final_candidate,
+            mode=RUN_MODE,
+            source_type=RUN_SOURCE_TYPE,
+            signal_id=signal.id,
+            order_id=payload.get("order_id") if submitted else None,
+        )
+        payload["signal_id"] = signal.id
+        payload["run"] = _serialize_run(run)
+        return sanitize_kis_payload(payload)
+
+    def _decision_payload(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        mode: str,
+        source_type: str,
+        result: str,
+        action: str,
+        reason: str,
+        account_state: dict[str, Any] | None,
+        candidates: list[_AutoSellCandidate],
+        final_candidate: _AutoSellCandidate | None,
+        block_reasons: list[str],
+        read_only: bool,
+        diagnostics_extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        status_block_reasons = _status_block_reasons(context)
+        daily_limit = self._daily_limit_state(
+            db,
+            context=context,
+            symbol=final_candidate.symbol if final_candidate else None,
+        )
+        candidate_payloads = [_candidate_payload(candidate) for candidate in candidates]
+        final_payload = (
+            _candidate_payload(final_candidate) if final_candidate is not None else None
+        )
+        safety = _safety_payload(
+            context,
+            read_only=read_only,
+            source_type=source_type,
+        )
+        metadata = (
+            _source_metadata(
+                context=context,
+                candidate=final_candidate,
+                source_type=source_type,
+                real_order_submitted=False,
+                broker_submit_called=False,
+                manual_submit_called=False,
+                real_order_submit_allowed=False,
+                block_reasons=block_reasons,
+                daily_limit=daily_limit,
+            )
+            if final_candidate is not None
+            else None
+        )
+        all_block_reasons = _dedupe(block_reasons)
+        diagnostics = {
+            "positions_evaluated": len(candidates),
+            "candidate_selected": final_candidate is not None,
+            "status_block_reasons": status_block_reasons,
+            "daily_limit": daily_limit,
+            "account_state": _account_state_summary(account_state or {}),
+            "market_session": _public_market_session(context.market_session),
+            "cost_basis_required_for_stop_loss": True,
+            "take_profit_actionable": False,
+            "read_only": read_only,
+        }
+        validation_payload = (
+            diagnostics.get("validation")
+            if isinstance(diagnostics.get("validation"), dict)
+            else None
+        )
+        if diagnostics_extra:
+            diagnostics.update(diagnostics_extra)
+            validation_payload = (
+                diagnostics.get("validation")
+                if isinstance(diagnostics.get("validation"), dict)
+                else None
+            )
+        validation_status = _validation_status(validation_payload, read_only=read_only)
+        payload: dict[str, Any] = {
+            "status": "ok",
+            "provider": PROVIDER,
+            "market": MARKET,
+            "mode": mode,
+            "source": SOURCE,
+            "source_type": source_type,
+            "trigger_source": _trigger_source(source_type),
+            "result": result,
+            "action": action,
+            "reason": reason,
+            "primary_block_reason": all_block_reasons[0] if all_block_reasons else None,
+            "human_readable_status": _human_status(result, reason, all_block_reasons),
+            "candidate_count": len(candidate_payloads),
+            "candidates": candidate_payloads,
+            "final_candidate": final_payload,
+            "symbol": final_candidate.symbol if final_candidate else None,
+            "company_name": final_candidate.name if final_candidate else None,
+            "name": final_candidate.name if final_candidate else None,
+            "quantity": final_candidate.quantity if final_candidate else None,
+            "qty": final_candidate.quantity if final_candidate else None,
+            "current_price": final_candidate.current_price if final_candidate else None,
+            "average_price": final_candidate.average_price if final_candidate else None,
+            "cost_basis": final_candidate.cost_basis if final_candidate else None,
+            "current_value": final_candidate.current_value if final_candidate else None,
+            "unrealized_pl": final_candidate.unrealized_pl if final_candidate else None,
+            "unrealized_pl_pct": (
+                final_candidate.unrealized_pl_pct if final_candidate else None
+            ),
+            "stop_loss_threshold_pct": (
+                final_candidate.stop_loss_threshold_pct if final_candidate else None
+            ),
+            "take_profit_threshold_pct": (
+                final_candidate.take_profit_threshold_pct if final_candidate else None
+            ),
+            "trigger": (
+                STOP_LOSS_TRIGGER
+                if final_candidate and final_candidate.stop_loss_triggered
+                else TAKE_PROFIT_TRIGGER
+                if final_candidate and final_candidate.take_profit_triggered
+                else None
+            ),
+            "trigger_source_detail": (
+                final_candidate.trigger_source if final_candidate else None
+            ),
+            "exit_trigger": (
+                STOP_LOSS_TRIGGER
+                if final_candidate and final_candidate.stop_loss_triggered
+                else TAKE_PROFIT_TRIGGER
+                if final_candidate and final_candidate.take_profit_triggered
+                else None
+            ),
+            "exit_trigger_source": (
+                final_candidate.trigger_source if final_candidate else None
+            ),
+            "side": SELL,
+            "stop_loss_triggered": bool(
+                final_candidate and final_candidate.stop_loss_triggered
+            ),
+            "take_profit_triggered": bool(
+                final_candidate and final_candidate.take_profit_triggered
+            ),
+            "weak_trend_triggered": bool(
+                final_candidate and final_candidate.weak_trend_triggered
+            ),
+            "sell_pressure_triggered": bool(
+                final_candidate and final_candidate.sell_pressure_triggered
+            ),
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
+            "broker_order_id": None,
+            "kis_odno": None,
+            "order_id": None,
+            "order_log_id": None,
+            "live_auto_sell_enabled": context.live_auto_sell_enabled,
+            "stop_loss_auto_sell_enabled": context.stop_loss_enabled,
+            "take_profit_auto_sell_enabled": False,
+            "scheduler_real_orders_enabled": False,
+            "dry_run": bool(context.runtime.get("dry_run", True)),
+            "kill_switch": bool(context.runtime.get("kill_switch", False)),
+            "kis_enabled": bool(getattr(context.settings, "kis_enabled", False)),
+            "kis_real_order_enabled": bool(
+                getattr(context.settings, "kis_real_order_enabled", False)
+            ),
+            "market_open": context.market_session.get("is_market_open") is True,
+            "sell_session_allowed": context.sell_session_allowed,
+            "auto_order_ready": bool(
+                final_candidate is not None
+                and final_candidate.stop_loss_triggered
+                and not all_block_reasons
+            ),
+            "real_order_submit_allowed": bool(
+                source_type == RUN_SOURCE_TYPE
+                and final_candidate is not None
+                and final_candidate.stop_loss_triggered
+                and not all_block_reasons
+                and not read_only
+            ),
+            "stop_loss_execution_enabled": (
+                not status_block_reasons
+                and daily_limit["daily_limit_remaining"] > 0
+            ),
+            "daily_limit_remaining": daily_limit["daily_limit_remaining"],
+            "daily_limit": daily_limit,
+            "duplicate_order_check": {
+                "duplicate_open_sell_order": bool(
+                    final_candidate and final_candidate.duplicate_open_sell_order
+                ),
+                "latest_related_sell_order": (
+                    final_candidate.latest_order if final_candidate else None
+                ),
+            },
+            "validation_status": validation_status,
+            "block_reasons": all_block_reasons,
+            "blocked_by": all_block_reasons,
+            "failed_checks": all_block_reasons,
+            "safety": safety,
+            "diagnostics": diagnostics,
+            "checks": _checks_payload(context, account_state=account_state),
+            "risk_flags": _dedupe(
+                ["limited_auto_sell", "stop_loss_only", "no_auto_buy"]
+                + _string_list(final_candidate.risk_flags if final_candidate else [])
+                + all_block_reasons
+            ),
+            "gating_notes": _dedupe(
+                [
+                    "readiness_only" if read_only else "guarded_execution",
+                    "stop_loss_only",
+                    "take_profit_disabled",
+                    "auto_buy_disabled",
+                    "scheduler_real_orders_disabled",
+                    "no_broker_submit_unless_all_gates_pass",
+                ]
+                + _string_list(final_candidate.gating_notes if final_candidate else [])
+            ),
+            "audit_metadata": metadata,
+            "source_metadata": metadata,
+            "market_session": _public_market_session(context.market_session),
+            "account_state": _account_state_summary(account_state or {}),
+            "readiness_labels": _readiness_labels(
+                read_only=read_only,
+                submitted=result == "submitted",
+            ),
+            "created_at": context.created_at,
+            "checked_at": context.created_at,
+        }
+        if metadata:
+            payload.update(kis_order_source_fields(metadata))
+        return sanitize_kis_payload(payload)
 
     def _record_signal(
         self,
@@ -880,6 +1024,7 @@ class KisLimitedAutoSellService:
         *,
         payload: dict[str, Any],
         candidate: _AutoSellCandidate | None,
+        source_type: str,
         related_order_id: int | None = None,
     ) -> SignalLog:
         signal = SignalLog(
@@ -888,16 +1033,16 @@ class KisLimitedAutoSellService:
             reason=str(payload.get("reason") or "limited_auto_sell_blocked"),
             indicator_payload=_json((candidate.position if candidate else {}) or {}),
             risk_flags=_json(payload.get("risk_flags") or []),
-            approved_by_risk=payload.get("result") == "submitted",
+            approved_by_risk=payload.get("real_order_submitted") is True,
             related_order_id=related_order_id,
-            signal_status=MODE if payload.get("result") == "submitted" else "blocked",
-            trigger_source=TRIGGER_SOURCE,
+            signal_status=source_type,
+            trigger_source=_trigger_source(source_type),
             hard_block_reason=(
                 None
-                if payload.get("result") == "submitted"
+                if payload.get("real_order_submitted") is True
                 else str(payload.get("reason") or "limited_auto_sell_blocked")
             ),
-            hard_blocked=payload.get("result") != "submitted",
+            hard_blocked=payload.get("real_order_submitted") is not True,
             gating_notes=_json(payload.get("gating_notes") or []),
         )
         db.add(signal)
@@ -910,15 +1055,17 @@ class KisLimitedAutoSellService:
         db: Session,
         *,
         payload: dict[str, Any],
-        symbol: str,
+        candidate: _AutoSellCandidate | None,
+        mode: str,
+        source_type: str,
         signal_id: int,
         order_id: int | None,
     ) -> TradeRunLog:
         run = TradeRunLog(
             run_key=f"kis_limited_auto_sell_{uuid.uuid4().hex[:10]}",
-            trigger_source=TRIGGER_SOURCE,
-            symbol=symbol,
-            mode=MODE,
+            trigger_source=_trigger_source(source_type),
+            symbol=(candidate.symbol if candidate else None) or "WATCHLIST",
+            mode=mode,
             stage="done",
             result=str(payload.get("result") or "blocked"),
             reason=str(payload.get("reason") or ""),
@@ -928,13 +1075,13 @@ class KisLimitedAutoSellService:
                 {
                     "provider": PROVIDER,
                     "market": MARKET,
-                    "mode": MODE,
+                    "mode": mode,
                     "source": SOURCE,
-                    "source_type": SOURCE_TYPE,
-                    "trigger_source": TRIGGER_SOURCE,
+                    "source_type": source_type,
+                    "trigger_source": _trigger_source(source_type),
                     "real_order_submitted": payload.get("real_order_submitted") is True,
                     "broker_submit_called": payload.get("broker_submit_called") is True,
-                    "manual_submit_called": False,
+                    "manual_submit_called": payload.get("manual_submit_called") is True,
                 }
             ),
             response_payload=_json(payload),
@@ -945,214 +1092,441 @@ class KisLimitedAutoSellService:
         return run
 
 
-def _first_failed_preliminary_reason(checks: dict[str, Any]) -> str | None:
-    ordered = [
-        ("kis_limited_auto_sell_enabled", "limited_auto_sell_disabled"),
-        ("kis_limited_auto_sell_stop_loss_enabled", "stop_loss_auto_sell_disabled"),
-        ("dry_run_false", "runtime_dry_run_true"),
-        ("kill_switch_false", "kill_switch_enabled"),
-        ("kis_enabled", "kis_disabled"),
-        ("kis_real_order_enabled", "kis_real_order_disabled"),
-        ("kis_live_auto_enabled", "kis_live_auto_disabled"),
-        ("kis_live_auto_sell_enabled", "kis_live_auto_sell_disabled"),
-        ("scheduler_real_orders_disabled", "scheduler_real_orders_must_remain_disabled"),
-        ("market_open", "market_closed"),
-        ("today_not_holiday", "today_is_holiday"),
-    ]
-    for key, reason in ordered:
-        if checks.get(key) is not True:
-            return reason
-    if checks.get("kis_live_auto_buy_enabled") is True:
-        return "auto_buy_must_remain_disabled"
-    return None
-
-
-def _safety(runtime: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "max_orders_per_day": int(
-            runtime.get("kis_limited_auto_sell_max_orders_per_day", 1) or 1
-        ),
-        "max_notional_pct": float(
-            runtime.get("kis_limited_auto_sell_max_notional_pct", 0.03) or 0.03
-        ),
-        "stop_loss_only": not bool(
-            runtime.get("kis_limited_auto_sell_allow_take_profit_trigger", False)
-        ),
-        "take_profit_auto_sell_enabled": bool(
-            runtime.get("kis_limited_auto_sell_take_profit_enabled", False)
-            and runtime.get("kis_limited_auto_sell_allow_take_profit_trigger", False)
-        ),
-        "manual_review_auto_sell_enabled": bool(
-            runtime.get("kis_limited_auto_sell_allow_manual_review_trigger", False)
-        ),
-        "queue_review_required": bool(
-            runtime.get("kis_limited_auto_sell_requires_queue_review", True)
-        ),
-        "real_order_submitted": False,
-        "broker_submit_called": False,
-        "manual_submit_called": False,
-        "auto_buy_enabled": False,
-        "scheduler_real_order_enabled": False,
-    }
-
-
-def _base_payload(
+def _status_payload(
     *,
+    context: _Context,
+    block_reasons: list[str],
+    daily_limit: dict[str, Any],
     result: str,
-    action: str,
     reason: str,
-    checks: dict[str, Any],
-    safety: dict[str, Any],
-    created_at: str,
-    runtime: dict[str, Any],
-    market_session: dict[str, Any],
-    candidate: _AutoSellCandidate | None,
-    blocked_by: list[str],
-    audit_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    diagnostics = candidate.diagnostics if candidate is not None else {}
-    risk_flags = _dedupe(
-        ["limited_auto_sell", "sell_only", "no_auto_buy"]
-        + _string_list(candidate.risk_flags if candidate is not None else [])
-        + blocked_by
-    )
-    gating_notes = _dedupe(
-        [
-            "KIS limited auto sell is disabled by default.",
-            "This path can submit SELL only after every runtime and risk gate passes.",
-            "KIS auto buy and scheduler real orders remain disabled.",
-            "Manual submit service is not called by limited auto sell.",
-        ]
-        + _string_list(candidate.gating_notes if candidate is not None else [])
-    )
-    payload = {
+    return {
         "status": "ok",
         "provider": PROVIDER,
         "market": MARKET,
-        "mode": MODE,
+        "mode": STATUS_MODE,
         "source": SOURCE,
-        "source_type": SOURCE_TYPE,
+        "source_type": "limited_auto_sell_status",
+        "trigger_source": "limited_auto_sell_status",
         "result": result,
-        "action": action,
+        "action": "hold",
         "reason": reason,
-        "symbol": candidate.symbol if candidate is not None else None,
-        "quantity": candidate.qty if candidate is not None else None,
-        "qty": candidate.qty if candidate is not None else None,
-        "trigger": candidate.trigger if candidate is not None else None,
-        "trigger_source": candidate.trigger_source if candidate is not None else None,
-        "exit_trigger": candidate.trigger if candidate is not None else None,
-        "exit_trigger_source": candidate.trigger_source if candidate is not None else None,
-        "cost_basis": diagnostics.get("cost_basis"),
-        "current_value": diagnostics.get("current_value"),
-        "current_price": candidate.current_price if candidate is not None else None,
-        "unrealized_pl": diagnostics.get("unrealized_pl"),
-        "unrealized_pl_pct": diagnostics.get("unrealized_pl_pct"),
-        "notional": candidate.notional if candidate is not None else None,
-        "order_id": None,
-        "broker_order_id": None,
-        "kis_odno": None,
+        "primary_block_reason": block_reasons[0] if block_reasons else None,
+        "live_auto_sell_enabled": context.live_auto_sell_enabled,
+        "stop_loss_auto_sell_enabled": context.stop_loss_enabled,
+        "take_profit_auto_sell_enabled": False,
+        "scheduler_real_orders_enabled": False,
+        "dry_run": bool(context.runtime.get("dry_run", True)),
+        "kill_switch": bool(context.runtime.get("kill_switch", False)),
+        "kis_enabled": bool(getattr(context.settings, "kis_enabled", False)),
+        "kis_real_order_enabled": bool(
+            getattr(context.settings, "kis_real_order_enabled", False)
+        ),
+        "market_open": context.market_session.get("is_market_open") is True,
+        "sell_session_allowed": context.sell_session_allowed,
+        "auto_order_ready": False,
+        "real_order_submit_allowed": False,
+        "stop_loss_execution_enabled": (
+            not block_reasons and daily_limit["daily_limit_remaining"] > 0
+        ),
+        "daily_limit_remaining": daily_limit["daily_limit_remaining"],
+        "daily_limit": daily_limit,
+        "block_reasons": block_reasons,
+        "blocked_by": block_reasons,
+        "human_readable_status": _human_status(result, reason, block_reasons),
+        "candidate_count": 0,
+        "candidates": [],
+        "final_candidate": None,
         "real_order_submitted": False,
         "broker_submit_called": False,
         "manual_submit_called": False,
-        "auto_buy_enabled": False,
-        "auto_sell_enabled": bool(
-            runtime.get("kis_limited_auto_sell_enabled", False)
-            and runtime.get("kis_live_auto_sell_enabled", False)
+        "live_auto_buy_enabled": False,
+        "configured_live_auto_buy_enabled": context.live_auto_buy_configured,
+        "configured_take_profit_auto_sell_enabled": context.take_profit_enabled,
+        "configured_scheduler_real_orders_enabled": (
+            context.scheduler_real_orders_configured
         ),
-        "scheduler_real_order_enabled": False,
-        "checks": checks,
-        "failed_checks": blocked_by,
-        "blocked_by": blocked_by,
-        "safety": safety,
-        "risk_flags": risk_flags,
-        "gating_notes": gating_notes,
-        "audit_metadata": audit_metadata,
-        "market_session": _public_market_session(market_session),
-        "created_at": created_at,
-        "checked_at": created_at,
+        "configured_scheduler_limited_auto_sell_enabled": (
+            context.scheduler_limited_auto_sell_configured
+        ),
+        "safety": _safety_payload(
+            context,
+            read_only=True,
+            source_type="limited_auto_sell_status",
+        ),
+        "checks": _checks_payload(context, account_state=None),
+        "diagnostics": {
+            "status_only": True,
+            "positions_evaluated": 0,
+            "market_session": _public_market_session(context.market_session),
+            "daily_limit": daily_limit,
+            "runtime_aliases": {
+                "kis_limited_auto_stop_loss_enabled": context.stop_loss_enabled,
+                "kis_limited_auto_take_profit_enabled": False,
+            },
+        },
+        "readiness_labels": _readiness_labels(read_only=True, submitted=False),
+        "market_session": _public_market_session(context.market_session),
+        "created_at": context.created_at,
+        "checked_at": context.created_at,
     }
-    if audit_metadata:
-        payload.update(kis_order_source_fields(audit_metadata))
+
+
+def _checks_payload(
+    context: _Context,
+    *,
+    account_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = {
+        "dry_run": bool(context.runtime.get("dry_run", True)),
+        "dry_run_false": bool(context.runtime.get("dry_run", True)) is False,
+        "kill_switch": bool(context.runtime.get("kill_switch", False)),
+        "kill_switch_false": bool(context.runtime.get("kill_switch", False)) is False,
+        "kis_enabled": bool(getattr(context.settings, "kis_enabled", False)),
+        "kis_real_order_enabled": bool(
+            getattr(context.settings, "kis_real_order_enabled", False)
+        ),
+        "kis_live_auto_sell_enabled": context.live_auto_sell_enabled,
+        "kis_live_auto_buy_enabled": False,
+        "configured_kis_live_auto_buy_enabled": context.live_auto_buy_configured,
+        "kis_limited_auto_stop_loss_enabled": context.stop_loss_enabled,
+        "kis_limited_auto_sell_stop_loss_enabled": context.stop_loss_enabled,
+        "kis_limited_auto_take_profit_enabled": False,
+        "kis_limited_auto_sell_take_profit_enabled": False,
+        "configured_take_profit_auto_sell_enabled": context.take_profit_enabled,
+        "kis_scheduler_allow_real_orders": False,
+        "configured_scheduler_real_orders_enabled": (
+            context.scheduler_real_orders_configured
+        ),
+        "configured_scheduler_limited_auto_sell_enabled": (
+            context.scheduler_limited_auto_sell_configured
+        ),
+        "scheduler_real_orders_disabled": (
+            context.scheduler_real_orders_configured is False
+        ),
+        "scheduler_limited_auto_sell_disabled": (
+            context.scheduler_limited_auto_sell_configured is False
+        ),
+        "market_open": context.market_session.get("is_market_open") is True,
+        "sell_session_allowed": context.sell_session_allowed,
+    }
+    if account_state is not None:
+        payload.update(
+            {
+                "account_state_available": bool(account_state.get("fetch_success")),
+                "positions_available": bool(account_state.get("positions")),
+                "open_order_fetch_available": "open_orders_unavailable"
+                not in _warning_names(account_state),
+            }
+        )
     return payload
 
 
-def _audit_metadata(
-    candidate: _AutoSellCandidate,
+def _safety_payload(
+    context: _Context,
     *,
-    created_at: str,
-    runtime: dict[str, Any],
-    queue_review_status: str,
-    shadow_occurrence_count: int | None,
-    submitted: bool,
+    read_only: bool,
+    source_type: str,
 ) -> dict[str, Any]:
     return {
-        "source": SOURCE,
-        "source_type": SOURCE_TYPE,
-        "limited_auto_sell_checked_at": created_at,
-        "checked_at": created_at,
-        "exit_trigger": candidate.trigger,
-        "trigger_source": candidate.trigger_source,
-        "queue_id": _queue_key(candidate.symbol, candidate.trigger, candidate.trigger_source),
-        "queue_review_required": bool(
-            runtime.get("kis_limited_auto_sell_requires_queue_review", True)
-        ),
-        "queue_review_status": queue_review_status,
-        "unrealized_pl": candidate.diagnostics.get("unrealized_pl"),
-        "unrealized_pl_pct": candidate.diagnostics.get("unrealized_pl_pct"),
-        "cost_basis": candidate.diagnostics.get("cost_basis"),
-        "current_value": candidate.diagnostics.get("current_value"),
-        "current_price": candidate.current_price,
-        "suggested_quantity": candidate.qty,
-        "quantity": candidate.qty,
-        "notional": candidate.notional,
-        "max_notional_pct": float(
-            runtime.get("kis_limited_auto_sell_max_notional_pct", 0.03) or 0.03
-        ),
-        "risk_flags": candidate.risk_flags,
-        "gating_notes": candidate.gating_notes,
-        "manual_confirm_required": False,
-        "auto_buy_enabled": False,
-        "auto_sell_enabled": submitted,
-        "scheduler_real_order_enabled": False,
-        "real_order_submit_allowed": True,
-        "limited_auto_sell_enabled": bool(
-            runtime.get("kis_limited_auto_sell_enabled", False)
-        ),
-        "stop_loss_auto_sell_enabled": bool(
-            runtime.get("kis_limited_auto_sell_stop_loss_enabled", False)
-        ),
+        "read_only": read_only,
+        "readiness_only": source_type != RUN_SOURCE_TYPE,
+        "preflight_only": source_type == PREFLIGHT_SOURCE_TYPE,
+        "guarded_execution": source_type == RUN_SOURCE_TYPE,
+        "stop_loss_only": True,
+        "take_profit_disabled": True,
         "take_profit_auto_sell_enabled": False,
-        "manual_review_auto_sell_enabled": False,
-        "limited_auto_sell_real_order_submitted": submitted,
-        "limited_auto_sell_broker_submit_called": submitted,
-        "limited_auto_sell_manual_submit_called": False,
-        "shadow_occurrence_count": shadow_occurrence_count,
+        "auto_buy_disabled": True,
+        "live_auto_buy_enabled": False,
+        "scheduler_real_orders_enabled": False,
+        "scheduler_real_order_enabled": False,
+        "dry_run": bool(context.runtime.get("dry_run", True)),
+        "kill_switch": bool(context.runtime.get("kill_switch", False)),
+        "max_orders_per_day": int(
+            context.runtime.get("kis_limited_auto_sell_max_orders_per_day", 1) or 1
+        ),
+        "requires_valid_cost_basis": _requires_valid_cost_basis(context.runtime),
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "no_broker_submit": True,
+        "uses_existing_manual_submit_path": True,
     }
 
 
-def _notional_cap_reason(
-    account_state: dict[str, Any],
-    *,
-    notional: float,
-    max_notional_pct: float,
-) -> str | None:
-    balance = account_state.get("balance")
-    if not isinstance(balance, dict):
-        return "account_value_unavailable_for_notional_cap"
-    account_value = _first_float(
-        balance,
-        "total_asset_value",
-        "total_equity",
-        "equity",
-        "stock_evaluation_amount",
-        "total_market_value",
-        "tot_evlu_amt",
-    )
-    if account_value is None or account_value <= 0:
-        return "account_value_unavailable_for_notional_cap"
-    if notional > account_value * max_notional_pct:
-        return "notional_cap_exceeded"
+def _status_block_reasons(context: _Context) -> list[str]:
+    reasons: list[str] = []
+    if bool(context.runtime.get("dry_run", True)):
+        reasons.append("dry_run_true")
+    if bool(context.runtime.get("kill_switch", False)):
+        reasons.append("kill_switch_enabled")
+    if not bool(getattr(context.settings, "kis_enabled", False)):
+        reasons.append("kis_disabled")
+    if not bool(getattr(context.settings, "kis_real_order_enabled", False)):
+        reasons.append("kis_real_order_disabled")
+    if context.live_auto_buy_configured:
+        reasons.append("live_auto_buy_must_remain_disabled")
+    if not context.live_auto_sell_enabled:
+        reasons.append("kis_live_auto_sell_disabled")
+    if not context.stop_loss_enabled:
+        reasons.append("stop_loss_auto_sell_disabled")
+    if context.take_profit_enabled:
+        reasons.append("take_profit_auto_sell_must_remain_disabled")
+    if context.scheduler_real_orders_configured:
+        reasons.append("scheduler_real_orders_must_remain_disabled")
+    if context.scheduler_limited_auto_sell_configured:
+        reasons.append("scheduler_limited_auto_sell_must_remain_disabled")
+    if not context.sell_session_allowed:
+        reasons.append("sell_session_not_allowed")
+    return _dedupe(reasons)
+
+
+def _run_pre_account_block_reasons(context: _Context) -> list[str]:
+    return _status_block_reasons(context)
+
+
+def _daily_limit_block_reason(daily_limit: dict[str, Any]) -> str | None:
+    if bool(daily_limit.get("symbol_already_auto_sold_today")):
+        return "symbol_already_auto_sold_today"
+    if bool(daily_limit.get("daily_limit_reached")):
+        return "daily_auto_sell_limit_reached"
     return None
+
+
+def _preflight_block_reasons(candidate: _AutoSellCandidate | None) -> list[str]:
+    reasons = ["preflight_read_only_no_submit"]
+    if candidate is None:
+        reasons.append("no_held_position")
+    elif candidate.block_reasons:
+        reasons.extend(candidate.block_reasons)
+    return _dedupe(reasons)
+
+
+def _preflight_result(candidate: _AutoSellCandidate | None) -> str:
+    if candidate is None:
+        return "blocked"
+    return "preview_only"
+
+
+def _preflight_reason(candidate: _AutoSellCandidate | None) -> str:
+    if candidate is None:
+        return "no_held_position"
+    if candidate.status == SELL_READY:
+        return "stop_loss_candidate_ready_read_only"
+    if candidate.status == REVIEW_SELL:
+        return candidate.exit_reason or "manual_review_required"
+    return "no_stop_loss_candidate"
+
+
+def _action_for_candidate(candidate: _AutoSellCandidate | None) -> str:
+    if candidate is None:
+        return "hold"
+    if candidate.status == SELL_READY:
+        return "sell_ready"
+    if candidate.status == REVIEW_SELL:
+        return "review_sell"
+    return "hold"
+
+
+def _trigger_source(source_type: str) -> str:
+    if source_type == RUN_SOURCE_TYPE:
+        return RUN_TRIGGER_SOURCE
+    return TRIGGER_SOURCE
+
+
+def _run_blocked_action(candidate: _AutoSellCandidate | None) -> str:
+    if candidate is not None and candidate.stop_loss_triggered:
+        return "blocked_sell"
+    return "hold"
+
+
+def _validation_status(
+    validation_payload: dict[str, Any] | None,
+    *,
+    read_only: bool,
+) -> str:
+    if read_only:
+        return "not_called_read_only"
+    if validation_payload is None:
+        return "not_called"
+    if validation_payload.get("validated_for_submission") is True:
+        return "passed"
+    return "blocked"
+
+
+def _readiness_labels(*, read_only: bool, submitted: bool) -> list[str]:
+    labels = [
+        "STOP-LOSS ONLY",
+        "GUARDED EXECUTION",
+        "DEFAULT OFF",
+        "TAKE-PROFIT DISABLED",
+        "AUTO BUY DISABLED",
+        "SCHEDULER REAL ORDERS DISABLED",
+    ]
+    labels.append("BROKER SUBMIT CALLED" if submitted else "NO BROKER SUBMIT")
+    if read_only:
+        labels.append("READ-ONLY")
+    return labels
+
+
+def _select_final_candidate(
+    candidates: list[_AutoSellCandidate],
+) -> _AutoSellCandidate | None:
+    if not candidates:
+        return None
+    sell_ready = [item for item in candidates if item.status == SELL_READY]
+    if sell_ready:
+        sell_ready.sort(
+            key=lambda item: (
+                abs(_safe_float(item.unrealized_pl, 0.0)),
+                _safe_float(item.current_value, 0.0),
+            ),
+            reverse=True,
+        )
+        return sell_ready[0]
+    review = [item for item in candidates if item.status == REVIEW_SELL]
+    if review:
+        review.sort(
+            key=lambda item: _safe_float(item.current_value, 0.0),
+            reverse=True,
+        )
+        return review[0]
+    return candidates[0]
+
+
+def _candidate_payload(candidate: _AutoSellCandidate) -> dict[str, Any]:
+    return {
+        "provider": PROVIDER,
+        "market": MARKET,
+        "symbol": candidate.symbol,
+        "name": candidate.name,
+        "company_name": candidate.name,
+        "quantity": candidate.quantity,
+        "qty": candidate.held_qty,
+        "current_price": candidate.current_price,
+        "average_price": candidate.average_price,
+        "avg_entry_price": candidate.average_price,
+        "cost_basis": candidate.cost_basis,
+        "current_value": candidate.current_value,
+        "market_value": candidate.current_value,
+        "unrealized_pl": candidate.unrealized_pl,
+        "unrealized_pl_pct": candidate.unrealized_pl_pct,
+        "stop_loss_threshold_pct": candidate.stop_loss_threshold_pct,
+        "take_profit_threshold_pct": candidate.take_profit_threshold_pct,
+        "stop_loss_triggered": candidate.stop_loss_triggered,
+        "take_profit_triggered": candidate.take_profit_triggered,
+        "weak_trend_triggered": candidate.weak_trend_triggered,
+        "sell_pressure_triggered": candidate.sell_pressure_triggered,
+        "status": candidate.status,
+        "holding_status": candidate.status,
+        "exit_reason": candidate.exit_reason,
+        "risk_flags": candidate.risk_flags,
+        "gating_notes": candidate.gating_notes,
+        "block_reasons": candidate.block_reasons,
+        "trigger_source": candidate.trigger_source,
+        "latest_order": candidate.latest_order,
+        "latest_related_sell_order": candidate.latest_order,
+        "duplicate_open_sell_order": candidate.duplicate_open_sell_order,
+        "manual_review_required": "manual_review_required" in candidate.block_reasons,
+        "pl_diagnostics": candidate.diagnostics,
+    }
+
+
+def _source_metadata(
+    *,
+    context: _Context,
+    candidate: _AutoSellCandidate,
+    source_type: str,
+    real_order_submitted: bool,
+    broker_submit_called: bool,
+    manual_submit_called: bool,
+    real_order_submit_allowed: bool,
+    block_reasons: list[str],
+    daily_limit: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "source": SOURCE,
+        "source_type": source_type,
+        "mode": RUN_MODE if source_type == RUN_SOURCE_TYPE else PREFLIGHT_MODE,
+        "limited_auto_sell_checked_at": context.created_at,
+        "checked_at": context.created_at,
+        "symbol": candidate.symbol,
+        "company_name": candidate.name,
+        "quantity": candidate.quantity,
+        "exit_trigger": STOP_LOSS_TRIGGER
+        if candidate.stop_loss_triggered
+        else TAKE_PROFIT_TRIGGER
+        if candidate.take_profit_triggered
+        else "none",
+        "trigger_source": _trigger_source(source_type),
+        "pl_trigger_source": candidate.trigger_source,
+        "trigger_flags": {
+            "stop_loss_triggered": candidate.stop_loss_triggered,
+            "take_profit_triggered": False,
+            "take_profit_triggered_ignored": candidate.take_profit_triggered,
+            "weak_trend_triggered": candidate.weak_trend_triggered,
+            "sell_pressure_triggered": candidate.sell_pressure_triggered,
+        },
+        "position_snapshot": {
+            "symbol": candidate.symbol,
+            "quantity": candidate.quantity,
+            "cost_basis": candidate.cost_basis,
+            "current_price": candidate.current_price,
+            "current_value": candidate.current_value,
+            "unrealized_pl": candidate.unrealized_pl,
+            "unrealized_pl_pct": candidate.unrealized_pl_pct,
+            "status": candidate.status,
+        },
+        "duplicate_order_check": {
+            "duplicate_open_sell_order": candidate.duplicate_open_sell_order,
+            "latest_related_sell_order": candidate.latest_order,
+        },
+        "daily_limit": daily_limit,
+        "runtime_safety_snapshot": {
+            "dry_run": bool(context.runtime.get("dry_run", True)),
+            "kill_switch": bool(context.runtime.get("kill_switch", False)),
+            "kis_live_auto_sell_enabled": context.live_auto_sell_enabled,
+            "kis_limited_auto_stop_loss_enabled": context.stop_loss_enabled,
+            "kis_limited_auto_take_profit_enabled": False,
+            "kis_scheduler_allow_real_orders": False,
+            "kis_live_auto_buy_enabled": False,
+            "kis_enabled": bool(getattr(context.settings, "kis_enabled", False)),
+            "kis_real_order_enabled": bool(
+                getattr(context.settings, "kis_real_order_enabled", False)
+            ),
+        },
+        "market_session_snapshot": _public_market_session(context.market_session),
+        "stop_loss_triggered": candidate.stop_loss_triggered,
+        "take_profit_triggered": False,
+        "take_profit_triggered_ignored": candidate.take_profit_triggered,
+        "weak_trend_triggered": candidate.weak_trend_triggered,
+        "sell_pressure_triggered": candidate.sell_pressure_triggered,
+        "status": candidate.status,
+        "block_reasons": block_reasons,
+        "real_order_submitted": real_order_submitted,
+        "broker_submit_called": broker_submit_called,
+        "manual_submit_called": manual_submit_called,
+        "limited_auto_sell_real_order_submitted": real_order_submitted,
+        "limited_auto_sell_broker_submit_called": broker_submit_called,
+        "limited_auto_sell_manual_submit_called": manual_submit_called,
+        "manual_confirm_required": False,
+        "auto_buy_enabled": False,
+        "auto_sell_enabled": real_order_submitted,
+        "scheduler_real_order_enabled": False,
+        "real_order_submit_allowed": real_order_submit_allowed,
+        "limited_auto_sell_enabled": context.live_auto_sell_enabled,
+        "stop_loss_auto_sell_enabled": context.stop_loss_enabled,
+        "take_profit_auto_sell_enabled": False,
+        "manual_review_auto_sell_enabled": False,
+        "unrealized_pl": candidate.unrealized_pl,
+        "unrealized_pl_pct": candidate.unrealized_pl_pct,
+        "cost_basis": candidate.cost_basis,
+        "current_value": candidate.current_value,
+        "current_price": candidate.current_price,
+        "suggested_quantity": candidate.quantity,
+        "risk_flags": candidate.risk_flags,
+        "gating_notes": candidate.gating_notes,
+    }
 
 
 def _held_positions(value: Any) -> list[dict[str, Any]]:
@@ -1175,7 +1549,7 @@ def _normalize_position(item: Any) -> dict[str, Any]:
     return {
         **item,
         "symbol": symbol,
-        "name": item.get("name") or item.get("prdt_name"),
+        "name": _name(item),
         "qty": to_float(item.get("qty") or item.get("hldg_qty") or 0),
         "avg_entry_price": to_float(
             item.get("avg_entry_price") or item.get("pchs_avg_pric") or 0
@@ -1185,7 +1559,10 @@ def _normalize_position(item: Any) -> dict[str, Any]:
         ),
         "market_value": to_float(item.get("market_value") or item.get("evlu_amt") or 0),
         "current_value": to_float(
-            item.get("current_value") or item.get("market_value") or item.get("evlu_amt") or 0
+            item.get("current_value")
+            or item.get("market_value")
+            or item.get("evlu_amt")
+            or 0
         ),
         "cost_basis": to_float(
             item.get("cost_basis")
@@ -1209,73 +1586,148 @@ def _normalize_order(item: Any) -> dict[str, Any]:
     return {**item, "symbol": symbol or ""}
 
 
-def _first_priority_block(blocks: list[str]) -> str:
-    priority = [
-        "missing_cost_basis",
-        "missing_current_price",
-        "qty_not_positive",
-        "take_profit_auto_sell_disabled",
-        "manual_review_auto_sell_disabled",
-        "notional_cap_exceeded",
-        "account_value_unavailable_for_notional_cap",
-        "quantity_exceeds_held_quantity",
-        "no_stop_loss_candidate",
-    ]
-    for item in priority:
-        if item in blocks:
-            return item
-    return blocks[0] if blocks else "no_stop_loss_candidate"
-
-
-def _queue_key(symbol: str, trigger: str, trigger_source: str) -> str:
-    return f"{_safe_key_part(symbol)}:{_safe_key_part(trigger)}:{_safe_key_part(trigger_source)}"
-
-
-def _safe_key_part(value: Any) -> str:
-    text = "".join(
-        char if char.isalnum() or char in {"_", ".", "-"} else "_"
-        for char in str(value or "").strip()
+def _has_duplicate_open_sell(
+    db: Session,
+    *,
+    symbol: str,
+    account_state: dict[str, Any],
+) -> bool:
+    if not symbol:
+        return False
+    normalized = symbol.upper()
+    for order in _dict_list(account_state.get("open_orders")):
+        if _order_symbol(order) == normalized and _order_is_sell(order):
+            return True
+    for order in _dict_list(account_state.get("recent_orders")):
+        if _order_symbol(order) != normalized:
+            continue
+        status = str(
+            order.get("internal_status")
+            or order.get("clear_status")
+            or order.get("status")
+            or ""
+        ).upper()
+        if status in OPEN_ORDER_STATUSES and _order_is_sell(order):
+            return True
+    row = (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == PROVIDER)
+        .filter(OrderLog.symbol == normalized)
+        .filter(OrderLog.side == SELL)
+        .filter(OrderLog.internal_status.in_(sorted(OPEN_ORDER_STATUSES)))
+        .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
+        .first()
     )
-    return text[:80] or "unknown"
+    return row is not None
 
 
-def _candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    candidate = payload.get("candidate")
-    if isinstance(candidate, dict):
-        return candidate
-    candidates = payload.get("candidates") or payload.get("candidates_evaluated")
-    if isinstance(candidates, list):
-        for item in candidates:
-            if isinstance(item, dict):
-                return item
-    return {}
+def _latest_related_sell_order(
+    db: Session,
+    *,
+    symbol: str,
+    account_state: dict[str, Any],
+) -> dict[str, Any] | None:
+    normalized = symbol.upper()
+    for order in _dict_list(account_state.get("open_orders")):
+        if _order_symbol(order) == normalized and _order_is_sell(order):
+            return order
+    for order in _dict_list(account_state.get("recent_orders")):
+        if _order_symbol(order) == normalized and _order_is_sell(order):
+            return order
+    row = (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == PROVIDER)
+        .filter(OrderLog.symbol == normalized)
+        .filter(OrderLog.side == SELL)
+        .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
+        .first()
+    )
+    return serialize_kis_order(row) if row is not None else None
 
 
-def _order_mode(row: OrderLog) -> str:
+def _is_limited_auto_stop_loss_order(row: OrderLog) -> bool:
     for raw in (row.response_payload, row.request_payload, row.last_sync_payload):
         payload = _parse_json_object(raw)
-        mode = str(payload.get("mode") or "").strip()
-        if mode:
-            return mode
-    return ""
+        hint = " ".join(
+            str(payload.get(key) or "")
+            for key in ("mode", "source", "source_type", "trigger_source")
+        ).lower()
+        if "limited_auto_sell" in hint or "kis_limited_auto_stop_loss" in hint:
+            return True
+        metadata = payload.get("source_metadata")
+        if isinstance(metadata, dict):
+            source = str(metadata.get("source") or "").lower()
+            if source in {"kis_limited_auto_stop_loss", "kis_limited_auto_sell"}:
+                return True
+    return False
 
 
-def _order_symbol(order: dict[str, Any]) -> str:
-    return _normalize_symbol(order.get("symbol") or order.get("pdno") or order.get("code")) or ""
-
-
-def _order_is_sell(order: dict[str, Any]) -> bool:
-    side = str(
-        order.get("side")
-        or order.get("order_side")
-        or order.get("sll_buy_dvsn_cd_name")
-        or order.get("sll_buy_dvsn_name")
-        or ""
-    ).strip().lower()
-    if side in {"sell", "s"}:
+def _weak_trend_triggered(position: dict[str, Any]) -> bool:
+    flags = {flag.lower() for flag in _string_list(position.get("risk_flags"))}
+    if "weak_trend_triggered" in flags or "weak_trend" in flags:
         return True
-    code = str(order.get("sll_buy_dvsn_cd") or order.get("sll_buy_dvsn") or "").strip()
-    return code in {"01", "1"}
+    for key in ("momentum", "recent_return"):
+        value = _safe_float_or_none(position.get(key))
+        if value is not None and value < 0:
+            return True
+    return False
+
+
+def _sell_pressure_triggered(position: dict[str, Any]) -> bool:
+    sell_score = _first_float(position, "final_sell_score", "sell_score", "quant_sell_score")
+    buy_score = _first_float(position, "final_buy_score", "final_entry_score", "score")
+    if sell_score is None:
+        return False
+    if sell_score >= 65:
+        return True
+    return buy_score is not None and sell_score >= 50 and sell_score > buy_score
+
+
+def _candidate_gating_notes(
+    *,
+    status: str,
+    stop_loss_triggered: bool,
+    take_profit_triggered: bool,
+    cost_basis_valid: bool,
+    duplicate_open_sell: bool,
+) -> list[str]:
+    notes = [
+        "Limited KIS auto sell is readiness/preflight-first.",
+        "Only cost-basis stop-loss is actionable in this PR.",
+        "Take-profit auto sell is visible but disabled.",
+        "KIS auto buy and scheduler real orders remain disabled.",
+    ]
+    if status == SELL_READY and stop_loss_triggered:
+        notes.append("Stop-loss threshold was reached with valid cost basis.")
+    if take_profit_triggered:
+        notes.append("Take-profit trigger is non-actionable in this PR.")
+    if not cost_basis_valid:
+        notes.append("Missing or ambiguous cost basis requires manual review.")
+    if duplicate_open_sell:
+        notes.append("Existing open sell order blocks auto sell.")
+    return _dedupe(notes)
+
+
+def _stop_loss_enabled(runtime: dict[str, Any]) -> bool:
+    return bool(
+        runtime.get(
+            "kis_limited_auto_stop_loss_enabled",
+            runtime.get("kis_limited_auto_sell_stop_loss_enabled", False),
+        )
+    )
+
+
+def _take_profit_enabled(runtime: dict[str, Any]) -> bool:
+    return bool(
+        runtime.get(
+            "kis_limited_auto_take_profit_enabled",
+            runtime.get("kis_limited_auto_sell_take_profit_enabled", False),
+        )
+    )
+
+
+def _requires_valid_cost_basis(runtime: dict[str, Any]) -> bool:
+    return bool(runtime.get("kis_limited_auto_sell_requires_valid_cost_basis", True))
 
 
 def _account_state_summary(account_state: dict[str, Any]) -> dict[str, Any]:
@@ -1305,8 +1757,20 @@ def _public_market_session(market_session: dict[str, Any]) -> dict[str, Any]:
         "regular_close",
         "effective_close",
         "no_new_entry_after",
+        "local_time",
+        "error",
     ]
     return {key: market_session.get(key) for key in keys if key in market_session}
+
+
+def _human_status(result: str, reason: str, block_reasons: list[str]) -> str:
+    if result == "submitted":
+        return "Stop-loss auto sell submitted through existing KIS manual order flow."
+    if result == "preview_only":
+        return "Read-only stop-loss preflight completed. No broker submit was called."
+    if block_reasons:
+        return f"Blocked: {block_reasons[0]}."
+    return reason or "Ready."
 
 
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
@@ -1325,27 +1789,22 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     }
 
 
-def _extract_broker_order_id(response: dict[str, Any]) -> str | None:
-    output = response.get("output")
-    if isinstance(output, list) and output:
-        output = output[0]
-    if not isinstance(output, dict):
-        output = response
-    value = (
-        output.get("ODNO")
-        or output.get("odno")
-        or output.get("order_id")
-        or output.get("ORD_NO")
-        or output.get("ord_no")
-    )
-    return str(value) if value is not None and str(value).strip() else None
+def _order_symbol(order: dict[str, Any]) -> str:
+    return _normalize_symbol(order.get("symbol") or order.get("pdno") or order.get("code")) or ""
 
 
-def _extract_broker_status(response: dict[str, Any]) -> str:
-    rt_cd = str(response.get("rt_cd", "0"))
-    if rt_cd in {"0", ""}:
-        return "submitted"
-    return str(response.get("msg_cd") or rt_cd)
+def _order_is_sell(order: dict[str, Any]) -> bool:
+    side = str(
+        order.get("side")
+        or order.get("order_side")
+        or order.get("sll_buy_dvsn_cd_name")
+        or order.get("sll_buy_dvsn_name")
+        or ""
+    ).strip().lower()
+    if side in {"sell", "s"}:
+        return True
+    code = str(order.get("sll_buy_dvsn_cd") or order.get("sll_buy_dvsn") or "").strip()
+    return code in {"01", "1"}
 
 
 def _warning_names(account_state: dict[str, Any]) -> set[str]:
@@ -1396,6 +1855,29 @@ def _normalize_symbol(value: Any) -> str | None:
 
 def _symbol(value: dict[str, Any] | None) -> str | None:
     return _normalize_symbol((value or {}).get("symbol"))
+
+
+def _name(payload: dict[str, Any]) -> str | None:
+    for key in (
+        "name",
+        "company_name",
+        "display_name",
+        "symbol_name",
+        "korean_name",
+        "asset_name",
+        "prdt_name",
+    ):
+        text = str(payload.get(key) or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _first_reason(values: list[str], fallback: str) -> str:
+    for value in values:
+        if value:
+            return value
+    return fallback
 
 
 def _first_float(payload: dict[str, Any], *keys: str) -> float | None:

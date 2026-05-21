@@ -16,6 +16,12 @@ void main() {
       'auto_buy_enabled': false,
       'auto_sell_enabled': false,
       'scheduler_real_order_enabled': false,
+      'stop_loss_execution_enabled': false,
+      'daily_limit_remaining': 1,
+      'daily_limit': {'max_orders_per_day': 1, 'submitted_count_today': 0},
+      'duplicate_order_check': {'duplicate_open_sell_order': false},
+      'validation_status': 'not_called',
+      'readiness_labels': ['GUARDED EXECUTION', 'NO BROKER SUBMIT'],
       'checks': {'kis_limited_auto_sell_enabled': false, 'dry_run': true},
       'safety': {'max_orders_per_day': 1, 'max_notional_pct': 0.03},
     });
@@ -28,6 +34,12 @@ void main() {
     expect(result.manualSubmitCalled, isFalse);
     expect(result.autoBuyEnabled, isFalse);
     expect(result.schedulerRealOrderEnabled, isFalse);
+    expect(result.stopLossExecutionEnabled, isFalse);
+    expect(result.dailyLimitRemaining, 1);
+    expect(result.dailyLimitInt('max_orders_per_day'), 1);
+    expect(result.duplicateOrderFlag('duplicate_open_sell_order'), isFalse);
+    expect(result.validationStatus, 'not_called');
+    expect(result.readinessLabels, contains('GUARDED EXECUTION'));
     expect(result.check('kis_limited_auto_sell_enabled'), isFalse);
     expect(result.safetyInt('max_orders_per_day'), 1);
     expect(result.safetyDouble('max_notional_pct'), 0.03);
@@ -50,6 +62,14 @@ void main() {
       'real_order_submitted': true,
       'broker_submit_called': true,
       'manual_submit_called': false,
+      'stop_loss_triggered': true,
+      'take_profit_triggered': false,
+      'stop_loss_execution_enabled': true,
+      'daily_limit_remaining': 1,
+      'daily_limit': {'max_orders_per_day': 1, 'submitted_count_today': 0},
+      'duplicate_order_check': {'duplicate_open_sell_order': false},
+      'validation_status': 'passed',
+      'readiness_labels': ['GUARDED EXECUTION', 'BROKER SUBMIT CALLED'],
       'auto_buy_enabled': false,
       'auto_sell_enabled': true,
       'scheduler_real_order_enabled': false,
@@ -67,6 +87,11 @@ void main() {
     expect(result.orderId, 123);
     expect(result.kisOdno, 'AUTO123');
     expect(result.manualSubmitCalled, isFalse);
+    expect(result.brokerSubmitActuallyCalled, isTrue);
+    expect(result.stopLossTriggered, isTrue);
+    expect(result.takeProfitTriggered, isFalse);
+    expect(result.stopLossExecutionEnabled, isTrue);
+    expect(result.validationStatus, 'passed');
     expect(result.auditMetadata['source'], 'kis_limited_auto_sell');
   });
 }

@@ -215,7 +215,16 @@ class TradingLogItem {
     }
     if (isKisLimitedAutoSell) {
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
+      _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
+      if (sourceType == 'limited_auto_sell_preflight' ||
+          mode.toLowerCase().contains('preflight')) {
+        _addUnique(labels, 'READINESS ONLY');
+        _addUnique(labels, 'STOP-LOSS PREFLIGHT');
+      } else {
+        _addUnique(labels, 'GUARDED EXECUTION');
+        _addUnique(labels, 'STOP-LOSS AUTO SELL');
+      }
       if ((exitTrigger ?? '').toLowerCase() == 'stop_loss') {
         _addUnique(labels, 'STOP LOSS');
       }
@@ -224,7 +233,9 @@ class TradingLogItem {
       if (manualSubmitCalled == false) {
         _addUnique(labels, 'MANUAL SUBMIT FALSE');
       }
-      if (realOrderSubmitted != true || brokerSubmitCalled != true) {
+      if (realOrderSubmitted == true && brokerSubmitCalled == true) {
+        _addUnique(labels, 'SUBMITTED');
+      } else {
         _addUnique(labels, 'BLOCKED');
         _addUnique(labels, 'NO BROKER SUBMIT');
       }
@@ -539,7 +550,16 @@ class OrderLogItem {
     }
     if (isKisLimitedAutoSell) {
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
+      _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
+      if (sourceType == 'limited_auto_sell_preflight' ||
+          mode.toLowerCase().contains('preflight')) {
+        _addUnique(labels, 'READINESS ONLY');
+        _addUnique(labels, 'STOP-LOSS PREFLIGHT');
+      } else {
+        _addUnique(labels, 'GUARDED EXECUTION');
+        _addUnique(labels, 'STOP-LOSS AUTO SELL');
+      }
       if ((exitTrigger ?? '').toLowerCase() == 'stop_loss') {
         _addUnique(labels, 'STOP LOSS');
       }
@@ -548,7 +568,9 @@ class OrderLogItem {
       if (manualSubmitCalled == false) {
         _addUnique(labels, 'MANUAL SUBMIT FALSE');
       }
-      if (realOrderSubmitted != true || brokerSubmitCalled != true) {
+      if (realOrderSubmitted == true && brokerSubmitCalled == true) {
+        _addUnique(labels, 'SUBMITTED');
+      } else {
         _addUnique(labels, 'BLOCKED');
         _addUnique(labels, 'NO BROKER SUBMIT');
       }
@@ -788,6 +810,23 @@ class SignalLogItem {
         _addUnique(labels, 'MANUAL SUBMIT FALSE');
       }
     }
+    if (isKisLimitedAutoSell) {
+      _addUnique(labels, 'KIS LIMITED AUTO SELL');
+      _addUnique(labels, 'SELL');
+      _addUnique(labels, 'STOP-LOSS AUTO SELL');
+      _addUnique(labels, 'GUARDED EXECUTION');
+      _addUnique(labels, 'AUTO BUY DISABLED');
+      _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
+      if (manualSubmitCalled == false) {
+        _addUnique(labels, 'MANUAL SUBMIT FALSE');
+      }
+      if (realOrderSubmitted == true && brokerSubmitCalled == true) {
+        _addUnique(labels, 'SUBMITTED');
+      } else {
+        _addUnique(labels, 'BLOCKED');
+        _addUnique(labels, 'NO BROKER SUBMIT');
+      }
+    }
     return labels;
   }
 
@@ -1020,7 +1059,8 @@ bool _isKisLimitedAutoSell(
   if (!_isKis(provider, market, mode, triggerSource)) return false;
   final hint = '$mode $triggerSource $source'.toLowerCase();
   return hint.contains('limited_auto_sell') ||
-      source == 'kis_limited_auto_sell';
+      source == 'kis_limited_auto_sell' ||
+      source == 'kis_limited_auto_stop_loss';
 }
 
 bool _isKisLimitedAutoBuy(

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../../core/utils/timestamp_formatter.dart';
@@ -991,9 +993,9 @@ class _TestLabActions extends StatelessWidget {
         run: controller.runKisLimitedAutoBuyOnce,
       ),
       _LabAction(
-        label: 'Run Limited Auto Sell Check',
+        label: 'Run Stop-Loss Preflight',
         loading: controller.kisLimitedAutoSellLoading,
-        run: controller.runKisLimitedAutoSellOnce,
+        run: controller.runKisLimitedAutoSellPreflightOnce,
       ),
       _LabAction(
         label: 'Run Scheduler Live Guarded Check',
@@ -1896,6 +1898,7 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = controller.settings;
     final result = controller.latestKisLimitedAutoSellResult;
+    final blockReasons = result?.blockReasons ?? const <String>[];
     return Container(
       key: const Key('kis_limited_auto_sell_card'),
       width: double.infinity,
@@ -1915,64 +1918,133 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 8),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _SoftBadge(text: 'SELL ONLY', color: Colors.greenAccent),
-          _SoftBadge(text: 'DISABLED BY DEFAULT', color: Colors.amberAccent),
-          _SoftBadge(text: 'STOP-LOSS ONLY', color: Colors.lightBlueAccent),
-          _SoftBadge(text: 'NO AUTO BUY', color: Colors.orangeAccent),
-          _SoftBadge(
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'STOP-LOSS ONLY', color: Colors.lightBlueAccent),
+          const _SoftBadge(text: 'GUARDED EXECUTION', color: Colors.white70),
+          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'TAKE-PROFIT DISABLED', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'AUTO BUY DISABLED', color: Colors.orangeAccent),
+          const _SoftBadge(
               text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
-          _SoftBadge(text: 'GUARDED EXECUTION', color: Colors.white70),
+          _SoftBadge(
+            text: _limitedAutoSellBrokerBadge(result),
+            color: result?.brokerSubmitActuallyCalled == true
+                ? Colors.redAccent
+                : Colors.orangeAccent,
+          ),
         ]),
         const SizedBox(height: 12),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _ResultPair(
-              label: 'limited auto sell',
-              value: _boolText(settings.kisLimitedAutoSellEnabled)),
+              label: 'live_auto_sell_enabled',
+              value: _boolText(result?.liveAutoSellEnabled ??
+                  settings.kisLiveAutoSellEnabled)),
           _ResultPair(
-              label: 'stop-loss enabled',
-              value: _boolText(settings.kisLimitedAutoSellStopLossEnabled)),
+              label: 'stop_loss_auto_sell_enabled',
+              value: _boolText(result?.stopLossAutoSellEnabled ??
+                  settings.kisLimitedAutoSellStopLossEnabled)),
           _ResultPair(
-              label: 'take-profit auto sell',
-              value: _boolText(settings.kisLimitedAutoSellTakeProfitEnabled)),
+              label: 'take_profit_auto_sell_enabled',
+              value: _boolText(result?.takeProfitAutoSellEnabled ?? false)),
           _ResultPair(
-              label: 'queue review required',
-              value: _boolText(settings.kisLimitedAutoSellRequiresQueueReview)),
+              label: 'dry_run',
+              value: _boolText(result?.dryRun ?? settings.dryRun)),
           _ResultPair(
-              label: 'max orders/day',
-              value: settings.kisLimitedAutoSellMaxOrdersPerDay.toString()),
+              label: 'kill_switch',
+              value: _boolText(result?.killSwitch ?? settings.killSwitch)),
           _ResultPair(
-              label: 'max notional pct',
-              value: _formatPercentValue(
-                  settings.kisLimitedAutoSellMaxNotionalPct * 100)),
+              label: 'kis_real_order_enabled',
+              value: _boolText(result?.kisRealOrderEnabled ??
+                  controller.kisSafetyStatus.kisRealOrderEnabled)),
           _ResultPair(
-              label: 'min shadow occurrences',
-              value:
-                  settings.kisLimitedAutoSellMinShadowOccurrences.toString()),
+              label: 'sell session',
+              value: result?.sellSessionAllowed == true ? 'Open' : 'Blocked'),
+          _ResultPair(
+              label: 'daily limit',
+              value: result == null
+                  ? 'n/a / ${settings.kisLimitedAutoSellMaxOrdersPerDay}'
+                  : _limitedAutoSellDailyLimitLabel(result)),
+          _ResultPair(
+              label: 'stop_loss_execution_enabled',
+              value: _boolText(result?.stopLossExecutionEnabled ?? false)),
+          _ResultPair(
+              label: 'auto_order_ready',
+              value: _boolText(result?.autoOrderReady ?? false)),
+          _ResultPair(
+              label: 'real_order_submit_allowed',
+              value: _boolText(result?.realOrderSubmitAllowed ?? false)),
         ]),
         const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: controller.kisLimitedAutoSellLoading
-              ? null
-              : () async {
-                  final actionResult =
-                      await controller.runKisLimitedAutoSellOnce();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(actionResult.message),
-                    backgroundColor:
-                        actionResult.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
-          icon: controller.kisLimitedAutoSellLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.play_arrow),
-          label: Text(controller.kisLimitedAutoSellLoading
-              ? 'Running limited auto sell...'
-              : 'Run Limited Auto Sell Once'),
+        if (blockReasons.isNotEmpty) ...[
+          _StateLine(text: 'Block reasons: ${_joinList(blockReasons)}'),
+          const SizedBox(height: 12),
+        ],
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: controller.kisLimitedAutoSellLoading
+                  ? null
+                  : () async {
+                      final actionResult =
+                          await controller.refreshKisLimitedAutoSellStatus();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(actionResult.message),
+                        backgroundColor: actionResult.success
+                            ? Colors.green
+                            : Colors.redAccent,
+                      ));
+                    },
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('Refresh Status'),
+            ),
+            FilledButton.icon(
+              onPressed: controller.kisLimitedAutoSellLoading
+                  ? null
+                  : () async {
+                      final actionResult =
+                          await controller.runKisLimitedAutoSellPreflightOnce();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(actionResult.message),
+                        backgroundColor: actionResult.success
+                            ? Colors.green
+                            : Colors.redAccent,
+                      ));
+                    },
+              icon: controller.kisLimitedAutoSellLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.fact_check_outlined),
+              label: Text(controller.kisLimitedAutoSellLoading
+                  ? 'Checking stop-loss...'
+                  : 'Run Stop-Loss Preflight'),
+            ),
+            OutlinedButton.icon(
+              onPressed: controller.kisLimitedAutoSellLoading
+                  ? null
+                  : () async {
+                      final actionResult =
+                          await controller.runKisLimitedAutoSellOnce();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(actionResult.message),
+                        backgroundColor: actionResult.success
+                            ? Colors.green
+                            : Colors.redAccent,
+                      ));
+                    },
+              icon: const Icon(Icons.play_arrow, size: 18),
+              label: const Text('Run Limited Auto Sell Once'),
+            ),
+          ],
         ),
         if (controller.kisLimitedAutoSellError != null) ...[
           const SizedBox(height: 10),
@@ -2002,6 +2074,17 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final candidate = result.finalCandidate;
+    final symbol = result.symbol ?? candidate?.symbol ?? 'n/a';
+    final company = candidate?.name ?? 'n/a';
+    final quantity = result.quantity ?? candidate?.quantity;
+    final currentPrice = result.currentPrice ?? candidate?.currentPrice;
+    final costBasis = result.costBasis ?? candidate?.costBasis;
+    final currentValue =
+        result.notional ?? result.currentValue ?? candidate?.currentValue;
+    final unrealizedPl = result.unrealizedPl ?? candidate?.unrealizedPl;
+    final unrealizedPlPct =
+        result.unrealizedPlPct ?? candidate?.unrealizedPlPct;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (result.submitted) ...[
         _StateLine(
@@ -2015,12 +2098,49 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         _ResultPair(label: 'result', value: result.result),
         _ResultPair(label: 'action', value: result.action),
         _ResultPair(label: 'reason', value: result.reason),
-        _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
-        _ResultPair(label: 'trigger', value: result.trigger ?? 'n/a'),
+        _ResultPair(label: 'mode', value: result.mode),
         _ResultPair(
-            label: 'latest P/L',
+            label: 'candidate_count', value: result.candidateCount.toString()),
+        _ResultPair(label: 'symbol', value: symbol),
+        _ResultPair(label: 'company', value: company),
+        _ResultPair(label: 'quantity', value: quantity?.toString() ?? 'n/a'),
+        _ResultPair(
+            label: 'current price',
+            value: _formatReviewKrwOrDash(currentPrice)),
+        _ResultPair(
+            label: 'current notional',
+            value: _formatReviewKrwOrDash(currentValue)),
+        _ResultPair(
+            label: 'cost basis', value: _formatReviewKrwOrDash(costBasis)),
+        _ResultPair(
+            label: 'P/L',
             value:
-                '${_formatReviewKrwOrDash(result.unrealizedPl)} / ${_formatLimitedAutoSellPlPercent(result)}'),
+                '${_formatReviewKrwOrDash(unrealizedPl)} / ${_formatPercentFromDecimal(unrealizedPlPct)}'),
+        _ResultPair(
+            label: 'stop-loss trigger',
+            value: _boolText(result.stopLossTriggered)),
+        _ResultPair(label: 'dry_run', value: _boolText(result.dryRun)),
+        _ResultPair(label: 'kill_switch', value: _boolText(result.killSwitch)),
+        _ResultPair(
+            label: 'kis_real_order_enabled',
+            value: _boolText(result.kisRealOrderEnabled)),
+        _ResultPair(
+            label: 'live_auto_sell_enabled',
+            value: _boolText(result.liveAutoSellEnabled)),
+        _ResultPair(
+            label: 'stop_loss_auto_sell_enabled',
+            value: _boolText(result.stopLossAutoSellEnabled)),
+        _ResultPair(
+            label: 'daily limit',
+            value: _limitedAutoSellDailyLimitLabel(result)),
+        _ResultPair(
+            label: 'duplicate sell',
+            value: _limitedAutoSellDuplicateLabel(result)),
+        _ResultPair(
+            label: 'validation',
+            value: result.validationStatus.isEmpty
+                ? 'not_called'
+                : result.validationStatus),
         _ResultPair(
             label: 'real_order_submitted',
             value: _boolText(result.realOrderSubmitted)),
@@ -2033,40 +2153,135 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         if (result.orderId != null)
           _ResultPair(label: 'order id', value: result.orderId.toString()),
         if (result.kisOdno != null)
-          _ResultPair(label: 'ODNO', value: result.kisOdno!),
+          _ResultPair(label: 'KIS ODNO', value: result.kisOdno!),
       ]),
-      if (result.blockedBy.isNotEmpty) ...[
+      if (result.primaryBlockReason != null) ...[
         const SizedBox(height: 8),
-        _StateLine(text: 'blocked_by: ${_joinList(result.blockedBy)}'),
+        _StateLine(text: 'primary_block_reason: ${result.primaryBlockReason}'),
+      ],
+      if (result.blockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'block_reasons: ${_joinList(result.blockReasons)}'),
       ],
       const SizedBox(height: 10),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        _SoftBadge(
-          text:
-              "limited_auto_sell_enabled=${_nullableBoolText(result.nullableCheck('kis_limited_auto_sell_enabled'))}",
-          color: Colors.lightBlueAccent,
-        ),
-        _SoftBadge(
-          text:
-              "stop_loss_enabled=${_nullableBoolText(result.nullableCheck('kis_limited_auto_sell_stop_loss_enabled'))}",
-          color: Colors.lightBlueAccent,
-        ),
-        _SoftBadge(
-          text:
-              "queue_review_required=${_nullableBoolText(result.nullableCheck('queue_review_required'))}",
-          color: Colors.lightBlueAccent,
-        ),
-        _SoftBadge(
-          text: 'auto_buy_enabled=${_boolText(result.autoBuyEnabled)}',
-          color: Colors.orangeAccent,
-        ),
-        _SoftBadge(
-          text:
-              'scheduler_real_order_enabled=${_boolText(result.schedulerRealOrderEnabled)}',
-          color: Colors.orangeAccent,
-        ),
-      ]),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final label in _limitedAutoSellLabels(result))
+            _SoftBadge(
+              text: label,
+              color: label == 'BROKER SUBMIT CALLED'
+                  ? Colors.redAccent
+                  : label == 'STOP-LOSS ONLY'
+                      ? Colors.lightBlueAccent
+                      : label.contains('DISABLED') || label == 'DEFAULT OFF'
+                          ? Colors.amberAccent
+                          : Colors.white70,
+            ),
+        ],
+      ),
+      if (result.candidates.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        const Text('Candidates', style: TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        for (final candidate in result.candidates)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _KisLimitedAutoSellCandidateCard(candidate: candidate),
+          ),
+      ],
+      const SizedBox(height: 4),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: const Text('Developer Raw Payload'),
+        children: [
+          _StateLine(text: _prettyJson(result.rawPayload)),
+        ],
+      ),
     ]);
+  }
+}
+
+class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
+  const _KisLimitedAutoSellCandidateCard({required this.candidate});
+
+  final KisLimitedAutoSellCandidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+              '${candidate.symbol} \u00B7 ${candidate.name}',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          _SoftBadge(
+            text: _autoSellStatusLabel(candidate.status),
+            color: _autoSellStatusColor(candidate.status),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'quantity',
+              value: candidate.quantity?.toString() ?? 'n/a'),
+          _ResultPair(
+              label: 'current price',
+              value: _formatReviewKrwOrDash(candidate.currentPrice)),
+          _ResultPair(
+              label: 'cost basis',
+              value: _formatReviewKrwOrDash(candidate.costBasis)),
+          _ResultPair(
+              label: 'current value',
+              value: _formatReviewKrwOrDash(candidate.currentValue)),
+          _ResultPair(
+              label: 'P/L',
+              value:
+                  '${_formatReviewKrwOrDash(candidate.unrealizedPl)} / ${_formatPercentFromDecimal(candidate.unrealizedPlPct)}'),
+          _ResultPair(
+              label: 'stop-loss threshold',
+              value: _formatThresholdPct(candidate.stopLossThresholdPct)),
+          _ResultPair(
+              label: 'take-profit',
+              value:
+                  'Disabled (${_formatThresholdPct(candidate.takeProfitThresholdPct)})'),
+          _ResultPair(
+              label: 'status', value: _autoSellStatusLabel(candidate.status)),
+          _ResultPair(
+              label: 'reason',
+              value: candidate.reason.isEmpty
+                  ? candidate.exitReason
+                  : candidate.reason),
+        ]),
+        if (candidate.blockReasons.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(
+              text: 'Block reasons: ${_joinList(candidate.blockReasons)}'),
+        ],
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'Triggers: stop_loss=${_boolText(candidate.stopLossTriggered)}, take_profit_ignored=${_boolText(candidate.takeProfitTriggered)}, weak_trend=${_boolText(candidate.weakTrendTriggered)}, sell_pressure=${_boolText(candidate.sellPressureTriggered)}',
+        ),
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'Safety flags: duplicate_sell=${_boolText(candidate.latestOrder.isNotEmpty)}, risk_flags=${_joinList(candidate.riskFlags)}',
+        ),
+        if (candidate.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'Gating notes: ${_joinList(candidate.gatingNotes)}'),
+        ],
+      ]),
+    );
   }
 }
 
@@ -4088,6 +4303,58 @@ String _formatPercentFromDecimal(double? value) {
   return _formatPercentValue(value * 100, signed: true);
 }
 
+String _limitedAutoSellBrokerBadge(KisLimitedAutoSell? result) {
+  if (result?.brokerSubmitActuallyCalled == true) {
+    return 'BROKER SUBMIT CALLED';
+  }
+  return 'NO BROKER SUBMIT';
+}
+
+List<String> _limitedAutoSellLabels(KisLimitedAutoSell result) {
+  final brokerBadge = _limitedAutoSellBrokerBadge(result);
+  final labels = <String>[];
+  void add(String label) {
+    final normalized = label.trim();
+    if (normalized.isEmpty) return;
+    if (normalized == 'NO BROKER SUBMIT' && brokerBadge != normalized) return;
+    if (normalized == 'BROKER SUBMIT CALLED' && brokerBadge != normalized) {
+      return;
+    }
+    if (!labels.contains(normalized)) labels.add(normalized);
+  }
+
+  add('STOP-LOSS ONLY');
+  add('GUARDED EXECUTION');
+  add('DEFAULT OFF');
+  add('TAKE-PROFIT DISABLED');
+  add('AUTO BUY DISABLED');
+  add('SCHEDULER REAL ORDERS DISABLED');
+  add(brokerBadge);
+  for (final label in result.readinessLabels) {
+    add(label);
+  }
+  return labels;
+}
+
+String _limitedAutoSellDailyLimitLabel(KisLimitedAutoSell result) {
+  final remaining = result.dailyLimitRemaining ??
+      result.dailyLimitInt('daily_limit_remaining');
+  final maxOrders = result.dailyLimitInt('max_orders_per_day') ??
+      result.safetyInt('max_orders_per_day');
+  final submitted = result.dailyLimitInt('submitted_count_today');
+  final base =
+      '${remaining?.toString() ?? 'n/a'} remaining / ${maxOrders?.toString() ?? 'n/a'} max';
+  if (submitted == null) return base;
+  return '$base, $submitted used';
+}
+
+String _limitedAutoSellDuplicateLabel(KisLimitedAutoSell result) {
+  final duplicate = result.duplicateOrderFlag('duplicate_open_sell_order') ||
+      (result.finalCandidate?.latestOrder.isNotEmpty ?? false);
+  if (duplicate) return 'blocked: duplicate open sell';
+  return 'clear';
+}
+
 String _formatSafePlPercent(KisLiveExitCandidate candidate) {
   if (!candidate.hasSafePlPct) return '--';
   return _formatPercentFromDecimal(candidate.unrealizedPlPct);
@@ -4108,9 +4375,29 @@ String _formatQueuePlPercent(KisShadowExitReviewQueueItem item) {
   return _formatPercentFromDecimal(item.latestUnrealizedPlPct);
 }
 
-String _formatLimitedAutoSellPlPercent(KisLimitedAutoSell result) {
-  if (result.unrealizedPlPct == null) return '--';
-  return _formatPercentFromDecimal(result.unrealizedPlPct);
+String _formatThresholdPct(double? value) {
+  if (value == null) return 'n/a';
+  return _formatPercentValue(value);
+}
+
+String _autoSellStatusLabel(String value) {
+  final normalized = value.trim().toUpperCase().replaceAll('_', ' ');
+  if (normalized == 'REVIEW SELL') return 'REVIEW SELL';
+  if (normalized == 'SELL READY') return 'SELL READY';
+  if (normalized == 'HOLD') return 'HOLD';
+  return normalized.isEmpty ? 'HOLD' : normalized;
+}
+
+Color _autoSellStatusColor(String value) {
+  final normalized = value.trim().toUpperCase();
+  if (normalized == 'SELL_READY') return Colors.greenAccent;
+  if (normalized == 'REVIEW_SELL') return Colors.amberAccent;
+  return Colors.white70;
+}
+
+String _prettyJson(Map<String, dynamic> payload) {
+  if (payload.isEmpty) return '{}';
+  return const JsonEncoder.withIndent('  ').convert(payload);
 }
 
 String _formatReviewKrwOrDash(double? value) {

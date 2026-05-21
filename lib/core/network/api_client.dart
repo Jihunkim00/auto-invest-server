@@ -565,6 +565,19 @@ class ApiClient {
     return KisLimitedAutoSell.fromJson(payload);
   }
 
+  Future<KisLimitedAutoSell> fetchKisLimitedAutoSellStatus() async {
+    final payload = await _getJsonNoCache('/kis/limited-auto-sell/status');
+    return KisLimitedAutoSell.fromJson(payload);
+  }
+
+  Future<KisLimitedAutoSell> runKisLimitedAutoSellPreflightOnce() async {
+    final payload = await _postJsonBody(
+      '/kis/limited-auto-sell/preflight-once',
+      const {},
+    );
+    return KisLimitedAutoSell.fromJson(payload);
+  }
+
   Future<KisBuyShadowDecision> runKisBuyShadowOnce() async {
     final payload = await _postJsonBody('/kis/buy-shadow/run-once', const {});
     return KisBuyShadowDecision.fromJson(payload);
