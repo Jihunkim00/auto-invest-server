@@ -202,6 +202,12 @@ class RuntimeSettingService:
         settings["kis_limited_auto_take_profit_enabled"] = settings[
             "kis_limited_auto_sell_take_profit_enabled"
         ]
+        settings["kis_limited_auto_take_profit_readiness_enabled"] = True
+        settings["kis_limited_auto_sell_take_profit_readiness_enabled"] = True
+        settings["kis_limited_auto_take_profit_requires_valid_cost_basis"] = True
+        settings["kis_limited_auto_sell_take_profit_requires_valid_cost_basis"] = True
+        settings["kis_limited_auto_take_profit_min_profit_pct"] = 0.03
+        settings["kis_limited_auto_sell_take_profit_min_profit_pct"] = 0.03
         settings["kis_scheduler_enabled"] = bool(
             getattr(self.settings, "kis_scheduler_enabled", False)
         )

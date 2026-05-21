@@ -214,10 +214,17 @@ class TradingLogItem {
       _addUnique(labels, 'LIVE AUTO SELL DISABLED');
     }
     if (isKisLimitedAutoSell) {
+      final takeProfitReadiness = source == 'kis_limited_auto_take_profit' ||
+          sourceType == 'take_profit_readiness_only' ||
+          (exitTrigger ?? '').toLowerCase() == 'take_profit';
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
-      if (sourceType == 'limited_auto_sell_preflight' ||
+      if (takeProfitReadiness) {
+        _addUnique(labels, 'TAKE-PROFIT READINESS');
+        _addUnique(labels, 'READINESS ONLY');
+        _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
+      } else if (sourceType == 'limited_auto_sell_preflight' ||
           mode.toLowerCase().contains('preflight')) {
         _addUnique(labels, 'READINESS ONLY');
         _addUnique(labels, 'STOP-LOSS PREFLIGHT');
@@ -549,10 +556,17 @@ class OrderLogItem {
       }
     }
     if (isKisLimitedAutoSell) {
+      final takeProfitReadiness = source == 'kis_limited_auto_take_profit' ||
+          sourceType == 'take_profit_readiness_only' ||
+          (exitTrigger ?? '').toLowerCase() == 'take_profit';
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
       _addUnique(labels, 'SELL ONLY');
-      if (sourceType == 'limited_auto_sell_preflight' ||
+      if (takeProfitReadiness) {
+        _addUnique(labels, 'TAKE-PROFIT READINESS');
+        _addUnique(labels, 'READINESS ONLY');
+        _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
+      } else if (sourceType == 'limited_auto_sell_preflight' ||
           mode.toLowerCase().contains('preflight')) {
         _addUnique(labels, 'READINESS ONLY');
         _addUnique(labels, 'STOP-LOSS PREFLIGHT');
@@ -813,8 +827,16 @@ class SignalLogItem {
     if (isKisLimitedAutoSell) {
       _addUnique(labels, 'KIS LIMITED AUTO SELL');
       _addUnique(labels, 'SELL');
-      _addUnique(labels, 'STOP-LOSS AUTO SELL');
-      _addUnique(labels, 'GUARDED EXECUTION');
+      if (mode.toLowerCase().contains('take_profit') ||
+          triggerSource.toLowerCase().contains('take_profit') ||
+          result.toLowerCase().contains('readiness')) {
+        _addUnique(labels, 'TAKE-PROFIT READINESS');
+        _addUnique(labels, 'READINESS ONLY');
+        _addUnique(labels, 'TAKE-PROFIT EXECUTION DISABLED');
+      } else {
+        _addUnique(labels, 'STOP-LOSS AUTO SELL');
+        _addUnique(labels, 'GUARDED EXECUTION');
+      }
       _addUnique(labels, 'AUTO BUY DISABLED');
       _addUnique(labels, 'SCHEDULER REAL ORDERS DISABLED');
       if (manualSubmitCalled == false) {
@@ -1060,7 +1082,8 @@ bool _isKisLimitedAutoSell(
   final hint = '$mode $triggerSource $source'.toLowerCase();
   return hint.contains('limited_auto_sell') ||
       source == 'kis_limited_auto_sell' ||
-      source == 'kis_limited_auto_stop_loss';
+      source == 'kis_limited_auto_stop_loss' ||
+      source == 'kis_limited_auto_take_profit';
 }
 
 bool _isKisLimitedAutoBuy(

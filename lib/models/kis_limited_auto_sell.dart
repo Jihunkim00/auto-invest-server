@@ -13,6 +13,9 @@ class KisLimitedAutoSellCandidate {
     required this.takeProfitThresholdPct,
     required this.stopLossTriggered,
     required this.takeProfitTriggered,
+    required this.takeProfitReadinessOnly,
+    required this.takeProfitActionable,
+    required this.takeProfitExecutionDisabled,
     required this.weakTrendTriggered,
     required this.sellPressureTriggered,
     required this.status,
@@ -48,6 +51,12 @@ class KisLimitedAutoSellCandidate {
           _nullableDouble(json['take_profit_threshold_pct']),
       stopLossTriggered: _boolValue(json['stop_loss_triggered']) ?? false,
       takeProfitTriggered: _boolValue(json['take_profit_triggered']) ?? false,
+      takeProfitReadinessOnly: _boolValue(json['take_profit_readiness_only']) ??
+          (_boolValue(json['take_profit_triggered']) ?? false),
+      takeProfitActionable: _boolValue(json['take_profit_actionable']) ?? false,
+      takeProfitExecutionDisabled:
+          _boolValue(json['take_profit_execution_disabled']) ??
+              (_boolValue(json['take_profit_triggered']) ?? false),
       weakTrendTriggered: _boolValue(json['weak_trend_triggered']) ?? false,
       sellPressureTriggered:
           _boolValue(json['sell_pressure_triggered']) ?? false,
@@ -83,6 +92,9 @@ class KisLimitedAutoSellCandidate {
   final double? takeProfitThresholdPct;
   final bool stopLossTriggered;
   final bool takeProfitTriggered;
+  final bool takeProfitReadinessOnly;
+  final bool takeProfitActionable;
+  final bool takeProfitExecutionDisabled;
   final bool weakTrendTriggered;
   final bool sellPressureTriggered;
   final String status;
@@ -126,6 +138,12 @@ class KisLimitedAutoSell {
     required this.autoOrderReady,
     required this.realOrderSubmitAllowed,
     required this.stopLossExecutionEnabled,
+    required this.takeProfitReadinessEnabled,
+    required this.takeProfitExecutionEnabled,
+    required this.takeProfitNonActionable,
+    required this.takeProfitActionable,
+    required this.takeProfitReadinessOnly,
+    required this.takeProfitExecutionDisabled,
     required this.stopLossTriggered,
     required this.takeProfitTriggered,
     required this.weakTrendTriggered,
@@ -251,6 +269,27 @@ class KisLimitedAutoSell {
           _boolValue(json['real_order_submit_allowed']) ?? false,
       stopLossExecutionEnabled:
           _boolValue(json['stop_loss_execution_enabled']) ?? false,
+      takeProfitReadinessEnabled:
+          _boolValue(json['take_profit_readiness_enabled']) ??
+              _boolValue(safety['take_profit_readiness_enabled']) ??
+              false,
+      takeProfitExecutionEnabled:
+          _boolValue(json['take_profit_execution_enabled']) ??
+              _boolValue(safety['take_profit_execution_enabled']) ??
+              false,
+      takeProfitNonActionable: _boolValue(json['take_profit_non_actionable']) ??
+          _boolValue(safety['take_profit_non_actionable']) ??
+          true,
+      takeProfitActionable: _boolValue(json['take_profit_actionable']) ??
+          _boolValue(safety['take_profit_actionable']) ??
+          false,
+      takeProfitReadinessOnly: _boolValue(json['take_profit_readiness_only']) ??
+          _boolValue(safety['take_profit_readiness_only']) ??
+          (finalCandidate?.takeProfitReadinessOnly ?? false),
+      takeProfitExecutionDisabled:
+          _boolValue(json['take_profit_execution_disabled']) ??
+              _boolValue(safety['take_profit_execution_disabled']) ??
+              (finalCandidate?.takeProfitExecutionDisabled ?? false),
       stopLossTriggered: _boolValue(json['stop_loss_triggered']) ??
           (finalCandidate?.stopLossTriggered ?? false),
       takeProfitTriggered: _boolValue(json['take_profit_triggered']) ??
@@ -333,6 +372,12 @@ class KisLimitedAutoSell {
   final bool autoOrderReady;
   final bool realOrderSubmitAllowed;
   final bool stopLossExecutionEnabled;
+  final bool takeProfitReadinessEnabled;
+  final bool takeProfitExecutionEnabled;
+  final bool takeProfitNonActionable;
+  final bool takeProfitActionable;
+  final bool takeProfitReadinessOnly;
+  final bool takeProfitExecutionDisabled;
   final bool stopLossTriggered;
   final bool takeProfitTriggered;
   final bool weakTrendTriggered;
@@ -419,6 +464,9 @@ KisLimitedAutoSellCandidate? _legacyCandidate(Map<String, dynamic> json) {
     'take_profit_triggered': json['take_profit_triggered'] ??
         (json['trigger'] == 'take_profit' ||
             json['exit_trigger'] == 'take_profit'),
+    'take_profit_readiness_only': json['take_profit_readiness_only'],
+    'take_profit_actionable': json['take_profit_actionable'],
+    'take_profit_execution_disabled': json['take_profit_execution_disabled'],
     'status': json['action'] == 'sell' ? 'SELL_READY' : 'HOLD',
     'reason': json['reason'],
     'risk_flags': json['risk_flags'],

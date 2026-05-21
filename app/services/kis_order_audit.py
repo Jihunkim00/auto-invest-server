@@ -10,6 +10,8 @@ EXIT_SHADOW_SOURCE = "kis_exit_shadow_decision"
 EXIT_SHADOW_SOURCE_TYPE = "dry_run_sell_simulation"
 LIMITED_AUTO_SELL_SOURCE = "kis_limited_auto_sell"
 LIMITED_AUTO_SELL_SOURCE_TYPE = "guarded_stop_loss_exit"
+LIMITED_AUTO_TAKE_PROFIT_SOURCE = "kis_limited_auto_take_profit"
+LIMITED_AUTO_TAKE_PROFIT_SOURCE_TYPE = "take_profit_readiness_only"
 LIMITED_AUTO_BUY_SOURCE = "kis_limited_auto_buy"
 LIMITED_AUTO_BUY_SOURCE_TYPE = "guarded_entry"
 PORTFOLIO_MANUAL_SELL_SOURCE = "kis_portfolio_manual_sell"
@@ -18,6 +20,7 @@ PORTFOLIO_MANUAL_SELL_SOURCE_TYPE = "operator_confirmed_position_exit"
 _STRING_KEYS = {
     "source",
     "source_type",
+    "mode",
     "preflight_id",
     "preflight_run_key",
     "preflight_checked_at",
@@ -61,6 +64,10 @@ _BOOL_KEYS = {
     "limited_auto_sell_enabled",
     "stop_loss_auto_sell_enabled",
     "take_profit_auto_sell_enabled",
+    "take_profit_readiness_enabled",
+    "take_profit_readiness_only",
+    "take_profit_actionable",
+    "take_profit_execution_disabled",
     "manual_review_auto_sell_enabled",
     "queue_review_required",
     "limited_auto_sell_real_order_submitted",
@@ -144,6 +151,24 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         result.setdefault("take_profit_auto_sell_enabled", False)
         result.setdefault("manual_review_auto_sell_enabled", False)
         result.setdefault("limited_auto_sell_manual_submit_called", False)
+    if result.get("source") == LIMITED_AUTO_TAKE_PROFIT_SOURCE:
+        result.setdefault("source_type", LIMITED_AUTO_TAKE_PROFIT_SOURCE_TYPE)
+        result.setdefault("manual_confirm_required", False)
+        result.setdefault("auto_buy_enabled", False)
+        result.setdefault("auto_sell_enabled", False)
+        result.setdefault("scheduler_real_order_enabled", False)
+        result.setdefault("real_order_submit_allowed", False)
+        result.setdefault("limited_auto_sell_enabled", False)
+        result.setdefault("stop_loss_auto_sell_enabled", False)
+        result.setdefault("take_profit_auto_sell_enabled", False)
+        result.setdefault("take_profit_readiness_enabled", True)
+        result.setdefault("take_profit_readiness_only", True)
+        result.setdefault("take_profit_actionable", False)
+        result.setdefault("take_profit_execution_disabled", True)
+        result.setdefault("manual_review_auto_sell_enabled", False)
+        result.setdefault("limited_auto_sell_real_order_submitted", False)
+        result.setdefault("limited_auto_sell_broker_submit_called", False)
+        result.setdefault("limited_auto_sell_manual_submit_called", False)
     if result.get("source") == LIMITED_AUTO_BUY_SOURCE:
         result.setdefault("source_type", LIMITED_AUTO_BUY_SOURCE_TYPE)
         result.setdefault("manual_confirm_required", False)
@@ -191,6 +216,12 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "limited_auto_sell_enabled": data.get("limited_auto_sell_enabled"),
         "stop_loss_auto_sell_enabled": data.get("stop_loss_auto_sell_enabled"),
         "take_profit_auto_sell_enabled": data.get("take_profit_auto_sell_enabled"),
+        "take_profit_readiness_enabled": data.get("take_profit_readiness_enabled"),
+        "take_profit_readiness_only": data.get("take_profit_readiness_only"),
+        "take_profit_actionable": data.get("take_profit_actionable"),
+        "take_profit_execution_disabled": data.get(
+            "take_profit_execution_disabled"
+        ),
         "manual_review_auto_sell_enabled": data.get("manual_review_auto_sell_enabled"),
         "queue_review_required": data.get("queue_review_required"),
         "queue_review_status": data.get("queue_review_status"),
@@ -264,6 +295,16 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             ),
             "take_profit_auto_sell_enabled": payload.get(
                 "take_profit_auto_sell_enabled"
+            ),
+            "take_profit_readiness_enabled": payload.get(
+                "take_profit_readiness_enabled"
+            ),
+            "take_profit_readiness_only": payload.get(
+                "take_profit_readiness_only"
+            ),
+            "take_profit_actionable": payload.get("take_profit_actionable"),
+            "take_profit_execution_disabled": payload.get(
+                "take_profit_execution_disabled"
             ),
             "manual_review_auto_sell_enabled": payload.get(
                 "manual_review_auto_sell_enabled"

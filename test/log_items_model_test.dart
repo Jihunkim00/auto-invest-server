@@ -331,6 +331,47 @@ void main() {
     );
   });
 
+  test('TradingLogItem labels take-profit readiness as no-submit readiness',
+      () {
+    final item = TradingLogItem.fromJson({
+      'id': 42,
+      'run_key': 'limited-auto-sell-take-profit',
+      'provider': 'kis',
+      'market': 'KR',
+      'mode': 'kis_limited_auto_stop_loss_run',
+      'source': 'kis_limited_auto_take_profit',
+      'source_type': 'take_profit_readiness_only',
+      'trigger_source': 'limited_auto_sell_run_once',
+      'symbol': '005930',
+      'action': 'review_sell',
+      'result': 'blocked',
+      'reason': 'take_profit_execution_disabled',
+      'created_at': '2026-05-08T00:04:00',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'scheduler_real_order_enabled': false,
+      'exit_trigger': 'take_profit',
+    });
+
+    expect(item.sourceLabel, 'KIS LIMITED AUTO SELL');
+    expect(item.isKisManualLive, isFalse);
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS LIMITED AUTO SELL',
+        'SELL',
+        'TAKE-PROFIT READINESS',
+        'READINESS ONLY',
+        'TAKE-PROFIT EXECUTION DISABLED',
+        'BLOCKED',
+        'NO BROKER SUBMIT',
+        'AUTO BUY DISABLED',
+      ]),
+    );
+    expect(item.safetyBadges, isNot(contains('STOP-LOSS AUTO SELL')));
+  });
+
   test('OrderLogItem labels KIS limited auto buy distinctly', () {
     final item = OrderLogItem.fromJson({
       'id': 43,

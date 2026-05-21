@@ -121,6 +121,11 @@ def test_status_endpoint_returns_default_disabled_off_state(
     assert body["live_auto_sell_enabled"] is False
     assert body["stop_loss_auto_sell_enabled"] is False
     assert body["take_profit_auto_sell_enabled"] is False
+    assert body["take_profit_readiness_enabled"] is True
+    assert body["take_profit_execution_enabled"] is False
+    assert body["take_profit_non_actionable"] is True
+    assert body["supported_triggers"]["stop_loss"]["mode"] == "guarded_execution"
+    assert body["supported_triggers"]["take_profit"]["mode"] == "readiness_only"
     assert body["scheduler_real_orders_enabled"] is False
     assert body["dry_run"] is True
     assert body["kill_switch"] is False
@@ -137,6 +142,8 @@ def test_status_endpoint_returns_default_disabled_off_state(
     assert body["safety"]["real_order_submitted"] is False
     assert body["safety"]["broker_submit_called"] is False
     assert body["safety"]["manual_submit_called"] is False
+    assert body["safety"]["take_profit_execution_enabled"] is False
+    assert body["safety"]["take_profit_non_actionable"] is True
     assert db_session.query(OrderLog).count() == 0
     assert db_session.query(SignalLog).count() == 0
     assert db_session.query(TradeRunLog).count() == 0
@@ -210,6 +217,51 @@ def test_preflight_valid_stop_loss_candidate_returns_sell_ready(db_session):
     assert db_session.query(TradeRunLog).count() == 0
 
 
+def test_preflight_returns_take_profit_candidate_as_readiness_only(
+    monkeypatch,
+    db_session,
+):
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("take-profit preflight must not validate"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("take-profit preflight must not submit"),
+    )
+    service = _service(client=_FakeClient(positions=[_take_profit_position()]))
+
+    result = service.preflight_once(db_session)
+
+    candidate = result["final_candidate"]
+    assert result["result"] == "preview_only"
+    assert result["action"] == "review_sell"
+    assert result["source"] == "kis_limited_auto_take_profit"
+    assert result["source_type"] == "take_profit_readiness_only"
+    assert result["take_profit_readiness_enabled"] is True
+    assert result["take_profit_execution_enabled"] is False
+    assert result["take_profit_non_actionable"] is True
+    assert result["real_order_submit_allowed"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert candidate["status"] == "TAKE_PROFIT_READY"
+    assert candidate["stop_loss_triggered"] is False
+    assert candidate["take_profit_triggered"] is True
+    assert candidate["take_profit_readiness_only"] is True
+    assert candidate["take_profit_actionable"] is False
+    assert candidate["take_profit_execution_disabled"] is True
+    assert candidate["trigger_source"] == "take_profit"
+    assert "take_profit_execution_disabled" in candidate["block_reasons"]
+    assert "take_profit_readiness_only" in candidate["block_reasons"]
+    assert "take_profit_execution_disabled" in result["block_reasons"]
+    assert result["audit_metadata"]["source"] == "kis_limited_auto_take_profit"
+    assert result["audit_metadata"]["source_type"] == "take_profit_readiness_only"
+    assert db_session.query(OrderLog).count() == 0
+    assert db_session.query(SignalLog).count() == 0
+    assert db_session.query(TradeRunLog).count() == 0
+
+
 def test_runtime_defaults_expose_safe_limited_auto_sell_aliases(db_session):
     settings = RuntimeSettingService().get_settings(db_session)
 
@@ -218,8 +270,12 @@ def test_runtime_defaults_expose_safe_limited_auto_sell_aliases(db_session):
     assert settings["kis_live_auto_sell_enabled"] is False
     assert settings["kis_limited_auto_stop_loss_enabled"] is False
     assert settings["kis_limited_auto_take_profit_enabled"] is False
+    assert settings["kis_limited_auto_take_profit_readiness_enabled"] is True
+    assert settings["kis_limited_auto_take_profit_requires_valid_cost_basis"] is True
+    assert settings["kis_limited_auto_take_profit_min_profit_pct"] == pytest.approx(0.03)
     assert settings["kis_limited_auto_sell_stop_loss_enabled"] is False
     assert settings["kis_limited_auto_sell_take_profit_enabled"] is False
+    assert settings["kis_limited_auto_sell_take_profit_readiness_enabled"] is True
     assert settings["kis_limited_auto_sell_max_orders_per_day"] == 1
     assert settings["kis_limited_auto_sell_requires_valid_cost_basis"] is True
     assert settings["kis_scheduler_allow_real_orders"] is False
@@ -233,6 +289,8 @@ def test_missing_cost_basis_requires_manual_review_and_blocks_auto_sell(db_sessi
     candidate = result["final_candidate"]
     assert candidate["status"] == "REVIEW_SELL"
     assert candidate["stop_loss_triggered"] is False
+    assert candidate["take_profit_triggered"] is False
+    assert candidate["take_profit_readiness_only"] is False
     assert candidate["unrealized_pl_pct"] is None
     assert "manual_review_required" in candidate["block_reasons"]
     assert "missing_cost_basis" in candidate["block_reasons"]
@@ -300,18 +358,108 @@ def test_run_once_kill_switch_blocks(db_session):
     assert result["real_order_submitted"] is False
 
 
-def test_run_once_does_not_respond_to_take_profit_trigger(db_session):
+def test_run_once_does_not_respond_to_take_profit_trigger(monkeypatch, db_session):
     _enable_runtime(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("take-profit run must not validate"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("take-profit run must not submit"),
+    )
     service = _service(client=_FakeClient(positions=[_take_profit_position()]))
 
     result = service.run_once(db_session)
 
     assert result["result"] == "blocked"
-    assert result["reason"] == "take_profit_auto_sell_disabled"
+    assert result["reason"] == "take_profit_execution_disabled"
+    assert result["primary_block_reason"] == "take_profit_execution_disabled"
+    assert result["action"] == "review_sell"
+    assert result["source"] == "kis_limited_auto_take_profit"
+    assert result["source_type"] == "take_profit_readiness_only"
+    assert result["take_profit_execution_enabled"] is False
+    assert result["take_profit_non_actionable"] is True
     assert result["final_candidate"]["take_profit_triggered"] is True
     assert result["final_candidate"]["stop_loss_triggered"] is False
+    assert result["validation_status"] == "not_called"
     assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
     assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_prioritizes_stop_loss_when_take_profit_flag_also_present(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(db_session)
+    validation_calls = []
+    manual_calls = []
+
+    def fake_thresholds(position, **kwargs):
+        return ["stop_loss_triggered", "take_profit_triggered"], {
+            "cost_basis": 100_000,
+            "current_value": 96_000,
+            "unrealized_pl": -4_000,
+            "unrealized_pl_pct": -0.04,
+            "take_profit_threshold_pct": 3.0,
+            "stop_loss_threshold_pct": 2.0,
+            "exit_trigger_source": "cost_basis",
+            "pl_input_warning": None,
+        }
+
+    def fake_validate(self, request, *, now=None):
+        validation_calls.append(request)
+        metadata = request.source_metadata
+        assert metadata["source"] == "kis_limited_auto_stop_loss"
+        assert metadata["source_type"] == "guarded_stop_loss_auto_sell"
+        assert metadata["stop_loss_triggered"] is True
+        assert metadata["take_profit_triggered"] is False
+        assert metadata["take_profit_triggered_ignored"] is True
+        return _FakeValidationResult(validated=True)
+
+    def fake_submit_manual(self, db, request, *, now=None):
+        manual_calls.append(request)
+        return 200, {
+            "real_order_submitted": True,
+            "broker_submit_called": True,
+            "manual_submit_called": True,
+            "order_id": 456,
+            "order_log_id": 456,
+            "broker_order_id": "STOPLOSS456",
+            "kis_odno": "STOPLOSS456",
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.position_exit_threshold_reasons",
+        fake_thresholds,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.record_kis_order_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit_manual,
+    )
+
+    result = _service().run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert len(manual_calls) == 1
+    assert result["result"] == "submitted"
+    assert result["action"] == "sell"
+    assert result["source"] == "kis_limited_auto_stop_loss"
+    assert result["source_type"] == "guarded_stop_loss_auto_sell"
+    assert result["stop_loss_triggered"] is True
+    assert result["take_profit_triggered"] is True
+    assert result["real_order_submitted"] is True
+    assert result["order_id"] == 456
 
 
 def test_no_held_position_blocks_without_submit(monkeypatch, db_session):
