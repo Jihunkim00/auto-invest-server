@@ -1920,11 +1920,15 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           const _SoftBadge(
-              text: 'STOP-LOSS ONLY', color: Colors.lightBlueAccent),
+              text: 'STOP-LOSS EXECUTION', color: Colors.lightBlueAccent),
+          const _SoftBadge(
+              text: 'TAKE-PROFIT READINESS ONLY',
+              color: Colors.lightBlueAccent),
+          const _SoftBadge(
+              text: 'TAKE-PROFIT EXECUTION DISABLED',
+              color: Colors.amberAccent),
           const _SoftBadge(text: 'GUARDED EXECUTION', color: Colors.white70),
           const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
-          const _SoftBadge(
-              text: 'TAKE-PROFIT DISABLED', color: Colors.amberAccent),
           const _SoftBadge(
               text: 'AUTO BUY DISABLED', color: Colors.orangeAccent),
           const _SoftBadge(
@@ -1970,6 +1974,15 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
           _ResultPair(
               label: 'stop_loss_execution_enabled',
               value: _boolText(result?.stopLossExecutionEnabled ?? false)),
+          _ResultPair(
+              label: 'take_profit_readiness_enabled',
+              value: _boolText(result?.takeProfitReadinessEnabled ?? true)),
+          _ResultPair(
+              label: 'take_profit_execution_enabled',
+              value: _boolText(result?.takeProfitExecutionEnabled ?? false)),
+          _ResultPair(
+              label: 'take_profit_non_actionable',
+              value: _boolText(result?.takeProfitNonActionable ?? true)),
           _ResultPair(
               label: 'auto_order_ready',
               value: _boolText(result?.autoOrderReady ?? false)),
@@ -2119,6 +2132,15 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         _ResultPair(
             label: 'stop-loss trigger',
             value: _boolText(result.stopLossTriggered)),
+        _ResultPair(
+            label: 'take-profit trigger',
+            value: _boolText(result.takeProfitTriggered)),
+        _ResultPair(
+            label: 'take-profit readiness',
+            value: result.takeProfitReadinessOnly ? 'readiness only' : 'n/a'),
+        _ResultPair(
+            label: 'take-profit execution',
+            value: result.takeProfitExecutionEnabled ? 'enabled' : 'disabled'),
         _ResultPair(label: 'dry_run', value: _boolText(result.dryRun)),
         _ResultPair(label: 'kill_switch', value: _boolText(result.killSwitch)),
         _ResultPair(
@@ -2173,7 +2195,8 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
               text: label,
               color: label == 'BROKER SUBMIT CALLED'
                   ? Colors.redAccent
-                  : label == 'STOP-LOSS ONLY'
+                  : label == 'STOP-LOSS EXECUTION' ||
+                          label == 'TAKE-PROFIT READINESS ONLY'
                       ? Colors.lightBlueAccent
                       : label.contains('DISABLED') || label == 'DEFAULT OFF'
                           ? Colors.amberAccent
@@ -2224,7 +2247,7 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
             ),
           ),
           _SoftBadge(
-            text: _autoSellStatusLabel(candidate.status),
+            text: _autoSellTriggerBadgeLabel(candidate),
             color: _autoSellStatusColor(candidate.status),
           ),
         ]),
@@ -2251,8 +2274,7 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
               value: _formatThresholdPct(candidate.stopLossThresholdPct)),
           _ResultPair(
               label: 'take-profit',
-              value:
-                  'Disabled (${_formatThresholdPct(candidate.takeProfitThresholdPct)})'),
+              value: _formatThresholdPct(candidate.takeProfitThresholdPct)),
           _ResultPair(
               label: 'status', value: _autoSellStatusLabel(candidate.status)),
           _ResultPair(
@@ -2269,8 +2291,15 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
         const SizedBox(height: 8),
         _StateLine(
           text:
-              'Triggers: stop_loss=${_boolText(candidate.stopLossTriggered)}, take_profit_ignored=${_boolText(candidate.takeProfitTriggered)}, weak_trend=${_boolText(candidate.weakTrendTriggered)}, sell_pressure=${_boolText(candidate.sellPressureTriggered)}',
+              'Triggers: stop_loss=${_boolText(candidate.stopLossTriggered)}, take_profit=${_boolText(candidate.takeProfitTriggered)}, weak_trend=${_boolText(candidate.weakTrendTriggered)}, sell_pressure=${_boolText(candidate.sellPressureTriggered)}',
         ),
+        if (candidate.takeProfitTriggered) ...[
+          const SizedBox(height: 8),
+          const _StateLine(
+            text:
+                'Take-profit: Readiness only. Execution disabled. No broker submit.',
+          ),
+        ],
         const SizedBox(height: 8),
         _StateLine(
           text:
@@ -4323,10 +4352,11 @@ List<String> _limitedAutoSellLabels(KisLimitedAutoSell result) {
     if (!labels.contains(normalized)) labels.add(normalized);
   }
 
-  add('STOP-LOSS ONLY');
+  add('STOP-LOSS EXECUTION');
+  add('TAKE-PROFIT READINESS ONLY');
+  add('TAKE-PROFIT EXECUTION DISABLED');
   add('GUARDED EXECUTION');
   add('DEFAULT OFF');
-  add('TAKE-PROFIT DISABLED');
   add('AUTO BUY DISABLED');
   add('SCHEDULER REAL ORDERS DISABLED');
   add(brokerBadge);
@@ -4382,15 +4412,23 @@ String _formatThresholdPct(double? value) {
 
 String _autoSellStatusLabel(String value) {
   final normalized = value.trim().toUpperCase().replaceAll('_', ' ');
+  if (normalized == 'TAKE PROFIT READY') return 'TAKE PROFIT READY';
   if (normalized == 'REVIEW SELL') return 'REVIEW SELL';
   if (normalized == 'SELL READY') return 'SELL READY';
   if (normalized == 'HOLD') return 'HOLD';
   return normalized.isEmpty ? 'HOLD' : normalized;
 }
 
+String _autoSellTriggerBadgeLabel(KisLimitedAutoSellCandidate candidate) {
+  if (candidate.stopLossTriggered) return 'STOP-LOSS READY';
+  if (candidate.takeProfitTriggered) return 'TAKE-PROFIT READY';
+  return _autoSellStatusLabel(candidate.status);
+}
+
 Color _autoSellStatusColor(String value) {
   final normalized = value.trim().toUpperCase();
   if (normalized == 'SELL_READY') return Colors.greenAccent;
+  if (normalized == 'TAKE_PROFIT_READY') return Colors.lightBlueAccent;
   if (normalized == 'REVIEW_SELL') return Colors.amberAccent;
   return Colors.white70;
 }
