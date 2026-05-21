@@ -1918,15 +1918,23 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 8),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _SoftBadge(text: 'READINESS ONLY', color: Colors.white70),
-          _SoftBadge(text: 'STOP-LOSS ONLY', color: Colors.lightBlueAccent),
-          _SoftBadge(text: 'TAKE-PROFIT DISABLED', color: Colors.amberAccent),
-          _SoftBadge(text: 'AUTO BUY DISABLED', color: Colors.orangeAccent),
-          _SoftBadge(
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'STOP-LOSS ONLY', color: Colors.lightBlueAccent),
+          const _SoftBadge(text: 'GUARDED EXECUTION', color: Colors.white70),
+          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'TAKE-PROFIT DISABLED', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'AUTO BUY DISABLED', color: Colors.orangeAccent),
+          const _SoftBadge(
               text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
-          _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
-          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(
+            text: _limitedAutoSellBrokerBadge(result),
+            color: result?.brokerSubmitActuallyCalled == true
+                ? Colors.redAccent
+                : Colors.orangeAccent,
+          ),
         ]),
         const SizedBox(height: 12),
         Wrap(spacing: 14, runSpacing: 8, children: [
@@ -1956,9 +1964,12 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
               value: result?.sellSessionAllowed == true ? 'Open' : 'Blocked'),
           _ResultPair(
               label: 'daily limit',
-              value: (result?.safetyInt('max_orders_per_day') ??
-                      settings.kisLimitedAutoSellMaxOrdersPerDay)
-                  .toString()),
+              value: result == null
+                  ? 'n/a / ${settings.kisLimitedAutoSellMaxOrdersPerDay}'
+                  : _limitedAutoSellDailyLimitLabel(result)),
+          _ResultPair(
+              label: 'stop_loss_execution_enabled',
+              value: _boolText(result?.stopLossExecutionEnabled ?? false)),
           _ResultPair(
               label: 'auto_order_ready',
               value: _boolText(result?.autoOrderReady ?? false)),
@@ -2063,6 +2074,17 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final candidate = result.finalCandidate;
+    final symbol = result.symbol ?? candidate?.symbol ?? 'n/a';
+    final company = candidate?.name ?? 'n/a';
+    final quantity = result.quantity ?? candidate?.quantity;
+    final currentPrice = result.currentPrice ?? candidate?.currentPrice;
+    final costBasis = result.costBasis ?? candidate?.costBasis;
+    final currentValue =
+        result.notional ?? result.currentValue ?? candidate?.currentValue;
+    final unrealizedPl = result.unrealizedPl ?? candidate?.unrealizedPl;
+    final unrealizedPlPct =
+        result.unrealizedPlPct ?? candidate?.unrealizedPlPct;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (result.submitted) ...[
         _StateLine(
@@ -2079,6 +2101,46 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         _ResultPair(label: 'mode', value: result.mode),
         _ResultPair(
             label: 'candidate_count', value: result.candidateCount.toString()),
+        _ResultPair(label: 'symbol', value: symbol),
+        _ResultPair(label: 'company', value: company),
+        _ResultPair(label: 'quantity', value: quantity?.toString() ?? 'n/a'),
+        _ResultPair(
+            label: 'current price',
+            value: _formatReviewKrwOrDash(currentPrice)),
+        _ResultPair(
+            label: 'current notional',
+            value: _formatReviewKrwOrDash(currentValue)),
+        _ResultPair(
+            label: 'cost basis', value: _formatReviewKrwOrDash(costBasis)),
+        _ResultPair(
+            label: 'P/L',
+            value:
+                '${_formatReviewKrwOrDash(unrealizedPl)} / ${_formatPercentFromDecimal(unrealizedPlPct)}'),
+        _ResultPair(
+            label: 'stop-loss trigger',
+            value: _boolText(result.stopLossTriggered)),
+        _ResultPair(label: 'dry_run', value: _boolText(result.dryRun)),
+        _ResultPair(label: 'kill_switch', value: _boolText(result.killSwitch)),
+        _ResultPair(
+            label: 'kis_real_order_enabled',
+            value: _boolText(result.kisRealOrderEnabled)),
+        _ResultPair(
+            label: 'live_auto_sell_enabled',
+            value: _boolText(result.liveAutoSellEnabled)),
+        _ResultPair(
+            label: 'stop_loss_auto_sell_enabled',
+            value: _boolText(result.stopLossAutoSellEnabled)),
+        _ResultPair(
+            label: 'daily limit',
+            value: _limitedAutoSellDailyLimitLabel(result)),
+        _ResultPair(
+            label: 'duplicate sell',
+            value: _limitedAutoSellDuplicateLabel(result)),
+        _ResultPair(
+            label: 'validation',
+            value: result.validationStatus.isEmpty
+                ? 'not_called'
+                : result.validationStatus),
         _ResultPair(
             label: 'real_order_submitted',
             value: _boolText(result.realOrderSubmitted)),
@@ -2091,42 +2153,34 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
         if (result.orderId != null)
           _ResultPair(label: 'order id', value: result.orderId.toString()),
         if (result.kisOdno != null)
-          _ResultPair(label: 'ODNO', value: result.kisOdno!),
+          _ResultPair(label: 'KIS ODNO', value: result.kisOdno!),
       ]),
+      if (result.primaryBlockReason != null) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'primary_block_reason: ${result.primaryBlockReason}'),
+      ],
       if (result.blockReasons.isNotEmpty) ...[
         const SizedBox(height: 8),
         _StateLine(text: 'block_reasons: ${_joinList(result.blockReasons)}'),
       ],
       const SizedBox(height: 10),
-      Wrap(spacing: 8, runSpacing: 8, children: [
-        _SoftBadge(
-          text: 'READINESS ONLY',
-          color: Colors.white70,
-        ),
-        _SoftBadge(
-          text:
-              'STOP-LOSS ${result.stopLossAutoSellEnabled ? 'ENABLED' : 'DISABLED'}',
-          color: Colors.lightBlueAccent,
-        ),
-        _SoftBadge(
-          text: 'TAKE-PROFIT DISABLED',
-          color: Colors.amberAccent,
-        ),
-        _SoftBadge(
-          text: 'AUTO BUY DISABLED',
-          color: Colors.orangeAccent,
-        ),
-        _SoftBadge(
-          text: 'SCHEDULER REAL ORDERS DISABLED',
-          color: Colors.orangeAccent,
-        ),
-        _SoftBadge(
-          text: result.realOrderSubmitted
-              ? 'BROKER SUBMIT CALLED'
-              : 'NO BROKER SUBMIT',
-          color: Colors.orangeAccent,
-        ),
-      ]),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final label in _limitedAutoSellLabels(result))
+            _SoftBadge(
+              text: label,
+              color: label == 'BROKER SUBMIT CALLED'
+                  ? Colors.redAccent
+                  : label == 'STOP-LOSS ONLY'
+                      ? Colors.lightBlueAccent
+                      : label.contains('DISABLED') || label == 'DEFAULT OFF'
+                          ? Colors.amberAccent
+                          : Colors.white70,
+            ),
+        ],
+      ),
       if (result.candidates.isNotEmpty) ...[
         const SizedBox(height: 12),
         const Text('Candidates', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -2180,6 +2234,15 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
               label: 'quantity',
               value: candidate.quantity?.toString() ?? 'n/a'),
           _ResultPair(
+              label: 'current price',
+              value: _formatReviewKrwOrDash(candidate.currentPrice)),
+          _ResultPair(
+              label: 'cost basis',
+              value: _formatReviewKrwOrDash(candidate.costBasis)),
+          _ResultPair(
+              label: 'current value',
+              value: _formatReviewKrwOrDash(candidate.currentValue)),
+          _ResultPair(
               label: 'P/L',
               value:
                   '${_formatReviewKrwOrDash(candidate.unrealizedPl)} / ${_formatPercentFromDecimal(candidate.unrealizedPlPct)}'),
@@ -2206,8 +2269,17 @@ class _KisLimitedAutoSellCandidateCard extends StatelessWidget {
         const SizedBox(height: 8),
         _StateLine(
           text:
-              'Safety flags: stop_loss=${_boolText(candidate.stopLossTriggered)}, take_profit_disabled=${_boolText(candidate.takeProfitTriggered)}, duplicate_sell=${_boolText(candidate.latestOrder.isNotEmpty)}',
+              'Triggers: stop_loss=${_boolText(candidate.stopLossTriggered)}, take_profit_ignored=${_boolText(candidate.takeProfitTriggered)}, weak_trend=${_boolText(candidate.weakTrendTriggered)}, sell_pressure=${_boolText(candidate.sellPressureTriggered)}',
         ),
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'Safety flags: duplicate_sell=${_boolText(candidate.latestOrder.isNotEmpty)}, risk_flags=${_joinList(candidate.riskFlags)}',
+        ),
+        if (candidate.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'Gating notes: ${_joinList(candidate.gatingNotes)}'),
+        ],
       ]),
     );
   }
@@ -4229,6 +4301,58 @@ String _formatKrwOrDash(double? value) {
 String _formatPercentFromDecimal(double? value) {
   if (value == null) return 'n/a';
   return _formatPercentValue(value * 100, signed: true);
+}
+
+String _limitedAutoSellBrokerBadge(KisLimitedAutoSell? result) {
+  if (result?.brokerSubmitActuallyCalled == true) {
+    return 'BROKER SUBMIT CALLED';
+  }
+  return 'NO BROKER SUBMIT';
+}
+
+List<String> _limitedAutoSellLabels(KisLimitedAutoSell result) {
+  final brokerBadge = _limitedAutoSellBrokerBadge(result);
+  final labels = <String>[];
+  void add(String label) {
+    final normalized = label.trim();
+    if (normalized.isEmpty) return;
+    if (normalized == 'NO BROKER SUBMIT' && brokerBadge != normalized) return;
+    if (normalized == 'BROKER SUBMIT CALLED' && brokerBadge != normalized) {
+      return;
+    }
+    if (!labels.contains(normalized)) labels.add(normalized);
+  }
+
+  add('STOP-LOSS ONLY');
+  add('GUARDED EXECUTION');
+  add('DEFAULT OFF');
+  add('TAKE-PROFIT DISABLED');
+  add('AUTO BUY DISABLED');
+  add('SCHEDULER REAL ORDERS DISABLED');
+  add(brokerBadge);
+  for (final label in result.readinessLabels) {
+    add(label);
+  }
+  return labels;
+}
+
+String _limitedAutoSellDailyLimitLabel(KisLimitedAutoSell result) {
+  final remaining = result.dailyLimitRemaining ??
+      result.dailyLimitInt('daily_limit_remaining');
+  final maxOrders = result.dailyLimitInt('max_orders_per_day') ??
+      result.safetyInt('max_orders_per_day');
+  final submitted = result.dailyLimitInt('submitted_count_today');
+  final base =
+      '${remaining?.toString() ?? 'n/a'} remaining / ${maxOrders?.toString() ?? 'n/a'} max';
+  if (submitted == null) return base;
+  return '$base, $submitted used';
+}
+
+String _limitedAutoSellDuplicateLabel(KisLimitedAutoSell result) {
+  final duplicate = result.duplicateOrderFlag('duplicate_open_sell_order') ||
+      (result.finalCandidate?.latestOrder.isNotEmpty ?? false);
+  if (duplicate) return 'blocked: duplicate open sell';
+  return 'clear';
 }
 
 String _formatSafePlPercent(KisLiveExitCandidate candidate) {

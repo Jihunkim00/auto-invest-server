@@ -43,8 +43,9 @@ RUN_MODE = "kis_limited_auto_stop_loss_run"
 MODE = RUN_MODE
 SOURCE = "kis_limited_auto_stop_loss"
 PREFLIGHT_SOURCE_TYPE = "limited_auto_sell_preflight"
-RUN_SOURCE_TYPE = "limited_auto_sell_run"
+RUN_SOURCE_TYPE = "guarded_stop_loss_auto_sell"
 TRIGGER_SOURCE = "kis_limited_auto_sell"
+RUN_TRIGGER_SOURCE = "limited_auto_sell_run_once"
 STOP_LOSS_TRIGGER = "stop_loss"
 TAKE_PROFIT_TRIGGER = "take_profit"
 KR_TZ = ZoneInfo("Asia/Seoul")
@@ -132,9 +133,11 @@ class KisLimitedAutoSellService:
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         context = self._context(db, now=now)
         block_reasons = _status_block_reasons(context)
+        daily_limit = self._daily_limit_state(db, context=context, symbol=None)
         payload = _status_payload(
             context=context,
             block_reasons=block_reasons,
+            daily_limit=daily_limit,
             result="blocked" if block_reasons else "ready",
             reason=block_reasons[0] if block_reasons else "base_gates_ready",
         )
@@ -225,7 +228,7 @@ class KisLimitedAutoSellService:
                 mode=RUN_MODE,
                 source_type=RUN_SOURCE_TYPE,
                 result="blocked",
-                action=_action_for_candidate(final_candidate),
+                action=_run_blocked_action(final_candidate),
                 reason=run_blocks[0],
                 account_state=account_state,
                 candidates=candidates,
@@ -264,7 +267,7 @@ class KisLimitedAutoSellService:
                 mode=RUN_MODE,
                 source_type=RUN_SOURCE_TYPE,
                 result="blocked",
-                action=_action_for_candidate(final_candidate),
+                action=_run_blocked_action(final_candidate),
                 reason=validation_block[0],
                 account_state=account_state,
                 candidates=candidates,
@@ -553,35 +556,38 @@ class KisLimitedAutoSellService:
                 reasons.append(final_candidate.exit_reason or "no_stop_loss_candidate")
         if final_candidate.cost_basis is None or final_candidate.cost_basis <= 0:
             reasons.extend(["manual_review_required", "missing_cost_basis"])
+        if final_candidate.current_price is None or final_candidate.current_price <= 0:
+            reasons.append("current_price_unavailable")
+        if final_candidate.unrealized_pl_pct is None:
+            reasons.extend(["manual_review_required", "missing_or_ambiguous_pl_basis"])
+        if final_candidate.status != SELL_READY and not final_candidate.block_reasons:
+            reasons.append(final_candidate.exit_reason or "candidate_not_sell_ready")
         if final_candidate.quantity <= 0:
             reasons.append("quantity_not_positive")
         if not context.sell_session_allowed:
             reasons.append("sell_session_not_allowed")
         if final_candidate.duplicate_open_sell_order:
             reasons.append("duplicate_open_sell_order")
-        daily_reason = self._daily_limit_reason(
-            db,
-            context=context,
-            symbol=final_candidate.symbol,
+        daily_limit = self._daily_limit_state(
+            db, context=context, symbol=final_candidate.symbol
         )
+        daily_reason = _daily_limit_block_reason(daily_limit)
         if daily_reason:
             reasons.append(daily_reason)
         reasons.extend(final_candidate.block_reasons)
         return _dedupe(reasons)
 
-    def _daily_limit_reason(
+    def _daily_limit_state(
         self,
         db: Session,
         *,
         context: _Context,
-        symbol: str,
-    ) -> str | None:
+        symbol: str | None,
+    ) -> dict[str, Any]:
         max_orders = max(
             0,
             int(context.runtime.get("kis_limited_auto_sell_max_orders_per_day", 1) or 0),
         )
-        if max_orders <= 0:
-            return "daily_auto_sell_limit_reached"
         start_utc, end_utc = _day_bounds_utc(context.now_utc)
         rows = (
             db.query(OrderLog)
@@ -593,6 +599,7 @@ class KisLimitedAutoSellService:
         )
         total = 0
         symbol_total = 0
+        normalized_symbol = str(symbol or "").upper()
         for row in rows:
             if not _is_limited_auto_stop_loss_order(row):
                 continue
@@ -600,13 +607,17 @@ class KisLimitedAutoSellService:
             if status not in SUBMITTED_STATUSES:
                 continue
             total += 1
-            if str(row.symbol or "").upper() == symbol.upper():
+            if normalized_symbol and str(row.symbol or "").upper() == normalized_symbol:
                 symbol_total += 1
-        if symbol_total > 0:
-            return "symbol_already_auto_sold_today"
-        if total >= max_orders:
-            return "daily_auto_sell_limit_reached"
-        return None
+        return {
+            "max_orders_per_day": max_orders,
+            "submitted_count_today": total,
+            "symbol_submitted_count_today": symbol_total,
+            "daily_limit_remaining": max(0, max_orders - total),
+            "symbol_already_auto_sold_today": symbol_total > 0,
+            "daily_limit_reached": max_orders <= 0 or total >= max_orders,
+            "checked_symbol": normalized_symbol or None,
+        }
 
     def _validate_candidate(
         self,
@@ -633,6 +644,10 @@ class KisLimitedAutoSellService:
                 broker_submit_called=False,
                 manual_submit_called=False,
                 real_order_submit_allowed=False,
+                block_reasons=[],
+                daily_limit=self._daily_limit_state(
+                    db, context=context, symbol=candidate.symbol
+                ),
             ),
         )
         try:
@@ -670,6 +685,10 @@ class KisLimitedAutoSellService:
             broker_submit_called=False,
             manual_submit_called=False,
             real_order_submit_allowed=True,
+            block_reasons=[],
+            daily_limit=self._daily_limit_state(
+                db, context=context, symbol=final_candidate.symbol
+            ),
         )
         confirmation_phrase = str(
             getattr(context.settings, "kis_confirmation_phrase", None)
@@ -705,7 +724,7 @@ class KisLimitedAutoSellService:
             mode=RUN_MODE,
             source_type=RUN_SOURCE_TYPE,
             result="submitted" if submitted else "blocked",
-            action="sell" if submitted else _action_for_candidate(final_candidate),
+            action="sell" if submitted else _run_blocked_action(final_candidate),
             reason=reason,
             account_state=account_state,
             candidates=candidates,
@@ -734,11 +753,27 @@ class KisLimitedAutoSellService:
                 "kis_odno": manual_payload.get("kis_odno"),
             }
         )
+        payload["source_metadata"] = _source_metadata(
+            context=context,
+            candidate=final_candidate,
+            source_type=RUN_SOURCE_TYPE,
+            real_order_submitted=submitted,
+            broker_submit_called=bool(manual_payload.get("broker_submit_called")),
+            manual_submit_called=bool(manual_payload.get("manual_submit_called")),
+            real_order_submit_allowed=submitted,
+            block_reasons=block_reasons,
+            daily_limit=self._daily_limit_state(
+                db, context=context, symbol=final_candidate.symbol
+            ),
+        )
+        payload["audit_metadata"] = payload["source_metadata"]
+        payload.update(kis_order_source_fields(payload["source_metadata"]))
         payload["safety"] = {
             **payload["safety"],
             "real_order_submitted": submitted,
             "broker_submit_called": bool(manual_payload.get("broker_submit_called")),
             "manual_submit_called": bool(manual_payload.get("manual_submit_called")),
+            "no_broker_submit": not submitted,
         }
         signal = self._record_signal(
             db,
@@ -778,6 +813,11 @@ class KisLimitedAutoSellService:
         diagnostics_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         status_block_reasons = _status_block_reasons(context)
+        daily_limit = self._daily_limit_state(
+            db,
+            context=context,
+            symbol=final_candidate.symbol if final_candidate else None,
+        )
         candidate_payloads = [_candidate_payload(candidate) for candidate in candidates]
         final_payload = (
             _candidate_payload(final_candidate) if final_candidate is not None else None
@@ -796,6 +836,8 @@ class KisLimitedAutoSellService:
                 broker_submit_called=False,
                 manual_submit_called=False,
                 real_order_submit_allowed=False,
+                block_reasons=block_reasons,
+                daily_limit=daily_limit,
             )
             if final_candidate is not None
             else None
@@ -805,14 +847,26 @@ class KisLimitedAutoSellService:
             "positions_evaluated": len(candidates),
             "candidate_selected": final_candidate is not None,
             "status_block_reasons": status_block_reasons,
+            "daily_limit": daily_limit,
             "account_state": _account_state_summary(account_state or {}),
             "market_session": _public_market_session(context.market_session),
             "cost_basis_required_for_stop_loss": True,
             "take_profit_actionable": False,
             "read_only": read_only,
         }
+        validation_payload = (
+            diagnostics.get("validation")
+            if isinstance(diagnostics.get("validation"), dict)
+            else None
+        )
         if diagnostics_extra:
             diagnostics.update(diagnostics_extra)
+            validation_payload = (
+                diagnostics.get("validation")
+                if isinstance(diagnostics.get("validation"), dict)
+                else None
+            )
+        validation_status = _validation_status(validation_payload, read_only=read_only)
         payload: dict[str, Any] = {
             "status": "ok",
             "provider": PROVIDER,
@@ -820,10 +874,11 @@ class KisLimitedAutoSellService:
             "mode": mode,
             "source": SOURCE,
             "source_type": source_type,
-            "trigger_source": TRIGGER_SOURCE,
+            "trigger_source": _trigger_source(source_type),
             "result": result,
             "action": action,
             "reason": reason,
+            "primary_block_reason": all_block_reasons[0] if all_block_reasons else None,
             "human_readable_status": _human_status(result, reason, all_block_reasons),
             "candidate_count": len(candidate_payloads),
             "candidates": candidate_payloads,
@@ -867,6 +922,7 @@ class KisLimitedAutoSellService:
             "exit_trigger_source": (
                 final_candidate.trigger_source if final_candidate else None
             ),
+            "side": SELL,
             "stop_loss_triggered": bool(
                 final_candidate and final_candidate.stop_loss_triggered
             ),
@@ -903,7 +959,28 @@ class KisLimitedAutoSellService:
                 and final_candidate.stop_loss_triggered
                 and not all_block_reasons
             ),
-            "real_order_submit_allowed": False,
+            "real_order_submit_allowed": bool(
+                source_type == RUN_SOURCE_TYPE
+                and final_candidate is not None
+                and final_candidate.stop_loss_triggered
+                and not all_block_reasons
+                and not read_only
+            ),
+            "stop_loss_execution_enabled": (
+                not status_block_reasons
+                and daily_limit["daily_limit_remaining"] > 0
+            ),
+            "daily_limit_remaining": daily_limit["daily_limit_remaining"],
+            "daily_limit": daily_limit,
+            "duplicate_order_check": {
+                "duplicate_open_sell_order": bool(
+                    final_candidate and final_candidate.duplicate_open_sell_order
+                ),
+                "latest_related_sell_order": (
+                    final_candidate.latest_order if final_candidate else None
+                ),
+            },
+            "validation_status": validation_status,
             "block_reasons": all_block_reasons,
             "blocked_by": all_block_reasons,
             "failed_checks": all_block_reasons,
@@ -917,7 +994,7 @@ class KisLimitedAutoSellService:
             ),
             "gating_notes": _dedupe(
                 [
-                    "readiness_only" if read_only else "guarded_run_once",
+                    "readiness_only" if read_only else "guarded_execution",
                     "stop_loss_only",
                     "take_profit_disabled",
                     "auto_buy_disabled",
@@ -930,6 +1007,10 @@ class KisLimitedAutoSellService:
             "source_metadata": metadata,
             "market_session": _public_market_session(context.market_session),
             "account_state": _account_state_summary(account_state or {}),
+            "readiness_labels": _readiness_labels(
+                read_only=read_only,
+                submitted=result == "submitted",
+            ),
             "created_at": context.created_at,
             "checked_at": context.created_at,
         }
@@ -955,7 +1036,7 @@ class KisLimitedAutoSellService:
             approved_by_risk=payload.get("real_order_submitted") is True,
             related_order_id=related_order_id,
             signal_status=source_type,
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=_trigger_source(source_type),
             hard_block_reason=(
                 None
                 if payload.get("real_order_submitted") is True
@@ -982,7 +1063,7 @@ class KisLimitedAutoSellService:
     ) -> TradeRunLog:
         run = TradeRunLog(
             run_key=f"kis_limited_auto_sell_{uuid.uuid4().hex[:10]}",
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=_trigger_source(source_type),
             symbol=(candidate.symbol if candidate else None) or "WATCHLIST",
             mode=mode,
             stage="done",
@@ -997,7 +1078,7 @@ class KisLimitedAutoSellService:
                     "mode": mode,
                     "source": SOURCE,
                     "source_type": source_type,
-                    "trigger_source": TRIGGER_SOURCE,
+                    "trigger_source": _trigger_source(source_type),
                     "real_order_submitted": payload.get("real_order_submitted") is True,
                     "broker_submit_called": payload.get("broker_submit_called") is True,
                     "manual_submit_called": payload.get("manual_submit_called") is True,
@@ -1015,6 +1096,7 @@ def _status_payload(
     *,
     context: _Context,
     block_reasons: list[str],
+    daily_limit: dict[str, Any],
     result: str,
     reason: str,
 ) -> dict[str, Any]:
@@ -1025,10 +1107,11 @@ def _status_payload(
         "mode": STATUS_MODE,
         "source": SOURCE,
         "source_type": "limited_auto_sell_status",
-        "trigger_source": TRIGGER_SOURCE,
+        "trigger_source": "limited_auto_sell_status",
         "result": result,
         "action": "hold",
         "reason": reason,
+        "primary_block_reason": block_reasons[0] if block_reasons else None,
         "live_auto_sell_enabled": context.live_auto_sell_enabled,
         "stop_loss_auto_sell_enabled": context.stop_loss_enabled,
         "take_profit_auto_sell_enabled": False,
@@ -1041,8 +1124,13 @@ def _status_payload(
         ),
         "market_open": context.market_session.get("is_market_open") is True,
         "sell_session_allowed": context.sell_session_allowed,
-        "auto_order_ready": not block_reasons,
+        "auto_order_ready": False,
         "real_order_submit_allowed": False,
+        "stop_loss_execution_enabled": (
+            not block_reasons and daily_limit["daily_limit_remaining"] > 0
+        ),
+        "daily_limit_remaining": daily_limit["daily_limit_remaining"],
+        "daily_limit": daily_limit,
         "block_reasons": block_reasons,
         "blocked_by": block_reasons,
         "human_readable_status": _human_status(result, reason, block_reasons),
@@ -1071,11 +1159,13 @@ def _status_payload(
             "status_only": True,
             "positions_evaluated": 0,
             "market_session": _public_market_session(context.market_session),
+            "daily_limit": daily_limit,
             "runtime_aliases": {
                 "kis_limited_auto_stop_loss_enabled": context.stop_loss_enabled,
                 "kis_limited_auto_take_profit_enabled": False,
             },
         },
+        "readiness_labels": _readiness_labels(read_only=True, submitted=False),
         "market_session": _public_market_session(context.market_session),
         "created_at": context.created_at,
         "checked_at": context.created_at,
@@ -1142,6 +1232,7 @@ def _safety_payload(
         "read_only": read_only,
         "readiness_only": source_type != RUN_SOURCE_TYPE,
         "preflight_only": source_type == PREFLIGHT_SOURCE_TYPE,
+        "guarded_execution": source_type == RUN_SOURCE_TYPE,
         "stop_loss_only": True,
         "take_profit_disabled": True,
         "take_profit_auto_sell_enabled": False,
@@ -1194,6 +1285,14 @@ def _run_pre_account_block_reasons(context: _Context) -> list[str]:
     return _status_block_reasons(context)
 
 
+def _daily_limit_block_reason(daily_limit: dict[str, Any]) -> str | None:
+    if bool(daily_limit.get("symbol_already_auto_sold_today")):
+        return "symbol_already_auto_sold_today"
+    if bool(daily_limit.get("daily_limit_reached")):
+        return "daily_auto_sell_limit_reached"
+    return None
+
+
 def _preflight_block_reasons(candidate: _AutoSellCandidate | None) -> list[str]:
     reasons = ["preflight_read_only_no_submit"]
     if candidate is None:
@@ -1227,6 +1326,47 @@ def _action_for_candidate(candidate: _AutoSellCandidate | None) -> str:
     if candidate.status == REVIEW_SELL:
         return "review_sell"
     return "hold"
+
+
+def _trigger_source(source_type: str) -> str:
+    if source_type == RUN_SOURCE_TYPE:
+        return RUN_TRIGGER_SOURCE
+    return TRIGGER_SOURCE
+
+
+def _run_blocked_action(candidate: _AutoSellCandidate | None) -> str:
+    if candidate is not None and candidate.stop_loss_triggered:
+        return "blocked_sell"
+    return "hold"
+
+
+def _validation_status(
+    validation_payload: dict[str, Any] | None,
+    *,
+    read_only: bool,
+) -> str:
+    if read_only:
+        return "not_called_read_only"
+    if validation_payload is None:
+        return "not_called"
+    if validation_payload.get("validated_for_submission") is True:
+        return "passed"
+    return "blocked"
+
+
+def _readiness_labels(*, read_only: bool, submitted: bool) -> list[str]:
+    labels = [
+        "STOP-LOSS ONLY",
+        "GUARDED EXECUTION",
+        "DEFAULT OFF",
+        "TAKE-PROFIT DISABLED",
+        "AUTO BUY DISABLED",
+        "SCHEDULER REAL ORDERS DISABLED",
+    ]
+    labels.append("BROKER SUBMIT CALLED" if submitted else "NO BROKER SUBMIT")
+    if read_only:
+        labels.append("READ-ONLY")
+    return labels
 
 
 def _select_final_candidate(
@@ -1301,23 +1441,29 @@ def _source_metadata(
     broker_submit_called: bool,
     manual_submit_called: bool,
     real_order_submit_allowed: bool,
+    block_reasons: list[str],
+    daily_limit: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "source": SOURCE,
         "source_type": source_type,
+        "mode": RUN_MODE if source_type == RUN_SOURCE_TYPE else PREFLIGHT_MODE,
         "limited_auto_sell_checked_at": context.created_at,
         "checked_at": context.created_at,
         "symbol": candidate.symbol,
         "company_name": candidate.name,
+        "quantity": candidate.quantity,
         "exit_trigger": STOP_LOSS_TRIGGER
         if candidate.stop_loss_triggered
         else TAKE_PROFIT_TRIGGER
         if candidate.take_profit_triggered
         else "none",
-        "trigger_source": candidate.trigger_source,
+        "trigger_source": _trigger_source(source_type),
+        "pl_trigger_source": candidate.trigger_source,
         "trigger_flags": {
             "stop_loss_triggered": candidate.stop_loss_triggered,
             "take_profit_triggered": False,
+            "take_profit_triggered_ignored": candidate.take_profit_triggered,
             "weak_trend_triggered": candidate.weak_trend_triggered,
             "sell_pressure_triggered": candidate.sell_pressure_triggered,
         },
@@ -1331,6 +1477,11 @@ def _source_metadata(
             "unrealized_pl_pct": candidate.unrealized_pl_pct,
             "status": candidate.status,
         },
+        "duplicate_order_check": {
+            "duplicate_open_sell_order": candidate.duplicate_open_sell_order,
+            "latest_related_sell_order": candidate.latest_order,
+        },
+        "daily_limit": daily_limit,
         "runtime_safety_snapshot": {
             "dry_run": bool(context.runtime.get("dry_run", True)),
             "kill_switch": bool(context.runtime.get("kill_switch", False)),
@@ -1338,9 +1489,20 @@ def _source_metadata(
             "kis_limited_auto_stop_loss_enabled": context.stop_loss_enabled,
             "kis_limited_auto_take_profit_enabled": False,
             "kis_scheduler_allow_real_orders": False,
+            "kis_live_auto_buy_enabled": False,
+            "kis_enabled": bool(getattr(context.settings, "kis_enabled", False)),
+            "kis_real_order_enabled": bool(
+                getattr(context.settings, "kis_real_order_enabled", False)
+            ),
         },
+        "market_session_snapshot": _public_market_session(context.market_session),
         "stop_loss_triggered": candidate.stop_loss_triggered,
         "take_profit_triggered": False,
+        "take_profit_triggered_ignored": candidate.take_profit_triggered,
+        "weak_trend_triggered": candidate.weak_trend_triggered,
+        "sell_pressure_triggered": candidate.sell_pressure_triggered,
+        "status": candidate.status,
+        "block_reasons": block_reasons,
         "real_order_submitted": real_order_submitted,
         "broker_submit_called": broker_submit_called,
         "manual_submit_called": manual_submit_called,
@@ -1362,7 +1524,6 @@ def _source_metadata(
         "current_value": candidate.current_value,
         "current_price": candidate.current_price,
         "suggested_quantity": candidate.quantity,
-        "quantity": candidate.quantity,
         "risk_flags": candidate.risk_flags,
         "gating_notes": candidate.gating_notes,
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -313,6 +314,25 @@ def test_run_once_does_not_respond_to_take_profit_trigger(db_session):
     assert db_session.query(OrderLog).count() == 0
 
 
+def test_no_held_position_blocks_without_submit(monkeypatch, db_session):
+    _enable_runtime(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("no-position run must not submit"),
+    )
+    service = _service(client=_FakeClient(positions=[]))
+
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "no_held_position"
+    assert result["primary_block_reason"] == "no_held_position"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+    assert db_session.query(OrderLog).count() == 0
+
+
 def test_duplicate_open_sell_order_blocks(db_session):
     _enable_runtime(db_session)
     service = _service(
@@ -340,6 +360,124 @@ def test_daily_auto_sell_count_limit_blocks(db_session):
     assert db_session.query(OrderLog).count() == 1
 
 
+def test_validation_failure_blocks_before_manual_submit(monkeypatch, db_session):
+    _enable_runtime(db_session)
+    validation_calls = []
+
+    def fake_validate(self, request, *, now=None):
+        validation_calls.append(request)
+        return _FakeValidationResult(
+            validated=False,
+            block_reasons=["validation_failed_for_test"],
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.record_kis_order_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("manual submit must not run after validation failure"),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert validation_calls[0].source_metadata["source"] == "kis_limited_auto_stop_loss"
+    assert validation_calls[0].source_metadata["source_type"] == "guarded_stop_loss_auto_sell"
+    assert result["result"] == "blocked"
+    assert result["action"] == "blocked_sell"
+    assert result["reason"] == "validation_failed_for_test"
+    assert result["validation_status"] == "blocked"
+    assert result["real_order_submitted"] is False
+    assert result["manual_submit_called"] is False
+    assert result["broker_submit_called"] is False
+
+
+def test_all_gates_true_submits_through_validation_and_manual_service(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(db_session)
+    validation_calls = []
+    manual_calls = []
+
+    def fake_validate(self, request, *, now=None):
+        validation_calls.append(request)
+        metadata = request.source_metadata
+        assert metadata["source"] == "kis_limited_auto_stop_loss"
+        assert metadata["source_type"] == "guarded_stop_loss_auto_sell"
+        assert metadata["mode"] == "kis_limited_auto_stop_loss_run"
+        assert metadata["trigger_source"] == "limited_auto_sell_run_once"
+        assert metadata["symbol"] == "005930"
+        assert metadata["quantity"] == 1
+        assert metadata["stop_loss_triggered"] is True
+        assert metadata["take_profit_triggered"] is False
+        assert metadata["daily_limit"]["daily_limit_remaining"] == 1
+        return _FakeValidationResult(validated=True)
+
+    def fake_submit_manual(self, db, request, *, now=None):
+        manual_calls.append(request)
+        metadata = request.source_metadata
+        assert request.side == "sell"
+        assert request.dry_run is False
+        assert request.confirm_live is True
+        assert request.confirmation == "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
+        assert metadata["source"] == "kis_limited_auto_stop_loss"
+        assert metadata["source_type"] == "guarded_stop_loss_auto_sell"
+        assert metadata["real_order_submit_allowed"] is True
+        return 200, {
+            "real_order_submitted": True,
+            "broker_submit_called": True,
+            "manual_submit_called": True,
+            "order_id": 123,
+            "order_log_id": 123,
+            "broker_order_id": "AUTO123",
+            "kis_odno": "AUTO123",
+            "broker_status": "submitted",
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.record_kis_order_validation",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit_manual,
+    )
+
+    result = _service().run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert len(manual_calls) == 1
+    assert result["result"] == "submitted"
+    assert result["action"] == "sell"
+    assert result["side"] == "sell"
+    assert result["source"] == "kis_limited_auto_stop_loss"
+    assert result["source_type"] == "guarded_stop_loss_auto_sell"
+    assert result["mode"] == "kis_limited_auto_stop_loss_run"
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result["manual_submit_called"] is True
+    assert result["order_id"] == 123
+    assert result["broker_order_id"] == "AUTO123"
+    assert result["kis_odno"] == "AUTO123"
+    assert result["validation_status"] == "passed"
+    assert result["source_metadata"]["real_order_submitted"] is True
+    assert result["source_metadata"]["broker_submit_called"] is True
+    assert result["source_metadata"]["manual_submit_called"] is True
+    assert db_session.query(SignalLog).count() == 1
+    assert db_session.query(TradeRunLog).filter(TradeRunLog.mode == "kis_limited_auto_stop_loss_run").count() == 1
+
+
 def test_scheduler_real_orders_and_live_auto_buy_remain_disabled(db_session):
     _enable_runtime(
         db_session,
@@ -354,6 +492,16 @@ def test_scheduler_real_orders_and_live_auto_buy_remain_disabled(db_session):
     assert result["take_profit_auto_sell_enabled"] is False
     assert "live_auto_buy_must_remain_disabled" in result["block_reasons"]
     assert "scheduler_real_orders_must_remain_disabled" in result["block_reasons"]
+
+
+def test_limited_auto_sell_service_has_no_direct_broker_submit_calls():
+    source = inspect.getsource(KisLimitedAutoSellService)
+
+    assert "submit_order" not in source
+    assert "submit_domestic_cash_order" not in source
+    assert "submit_market_sell" not in source
+    assert "self.client.submit" not in source
+    assert "self.broker.submit" not in source
 
 
 def _service(client=None):
@@ -379,6 +527,57 @@ def _enable_runtime(db_session, **overrides):
     values.update(overrides)
     db_session.add(RuntimeSetting(**values))
     db_session.commit()
+
+
+class _FakeValidationResult:
+    def __init__(self, *, validated, block_reasons=None):
+        self.provider = "kis"
+        self.market = "KR"
+        self.environment = "prod"
+        self.dry_run = True
+        self.validated_for_submission = validated
+        self.can_submit_later = validated
+        self.symbol = "005930"
+        self.side = "sell"
+        self.qty = 1
+        self.order_type = "market"
+        self.current_price = 96_000
+        self.estimated_amount = 96_000
+        self.available_cash = None
+        self.held_qty = 1
+        self.warnings = []
+        self.block_reasons = block_reasons or []
+        self.market_session = {"is_market_open": True}
+        self.order_preview = {}
+        self.source_metadata = None
+        self.primary_block_reason = self.block_reasons[0] if self.block_reasons else None
+        self.message = None
+        self.detail = None
+
+    def to_dict(self):
+        return {
+            "provider": self.provider,
+            "market": self.market,
+            "environment": self.environment,
+            "dry_run": self.dry_run,
+            "validated_for_submission": self.validated_for_submission,
+            "can_submit_later": self.can_submit_later,
+            "symbol": self.symbol,
+            "side": self.side,
+            "qty": self.qty,
+            "order_type": self.order_type,
+            "current_price": self.current_price,
+            "estimated_amount": self.estimated_amount,
+            "available_cash": self.available_cash,
+            "held_qty": self.held_qty,
+            "warnings": self.warnings,
+            "block_reasons": self.block_reasons,
+            "market_session": self.market_session,
+            "order_preview": self.order_preview,
+            "primary_block_reason": self.primary_block_reason,
+            "message": self.message,
+            "detail": self.detail,
+        }
 
 
 def _stop_loss_position(**overrides):

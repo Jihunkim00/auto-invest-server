@@ -76,13 +76,16 @@ void main() {
       findsOneWidget,
     );
     expect(
-        find.descendant(
-            of: limitedAutoSellCard, matching: find.text('READINESS ONLY')),
-        findsWidgets);
-    expect(
       find.descendant(
         of: limitedAutoSellCard,
         matching: find.text('STOP-LOSS ONLY'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('GUARDED EXECUTION'),
       ),
       findsOneWidget,
     );
@@ -152,6 +155,8 @@ void main() {
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
     expect(find.text('dry_run_true'), findsWidgets);
+    expect(find.text('blocked'), findsWidgets);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(
       find.descendant(
         of: limitedAutoSellCard,
@@ -207,8 +212,12 @@ void main() {
     expect(find.textContaining('005930'), findsWidgets);
     expect(find.textContaining('Samsung Electronics'), findsWidgets);
     expect(find.text('SELL READY'), findsWidgets);
+    expect(find.text('KRW 96,000'), findsWidgets);
+    expect(find.text('KRW 100,000'), findsWidgets);
     expect(find.text('KRW -4,000 / -4.00%'), findsWidgets);
     expect(find.text('2.00%'), findsWidgets);
+    expect(find.textContaining('preflight_read_only_no_submit'), findsWidgets);
+    expect(find.textContaining('stop_loss=true'), findsWidgets);
     expect(find.text('TAKE-PROFIT DISABLED'), findsWidgets);
     expect(find.text('Developer Raw Payload'), findsOneWidget);
     expect(find.textContaining('"raw_marker"'), findsNothing);
@@ -239,6 +248,49 @@ void main() {
     expect(api.statusCalls, 1);
     expect(find.text('dry_run_true'), findsWidgets);
     expect(find.textContaining('kis_live_auto_sell_disabled'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('submitted result shows broker submit and KIS order ids',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeLimitedAutoSellApi(
+      runResult: KisLimitedAutoSell.fromJson(_limitedAutoSellSubmittedJson()),
+    );
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+    final limitedAutoSellCard =
+        find.byKey(const Key('kis_limited_auto_sell_card'));
+    final runButton = find.descendant(
+      of: limitedAutoSellCard,
+      matching: find.text('Run Limited Auto Sell Once'),
+    );
+    await tester.ensureVisible(runButton);
+    await tester.tap(runButton);
+    await tester.pumpAndSettle();
+
+    expect(api.runCalls, 1);
+    expect(find.textContaining('LIVE SELL SUBMITTED'), findsOneWidget);
+    expect(find.text('submitted'), findsWidgets);
+    expect(find.text('BROKER SUBMIT CALLED'), findsWidgets);
+    expect(find.text('ORDER ID'), findsOneWidget);
+    expect(find.text('77'), findsOneWidget);
+    expect(find.text('KIS ODNO'), findsOneWidget);
+    expect(find.text('ODNO777'), findsWidgets);
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('NO BROKER SUBMIT'),
+      ),
+      findsNothing,
+    );
+    expect(find.text('passed'), findsWidgets);
 
     controller.dispose();
   });
@@ -341,6 +393,7 @@ Map<String, dynamic> _limitedAutoSellStatusJson() {
     'result': 'blocked',
     'action': 'hold',
     'reason': 'dry_run_true',
+    'primary_block_reason': 'dry_run_true',
     'live_auto_sell_enabled': false,
     'stop_loss_auto_sell_enabled': false,
     'take_profit_auto_sell_enabled': false,
@@ -352,6 +405,7 @@ Map<String, dynamic> _limitedAutoSellStatusJson() {
     'sell_session_allowed': true,
     'auto_order_ready': false,
     'real_order_submit_allowed': false,
+    'stop_loss_execution_enabled': false,
     'real_order_submitted': false,
     'broker_submit_called': false,
     'manual_submit_called': false,
@@ -362,6 +416,28 @@ Map<String, dynamic> _limitedAutoSellStatusJson() {
       'dry_run_true',
       'kis_live_auto_sell_disabled',
       'stop_loss_auto_sell_disabled',
+    ],
+    'daily_limit_remaining': 1,
+    'daily_limit': {
+      'max_orders_per_day': 1,
+      'submitted_count_today': 0,
+      'daily_limit_remaining': 1,
+      'symbol_already_auto_sold_today': false,
+      'daily_limit_reached': false,
+    },
+    'duplicate_order_check': {
+      'duplicate_open_sell_order': false,
+      'latest_related_sell_order': null,
+    },
+    'validation_status': 'not_called',
+    'readiness_labels': [
+      'STOP-LOSS ONLY',
+      'GUARDED EXECUTION',
+      'DEFAULT OFF',
+      'TAKE-PROFIT DISABLED',
+      'AUTO BUY DISABLED',
+      'SCHEDULER REAL ORDERS DISABLED',
+      'NO BROKER SUBMIT',
     ],
     'safety': {
       'max_orders_per_day': 1,
@@ -397,6 +473,7 @@ Map<String, dynamic> _limitedAutoSellPreflightJson() {
     'result': 'preview_only',
     'action': 'sell_ready',
     'reason': 'stop_loss_candidate_ready_read_only',
+    'primary_block_reason': 'preflight_read_only_no_submit',
     'candidate_count': 1,
     'candidates': [
       {
@@ -443,6 +520,10 @@ Map<String, dynamic> _limitedAutoSellPreflightJson() {
     'real_order_submitted': false,
     'broker_submit_called': false,
     'manual_submit_called': false,
+    'stop_loss_triggered': true,
+    'take_profit_triggered': false,
+    'weak_trend_triggered': false,
+    'sell_pressure_triggered': false,
     'auto_buy_enabled': false,
     'auto_sell_enabled': false,
     'scheduler_real_order_enabled': false,
@@ -457,7 +538,31 @@ Map<String, dynamic> _limitedAutoSellPreflightJson() {
     'sell_session_allowed': true,
     'auto_order_ready': false,
     'real_order_submit_allowed': false,
+    'stop_loss_execution_enabled': false,
     'block_reasons': ['preflight_read_only_no_submit'],
+    'daily_limit_remaining': 1,
+    'daily_limit': {
+      'max_orders_per_day': 1,
+      'submitted_count_today': 0,
+      'daily_limit_remaining': 1,
+      'symbol_already_auto_sold_today': false,
+      'daily_limit_reached': false,
+    },
+    'duplicate_order_check': {
+      'duplicate_open_sell_order': false,
+      'latest_related_sell_order': null,
+    },
+    'validation_status': 'not_called_read_only',
+    'readiness_labels': [
+      'STOP-LOSS ONLY',
+      'GUARDED EXECUTION',
+      'DEFAULT OFF',
+      'TAKE-PROFIT DISABLED',
+      'AUTO BUY DISABLED',
+      'SCHEDULER REAL ORDERS DISABLED',
+      'NO BROKER SUBMIT',
+      'READ-ONLY',
+    ],
     'safety': {
       'max_orders_per_day': 1,
       'stop_loss_only': true,
@@ -473,4 +578,57 @@ Map<String, dynamic> _limitedAutoSellPreflightJson() {
       'source_type': 'limited_auto_sell_preflight',
     },
   };
+}
+
+Map<String, dynamic> _limitedAutoSellSubmittedJson() {
+  final payload = _limitedAutoSellPreflightJson();
+  payload['mode'] = 'kis_limited_auto_stop_loss_run';
+  payload['source_type'] = 'guarded_stop_loss_auto_sell';
+  payload['trigger_source'] = 'limited_auto_sell_run_once';
+  payload['result'] = 'submitted';
+  payload['action'] = 'sell';
+  payload['reason'] = 'stop_loss_auto_sell_submitted';
+  payload['primary_block_reason'] = null;
+  payload['live_auto_sell_enabled'] = true;
+  payload['stop_loss_auto_sell_enabled'] = true;
+  payload['dry_run'] = false;
+  payload['kis_real_order_enabled'] = true;
+  payload['auto_order_ready'] = true;
+  payload['real_order_submit_allowed'] = true;
+  payload['stop_loss_execution_enabled'] = true;
+  payload['real_order_submitted'] = true;
+  payload['broker_submit_called'] = true;
+  payload['manual_submit_called'] = true;
+  payload['order_id'] = 77;
+  payload['order_log_id'] = 77;
+  payload['broker_order_id'] = 'BRK777';
+  payload['kis_odno'] = 'ODNO777';
+  payload['block_reasons'] = const [];
+  payload['validation_status'] = 'passed';
+  payload['readiness_labels'] = [
+    'STOP-LOSS ONLY',
+    'GUARDED EXECUTION',
+    'DEFAULT OFF',
+    'TAKE-PROFIT DISABLED',
+    'AUTO BUY DISABLED',
+    'SCHEDULER REAL ORDERS DISABLED',
+    'BROKER SUBMIT CALLED',
+  ];
+  payload['daily_limit'] = {
+    'max_orders_per_day': 1,
+    'submitted_count_today': 0,
+    'daily_limit_remaining': 1,
+    'symbol_already_auto_sold_today': false,
+    'daily_limit_reached': false,
+  };
+  payload['safety'] = {
+    ...Map<String, dynamic>.from(payload['safety'] as Map),
+    'read_only': false,
+    'guarded_execution': true,
+    'real_order_submitted': true,
+    'broker_submit_called': true,
+    'manual_submit_called': true,
+    'no_broker_submit': false,
+  };
+  return payload;
 }

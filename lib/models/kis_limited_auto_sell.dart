@@ -125,10 +125,17 @@ class KisLimitedAutoSell {
     required this.sellSessionAllowed,
     required this.autoOrderReady,
     required this.realOrderSubmitAllowed,
+    required this.stopLossExecutionEnabled,
+    required this.stopLossTriggered,
+    required this.takeProfitTriggered,
+    required this.weakTrendTriggered,
+    required this.sellPressureTriggered,
     required this.candidateCount,
     required this.candidates,
     required this.checks,
     required this.safety,
+    required this.dailyLimit,
+    required this.duplicateOrderCheck,
     required this.auditMetadata,
     required this.diagnostics,
     required this.rawPayload,
@@ -149,6 +156,10 @@ class KisLimitedAutoSell {
     this.notional,
     this.stopLossThresholdPct,
     this.takeProfitThresholdPct,
+    this.primaryBlockReason,
+    this.dailyLimitRemaining,
+    this.validationStatus = '',
+    this.readinessLabels = const [],
     this.blockReasons = const [],
     this.blockedBy = const [],
     this.failedChecks = const [],
@@ -160,6 +171,10 @@ class KisLimitedAutoSell {
     final finalCandidate = finalCandidateMap.isNotEmpty
         ? KisLimitedAutoSellCandidate.fromJson(finalCandidateMap)
         : _legacyCandidate(json);
+    final checks = _dynamicMap(json['checks']);
+    final safety = _dynamicMap(json['safety']);
+    final dailyLimit = _dynamicMap(json['daily_limit']);
+    final duplicateOrderCheck = _dynamicMap(json['duplicate_order_check']);
     return KisLimitedAutoSell(
       status: _stringValue(json['status'], fallback: 'ok'),
       provider: _stringValue(json['provider'], fallback: 'kis'),
@@ -176,6 +191,7 @@ class KisLimitedAutoSell {
       result: _stringValue(json['result'], fallback: 'blocked'),
       action: _stringValue(json['action'], fallback: 'hold'),
       reason: _stringValue(json['reason'], fallback: ''),
+      primaryBlockReason: _nullableString(json['primary_block_reason']),
       humanReadableStatus: _stringValue(
         json['human_readable_status'] ?? json['message'],
         fallback: '',
@@ -213,33 +229,44 @@ class KisLimitedAutoSell {
           _boolValue(json['take_profit_auto_sell_enabled']) ?? false,
       schedulerRealOrdersEnabled:
           _boolValue(json['scheduler_real_orders_enabled']) ?? false,
-      dryRun: _boolValue(json['dry_run']) ??
-          _boolValue(_dynamicMap(json['checks'])['dry_run']) ??
-          true,
+      dryRun:
+          _boolValue(json['dry_run']) ?? _boolValue(checks['dry_run']) ?? true,
       killSwitch: _boolValue(json['kill_switch']) ??
-          _boolValue(_dynamicMap(json['checks'])['kill_switch']) ??
+          _boolValue(checks['kill_switch']) ??
           false,
       kisEnabled: _boolValue(json['kis_enabled']) ??
-          _boolValue(_dynamicMap(json['checks'])['kis_enabled']) ??
+          _boolValue(checks['kis_enabled']) ??
           false,
       kisRealOrderEnabled: _boolValue(json['kis_real_order_enabled']) ??
-          _boolValue(_dynamicMap(json['checks'])['kis_real_order_enabled']) ??
+          _boolValue(checks['kis_real_order_enabled']) ??
           false,
       marketOpen: _boolValue(json['market_open']) ??
-          _boolValue(_dynamicMap(json['checks'])['market_open']) ??
+          _boolValue(checks['market_open']) ??
           false,
       sellSessionAllowed: _boolValue(json['sell_session_allowed']) ??
-          _boolValue(_dynamicMap(json['checks'])['sell_session_allowed']) ??
+          _boolValue(checks['sell_session_allowed']) ??
           false,
       autoOrderReady: _boolValue(json['auto_order_ready']) ?? false,
       realOrderSubmitAllowed:
           _boolValue(json['real_order_submit_allowed']) ?? false,
+      stopLossExecutionEnabled:
+          _boolValue(json['stop_loss_execution_enabled']) ?? false,
+      stopLossTriggered: _boolValue(json['stop_loss_triggered']) ??
+          (finalCandidate?.stopLossTriggered ?? false),
+      takeProfitTriggered: _boolValue(json['take_profit_triggered']) ??
+          (finalCandidate?.takeProfitTriggered ?? false),
+      weakTrendTriggered: _boolValue(json['weak_trend_triggered']) ??
+          (finalCandidate?.weakTrendTriggered ?? false),
+      sellPressureTriggered: _boolValue(json['sell_pressure_triggered']) ??
+          (finalCandidate?.sellPressureTriggered ?? false),
       candidateCount:
           _nullableInt(json['candidate_count']) ?? candidates.length,
       candidates: candidates,
       finalCandidate: finalCandidate,
-      checks: _dynamicMap(json['checks']),
-      safety: _dynamicMap(json['safety']),
+      checks: checks,
+      safety: safety,
+      dailyLimit: dailyLimit,
+      duplicateOrderCheck: duplicateOrderCheck,
       auditMetadata:
           _dynamicMap(json['audit_metadata'] ?? json['source_metadata']),
       diagnostics: _dynamicMap(json['diagnostics']),
@@ -254,6 +281,16 @@ class KisLimitedAutoSell {
       stopLossThresholdPct: _nullableDouble(json['stop_loss_threshold_pct']),
       takeProfitThresholdPct:
           _nullableDouble(json['take_profit_threshold_pct']),
+      dailyLimitRemaining: _nullableInt(
+        json['daily_limit_remaining'] ??
+            dailyLimit['daily_limit_remaining'] ??
+            safety['daily_limit_remaining'],
+      ),
+      validationStatus: _stringValue(
+        json['validation_status'],
+        fallback: '',
+      ),
+      readinessLabels: _stringList(json['readiness_labels']),
       blockReasons: _stringList(json['block_reasons'] ?? json['blocked_by']),
       blockedBy: _stringList(json['blocked_by'] ?? json['block_reasons']),
       failedChecks: _stringList(json['failed_checks']),
@@ -295,11 +332,18 @@ class KisLimitedAutoSell {
   final bool sellSessionAllowed;
   final bool autoOrderReady;
   final bool realOrderSubmitAllowed;
+  final bool stopLossExecutionEnabled;
+  final bool stopLossTriggered;
+  final bool takeProfitTriggered;
+  final bool weakTrendTriggered;
+  final bool sellPressureTriggered;
   final int candidateCount;
   final List<KisLimitedAutoSellCandidate> candidates;
   final KisLimitedAutoSellCandidate? finalCandidate;
   final Map<String, dynamic> checks;
   final Map<String, dynamic> safety;
+  final Map<String, dynamic> dailyLimit;
+  final Map<String, dynamic> duplicateOrderCheck;
   final Map<String, dynamic> auditMetadata;
   final Map<String, dynamic> diagnostics;
   final Map<String, dynamic> rawPayload;
@@ -312,11 +356,18 @@ class KisLimitedAutoSell {
   final double? notional;
   final double? stopLossThresholdPct;
   final double? takeProfitThresholdPct;
+  final String? primaryBlockReason;
+  final int? dailyLimitRemaining;
+  final String validationStatus;
+  final List<String> readinessLabels;
   final List<String> blockReasons;
   final List<String> blockedBy;
   final List<String> failedChecks;
 
   bool get submitted => realOrderSubmitted || result == 'submitted';
+
+  bool get brokerSubmitActuallyCalled =>
+      realOrderSubmitted == true && brokerSubmitCalled == true;
 
   bool get isStatus => mode.contains('status');
 
@@ -331,6 +382,11 @@ class KisLimitedAutoSell {
   int? safetyInt(String key) => _nullableInt(safety[key]);
 
   double? safetyDouble(String key) => _nullableDouble(safety[key]);
+
+  int? dailyLimitInt(String key) => _nullableInt(dailyLimit[key]);
+
+  bool duplicateOrderFlag(String key) =>
+      _boolValue(duplicateOrderCheck[key]) ?? false;
 }
 
 List<KisLimitedAutoSellCandidate> _candidateList(Object? value) {
