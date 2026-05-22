@@ -1,0 +1,154 @@
+market: KR
+currency: KRW
+timezone: Asia/Seoul
+symbols:
+- symbol: '100001'
+  name: KOSDAQ 1
+  market: KOSDAQ
+- symbol: '100002'
+  name: KOSDAQ 2
+  market: KOSDAQ
+- symbol: '100003'
+  name: KOSDAQ 3
+  market: KOSDAQ
+- symbol: '100004'
+  name: KOSDAQ 4
+  market: KOSDAQ
+- symbol: '100005'
+  name: KOSDAQ 5
+  market: KOSDAQ
+- symbol: '100006'
+  name: KOSDAQ 6
+  market: KOSDAQ
+- symbol: '100007'
+  name: KOSDAQ 7
+  market: KOSDAQ
+- symbol: '100008'
+  name: KOSDAQ 8
+  market: KOSDAQ
+- symbol: '100009'
+  name: KOSDAQ 9
+  market: KOSDAQ
+- symbol: '100010'
+  name: KOSDAQ 10
+  market: KOSDAQ
+- symbol: '100011'
+  name: KOSDAQ 11
+  market: KOSDAQ
+- symbol: '100012'
+  name: KOSDAQ 12
+  market: KOSDAQ
+- symbol: '100013'
+  name: KOSDAQ 13
+  market: KOSDAQ
+- symbol: '100014'
+  name: KOSDAQ 14
+  market: KOSDAQ
+- symbol: '100015'
+  name: KOSDAQ 15
+  market: KOSDAQ
+- symbol: '100016'
+  name: KOSDAQ 16
+  market: KOSDAQ
+- symbol: '100017'
+  name: KOSDAQ 17
+  market: KOSDAQ
+- symbol: '100018'
+  name: KOSDAQ 18
+  market: KOSDAQ
+- symbol: '100019'
+  name: KOSDAQ 19
+  market: KOSDAQ
+- symbol: '100020'
+  name: KOSDAQ 20
+  market: KOSDAQ
+- symbol: '100021'
+  name: KOSDAQ 21
+  market: KOSDAQ
+- symbol: '100022'
+  name: KOSDAQ 22
+  market: KOSDAQ
+- symbol: '100023'
+  name: KOSDAQ 23
+  market: KOSDAQ
+- symbol: '100024'
+  name: KOSDAQ 24
+  market: KOSDAQ
+- symbol: '100025'
+  name: KOSDAQ 25
+  market: KOSDAQ
+- symbol: '100026'
+  name: KOSDAQ 26
+  market: KOSDAQ
+- symbol: '100027'
+  name: KOSDAQ 27
+  market: KOSDAQ
+- symbol: '100028'
+  name: KOSDAQ 28
+  market: KOSDAQ
+- symbol: '100029'
+  name: KOSDAQ 29
+  market: KOSDAQ
+- symbol: '100030'
+  name: KOSDAQ 30
+  market: KOSDAQ
+- symbol: '100031'
+  name: KOSDAQ 31
+  market: KOSDAQ
+- symbol: '100032'
+  name: KOSDAQ 32
+  market: KOSDAQ
+- symbol: '100033'
+  name: KOSDAQ 33
+  market: KOSDAQ
+- symbol: '100034'
+  name: KOSDAQ 34
+  market: KOSDAQ
+- symbol: '100035'
+  name: KOSDAQ 35
+  market: KOSDAQ
+- symbol: '100036'
+  name: KOSDAQ 36
+  market: KOSDAQ
+- symbol: '100037'
+  name: KOSDAQ 37
+  market: KOSDAQ
+- symbol: '100038'
+  name: KOSDAQ 38
+  market: KOSDAQ
+- symbol: '100039'
+  name: KOSDAQ 39
+  market: KOSDAQ
+- symbol: '100040'
+  name: KOSDAQ 40
+  market: KOSDAQ
+- symbol: '100041'
+  name: KOSDAQ 41
+  market: KOSDAQ
+- symbol: '100042'
+  name: KOSDAQ 42
+  market: KOSDAQ
+- symbol: '100043'
+  name: KOSDAQ 43
+  market: KOSDAQ
+- symbol: '100044'
+  name: KOSDAQ 44
+  market: KOSDAQ
+- symbol: '100045'
+  name: KOSDAQ 45
+  market: KOSDAQ
+- symbol: '100046'
+  name: KOSDAQ 46
+  market: KOSDAQ
+- symbol: '100047'
+  name: KOSDAQ 47
+  market: KOSDAQ
+- symbol: '100048'
+  name: KOSDAQ 48
+  market: KOSDAQ
+- symbol: '100049'
+  name: KOSDAQ 49
+  market: KOSDAQ
+- symbol: '100050'
+  name: KOSDAQ 50
+  market: KOSDAQ

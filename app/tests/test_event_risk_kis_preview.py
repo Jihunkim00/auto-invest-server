@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -99,6 +99,25 @@ def _seed_kr_event(db_session, *, symbol="005930", event_date=date(2026, 5, 4)):
     return row
 
 
+def _daily_bars(count: int, *, start_close: float = 60000.0):
+    start = date(2026, 1, 1)
+    bars = []
+    for index in range(count):
+        close = start_close + (index * 120)
+        bars.append(
+            {
+                "symbol": "005930",
+                "timestamp": (start + timedelta(days=index)).isoformat(),
+                "open": close - 40,
+                "high": close + 90,
+                "low": close - 120,
+                "close": close,
+                "volume": 1000000 + (index * 10000),
+            }
+        )
+    return bars
+
+
 def test_kis_preview_includes_event_risk_and_never_creates_order(
     monkeypatch,
     client,
@@ -119,6 +138,10 @@ def test_kis_preview_includes_event_risk_and_never_creates_order(
     monkeypatch.setattr(
         "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
         fake_gpt,
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
     )
     monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.submit_domestic_cash_order",

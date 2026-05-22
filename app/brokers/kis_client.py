@@ -23,6 +23,8 @@ KIS_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_PRICE_TR_ID = "FHKST01010100"
 KIS_DAILY_BARS_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
 KIS_DAILY_BARS_TR_ID = "FHKST03010100"
+KIS_MARKET_CAP_RANKING_PATH = "/uapi/domestic-stock/v1/ranking/market-cap"
+KIS_MARKET_CAP_RANKING_TR_ID = "FHPST01740000"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_BALANCE_TR_ID_REAL = "TTTC8434R"
 KIS_BALANCE_TR_ID_DEMO = "VTTC8434R"
@@ -161,6 +163,44 @@ class KisClient:
             _as_list(response.get("output2")),
             limit=safe_limit,
         )
+
+    def get_domestic_market_cap_ranking(
+        self,
+        *,
+        market: str = "KOSDAQ",
+        limit: int = 50,
+    ) -> list[dict]:
+        normalized_market = _normalize_domestic_ranking_market(market)
+        safe_limit = max(1, min(int(limit or 50), 50))
+        response = self.request_get(
+            KIS_MARKET_CAP_RANKING_PATH,
+            tr_id=KIS_MARKET_CAP_RANKING_TR_ID,
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_COND_SCR_DIV_CODE": "20174",
+                "FID_INPUT_ISCD": _ranking_market_code(normalized_market),
+                "FID_DIV_CLS_CODE": "0",
+                "FID_BLNG_CLS_CODE": "0",
+                "FID_TRGT_CLS_CODE": "0",
+                "FID_TRGT_EXLS_CLS_CODE": "0",
+                "FID_INPUT_PRICE_1": "",
+                "FID_INPUT_PRICE_2": "",
+                "FID_VOL_CNT": "",
+            },
+        )
+        rows = _as_list(response.get("output") or response.get("output1"))
+        ranked = []
+        for index, row in enumerate(rows, start=1):
+            item = normalize_domestic_market_cap_row(
+                row,
+                market=normalized_market,
+                fallback_rank=index,
+            )
+            if item is not None:
+                ranked.append(item)
+            if len(ranked) >= safe_limit:
+                break
+        return ranked
 
     def get_account_balance(self) -> dict:
         response = self._request_balance()
@@ -863,6 +903,71 @@ def normalize_domestic_daily_bars(
     sorted_bars = [by_timestamp[key] for key in sorted(by_timestamp)]
     safe_limit = max(1, int(limit or 120))
     return sorted_bars[-safe_limit:]
+
+
+def normalize_domestic_market_cap_row(
+    row,
+    *,
+    market: str,
+    fallback_rank: int,
+) -> dict | None:
+    item = _as_dict(row)
+    symbol = first_present(
+        item,
+        [
+            "mksc_shrn_iscd",
+            "stck_shrn_iscd",
+            "pdno",
+            "symbol",
+            "code",
+            "isu_cd",
+        ],
+    )
+    normalized_symbol = _normalize_domestic_symbol(symbol)
+    if not normalized_symbol:
+        return None
+    rank = to_int(
+        first_present(
+            item,
+            ["data_rank", "rank", "stck_avls_rank", "avls_rank", "rnum"],
+        ),
+        fallback_rank,
+    )
+    return {
+        "symbol": normalized_symbol,
+        "name": first_present(
+            item,
+            ["hts_kor_isnm", "prdt_name", "iscd_name", "name", "kor_isnm"],
+        ),
+        "market": _normalize_domestic_ranking_market(market),
+        "market_cap": first_float(
+            item,
+            ["stck_avls", "market_cap", "mktcap", "avls", "lstn_stcn"],
+            default=0.0,
+        ),
+        "rank": rank if rank > 0 else fallback_rank,
+    }
+
+
+def _normalize_domestic_symbol(value) -> str | None:
+    text = str(value or "").strip()
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return None
+    if len(digits) > 6:
+        digits = digits[-6:]
+    return digits.zfill(6)
+
+
+def _normalize_domestic_ranking_market(value: str) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized not in {"KOSPI", "KOSDAQ"}:
+        raise ValueError("KIS domestic ranking market must be KOSPI or KOSDAQ.")
+    return normalized
+
+
+def _ranking_market_code(market: str) -> str:
+    return "1001" if market == "KOSDAQ" else "0001"
 
 
 def _normalize_kis_date(value) -> str | None:

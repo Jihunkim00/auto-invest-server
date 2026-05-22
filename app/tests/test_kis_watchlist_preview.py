@@ -150,9 +150,14 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert body["dry_run"] is True
     assert body["preview_only"] is True
     assert body["trading_enabled"] is False
-    assert body["gpt_analysis_included"] is True
-    assert body["configured_symbol_count"] == 8
-    assert body["analyzed_symbol_count"] == 8
+    assert body["gpt_analysis_included"] is False
+    assert body["configured_symbol_count"] == 50
+    assert body["analyzed_symbol_count"] == 50
+    assert body["quant_scanned_symbol_count"] == 50
+    assert body["gpt_target_count"] == 0
+    assert body["gpt_target_symbols"] == []
+    assert body["gpt_analyzed_symbol_count"] == 0
+    assert len(body["quant_only_symbols"]) == 50
     assert body["quant_candidates_count"] == 0
     assert body["researched_candidates_count"] == 0
     assert body["final_best_candidate"] is None
@@ -175,8 +180,8 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert body["trade_result"]["order_id"] is None
     assert body["top_quant_candidates"] == []
     assert body["researched_candidates"] == []
-    assert len(body["final_ranked_candidates"]) == 8
-    assert body["count"] == 8
+    assert len(body["final_ranked_candidates"]) == 50
+    assert body["count"] == 50
     item = body["items"][0]
     ranked = body["final_ranked_candidates"][0]
     assert ranked["symbol"] == item["symbol"]
@@ -217,6 +222,18 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert payload["real_order_submitted"] is False
     assert payload["broker_submit_called"] is False
     assert payload["manual_submit_called"] is False
+    assert payload["quant_scanned_symbol_count"] == 50
+    assert payload["gpt_target_count"] == 0
+
+
+def test_kis_watchlist_preview_includes_ninth_symbol(client):
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["analyzed_symbol_count"] == 50
+    assert len(body["items"]) == 50
+    assert body["items"][8]["symbol"] == body["watchlist"][8]["symbol"]
 
 
 def test_kis_watchlist_preview_accepts_gate_bounds(client):
@@ -346,7 +363,7 @@ def test_kis_preview_market_closed_warns_but_still_previews(monkeypatch, client)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 8
+    assert body["count"] == 50
     assert body["market_session"]["closure_reason"] == "holiday_labor_day"
     assert "market_closed" in body["warnings"]
     assert "holiday_labor_day" in body["warnings"]
@@ -368,7 +385,7 @@ def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["count"] == 8
+    assert body["count"] == 50
     assert body["items"][0]["symbol"] == "005930"
     assert body["items"][0]["current_price"] is None
     assert body["items"][0]["indicator_status"] == "insufficient_data"
@@ -381,13 +398,20 @@ def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
 
 def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, client):
     captured_payloads = []
+    captured_symbols = []
+    bar_symbols = []
+
+    def fake_bars(self, symbol, limit=120):
+        bar_symbols.append(symbol)
+        return _daily_bars(60)
 
     monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
-        lambda self, symbol, limit=120: _daily_bars(60),
+        fake_bars,
     )
 
     def fake_gpt(self, **kwargs):
+        captured_symbols.append(kwargs["symbol"])
         captured_payloads.append(kwargs["indicator_payload"])
         return KisGptPreview(
             gpt_used=True,
@@ -440,10 +464,20 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert item["trading_enabled"] is False
     assert item["order_id"] is None
     assert item["block_reason"] == "kr_trading_disabled"
-    assert body["quant_candidates_count"] == 8
-    assert body["researched_candidates_count"] == 8
+    assert body["quant_scanned_symbol_count"] == 50
+    assert body["quant_candidates_count"] == 50
+    assert body["gpt_target_count"] == 5
+    assert body["gpt_analyzed_symbol_count"] == 5
+    assert len(body["quant_only_symbols"]) == 45
+    assert body["researched_candidates_count"] == 5
     assert body["top_quant_candidates"]
     assert body["final_best_candidate"]["symbol"] == "005930"
+    assert body["gpt_target_symbols"] == [
+        item["symbol"] for item in body["top_quant_candidates"][:5]
+    ]
+    assert captured_symbols == body["gpt_target_symbols"]
+    assert len(bar_symbols) == 55
+    assert len(captured_payloads) == 5
     assert body["best_score"] is not None
     assert body["should_trade"] is False
     assert body["final_entry_ready"] is False
@@ -512,6 +546,11 @@ def test_kis_preview_gpt_unavailable_keeps_quant_scores(monkeypatch, client):
 
 
 def test_kis_preview_gpt_failure_falls_back_to_quant(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+
     def fail_gpt(self, **kwargs):
         return KisGptPreview(
             gpt_used=False,
@@ -530,8 +569,10 @@ def test_kis_preview_gpt_failure_falls_back_to_quant(monkeypatch, client):
     assert response.status_code == 200
     body = response.json()
     assert body["gpt_analysis_included"] is False
-    assert body["items"][0]["quant_buy_score"] is None
-    assert body["items"][0]["final_buy_score"] is None
+    assert body["gpt_target_count"] == 5
+    assert body["gpt_analyzed_symbol_count"] == 0
+    assert body["items"][0]["quant_buy_score"] is not None
+    assert body["items"][0]["final_buy_score"] == body["items"][0]["quant_buy_score"]
     assert "gpt_unavailable" in body["items"][0]["warnings"]
     assert "gpt_unavailable" in body["items"][0]["risk_flags"]
     assert body["items"][0]["entry_ready"] is False
@@ -547,6 +588,12 @@ def test_kis_preview_kr_trading_remains_disabled(client):
     assert all(item["trade_allowed"] is False for item in body["items"])
     assert all(item["approved_by_risk"] is False for item in body["items"])
     assert body["order_id"] is None
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["manual_submit_called"] is False
+    assert all(item["real_order_submitted"] is False for item in body["items"])
+    assert all(item["broker_submit_called"] is False for item in body["items"])
+    assert all(item["manual_submit_called"] is False for item in body["items"])
 
 
 def test_kis_preview_does_not_call_kis_order_paths(monkeypatch, client):

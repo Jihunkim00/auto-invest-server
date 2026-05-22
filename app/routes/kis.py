@@ -54,6 +54,10 @@ from app.services.kis_order_sync_service import (
 )
 from app.services.kis_auto_readiness_service import KisAutoReadinessService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
+from app.services.kis_watchlist_update_service import (
+    KisWatchlistUpdateError,
+    KisWatchlistUpdateService,
+)
 from app.services.market_profile_service import MarketProfileError
 from app.services.market_session_service import MarketSessionError, MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -363,6 +367,48 @@ def preview_kis_watchlist(
     except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketSessionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/watchlist/kosdaq-top50/preview")
+def preview_kis_kosdaq_top50_watchlist(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisWatchlistUpdateService(client)
+    try:
+        return service.preview_kosdaq_top50()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
+    except KisApiError as exc:
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
+    except MarketProfileError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/watchlist/kosdaq-top50/update")
+def update_kis_kosdaq_top50_watchlist(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisWatchlistUpdateService(client)
+    try:
+        return service.update_kosdaq_top50()
+    except KisWatchlistUpdateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisConfigurationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
+    except KisApiError as exc:
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
+    except MarketProfileError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

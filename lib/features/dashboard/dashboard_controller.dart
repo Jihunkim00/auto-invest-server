@@ -114,6 +114,9 @@ class DashboardController extends ChangeNotifier {
   MarketWatchlist krWatchlist = MarketWatchlist.empty('KR');
   bool watchlistLoading = false;
   String? watchlistError;
+  bool kosdaqTop50Updating = false;
+  String? kosdaqTop50UpdateError;
+  Map<String, dynamic>? latestKosdaqTop50Update;
   bool krWatchlistPreviewLoading = false;
   WatchlistRunResult? krWatchlistPreview;
   String? krWatchlistPreviewError;
@@ -998,6 +1001,40 @@ class DashboardController extends ChangeNotifier {
       return const ActionResult(success: true, message: 'Watchlist refreshed.');
     } finally {
       watchlistLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> updateKosdaqTop50Watchlist() async {
+    if (kosdaqTop50Updating) {
+      return const ActionResult(
+        success: false,
+        message: 'KOSDAQ top 50 watchlist update already in progress.',
+      );
+    }
+
+    kosdaqTop50Updating = true;
+    kosdaqTop50UpdateError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.updateKosdaqTop50Watchlist();
+      latestKosdaqTop50Update = result;
+      await loadMarketWatchlists();
+      if (watchlistError != null) {
+        return ActionResult(success: false, message: watchlistError!);
+      }
+      return const ActionResult(
+        success: true,
+        message: 'KOSDAQ top 50 watchlist updated.',
+      );
+    } catch (e) {
+      kosdaqTop50UpdateError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kosdaqTop50UpdateError!),
+      );
+    } finally {
+      kosdaqTop50Updating = false;
       notifyListeners();
     }
   }

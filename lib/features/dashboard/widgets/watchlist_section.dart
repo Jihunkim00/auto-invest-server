@@ -107,7 +107,51 @@ class WatchlistSection extends StatelessWidget {
             label:
                 Text(controller.watchlistLoading ? 'Refreshing...' : 'Refresh'),
           ),
+          if (isKr)
+            OutlinedButton.icon(
+              key: const Key('update_kosdaq_top50_button'),
+              onPressed: controller.kosdaqTop50Updating ||
+                      controller.watchlistLoading
+                  ? null
+                  : () async {
+                      final confirmed =
+                          await _confirmKosdaqTop50Update(context);
+                      if (confirmed != true || !context.mounted) return;
+                      final result =
+                          await controller.updateKosdaqTop50Watchlist();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.redAccent,
+                      ));
+                    },
+              icon: controller.kosdaqTop50Updating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.update),
+              label: Text(controller.kosdaqTop50Updating
+                  ? 'Updating KOSDAQ Top 50...'
+                  : 'Update KOSDAQ Top 50'),
+            ),
         ]),
+        if (isKr) ...[
+          const SizedBox(height: 8),
+          const Wrap(spacing: 8, runSpacing: 8, children: [
+            _SoftBadge(
+                text: 'WATCHLIST CONFIG ONLY', color: Colors.lightBlueAccent),
+            _SoftBadge(text: 'NO ORDER SUBMIT', color: Colors.orangeAccent),
+          ]),
+        ],
+        if (controller.kosdaqTop50UpdateError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kosdaqTop50UpdateError!),
+            color: Colors.redAccent,
+          ),
+        ],
         const SizedBox(height: 12),
         _GateSelector(controller: controller),
         const SizedBox(height: 12),
@@ -174,6 +218,28 @@ class WatchlistSection extends StatelessWidget {
       ]),
     );
   }
+}
+
+Future<bool?> _confirmKosdaqTop50Update(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text('Update KOSDAQ Top 50'),
+      content: const Text(
+        'This will replace the KR watchlist with KOSDAQ top 50 by market cap. No order will be submitted.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('Update'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _WatchlistRunResultSummary extends StatelessWidget {

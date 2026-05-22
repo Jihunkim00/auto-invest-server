@@ -390,6 +390,14 @@ class ApiClient {
     return WatchlistRunResult.fromJson(payload);
   }
 
+  Future<Map<String, dynamic>> previewKosdaqTop50Watchlist() async {
+    return _getJsonNoCache('/kis/watchlist/kosdaq-top50/preview');
+  }
+
+  Future<Map<String, dynamic>> updateKosdaqTop50Watchlist() async {
+    return _postJsonBody('/kis/watchlist/kosdaq-top50/update', const {});
+  }
+
   Future<KisAutoSimulatorResult> runKisDryRunAuto({
     required int gateLevel,
   }) async {

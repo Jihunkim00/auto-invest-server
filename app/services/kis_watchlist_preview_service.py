@@ -24,6 +24,7 @@ from app.services.technical_indicator_service import (
 )
 
 KR_PREVIEW_LIMIT = 50
+KR_PREVIEW_TOP_GPT_CANDIDATES = 5
 KR_DISABLED_REASONS = ["preview_only", "kr_trading_disabled"]
 EMPTY_INDICATORS = dict(EMPTY_TECHNICAL_INDICATORS)
 SCOREABLE_INDICATOR_STATUSES = {"ok", "partial"}
@@ -79,6 +80,7 @@ class KisWatchlistPreviewService:
         event_risk_service: EventRiskService | None = None,
         db=None,
         limit: int = KR_PREVIEW_LIMIT,
+        gpt_candidate_limit: int = KR_PREVIEW_TOP_GPT_CANDIDATES,
     ):
         self.client = client
         self.db = db
@@ -90,6 +92,10 @@ class KisWatchlistPreviewService:
         self.event_risk_service = event_risk_service or EventRiskService()
         self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
+        self.gpt_candidate_limit = max(
+            0,
+            min(int(gpt_candidate_limit), KR_PREVIEW_LIMIT),
+        )
 
     def run_preview(
         self,
@@ -119,20 +125,68 @@ class KisWatchlistPreviewService:
         held_symbols = [position["symbol"] for position in held_positions]
         managed_symbols = [position["symbol"] for position in managed_positions]
 
-        items = []
+        quant_items = []
+        for raw in configured_symbols:
+            quant_items.append(
+                self._preview_symbol(
+                    raw,
+                    gate_level=gate_level,
+                    market_session=market_session,
+                    session_warnings=session_warnings,
+                    reference_sources=references.get("sources") or [],
+                    include_gpt=False,
+                    db=db,
+                )
+            )
+
+        quant_ranked_candidates = self._rank_quant_candidates(quant_items)
+        gpt_target_symbols = []
+        if include_gpt and self.gpt_candidate_limit > 0:
+            gpt_target_symbols = [
+                str(item.get("symbol"))
+                for item in quant_ranked_candidates[: self.gpt_candidate_limit]
+                if item.get("symbol")
+            ]
+
+        items_by_symbol = {
+            str(item.get("symbol") or ""): item
+            for item in quant_items
+            if item.get("symbol")
+        }
         gpt_used = False
         for raw in configured_symbols:
+            symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
+            if symbol not in gpt_target_symbols:
+                continue
             item = self._preview_symbol(
                 raw,
                 gate_level=gate_level,
                 market_session=market_session,
                 session_warnings=session_warnings,
                 reference_sources=references.get("sources") or [],
-                include_gpt=include_gpt,
+                include_gpt=True,
                 db=db,
             )
             gpt_used = gpt_used or bool(item.get("gpt_used"))
-            items.append(item)
+            items_by_symbol[symbol] = item
+
+        items = [
+            items_by_symbol[self.profile_service.normalize_symbol(raw.get("symbol"), "KR")]
+            for raw in configured_symbols
+            if self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
+            in items_by_symbol
+        ]
+        gpt_analyzed_symbols = [
+            str(item.get("symbol"))
+            for item in items
+            if item.get("gpt_used") and item.get("symbol")
+        ]
+        gpt_target_symbol_set = set(gpt_target_symbols)
+        quant_only_symbols = [
+            str(item.get("symbol"))
+            for item in items
+            if item.get("symbol") and str(item.get("symbol")) not in gpt_target_symbol_set
+        ]
 
         final_ranked_candidates = self._rank_final_candidates(items)
         quant_candidates = self._rank_quant_candidates(items)
@@ -268,6 +322,11 @@ class KisWatchlistPreviewService:
             "reference_sites_file": references.get("reference_sites_file"),
             "configured_symbol_count": len(configured_symbols),
             "analyzed_symbol_count": len(items),
+            "quant_scanned_symbol_count": len(quant_items),
+            "gpt_target_symbols": gpt_target_symbols,
+            "gpt_target_count": len(gpt_target_symbols),
+            "gpt_analyzed_symbol_count": len(gpt_analyzed_symbols),
+            "quant_only_symbols": quant_only_symbols,
             "max_watchlist_size": self.limit,
             "watchlist": items,
             "quant_candidates_count": len(quant_candidates),
@@ -309,6 +368,9 @@ class KisWatchlistPreviewService:
             "final_action_hint": "watch",
             "action": "hold",
             "order_id": None,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
             "result": "preview_only",
             "reason": "kr_trading_disabled",
             "trade_result": trade_result,
@@ -403,6 +465,8 @@ class KisWatchlistPreviewService:
                 "trading_enabled": False,
                 "order_id": None,
                 "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
             }
         )
         payload["risk_flags"] = _dedupe(
@@ -603,6 +667,8 @@ class KisWatchlistPreviewService:
             "trading_enabled": False,
             "order_id": None,
             "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
             "risk_flags": _dedupe(risk_flags),
             "gating_notes": _dedupe(gating_notes),
             "block_reason": block_reason,
@@ -859,6 +925,11 @@ def _preview_log_payload(
             "signal_id": None,
             "configured_symbol_count": payload.get("configured_symbol_count"),
             "analyzed_symbol_count": payload.get("analyzed_symbol_count"),
+            "quant_scanned_symbol_count": payload.get("quant_scanned_symbol_count"),
+            "gpt_target_symbols": payload.get("gpt_target_symbols") or [],
+            "gpt_target_count": payload.get("gpt_target_count"),
+            "gpt_analyzed_symbol_count": payload.get("gpt_analyzed_symbol_count"),
+            "quant_only_symbols": payload.get("quant_only_symbols") or [],
             "quant_candidates_count": payload.get("quant_candidates_count"),
             "researched_candidates_count": payload.get("researched_candidates_count"),
             "final_best_candidate": final_best,

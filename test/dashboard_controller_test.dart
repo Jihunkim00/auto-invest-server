@@ -136,6 +136,25 @@ void main() {
     controller.dispose();
   });
 
+  test('KOSDAQ top 50 update calls backend and refreshes KR watchlist',
+      () async {
+    final updatedWatchlist = _watchlist('KR', const ['100001', '100002']);
+    final api = _FakeApiClient(updatedKosdaqWatchlist: updatedWatchlist);
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    final result = await controller.updateKosdaqTop50Watchlist();
+
+    expect(result.success, isTrue);
+    expect(result.message, 'KOSDAQ top 50 watchlist updated.');
+    expect(api.updateKosdaqTop50WatchlistCalls, 1);
+    expect(controller.latestKosdaqTop50Update?['updated'], isTrue);
+    expect(controller.krWatchlist.symbols.first.symbol, '100001');
+    expect(controller.kosdaqTop50Updating, isFalse);
+
+    controller.dispose();
+  });
+
   test('KIS order validation stays dry-run through API method', () async {
     final api = _FakeApiClient(validationResult: _validationResult());
     final controller = DashboardController(api, autoload: false)
@@ -997,6 +1016,7 @@ class _FakeApiClient extends ApiClient {
     this.limitedAutoBuy,
     this.kisSingle,
     this.schedulerLive,
+    this.updatedKosdaqWatchlist,
   });
 
   final WatchlistRunResult? latest;
@@ -1024,6 +1044,7 @@ class _FakeApiClient extends ApiClient {
   final KisLimitedAutoBuy? limitedAutoBuy;
   final KisSingleSymbolTradingResult? kisSingle;
   final KisSchedulerLiveResult? schedulerLive;
+  final MarketWatchlist? updatedKosdaqWatchlist;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
@@ -1040,6 +1061,7 @@ class _FakeApiClient extends ApiClient {
   int runKisLimitedAutoBuyCalls = 0;
   int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
+  int updateKosdaqTop50WatchlistCalls = 0;
   String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
@@ -1267,9 +1289,29 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<MarketWatchlist> fetchMarketWatchlist(String market) async {
     if (market.toUpperCase() == 'KR') {
+      if (updateKosdaqTop50WatchlistCalls > 0 &&
+          updatedKosdaqWatchlist != null) {
+        return updatedKosdaqWatchlist!;
+      }
       return krWatchlist ?? MarketWatchlist.empty('KR');
     }
     return usWatchlist ?? MarketWatchlist.empty('US');
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateKosdaqTop50Watchlist() async {
+    updateKosdaqTop50WatchlistCalls += 1;
+    return {
+      'provider': 'kis',
+      'market': 'KR',
+      'source_market': 'KOSDAQ',
+      'mode': 'watchlist_update_applied',
+      'updated': true,
+      'count': 50,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
   }
 
   @override
