@@ -304,7 +304,7 @@ def test_market_closed_blocks(db_session):
 
 
 def test_no_new_entry_after_blocks_entry(db_session):
-    _enable_runtime(db_session)
+    _enable_runtime(db_session, kis_limited_auto_buy_no_new_entry_after="14:50")
     now = datetime(2026, 5, 22, 6, 0, tzinfo=UTC)  # 15:00 Asia/Seoul
 
     result = _service().preflight_once(db_session, now=now)
@@ -380,7 +380,7 @@ def _enable_runtime(db_session, **overrides):
         "kis_limited_auto_buy_block_if_open_order_exists": True,
         "kis_limited_auto_buy_allow_reentry_same_day": False,
         "kis_limited_auto_buy_require_market_open": True,
-        "kis_limited_auto_buy_no_new_entry_after": "14:50",
+        "kis_limited_auto_buy_no_new_entry_after": "23:59",
         "kis_limited_auto_buy_allow_gpt_hard_block": False,
         "kis_scheduler_live_enabled": False,
         "kis_scheduler_allow_real_orders": False,

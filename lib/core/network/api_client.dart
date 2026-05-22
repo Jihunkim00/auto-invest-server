@@ -9,6 +9,7 @@ import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
+import '../../models/kis_limited_auto_buy_review.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
@@ -65,11 +66,10 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _getJsonNoCache(String path) async {
-    final uri = Uri.parse('${AppConfig.baseUrl}$path').replace(
-      queryParameters: {
-        '_ts': DateTime.now().millisecondsSinceEpoch.toString(),
-      },
-    );
+    final baseUri = Uri.parse('${AppConfig.baseUrl}$path');
+    final queryParameters = Map<String, String>.from(baseUri.queryParameters);
+    queryParameters['_ts'] = DateTime.now().millisecondsSinceEpoch.toString();
+    final uri = baseUri.replace(queryParameters: queryParameters);
     final r = await _client.get(uri, headers: const {
       'Cache-Control': 'no-cache',
       'Pragma': 'no-cache',
@@ -609,6 +609,23 @@ class ApiClient {
         : '/kis/limited-auto-buy/run-once?gate_level=$gateLevel';
     final payload = await _postJsonBody(path, const {});
     return KisLimitedAutoBuy.fromJson(payload);
+  }
+
+  Future<KisLimitedAutoBuyReview> fetchKisLimitedAutoBuyReview({
+    int limit = 20,
+    int days = 30,
+    String? symbol,
+    bool includeRaw = false,
+  }) async {
+    final query = Uri(queryParameters: {
+      'limit': limit.toString(),
+      'days': days.toString(),
+      if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+      if (includeRaw) 'include_raw': 'true',
+    }).query;
+    final payload =
+        await _getJsonNoCache('/kis/limited-auto-buy/review?$query');
+    return KisLimitedAutoBuyReview.fromJson(payload);
   }
 
   Future<KisSingleSymbolTradingResult> runKisSingleSymbolAnalyzeBuy({
