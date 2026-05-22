@@ -28,6 +28,7 @@ class KisLimitedAutoBuy {
     this.humanReadableStatus,
     this.noNewEntryAfter,
     this.cashAvailable,
+    this.totalAssetValue,
     this.dailyBuyCount,
     this.dailyBuyLimit,
     this.dailyBuyLimitRemaining,
@@ -126,6 +127,7 @@ class KisLimitedAutoBuy {
           json['no_new_entry_after'] ?? checks['no_new_entry_after']),
       cashAvailable:
           _nullableDouble(json['cash_available'] ?? checks['cash_available']),
+      totalAssetValue: _nullableDouble(json['total_asset_value']),
       dailyBuyCount: _nullableInt(json['daily_buy_count']),
       dailyBuyLimit: _nullableInt(json['daily_buy_limit']),
       dailyBuyLimitRemaining: _nullableInt(json['daily_buy_limit_remaining']),
@@ -185,6 +187,7 @@ class KisLimitedAutoBuy {
   final bool entryAllowedNow;
   final String? noNewEntryAfter;
   final double? cashAvailable;
+  final double? totalAssetValue;
   final int? dailyBuyCount;
   final int? dailyBuyLimit;
   final int? dailyBuyLimitRemaining;

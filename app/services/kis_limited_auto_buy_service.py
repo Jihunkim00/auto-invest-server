@@ -19,6 +19,16 @@ from app.services.entry_readiness_service import evaluate_entry_readiness
 from app.services.gpt_hard_block_policy import should_apply_gpt_hard_block
 from app.services.kis_buy_shadow_decision_service import KisBuyShadowDecisionService
 from app.services.kis_dry_run_risk_service import BUY, HOLD, MARKET, OPEN_ORDER_STATUSES, PROVIDER
+from app.services.kis_manual_order_service import (
+    KIS_MANUAL_CONFIRMATION_PHRASE,
+    KisManualOrderService,
+    KisManualOrderSubmitRequest,
+)
+from app.services.kis_order_validation_service import (
+    KisOrderValidationRequest,
+    KisOrderValidationService,
+    record_kis_order_validation,
+)
 from app.services.kis_order_sync_service import KisOrderSyncService, serialize_kis_order
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
@@ -31,6 +41,7 @@ RUN_MODE = "kis_limited_auto_buy_run"
 MODE = RUN_MODE
 SOURCE = "kis_limited_auto_buy"
 SOURCE_TYPE = "buy_readiness_only"
+GUARDED_SOURCE_TYPE = "guarded_limited_auto_buy"
 STATUS_TRIGGER_SOURCE = "limited_auto_buy_status"
 PREFLIGHT_TRIGGER_SOURCE = "limited_auto_buy_preflight"
 RUN_TRIGGER_SOURCE = "limited_auto_buy_run_once"
@@ -255,14 +266,103 @@ class KisLimitedAutoBuyService:
             candidate=candidate,
             shadow_reason=shadow_reason,
         )
-        entry_ready = candidate is not None and candidate.entry_ready and not preliminary_blocks
-        if entry_ready:
+        execution_blocks = _execution_block_reasons(context)
+        readiness_ready = (
+            candidate is not None
+            and candidate.entry_ready
+            and not preliminary_blocks
+        )
+        source_type = GUARDED_SOURCE_TYPE if mode == RUN_MODE else SOURCE_TYPE
+        execution_enabled = not execution_blocks
+        validation_called = False
+        validation_status = "not_called"
+        validation_summary: dict[str, Any] | None = None
+        manual_submit_called = False
+        manual_submit_response: dict[str, Any] | None = None
+        order_id = None
+        broker_order_id = None
+        kis_odno = None
+        real_order_submitted = False
+        broker_submit_called = False
+
+        if mode == PREFLIGHT_MODE and readiness_ready:
             action = "buy_ready"
-            result = "ready" if mode == PREFLIGHT_MODE else "readiness_only"
+            result = "ready"
             reason = "buy_readiness_only"
-            primary_block_reason = "auto_buy_execution_disabled"
+            primary_block_reason = execution_blocks[0] if execution_blocks else None
+        elif mode == RUN_MODE and readiness_ready and not execution_blocks:
+            validation_called = True
+            validation_status, validation_summary = self._validate_candidate(
+                db,
+                context=context,
+                candidate=candidate,
+                account_state=account_state,
+                daily_limit=daily_limit,
+            )
+            if validation_status != "passed":
+                action = "blocked_buy"
+                result = "blocked"
+                reason = "validation_failed"
+                primary_block_reason = "validation_failed"
+                block_reasons = _dedupe(["validation_failed"] + block_reasons)
+            else:
+                (
+                    manual_submit_called,
+                    manual_submit_response,
+                ) = self._submit_validated_candidate(
+                    db,
+                    context=context,
+                    candidate=candidate,
+                    account_state=account_state,
+                    daily_limit=daily_limit,
+                    validation_summary=validation_summary,
+                )
+                real_order_submitted = bool(
+                    manual_submit_response
+                    and manual_submit_response.get("real_order_submitted") is True
+                )
+                broker_submit_called = bool(
+                    manual_submit_response
+                    and manual_submit_response.get("broker_submit_called") is True
+                )
+                if real_order_submitted:
+                    action = BUY
+                    result = "submitted"
+                    reason = "guarded_limited_auto_buy_submitted"
+                    primary_block_reason = None
+                    order_id = (
+                        manual_submit_response.get("order_id")
+                        or manual_submit_response.get("order_log_id")
+                    )
+                    broker_order_id = manual_submit_response.get("broker_order_id")
+                    kis_odno = manual_submit_response.get("kis_odno")
+                    block_reasons = []
+                else:
+                    action = "blocked_buy"
+                    result = "blocked"
+                    reason = "manual_submit_failed"
+                    primary_block_reason = _nullable_string(
+                        manual_submit_response.get("primary_block_reason")
+                        if manual_submit_response
+                        else None
+                    ) or "manual_submit_failed"
+                    block_reasons = _dedupe(
+                        _string_list(
+                            manual_submit_response.get("block_reasons")
+                            if manual_submit_response
+                            else None
+                        )
+                        + [primary_block_reason]
+                        + block_reasons
+                    )
+                    order_id = (
+                        manual_submit_response.get("order_id")
+                        or manual_submit_response.get("order_log_id")
+                        if manual_submit_response
+                        else None
+                    )
         else:
-            action = HOLD
+            action = "blocked_buy" if mode == RUN_MODE else HOLD
             result = "blocked"
             reason = block_reasons[0] if block_reasons else "no_candidate"
             primary_block_reason = reason
@@ -280,6 +380,18 @@ class KisLimitedAutoBuyService:
             candidate=candidate,
             block_reasons=block_reasons,
             shadow_result=shadow_result,
+            source_type=source_type,
+            execution_enabled=execution_enabled,
+            validation_called=validation_called,
+            validation_status=validation_status,
+            validation_summary=validation_summary,
+            manual_submit_called=manual_submit_called,
+            manual_submit_response=manual_submit_response,
+            real_order_submitted=real_order_submitted,
+            broker_submit_called=broker_submit_called,
+            order_id=order_id,
+            broker_order_id=broker_order_id,
+            kis_odno=kis_odno,
         )
         if record:
             signal = self._record_signal(
@@ -646,6 +758,133 @@ class KisLimitedAutoBuyService:
             raw=sanitize_kis_payload(raw),
         )
 
+    def _validate_candidate(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        candidate: _BuyCandidate,
+        account_state: dict[str, Any],
+        daily_limit: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        metadata = _source_metadata(
+            context=context,
+            mode=RUN_MODE,
+            trigger_source=RUN_TRIGGER_SOURCE,
+            candidate=candidate,
+            block_reasons=[],
+            account_state=account_state,
+            daily_limit=daily_limit,
+            source_type=GUARDED_SOURCE_TYPE,
+            validation_summary=None,
+            real_order_submitted=False,
+            broker_submit_called=False,
+            manual_submit_called=False,
+            validation_called=True,
+        )
+        request = KisOrderValidationRequest(
+            market=MARKET,
+            symbol=candidate.symbol,
+            side=BUY,
+            qty=candidate.suggested_quantity,
+            order_type="market",
+            dry_run=True,
+            reason="guarded limited auto buy validation",
+            source_metadata=metadata,
+        )
+        try:
+            result = KisOrderValidationService(
+                self.client,
+                session_service=self.session_service,
+            ).validate(request, now=context.now_utc)
+            record_kis_order_validation(db, request=request, result=result)
+        except Exception as exc:
+            return (
+                "failed",
+                {
+                    "validated_for_submission": False,
+                    "can_submit_later": False,
+                    "primary_block_reason": "validation_failed",
+                    "block_reasons": ["validation_failed"],
+                    "error": _safe_error(exc),
+                },
+            )
+        summary = sanitize_kis_payload(result.to_dict())
+        if result.validated_for_submission is not True:
+            return "failed", summary
+        return "passed", summary
+
+    def _submit_validated_candidate(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        candidate: _BuyCandidate,
+        account_state: dict[str, Any],
+        daily_limit: dict[str, Any],
+        validation_summary: dict[str, Any] | None,
+    ) -> tuple[bool, dict[str, Any]]:
+        metadata = _source_metadata(
+            context=context,
+            mode=RUN_MODE,
+            trigger_source=RUN_TRIGGER_SOURCE,
+            candidate=candidate,
+            block_reasons=[],
+            account_state=account_state,
+            daily_limit=daily_limit,
+            source_type=GUARDED_SOURCE_TYPE,
+            validation_summary=validation_summary,
+            real_order_submitted=False,
+            broker_submit_called=False,
+            manual_submit_called=True,
+            validation_called=True,
+        )
+        confirmation_phrase = str(
+            getattr(
+                context.settings,
+                "kis_confirmation_phrase",
+                KIS_MANUAL_CONFIRMATION_PHRASE,
+            )
+            or KIS_MANUAL_CONFIRMATION_PHRASE
+        )
+        request = KisManualOrderSubmitRequest(
+            market=MARKET,
+            symbol=candidate.symbol,
+            side=BUY,
+            qty=candidate.suggested_quantity,
+            order_type="market",
+            dry_run=False,
+            confirm_live=True,
+            confirmation=confirmation_phrase,
+            reason="guarded limited auto buy run-once",
+            source_metadata=metadata,
+        )
+        try:
+            _, response = KisManualOrderService(
+                self.client,
+                session_service=self.session_service,
+                runtime_settings=self.runtime_settings,
+            ).submit_manual(db, request, now=context.now_utc)
+        except Exception as exc:
+            response = {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "mode": RUN_MODE,
+                "source": SOURCE,
+                "source_type": GUARDED_SOURCE_TYPE,
+                "result": "blocked",
+                "action": "blocked_buy",
+                "reason": "manual_submit_failed",
+                "primary_block_reason": "manual_submit_failed",
+                "block_reasons": ["manual_submit_failed"],
+                "error": _safe_error(exc),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": True,
+                "validation_called": True,
+            }
+        return True, sanitize_kis_payload(response)
+
     def _record_signal(
         self,
         db: Session,
@@ -669,13 +908,13 @@ class KisLimitedAutoBuyService:
             reason=str(payload.get("reason") or ""),
             indicator_payload=_json(candidate.technical_snapshot if candidate else {}),
             risk_flags=_json(payload.get("risk_flags") or []),
-            approved_by_risk=False,
-            related_order_id=None,
+            approved_by_risk=bool(payload.get("real_order_submitted") is True),
+            related_order_id=_safe_int(payload.get("order_id")),
             signal_status=str(payload.get("source_type") or SOURCE_TYPE),
             trigger_source=str(payload.get("trigger_source") or RUN_TRIGGER_SOURCE),
             gate_level=gate_level,
             hard_block_reason=str(payload.get("primary_block_reason") or "") or None,
-            hard_blocked=bool(payload.get("result") != "ready"),
+            hard_blocked=bool(payload.get("result") not in {"ready", "submitted"}),
             gating_notes=_json(payload.get("gating_notes") or []),
         )
         db.add(signal)
@@ -705,20 +944,28 @@ class KisLimitedAutoBuyService:
             result=str(payload.get("result") or "blocked"),
             reason=str(payload.get("reason") or ""),
             signal_id=signal_id,
-            order_id=None,
+            order_id=_safe_int(payload.get("order_id")),
             request_payload=_json(
                 {
                     "provider": PROVIDER,
                     "market": MARKET,
                     "source": SOURCE,
-                    "source_type": SOURCE_TYPE,
+                    "source_type": str(payload.get("source_type") or SOURCE_TYPE),
                     "mode": mode,
                     "trigger_source": trigger_source,
                     "gate_level": gate_level,
-                    "real_order_submitted": False,
-                    "broker_submit_called": False,
-                    "manual_submit_called": False,
-                    "validation_called": False,
+                    "real_order_submitted": bool(
+                        payload.get("real_order_submitted") is True
+                    ),
+                    "broker_submit_called": bool(
+                        payload.get("broker_submit_called") is True
+                    ),
+                    "manual_submit_called": bool(
+                        payload.get("manual_submit_called") is True
+                    ),
+                    "validation_called": bool(
+                        payload.get("validation_called") is True
+                    ),
                 }
             ),
             response_payload=_json(payload),
@@ -749,6 +996,8 @@ def _status_payload(
             context.runtime.get("kis_limited_auto_buy_min_cash_buffer_krw", 0) or 0
         ),
     )
+    execution_enabled = not _execution_block_reasons(context)
+    real_order_submit_allowed = execution_enabled and not block_reasons
     result = "blocked" if block_reasons else "ready"
     reason = block_reasons[0] if block_reasons else "buy_readiness_gates_ready"
     return {
@@ -763,7 +1012,8 @@ def _status_payload(
         "action": HOLD,
         "reason": reason,
         "primary_block_reason": block_reasons[0] if block_reasons else None,
-        "live_auto_buy_enabled": False,
+        "auto_buy_execution_enabled": execution_enabled,
+        "live_auto_buy_enabled": context.live_auto_buy_configured,
         "configured_live_auto_buy_enabled": context.live_auto_buy_configured,
         "limited_auto_buy_enabled": context.limited_auto_buy_configured,
         "buy_readiness_enabled": context.readiness_enabled,
@@ -782,18 +1032,21 @@ def _status_payload(
         "no_new_entry_after": context.no_new_entry_after,
         "no_new_entry_after_blocked": context.no_new_entry_after_blocked,
         "cash_available": cash,
+        "total_asset_value": equity,
         "daily_buy_count": daily_limit["daily_buy_count"],
         "daily_buy_limit": daily_limit["daily_buy_limit"],
         "daily_buy_limit_remaining": daily_limit["daily_buy_limit_remaining"],
         "max_notional_pct": max_notional_pct,
         "estimated_max_notional": estimated_max_notional,
         "auto_order_ready": False,
-        "real_order_submit_allowed": False,
+        "real_order_submit_allowed": real_order_submit_allowed,
         "block_reasons": block_reasons,
         "blocked_by": block_reasons,
         "failed_checks": block_reasons,
         "human_readable_status": _human_status(result, reason, block_reasons),
-        "supported_triggers": {"buy": "readiness_only"},
+        "supported_triggers": {
+            "buy": "guarded_execution" if real_order_submit_allowed else "readiness_only"
+        },
         "candidate_count": 0,
         "candidates": [],
         "final_candidate": None,
@@ -804,8 +1057,12 @@ def _status_payload(
         "order_id": None,
         "broker_order_id": None,
         "kis_odno": None,
-        "auto_buy_execution_enabled": False,
-        "safety": _safety_payload(context, source_type="buy_readiness_status"),
+        "safety": _safety_payload(
+            context,
+            source_type="buy_readiness_status",
+            execution_enabled=execution_enabled,
+            real_order_submit_allowed=real_order_submit_allowed,
+        ),
         "checks": _checks_payload(context, account_state=account_state),
         "diagnostics": {
             "status_only": True,
@@ -834,8 +1091,32 @@ def _decision_payload(
     candidate: _BuyCandidate | None,
     block_reasons: list[str],
     shadow_result: dict[str, Any],
+    source_type: str,
+    execution_enabled: bool,
+    validation_called: bool,
+    validation_status: str,
+    validation_summary: dict[str, Any] | None,
+    manual_submit_called: bool,
+    manual_submit_response: dict[str, Any] | None,
+    real_order_submitted: bool,
+    broker_submit_called: bool,
+    order_id: Any,
+    broker_order_id: Any,
+    kis_odno: Any,
 ) -> dict[str, Any]:
-    candidate_payload = _candidate_payload(candidate) if candidate else None
+    real_order_submit_allowed = bool(
+        execution_enabled and candidate is not None and candidate.entry_ready
+    )
+    readiness_only = source_type == SOURCE_TYPE
+    candidate_payload = (
+        _candidate_payload(
+            candidate,
+            buy_actionable=real_order_submit_allowed,
+            buy_readiness_only=readiness_only,
+        )
+        if candidate
+        else None
+    )
     candidates = [candidate_payload] if candidate_payload else []
     metadata = _source_metadata(
         context=context,
@@ -845,20 +1126,35 @@ def _decision_payload(
         block_reasons=block_reasons,
         account_state=account_state,
         daily_limit=daily_limit,
+        source_type=source_type,
+        validation_summary=validation_summary,
+        real_order_submitted=real_order_submitted,
+        broker_submit_called=broker_submit_called,
+        manual_submit_called=manual_submit_called,
+        validation_called=validation_called,
     )
     risk_flags = _dedupe(
-        ["limited_auto_buy", "buy_readiness_only", "no_real_order_submitted"]
+        [
+            "limited_auto_buy",
+            source_type,
+            (
+                "real_order_submitted"
+                if real_order_submitted
+                else "no_real_order_submitted"
+            ),
+        ]
         + _string_list(candidate.risk_flags if candidate else [])
         + block_reasons
     )
+    base_notes = [source_type, "scheduler_real_orders_disabled"]
+    if readiness_only:
+        base_notes.extend(["buy_readiness_only", "no_broker_order_path"])
+    if not execution_enabled:
+        base_notes.append("auto_buy_disabled")
+    if validation_called:
+        base_notes.append(f"validation_{validation_status}")
     gating_notes = _dedupe(
-        [
-            "buy_readiness_only",
-            "auto_buy_disabled",
-            "scheduler_real_orders_disabled",
-            "no_broker_order_path",
-        ]
-        + _string_list(candidate.gating_notes if candidate else [])
+        base_notes + _string_list(candidate.gating_notes if candidate else [])
     )
     return sanitize_kis_payload(
         {
@@ -867,10 +1163,11 @@ def _decision_payload(
             "market": MARKET,
             "mode": mode,
             "source": SOURCE,
-            "source_type": SOURCE_TYPE,
+            "source_type": source_type,
             "trigger_source": trigger_source,
             "result": result,
             "action": action,
+            "side": BUY if action == BUY or real_order_submitted else None,
             "reason": reason,
             "primary_block_reason": primary_block_reason,
             "human_readable_status": _human_status(result, reason, block_reasons),
@@ -907,6 +1204,7 @@ def _decision_payload(
             ),
             "buy_sell_spread": candidate.buy_sell_spread if candidate else None,
             "cash_available": _account_cash(account_state),
+            "total_asset_value": _account_equity(account_state),
             "daily_buy_count": daily_limit["daily_buy_count"],
             "daily_buy_limit": daily_limit["daily_buy_limit"],
             "daily_buy_limit_remaining": daily_limit["daily_buy_limit_remaining"],
@@ -917,7 +1215,7 @@ def _decision_payload(
             "estimated_max_notional": (
                 candidate.estimated_max_notional if candidate else None
             ),
-            "live_auto_buy_enabled": False,
+            "live_auto_buy_enabled": context.live_auto_buy_configured,
             "configured_live_auto_buy_enabled": context.live_auto_buy_configured,
             "limited_auto_buy_enabled": context.limited_auto_buy_configured,
             "buy_readiness_enabled": context.readiness_enabled,
@@ -932,25 +1230,39 @@ def _decision_payload(
             "entry_allowed_now": context.entry_allowed_now,
             "no_new_entry_after": context.no_new_entry_after,
             "no_new_entry_after_blocked": context.no_new_entry_after_blocked,
-            "auto_order_ready": False,
-            "real_order_submit_allowed": False,
-            "real_order_submitted": False,
-            "broker_submit_called": False,
-            "manual_submit_called": False,
-            "validation_called": False,
-            "order_id": None,
-            "order_log_id": None,
-            "broker_order_id": None,
-            "kis_odno": None,
+            "auto_buy_execution_enabled": execution_enabled,
+            "auto_buy_enabled": execution_enabled,
+            "auto_order_ready": real_order_submit_allowed,
+            "real_order_submit_allowed": real_order_submit_allowed,
+            "real_order_submitted": real_order_submitted,
+            "broker_submit_called": broker_submit_called,
+            "manual_submit_called": manual_submit_called,
+            "validation_called": validation_called,
+            "validation_status": validation_status,
+            "order_id": order_id,
+            "order_log_id": order_id,
+            "broker_order_id": broker_order_id,
+            "kis_odno": kis_odno,
             "block_reasons": block_reasons,
             "blocked_by": block_reasons,
             "failed_checks": block_reasons,
             "risk_flags": risk_flags,
             "gating_notes": gating_notes,
-            "safety": _safety_payload(context, source_type=SOURCE_TYPE),
+            "safety": _safety_payload(
+                context,
+                source_type=source_type,
+                execution_enabled=execution_enabled,
+                real_order_submit_allowed=real_order_submit_allowed,
+                real_order_submitted=real_order_submitted,
+                broker_submit_called=broker_submit_called,
+                manual_submit_called=manual_submit_called,
+                validation_called=validation_called,
+            ),
             "checks": _checks_payload(context, account_state=account_state),
             "diagnostics": {
-                "readiness_only": True,
+                "readiness_only": readiness_only,
+                "validation_summary": validation_summary,
+                "manual_submit_response": manual_submit_response,
                 "candidate_source": _shadow_summary(shadow_result),
                 "runtime_snapshot": _runtime_snapshot(context),
                 "market_session_snapshot": _public_market_session(context),
@@ -969,14 +1281,21 @@ def _decision_payload(
             "audit_metadata": metadata,
             "market_session": _public_market_session(context),
             "account_state": _account_state_summary(account_state),
-            "supported_triggers": {"buy": "readiness_only"},
+            "supported_triggers": {
+                "buy": "guarded_execution" if execution_enabled else "readiness_only"
+            },
             "created_at": context.created_at,
             "checked_at": context.created_at,
         }
     )
 
 
-def _candidate_payload(candidate: _BuyCandidate | None) -> dict[str, Any] | None:
+def _candidate_payload(
+    candidate: _BuyCandidate | None,
+    *,
+    buy_actionable: bool = False,
+    buy_readiness_only: bool = True,
+) -> dict[str, Any] | None:
     if candidate is None:
         return None
     status = "BUY READY" if candidate.entry_ready else _candidate_status(candidate)
@@ -1017,9 +1336,9 @@ def _candidate_payload(candidate: _BuyCandidate | None) -> dict[str, Any] | None
             "technical_snapshot": candidate.technical_snapshot,
             "entry_ready": candidate.entry_ready,
             "status": status,
-            "trade_allowed": False,
-            "buy_readiness_only": True,
-            "buy_actionable": False,
+            "trade_allowed": buy_actionable,
+            "buy_readiness_only": buy_readiness_only,
+            "buy_actionable": buy_actionable,
             "duplicate_position": candidate.duplicate_position,
             "duplicate_open_order": candidate.duplicate_open_order,
             "duplicate_open_buy_order": candidate.duplicate_open_order,
@@ -1045,24 +1364,52 @@ def _source_metadata(
     block_reasons: list[str],
     account_state: dict[str, Any],
     daily_limit: dict[str, Any],
+    source_type: str,
+    validation_summary: dict[str, Any] | None,
+    real_order_submitted: bool,
+    broker_submit_called: bool,
+    manual_submit_called: bool,
+    validation_called: bool,
 ) -> dict[str, Any]:
     return sanitize_kis_payload(
         {
             "source": SOURCE,
-            "source_type": SOURCE_TYPE,
+            "source_type": source_type,
             "mode": mode,
             "trigger_source": trigger_source,
             "symbol": candidate.symbol if candidate else None,
+            "company": candidate.name if candidate else None,
+            "company_name": candidate.name if candidate else None,
+            "side": BUY if candidate else None,
+            "quantity": candidate.suggested_quantity if candidate else None,
             "suggested_quantity": candidate.suggested_quantity if candidate else None,
+            "current_price": candidate.current_price if candidate else None,
             "estimated_notional": (
                 candidate.estimated_notional if candidate else None
             ),
+            "available_cash": _account_cash(account_state),
+            "cash_available": _account_cash(account_state),
+            "total_asset_value": _account_equity(account_state),
+            "max_notional_pct": (
+                candidate.max_notional_pct
+                if candidate
+                else float(
+                    context.runtime.get("kis_limited_auto_buy_max_notional_pct", 0.03)
+                    or 0.03
+                )
+            ),
             "final_buy_score": candidate.final_buy_score if candidate else None,
             "final_sell_score": candidate.final_sell_score if candidate else None,
+            "required_buy_score": candidate.required_buy_score if candidate else None,
+            "buy_sell_spread": candidate.buy_sell_spread if candidate else None,
             "quant_buy_score": candidate.quant_buy_score if candidate else None,
             "quant_sell_score": candidate.quant_sell_score if candidate else None,
             "confidence": candidate.confidence if candidate else None,
             "gate_level": context.gate_level,
+            "indicator_status": candidate.indicator_status if candidate else None,
+            "indicator_bar_count": candidate.indicator_bar_count if candidate else None,
+            "risk_flags": candidate.risk_flags if candidate else [],
+            "gating_notes": candidate.gating_notes if candidate else [],
             "block_reasons": block_reasons,
             "runtime_snapshot": _runtime_snapshot(context),
             "market_session_snapshot": _public_market_session(context),
@@ -1072,30 +1419,42 @@ def _source_metadata(
                 candidate and candidate.duplicate_open_order
             ),
             "daily_limit_summary": daily_limit,
-            "real_order_submitted": False,
-            "broker_submit_called": False,
-            "manual_submit_called": False,
-            "validation_called": False,
+            "validation_summary": validation_summary,
+            "real_order_submitted": real_order_submitted,
+            "broker_submit_called": broker_submit_called,
+            "manual_submit_called": manual_submit_called,
+            "validation_called": validation_called,
         }
     )
 
 
-def _safety_payload(context: _Context, *, source_type: str) -> dict[str, Any]:
+def _safety_payload(
+    context: _Context,
+    *,
+    source_type: str,
+    execution_enabled: bool = False,
+    real_order_submit_allowed: bool = False,
+    real_order_submitted: bool = False,
+    broker_submit_called: bool = False,
+    manual_submit_called: bool = False,
+    validation_called: bool = False,
+) -> dict[str, Any]:
+    readiness_only = source_type == SOURCE_TYPE or source_type == "buy_readiness_status"
     return {
         "source": SOURCE,
         "source_type": source_type,
-        "buy_readiness_only": True,
-        "auto_buy_execution_enabled": False,
-        "auto_buy_enabled": False,
-        "live_auto_buy_enabled": False,
+        "buy_readiness_only": readiness_only,
+        "auto_buy_execution_enabled": execution_enabled,
+        "auto_buy_enabled": execution_enabled,
+        "live_auto_buy_enabled": context.live_auto_buy_configured,
         "configured_live_auto_buy_enabled": context.live_auto_buy_configured,
         "limited_auto_buy_enabled": context.limited_auto_buy_configured,
         "buy_readiness_enabled": context.readiness_enabled,
-        "real_order_submit_allowed": False,
-        "real_order_submitted": False,
-        "broker_submit_called": False,
-        "manual_submit_called": False,
-        "validation_called": False,
+        "real_order_submit_allowed": real_order_submit_allowed,
+        "real_order_submitted": real_order_submitted,
+        "broker_submit_called": broker_submit_called,
+        "manual_submit_called": manual_submit_called,
+        "validation_called": validation_called,
         "scheduler_real_orders_enabled": False,
         "configured_scheduler_real_orders_enabled": (
             context.scheduler_real_orders_configured
@@ -1121,7 +1480,7 @@ def _safety_payload(context: _Context, *, source_type: str) -> dict[str, Any]:
             )
         ),
         "existing_sell_guards_ready": context.sell_guards_ready,
-        "no_real_order_submitted": True,
+        "no_real_order_submitted": not real_order_submitted,
     }
 
 
@@ -1207,23 +1566,38 @@ def _readiness_preliminary_blocks(
     if bool(account_state) and account_state.get("fetch_success") is False:
         reasons.append("account_state_unavailable")
     if int(daily_limit.get("daily_buy_limit_remaining") or 0) <= 0:
-        reasons.append("daily_buy_limit_reached")
+        reasons.append("daily_auto_buy_limit_reached")
     return _dedupe(reasons)
 
 
 def _execution_block_reasons(context: _Context) -> list[str]:
-    reasons = ["auto_buy_execution_disabled"]
+    reasons: list[str] = []
+    auto_disabled = False
     if not context.live_auto_buy_configured:
+        auto_disabled = True
         reasons.append("live_auto_buy_disabled")
-    else:
-        reasons.append("live_auto_buy_must_remain_disabled")
     if not context.limited_auto_buy_configured:
+        auto_disabled = True
         reasons.append("limited_auto_buy_disabled")
     if bool(context.runtime.get("dry_run", True)):
-        reasons.append("dry_run_blocks_real_submit")
+        reasons.append("dry_run_enabled")
+    if bool(context.runtime.get("kill_switch", False)):
+        reasons.append("kill_switch_enabled")
+    if not bool(getattr(context.settings, "kis_enabled", False)):
+        reasons.append("kis_disabled")
     if not bool(getattr(context.settings, "kis_real_order_enabled", False)):
         reasons.append("kis_real_order_disabled")
-    reasons.append("scheduler_real_orders_disabled")
+    max_notional_pct = _safe_float_or_none(
+        context.runtime.get("kis_limited_auto_buy_max_notional_pct")
+    )
+    if max_notional_pct is None or max_notional_pct <= 0 or max_notional_pct > 1:
+        reasons.append("max_notional_pct_invalid")
+    if context.scheduler_context:
+        reasons.append("scheduler_real_orders_disabled")
+    if context.scheduler_real_orders_configured:
+        reasons.append("scheduler_real_orders_enabled")
+    if auto_disabled and reasons:
+        reasons = ["auto_buy_execution_disabled"] + reasons
     return _dedupe(reasons)
 
 
@@ -1273,20 +1647,20 @@ def _candidate_block_reasons(
     if current_price is None or current_price <= 0:
         reasons.append("current_price_unavailable")
     if suggested_quantity <= 0:
-        reasons.append("insufficient_cash")
+        reasons.append("invalid_quantity")
     if estimated_notional is None or estimated_notional <= 0:
         reasons.append("insufficient_cash")
     if not cash_sufficient:
         reasons.append("insufficient_cash")
     if estimated_max_notional is not None and estimated_notional is not None:
         if estimated_notional > estimated_max_notional and cash_sufficient:
-            reasons.append("notional_cap_exceeded")
+            reasons.append("max_notional_exceeded")
     if duplicate_position:
         reasons.append("duplicate_position")
     if duplicate_open_order:
         reasons.append("duplicate_open_buy_order")
     if int(daily_limit.get("daily_buy_limit_remaining") or 0) <= 0:
-        reasons.append("daily_buy_limit_reached")
+        reasons.append("daily_auto_buy_limit_reached")
     if daily_limit.get("same_symbol_bought_today") and not bool(
         context.runtime.get("kis_limited_auto_buy_allow_reentry_same_day", False)
     ):
@@ -1316,8 +1690,10 @@ def _normalize_block_reasons(reasons: list[str]) -> list[str]:
         "open_order_exists": "duplicate_open_buy_order",
         "open_buy_order_exists": "duplicate_open_buy_order",
         "current_price": "current_price_unavailable",
-        "quantity_not_positive": "insufficient_cash",
-        "notional_cap": "notional_cap_exceeded",
+        "quantity_not_positive": "invalid_quantity",
+        "notional_cap": "max_notional_exceeded",
+        "notional_cap_exceeded": "max_notional_exceeded",
+        "daily_buy_limit_reached": "daily_auto_buy_limit_reached",
     }
     return [mapping.get(reason, reason) for reason in reasons if reason]
 
@@ -1809,6 +2185,8 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
 
 
 def _human_status(result: str, reason: str, block_reasons: list[str]) -> str:
+    if result == "submitted":
+        return "Guarded limited auto buy submitted through validated manual path."
     if result in {"ready", "readiness_only"} and reason == "buy_readiness_only":
         return "BUY READY, but auto buy execution is disabled."
     if reason == "no_candidate":

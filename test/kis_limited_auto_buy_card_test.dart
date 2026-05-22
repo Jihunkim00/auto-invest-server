@@ -38,7 +38,7 @@ void main() {
     expect(paths.join('\n'), isNot(contains('/kis/orders/validate')));
   });
 
-  testWidgets('limited auto buy card renders disabled readiness-only state',
+  testWidgets('limited auto buy card renders guarded default-off state',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 4400);
     tester.view.devicePixelRatio = 1.0;
@@ -53,13 +53,13 @@ void main() {
     final card = find.byKey(const Key('kis_limited_auto_buy_card'));
     expect(card, findsOneWidget);
     for (final label in [
-      'BUY READINESS ONLY',
+      'BUY GUARDED EXECUTION',
       'AUTO BUY DISABLED',
       'NO BROKER SUBMIT',
       'SCHEDULER REAL ORDERS DISABLED',
       'DEFAULT OFF',
-      'GUARDED FUTURE BUY',
-      'READINESS / PREFLIGHT',
+      'MAX 1 BUY / DAY',
+      'POSITION DUPLICATE BLOCK',
     ]) {
       expect(find.descendant(of: card, matching: find.text(label)),
           findsOneWidget);
@@ -122,7 +122,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('run-once shows buy ready but auto buy disabled no broker submit',
+  testWidgets('run-once shows blocked default-off no broker submit',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 5200);
     tester.view.devicePixelRatio = 1.0;
@@ -142,11 +142,43 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(api.runCalls, 1);
-    expect(find.text('BUY READY'), findsWidgets);
+    expect(find.text('BLOCKED'), findsWidgets);
     expect(find.text('auto_buy_enabled=false'), findsOneWidget);
-    expect(find.text('BROKER_SUBMIT_CALLED'), findsWidgets);
-    expect(find.text('false'), findsWidgets);
+    expect(find.text('Broker submit: No'), findsWidgets);
     expect(find.textContaining('UNEXPECTED LIVE BUY SUBMITTED'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('submitted fake payload shows order id and KIS ODNO',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 5200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeLimitedAutoBuyApi(
+      result: KisLimitedAutoBuy.fromJson(_limitedAutoBuyJson(submitted: true)),
+    );
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+    final runButton = find.descendant(
+      of: find.byKey(const Key('kis_limited_auto_buy_card')),
+      matching: find.text('Run Limited Buy Once'),
+    );
+    await tester.ensureVisible(runButton);
+    await tester.tap(runButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('SUBMITTED'), findsWidgets);
+    expect(find.text('BUY'), findsWidgets);
+    expect(find.textContaining('SUBMITTED BUY: order 123 / ODNO KIS-123'),
+        findsOneWidget);
+    expect(find.text('Broker submit: Yes'), findsWidgets);
+    expect(find.text('Real order submitted: Yes'), findsWidgets);
+    expect(find.text('Validation called: Yes'), findsWidgets);
+    expect(find.text('KIS-123'), findsWidgets);
 
     controller.dispose();
   });
@@ -265,32 +297,48 @@ Map<String, dynamic> _limitedAutoBuyJson({
   String mode = 'kis_limited_auto_buy_run',
   bool blocked = false,
   bool weak = false,
+  bool submitted = false,
 }) {
   final candidate = _candidate(weak: weak);
   final blockReasons = weak
       ? ['score_threshold_not_met', 'auto_buy_execution_disabled']
-      : ['auto_buy_execution_disabled'];
+      : submitted
+          ? <String>[]
+          : ['auto_buy_execution_disabled'];
   return {
     'status': 'ok',
     'mode': mode,
     'source': 'kis_limited_auto_buy',
-    'source_type': 'buy_readiness_only',
-    'result': blocked
-        ? 'blocked'
-        : weak
+    'source_type':
+        submitted ? 'guarded_limited_auto_buy' : 'buy_readiness_only',
+    'result': submitted
+        ? 'submitted'
+        : blocked
             ? 'blocked'
-            : 'readiness_only',
-    'action': weak || blocked ? 'hold' : 'buy_ready',
-    'reason': blocked
-        ? 'auto_buy_execution_disabled'
-        : weak
-            ? 'score_threshold_not_met'
-            : 'buy_readiness_only',
-    'primary_block_reason': blocked
-        ? 'auto_buy_execution_disabled'
-        : weak
-            ? 'score_threshold_not_met'
-            : 'auto_buy_execution_disabled',
+            : weak
+                ? 'blocked'
+                : mode == 'kis_limited_auto_buy_run'
+                    ? 'blocked'
+                    : 'ready',
+    'action': submitted
+        ? 'buy'
+        : weak || blocked || mode == 'kis_limited_auto_buy_run'
+            ? 'blocked_buy'
+            : 'buy_ready',
+    'reason': submitted
+        ? 'guarded_limited_auto_buy_submitted'
+        : blocked
+            ? 'auto_buy_execution_disabled'
+            : weak
+                ? 'score_threshold_not_met'
+                : 'buy_readiness_only',
+    'primary_block_reason': submitted
+        ? null
+        : blocked
+            ? 'auto_buy_execution_disabled'
+            : weak
+                ? 'score_threshold_not_met'
+                : 'auto_buy_execution_disabled',
     'symbol': blocked ? null : '005930',
     'quantity': blocked ? null : 4,
     'estimated_notional': blocked ? null : 288000,
@@ -317,16 +365,23 @@ Map<String, dynamic> _limitedAutoBuyJson({
     'entry_allowed_now': true,
     'no_new_entry_after': '14:50',
     'cash_available': 3000000,
+    'total_asset_value': 10000000,
+    'estimated_max_notional': 300000,
     'daily_buy_count': 0,
     'daily_buy_limit': 1,
+    'daily_buy_limit_remaining': 1,
     'max_notional_pct': 0.03,
-    'real_order_submit_allowed': false,
-    'real_order_submitted': false,
-    'broker_submit_called': false,
-    'manual_submit_called': false,
-    'validation_called': false,
-    'auto_buy_enabled': false,
+    'real_order_submit_allowed': submitted,
+    'real_order_submitted': submitted,
+    'broker_submit_called': submitted,
+    'manual_submit_called': submitted,
+    'validation_called': submitted,
+    'validation_status': submitted ? 'passed' : 'not_called',
+    'auto_buy_enabled': submitted,
     'scheduler_real_orders_enabled': false,
+    'order_id': submitted ? 123 : null,
+    'broker_order_id': submitted ? 'KIS-123' : null,
+    'kis_odno': submitted ? 'KIS-123' : null,
     'block_reasons': blockReasons,
     'blocked_by': blockReasons,
     'candidates': blocked ? [] : [candidate],
@@ -337,11 +392,11 @@ Map<String, dynamic> _limitedAutoBuyJson({
     },
     'safety': {
       'buy_readiness_only': true,
-      'auto_buy_execution_enabled': false,
-      'real_order_submit_allowed': false,
-      'broker_submit_called': false,
-      'manual_submit_called': false,
-      'validation_called': false,
+      'auto_buy_execution_enabled': submitted,
+      'real_order_submit_allowed': submitted,
+      'broker_submit_called': submitted,
+      'manual_submit_called': submitted,
+      'validation_called': submitted,
     },
     'audit_metadata': {'source': 'kis_limited_auto_buy'},
   };
