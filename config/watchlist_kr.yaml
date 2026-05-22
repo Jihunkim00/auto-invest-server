@@ -26,3 +26,6 @@ symbols:
   - symbol: "207940"
     name: "삼성바이오로직스"
     market: "KOSPI"
+  - symbol: "094360"
+    name: "칩스앤미디어"
+    market: "KOSPI"

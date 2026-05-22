@@ -23,7 +23,7 @@ from app.services.technical_indicator_service import (
     indicator_payload_is_quant_ready,
 )
 
-KR_PREVIEW_LIMIT = 8
+KR_PREVIEW_LIMIT = 50
 KR_DISABLED_REASONS = ["preview_only", "kr_trading_disabled"]
 EMPTY_INDICATORS = dict(EMPTY_TECHNICAL_INDICATORS)
 SCOREABLE_INDICATOR_STATUSES = {"ok", "partial"}
