@@ -10,6 +10,7 @@ import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_buy_shadow_decision.dart';
 import '../../../models/kis_exit_shadow_decision.dart';
 import '../../../models/kis_limited_auto_buy.dart';
+import '../../../models/kis_limited_auto_buy_review.dart';
 import '../../../models/kis_limited_auto_sell.dart';
 import '../../../models/kis_shadow_exit_review.dart';
 import '../../../models/kis_shadow_exit_review_queue.dart';
@@ -801,6 +802,8 @@ class TestLabSection extends StatelessWidget {
       _KisAutoSimulatorPanel(controller: controller),
       const SizedBox(height: 12),
       _KisLimitedAutoBuyCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisLimitedAutoBuyReviewCard(controller: controller),
       const SizedBox(height: 12),
       _KisLimitedAutoSellCard(controller: controller),
       const SizedBox(height: 12),
@@ -2492,6 +2495,223 @@ class _KisLimitedAutoBuyCard extends StatelessWidget {
           const SizedBox(height: 10),
           _KisLimitedAutoBuyResultPanel(result: result),
         ],
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuyReviewCard extends StatelessWidget {
+  const _KisLimitedAutoBuyReviewCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final review = controller.latestKisLimitedAutoBuyReview;
+    final summary = review?.summary;
+    return Container(
+      key: const Key('kis_limited_auto_buy_review_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.rate_review_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Limited Buy Review',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'BUY REVIEW ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'READINESS QUALITY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.redAccent),
+          _SoftBadge(text: 'AUTO BUY DISABLED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisLimitedAutoBuyReviewLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshKisLimitedAutoBuyReview();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisLimitedAutoBuyReviewLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(controller.kisLimitedAutoBuyReviewLoading
+              ? 'Refreshing review...'
+              : 'Refresh Review'),
+        ),
+        if (controller.kisLimitedAutoBuyReviewError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kisLimitedAutoBuyReviewError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (review == null || review.recentDecisions.isEmpty) ...[
+          const _StateLine(
+            text:
+                'No limited buy readiness decisions yet. Run Buy Preflight or Run Limited Buy Once to generate review data.',
+          ),
+        ] else ...[
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            _ResultPair(
+                label: 'total runs', value: summary!.totalRuns.toString()),
+            _ResultPair(
+                label: 'BUY READY count',
+                value: summary.buyReadyCount.toString()),
+            _ResultPair(
+                label: 'blocked count', value: summary.blockedCount.toString()),
+            _ResultPair(
+                label: 'no candidate count',
+                value: summary.noCandidateCount.toString()),
+            _ResultPair(
+                label: 'top block reason',
+                value: _limitedBuyReviewTopReason(review)),
+            _ResultPair(
+                label: 'avg final buy score',
+                value: _score(summary.avgFinalBuyScore)),
+            _ResultPair(
+                label: 'avg required score',
+                value: _score(summary.avgRequiredBuyScore)),
+            _ResultPair(
+                label: 'latest run time',
+                value: summary.latestRunAt == null
+                    ? 'n/a'
+                    : formatTimestampWithKst(summary.latestRunAt)),
+            _ResultPair(
+                label: 'latest candidate',
+                value: _reviewCandidateLabel(
+                  summary.latestCandidateSymbol,
+                  summary.latestCandidateCompany,
+                )),
+            _ResultPair(
+                label: 'no submit invariant',
+                value: _yesNo(summary.noSubmitInvariantOk)),
+          ]),
+          if (review.topBlockReasons.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('Top Block Reasons',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final reason in review.topBlockReasons)
+                _SoftBadge(
+                  text: '${reason.label}: ${reason.count}',
+                  color: Colors.amberAccent,
+                ),
+            ]),
+          ],
+          const SizedBox(height: 12),
+          const Text('Recent Decisions',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          for (final decision in review.recentDecisions) ...[
+            _KisLimitedAutoBuyReviewDecisionCard(decision: decision),
+            const SizedBox(height: 8),
+          ],
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(review.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuyReviewDecisionCard extends StatelessWidget {
+  const _KisLimitedAutoBuyReviewDecisionCard({required this.decision});
+
+  final KisLimitedAutoBuyReviewDecision decision;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+              _reviewCandidateLabel(decision.symbol, decision.companyName),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          _SoftBadge(
+            text: decision.status,
+            color: _reviewStatusColor(decision.status),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+            label: 'final buy / required',
+            value:
+                '${_score(decision.finalBuyScore)} / ${_score(decision.requiredBuyScore)}',
+          ),
+          _ResultPair(
+            label: 'final sell score',
+            value: _score(decision.finalSellScore),
+          ),
+          _ResultPair(
+            label: 'estimated notional',
+            value: _formatReviewKrwOrDash(decision.estimatedNotional),
+          ),
+          _ResultPair(
+            label: 'reason',
+            value: decision.reason.isEmpty ? 'n/a' : decision.reason,
+          ),
+          _ResultPair(
+            label: 'created_at',
+            value: decision.createdAt == null
+                ? 'n/a'
+                : formatTimestampWithKst(decision.createdAt),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        _StateLine(text: 'block reasons: ${_joinList(decision.blockReasons)}'),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+            text: 'Broker submit: ${_yesNo(decision.brokerSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text:
+                'Real order submitted: ${_yesNo(decision.realOrderSubmitted)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text: 'Manual submit: ${_yesNo(decision.manualSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+        ]),
       ]),
     );
   }
@@ -4590,6 +4810,28 @@ String _limitedAutoSellDuplicateLabel(KisLimitedAutoSell result) {
       (result.finalCandidate?.latestOrder.isNotEmpty ?? false);
   if (duplicate) return 'blocked: duplicate open sell';
   return 'clear';
+}
+
+String _limitedBuyReviewTopReason(KisLimitedAutoBuyReview review) {
+  if (review.topBlockReasons.isEmpty) return 'n/a';
+  final top = review.topBlockReasons.first;
+  return '${top.label} (${top.count})';
+}
+
+String _reviewCandidateLabel(String? symbol, String? companyName) {
+  final safeSymbol = symbol?.trim();
+  final safeCompany = companyName?.trim();
+  if (safeSymbol == null || safeSymbol.isEmpty) return 'n/a';
+  if (safeCompany == null || safeCompany.isEmpty) return safeSymbol;
+  return '$safeSymbol · $safeCompany';
+}
+
+Color _reviewStatusColor(String status) {
+  final normalized = status.trim().toUpperCase();
+  if (normalized == 'BUY_READY') return Colors.greenAccent;
+  if (normalized == 'WATCH') return Colors.lightBlueAccent;
+  if (normalized == 'BLOCKED') return Colors.amberAccent;
+  return Colors.white70;
 }
 
 String _formatSafePlPercent(KisLiveExitCandidate candidate) {

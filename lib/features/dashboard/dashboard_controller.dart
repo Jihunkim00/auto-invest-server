@@ -8,6 +8,7 @@ import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
+import '../../models/kis_limited_auto_buy_review.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
@@ -148,6 +149,9 @@ class DashboardController extends ChangeNotifier {
   bool kisLimitedAutoBuyLoading = false;
   KisLimitedAutoBuy? latestKisLimitedAutoBuyResult;
   String? kisLimitedAutoBuyError;
+  bool kisLimitedAutoBuyReviewLoading = false;
+  KisLimitedAutoBuyReview? latestKisLimitedAutoBuyReview;
+  String? kisLimitedAutoBuyReviewError;
   bool kisSingleSymbolTradingLoading = false;
   KisSingleSymbolTradingResult? latestKisSingleSymbolTradingResult;
   String? kisSingleSymbolTradingError;
@@ -657,6 +661,8 @@ class DashboardController extends ChangeNotifier {
     kisGuardedRunConfirmation = false;
     latestKisLimitedAutoBuyResult = null;
     kisLimitedAutoBuyError = null;
+    latestKisLimitedAutoBuyReview = null;
+    kisLimitedAutoBuyReviewError = null;
     latestKisSingleSymbolTradingResult = null;
     kisSingleSymbolTradingError = null;
     notifyListeners();
@@ -1901,6 +1907,45 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisLimitedAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisLimitedAutoBuyReview({
+    int limit = 20,
+    int days = 30,
+    String? symbol,
+  }) async {
+    if (kisLimitedAutoBuyReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited buy review already in progress.',
+      );
+    }
+
+    kisLimitedAutoBuyReviewLoading = true;
+    kisLimitedAutoBuyReviewError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisLimitedAutoBuyReview(
+        limit: limit,
+        days: days,
+        symbol: symbol,
+      );
+      latestKisLimitedAutoBuyReview = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS limited buy review refreshed: ${result.summary.totalRuns} runs.',
+      );
+    } catch (e) {
+      kisLimitedAutoBuyReviewError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoBuyReviewError!),
+      );
+    } finally {
+      kisLimitedAutoBuyReviewLoading = false;
       notifyListeners();
     }
   }

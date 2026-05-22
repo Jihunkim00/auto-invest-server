@@ -36,6 +36,9 @@ from app.services.kis_shadow_exit_review_queue_service import (
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_buy_shadow_decision_service import KisBuyShadowDecisionService
 from app.services.kis_limited_auto_buy_service import KisLimitedAutoBuyService
+from app.services.kis_limited_auto_buy_review_service import (
+    KisLimitedAutoBuyReviewService,
+)
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
@@ -573,6 +576,24 @@ def run_kis_limited_auto_buy_once(
     client = _client(db)
     service = KisLimitedAutoBuyService(client)
     return service.run_once(db, gate_level=gate_level)
+
+
+@router.get("/limited-auto-buy/review")
+def get_kis_limited_auto_buy_review(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    symbol: str | None = Query(default=None),
+    include_raw: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    service = KisLimitedAutoBuyReviewService()
+    return service.review(
+        db,
+        limit=limit,
+        days=days,
+        symbol=symbol,
+        include_raw=include_raw,
+    )
 
 
 @router.get("/limited-auto-buy/status")
