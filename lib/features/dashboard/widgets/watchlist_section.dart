@@ -2423,16 +2423,31 @@ class _KisLimitedAutoBuyCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 8),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _SoftBadge(text: 'BUY READINESS ONLY', color: Colors.greenAccent),
-          _SoftBadge(text: 'AUTO BUY DISABLED', color: Colors.amberAccent),
-          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.redAccent),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'BUY GUARDED EXECUTION', color: Colors.greenAccent),
+          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
           _SoftBadge(
+            text: result?.autoBuyEnabled == true
+                ? 'AUTO BUY ENABLED'
+                : 'AUTO BUY DISABLED',
+            color: result?.autoBuyEnabled == true
+                ? Colors.greenAccent
+                : Colors.amberAccent,
+          ),
+          _SoftBadge(
+            text: result?.brokerSubmitCalled == true
+                ? 'BROKER SUBMIT RECORDED'
+                : 'NO BROKER SUBMIT',
+            color: result?.brokerSubmitCalled == true
+                ? Colors.greenAccent
+                : Colors.redAccent,
+          ),
+          const _SoftBadge(
               text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
-          _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
-          _SoftBadge(text: 'GUARDED FUTURE BUY', color: Colors.white70),
-          _SoftBadge(
-              text: 'READINESS / PREFLIGHT', color: Colors.lightBlueAccent),
+          const _SoftBadge(text: 'MAX 1 BUY / DAY', color: Colors.white70),
+          const _SoftBadge(
+              text: 'POSITION DUPLICATE BLOCK', color: Colors.white70),
         ]),
         const SizedBox(height: 12),
         Wrap(spacing: 14, runSpacing: 8, children: [
@@ -2448,6 +2463,9 @@ class _KisLimitedAutoBuyCard extends StatelessWidget {
               label: 'buy_readiness_enabled',
               value: _boolText(result?.buyReadinessEnabled ??
                   settings.kisLimitedAutoBuyReadinessEnabled)),
+          _ResultPair(
+              label: 'auto_buy_execution_enabled',
+              value: _boolText(result?.autoBuyEnabled ?? false)),
           _ResultPair(
               label: 'dry_run',
               value: _boolText(result?.dryRun ?? settings.dryRun)),
@@ -2470,6 +2488,12 @@ class _KisLimitedAutoBuyCard extends StatelessWidget {
           _ResultPair(
               label: 'cash_available',
               value: _formatReviewKrwOrDash(result?.cashAvailable)),
+          _ResultPair(
+              label: 'total_asset_value',
+              value: _formatReviewKrwOrDash(result?.totalAssetValue)),
+          _ResultPair(
+              label: 'estimated max notional',
+              value: _formatReviewKrwOrDash(result?.estimatedMaxNotional)),
           _ResultPair(
               label: 'daily buy limit',
               value:
@@ -2790,15 +2814,47 @@ class _KisLimitedAutoBuyResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final statusLabel = result.submitted
+        ? 'SUBMITTED'
+        : result.result == 'blocked'
+            ? 'BLOCKED'
+            : result.buyReady
+                ? 'BUY READY'
+                : 'HOLD';
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (result.submitted) ...[
         _StateLine(
           text:
-              'UNEXPECTED LIVE BUY SUBMITTED: order ${result.orderId ?? 'n/a'} / ODNO ${result.kisOdno ?? result.brokerOrderId ?? 'n/a'}',
-          color: Colors.redAccent,
+              'SUBMITTED BUY: order ${result.orderId ?? 'n/a'} / ODNO ${result.kisOdno ?? result.brokerOrderId ?? 'n/a'}',
+          color: Colors.greenAccent,
         ),
         const SizedBox(height: 10),
       ],
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: statusLabel,
+          color: result.submitted ? Colors.greenAccent : Colors.amberAccent,
+        ),
+        _SoftBadge(
+          text: result.action.toUpperCase(),
+          color: Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'Broker submit: ${_yesNo(result.brokerSubmitCalled)}',
+          color:
+              result.brokerSubmitCalled ? Colors.greenAccent : Colors.white70,
+        ),
+        _SoftBadge(
+          text: 'Real order submitted: ${_yesNo(result.realOrderSubmitted)}',
+          color:
+              result.realOrderSubmitted ? Colors.greenAccent : Colors.white70,
+        ),
+        _SoftBadge(
+          text: 'Validation called: ${_yesNo(result.validationCalled)}',
+          color: result.validationCalled ? Colors.greenAccent : Colors.white70,
+        ),
+      ]),
+      const SizedBox(height: 10),
       Wrap(spacing: 14, runSpacing: 8, children: [
         _ResultPair(label: 'result', value: result.result),
         _ResultPair(label: 'action', value: result.action),
@@ -2810,6 +2866,11 @@ class _KisLimitedAutoBuyResultPanel extends StatelessWidget {
             label: 'quantity', value: result.quantity?.toString() ?? 'n/a'),
         _ResultPair(
             label: 'notional', value: _formatReviewKrwOrDash(result.notional)),
+        _ResultPair(
+            label: 'order id', value: result.orderId?.toString() ?? 'none'),
+        _ResultPair(
+            label: 'KIS ODNO',
+            value: result.kisOdno ?? result.brokerOrderId ?? 'none'),
         _ResultPair(
             label: 'final buy score', value: _score(result.finalBuyScore)),
         _ResultPair(
@@ -2838,12 +2899,27 @@ class _KisLimitedAutoBuyResultPanel extends StatelessWidget {
       ],
       const SizedBox(height: 10),
       Wrap(spacing: 8, runSpacing: 8, children: [
-        const _SoftBadge(text: 'BUY READINESS ONLY', color: Colors.greenAccent),
-        const _SoftBadge(text: 'AUTO BUY DISABLED', color: Colors.amberAccent),
-        const _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.redAccent),
+        const _SoftBadge(
+            text: 'BUY GUARDED EXECUTION', color: Colors.greenAccent),
+        _SoftBadge(
+          text:
+              result.autoBuyEnabled ? 'AUTO BUY ENABLED' : 'AUTO BUY DISABLED',
+          color:
+              result.autoBuyEnabled ? Colors.greenAccent : Colors.amberAccent,
+        ),
+        _SoftBadge(
+          text: result.brokerSubmitCalled
+              ? 'BROKER SUBMIT RECORDED'
+              : 'NO BROKER SUBMIT',
+          color:
+              result.brokerSubmitCalled ? Colors.greenAccent : Colors.redAccent,
+        ),
         const _SoftBadge(
             text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
         const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+        const _SoftBadge(text: 'MAX 1 BUY / DAY', color: Colors.white70),
+        const _SoftBadge(
+            text: 'POSITION DUPLICATE BLOCK', color: Colors.white70),
         _SoftBadge(
           text: 'auto_buy_enabled=${_boolText(result.autoBuyEnabled)}',
           color: Colors.orangeAccent,
@@ -4894,6 +4970,7 @@ String _reviewCandidateLabel(String? symbol, String? companyName) {
 
 Color _reviewStatusColor(String status) {
   final normalized = status.trim().toUpperCase();
+  if (normalized == 'SUBMITTED') return Colors.greenAccent;
   if (normalized == 'BUY_READY') return Colors.greenAccent;
   if (normalized == 'WATCH') return Colors.lightBlueAccent;
   if (normalized == 'BLOCKED') return Colors.amberAccent;

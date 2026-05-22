@@ -1,7 +1,0 @@
-market: KR
-currency: KRW
-timezone: Asia/Seoul
-symbols:
-- symbol: 005930
-  name: Samsung
-  market: KOSPI

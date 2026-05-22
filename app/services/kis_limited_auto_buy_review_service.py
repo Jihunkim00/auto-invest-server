@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 from app.db.models import RuntimeSetting, TradeRunLog
 from app.services.kis_dry_run_risk_service import MARKET, PROVIDER
 from app.services.kis_limited_auto_buy_service import (
+    GUARDED_SOURCE_TYPE,
     PREFLIGHT_MODE,
     PREFLIGHT_TRIGGER_SOURCE,
     RUN_MODE,
     RUN_TRIGGER_SOURCE,
     SOURCE,
+    SOURCE_TYPE,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -52,6 +54,7 @@ _REASON_LABELS = {
     "confidence_threshold_not_met": "Confidence threshold not met",
     "current_price_unavailable": "Current price unavailable",
     "daily_buy_limit_reached": "Daily buy limit reached",
+    "daily_auto_buy_limit_reached": "Daily buy limit reached",
     "duplicate_open_buy_order": "Duplicate open order",
     "duplicate_open_order": "Duplicate open order",
     "duplicate_position": "Duplicate position",
@@ -65,6 +68,7 @@ _REASON_LABELS = {
     "no_candidate": "No candidate",
     "no_new_entry_after_blocked": "No new entry after cutoff",
     "notional_cap_exceeded": "Notional cap exceeded",
+    "max_notional_exceeded": "Max notional exceeded",
     "same_day_reentry_blocked": "Same-day re-entry blocked",
     "score_threshold_not_met": "Score threshold not met",
     "sell_pressure_too_high": "Sell pressure too high",
@@ -103,9 +107,12 @@ class KisLimitedAutoBuyReviewService:
         ]
         recent = decisions[:safe_limit]
         no_submit_invariant_ok = all(
-            not decision["real_order_submitted"]
-            and not decision["broker_submit_called"]
-            and not decision["manual_submit_called"]
+            _allowed_submit_decision(decision)
+            or (
+                not decision["real_order_submitted"]
+                and not decision["broker_submit_called"]
+                and not decision["manual_submit_called"]
+            )
             for decision in decisions
         )
         summary = _summary(decisions, no_submit_invariant_ok=no_submit_invariant_ok)
@@ -233,6 +240,11 @@ def _decision_from_row(
     )
     result = _first_text(payload.get("result"), row.result, "blocked")
     action = _first_text(payload.get("action"), "hold")
+    source_type = _first_text(
+        payload.get("source_type"),
+        request_payload.get("source_type"),
+        SOURCE_TYPE,
+    )
     status = _decision_status(
         result=result,
         action=action,
@@ -263,6 +275,7 @@ def _decision_from_row(
         "name": company,
         "result": result,
         "action": action,
+        "source_type": source_type,
         "status": status,
         "final_buy_score": _number_value(
             payload.get("final_buy_score"),
@@ -353,6 +366,11 @@ def _summary(
     return {
         "total_runs": len(decisions),
         "buy_ready_count": sum(1 for item in decisions if item["status"] == "BUY_READY"),
+        "submitted_count": sum(
+            1
+            for item in decisions
+            if item.get("result") == "submitted" or item.get("status") == "SUBMITTED"
+        ),
         "blocked_count": sum(
             1
             for item in decisions
@@ -383,6 +401,7 @@ def _summary(
         "daily_limit_reached_count": _count_reason(
             decisions,
             "daily_buy_limit_reached",
+            "daily_auto_buy_limit_reached",
         ),
         "market_session_block_count": _count_reason(
             decisions,
@@ -474,6 +493,8 @@ def _decision_status(
     block_reasons: list[str],
     candidate: dict[str, Any],
 ) -> str:
+    if result == "submitted" or action == "buy":
+        return "SUBMITTED"
     candidate_status = _first_text(candidate.get("status"))
     if action == "buy_ready" or result in {"ready", "readiness_only"}:
         return "BUY_READY"
@@ -486,6 +507,14 @@ def _decision_status(
             return "WATCH"
         return "BLOCKED"
     return "HOLD"
+
+
+def _allowed_submit_decision(decision: dict[str, Any]) -> bool:
+    return (
+        decision.get("source_type") == GUARDED_SOURCE_TYPE
+        and decision.get("result") == "submitted"
+        and decision.get("action") == "buy"
+    )
 
 
 def _json_dict(value: str | None) -> dict[str, Any]:
@@ -521,6 +550,8 @@ def _normalize_reasons(values: list[str]) -> list[str]:
         "open_order_exists": "duplicate_open_buy_order",
         "position_already_exists": "duplicate_position",
         "position_exists": "duplicate_position",
+        "notional_cap_exceeded": "max_notional_exceeded",
+        "daily_buy_limit_reached": "daily_auto_buy_limit_reached",
     }
     result: list[str] = []
     for value in values:

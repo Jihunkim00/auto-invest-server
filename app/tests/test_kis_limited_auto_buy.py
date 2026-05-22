@@ -13,6 +13,7 @@ from app.db.database import get_db
 from app.db.models import OrderLog, RuntimeSetting, SignalLog, TradeRunLog
 from app.main import app
 from app.services.kis_limited_auto_buy_service import (
+    GUARDED_SOURCE_TYPE,
     PREFLIGHT_MODE,
     RUN_MODE,
     STATUS_MODE,
@@ -84,6 +85,63 @@ class _ClosedSessionService:
             "is_entry_allowed_now": False,
             "is_holiday": False,
             "closure_reason": "closed",
+        }
+
+
+class _FakeValidationResult:
+    def __init__(
+        self,
+        *,
+        validated_for_submission=True,
+        block_reasons=None,
+        symbol="005930",
+        qty=4,
+    ):
+        self.provider = "kis"
+        self.market = "KR"
+        self.environment = "prod"
+        self.dry_run = True
+        self.validated_for_submission = validated_for_submission
+        self.can_submit_later = validated_for_submission
+        self.symbol = symbol
+        self.side = "buy"
+        self.qty = qty
+        self.order_type = "market"
+        self.current_price = 72_000
+        self.estimated_amount = 288_000
+        self.available_cash = 3_000_000
+        self.held_qty = None
+        self.warnings = []
+        self.block_reasons = block_reasons or []
+        self.market_session = {
+            "market": "KR",
+            "is_market_open": True,
+            "is_entry_allowed_now": True,
+        }
+        self.order_preview = {}
+        self.source_metadata = None
+        self.primary_block_reason = self.block_reasons[0] if self.block_reasons else None
+        self.message = None
+        self.detail = None
+
+    def to_dict(self):
+        return {
+            "provider": self.provider,
+            "market": self.market,
+            "environment": self.environment,
+            "dry_run": self.dry_run,
+            "validated_for_submission": self.validated_for_submission,
+            "can_submit_later": self.can_submit_later,
+            "symbol": self.symbol,
+            "side": self.side,
+            "qty": self.qty,
+            "order_type": self.order_type,
+            "current_price": self.current_price,
+            "estimated_amount": self.estimated_amount,
+            "available_cash": self.available_cash,
+            "block_reasons": self.block_reasons,
+            "market_session": self.market_session,
+            "primary_block_reason": self.primary_block_reason,
         }
 
 
@@ -217,8 +275,9 @@ def test_run_once_good_candidate_blocks_with_auto_buy_execution_disabled(db_sess
     result = _service().run_once(db_session)
 
     assert result["mode"] == RUN_MODE
-    assert result["result"] == "readiness_only"
-    assert result["action"] == "buy_ready"
+    assert result["result"] == "blocked"
+    assert result["action"] == "blocked_buy"
+    assert result["source_type"] == GUARDED_SOURCE_TYPE
     assert result["primary_block_reason"] == "auto_buy_execution_disabled"
     assert result["order_id"] is None
     assert result["kis_odno"] is None
@@ -231,6 +290,75 @@ def test_run_once_good_candidate_blocks_with_auto_buy_execution_disabled(db_sess
         db_session.query(TradeRunLog).filter(TradeRunLog.mode == RUN_MODE).count()
         == 1
     )
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"dry_run": True}, "dry_run_enabled"),
+        ({"kill_switch": True}, "kill_switch_enabled"),
+        ({"kis_live_auto_buy_enabled": False}, "auto_buy_execution_disabled"),
+        ({"kis_limited_auto_buy_enabled": False}, "auto_buy_execution_disabled"),
+    ],
+)
+def test_run_once_runtime_gates_block_before_validation(
+    monkeypatch,
+    db_session,
+    override,
+    reason,
+):
+    values = {
+        "dry_run": False,
+        "kis_live_auto_buy_enabled": True,
+        "kis_limited_auto_buy_enabled": True,
+    }
+    values.update(override)
+    _enable_runtime(db_session, **values)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("blocked run must not validate"),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("blocked run must not submit"),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == reason
+    assert result["validation_called"] is False
+    assert result["manual_submit_called"] is False
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_blocks_when_kis_real_order_disabled(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: pytest.fail("KIS-real-order blocked run must not validate"),
+    )
+
+    result = _service(
+        client=_FakeClient(
+            settings=SimpleNamespace(
+                kis_enabled=True,
+                kis_real_order_enabled=False,
+                kis_scheduler_allow_real_orders=False,
+                kr_scheduler_allow_real_orders=False,
+            )
+        )
+    ).run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "kis_real_order_disabled"
+    assert result["validation_called"] is False
+    assert db_session.query(OrderLog).count() == 0
 
 
 @pytest.mark.parametrize(
@@ -281,6 +409,19 @@ def test_cash_duplicate_position_and_open_order_blocks(
     assert db_session.query(OrderLog).count() == 0
 
 
+def test_max_notional_exceeded_blocks(db_session):
+    _enable_runtime(db_session, kis_limited_auto_buy_max_notional_pct=0.01)
+    shadow = _FakeShadowService(
+        _shadow_payload(suggested_notional=500_000, estimated_notional=500_000)
+    )
+
+    result = _service(shadow_service=shadow).preflight_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "max_notional_exceeded"
+    assert db_session.query(OrderLog).count() == 0
+
+
 def test_daily_buy_limit_blocks(db_session):
     _enable_runtime(db_session)
     _seed_limited_buy_order(db_session)
@@ -288,7 +429,7 @@ def test_daily_buy_limit_blocks(db_session):
     result = _service().preflight_once(db_session)
 
     assert result["result"] == "blocked"
-    assert result["primary_block_reason"] == "daily_buy_limit_reached"
+    assert result["primary_block_reason"] == "daily_auto_buy_limit_reached"
     assert result["candidate_count"] == 0
     assert db_session.query(OrderLog).count() == 1
 
@@ -314,6 +455,110 @@ def test_no_new_entry_after_blocks_entry(db_session):
     assert result["entry_allowed_now"] is False
 
 
+def test_validation_failure_blocks_without_manual_submit(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+    )
+    validation_calls = []
+
+    def fake_validate(self, request, **kwargs):
+        validation_calls.append(request)
+        return _FakeValidationResult(
+            validated_for_submission=False,
+            block_reasons=["current_price_unavailable"],
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: pytest.fail("validation failure must not submit"),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "validation_failed"
+    assert result["validation_called"] is True
+    assert result["validation_status"] == "failed"
+    assert result["manual_submit_called"] is False
+    assert result["real_order_submitted"] is False
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_all_gates_true_validates_then_calls_manual_submit(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+    )
+    validation_calls = []
+    submit_calls = []
+
+    def fake_validate(self, request, **kwargs):
+        validation_calls.append(request)
+        assert request.side == "buy"
+        assert request.dry_run is True
+        assert request.source_metadata["source_type"] == GUARDED_SOURCE_TYPE
+        return _FakeValidationResult()
+
+    def fake_submit(self, db, request, **kwargs):
+        submit_calls.append(request)
+        assert request.side == "buy"
+        assert request.dry_run is False
+        assert request.confirm_live is True
+        assert request.source_metadata["source_type"] == GUARDED_SOURCE_TYPE
+        assert request.source_metadata["validation_called"] is True
+        return 200, {
+            "provider": "kis",
+            "market": "KR",
+            "mode": "manual_live",
+            "source": SOURCE,
+            "source_type": GUARDED_SOURCE_TYPE,
+            "real_order_submitted": True,
+            "broker_submit_called": True,
+            "manual_submit_called": True,
+            "symbol": "005930",
+            "side": "buy",
+            "qty": 4,
+            "order_id": 123,
+            "order_log_id": 123,
+            "broker_order_id": "KIS-123",
+            "kis_odno": "KIS-123",
+            "broker_status": "submitted",
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisManualOrderService.submit_manual",
+        fake_submit,
+    )
+
+    result = _service().run_once(db_session)
+
+    assert len(validation_calls) == 1
+    assert len(submit_calls) == 1
+    assert result["result"] == "submitted"
+    assert result["action"] == "buy"
+    assert result["source_type"] == GUARDED_SOURCE_TYPE
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result["manual_submit_called"] is True
+    assert result["validation_called"] is True
+    assert result["order_id"] == 123
+    assert result["kis_odno"] == "KIS-123"
+
+
 def test_kill_switch_blocks_without_candidate_source(db_session):
     _enable_runtime(db_session, kill_switch=True)
     shadow = _FakeShadowService()
@@ -334,7 +579,6 @@ def test_no_direct_broker_or_manual_submit_calls_in_readiness_service():
         "submit_domestic_cash_order",
         "submit_market_buy",
         "submit_market_sell",
-        "submit_manual",
         "self.client.submit",
         "self.broker.submit",
     ]:

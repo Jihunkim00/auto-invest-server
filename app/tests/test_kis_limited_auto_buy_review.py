@@ -11,6 +11,7 @@ from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
 from app.main import app
 from app.services.kis_limited_auto_buy_review_service import REVIEW_MODE
 from app.services.kis_limited_auto_buy_service import (
+    GUARDED_SOURCE_TYPE,
     PREFLIGHT_MODE,
     PREFLIGHT_TRIGGER_SOURCE,
     RUN_MODE,
@@ -197,6 +198,36 @@ def test_review_flags_malformed_historical_submit_row_without_submitting(
     assert db_session.query(OrderLog).count() == 0
 
 
+def test_review_allows_guarded_submitted_rows_without_breaking_readiness_invariant(
+    client,
+    db_session,
+):
+    _seed_run(
+        db_session,
+        result="submitted",
+        action="buy",
+        reason="guarded_limited_auto_buy_submitted",
+        primary_block_reason=None,
+        block_reasons=[],
+        source_type=GUARDED_SOURCE_TYPE,
+        real_order_submitted=True,
+        broker_submit_called=True,
+        manual_submit_called=True,
+    )
+
+    body = client.get("/kis/limited-auto-buy/review").json()
+
+    assert body["summary"]["total_runs"] == 1
+    assert body["summary"]["submitted_count"] == 1
+    assert body["summary"]["no_submit_invariant_ok"] is True
+    decision = body["recent_decisions"][0]
+    assert decision["status"] == "SUBMITTED"
+    assert decision["source_type"] == GUARDED_SOURCE_TYPE
+    assert decision["real_order_submitted"] is True
+    assert decision["broker_submit_called"] is True
+    assert decision["manual_submit_called"] is True
+
+
 def _seed_run(
     db_session,
     *,
@@ -219,6 +250,7 @@ def _seed_run(
     real_order_submitted: bool = False,
     broker_submit_called: bool = False,
     manual_submit_called: bool = False,
+    source_type: str = SOURCE_TYPE,
     created_days_ago: int = 1,
 ) -> TradeRunLog:
     reasons = block_reasons or ["auto_buy_execution_disabled"]
@@ -245,7 +277,7 @@ def _seed_run(
         "market": "KR",
         "mode": mode,
         "source": SOURCE,
-        "source_type": SOURCE_TYPE,
+        "source_type": source_type,
         "trigger_source": trigger_source,
         "result": result,
         "action": action,
@@ -287,7 +319,7 @@ def _seed_run(
         request_payload=json.dumps(
             {
                 "source": SOURCE,
-                "source_type": SOURCE_TYPE,
+                "source_type": source_type,
                 "mode": mode,
                 "trigger_source": trigger_source,
                 "real_order_submitted": real_order_submitted,
