@@ -39,6 +39,9 @@ from app.services.kis_limited_auto_buy_service import KisLimitedAutoBuyService
 from app.services.kis_limited_auto_buy_review_service import (
     KisLimitedAutoBuyReviewService,
 )
+from app.services.kis_limited_auto_buy_execution_review_service import (
+    KisLimitedAutoBuyExecutionReviewService,
+)
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
@@ -633,6 +636,24 @@ def get_kis_limited_auto_buy_review(
     db: Session = Depends(get_db),
 ):
     service = KisLimitedAutoBuyReviewService()
+    return service.review(
+        db,
+        limit=limit,
+        days=days,
+        symbol=symbol,
+        include_raw=include_raw,
+    )
+
+
+@router.get("/limited-auto-buy/execution-review")
+def get_kis_limited_auto_buy_execution_review(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    symbol: str | None = Query(default=None),
+    include_raw: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    service = KisLimitedAutoBuyExecutionReviewService()
     return service.review(
         db,
         limit=limit,

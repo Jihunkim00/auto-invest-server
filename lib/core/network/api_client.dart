@@ -9,6 +9,7 @@ import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
+import '../../models/kis_limited_auto_buy_execution_review.dart';
 import '../../models/kis_limited_auto_buy_review.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
@@ -634,6 +635,25 @@ class ApiClient {
     final payload =
         await _getJsonNoCache('/kis/limited-auto-buy/review?$query');
     return KisLimitedAutoBuyReview.fromJson(payload);
+  }
+
+  Future<KisLimitedAutoBuyExecutionReview>
+      fetchKisLimitedAutoBuyExecutionReview({
+    int limit = 20,
+    int days = 30,
+    String? symbol,
+    bool includeRaw = false,
+  }) async {
+    final query = Uri(queryParameters: {
+      'limit': limit.toString(),
+      'days': days.toString(),
+      if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+      if (includeRaw) 'include_raw': 'true',
+    }).query;
+    final payload = await _getJsonNoCache(
+      '/kis/limited-auto-buy/execution-review?$query',
+    );
+    return KisLimitedAutoBuyExecutionReview.fromJson(payload);
   }
 
   Future<KisSingleSymbolTradingResult> runKisSingleSymbolAnalyzeBuy({
