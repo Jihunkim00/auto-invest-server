@@ -52,7 +52,11 @@ void main() {
     await tester.pumpWidget(_wrap(controller));
 
     expect(find.text('KIS Shadow Exit Review'), findsOneWidget);
-    expect(find.text('REVIEW ONLY'), findsOneWidget);
+    final card = find.byKey(const Key('kis_shadow_exit_review_card'));
+    expect(
+      find.descendant(of: card, matching: find.text('REVIEW ONLY')),
+      findsOneWidget,
+    );
     expect(find.text('SHADOW DECISION QUALITY'), findsOneWidget);
     expect(find.text('NO BROKER SUBMIT'), findsWidgets);
     expect(find.text('NO MANUAL SUBMIT'), findsWidgets);

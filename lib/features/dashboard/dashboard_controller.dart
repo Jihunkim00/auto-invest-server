@@ -8,6 +8,7 @@ import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
 import '../../models/kis_exit_shadow_decision.dart';
 import '../../models/kis_limited_auto_buy.dart';
+import '../../models/kis_limited_auto_buy_execution_review.dart';
 import '../../models/kis_limited_auto_buy_review.dart';
 import '../../models/kis_limited_auto_sell.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
@@ -155,6 +156,9 @@ class DashboardController extends ChangeNotifier {
   bool kisLimitedAutoBuyReviewLoading = false;
   KisLimitedAutoBuyReview? latestKisLimitedAutoBuyReview;
   String? kisLimitedAutoBuyReviewError;
+  bool kisLimitedAutoBuyExecutionReviewLoading = false;
+  KisLimitedAutoBuyExecutionReview? latestKisLimitedAutoBuyExecutionReview;
+  String? kisLimitedAutoBuyExecutionReviewError;
   bool kisSingleSymbolTradingLoading = false;
   KisSingleSymbolTradingResult? latestKisSingleSymbolTradingResult;
   String? kisSingleSymbolTradingError;
@@ -666,6 +670,8 @@ class DashboardController extends ChangeNotifier {
     kisLimitedAutoBuyError = null;
     latestKisLimitedAutoBuyReview = null;
     kisLimitedAutoBuyReviewError = null;
+    latestKisLimitedAutoBuyExecutionReview = null;
+    kisLimitedAutoBuyExecutionReviewError = null;
     latestKisSingleSymbolTradingResult = null;
     kisSingleSymbolTradingError = null;
     notifyListeners();
@@ -1983,6 +1989,46 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisLimitedAutoBuyReviewLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisLimitedAutoBuyExecutionReview({
+    int limit = 20,
+    int days = 30,
+    String? symbol,
+  }) async {
+    if (kisLimitedAutoBuyExecutionReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS limited buy execution review already in progress.',
+      );
+    }
+
+    kisLimitedAutoBuyExecutionReviewLoading = true;
+    kisLimitedAutoBuyExecutionReviewError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisLimitedAutoBuyExecutionReview(
+        limit: limit,
+        days: days,
+        symbol: symbol,
+      );
+      latestKisLimitedAutoBuyExecutionReview = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS limited buy execution review refreshed: ${result.summary.submittedBuyCount} submitted, ${result.summary.blockedCount} blocked.',
+      );
+    } catch (e) {
+      kisLimitedAutoBuyExecutionReviewError =
+          ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisLimitedAutoBuyExecutionReviewError!),
+      );
+    } finally {
+      kisLimitedAutoBuyExecutionReviewLoading = false;
       notifyListeners();
     }
   }

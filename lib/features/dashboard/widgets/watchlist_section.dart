@@ -10,6 +10,7 @@ import '../../../models/kis_auto_simulator_result.dart';
 import '../../../models/kis_buy_shadow_decision.dart';
 import '../../../models/kis_exit_shadow_decision.dart';
 import '../../../models/kis_limited_auto_buy.dart';
+import '../../../models/kis_limited_auto_buy_execution_review.dart';
 import '../../../models/kis_limited_auto_buy_review.dart';
 import '../../../models/kis_limited_auto_sell.dart';
 import '../../../models/kis_shadow_exit_review.dart';
@@ -871,6 +872,8 @@ class TestLabSection extends StatelessWidget {
       const SizedBox(height: 12),
       _KisLimitedAutoBuyReviewCard(controller: controller),
       const SizedBox(height: 12),
+      _KisLimitedAutoBuyExecutionReviewCard(controller: controller),
+      const SizedBox(height: 12),
       _KisLimitedAutoSellCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerLiveAutomationCard(controller: controller),
@@ -1507,6 +1510,7 @@ class _KisShadowExitReviewCard extends StatelessWidget {
     final review = controller.latestKisShadowExitReview;
     final summary = review?.summary;
     return Container(
+      key: const Key('kis_shadow_exit_review_card'),
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -2802,6 +2806,341 @@ class _KisLimitedAutoBuyReviewDecisionCard extends StatelessWidget {
             color: Colors.lightBlueAccent,
           ),
         ]),
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuyExecutionReviewCard extends StatelessWidget {
+  const _KisLimitedAutoBuyExecutionReviewCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final review = controller.latestKisLimitedAutoBuyExecutionReview;
+    final summary = review?.summary;
+    return Container(
+      key: const Key('kis_limited_auto_buy_execution_review_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.verified_user_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Limited Buy Execution Review',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'BUY EXECUTION REVIEW', color: Colors.greenAccent),
+          _SoftBadge(text: 'OPERATOR AUDIT', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'REVIEW ONLY', color: Colors.white70),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.redAccent),
+          _SoftBadge(
+              text: 'SCHEDULER REAL ORDERS DISABLED', color: Colors.redAccent),
+          _SoftBadge(text: 'SAFETY INVARIANTS', color: Colors.amberAccent),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisLimitedAutoBuyExecutionReviewLoading
+              ? null
+              : () async {
+                  final actionResult = await controller
+                      .refreshKisLimitedAutoBuyExecutionReview();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisLimitedAutoBuyExecutionReviewLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh),
+          label: Text(controller.kisLimitedAutoBuyExecutionReviewLoading
+              ? 'Refreshing execution review...'
+              : 'Refresh Execution Review'),
+        ),
+        if (controller.kisLimitedAutoBuyExecutionReviewError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text:
+                _primaryLine(controller.kisLimitedAutoBuyExecutionReviewError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (review == null ||
+            (review.submittedBuys.isEmpty &&
+                review.blockedDecisions.isEmpty &&
+                review.safetyViolations.isEmpty)) ...[
+          const _StateLine(
+            text:
+                'No guarded limited buy execution audit rows found for the selected window.',
+          ),
+        ] else ...[
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            _ResultPair(
+              label: 'submitted buy count',
+              value: summary!.submittedBuyCount.toString(),
+            ),
+            _ResultPair(
+              label: 'blocked count',
+              value: summary.blockedCount.toString(),
+            ),
+            _ResultPair(
+              label: 'readiness-only count',
+              value: summary.readinessOnlyCount.toString(),
+            ),
+            _ResultPair(
+              label: 'no-submit invariant',
+              value: _yesNo(summary.noSubmitInvariantOk),
+            ),
+            _ResultPair(
+              label: 'audit metadata',
+              value: _yesNo(summary.submittedRowsHaveAuditMetadata),
+            ),
+            _ResultPair(
+              label: 'latest submitted time',
+              value: summary.latestSubmittedAt == null
+                  ? 'n/a'
+                  : formatTimestampWithKst(summary.latestSubmittedAt),
+            ),
+            _ResultPair(
+              label: 'latest symbol',
+              value: summary.latestSymbol ?? 'n/a',
+            ),
+            _ResultPair(
+              label: 'max daily buy count observed',
+              value: summary.maxDailyBuyCountObserved.toString(),
+            ),
+            _ResultPair(
+              label: 'top block reason',
+              value: _limitedBuyExecutionTopReason(review),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          if (review.safetyViolations.isEmpty)
+            const _StateLine(text: 'No safety violations detected')
+          else ...[
+            const Text('Safety Violations',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final violation in review.safetyViolations) ...[
+              _KisLimitedAutoBuySafetyViolationCard(violation: violation),
+              const SizedBox(height: 8),
+            ],
+          ],
+          if (review.submittedBuys.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('Submitted Buy Audit',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final item in review.submittedBuys) ...[
+              _KisLimitedAutoBuySubmittedAuditCard(item: item),
+              const SizedBox(height: 8),
+            ],
+          ],
+          if (review.blockedDecisions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text('Blocked Decisions',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            for (final item in review.blockedDecisions) ...[
+              _KisLimitedAutoBuyBlockedAuditCard(item: item),
+              const SizedBox(height: 8),
+            ],
+          ],
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(review.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuySubmittedAuditCard extends StatelessWidget {
+  const _KisLimitedAutoBuySubmittedAuditCard({required this.item});
+
+  final KisLimitedAutoBuySubmittedAuditItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _firstText([
+      item.internalStatus,
+      item.brokerStatus,
+      item.realOrderSubmitted ? 'SUBMITTED' : 'AUDIT',
+    ]).toUpperCase();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+              _reviewCandidateLabel(item.symbol, item.companyName),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          _SoftBadge(
+            text: status,
+            color: item.realOrderSubmitted
+                ? Colors.greenAccent
+                : Colors.amberAccent,
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'quantity', value: item.quantity?.toString() ?? 'n/a'),
+          _ResultPair(
+              label: 'estimated notional',
+              value: _formatReviewKrwOrDash(item.estimatedNotional)),
+          _ResultPair(
+              label: 'order id',
+              value: item.orderId == null ? 'n/a' : item.orderId.toString()),
+          _ResultPair(label: 'KIS ODNO', value: item.kisOdno ?? 'n/a'),
+          _ResultPair(
+            label: 'buy score / required',
+            value:
+                '${_score(item.finalBuyScore)} / ${_score(item.requiredBuyScore)}',
+          ),
+          _ResultPair(
+              label: 'validation called', value: _yesNo(item.validationCalled)),
+          _ResultPair(
+              label: 'manual submit called',
+              value: _yesNo(item.manualSubmitCalled)),
+          _ResultPair(
+              label: 'broker submit called',
+              value: _yesNo(item.brokerSubmitCalled)),
+        ]),
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'runtime safety snapshot: ${_auditSnapshotLabel(item.runtimeSafetySnapshot)}',
+        ),
+        if (item.validationSummary.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(
+            text:
+                'validation summary: ${_auditSnapshotLabel(item.validationSummary)}',
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuyBlockedAuditCard extends StatelessWidget {
+  const _KisLimitedAutoBuyBlockedAuditCard({required this.item});
+
+  final KisLimitedAutoBuyBlockedDecisionItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = item.primaryBlockReason ??
+        (item.blockReasons.isEmpty ? 'n/a' : item.blockReasons.first);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(
+              _reviewCandidateLabel(item.symbol, item.companyName),
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          const _SoftBadge(text: 'BLOCKED', color: Colors.amberAccent),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(label: 'primary block reason', value: primary),
+          _ResultPair(
+            label: 'score vs required',
+            value:
+                '${_score(item.finalBuyScore)} / ${_score(item.requiredBuyScore)}',
+          ),
+          _ResultPair(
+            label: 'estimated notional',
+            value: _formatReviewKrwOrDash(item.estimatedNotional),
+          ),
+          _ResultPair(
+              label: 'Broker submit', value: _yesNo(item.brokerSubmitCalled)),
+          _ResultPair(
+              label: 'real order submitted',
+              value: _yesNo(item.realOrderSubmitted)),
+        ]),
+        if (item.blockReasons.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'block reasons: ${_joinList(item.blockReasons)}'),
+        ],
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+            text: 'Broker submit: ${_yesNo(item.brokerSubmitCalled)}',
+            color: Colors.lightBlueAccent,
+          ),
+          _SoftBadge(
+            text: 'Real order submitted: ${_yesNo(item.realOrderSubmitted)}',
+            color: Colors.lightBlueAccent,
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _KisLimitedAutoBuySafetyViolationCard extends StatelessWidget {
+  const _KisLimitedAutoBuySafetyViolationCard({required this.violation});
+
+  final KisLimitedAutoBuySafetyViolation violation;
+
+  @override
+  Widget build(BuildContext context) {
+    final affected = _joinList([
+      if (violation.symbol != null) 'symbol ${violation.symbol}',
+      if (violation.orderId != null) 'order ${violation.orderId}',
+      if (violation.runId != null) 'run ${violation.runId}',
+    ]);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.redAccent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.35)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.warning_amber_outlined,
+              size: 18, color: Colors.redAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(violation.code,
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          const _SoftBadge(text: 'SAFETY VIOLATION', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 8),
+        _StateLine(text: violation.reason, color: Colors.redAccent),
+        const SizedBox(height: 8),
+        _StateLine(text: 'Affected: $affected'),
       ]),
     );
   }
@@ -4958,6 +5297,23 @@ String _limitedBuyReviewTopReason(KisLimitedAutoBuyReview review) {
   if (review.topBlockReasons.isEmpty) return 'n/a';
   final top = review.topBlockReasons.first;
   return '${top.label} (${top.count})';
+}
+
+String _limitedBuyExecutionTopReason(KisLimitedAutoBuyExecutionReview review) {
+  if (review.topBlockReasons.isEmpty) return 'n/a';
+  final top = review.topBlockReasons.first;
+  return '${top.label} (${top.count})';
+}
+
+String _auditSnapshotLabel(Map<String, dynamic> value) {
+  if (value.isEmpty) return 'n/a';
+  final parts = <String>[];
+  for (final key in value.keys.take(4)) {
+    final item = value[key];
+    if (item == null || item.toString() == 'null') continue;
+    parts.add('$key=$item');
+  }
+  return parts.isEmpty ? 'n/a' : parts.join(', ');
 }
 
 String _reviewCandidateLabel(String? symbol, String? companyName) {
