@@ -43,6 +43,9 @@ from app.services.kis_limited_auto_buy_execution_review_service import (
     KisLimitedAutoBuyExecutionReviewService,
 )
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
+from app.services.kis_scheduler_readiness_service import (
+    KisSchedulerReadinessService,
+)
 from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
     KisSingleSymbolTradingService,
@@ -301,6 +304,23 @@ def get_kis_scheduler_status(db: Session = Depends(get_db)):
     payload = service.status(db)
     payload["live"] = KisSchedulerLiveService(client).status(db)
     return payload
+
+
+@router.get("/scheduler/readiness")
+def get_kis_scheduler_readiness(
+    include_modules: bool = Query(default=True),
+    include_recent_runs: bool = Query(default=True),
+    include_raw: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisSchedulerReadinessService(client)
+    return service.readiness(
+        db,
+        include_modules=include_modules,
+        include_recent_runs=include_recent_runs,
+        include_raw=include_raw,
+    )
 
 
 @router.get("/orders/summary")

@@ -16,6 +16,7 @@ import '../../../models/kis_limited_auto_sell.dart';
 import '../../../models/kis_shadow_exit_review.dart';
 import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
+import '../../../models/kis_scheduler_readiness.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
@@ -875,6 +876,8 @@ class TestLabSection extends StatelessWidget {
       _KisLimitedAutoBuyExecutionReviewCard(controller: controller),
       const SizedBox(height: 12),
       _KisLimitedAutoSellCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerReadinessCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerLiveAutomationCard(controller: controller),
       const SizedBox(height: 12),
@@ -3395,6 +3398,437 @@ String _tech(KisLimitedAutoBuyCandidate candidate, String key) {
   if (value == null) return 'n/a';
   if (value is num) return _score(value.toDouble());
   return value.toString();
+}
+
+class _KisSchedulerReadinessCard extends StatelessWidget {
+  const _KisSchedulerReadinessCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.latestKisSchedulerReadiness;
+    final summary = result?.summary;
+    return Container(
+      key: const Key('kis_scheduler_readiness_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.event_available_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Readiness / Schedule Audit',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+              text: 'SCHEDULER READINESS', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'SCHEDULE AUDIT', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'READINESS ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'REAL ORDERS DISABLED', color: Colors.redAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'DRY-RUN SAFE', color: Colors.white70),
+          _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+            label: 'scheduler enabled',
+            value: _boolText(summary?.schedulerEnabled ??
+                controller.settings.schedulerEnabled),
+          ),
+          _ResultPair(
+            label: 'KIS scheduler enabled',
+            value: _boolText(summary?.kisSchedulerEnabled ?? false),
+          ),
+          _ResultPair(
+            label: 'scheduler dry-run',
+            value: _boolText(summary?.kisSchedulerDryRun ?? true),
+          ),
+          _ResultPair(
+            label: 'real orders allowed',
+            value: _yesNo(summary?.realOrderSubmitAllowed ?? false),
+          ),
+          _ResultPair(
+            label: 'market open',
+            value: _boolText(summary?.marketOpen ?? false),
+          ),
+          _ResultPair(
+            label: 'entry allowed now',
+            value: _boolText(summary?.entryAllowedNow ?? false),
+          ),
+          _ResultPair(
+            label: 'sell session allowed',
+            value: _boolText(summary?.sellSessionAllowed ?? false),
+          ),
+          _ResultPair(
+            label: 'next scheduled slot',
+            value: _schedulerSlotLabel(summary?.nextScheduledSlot),
+          ),
+          _ResultPair(
+            label: 'readiness status',
+            value: summary?.readinessStatus ?? 'DISABLED',
+          ),
+          _ResultPair(
+            label: 'primary block reason',
+            value: summary?.primaryBlockReason ?? 'not_loaded',
+          ),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisSchedulerReadinessLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshKisSchedulerReadiness();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisSchedulerReadinessLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh, size: 18),
+          label: Text(controller.kisSchedulerReadinessLoading
+              ? 'Refreshing scheduler readiness...'
+              : 'Refresh Scheduler Readiness'),
+        ),
+        if (controller.kisSchedulerReadinessError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kisSchedulerReadinessError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (result == null) ...[
+          const _StateLine(
+            text:
+                'No scheduler readiness data yet. Default scheduler state remains off.',
+          ),
+        ] else ...[
+          _KisSchedulerReadinessSummaryPanel(result: result),
+          const SizedBox(height: 12),
+          _KisSchedulerScheduleAudit(schedule: result.schedule),
+          const SizedBox(height: 12),
+          _KisSchedulerModuleAudit(modules: result.modules),
+          const SizedBox(height: 12),
+          _KisSchedulerRecentRuns(runs: result.recentRuns),
+          const SizedBox(height: 4),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(result.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerReadinessSummaryPanel extends StatelessWidget {
+  const _KisSchedulerReadinessSummaryPanel({required this.result});
+
+  final KisSchedulerReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = result.summary;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Readiness Summary',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'provider', value: result.provider),
+        _ResultPair(label: 'market', value: result.market),
+        _ResultPair(label: 'mode', value: result.mode),
+        _ResultPair(
+            label: 'readiness only', value: _yesNo(result.readinessOnly)),
+        _ResultPair(
+          label: 'real order submitted',
+          value: _yesNo(result.realOrderSubmitted),
+        ),
+        _ResultPair(
+          label: 'broker submit',
+          value: _yesNo(result.brokerSubmitCalled),
+        ),
+        _ResultPair(
+          label: 'manual submit',
+          value: _yesNo(result.manualSubmitCalled),
+        ),
+        _ResultPair(
+          label: 'current slot',
+          value: summary.currentSlotLabel ?? 'n/a',
+        ),
+      ]),
+      if (summary.blockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+          text: 'block_reasons: ${_joinList(summary.blockReasons)}',
+        ),
+      ],
+    ]);
+  }
+}
+
+class _KisSchedulerScheduleAudit extends StatelessWidget {
+  const _KisSchedulerScheduleAudit({required this.schedule});
+
+  final List<KisSchedulerScheduleItem> schedule;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Schedule Audit',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (schedule.isEmpty)
+        const _StateLine(text: 'No scheduler slots returned.')
+      else
+        for (final slot in schedule)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${slot.displayLabel} / ${slot.scheduledTime} / ${slot.timezone}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 14, runSpacing: 8, children: [
+                    _ResultPair(label: 'purpose', value: slot.purpose),
+                    _ResultPair(
+                        label: 'enabled', value: _boolText(slot.enabled)),
+                    _ResultPair(
+                        label: 'dry-run only', value: _yesNo(slot.dryRunOnly)),
+                    _ResultPair(
+                      label: 'real order allowed',
+                      value: _yesNo(slot.realOrderAllowed),
+                    ),
+                  ]),
+                  if (slot.notes.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _StateLine(text: 'notes: ${_joinList(slot.notes)}'),
+                  ],
+                ],
+              ),
+            ),
+          ),
+    ]);
+  }
+}
+
+class _KisSchedulerModuleAudit extends StatelessWidget {
+  const _KisSchedulerModuleAudit({required this.modules});
+
+  final KisSchedulerReadinessModules modules;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Modules', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      _KisSchedulerModulePanel(
+        title: 'Limited Auto Sell',
+        module: modules.limitedAutoSell,
+        pairs: [
+          _ResultPair(
+            label: 'stop-loss execution enabled',
+            value: _boolText(modules.limitedAutoSell.stopLossExecutionEnabled),
+          ),
+          _ResultPair(
+            label: 'take-profit execution enabled',
+            value:
+                _boolText(modules.limitedAutoSell.takeProfitExecutionEnabled),
+          ),
+          _ResultPair(
+            label: 'ready for scheduler dry-run',
+            value: _yesNo(modules.limitedAutoSell.readyForSchedulerDryRun),
+          ),
+          _ResultPair(
+            label: 'ready for scheduler real order',
+            value: _yesNo(modules.limitedAutoSell.readyForSchedulerRealOrder),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      _KisSchedulerModulePanel(
+        title: 'Limited Auto Buy',
+        module: modules.limitedAutoBuy,
+        pairs: [
+          _ResultPair(
+            label: 'buy execution enabled',
+            value: _boolText(modules.limitedAutoBuy.autoBuyExecutionEnabled),
+          ),
+          _ResultPair(
+            label: 'ready for scheduler dry-run',
+            value: _yesNo(modules.limitedAutoBuy.readyForSchedulerDryRun),
+          ),
+          _ResultPair(
+            label: 'ready for scheduler real order',
+            value: _yesNo(modules.limitedAutoBuy.readyForSchedulerRealOrder),
+          ),
+        ],
+      ),
+      const SizedBox(height: 8),
+      _KisSchedulerModulePanel(
+        title: 'Execution reviews',
+        module: modules.executionReview,
+        pairs: [
+          _ResultPair(
+            label: 'read-only',
+            value: _yesNo(modules.executionReview.readOnly),
+          ),
+          _ResultPair(
+            label: 'available',
+            value: _yesNo(modules.executionReview.available),
+          ),
+        ],
+      ),
+    ]);
+  }
+}
+
+class _KisSchedulerModulePanel extends StatelessWidget {
+  const _KisSchedulerModulePanel({
+    required this.title,
+    required this.module,
+    required this.pairs,
+  });
+
+  final String title;
+  final KisSchedulerModuleStatus module;
+  final List<Widget> pairs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Text(title,
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          _SoftBadge(
+            text: module.available ? 'AVAILABLE' : 'UNAVAILABLE',
+            color: module.available ? Colors.greenAccent : Colors.amberAccent,
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+            label: 'status endpoint',
+            value:
+                module.statusEndpoint.isEmpty ? 'n/a' : module.statusEndpoint,
+          ),
+          _ResultPair(
+            label: 'daily limit remaining',
+            value: module.dailyLimitRemaining?.toString() ?? 'n/a',
+          ),
+          ...pairs,
+        ]),
+        if (module.blockReasons.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _StateLine(text: 'block reasons: ${_joinList(module.blockReasons)}'),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerRecentRuns extends StatelessWidget {
+  const _KisSchedulerRecentRuns({required this.runs});
+
+  final List<KisSchedulerRecentRun> runs;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Recent Runs', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (runs.isEmpty)
+        const _StateLine(text: 'No recent scheduler runs returned.')
+      else
+        for (final run in runs.take(5))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${run.mode} / ${run.triggerSource}',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(label: 'result', value: run.result),
+                      _ResultPair(label: 'symbol', value: run.symbol),
+                      _ResultPair(
+                        label: 'broker submit',
+                        value: _yesNo(run.brokerSubmitCalled),
+                      ),
+                      _ResultPair(
+                        label: 'real order submitted',
+                        value: _yesNo(run.realOrderSubmitted),
+                      ),
+                      _ResultPair(
+                        label: 'manual submit',
+                        value: _yesNo(run.manualSubmitCalled),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      _SoftBadge(
+                        text:
+                            'Broker submit: ${_yesNo(run.brokerSubmitCalled)}',
+                        color: Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Real order submitted: ${_yesNo(run.realOrderSubmitted)}',
+                        color: Colors.lightBlueAccent,
+                      ),
+                    ]),
+                    if (run.blockReasons.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _StateLine(
+                        text: 'block reasons: ${_joinList(run.blockReasons)}',
+                      ),
+                    ],
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+String _schedulerSlotLabel(KisSchedulerScheduleItem? slot) {
+  if (slot == null) return 'n/a';
+  return '${slot.displayLabel} ${slot.scheduledTime} ${slot.timezone}';
 }
 
 class _KisSchedulerLiveAutomationCard extends StatelessWidget {

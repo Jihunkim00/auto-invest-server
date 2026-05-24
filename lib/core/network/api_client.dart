@@ -16,6 +16,7 @@ import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
+import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
 import '../../models/kis_manual_order_result.dart';
@@ -423,6 +424,20 @@ class ApiClient {
   Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
     final payload = await _getJsonNoCache('/kis/scheduler/status');
     return KisSchedulerSimulationStatus.fromJson(payload);
+  }
+
+  Future<KisSchedulerReadiness> fetchKisSchedulerReadiness({
+    bool includeModules = true,
+    bool includeRecentRuns = true,
+    bool includeRaw = false,
+  }) async {
+    final query = Uri(queryParameters: {
+      'include_modules': includeModules.toString(),
+      'include_recent_runs': includeRecentRuns.toString(),
+      if (includeRaw) 'include_raw': 'true',
+    }).query;
+    final payload = await _getJsonNoCache('/kis/scheduler/readiness?$query');
+    return KisSchedulerReadiness.fromJson(payload);
   }
 
   Future<KisSchedulerRunResult> runKisSchedulerDryRunOnce() async {
