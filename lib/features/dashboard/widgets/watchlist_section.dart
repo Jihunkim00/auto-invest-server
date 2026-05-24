@@ -18,10 +18,12 @@ import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../../models/kis_scheduler_dry_run_review.dart';
+import '../../../models/kis_scheduler_guarded_sell.dart';
 import '../../../models/kis_scheduler_readiness.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
+import '../../../models/ops_settings.dart';
 import '../../../models/watchlist_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
 import 'result_presentation_helpers.dart' as presentation;
@@ -885,6 +887,8 @@ class TestLabSection extends StatelessWidget {
       const SizedBox(height: 12),
       _KisSchedulerDryRunReviewCard(controller: controller),
       const SizedBox(height: 12),
+      _KisSchedulerGuardedSellCard(controller: controller),
+      const SizedBox(height: 12),
       _KisSchedulerLiveAutomationCard(controller: controller),
       const SizedBox(height: 12),
       _KisLiveExitPreflightCard(controller: controller),
@@ -1082,6 +1086,11 @@ class _TestLabActions extends StatelessWidget {
         label: 'Run Scheduler Live Guarded Check',
         loading: controller.kisSchedulerLiveLoading,
         run: controller.runKisSchedulerLiveOnce,
+      ),
+      _LabAction(
+        label: 'Run Scheduler Guarded Sell',
+        loading: controller.kisSchedulerGuardedSellLoading,
+        run: controller.runKisSchedulerGuardedSellOnce,
       ),
       _LabAction(
         label: 'Refresh Readiness',
@@ -4612,9 +4621,345 @@ bool _mapBool(Map<String, dynamic> map, String key) {
   return text == 'true' || text == '1' || text == 'yes';
 }
 
+bool? _mapNullableBool(Map<String, dynamic> map, String key) {
+  final value = map[key];
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
+}
+
 String _schedulerSlotLabel(KisSchedulerScheduleItem? slot) {
   if (slot == null) return 'n/a';
   return '${slot.displayLabel} ${slot.scheduledTime} ${slot.timezone}';
+}
+
+class _KisSchedulerGuardedSellCard extends StatelessWidget {
+  const _KisSchedulerGuardedSellCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final result = controller.latestKisSchedulerGuardedSellResult;
+    final brokerBadge = result?.brokerSubmitCalled == true
+        ? 'BROKER SUBMIT: YES'
+        : 'NO BROKER SUBMIT';
+    return Container(
+      key: const Key('kis_scheduler_guarded_sell_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.output_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Guarded Sell',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'SCHEDULER GUARDED SELL', color: Colors.lightBlueAccent),
+          const _SoftBadge(text: 'SELL ONLY', color: Colors.greenAccent),
+          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+          const _SoftBadge(text: 'BUY DISABLED', color: Colors.orangeAccent),
+          const _SoftBadge(
+              text: 'REAL ORDERS REQUIRE EXPLICIT SETTINGS',
+              color: Colors.redAccent),
+          _SoftBadge(
+            text: brokerBadge,
+            color: result?.brokerSubmitCalled == true
+                ? Colors.redAccent
+                : Colors.orangeAccent,
+          ),
+          const _SoftBadge(
+              text: 'USES LIMITED AUTO SELL GATES',
+              color: Colors.lightGreenAccent),
+        ]),
+        const SizedBox(height: 12),
+        _KisSchedulerGuardedSellStatusGrid(
+          result: result,
+          settings: settings,
+        ),
+        const SizedBox(height: 10),
+        const _StateLine(text: 'BUY DISABLED FOR SCHEDULER SELL-ONLY'),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            onPressed: controller.kisSchedulerGuardedSellLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.refreshKisSchedulerGuardedSellStatus();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisSchedulerGuardedSellLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh, size: 18),
+            label: Text(controller.kisSchedulerGuardedSellLoading
+                ? 'Refreshing scheduler sell status...'
+                : 'Refresh Scheduler Sell Status'),
+          ),
+          FilledButton.icon(
+            onPressed: controller.kisSchedulerGuardedSellLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.runKisSchedulerGuardedSellOnce();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisSchedulerGuardedSellLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.play_arrow, size: 18),
+            label: Text(controller.kisSchedulerGuardedSellLoading
+                ? 'Running scheduler guarded sell...'
+                : 'Run Scheduler Guarded Sell Once'),
+          ),
+        ]),
+        if (controller.kisSchedulerGuardedSellError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kisSchedulerGuardedSellError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No scheduler guarded sell run yet. Default backend state blocks real orders.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisSchedulerGuardedSellResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerGuardedSellStatusGrid extends StatelessWidget {
+  const _KisSchedulerGuardedSellStatusGrid({
+    required this.result,
+    required this.settings,
+  });
+
+  final KisSchedulerGuardedSellResult? result;
+  final OpsSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    final checks = result?.checks ?? const <String, dynamic>{};
+    final safety = result?.safety ?? const <String, dynamic>{};
+    final dailyLimit = result?.dailyLimit ?? const <String, dynamic>{};
+    final duplicate = result?.duplicateOrderCheck ?? const <String, dynamic>{};
+    final market = result?.marketSessionCheck ?? const <String, dynamic>{};
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(
+        label: 'scheduler real orders enabled',
+        value: _boolText(result?.schedulerRealOrdersEnabled ??
+            settings.kisSchedulerAllowRealOrders),
+      ),
+      _ResultPair(
+        label: 'scheduler sell enabled',
+        value: _boolText(
+            _mapNullableBool(safety, 'kis_scheduler_sell_enabled') ??
+                _mapNullableBool(checks, 'kis_scheduler_sell_enabled') ??
+                settings.kisSchedulerSellEnabled),
+      ),
+      const _ResultPair(label: 'buy execution allowed', value: 'No'),
+      _ResultPair(
+        label: 'dry_run',
+        value:
+            _boolText(_mapNullableBool(safety, 'dry_run') ?? settings.dryRun),
+      ),
+      _ResultPair(
+        label: 'kill_switch',
+        value: _boolText(
+            _mapNullableBool(safety, 'kill_switch') ?? settings.killSwitch),
+      ),
+      _ResultPair(
+        label: 'kis_real_order_enabled',
+        value: _nullableBoolText(
+          _mapNullableBool(safety, 'kis_real_order_enabled') ??
+              _mapNullableBool(checks, 'kis_real_order_enabled'),
+        ),
+      ),
+      _ResultPair(
+        label: 'kis_live_auto_sell_enabled',
+        value: _boolText(
+          _mapNullableBool(safety, 'kis_live_auto_sell_enabled') ??
+              _mapNullableBool(checks, 'kis_live_auto_sell_enabled') ??
+              settings.kisLiveAutoSellEnabled,
+        ),
+      ),
+      _ResultPair(
+        label: 'stop-loss enabled',
+        value: _boolText(
+          _mapNullableBool(checks, 'kis_limited_auto_stop_loss_enabled') ??
+              settings.kisLimitedAutoSellStopLossEnabled,
+        ),
+      ),
+      _ResultPair(
+        label: 'take-profit enabled',
+        value: _boolText(
+          _mapNullableBool(checks, 'kis_limited_auto_take_profit_enabled') ??
+              settings.kisLimitedAutoSellTakeProfitEnabled,
+        ),
+      ),
+      _ResultPair(
+        label: 'market sell session',
+        value: _nullableYesNo(
+          _mapNullableBool(market, 'sell_session_allowed') ??
+              _mapNullableBool(checks, 'sell_session_allowed'),
+        ),
+      ),
+      _ResultPair(
+        label: 'daily sell limit',
+        value: _schedulerGuardedSellDailyLimitLabel(dailyLimit),
+      ),
+      _ResultPair(
+        label: 'duplicate order status',
+        value: _schedulerGuardedSellDuplicateLabel(duplicate),
+      ),
+      _ResultPair(
+        label: 'primary block reason',
+        value: result?.primaryBlockReason ?? 'not_loaded',
+      ),
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedSellResultPanel extends StatelessWidget {
+  const _KisSchedulerGuardedSellResultPanel({required this.result});
+
+  final KisSchedulerGuardedSellResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final submitted = result.submitted;
+    final primaryBlockReason = result.primaryBlockReason ??
+        (result.blockReasons.isEmpty ? 'n/a' : result.blockReasons.first);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _StateLine(
+        text: submitted
+            ? 'SUBMITTED SELL: ${result.symbol ?? 'n/a'} qty ${result.quantity?.toString() ?? 'n/a'}'
+            : 'BLOCKED: $primaryBlockReason',
+        color: submitted ? Colors.redAccent : Colors.amberAccent,
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'Broker submit: ${_yesNo(result.brokerSubmitCalled)}',
+          color: result.brokerSubmitCalled
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'Manual submit: ${_yesNo(result.manualSubmitCalled)}',
+          color: result.manualSubmitCalled
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'Real order submitted: ${_yesNo(result.realOrderSubmitted)}',
+          color: result.realOrderSubmitted
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(label: 'primary block reason', value: primaryBlockReason),
+        _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
+        _ResultPair(label: 'company', value: result.companyName ?? 'n/a'),
+        _ResultPair(
+            label: 'quantity', value: result.quantity?.toString() ?? 'n/a'),
+        _ResultPair(label: 'trigger', value: result.trigger ?? 'n/a'),
+        _ResultPair(
+            label: 'order id', value: result.orderId?.toString() ?? 'none'),
+        _ResultPair(label: 'KIS ODNO', value: result.kisOdno ?? 'none'),
+        _ResultPair(
+          label: 'broker order id',
+          value: result.brokerOrderId ?? 'none',
+        ),
+      ]),
+      const SizedBox(height: 10),
+      _StateLine(
+        text:
+            'buy_result: ${result.buyResult['result'] ?? 'skipped'} / ${result.buyResult['reason'] ?? 'buy_scheduler_execution_disabled'}',
+      ),
+      if (result.sellResult.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'sell_result: ${result.sellResult['result'] ?? 'n/a'} / ${result.sellResult['reason'] ?? 'n/a'}',
+        ),
+      ],
+      if (result.blockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'block reasons: ${_joinList(result.blockReasons)}'),
+      ],
+      const SizedBox(height: 4),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: const Text('Developer Raw Payload'),
+        children: [
+          _StateLine(text: _prettyJson(result.rawPayload)),
+        ],
+      ),
+    ]);
+  }
+}
+
+String _schedulerGuardedSellDailyLimitLabel(Map<String, dynamic> value) {
+  if (value.isEmpty) return 'n/a';
+  final remaining = value['daily_limit_remaining']?.toString();
+  final maxOrders = value['max_orders_per_day']?.toString();
+  final submitted = value['submitted_count_today']?.toString();
+  final base =
+      '${remaining == null || remaining == 'null' ? 'n/a' : remaining} remaining / ${maxOrders == null || maxOrders == 'null' ? 'n/a' : maxOrders} max';
+  if (submitted == null || submitted == 'null') return base;
+  return '$base, $submitted used';
+}
+
+String _schedulerGuardedSellDuplicateLabel(Map<String, dynamic> value) {
+  if (value.isEmpty) return 'n/a';
+  final duplicate =
+      _mapNullableBool(value, 'duplicate_open_sell_order') ?? false;
+  if (duplicate) return 'blocked: duplicate open sell';
+  final checked = _mapNullableBool(value, 'checked');
+  if (checked == false) return 'not checked';
+  return 'clear';
 }
 
 class _KisSchedulerLiveAutomationCard extends StatelessWidget {

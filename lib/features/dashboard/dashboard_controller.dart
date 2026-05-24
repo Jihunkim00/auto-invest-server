@@ -19,6 +19,7 @@ import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_dry_run_review.dart';
+import '../../models/kis_scheduler_guarded_sell.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -177,6 +178,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerLiveLoading = false;
   KisSchedulerLiveResult? latestKisSchedulerLiveResult;
   String? kisSchedulerLiveError;
+  bool kisSchedulerGuardedSellLoading = false;
+  KisSchedulerGuardedSellResult? latestKisSchedulerGuardedSellResult;
+  String? kisSchedulerGuardedSellError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -2256,6 +2260,72 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerLiveLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerGuardedSellStatus() async {
+    if (kisSchedulerGuardedSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler guarded sell already in progress.',
+      );
+    }
+
+    kisSchedulerGuardedSellLoading = true;
+    kisSchedulerGuardedSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisSchedulerGuardedSellStatus();
+      latestKisSchedulerGuardedSellResult = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS scheduler guarded sell status refreshed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisSchedulerGuardedSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerGuardedSellError!),
+      );
+    } finally {
+      kisSchedulerGuardedSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisSchedulerGuardedSellOnce() async {
+    if (kisSchedulerGuardedSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler guarded sell already in progress.',
+      );
+    }
+
+    kisSchedulerGuardedSellLoading = true;
+    kisSchedulerGuardedSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisSchedulerGuardedSellOnce();
+      latestKisSchedulerGuardedSellResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await refreshKisSchedulerStatus(silent: true);
+      if (result.realOrderSubmitted || result.orderId != null) {
+        await refreshKisOrderMonitoring(silent: true);
+      }
+      return ActionResult(
+        success: true,
+        message: 'KIS scheduler guarded sell completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisSchedulerGuardedSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerGuardedSellError!),
+      );
+    } finally {
+      kisSchedulerGuardedSellLoading = false;
       notifyListeners();
     }
   }
