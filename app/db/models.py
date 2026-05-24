@@ -236,6 +236,7 @@ class RuntimeSetting(Base):
     kis_limited_auto_buy_allow_gpt_hard_block = Column(Boolean, nullable=False, default=False)
     kis_scheduler_live_enabled = Column(Boolean, nullable=False, default=False)
     kis_scheduler_allow_real_orders = Column(Boolean, nullable=False, default=False)
+    kis_scheduler_sell_enabled = Column(Boolean, nullable=False, default=False)
     kis_scheduler_allow_limited_auto_buy = Column(Boolean, nullable=False, default=False)
     kis_scheduler_allow_limited_auto_sell = Column(Boolean, nullable=False, default=False)
     kis_scheduler_max_live_orders_per_day = Column(Integer, nullable=False, default=2)

@@ -130,10 +130,12 @@ class KisLimitedAutoSellService:
         broker: Any | None = None,
         runtime_settings: RuntimeSettingService | None = None,
         session_service: MarketSessionService | None = None,
+        allow_scheduler_guarded_sell: bool = False,
     ):
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.session_service = session_service or MarketSessionService()
+        self.allow_scheduler_guarded_sell = allow_scheduler_guarded_sell
         self._unused_legacy_broker = broker
 
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
@@ -295,6 +297,10 @@ class KisLimitedAutoSellService:
             runtime.get("kis_scheduler_allow_limited_auto_sell", False)
         )
         live_auto_buy_configured = bool(runtime.get("kis_live_auto_buy_enabled", False))
+        if self.allow_scheduler_guarded_sell:
+            scheduler_real_orders_configured = False
+            scheduler_limited_auto_sell_configured = False
+            live_auto_buy_configured = False
         is_holiday = bool(market_session.get("is_holiday"))
         closure_reason = str(market_session.get("closure_reason") or "")
         if closure_reason.startswith("holiday_"):

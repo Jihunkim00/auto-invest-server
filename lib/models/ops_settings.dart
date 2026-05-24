@@ -44,6 +44,7 @@ class OpsSettings {
     this.kisLimitedAutoBuyAllowGptHardBlock = false,
     this.kisSchedulerLiveEnabled = false,
     this.kisSchedulerAllowRealOrders = false,
+    this.kisSchedulerSellEnabled = false,
     this.kisSchedulerAllowLimitedAutoBuy = false,
     this.kisSchedulerAllowLimitedAutoSell = false,
     this.kisSchedulerMaxLiveOrdersPerDay = 2,
@@ -95,6 +96,7 @@ class OpsSettings {
   final bool kisLimitedAutoBuyAllowGptHardBlock;
   final bool kisSchedulerLiveEnabled;
   final bool kisSchedulerAllowRealOrders;
+  final bool kisSchedulerSellEnabled;
   final bool kisSchedulerAllowLimitedAutoBuy;
   final bool kisSchedulerAllowLimitedAutoSell;
   final int kisSchedulerMaxLiveOrdersPerDay;
@@ -146,6 +148,7 @@ class OpsSettings {
     bool? kisLimitedAutoBuyAllowGptHardBlock,
     bool? kisSchedulerLiveEnabled,
     bool? kisSchedulerAllowRealOrders,
+    bool? kisSchedulerSellEnabled,
     bool? kisSchedulerAllowLimitedAutoBuy,
     bool? kisSchedulerAllowLimitedAutoSell,
     int? kisSchedulerMaxLiveOrdersPerDay,
@@ -240,6 +243,8 @@ class OpsSettings {
           kisSchedulerLiveEnabled ?? this.kisSchedulerLiveEnabled,
       kisSchedulerAllowRealOrders:
           kisSchedulerAllowRealOrders ?? this.kisSchedulerAllowRealOrders,
+      kisSchedulerSellEnabled:
+          kisSchedulerSellEnabled ?? this.kisSchedulerSellEnabled,
       kisSchedulerAllowLimitedAutoBuy: kisSchedulerAllowLimitedAutoBuy ??
           this.kisSchedulerAllowLimitedAutoBuy,
       kisSchedulerAllowLimitedAutoSell: kisSchedulerAllowLimitedAutoSell ??
