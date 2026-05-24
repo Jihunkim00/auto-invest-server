@@ -49,6 +49,9 @@ from app.services.kis_scheduler_readiness_service import (
 from app.services.kis_scheduler_dry_run_orchestration_service import (
     KisSchedulerDryRunOrchestrationService,
 )
+from app.services.kis_scheduler_dry_run_review_service import (
+    KisSchedulerDryRunReviewService,
+)
 from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
     KisSingleSymbolTradingService,
@@ -347,6 +350,26 @@ def run_kis_scheduler_dry_run_orchestration_once(
         include_buy=request.include_buy,
         include_sell=request.include_sell,
         include_raw=request.include_raw,
+    )
+
+
+@router.get("/scheduler/dry-run-review")
+def get_kis_scheduler_dry_run_review(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    include_raw: bool = Query(default=False),
+    slot_label: str | None = Query(default=None, min_length=1),
+    module: str | None = Query(default=None, min_length=1),
+    db: Session = Depends(get_db),
+):
+    service = KisSchedulerDryRunReviewService()
+    return service.review(
+        db,
+        limit=limit,
+        days=days,
+        include_raw=include_raw,
+        slot_label=slot_label,
+        module=module,
     )
 
 
