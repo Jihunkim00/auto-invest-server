@@ -46,6 +46,9 @@ from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_scheduler_readiness_service import (
     KisSchedulerReadinessService,
 )
+from app.services.kis_scheduler_dry_run_orchestration_service import (
+    KisSchedulerDryRunOrchestrationService,
+)
 from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingRequest,
     KisSingleSymbolTradingService,
@@ -77,6 +80,13 @@ class KisShadowExitReviewQueueActionRequest(BaseModel):
 
     def note_value(self) -> str | None:
         return self.operator_note if self.operator_note is not None else self.note
+
+
+class KisSchedulerDryRunOrchestrationRequest(BaseModel):
+    slot_label: str | None = None
+    include_buy: bool = True
+    include_sell: bool = True
+    include_raw: bool = False
 
 
 @router.get("/manual-order/status")
@@ -320,6 +330,23 @@ def get_kis_scheduler_readiness(
         include_modules=include_modules,
         include_recent_runs=include_recent_runs,
         include_raw=include_raw,
+    )
+
+
+@router.post("/scheduler/run-dry-run-orchestration-once")
+def run_kis_scheduler_dry_run_orchestration_once(
+    payload: KisSchedulerDryRunOrchestrationRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    request = payload or KisSchedulerDryRunOrchestrationRequest()
+    client = _client(db)
+    service = KisSchedulerDryRunOrchestrationService(client)
+    return service.run_once(
+        db,
+        slot_label=request.slot_label,
+        include_buy=request.include_buy,
+        include_sell=request.include_sell,
+        include_raw=request.include_raw,
     )
 
 

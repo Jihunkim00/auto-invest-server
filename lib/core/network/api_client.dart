@@ -16,6 +16,7 @@ import '../../models/kis_single_symbol_trading_result.dart';
 import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
+import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -438,6 +439,26 @@ class ApiClient {
     }).query;
     final payload = await _getJsonNoCache('/kis/scheduler/readiness?$query');
     return KisSchedulerReadiness.fromJson(payload);
+  }
+
+  Future<KisSchedulerDryRunOrchestration>
+      runKisSchedulerDryRunOrchestrationOnce({
+    String? slotLabel,
+    bool includeBuy = true,
+    bool includeSell = true,
+    bool includeRaw = false,
+  }) async {
+    final body = <String, dynamic>{
+      if (slotLabel != null) 'slot_label': slotLabel,
+      'include_buy': includeBuy,
+      'include_sell': includeSell,
+      'include_raw': includeRaw,
+    };
+    final payload = await _postJsonBody(
+      '/kis/scheduler/run-dry-run-orchestration-once',
+      body,
+    );
+    return KisSchedulerDryRunOrchestration.fromJson(payload);
   }
 
   Future<KisSchedulerRunResult> runKisSchedulerDryRunOnce() async {

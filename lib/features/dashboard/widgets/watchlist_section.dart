@@ -16,6 +16,7 @@ import '../../../models/kis_limited_auto_sell.dart';
 import '../../../models/kis_shadow_exit_review.dart';
 import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
+import '../../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../../models/kis_scheduler_readiness.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
@@ -878,6 +879,8 @@ class TestLabSection extends StatelessWidget {
       _KisLimitedAutoSellCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerReadinessCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerDryRunOrchestrationCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerLiveAutomationCard(controller: controller),
       const SizedBox(height: 12),
@@ -3824,6 +3827,298 @@ class _KisSchedulerRecentRuns extends StatelessWidget {
           ),
     ]);
   }
+}
+
+class _KisSchedulerDryRunOrchestrationCard extends StatelessWidget {
+  const _KisSchedulerDryRunOrchestrationCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.latestKisSchedulerDryRunOrchestration;
+    return Container(
+      key: const Key('kis_scheduler_dry_run_orchestration_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.account_tree_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Dry-run Orchestration',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'SCHEDULER DRY-RUN', color: Colors.greenAccent),
+          _SoftBadge(text: 'ORCHESTRATION', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'READINESS ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'REAL ORDERS DISABLED', color: Colors.redAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'POSITION MANAGEMENT FIRST', color: Colors.white70),
+          _SoftBadge(text: 'BUY AFTER SELL REVIEW', color: Colors.amberAccent),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisSchedulerDryRunOrchestrationLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.runKisSchedulerDryRunOrchestrationOnce();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisSchedulerDryRunOrchestrationLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.play_circle_outline, size: 18),
+          label: Text(controller.kisSchedulerDryRunOrchestrationLoading
+              ? 'Running scheduler dry-run...'
+              : 'Run Scheduler Dry-run Once'),
+        ),
+        if (controller.kisSchedulerDryRunOrchestrationError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text:
+                _primaryLine(controller.kisSchedulerDryRunOrchestrationError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (result == null) ...[
+          const _StateLine(
+            text:
+                'No scheduler dry-run orchestration result yet. Real orders remain disabled.',
+          ),
+        ] else ...[
+          _KisSchedulerDryRunSummaryPanel(result: result),
+          const SizedBox(height: 12),
+          _KisSchedulerDryRunChildren(children: result.childRuns),
+          const SizedBox(height: 12),
+          _KisSchedulerDryRunSafety(result: result),
+          const SizedBox(height: 4),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(result.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerDryRunSummaryPanel extends StatelessWidget {
+  const _KisSchedulerDryRunSummaryPanel({required this.result});
+
+  final KisSchedulerDryRunOrchestration result;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = result.summary;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Dry-run Summary',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(label: 'slot label', value: result.slotLabel),
+        _ResultPair(
+          label: 'modules completed',
+          value: _joinList(summary.modulesCompleted),
+        ),
+        _ResultPair(
+          label: 'sell candidates reviewed',
+          value: summary.sellCandidatesReviewed.toString(),
+        ),
+        _ResultPair(
+          label: 'buy candidates reviewed',
+          value: summary.buyCandidatesReviewed.toString(),
+        ),
+        _ResultPair(
+          label: 'sell ready count',
+          value: summary.sellReadyCount.toString(),
+        ),
+        _ResultPair(
+          label: 'buy ready count',
+          value: summary.buyReadyCount.toString(),
+        ),
+        _ResultPair(
+          label: 'submitted order count',
+          value: summary.submittedOrderCount.toString(),
+        ),
+        _ResultPair(
+          label: 'broker submit count',
+          value: summary.brokerSubmitCount.toString(),
+        ),
+        _ResultPair(
+          label: 'manual submit count',
+          value: summary.manualSubmitCount.toString(),
+        ),
+        _ResultPair(
+          label: 'primary block reason',
+          value: summary.primaryBlockReason ?? 'n/a',
+        ),
+        _ResultPair(
+          label: 'next recommended operator action',
+          value: summary.nextRecommendedOperatorAction ?? 'n/a',
+        ),
+      ]),
+      if (summary.topBlockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+          text: 'top block reasons: ${_joinList(summary.topBlockReasons)}',
+        ),
+      ],
+    ]);
+  }
+}
+
+class _KisSchedulerDryRunChildren extends StatelessWidget {
+  const _KisSchedulerDryRunChildren({required this.children});
+
+  final List<KisSchedulerDryRunChild> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Child Modules',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (children.isEmpty)
+        const _StateLine(text: 'No child module results returned.')
+      else
+        for (final child in children)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      child.module,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(label: 'result', value: child.result),
+                      _ResultPair(label: 'action', value: child.action),
+                      _ResultPair(label: 'status', value: child.status),
+                      _ResultPair(
+                        label: 'symbol',
+                        value: child.symbol ?? 'n/a',
+                      ),
+                      _ResultPair(
+                        label: 'primary block reason',
+                        value: child.primaryBlockReason ?? 'n/a',
+                      ),
+                      _ResultPair(
+                        label: 'broker submit',
+                        value: _yesNo(child.brokerSubmitCalled),
+                      ),
+                      _ResultPair(
+                        label: 'real order submitted',
+                        value: _yesNo(child.realOrderSubmitted),
+                      ),
+                      _ResultPair(
+                        label: 'manual submit',
+                        value: _yesNo(child.manualSubmitCalled),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      _SoftBadge(
+                        text:
+                            'Broker submit: ${_yesNo(child.brokerSubmitCalled)}',
+                        color: Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Real order submitted: ${_yesNo(child.realOrderSubmitted)}',
+                        color: Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Manual submit: ${_yesNo(child.manualSubmitCalled)}',
+                        color: Colors.lightBlueAccent,
+                      ),
+                    ]),
+                    if (child.blockReasons.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      _StateLine(
+                        text: 'block reasons: ${_joinList(child.blockReasons)}',
+                      ),
+                    ],
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+class _KisSchedulerDryRunSafety extends StatelessWidget {
+  const _KisSchedulerDryRunSafety({required this.result});
+
+  final KisSchedulerDryRunOrchestration result;
+
+  @override
+  Widget build(BuildContext context) {
+    final safety = result.safety;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Safety', style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(
+          label: 'scheduler real orders disabled',
+          value: _yesNo(!result.schedulerRealOrdersEnabled),
+        ),
+        _ResultPair(
+          label: 'dry-run orchestration',
+          value: _yesNo(_mapBool(safety, 'scheduler_dry_run_orchestration')),
+        ),
+        _ResultPair(
+          label: 'no broker submit',
+          value: _yesNo(_mapBool(safety, 'no_broker_submit')),
+        ),
+        _ResultPair(
+          label: 'no OrderLog creation',
+          value: _yesNo(_mapBool(safety, 'no_order_log_created')),
+        ),
+        _ResultPair(
+          label: 'buy called in dry-run mode',
+          value: _yesNo(_mapBool(safety, 'limited_buy_called_in_dry_run_mode')),
+        ),
+        _ResultPair(
+          label: 'sell called in dry-run mode',
+          value:
+              _yesNo(_mapBool(safety, 'limited_sell_called_in_dry_run_mode')),
+        ),
+      ]),
+    ]);
+  }
+}
+
+bool _mapBool(Map<String, dynamic> map, String key) {
+  final value = map[key];
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value?.toString().trim().toLowerCase();
+  return text == 'true' || text == '1' || text == 'yes';
 }
 
 String _schedulerSlotLabel(KisSchedulerScheduleItem? slot) {
