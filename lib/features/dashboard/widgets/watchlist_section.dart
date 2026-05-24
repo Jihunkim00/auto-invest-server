@@ -19,6 +19,7 @@ import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../../models/kis_scheduler_dry_run_review.dart';
 import '../../../models/kis_scheduler_guarded_sell.dart';
+import '../../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../../models/kis_scheduler_readiness.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
@@ -888,6 +889,8 @@ class TestLabSection extends StatelessWidget {
       _KisSchedulerDryRunReviewCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerGuardedSellCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerGuardedSellReviewCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerLiveAutomationCard(controller: controller),
       const SizedBox(height: 12),
@@ -4960,6 +4963,468 @@ String _schedulerGuardedSellDuplicateLabel(Map<String, dynamic> value) {
   final checked = _mapNullableBool(value, 'checked');
   if (checked == false) return 'not checked';
   return 'clear';
+}
+
+class _KisSchedulerGuardedSellReviewCard extends StatelessWidget {
+  const _KisSchedulerGuardedSellReviewCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.latestKisSchedulerGuardedSellReview;
+    return Container(
+      key: const Key('kis_scheduler_guarded_sell_review_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.fact_check_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Guarded Sell Review',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+              text: 'SCHEDULER GUARDED SELL REVIEW',
+              color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'OPERATOR AUDIT', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'SELL ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'BUY DISABLED', color: Colors.orangeAccent),
+          _SoftBadge(text: 'REVIEW ONLY', color: Colors.greenAccent),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'SAFETY INVARIANTS', color: Colors.white70),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.kisSchedulerGuardedSellReviewLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshKisSchedulerGuardedSellReview();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.kisSchedulerGuardedSellReviewLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh, size: 18),
+          label: Text(controller.kisSchedulerGuardedSellReviewLoading
+              ? 'Refreshing guarded sell review...'
+              : 'Refresh Guarded Sell Review'),
+        ),
+        if (controller.kisSchedulerGuardedSellReviewError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kisSchedulerGuardedSellReviewError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (result == null) ...[
+          const _StateLine(
+            text:
+                'No scheduler guarded sell review data yet. Audit remains read-only.',
+          ),
+        ] else ...[
+          _KisSchedulerGuardedSellReviewSummaryPanel(result: result),
+          const SizedBox(height: 12),
+          _KisSchedulerGuardedSellReviewAttempts(
+            attempts: result.recentAttempts,
+          ),
+          const SizedBox(height: 12),
+          _KisSchedulerGuardedSellSubmittedSells(
+            submittedSells: result.submittedSells,
+          ),
+          const SizedBox(height: 12),
+          _KisSchedulerGuardedSellBlockedAttempts(
+            blockedAttempts: result.blockedAttempts,
+          ),
+          const SizedBox(height: 12),
+          _KisSchedulerGuardedSellSafetyViolations(
+            violations: result.safetyViolations,
+          ),
+          const SizedBox(height: 4),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(result.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerGuardedSellReviewSummaryPanel extends StatelessWidget {
+  const _KisSchedulerGuardedSellReviewSummaryPanel({required this.result});
+
+  final KisSchedulerGuardedSellReview result;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = result.summary;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Guarded Sell Review Summary',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(
+            label: 'total attempts', value: summary.totalAttempts.toString()),
+        _ResultPair(
+            label: 'submitted count', value: summary.submittedCount.toString()),
+        _ResultPair(
+            label: 'blocked count', value: summary.blockedCount.toString()),
+        _ResultPair(
+          label: 'failed/skipped count',
+          value: '${summary.failedCount}/${summary.skippedCount}',
+        ),
+        _ResultPair(
+          label: 'stop-loss submit count',
+          value: summary.stopLossSubmitCount.toString(),
+        ),
+        _ResultPair(
+          label: 'take-profit submit count',
+          value: summary.takeProfitSubmitCount.toString(),
+        ),
+        _ResultPair(
+          label: 'daily limit blocks',
+          value: summary.dailyLimitBlockCount.toString(),
+        ),
+        _ResultPair(
+          label: 'duplicate order blocks',
+          value: summary.duplicateOrderBlockCount.toString(),
+        ),
+        _ResultPair(
+          label: 'no direct scheduler submit invariant',
+          value: _yesNo(summary.noDirectSchedulerSubmitInvariantOk),
+        ),
+        _ResultPair(
+          label: 'sell-only invariant',
+          value: _yesNo(summary.sellOnlyInvariantOk),
+        ),
+        _ResultPair(
+          label: 'latest attempt time',
+          value: formatTimestampWithKst(
+            summary.latestAttemptAt,
+            fallback: 'n/a',
+          ),
+        ),
+        _ResultPair(
+          label: 'latest submitted time',
+          value: formatTimestampWithKst(
+            summary.latestSubmittedAt,
+            fallback: 'n/a',
+          ),
+        ),
+        _ResultPair(
+          label: 'latest symbol',
+          value: summary.latestSymbol ?? 'n/a',
+        ),
+      ]),
+      if (result.topBlockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final reason in result.topBlockReasons.take(5))
+            _SoftBadge(
+              text: '${reason.label}: ${reason.count}',
+              color: Colors.amberAccent,
+            ),
+        ]),
+      ],
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedSellReviewAttempts extends StatelessWidget {
+  const _KisSchedulerGuardedSellReviewAttempts({required this.attempts});
+
+  final List<KisSchedulerGuardedSellAttempt> attempts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Recent Guarded Sell Attempts',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (attempts.isEmpty)
+        const _StateLine(text: 'No scheduler guarded sell attempts recorded.')
+      else
+        for (final attempt in attempts.take(5))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _guardedSellAttemptTitle(
+                          attempt.symbol, attempt.companyName),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(label: 'result', value: attempt.result),
+                      _ResultPair(
+                          label: 'trigger', value: attempt.trigger ?? 'n/a'),
+                      _ResultPair(
+                        label: 'primary block reason',
+                        value: attempt.primaryBlockReason ?? 'n/a',
+                      ),
+                      _ResultPair(
+                        label: 'scheduler sell enabled',
+                        value: _yesNo(attempt.kisSchedulerSellEnabled),
+                      ),
+                      _ResultPair(
+                        label: 'order id',
+                        value: attempt.orderId ?? 'none',
+                      ),
+                      _ResultPair(
+                        label: 'KIS ODNO',
+                        value: attempt.kisOdno ?? 'none',
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      _SoftBadge(
+                        text:
+                            'Broker submit: ${_yesNo(attempt.brokerSubmitCalled)}',
+                        color: attempt.brokerSubmitCalled
+                            ? Colors.redAccent
+                            : Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Manual submit: ${_yesNo(attempt.manualSubmitCalled)}',
+                        color: attempt.manualSubmitCalled
+                            ? Colors.redAccent
+                            : Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Real order submitted: ${_yesNo(attempt.realOrderSubmitted)}',
+                        color: attempt.realOrderSubmitted
+                            ? Colors.redAccent
+                            : Colors.lightBlueAccent,
+                      ),
+                    ]),
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedSellSubmittedSells extends StatelessWidget {
+  const _KisSchedulerGuardedSellSubmittedSells({
+    required this.submittedSells,
+  });
+
+  final List<KisSchedulerGuardedSellSubmittedSell> submittedSells;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Submitted Sells',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (submittedSells.isEmpty)
+        const _StateLine(text: 'No submitted scheduler guarded sells recorded.')
+      else
+        for (final item in submittedSells.take(5))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _guardedSellAttemptTitle(item.symbol, item.companyName),
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(
+                          label: 'quantity',
+                          value: item.quantity?.toString() ?? 'n/a'),
+                      _ResultPair(
+                          label: 'trigger', value: item.trigger ?? 'n/a'),
+                      _ResultPair(
+                          label: 'order id', value: item.orderId ?? 'none'),
+                      _ResultPair(
+                          label: 'KIS ODNO', value: item.kisOdno ?? 'none'),
+                      _ResultPair(
+                        label: 'parent scheduler run id',
+                        value: item.parentSchedulerRunId ?? 'n/a',
+                      ),
+                      _ResultPair(
+                        label: 'estimated notional',
+                        value:
+                            _displayNumber(item.estimatedNotional?.toDouble()),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      _SoftBadge(
+                        text:
+                            'Broker submit: ${_yesNo(item.brokerSubmitCalled)}',
+                        color: Colors.redAccent,
+                      ),
+                      _SoftBadge(
+                        text:
+                            'Manual submit: ${_yesNo(item.manualSubmitCalled)}',
+                        color: Colors.redAccent,
+                      ),
+                    ]),
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedSellBlockedAttempts extends StatelessWidget {
+  const _KisSchedulerGuardedSellBlockedAttempts({
+    required this.blockedAttempts,
+  });
+
+  final List<KisSchedulerGuardedSellBlockedAttempt> blockedAttempts;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Blocked Attempts',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (blockedAttempts.isEmpty)
+        const _StateLine(text: 'No blocked scheduler guarded sell attempts.')
+      else
+        for (final item in blockedAttempts.take(5))
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.symbol ?? 'WATCHLIST',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(label: 'result', value: item.result),
+                      _ResultPair(
+                        label: 'primary block reason',
+                        value: item.primaryBlockReason ?? 'n/a',
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    const Wrap(spacing: 8, runSpacing: 8, children: [
+                      _SoftBadge(
+                        text: 'Broker submit: No',
+                        color: Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text: 'Manual submit: No',
+                        color: Colors.lightBlueAccent,
+                      ),
+                      _SoftBadge(
+                        text: 'Real order submitted: No',
+                        color: Colors.lightBlueAccent,
+                      ),
+                    ]),
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedSellSafetyViolations extends StatelessWidget {
+  const _KisSchedulerGuardedSellSafetyViolations({
+    required this.violations,
+  });
+
+  final List<KisSchedulerGuardedSellSafetyViolation> violations;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text('Safety Violations',
+          style: TextStyle(fontWeight: FontWeight.w700)),
+      const SizedBox(height: 8),
+      if (violations.isEmpty)
+        const _StateLine(
+          text: 'No scheduler guarded sell safety violations detected',
+        )
+      else
+        for (final item in violations)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: _panelDecoration(),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.warning_amber_outlined,
+                          size: 18, color: Colors.redAccent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(item.label,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w800)),
+                      ),
+                      const _SoftBadge(
+                        text: 'SAFETY VIOLATION',
+                        color: Colors.redAccent,
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Wrap(spacing: 14, runSpacing: 8, children: [
+                      _ResultPair(label: 'reason', value: item.reason),
+                      _ResultPair(label: 'run id', value: item.runId ?? 'n/a'),
+                      _ResultPair(
+                          label: 'order id', value: item.orderId ?? 'n/a'),
+                      _ResultPair(label: 'symbol', value: item.symbol ?? 'n/a'),
+                    ]),
+                  ]),
+            ),
+          ),
+    ]);
+  }
+}
+
+String _guardedSellAttemptTitle(String? symbol, String? companyName) {
+  final safeSymbol = symbol?.trim();
+  final safeCompany = companyName?.trim();
+  if (safeSymbol == null || safeSymbol.isEmpty) return 'WATCHLIST';
+  if (safeCompany == null || safeCompany.isEmpty) return safeSymbol;
+  return '$safeSymbol · $safeCompany';
 }
 
 class _KisSchedulerLiveAutomationCard extends StatelessWidget {

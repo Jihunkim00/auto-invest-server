@@ -19,6 +19,7 @@ import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_guarded_sell.dart';
+import '../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -762,6 +763,25 @@ class ApiClient {
       body,
     );
     return KisSchedulerGuardedSellResult.fromJson(payload);
+  }
+
+  Future<KisSchedulerGuardedSellReview> fetchKisSchedulerGuardedSellReview({
+    int limit = 20,
+    int days = 30,
+    String? symbol,
+    bool includeRaw = false,
+    String? result,
+  }) async {
+    final query = Uri(queryParameters: {
+      'limit': limit.toString(),
+      'days': days.toString(),
+      if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+      if (includeRaw) 'include_raw': 'true',
+      if (result != null && result.trim().isNotEmpty) 'result': result.trim(),
+    }).query;
+    final payload =
+        await _getJsonNoCache('/kis/scheduler/guarded-sell/review?$query');
+    return KisSchedulerGuardedSellReview.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({

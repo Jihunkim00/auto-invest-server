@@ -20,6 +20,7 @@ import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_guarded_sell.dart';
+import '../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -181,6 +182,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerGuardedSellLoading = false;
   KisSchedulerGuardedSellResult? latestKisSchedulerGuardedSellResult;
   String? kisSchedulerGuardedSellError;
+  bool kisSchedulerGuardedSellReviewLoading = false;
+  KisSchedulerGuardedSellReview? latestKisSchedulerGuardedSellReview;
+  String? kisSchedulerGuardedSellReviewError;
   bool kisAutoReadinessLoading = false;
   bool kisAutoPreflightLoading = false;
   bool kisAutoReadinessLoaded = false;
@@ -2326,6 +2330,40 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerGuardedSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerGuardedSellReview({
+    bool silent = false,
+  }) async {
+    if (kisSchedulerGuardedSellReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler guarded sell review already in progress.',
+      );
+    }
+
+    kisSchedulerGuardedSellReviewLoading = true;
+    kisSchedulerGuardedSellReviewError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchKisSchedulerGuardedSellReview();
+      latestKisSchedulerGuardedSellReview = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS scheduler guarded sell review refreshed: ${result.summary.totalAttempts} attempts.',
+      );
+    } catch (e) {
+      kisSchedulerGuardedSellReviewError =
+          ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerGuardedSellReviewError!),
+      );
+    } finally {
+      kisSchedulerGuardedSellReviewLoading = false;
       notifyListeners();
     }
   }
