@@ -111,7 +111,12 @@ void main() {
     expect(api.readinessCalls, 1);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
-    expect(find.text('REAL ORDERS DISABLED'), findsOneWidget);
+    expect(
+        find.descendant(
+          of: find.byKey(const Key('kis_scheduler_readiness_card')),
+          matching: find.text('REAL ORDERS DISABLED'),
+        ),
+        findsOneWidget);
     expect(
         find.text(
             'No scheduler readiness data yet. Default scheduler state remains off.'),
