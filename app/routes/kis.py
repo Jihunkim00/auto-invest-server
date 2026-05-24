@@ -46,6 +46,9 @@ from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_scheduler_guarded_sell_service import (
     KisSchedulerGuardedSellService,
 )
+from app.services.kis_scheduler_guarded_sell_review_service import (
+    KisSchedulerGuardedSellReviewService,
+)
 from app.services.kis_scheduler_readiness_service import (
     KisSchedulerReadinessService,
 )
@@ -802,6 +805,26 @@ def run_kis_scheduler_guarded_sell_once(
         slot_label=request.slot_label,
         trigger_source=request.trigger_source,
         include_raw=request.include_raw,
+    )
+
+
+@router.get("/scheduler/guarded-sell/review")
+def get_kis_scheduler_guarded_sell_review(
+    limit: int = Query(default=20, ge=1, le=100),
+    days: int = Query(default=30, ge=1, le=365),
+    symbol: str | None = Query(default=None),
+    include_raw: bool = Query(default=False),
+    result: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    service = KisSchedulerGuardedSellReviewService()
+    return service.review(
+        db,
+        limit=limit,
+        days=days,
+        symbol=symbol,
+        include_raw=include_raw,
+        result=result,
     )
 
 
