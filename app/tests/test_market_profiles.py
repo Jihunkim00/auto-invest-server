@@ -59,7 +59,9 @@ def test_kr_watchlist_loading_returns_six_digit_symbols():
     symbols = [item["symbol"] for item in payload["symbols"]]
     assert payload["market"] == "KR"
     assert payload["currency"] == "KRW"
+    assert payload["count"] == 50
     assert "005930" in symbols
+    assert "035420" in symbols
     assert symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
 
@@ -67,7 +69,9 @@ def test_kr_watchlist_loading_returns_six_digit_symbols():
 def test_kr_watchlist_service_can_load_profile_symbols_without_analysis():
     service = WatchlistService(market="KR")
 
-    assert service.symbols[0] == "005930"
+    assert len(service.symbols) == 50
+    assert "005930" in service.symbols
+    assert "035420" in service.symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in service.symbols)
 
 
@@ -172,7 +176,9 @@ def test_kr_watchlist_endpoint_returns_six_digit_symbols():
     body = response.json()
     symbols = [item["symbol"] for item in body["symbols"]]
     assert body["market"] == "KR"
+    assert body["count"] == 50
     assert "005930" in symbols
+    assert "035420" in symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
 
 

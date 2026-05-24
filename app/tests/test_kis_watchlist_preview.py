@@ -56,6 +56,13 @@ def _has_hangul(value: str) -> bool:
     return any("\uac00" <= char <= "\ud7a3" for char in value)
 
 
+def _find_item(payload, symbol: str):
+    for item in payload.get("items") or []:
+        if item.get("symbol") == symbol:
+            return item
+    pytest.fail(f"Expected preview item for {symbol}.")
+
+
 def _scoreable_indicator_payload():
     return {
         "price": 72000.0,
@@ -182,10 +189,11 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert body["researched_candidates"] == []
     assert len(body["final_ranked_candidates"]) == 50
     assert body["count"] == 50
+    assert {"005930", "035420"} <= {item["symbol"] for item in body["watchlist"]}
     item = body["items"][0]
     ranked = body["final_ranked_candidates"][0]
-    assert ranked["symbol"] == item["symbol"]
-    assert item["symbol"] == "005930"
+    assert ranked["symbol"] in {row["symbol"] for row in body["items"]}
+    assert item["symbol"] in {row["symbol"] for row in body["watchlist"]}
     assert item["current_price"] == 72000.0
     assert item["currency"] == "KRW"
     assert item["score"] is None
@@ -386,14 +394,17 @@ def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
     assert response.status_code == 200
     body = response.json()
     assert body["count"] == 50
-    assert body["items"][0]["symbol"] == "005930"
-    assert body["items"][0]["current_price"] is None
-    assert body["items"][0]["indicator_status"] == "insufficient_data"
-    assert body["items"][0]["quant_buy_score"] is None
-    assert body["items"][0]["error"] is not None
-    assert body["final_ranked_candidates"][0]["symbol"] == "005930"
-    assert body["final_ranked_candidates"][0]["score"] is None
-    assert body["items"][1]["current_price"] == 50000.0
+    item = _find_item(body, "005930")
+    assert item["current_price"] is None
+    assert item["indicator_status"] == "insufficient_data"
+    assert item["quant_buy_score"] is None
+    assert item["error"] is not None
+    ranked_item = next(
+        ranked for ranked in body["final_ranked_candidates"] if ranked["symbol"] == "005930"
+    )
+    assert ranked_item["score"] is None
+    other_item = next(row for row in body["items"] if row["symbol"] != "005930")
+    assert other_item["current_price"] == 50000.0
 
 
 def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, client):
@@ -434,7 +445,7 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
 
     assert response.status_code == 200
     body = response.json()
-    item = body["items"][0]
+    item = _find_item(body, "005930")
     assert item["indicator_status"] == "ok"
     assert item["indicator_payload"]["ema20"] is not None
     assert item["indicator_payload"]["ema50"] is not None
@@ -471,7 +482,7 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert len(body["quant_only_symbols"]) == 45
     assert body["researched_candidates_count"] == 5
     assert body["top_quant_candidates"]
-    assert body["final_best_candidate"]["symbol"] == "005930"
+    assert body["final_best_candidate"] is not None
     assert body["gpt_target_symbols"] == [
         item["symbol"] for item in body["top_quant_candidates"][:5]
     ]

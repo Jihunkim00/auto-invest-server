@@ -2,93 +2,153 @@ market: KR
 currency: KRW
 timezone: Asia/Seoul
 symbols:
-- symbol: '247540'
-  name: 에코프로비엠
-  market: KOSDAQ
-- symbol: 086520
-  name: 에코프로
-  market: KOSDAQ
-- symbol: '196170'
-  name: 알테오젠
-  market: KOSDAQ
-- symbol: '277810'
-  name: 레인보우로보틱스
-  market: KOSDAQ
-- symbol: 036930
-  name: 주성엔지니어링
-  market: KOSDAQ
-- symbol: '000250'
-  name: 삼천당제약
-  market: KOSDAQ
-- symbol: 058470
-  name: 리노공업
-  market: KOSDAQ
-- symbol: 039030
-  name: 이오테크닉스
-  market: KOSDAQ
-- symbol: 028300
-  name: HLB
-  market: KOSDAQ
-- symbol: '298380'
-  name: 에이비엘바이오
-  market: KOSDAQ
-- symbol: '440110'
-  name: 파두
-  market: KOSDAQ
-- symbol: 087010
-  name: 펩트론
-  market: KOSDAQ
-- symbol: '240810'
-  name: 원익IPS
-  market: KOSDAQ
-- symbol: '141080'
-  name: 리가켐바이오
-  market: KOSDAQ
-- symbol: '310210'
-  name: 보로노이
-  market: KOSDAQ
-- symbol: '222800'
-  name: 심텍
-  market: KOSDAQ
-- symbol: '178320'
-  name: 서진시스템
-  market: KOSDAQ
-- symbol: '214370'
-  name: 케어젠
-  market: KOSDAQ
-- symbol: '403870'
-  name: HPSP
-  market: KOSDAQ
-- symbol: '108490'
-  name: 로보티즈
-  market: KOSDAQ
-- symbol: 095340
-  name: ISC
-  market: KOSDAQ
-- symbol: '319400'
-  name: 현대무벡스
-  market: KOSDAQ
-- symbol: 080220
-  name: 제주반도체
-  market: KOSDAQ
-- symbol: '010170'
-  name: 대한광통신
-  market: KOSDAQ
-- symbol: '067310'
-  name: 하나마이크론
-  market: KOSDAQ
-- symbol: '064760'
-  name: 티씨케이
-  market: KOSDAQ
-- symbol: '319660'
-  name: 피에스케이
-  market: KOSDAQ
-- symbol: '214150'
-  name: 클래시스
-  market: KOSDAQ
-- symbol: '357780'
-  name: 솔브레인
-  market: KOSDAQ
-- symbol: '131970'
-  name: 두산테스나
-  market: KOSDAQ
+  - symbol: "005930"
+    name: "Samsung Electronics"
+    market: "KOSPI"
+  - symbol: "000660"
+    name: "SK Hynix"
+    market: "KOSPI"
+  - symbol: "035420"
+    name: "NAVER"
+    market: "KOSPI"
+  - symbol: "035720"
+    name: "Kakao"
+    market: "KOSPI"
+  - symbol: "051910"
+    name: "LG Chem"
+    market: "KOSPI"
+  - symbol: "005380"
+    name: "Hyundai Motor"
+    market: "KOSPI"
+  - symbol: "068270"
+    name: "Celltrion"
+    market: "KOSPI"
+  - symbol: "207940"
+    name: "Samsung Biologics"
+    market: "KOSPI"
+  - symbol: "094360"
+    name: "Chips&Media"
+    market: "KOSDAQ"
+  - symbol: "196170"
+    name: "Alteogen"
+    market: "KOSDAQ"
+  - symbol: "247540"
+    name: "EcoPro BM"
+    market: "KOSDAQ"
+  - symbol: "086520"
+    name: "EcoPro"
+    market: "KOSDAQ"
+  - symbol: "028300"
+    name: "HLB"
+    market: "KOSDAQ"
+  - symbol: "141080"
+    name: "LigaChem Biosciences"
+    market: "KOSDAQ"
+  - symbol: "277810"
+    name: "Rainbow Robotics"
+    market: "KOSDAQ"
+  - symbol: "214450"
+    name: "PharmaResearch"
+    market: "KOSDAQ"
+  - symbol: "403870"
+    name: "HPSP"
+    market: "KOSDAQ"
+  - symbol: "263750"
+    name: "Pearl Abyss"
+    market: "KOSDAQ"
+  - symbol: "058470"
+    name: "Leeno Industrial"
+    market: "KOSDAQ"
+  - symbol: "145020"
+    name: "Hugel"
+    market: "KOSDAQ"
+  - symbol: "214150"
+    name: "Classys"
+    market: "KOSDAQ"
+  - symbol: "068760"
+    name: "Celltrion Pharm"
+    market: "KOSDAQ"
+  - symbol: "000250"
+    name: "Samchundang Pharm"
+    market: "KOSDAQ"
+  - symbol: "039030"
+    name: "EO Technics"
+    market: "KOSDAQ"
+  - symbol: "240810"
+    name: "Wonik IPS"
+    market: "KOSDAQ"
+  - symbol: "036930"
+    name: "Jusung Engineering"
+    market: "KOSDAQ"
+  - symbol: "005290"
+    name: "Dongjin Semichem"
+    market: "KOSDAQ"
+  - symbol: "357780"
+    name: "Soulbrain"
+    market: "KOSDAQ"
+  - symbol: "067310"
+    name: "Hana Micron"
+    market: "KOSDAQ"
+  - symbol: "095340"
+    name: "ISC"
+    market: "KOSDAQ"
+  - symbol: "089030"
+    name: "Techwing"
+    market: "KOSDAQ"
+  - symbol: "101490"
+    name: "SFA Semicon"
+    market: "KOSDAQ"
+  - symbol: "084370"
+    name: "Eugene Technology"
+    market: "KOSDAQ"
+  - symbol: "064760"
+    name: "Tokai Carbon Korea"
+    market: "KOSDAQ"
+  - symbol: "319660"
+    name: "PSK"
+    market: "KOSDAQ"
+  - symbol: "183300"
+    name: "KOMICO"
+    market: "KOSDAQ"
+  - symbol: "036540"
+    name: "SFA Engineering"
+    market: "KOSDAQ"
+  - symbol: "222800"
+    name: "Simtech"
+    market: "KOSDAQ"
+  - symbol: "098460"
+    name: "Koh Young"
+    market: "KOSDAQ"
+  - symbol: "121600"
+    name: "Nano New Material"
+    market: "KOSDAQ"
+  - symbol: "078600"
+    name: "Daejoo Electronic Materials"
+    market: "KOSDAQ"
+  - symbol: "278280"
+    name: "Chunbo"
+    market: "KOSDAQ"
+  - symbol: "348370"
+    name: "Enchem"
+    market: "KOSDAQ"
+  - symbol: "025900"
+    name: "Dongwha Enterprise"
+    market: "KOSDAQ"
+  - symbol: "035900"
+    name: "JYP Entertainment"
+    market: "KOSDAQ"
+  - symbol: "041510"
+    name: "SM Entertainment"
+    market: "KOSDAQ"
+  - symbol: "122870"
+    name: "YG Entertainment"
+    market: "KOSDAQ"
+  - symbol: "067160"
+    name: "SOOP"
+    market: "KOSDAQ"
+  - symbol: "112040"
+    name: "Wemade"
+    market: "KOSDAQ"
+  - symbol: "293490"
+    name: "Kakao Games"
+    market: "KOSDAQ"
