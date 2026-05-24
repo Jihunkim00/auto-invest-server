@@ -17,6 +17,7 @@ import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
+import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
 import '../../models/market_watchlist.dart';
@@ -132,6 +133,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerRunLoading = false;
   KisSchedulerRunResult? kisSchedulerRunResult;
   String? kisSchedulerRunError;
+  bool kisSchedulerReadinessLoading = false;
+  KisSchedulerReadiness? latestKisSchedulerReadiness;
+  String? kisSchedulerReadinessError;
   bool kisLiveExitPreflightLoading = false;
   KisLiveExitPreflightResult? kisLiveExitPreflightResult;
   String? kisLiveExitPreflightError;
@@ -1468,6 +1472,39 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerRunLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerReadiness({
+    bool silent = false,
+  }) async {
+    if (kisSchedulerReadinessLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler readiness already in progress.',
+      );
+    }
+
+    kisSchedulerReadinessLoading = true;
+    kisSchedulerReadinessError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchKisSchedulerReadiness();
+      latestKisSchedulerReadiness = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS scheduler readiness refreshed: ${result.summary.readinessStatus}.',
+      );
+    } catch (e) {
+      kisSchedulerReadinessError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerReadinessError!),
+      );
+    } finally {
+      kisSchedulerReadinessLoading = false;
       notifyListeners();
     }
   }
