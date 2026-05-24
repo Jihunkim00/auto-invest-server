@@ -18,6 +18,7 @@ import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_manual_order_result.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
+import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -140,6 +141,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerDryRunOrchestrationLoading = false;
   KisSchedulerDryRunOrchestration? latestKisSchedulerDryRunOrchestration;
   String? kisSchedulerDryRunOrchestrationError;
+  bool kisSchedulerDryRunReviewLoading = false;
+  KisSchedulerDryRunReview? latestKisSchedulerDryRunReview;
+  String? kisSchedulerDryRunReviewError;
   bool kisLiveExitPreflightLoading = false;
   KisLiveExitPreflightResult? kisLiveExitPreflightResult;
   String? kisLiveExitPreflightError;
@@ -1543,6 +1547,39 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerDryRunOrchestrationLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerDryRunReview({
+    bool silent = false,
+  }) async {
+    if (kisSchedulerDryRunReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler dry-run review already in progress.',
+      );
+    }
+
+    kisSchedulerDryRunReviewLoading = true;
+    kisSchedulerDryRunReviewError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchKisSchedulerDryRunReview();
+      latestKisSchedulerDryRunReview = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS scheduler dry-run review refreshed: ${result.summary.totalRuns} runs.',
+      );
+    } catch (e) {
+      kisSchedulerDryRunReviewError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerDryRunReviewError!),
+      );
+    } finally {
+      kisSchedulerDryRunReviewLoading = false;
       notifyListeners();
     }
   }

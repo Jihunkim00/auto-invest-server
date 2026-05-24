@@ -17,6 +17,7 @@ import '../../models/kis_shadow_exit_review.dart';
 import '../../models/kis_shadow_exit_review_queue.dart';
 import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
+import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
@@ -459,6 +460,26 @@ class ApiClient {
       body,
     );
     return KisSchedulerDryRunOrchestration.fromJson(payload);
+  }
+
+  Future<KisSchedulerDryRunReview> fetchKisSchedulerDryRunReview({
+    int limit = 20,
+    int days = 30,
+    bool includeRaw = false,
+    String? slotLabel,
+    String? module,
+  }) async {
+    final query = Uri(queryParameters: {
+      'limit': limit.toString(),
+      'days': days.toString(),
+      if (includeRaw) 'include_raw': 'true',
+      if (slotLabel != null && slotLabel.trim().isNotEmpty)
+        'slot_label': slotLabel.trim(),
+      if (module != null && module.trim().isNotEmpty) 'module': module.trim(),
+    }).query;
+    final payload =
+        await _getJsonNoCache('/kis/scheduler/dry-run-review?$query');
+    return KisSchedulerDryRunReview.fromJson(payload);
   }
 
   Future<KisSchedulerRunResult> runKisSchedulerDryRunOnce() async {
