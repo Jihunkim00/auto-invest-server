@@ -1,33 +1,24 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const background = Color(0xFF141313);
-  static const panel = Color(0x99101010);
-  static const panelInner = Color(0xFF201F1F);
+  static const background = Color(0xFFF5F7FB);
+  static const surface = Color(0xFFFFFFFF);
+  static const border = Color(0xFFE5E7EB);
+  static const primary = Color(0xFF2563EB);
 
-  static ThemeData get darkTheme {
-    final scheme = ColorScheme.fromSeed(
-            seedColor: Colors.white, brightness: Brightness.dark)
-        .copyWith(
-      surface: background,
-      primary: Colors.white,
-      secondary: const Color(0xFFC4C7C8),
-      error: const Color(0xFFEF4444),
+  static ThemeData get lightTheme {
+    final scheme = ColorScheme.fromSeed(seedColor: primary, brightness: Brightness.light).copyWith(
+      primary: primary,
+      surface: surface,
+      error: const Color(0xFFDC2626),
     );
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       colorScheme: scheme,
       scaffoldBackgroundColor: background,
-      cardColor: panel,
-      textTheme: const TextTheme(
-        headlineMedium: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
-        titleMedium: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: Colors.black.withValues(alpha: 0.95),
-        indicatorColor: Colors.white12,
-      ),
+      cardColor: surface,
+      dividerColor: border,
     );
   }
 }
