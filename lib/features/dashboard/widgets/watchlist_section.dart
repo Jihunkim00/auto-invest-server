@@ -25,6 +25,7 @@ import '../../../models/kis_scheduler_readiness.dart';
 import '../../../models/kis_scheduler_simulation.dart';
 import '../../../models/kis_scheduler_live.dart';
 import '../../../models/market_watchlist.dart';
+import '../../../models/ops_production_readiness.dart';
 import '../../../models/ops_settings.dart';
 import '../../../models/watchlist_run_result.dart';
 import '../../dashboard/dashboard_controller.dart';
@@ -865,6 +866,8 @@ class TestLabSection extends StatelessWidget {
         ]),
       ),
       const SizedBox(height: 12),
+      _OperationsReadinessCard(controller: controller),
+      const SizedBox(height: 12),
       _KisLiveAutoReadinessCard(controller: controller),
       const SizedBox(height: 12),
       _KisBuyShadowDecisionCard(controller: controller),
@@ -904,6 +907,361 @@ class TestLabSection extends StatelessWidget {
       _KisShadowExitReviewQueueCard(controller: controller),
     ]);
   }
+}
+
+class _OperationsReadinessCard extends StatelessWidget {
+  const _OperationsReadinessCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final result = controller.latestOpsProductionReadiness;
+    final status = result?.overallStatus ?? 'NOT LOADED';
+    return Container(
+      key: const Key('ops_production_readiness_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.health_and_safety_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('Operations Readiness',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(text: status, color: _opsStatusColor(status)),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+              text: 'OPERATIONS READINESS', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'SAFETY CHECK', color: Colors.greenAccent),
+          _SoftBadge(text: 'READINESS ONLY', color: Colors.white70),
+          _SoftBadge(text: 'NO BROKER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'PRODUCTION CHECKLIST', color: Colors.amberAccent),
+          _SoftBadge(text: 'LIVE ORDER STATUS', color: Colors.redAccent),
+        ]),
+        const SizedBox(height: 12),
+        _OperationsReadinessSummaryGrid(
+          result: result,
+          settings: controller.settings,
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: controller.opsProductionReadinessLoading
+              ? null
+              : () async {
+                  final actionResult =
+                      await controller.refreshOpsProductionReadiness();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(actionResult.message),
+                    backgroundColor:
+                        actionResult.success ? Colors.green : Colors.redAccent,
+                  ));
+                },
+          icon: controller.opsProductionReadinessLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.refresh, size: 18),
+          label: Text(controller.opsProductionReadinessLoading
+              ? 'Refreshing operations readiness...'
+              : 'Refresh Operations Readiness'),
+        ),
+        if (controller.opsProductionReadinessError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.opsProductionReadinessError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No operations readiness report loaded. Refresh before live review.',
+          ),
+        ] else ...[
+          const SizedBox(height: 12),
+          _OperationsTodayActivity(result: result),
+          const SizedBox(height: 12),
+          _OperationsProductionChecklist(result: result),
+          const SizedBox(height: 12),
+          _OperationsSafetyChecks(result: result),
+          const SizedBox(height: 12),
+          _OperationsIssuesAndActions(result: result),
+          const SizedBox(height: 4),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Developer Raw Payload'),
+            children: [
+              _StateLine(text: _prettyJson(result.rawPayload)),
+            ],
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _OperationsReadinessSummaryGrid extends StatelessWidget {
+  const _OperationsReadinessSummaryGrid({
+    required this.result,
+    required this.settings,
+  });
+
+  final OpsProductionReadiness? result;
+  final OpsSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(
+        label: 'overall status',
+        value: result?.overallStatus ?? 'not_loaded',
+      ),
+      _ResultPair(
+        label: 'dry_run',
+        value: _boolText(result?.dryRun ?? settings.dryRun),
+      ),
+      _ResultPair(
+        label: 'kill_switch',
+        value: _boolText(result?.killSwitch ?? settings.killSwitch),
+      ),
+      _ResultPair(
+        label: 'KIS real orders',
+        value: _boolText(result?.kisRealOrderEnabled ?? false),
+      ),
+      _ResultPair(
+        label: 'scheduler real orders',
+        value: _boolText(result?.schedulerRealOrdersEnabled ??
+            settings.kisSchedulerAllowRealOrders),
+      ),
+      _ResultPair(
+        label: 'scheduler sell',
+        value: _boolText(
+            result?.schedulerSellEnabled ?? settings.kisSchedulerSellEnabled),
+      ),
+      _ResultPair(
+        label: 'scheduler buy',
+        value: _boolText(
+            result?.schedulerBuyEnabled ?? settings.kisSchedulerBuyEnabled),
+      ),
+      _ResultPair(
+        label: 'live auto sell',
+        value: _boolText(
+            result?.liveAutoSellEnabled ?? settings.kisLiveAutoSellEnabled),
+      ),
+      _ResultPair(
+        label: 'live auto buy',
+        value: _boolText(
+            result?.liveAutoBuyEnabled ?? settings.kisLiveAutoBuyEnabled),
+      ),
+      _ResultPair(
+        label: 'today broker submits',
+        value: (result?.todayBrokerSubmits ?? 0).toString(),
+      ),
+      _ResultPair(
+        label: 'today order count',
+        value: (result?.todayOrderCount ?? 0).toString(),
+      ),
+      _ResultPair(
+        label: 'critical issues',
+        value: (result?.criticalIssueCount ?? 0).toString(),
+      ),
+      _ResultPair(
+        label: 'warnings',
+        value: (result?.warningCount ?? 0).toString(),
+      ),
+    ]);
+  }
+}
+
+class _OperationsTodayActivity extends StatelessWidget {
+  const _OperationsTodayActivity({required this.result});
+
+  final OpsProductionReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Today Activity', style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'total runs', value: '${result.totalRunsToday}'),
+        _ResultPair(
+            label: 'blocked count', value: '${result.blockedCountToday}'),
+        _ResultPair(
+            label: 'broker submit count',
+            value: '${result.todayBrokerSubmits}'),
+        _ResultPair(label: 'failed count', value: '${result.failedCountToday}'),
+        _ResultPair(label: 'top block reason', value: result.topBlockReason),
+      ]),
+    ]);
+  }
+}
+
+class _OperationsProductionChecklist extends StatelessWidget {
+  const _OperationsProductionChecklist({required this.result});
+
+  final OpsProductionReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = [
+      _opsChecklistRow(
+        'watchlist baseline',
+        result.check('kr_watchlist_baseline')?.status ?? 'INFO',
+      ),
+      _opsChecklistRow(
+        'DB writable',
+        result.check('db_writable')?.status ?? 'INFO',
+      ),
+      _opsChecklistRow(
+        'docs present',
+        result.check('production_docs_present')?.status ?? 'INFO',
+      ),
+      _opsChecklistRow(
+        'env example present',
+        result.check('env_example_present')?.status ?? 'INFO',
+      ),
+      _opsChecklistRow(
+        'recent dry-run available',
+        result.hasRecentDryRun ? 'PASS' : 'WARN',
+      ),
+      _opsChecklistRow(
+        'recent scheduler review available',
+        result.hasRecentSchedulerReview ? 'PASS' : 'WARN',
+      ),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Production Checklist',
+          style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      Wrap(spacing: 8, runSpacing: 8, children: rows),
+    ]);
+  }
+}
+
+class _OperationsSafetyChecks extends StatelessWidget {
+  const _OperationsSafetyChecks({required this.result});
+
+  final OpsProductionReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Safety Checks', style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      if (result.safetyChecks.isEmpty)
+        const _StateLine(text: 'No safety checks returned.')
+      else
+        Column(
+          children: [
+            for (final check in result.safetyChecks.take(12)) ...[
+              _OpsSafetyCheckRow(check: check),
+              const SizedBox(height: 6),
+            ],
+          ],
+        ),
+    ]);
+  }
+}
+
+class _OpsSafetyCheckRow extends StatelessWidget {
+  const _OpsSafetyCheckRow({required this.check});
+
+  final OpsSafetyCheck check;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _SoftBadge(
+                  text: check.status, color: _opsStatusColor(check.status)),
+              Text(check.label,
+                  style: const TextStyle(
+                      color: Colors.white70, fontWeight: FontWeight.w700)),
+            ]),
+        if (check.message.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(check.message, style: const TextStyle(color: Colors.white60)),
+        ],
+        if (check.recommendedAction.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(check.recommendedAction,
+              style: const TextStyle(color: Colors.white38, fontSize: 12)),
+        ],
+      ]),
+    );
+  }
+}
+
+class _OperationsIssuesAndActions extends StatelessWidget {
+  const _OperationsIssuesAndActions({required this.result});
+
+  final OpsProductionReadiness result;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Blocking Issues', style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      if (result.blockingIssues.isEmpty)
+        const _StateLine(text: 'No blocking issues reported.')
+      else
+        _StateLine(
+          text: _joinList(result.blockingIssues),
+          color: Colors.amberAccent,
+        ),
+      const SizedBox(height: 12),
+      Text('Recommended Actions',
+          style: Theme.of(context).textTheme.labelLarge),
+      const SizedBox(height: 8),
+      if (result.recommendedActions.isEmpty)
+        const _StateLine(text: 'No recommended actions returned.')
+      else
+        Column(children: [
+          for (final action in result.recommendedActions.take(6)) ...[
+            _StateLine(text: action),
+            const SizedBox(height: 6),
+          ],
+        ]),
+    ]);
+  }
+}
+
+Widget _opsChecklistRow(String label, String status) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      _SoftBadge(text: status, color: _opsStatusColor(status)),
+      const SizedBox(width: 8),
+      Text(label, style: const TextStyle(color: Colors.white70)),
+    ]),
+  );
 }
 
 class _GateSelector extends StatelessWidget {
@@ -7548,6 +7906,24 @@ String _firstText(List<String?> values) {
 }
 
 String _boolText(bool value) => value ? 'true' : 'false';
+
+Color _opsStatusColor(String value) {
+  final normalized = value.trim().toUpperCase();
+  if (normalized == 'PASS' ||
+      normalized == 'SAFE_DRY_RUN' ||
+      normalized == 'LIVE_READY') {
+    return Colors.greenAccent;
+  }
+  if (normalized == 'WARN' || normalized == 'REVIEW_REQUIRED') {
+    return Colors.amberAccent;
+  }
+  if (normalized == 'FAIL' ||
+      normalized == 'BLOCKED' ||
+      normalized == 'LIVE_ENABLED') {
+    return Colors.redAccent;
+  }
+  return Colors.lightBlueAccent;
+}
 
 String _nullableBoolText(bool? value) {
   if (value == null) return 'n/a';

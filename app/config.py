@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     app_debug: bool = True
     app_env: str = "dev"
     default_symbol: str = "AAPL"
+    default_us_symbol: str = "AAPL"
+    default_kr_symbol: str = "005930"
     dry_run: bool = True
 
     broker_provider: str = "alpaca"

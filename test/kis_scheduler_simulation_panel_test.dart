@@ -444,7 +444,9 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
 
     api.throwStatus = false;
-    await tester.tap(find.text('Retry'));
+    final retryButton = find.text('Retry');
+    await tester.ensureVisible(retryButton);
+    await tester.tap(retryButton);
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
