@@ -436,7 +436,9 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
-    await tester.tap(find.byTooltip('Refresh KIS scheduler status'));
+    final refreshButton = find.byTooltip('Refresh KIS scheduler status');
+    await tester.ensureVisible(refreshButton);
+    await tester.tap(refreshButton);
     await tester.pumpAndSettle();
 
     expect(api.statusCalls, 1);
@@ -445,7 +447,6 @@ void main() {
 
     api.throwStatus = false;
     final retryButton = find.text('Retry');
-    await tester.ensureVisible(retryButton);
     await tester.tap(retryButton);
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 4));
@@ -474,7 +475,8 @@ Widget _wrap(DashboardController controller) {
       body: SingleChildScrollView(
         child: AnimatedBuilder(
           animation: controller,
-          builder: (context, _) => TestLabSection(controller: controller),
+          builder: (context, _) => TestLabSection(
+              controller: controller, advancedInitiallyExpanded: true),
         ),
       ),
     ),

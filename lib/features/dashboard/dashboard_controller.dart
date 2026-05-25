@@ -1913,6 +1913,43 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshKisPositionManagement() async {
+    if (kisManagedPositionsLoading || kisLimitedAutoSellLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS position management already in progress.',
+      );
+    }
+
+    kisManagedPositionsLoading = true;
+    kisLimitedAutoSellLoading = true;
+    kisManagedPositionsError = null;
+    kisLimitedAutoSellError = null;
+    notifyListeners();
+    try {
+      kisManagedPositions = await apiClient.fetchKisManagedPositions();
+      latestKisLimitedAutoSellResult =
+          await apiClient.fetchKisLimitedAutoSellStatus();
+      return ActionResult(
+        success: true,
+        message:
+            'KIS position management refreshed: ${kisManagedPositions.length} holdings.',
+      );
+    } catch (e) {
+      final formatted = ApiErrorFormatter.format(e.toString());
+      kisManagedPositionsError =
+          'KIS position management unavailable: $formatted';
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisManagedPositionsError!),
+      );
+    } finally {
+      kisManagedPositionsLoading = false;
+      kisLimitedAutoSellLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runKisLimitedAutoSellPreflightOnce() async {
     if (kisLimitedAutoSellLoading) {
       return const ActionResult(

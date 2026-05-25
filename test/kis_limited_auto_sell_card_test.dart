@@ -365,9 +365,23 @@ void main() {
     expect(find.textContaining('LIVE SELL SUBMITTED'), findsOneWidget);
     expect(find.text('submitted'), findsWidgets);
     expect(find.text('BROKER SUBMIT CALLED'), findsWidgets);
-    expect(find.text('ORDER ID'), findsOneWidget);
+    final sellCard = find.byKey(const Key('kis_limited_auto_sell_card'));
+
+    expect(
+      find.descendant(
+        of: sellCard,
+        matching: find.text('ORDER ID'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('77'), findsOneWidget);
-    expect(find.text('KIS ODNO'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('KIS ODNO'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('ODNO777'), findsWidgets);
     expect(
       find.descendant(
@@ -409,9 +423,21 @@ void main() {
     expect(find.text('submitted'), findsWidgets);
     expect(find.text('take_profit'), findsWidgets);
     expect(find.text('BROKER SUBMIT CALLED'), findsWidgets);
-    expect(find.text('ORDER ID'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('ORDER ID'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('88'), findsOneWidget);
-    expect(find.text('KIS ODNO'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('KIS ODNO'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('TPODNO888'), findsWidgets);
 
     controller.dispose();
@@ -431,7 +457,8 @@ Widget _wrap(DashboardController controller) {
       body: SingleChildScrollView(
         child: AnimatedBuilder(
           animation: controller,
-          builder: (context, _) => TestLabSection(controller: controller),
+          builder: (context, _) => TestLabSection(
+              controller: controller, advancedInitiallyExpanded: true),
         ),
       ),
     ),
