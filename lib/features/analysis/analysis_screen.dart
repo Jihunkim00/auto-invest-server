@@ -28,7 +28,7 @@ class AnalysisScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     AppStrings.t(AppTextKey.analysis, controller.uiLanguage),
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),

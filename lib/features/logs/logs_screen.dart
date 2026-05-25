@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/gpt_risk_context_view.dart';
+import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/gpt_risk_context.dart';
 import '../../models/kis_manual_order_safety_status.dart';
@@ -11,6 +12,7 @@ import '../../models/log_items.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
+import '../settings/settings_screen.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.controller});
@@ -86,7 +88,7 @@ class _LogsScreenState extends State<LogsScreen> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     AppStrings.t(AppTextKey.logs, widget.controller.uiLanguage),
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
@@ -158,6 +160,26 @@ class _LogsScreenState extends State<LogsScreen> {
                 onAction: _loadLogs,
               ),
             if (!_loading && _error == null) ..._sectionWidgets(),
+
+            const SizedBox(height: 16),
+            SectionCard(
+              child: Row(
+                children: [
+                  const Icon(Icons.settings_outlined),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('App Settings')),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => SettingsScreen(controller: widget.controller),
+                      ),
+                    ),
+                    child: const Text('Open'),
+                  ),
+                ],
+              ),
+            ),
+
           ],
         ),
       ),

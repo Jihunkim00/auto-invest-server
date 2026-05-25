@@ -26,7 +26,7 @@ class TradingScreen extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Expanded(
+                Expanded(
                   child: Text(
                     AppStrings.t(AppTextKey.trading, controller.uiLanguage),
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
@@ -119,7 +119,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         const SizedBox(height: 12),
         TextField(
           controller: _symbolController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: AppStrings.t(AppTextKey.krSymbol, controller.uiLanguage),
             hintText: '005930',
             border: OutlineInputBorder(),
@@ -130,7 +130,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         const SizedBox(height: 10),
         TextField(
           controller: _qtyController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: AppStrings.t(AppTextKey.quantity, controller.uiLanguage),
             border: OutlineInputBorder(),
           ),
