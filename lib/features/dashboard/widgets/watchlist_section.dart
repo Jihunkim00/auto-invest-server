@@ -18,6 +18,7 @@ import '../../../models/kis_shadow_exit_review_queue.dart';
 import '../../../models/kis_live_exit_preflight.dart';
 import '../../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../../models/kis_scheduler_dry_run_review.dart';
+import '../../../models/kis_scheduler_guarded_buy.dart';
 import '../../../models/kis_scheduler_guarded_sell.dart';
 import '../../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../../models/kis_scheduler_readiness.dart';
@@ -889,6 +890,8 @@ class TestLabSection extends StatelessWidget {
       _KisSchedulerDryRunReviewCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerGuardedSellCard(controller: controller),
+      const SizedBox(height: 12),
+      _KisSchedulerGuardedBuyCard(controller: controller),
       const SizedBox(height: 12),
       _KisSchedulerGuardedSellReviewCard(controller: controller),
       const SizedBox(height: 12),
@@ -4960,6 +4963,353 @@ String _schedulerGuardedSellDuplicateLabel(Map<String, dynamic> value) {
   final duplicate =
       _mapNullableBool(value, 'duplicate_open_sell_order') ?? false;
   if (duplicate) return 'blocked: duplicate open sell';
+  final checked = _mapNullableBool(value, 'checked');
+  if (checked == false) return 'not checked';
+  return 'clear';
+}
+
+class _KisSchedulerGuardedBuyCard extends StatelessWidget {
+  const _KisSchedulerGuardedBuyCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final result = controller.latestKisSchedulerGuardedBuyResult;
+    final brokerBadge = result?.brokerSubmitCalled == true
+        ? 'BROKER SUBMIT: YES'
+        : 'NO BROKER SUBMIT';
+    return Container(
+      key: const Key('kis_scheduler_guarded_buy_card'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.add_shopping_cart_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Scheduler Guarded Buy',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _SoftBadge(
+              text: 'SCHEDULER GUARDED BUY', color: Colors.lightBlueAccent),
+          const _SoftBadge(text: 'BUY ONLY', color: Colors.greenAccent),
+          const _SoftBadge(text: 'DEFAULT OFF', color: Colors.amberAccent),
+          const _SoftBadge(
+              text: 'SELL REVIEW FIRST', color: Colors.orangeAccent),
+          const _SoftBadge(
+              text: 'SELL READY BLOCKS BUY', color: Colors.orangeAccent),
+          const _SoftBadge(
+              text: 'REAL ORDERS REQUIRE EXPLICIT SETTINGS',
+              color: Colors.redAccent),
+          _SoftBadge(
+            text: brokerBadge,
+            color: result?.brokerSubmitCalled == true
+                ? Colors.redAccent
+                : Colors.orangeAccent,
+          ),
+          const _SoftBadge(
+              text: 'USES LIMITED AUTO BUY GATES',
+              color: Colors.lightGreenAccent),
+        ]),
+        const SizedBox(height: 12),
+        _KisSchedulerGuardedBuyStatusGrid(
+          result: result,
+          settings: settings,
+        ),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            onPressed: controller.kisSchedulerGuardedBuyLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.refreshKisSchedulerGuardedBuyStatus();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisSchedulerGuardedBuyLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh, size: 18),
+            label: Text(controller.kisSchedulerGuardedBuyLoading
+                ? 'Refreshing scheduler buy status...'
+                : 'Refresh Scheduler Buy Status'),
+          ),
+          FilledButton.icon(
+            onPressed: controller.kisSchedulerGuardedBuyLoading
+                ? null
+                : () async {
+                    final actionResult =
+                        await controller.runKisSchedulerGuardedBuyOnce();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  },
+            icon: controller.kisSchedulerGuardedBuyLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.play_arrow, size: 18),
+            label: Text(controller.kisSchedulerGuardedBuyLoading
+                ? 'Running scheduler guarded buy...'
+                : 'Run Scheduler Guarded Buy Once'),
+          ),
+        ]),
+        if (controller.kisSchedulerGuardedBuyError != null) ...[
+          const SizedBox(height: 10),
+          _StateLine(
+            text: _primaryLine(controller.kisSchedulerGuardedBuyError!),
+            color: Colors.redAccent,
+          ),
+        ],
+        if (result == null) ...[
+          const SizedBox(height: 10),
+          const _StateLine(
+            text:
+                'No scheduler guarded buy run yet. Default backend state blocks real orders.',
+          ),
+        ] else ...[
+          const SizedBox(height: 10),
+          _KisSchedulerGuardedBuyResultPanel(result: result),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisSchedulerGuardedBuyStatusGrid extends StatelessWidget {
+  const _KisSchedulerGuardedBuyStatusGrid({
+    required this.result,
+    required this.settings,
+  });
+
+  final KisSchedulerGuardedBuyResult? result;
+  final OpsSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    final checks = result?.checks ?? const <String, dynamic>{};
+    final safety = result?.safety ?? const <String, dynamic>{};
+    final dailyLimit = result?.dailyLimit ?? const <String, dynamic>{};
+    final duplicate = result?.duplicateOrderCheck ?? const <String, dynamic>{};
+    final market = result?.marketSessionCheck ?? const <String, dynamic>{};
+    return Wrap(spacing: 14, runSpacing: 8, children: [
+      _ResultPair(
+        label: 'scheduler real orders enabled',
+        value: _boolText(result?.schedulerRealOrdersEnabled ??
+            settings.kisSchedulerAllowRealOrders),
+      ),
+      _ResultPair(
+        label: 'scheduler buy enabled',
+        value: _boolText(
+            result?.schedulerBuyEnabled ?? settings.kisSchedulerBuyEnabled),
+      ),
+      _ResultPair(
+        label: 'sell priority checked',
+        value: _boolText(result?.sellPriorityChecked ?? false),
+      ),
+      _ResultPair(
+        label: 'sell ready blocks buy',
+        value: _boolText(result?.sellReadyBlocksBuy ?? true),
+      ),
+      _ResultPair(
+        label: 'dry_run',
+        value:
+            _boolText(_mapNullableBool(safety, 'dry_run') ?? settings.dryRun),
+      ),
+      _ResultPair(
+        label: 'kill_switch',
+        value: _boolText(
+            _mapNullableBool(safety, 'kill_switch') ?? settings.killSwitch),
+      ),
+      _ResultPair(
+        label: 'kis_real_order_enabled',
+        value: _nullableBoolText(
+          _mapNullableBool(safety, 'kis_real_order_enabled') ??
+              _mapNullableBool(checks, 'kis_real_order_enabled'),
+        ),
+      ),
+      _ResultPair(
+        label: 'kis_live_auto_buy_enabled',
+        value: _boolText(
+          _mapNullableBool(safety, 'kis_live_auto_buy_enabled') ??
+              _mapNullableBool(checks, 'kis_live_auto_buy_enabled') ??
+              settings.kisLiveAutoBuyEnabled,
+        ),
+      ),
+      _ResultPair(
+        label: 'kis_limited_auto_buy_enabled',
+        value: _boolText(
+          _mapNullableBool(safety, 'kis_limited_auto_buy_enabled') ??
+              _mapNullableBool(checks, 'kis_limited_auto_buy_enabled') ??
+              settings.kisLimitedAutoBuyEnabled,
+        ),
+      ),
+      _ResultPair(
+        label: 'market entry session',
+        value: _nullableYesNo(
+          _mapNullableBool(market, 'entry_allowed_now') ??
+              _mapNullableBool(checks, 'entry_allowed_now'),
+        ),
+      ),
+      _ResultPair(
+        label: 'no_new_entry_after',
+        value: (market['no_new_entry_after'] ??
+                checks['no_new_entry_after'] ??
+                settings.kisLimitedAutoBuyNoNewEntryAfter)
+            .toString(),
+      ),
+      _ResultPair(
+        label: 'cash/notional cap',
+        value:
+            '${_formatPercentValue(settings.kisLimitedAutoBuyMaxNotionalPct * 100)} cap / ${_formatKrwOrDash(settings.kisLimitedAutoBuyMinCashBufferKrw)} buffer',
+      ),
+      _ResultPair(
+        label: 'daily buy limit',
+        value: _schedulerGuardedBuyDailyLimitLabel(dailyLimit),
+      ),
+      _ResultPair(
+        label: 'duplicate order status',
+        value: _schedulerGuardedBuyDuplicateLabel(duplicate),
+      ),
+      _ResultPair(
+        label: 'primary block reason',
+        value: result?.primaryBlockReason ?? 'not_loaded',
+      ),
+    ]);
+  }
+}
+
+class _KisSchedulerGuardedBuyResultPanel extends StatelessWidget {
+  const _KisSchedulerGuardedBuyResultPanel({required this.result});
+
+  final KisSchedulerGuardedBuyResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    final submitted = result.submitted;
+    final primaryBlockReason = result.primaryBlockReason ??
+        (result.blockReasons.isEmpty ? 'n/a' : result.blockReasons.first);
+    final skippedForSell = result.sellSkippedBuy;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      _StateLine(
+        text: submitted
+            ? 'SUBMITTED BUY: ${result.symbol ?? 'n/a'} qty ${result.quantity?.toString() ?? 'n/a'}'
+            : skippedForSell
+                ? 'SKIPPED: sell_review_required_before_buy'
+                : 'BLOCKED: $primaryBlockReason',
+        color: submitted
+            ? Colors.redAccent
+            : skippedForSell
+                ? Colors.orangeAccent
+                : Colors.amberAccent,
+      ),
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        _SoftBadge(
+          text: 'Broker submit: ${_yesNo(result.brokerSubmitCalled)}',
+          color: result.brokerSubmitCalled
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'Manual submit: ${_yesNo(result.manualSubmitCalled)}',
+          color: result.manualSubmitCalled
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+        _SoftBadge(
+          text: 'Real order submitted: ${_yesNo(result.realOrderSubmitted)}',
+          color: result.realOrderSubmitted
+              ? Colors.redAccent
+              : Colors.lightBlueAccent,
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 14, runSpacing: 8, children: [
+        _ResultPair(label: 'result', value: result.result),
+        _ResultPair(label: 'action', value: result.action),
+        _ResultPair(label: 'reason', value: result.reason),
+        _ResultPair(label: 'primary block reason', value: primaryBlockReason),
+        _ResultPair(label: 'symbol', value: result.symbol ?? 'n/a'),
+        _ResultPair(label: 'company', value: result.companyName ?? 'n/a'),
+        _ResultPair(
+            label: 'quantity', value: result.quantity?.toString() ?? 'n/a'),
+        _ResultPair(
+          label: 'estimated notional',
+          value: _formatKrwOrDash(result.estimatedNotional),
+        ),
+        _ResultPair(
+            label: 'order id', value: result.orderId?.toString() ?? 'none'),
+        _ResultPair(label: 'KIS ODNO', value: result.kisOdno ?? 'none'),
+        _ResultPair(
+          label: 'broker order id',
+          value: result.brokerOrderId ?? 'none',
+        ),
+      ]),
+      const SizedBox(height: 10),
+      _StateLine(
+        text:
+            'buy_result: ${result.buyResult['result'] ?? 'skipped'} / ${result.buyResult['reason'] ?? 'buy_execution_not_called'}',
+      ),
+      if (result.sellReviewResult.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(
+          text:
+              'sell review: ${result.sellReviewResult['result'] ?? 'n/a'} / ${result.sellReviewResult['reason'] ?? 'n/a'}',
+        ),
+      ],
+      if (result.blockReasons.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        _StateLine(text: 'block reasons: ${_joinList(result.blockReasons)}'),
+      ],
+      const SizedBox(height: 4),
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: const Text('Developer Raw Payload'),
+        children: [
+          _StateLine(text: _prettyJson(result.rawPayload)),
+        ],
+      ),
+    ]);
+  }
+}
+
+String _schedulerGuardedBuyDailyLimitLabel(Map<String, dynamic> value) {
+  if (value.isEmpty) return 'n/a';
+  final remaining = value['daily_limit_remaining']?.toString();
+  final maxOrders = value['max_orders_per_day']?.toString();
+  final submitted = value['submitted_count_today']?.toString();
+  final base =
+      '${remaining == null || remaining == 'null' ? 'n/a' : remaining} remaining / ${maxOrders == null || maxOrders == 'null' ? 'n/a' : maxOrders} max';
+  if (submitted == null || submitted == 'null') return base;
+  return '$base, $submitted used';
+}
+
+String _schedulerGuardedBuyDuplicateLabel(Map<String, dynamic> value) {
+  if (value.isEmpty) return 'n/a';
+  final duplicate =
+      _mapNullableBool(value, 'duplicate_open_buy_order') ?? false;
+  if (duplicate) return 'blocked: duplicate open buy';
   final checked = _mapNullableBool(value, 'checked');
   if (checked == false) return 'not checked';
   return 'clear';

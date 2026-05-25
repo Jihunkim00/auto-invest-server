@@ -74,6 +74,7 @@ class _Context:
     no_new_entry_after: str
     no_new_entry_after_blocked: bool
     entry_allowed_now: bool
+    scheduler_guarded_buy_allowed: bool
 
 
 @dataclass(frozen=True)
@@ -128,10 +129,12 @@ class KisLimitedAutoBuyService:
         shadow_service: KisBuyShadowDecisionService | None = None,
         runtime_settings: RuntimeSettingService | None = None,
         session_service: MarketSessionService | None = None,
+        allow_scheduler_guarded_buy: bool = False,
     ):
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.session_service = session_service or MarketSessionService()
+        self.allow_scheduler_guarded_buy = allow_scheduler_guarded_buy
         self.shadow_service = shadow_service or KisBuyShadowDecisionService(
             client,
             runtime_settings=self.runtime_settings,
@@ -466,6 +469,9 @@ class KisLimitedAutoBuyService:
             no_new_entry_after=no_new_entry_after,
             no_new_entry_after_blocked=no_new_blocked,
             entry_allowed_now=entry_allowed_now,
+            scheduler_guarded_buy_allowed=bool(
+                scheduler_context and self.allow_scheduler_guarded_buy
+            ),
         )
 
     def _market_session(self, now_utc: datetime) -> dict[str, Any]:
@@ -1023,7 +1029,7 @@ def _status_payload(
         "kis_real_order_enabled": bool(
             getattr(context.settings, "kis_real_order_enabled", False)
         ),
-        "scheduler_real_orders_enabled": False,
+        "scheduler_real_orders_enabled": _scheduler_submit_enabled(context),
         "configured_scheduler_real_orders_enabled": (
             context.scheduler_real_orders_configured
         ),
@@ -1225,7 +1231,7 @@ def _decision_payload(
             "kis_real_order_enabled": bool(
                 getattr(context.settings, "kis_real_order_enabled", False)
             ),
-            "scheduler_real_orders_enabled": False,
+            "scheduler_real_orders_enabled": _scheduler_submit_enabled(context),
             "market_open": context.market_session.get("is_market_open") is True,
             "entry_allowed_now": context.entry_allowed_now,
             "no_new_entry_after": context.no_new_entry_after,
@@ -1455,7 +1461,7 @@ def _safety_payload(
         "broker_submit_called": broker_submit_called,
         "manual_submit_called": manual_submit_called,
         "validation_called": validation_called,
-        "scheduler_real_orders_enabled": False,
+        "scheduler_real_orders_enabled": _scheduler_submit_enabled(context),
         "configured_scheduler_real_orders_enabled": (
             context.scheduler_real_orders_configured
         ),
@@ -1501,7 +1507,7 @@ def _checks_payload(
         "kis_real_order_enabled": bool(
             getattr(context.settings, "kis_real_order_enabled", False)
         ),
-        "scheduler_real_orders_enabled": False,
+        "scheduler_real_orders_enabled": _scheduler_submit_enabled(context),
         "configured_scheduler_real_orders_enabled": (
             context.scheduler_real_orders_configured
         ),
@@ -1593,12 +1599,38 @@ def _execution_block_reasons(context: _Context) -> list[str]:
     if max_notional_pct is None or max_notional_pct <= 0 or max_notional_pct > 1:
         reasons.append("max_notional_pct_invalid")
     if context.scheduler_context:
-        reasons.append("scheduler_real_orders_disabled")
-    if context.scheduler_real_orders_configured:
+        if not bool(context.runtime.get("scheduler_enabled", False)):
+            reasons.append("scheduler_disabled")
+        if not bool(context.runtime.get("kis_scheduler_enabled", False)):
+            reasons.append("kis_scheduler_disabled")
+        if bool(context.runtime.get("kis_scheduler_dry_run", True)):
+            reasons.append("kis_scheduler_dry_run_true")
+        if not bool(context.runtime.get("kis_scheduler_allow_real_orders", False)):
+            reasons.append("scheduler_real_orders_disabled")
+        if not context.scheduler_real_orders_configured:
+            reasons.append("configured_scheduler_real_orders_disabled")
+        if not bool(context.runtime.get("kis_scheduler_buy_enabled", False)):
+            reasons.append("scheduler_buy_disabled")
+        if not context.scheduler_guarded_buy_allowed:
+            reasons.append("scheduler_guarded_buy_not_allowed")
+    elif context.scheduler_real_orders_configured:
         reasons.append("scheduler_real_orders_enabled")
     if auto_disabled and reasons:
         reasons = ["auto_buy_execution_disabled"] + reasons
     return _dedupe(reasons)
+
+
+def _scheduler_submit_enabled(context: _Context) -> bool:
+    return bool(
+        context.scheduler_context
+        and context.scheduler_guarded_buy_allowed
+        and context.scheduler_real_orders_configured
+        and context.runtime.get("scheduler_enabled", False)
+        and context.runtime.get("kis_scheduler_enabled", False)
+        and not context.runtime.get("kis_scheduler_dry_run", True)
+        and context.runtime.get("kis_scheduler_allow_real_orders", False)
+        and context.runtime.get("kis_scheduler_buy_enabled", False)
+    )
 
 
 def _decision_block_reasons(

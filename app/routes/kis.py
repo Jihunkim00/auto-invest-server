@@ -46,6 +46,9 @@ from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.kis_scheduler_guarded_sell_service import (
     KisSchedulerGuardedSellService,
 )
+from app.services.kis_scheduler_guarded_buy_service import (
+    KisSchedulerGuardedBuyService,
+)
 from app.services.kis_scheduler_guarded_sell_review_service import (
     KisSchedulerGuardedSellReviewService,
 )
@@ -102,6 +105,13 @@ class KisSchedulerGuardedSellRequest(BaseModel):
     slot_label: str | None = None
     include_raw: bool = False
     trigger_source: str = "scheduler_manual_test"
+
+
+class KisSchedulerGuardedBuyRequest(BaseModel):
+    slot_label: str | None = None
+    include_raw: bool = False
+    trigger_source: str = "scheduler_manual_test"
+    gate_level: int = DEFAULT_GATE_LEVEL
 
 
 @router.get("/manual-order/status")
@@ -329,6 +339,7 @@ def get_kis_scheduler_status(db: Session = Depends(get_db)):
     payload = service.status(db)
     payload["live"] = KisSchedulerLiveService(client).status(db)
     payload["guarded_sell"] = KisSchedulerGuardedSellService(client).status(db)
+    payload["guarded_buy"] = KisSchedulerGuardedBuyService(client).status(db)
     return payload
 
 
@@ -825,6 +836,41 @@ def get_kis_scheduler_guarded_sell_review(
         symbol=symbol,
         include_raw=include_raw,
         result=result,
+    )
+
+
+@router.get("/scheduler/guarded-buy/status")
+def get_kis_scheduler_guarded_buy_status(
+    slot_label: str | None = Query(default=None),
+    trigger_source: str = Query(default="scheduler_manual_test"),
+    include_raw: bool = Query(default=False),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisSchedulerGuardedBuyService(client)
+    return service.status(
+        db,
+        slot_label=slot_label,
+        trigger_source=trigger_source,
+        include_raw=include_raw,
+    )
+
+
+@router.post("/scheduler/run-guarded-buy-once")
+@router.post("/scheduler/run-buy-once")
+def run_kis_scheduler_guarded_buy_once(
+    payload: KisSchedulerGuardedBuyRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    request = payload or KisSchedulerGuardedBuyRequest()
+    client = _client(db)
+    service = KisSchedulerGuardedBuyService(client)
+    return service.run_once(
+        db,
+        slot_label=request.slot_label,
+        trigger_source=request.trigger_source,
+        include_raw=request.include_raw,
+        gate_level=request.gate_level,
     )
 
 
