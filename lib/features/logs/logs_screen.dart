@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/app_strings.dart';
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/gpt_risk_context_view.dart';
 import '../../core/widgets/status_badge.dart';
@@ -87,7 +88,7 @@ class _LogsScreenState extends State<LogsScreen> {
               children: [
                 const Expanded(
                   child: Text(
-                    'Logs',
+                    AppStrings.t(AppTextKey.logs, widget.controller.uiLanguage),
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),

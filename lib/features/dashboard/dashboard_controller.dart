@@ -81,6 +81,8 @@ enum KisOrderHistoryFilter { open, filled, canceled, rejected, all }
 
 enum KisOrderHistorySort { newestFirst, oldestFirst }
 
+enum UiLanguage { en, ko }
+
 class DashboardController extends ChangeNotifier {
   DashboardController(this.apiClient, {bool autoload = true}) {
     if (autoload) {
@@ -226,7 +228,14 @@ class DashboardController extends ChangeNotifier {
   KisOrderHistorySort kisOrderSort = KisOrderHistorySort.newestFirst;
   KisManualOrderResult? selectedKisOrder;
 
-  bool get hasValidKisValidation =>
+  
+  UiLanguage uiLanguage = UiLanguage.en;
+  bool get isKoreanUi => uiLanguage == UiLanguage.ko;
+  void toggleUiLanguage() {
+    uiLanguage = isKoreanUi ? UiLanguage.en : UiLanguage.ko;
+    notifyListeners();
+  }
+bool get hasValidKisValidation =>
       orderValidationResult?.validatedForSubmission == true;
 
   int? get parsedOrderTicketQty => _parseOrderTicketQty(orderTicketQtyInput);

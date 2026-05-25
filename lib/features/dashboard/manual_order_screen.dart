@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/app_strings.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
 import 'dashboard_controller.dart';
@@ -27,7 +28,7 @@ class TradingScreen extends StatelessWidget {
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Expanded(
                   child: Text(
-                    'Trading',
+                    AppStrings.t(AppTextKey.trading, controller.uiLanguage),
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -110,7 +111,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           const Icon(Icons.verified_user_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Analyze & Buy',
+            child: Text(AppStrings.t(AppTextKey.kisAnalyzeBuy, controller.uiLanguage),
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           const _SoftBadge(text: 'KIS LIVE', color: Colors.redAccent),
@@ -119,7 +120,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         TextField(
           controller: _symbolController,
           decoration: const InputDecoration(
-            labelText: 'KR Symbol',
+            labelText: AppStrings.t(AppTextKey.krSymbol, controller.uiLanguage),
             hintText: '005930',
             border: OutlineInputBorder(),
           ),
@@ -130,7 +131,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         TextField(
           controller: _qtyController,
           decoration: const InputDecoration(
-            labelText: 'Quantity',
+            labelText: AppStrings.t(AppTextKey.quantity, controller.uiLanguage),
             border: OutlineInputBorder(),
           ),
           keyboardType: TextInputType.number,
@@ -159,7 +160,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
               ? null
               : (value) =>
                   controller.setKisGuardedRunConfirmation(value == true),
-          title: const Text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'),
+          title: Text(AppStrings.t(AppTextKey.kisCheckbox, controller.uiLanguage)),
         ),
         FilledButton.icon(
           onPressed: canRequest
@@ -190,7 +191,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
               : const Icon(Icons.play_arrow),
           label: Text(controller.kisSingleSymbolTradingLoading
               ? 'Analyzing...'
-              : 'Analyze & Buy KIS'),
+              : AppStrings.t(AppTextKey.kisAnalyzeBuy, controller.uiLanguage)),
         ),
         if (!canRequest) ...[
           const SizedBox(height: 8),
@@ -223,12 +224,12 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Confirm KIS Order'),
+        title: Text(AppStrings.t(AppTextKey.kisConfirmTitle, controller.uiLanguage)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('실제 KIS 주문이 제출될 수 있습니다.'),
+            Text(AppStrings.t(AppTextKey.kisConfirmBody, controller.uiLanguage)),
             const SizedBox(height: 12),
             _DialogRow(label: '종목', value: symbol),
             _DialogRow(label: '수량/금액', value: qty.toString()),
@@ -237,11 +238,11 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: Text(AppStrings.t(AppTextKey.cancel, controller.uiLanguage)),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('확인'),
+            child: Text(AppStrings.t(AppTextKey.confirm, controller.uiLanguage)),
           ),
         ],
       ),
