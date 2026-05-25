@@ -271,10 +271,9 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    expect(find.text('US new-buy scan / Alpaca'), findsOneWidget);
     expect(find.text('Watchlist Symbols'), findsOneWidget);
-    expect(find.text('Start Scan'), findsOneWidget);
-    expect(find.text('Refresh'), findsOneWidget);
+    expect(find.text('Run Watchlist Analysis'), findsOneWidget);
+    expect(find.text('Refresh Watchlist'), findsOneWidget);
     expect(find.text('Run Single Symbol'), findsNothing);
     expect(find.text('Validate'), findsNothing);
     expect(find.text('Submit'), findsNothing);
@@ -284,17 +283,17 @@ void main() {
     controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    expect(find.text('KR new-buy scan / KIS'), findsOneWidget);
+    expect(find.text('KR watchlist / KIS'), findsOneWidget);
     expect(find.text('Watchlist Symbols'), findsOneWidget);
     expect(find.text('PREVIEW ONLY'), findsOneWidget);
-    expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.text('NO AUTO ORDER'), findsOneWidget);
-    expect(find.text('Start Scan'), findsOneWidget);
-    expect(find.text('Refresh'), findsOneWidget);
+    expect(find.text('NO DIRECT ORDER SUBMIT'), findsOneWidget);
+    expect(find.text('CANDIDATE DETAIL'), findsOneWidget);
+    expect(find.text('Run Watchlist Analysis'), findsOneWidget);
+    expect(find.text('Refresh Watchlist'), findsOneWidget);
     expect(find.text('Run KIS Preview'), findsNothing);
     expect(find.text('Run Single Symbol'), findsNothing);
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(api.previewCalls, 1);
@@ -326,11 +325,11 @@ void main() {
     controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('PREVIEW ONLY'), findsWidgets);
-    expect(find.text('TRADING DISABLED'), findsWidgets);
+    expect(find.text('NO DIRECT ORDER SUBMIT'), findsWidgets);
     expect(api.previewCalls, 1);
 
     final candidate = controller.runResult.finalRankedCandidates.single;
@@ -383,7 +382,7 @@ void main() {
     controller.setProvider(SelectedProvider.kis);
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('Prepare Buy Ticket'),
@@ -407,7 +406,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Watchlist Start Scan shows Alpaca summary and no order created',
+  testWidgets(
+      'Watchlist Run Watchlist Analysis shows Alpaca summary and no order created',
       (tester) async {
     final api =
         _FakeApiClient(runWatchlistDelay: const Duration(milliseconds: 50));
@@ -420,10 +420,10 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pump(const Duration(milliseconds: 10));
 
-    expect(find.text('Scanning...'), findsOneWidget);
+    expect(find.text('Analyzing...'), findsOneWidget);
     await tester.pumpAndSettle();
 
     expect(api.lastProvider, 'alpaca');
@@ -438,7 +438,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Watchlist Start Scan renders realistic result summary in place',
+  testWidgets(
+      'Watchlist Run Watchlist Analysis renders realistic result summary in place',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 1800);
     tester.view.devicePixelRatio = 1.0;
@@ -466,7 +467,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(api.lastProvider, 'alpaca');
@@ -510,7 +511,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('Skipped'), findsWidgets);
@@ -534,7 +535,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('Top Watchlist Candidates'), findsOneWidget);
@@ -575,7 +576,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('005930 · Samsung Electronics'), findsWidgets);
@@ -618,7 +619,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('AAPL · Unknown company'), findsWidgets);
@@ -640,7 +641,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('No top candidate'), findsOneWidget);
@@ -672,7 +673,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Start Scan'));
+    await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
     expect(find.text('AI BUY'), findsWidgets);
@@ -743,7 +744,7 @@ void main() {
       () => WatchlistSection(controller: controller),
     ));
 
-    await tester.tap(find.text('Refresh'));
+    await tester.tap(find.text('Refresh Watchlist'));
     await tester.pumpAndSettle();
 
     expect(api.refreshLatestCalls, 1);
@@ -761,7 +762,8 @@ void main() {
 
     await tester.pumpWidget(_wrap(
       controller,
-      () => TestLabSection(controller: controller),
+      () => TestLabSection(
+          controller: controller, advancedInitiallyExpanded: true),
     ));
 
     expect(find.text('Run Buy Shadow'), findsOneWidget);
@@ -787,7 +789,8 @@ void main() {
 
     await tester.pumpWidget(_wrap(
       controller,
-      () => TestLabSection(controller: controller),
+      () => TestLabSection(
+          controller: controller, advancedInitiallyExpanded: true),
     ));
 
     controller.setProvider(SelectedProvider.kis);
@@ -1486,7 +1489,7 @@ class _FakeApiClient extends ApiClient {
       tiedFinalCandidates: [],
       nearTiedCandidates: [],
       tieBreakerApplied: false,
-      finalCandidateSelectionReason: 'KR preview only; trading disabled.',
+      finalCandidateSelectionReason: 'KR preview only; NO DIRECT ORDER SUBMIT.',
       bestScore: null,
       finalScoreGap: null,
       minEntryScore: null,
@@ -1558,7 +1561,7 @@ class _FakeApiClient extends ApiClient {
       nearTiedCandidates: [],
       tieBreakerApplied: false,
       finalCandidateSelectionReason:
-          'KR preview ranked by grounded KIS OHLCV scores; trading disabled.',
+          'KR preview ranked by grounded KIS OHLCV scores; NO DIRECT ORDER SUBMIT.',
       bestScore: 64,
       finalScoreGap: 0,
       minEntryScore: 65,
@@ -1875,7 +1878,7 @@ Map<String, dynamic> _kisPreviewPayload() {
     'block_reason': 'kr_trading_disabled',
     'block_reasons': ['kr_trading_disabled'],
     'risk_flags': ['preview_only'],
-    'gating_notes': ['trading disabled'],
+    'gating_notes': ['NO DIRECT ORDER SUBMIT'],
     'preview_only': true,
     'trading_enabled': false,
     'real_order_submitted': false,
