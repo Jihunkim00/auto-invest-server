@@ -62,6 +62,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_allow_gpt_hard_block": False,
             "kis_scheduler_live_enabled": False,
             "kis_scheduler_allow_real_orders": False,
+            "kis_scheduler_buy_enabled": False,
             "kis_scheduler_sell_enabled": False,
             "kis_scheduler_allow_limited_auto_buy": False,
             "kis_scheduler_allow_limited_auto_sell": False,
@@ -190,6 +191,7 @@ class RuntimeSettingService:
             "kis_scheduler_allow_real_orders": bool(
                 row.kis_scheduler_allow_real_orders
             ),
+            "kis_scheduler_buy_enabled": bool(row.kis_scheduler_buy_enabled),
             "kis_scheduler_sell_enabled": bool(row.kis_scheduler_sell_enabled),
             "kis_scheduler_allow_limited_auto_buy": bool(
                 row.kis_scheduler_allow_limited_auto_buy
@@ -341,6 +343,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_allow_gpt_hard_block",
             "kis_scheduler_live_enabled",
             "kis_scheduler_allow_real_orders",
+            "kis_scheduler_buy_enabled",
             "kis_scheduler_sell_enabled",
             "kis_scheduler_allow_limited_auto_buy",
             "kis_scheduler_allow_limited_auto_sell",

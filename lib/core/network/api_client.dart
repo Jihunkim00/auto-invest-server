@@ -19,6 +19,7 @@ import '../../models/kis_live_exit_preflight.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_guarded_sell.dart';
+import '../../models/kis_scheduler_guarded_buy.dart';
 import '../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
@@ -784,6 +785,30 @@ class ApiClient {
     return KisSchedulerGuardedSellReview.fromJson(payload);
   }
 
+  Future<KisSchedulerGuardedBuyResult>
+      fetchKisSchedulerGuardedBuyStatus() async {
+    final payload = await _getJsonNoCache('/kis/scheduler/guarded-buy/status');
+    return KisSchedulerGuardedBuyResult.fromJson(payload);
+  }
+
+  Future<KisSchedulerGuardedBuyResult> runKisSchedulerGuardedBuyOnce({
+    String? slotLabel,
+    bool includeRaw = false,
+    String triggerSource = 'scheduler_manual_test',
+  }) async {
+    final body = <String, dynamic>{
+      if (slotLabel != null && slotLabel.trim().isNotEmpty)
+        'slot_label': slotLabel.trim(),
+      'include_raw': includeRaw,
+      'trigger_source': triggerSource,
+    };
+    final payload = await _postJsonBody(
+      '/kis/scheduler/run-guarded-buy-once',
+      body,
+    );
+    return KisSchedulerGuardedBuyResult.fromJson(payload);
+  }
+
   Future<WatchlistRunResult> runWatchlistForProvider({
     required String provider,
     required int gateLevel,
@@ -879,6 +904,7 @@ class ApiClient {
         kisSchedulerLiveEnabled: j['kis_scheduler_live_enabled'] == true,
         kisSchedulerAllowRealOrders:
             j['kis_scheduler_allow_real_orders'] == true,
+        kisSchedulerBuyEnabled: j['kis_scheduler_buy_enabled'] == true,
         kisSchedulerSellEnabled: j['kis_scheduler_sell_enabled'] == true,
         kisSchedulerAllowLimitedAutoBuy:
             j['kis_scheduler_allow_limited_auto_buy'] == true,

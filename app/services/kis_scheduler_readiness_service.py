@@ -281,7 +281,12 @@ class KisSchedulerReadinessService:
                 timezone=timezone,
                 purpose="buy_readiness",
                 enabled=enabled
-                and bool(runtime.get("kis_scheduler_allow_limited_auto_buy", False)),
+                and bool(
+                    runtime.get(
+                        "kis_scheduler_buy_enabled",
+                        runtime.get("kis_scheduler_allow_limited_auto_buy", False),
+                    )
+                ),
             ),
             _schedule_item(
                 slot_id="midday_position_management",
@@ -422,6 +427,9 @@ def _scheduler_settings(settings: Any, runtime: dict[str, Any]) -> dict[str, boo
         "kis_scheduler_allow_limited_auto_buy": bool(
             runtime.get("kis_scheduler_allow_limited_auto_buy", False)
         ),
+        "kis_scheduler_buy_enabled": bool(
+            runtime.get("kis_scheduler_buy_enabled", False)
+        ),
         "kis_scheduler_allow_limited_auto_sell": bool(
             runtime.get("kis_scheduler_allow_limited_auto_sell", False)
         ),
@@ -464,7 +472,8 @@ def _block_reasons(
     if not scheduler["kis_scheduler_live_enabled"]:
         reasons.append("kis_scheduler_live_disabled")
     if not (
-        scheduler["kis_scheduler_allow_limited_auto_buy"]
+        scheduler["kis_scheduler_buy_enabled"]
+        or scheduler["kis_scheduler_allow_limited_auto_buy"]
         or scheduler["kis_scheduler_allow_limited_auto_sell"]
     ):
         reasons.append("scheduler_limited_auto_paths_disabled")

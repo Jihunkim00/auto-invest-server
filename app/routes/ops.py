@@ -63,6 +63,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_buy_allow_gpt_hard_block: bool | None = None
     kis_scheduler_live_enabled: bool | None = None
     kis_scheduler_allow_real_orders: bool | None = None
+    kis_scheduler_buy_enabled: bool | None = None
     kis_scheduler_sell_enabled: bool | None = None
     kis_scheduler_allow_limited_auto_buy: bool | None = None
     kis_scheduler_allow_limited_auto_sell: bool | None = None

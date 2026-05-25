@@ -20,6 +20,7 @@ import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_dry_run_orchestration.dart';
 import '../../models/kis_scheduler_dry_run_review.dart';
 import '../../models/kis_scheduler_guarded_sell.dart';
+import '../../models/kis_scheduler_guarded_buy.dart';
 import '../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
@@ -182,6 +183,9 @@ class DashboardController extends ChangeNotifier {
   bool kisSchedulerGuardedSellLoading = false;
   KisSchedulerGuardedSellResult? latestKisSchedulerGuardedSellResult;
   String? kisSchedulerGuardedSellError;
+  bool kisSchedulerGuardedBuyLoading = false;
+  KisSchedulerGuardedBuyResult? latestKisSchedulerGuardedBuyResult;
+  String? kisSchedulerGuardedBuyError;
   bool kisSchedulerGuardedSellReviewLoading = false;
   KisSchedulerGuardedSellReview? latestKisSchedulerGuardedSellReview;
   String? kisSchedulerGuardedSellReviewError;
@@ -2330,6 +2334,72 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerGuardedSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshKisSchedulerGuardedBuyStatus() async {
+    if (kisSchedulerGuardedBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler guarded buy already in progress.',
+      );
+    }
+
+    kisSchedulerGuardedBuyLoading = true;
+    kisSchedulerGuardedBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchKisSchedulerGuardedBuyStatus();
+      latestKisSchedulerGuardedBuyResult = result;
+      return ActionResult(
+        success: true,
+        message:
+            'KIS scheduler guarded buy status refreshed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisSchedulerGuardedBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerGuardedBuyError!),
+      );
+    } finally {
+      kisSchedulerGuardedBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runKisSchedulerGuardedBuyOnce() async {
+    if (kisSchedulerGuardedBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'KIS scheduler guarded buy already in progress.',
+      );
+    }
+
+    kisSchedulerGuardedBuyLoading = true;
+    kisSchedulerGuardedBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runKisSchedulerGuardedBuyOnce();
+      latestKisSchedulerGuardedBuyResult = result;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await refreshKisSchedulerStatus(silent: true);
+      if (result.realOrderSubmitted || result.orderId != null) {
+        await refreshKisOrderMonitoring(silent: true);
+      }
+      return ActionResult(
+        success: true,
+        message: 'KIS scheduler guarded buy completed: ${result.reason}.',
+      );
+    } catch (e) {
+      kisSchedulerGuardedBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(kisSchedulerGuardedBuyError!),
+      );
+    } finally {
+      kisSchedulerGuardedBuyLoading = false;
       notifyListeners();
     }
   }
