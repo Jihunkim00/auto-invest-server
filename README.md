@@ -48,9 +48,15 @@ Important variables:
 - `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` - Alpaca API credentials
 - `ALPACA_BASE_URL` - Alpaca base URL
 - `DEFAULT_SYMBOL` - default trading symbol
+- `DEFAULT_US_SYMBOL` - default US symbol, defaults to `AAPL`
+- `DEFAULT_KR_SYMBOL` - default Korean symbol, defaults to `005930`
 - `DATABASE_URL` - SQLite database connection string
 - `REFERENCE_SITES_CONFIG_PATH` - path to reference site YAML config
 - `OPENAI_API_KEY` - OpenAI API key
+
+Use `.env.example` as the safe-default template. Keep `DEFAULT_SYMBOL=AAPL`
+for legacy Alpaca compatibility. Korean symbols must be strings so leading
+zeroes are preserved.
 
 ## Run
 
@@ -82,6 +88,11 @@ Database initialization is handled on startup by `app.db.init_db.init_db()`.
 
 ## KIS safety lifecycle
 
+- Operations readiness: `/ops/production-readiness` is read-only and reports
+  dry-run/live state, kill switch, KIS real-order state, scheduler real-order
+  state, scheduler buy/sell flags, live auto settings, today's order and broker
+  submit counts, safety violations, KR watchlist validity, DB writability, docs
+  presence, and recommended next actions.
 - Readiness: `/kis/auto/readiness` and `/kis/auto/preflight-once` report gate state only.
 - Exit preflight: `/kis/live-exit/preflight-once` evaluates held-position exits without submitting and keeps manual confirmation required.
 - Manual live sell: `/kis/orders/manual-submit` and `/kis/orders/submit-manual` remain the explicit live order paths and require `confirm_live`.
@@ -100,6 +111,11 @@ Run tests with:
 ```powershell
 python -m pytest
 ```
+
+## Operations docs
+
+- `docs/OPERATIONS.md` - operator guide, safety model, flows, and emergency procedure.
+- `docs/PRODUCTION_CHECKLIST.md` - production and live-order checklist.
 
 ## Notes
 

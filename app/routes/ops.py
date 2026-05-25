@@ -6,7 +6,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings as get_app_settings
 from app.db.database import get_db
+from app.services.ops_production_readiness_service import (
+    OpsProductionReadinessService,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.trading_service import TradingService
@@ -99,6 +105,23 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
     return {"result": "updated", "settings": settings}
 
 
+@router.get("/production-readiness")
+def get_production_readiness(
+    include_raw: bool = Query(default=False),
+    days: int = Query(default=7, ge=1, le=365),
+    include_recent: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    client = _kis_client(db)
+    service = OpsProductionReadinessService(client)
+    return service.readiness(
+        db,
+        include_raw=include_raw,
+        days=days,
+        include_recent=include_recent,
+    )
+
+
 @router.post("/run-now")
 def run_now(payload: RunNowRequest, db: Session = Depends(get_db)):
     svc = TradingOrchestratorService()
@@ -161,3 +184,8 @@ def kill_switch_on(db: Session = Depends(get_db)):
 def kill_switch_off(db: Session = Depends(get_db)):
     svc = RuntimeSettingService()
     return {"result": "updated", "settings": svc.set_kill_switch(db, False)}
+
+
+def _kis_client(db: Session) -> KisClient:
+    settings = get_app_settings()
+    return KisClient(settings, KisAuthManager(settings, db))

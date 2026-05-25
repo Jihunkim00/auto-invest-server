@@ -31,6 +31,7 @@ import '../../models/managed_position.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/order_validation_result.dart';
+import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
@@ -807,6 +808,20 @@ class ApiClient {
       body,
     );
     return KisSchedulerGuardedBuyResult.fromJson(payload);
+  }
+
+  Future<OpsProductionReadiness> fetchOpsProductionReadiness({
+    bool includeRaw = false,
+    int days = 7,
+    bool includeRecent = true,
+  }) async {
+    final query = Uri(queryParameters: {
+      'include_raw': includeRaw.toString(),
+      'days': days.toString(),
+      'include_recent': includeRecent.toString(),
+    }).query;
+    final payload = await _getJsonNoCache('/ops/production-readiness?$query');
+    return OpsProductionReadiness.fromJson(payload);
   }
 
   Future<WatchlistRunResult> runWatchlistForProvider({

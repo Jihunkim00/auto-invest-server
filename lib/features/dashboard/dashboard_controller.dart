@@ -29,6 +29,7 @@ import '../../models/market_watchlist.dart';
 import '../../models/managed_position.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
+import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
@@ -102,6 +103,9 @@ class DashboardController extends ChangeNotifier {
     minScoreGap: 3,
   );
   SchedulerStatus schedulerStatus = SchedulerStatus.safeDefault();
+  bool opsProductionReadinessLoading = false;
+  OpsProductionReadiness? latestOpsProductionReadiness;
+  String? opsProductionReadinessError;
 
   WatchlistRunResult runResult = _emptyRunResult;
   PortfolioSummary usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
@@ -2334,6 +2338,38 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       kisSchedulerGuardedSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshOpsProductionReadiness({
+    bool silent = false,
+  }) async {
+    if (opsProductionReadinessLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Operations readiness refresh already in progress.',
+      );
+    }
+
+    opsProductionReadinessLoading = true;
+    opsProductionReadinessError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchOpsProductionReadiness();
+      latestOpsProductionReadiness = result;
+      return ActionResult(
+        success: true,
+        message: 'Operations readiness: ${result.overallStatus}.',
+      );
+    } catch (e) {
+      opsProductionReadinessError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(opsProductionReadinessError!),
+      );
+    } finally {
+      opsProductionReadinessLoading = false;
       notifyListeners();
     }
   }
