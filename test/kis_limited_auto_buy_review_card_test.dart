@@ -114,7 +114,8 @@ Widget _wrap(DashboardController controller) {
       body: SingleChildScrollView(
         child: AnimatedBuilder(
           animation: controller,
-          builder: (context, _) => TestLabSection(controller: controller),
+          builder: (context, _) => TestLabSection(
+              controller: controller, advancedInitiallyExpanded: true),
         ),
       ),
     ),
