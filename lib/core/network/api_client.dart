@@ -39,9 +39,11 @@ import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
 class ApiRequestException implements Exception {
-  const ApiRequestException(this.message);
+  const ApiRequestException(this.message, {this.statusCode, this.detail});
 
   final String message;
+  final int? statusCode;
+  final Map<String, dynamic>? detail;
 
   @override
   String toString() => message;
@@ -67,6 +69,21 @@ class ApiClient {
     return double.tryParse(text);
   }
 
+  static String? _readNullableString(Object? value) {
+    final text = value?.toString().trim();
+    if (text == null || text.isEmpty) return null;
+    return text;
+  }
+
+  static bool _looksLikeTokenExpired(String? value) {
+    final text = value?.toLowerCase() ?? '';
+    return text.contains('egw00123') ||
+        text.contains('token expired') ||
+        text.contains('expired token') ||
+        text.contains('기간이 만료된 token') ||
+        text.contains('만료된 token');
+  }
+
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _client.get(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
@@ -83,7 +100,7 @@ class ApiClient {
       'Pragma': 'no-cache',
     });
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
     final decoded = jsonDecode(r.body);
     if (decoded is! Map) {
@@ -175,12 +192,19 @@ class ApiClient {
   }
 
   Future<PortfolioSummary> fetchKrPortfolioSummary() async {
-    final balance = await _getJsonNoCache('/kis/account/balance');
-    final positionsPayload = await _getJsonNoCache('/kis/account/positions');
-    final ordersPayload = await _getJsonNoCache('/kis/account/open-orders');
+    final balanceResult =
+        await _fetchKrPortfolioEndpoint('/kis/account/balance');
+    final positionsResult =
+        await _fetchKrPortfolioEndpoint('/kis/account/positions');
+    final ordersResult =
+        await _fetchKrPortfolioEndpoint('/kis/account/open-orders');
+
+    final balance = balanceResult.payload;
+    final positionsPayload = positionsResult.payload;
+    final ordersPayload = ordersResult.payload;
 
     final rawPositions =
-        positionsPayload['positions'] as List<dynamic>? ?? const [];
+        positionsPayload?['positions'] as List<dynamic>? ?? const [];
     final positions = rawPositions
         .whereType<Map>()
         .map((item) => PositionSummary.fromJson(
@@ -188,7 +212,7 @@ class ApiClient {
         .map(_normalizeKrPositionSummary)
         .toList();
 
-    final rawOrders = ordersPayload['orders'] as List<dynamic>? ?? const [];
+    final rawOrders = ordersPayload?['orders'] as List<dynamic>? ?? const [];
     final pendingOrders = rawOrders
         .whereType<Map>()
         .map((item) => PendingOrderSummary.fromJson(
@@ -203,32 +227,103 @@ class ApiClient {
         0, (total, position) => total + position.unrealizedPl);
 
     final totalCostBasis =
-        _readNullableDouble(balance['purchase_amount']) ?? summedCostBasis;
+        _readNullableDouble(balance?['purchase_amount']) ?? summedCostBasis;
     final totalMarketValue =
-        _readNullableDouble(balance['stock_evaluation_amount']) ??
-            _readNullableDouble(balance['total_market_value']) ??
-            _readNullableDouble(balance['total_asset_value']) ??
+        _readNullableDouble(balance?['stock_evaluation_amount']) ??
+            _readNullableDouble(balance?['total_market_value']) ??
+            _readNullableDouble(balance?['total_asset_value']) ??
             summedMarketValue;
     final totalUnrealizedPl =
-        _readNullableDouble(balance['unrealized_pl']) ?? summedUnrealizedPl;
+        _readNullableDouble(balance?['unrealized_pl']) ?? summedUnrealizedPl;
     final totalUnrealizedPlpc =
         totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0.0;
-    final cash = _readNullableDouble(balance['cash']) ??
-        _readNullableDouble(balance['dnca_tot_amt']) ??
-        0;
+    final cashValue = _readNullableDouble(balance?['cash']) ??
+        _readNullableDouble(balance?['dnca_tot_amt']);
+    final authDetails = _krPortfolioAuthDetails([
+      balanceResult.error,
+      positionsResult.error,
+      ordersResult.error,
+    ]);
 
     return PortfolioSummary(
       currency: 'KRW',
-      positionsCount: _readInt(positionsPayload['count'], positions.length),
+      positionsCount: _readInt(positionsPayload?['count'], positions.length),
       pendingOrdersCount:
-          _readInt(ordersPayload['count'], pendingOrders.length),
+          _readInt(ordersPayload?['count'], pendingOrders.length),
       totalCostBasis: totalCostBasis,
       totalMarketValue: totalMarketValue,
       totalUnrealizedPl: totalUnrealizedPl,
       totalUnrealizedPlpc: totalUnrealizedPlpc,
-      cash: cash,
+      cash: cashValue ?? 0,
       positions: positions,
       pendingOrders: pendingOrders,
+      cashKnown: balance != null,
+      balanceUnavailable: balance == null,
+      positionsUnavailable: positionsPayload == null,
+      openOrdersUnavailable: ordersPayload == null,
+      kisAuthErrorMessage: authDetails.message,
+      nextRefreshAllowedAt: authDetails.nextRefreshAllowedAt,
+      tokenExpired: authDetails.tokenExpired,
+    );
+  }
+
+  Future<_KrPortfolioEndpointResult> _fetchKrPortfolioEndpoint(
+      String path) async {
+    try {
+      return _KrPortfolioEndpointResult.success(await _getJsonNoCache(path));
+    } on ApiRequestException catch (error) {
+      return _KrPortfolioEndpointResult.failure(error);
+    } on http.ClientException catch (error) {
+      return _KrPortfolioEndpointResult.failure(
+        ApiRequestException('KIS endpoint unavailable: ${error.message}'),
+      );
+    } on FormatException catch (_) {
+      return _KrPortfolioEndpointResult.failure(
+        const ApiRequestException('Invalid KIS endpoint response.'),
+      );
+    }
+  }
+
+  _KrPortfolioAuthDetails _krPortfolioAuthDetails(
+      Iterable<ApiRequestException?> errors) {
+    var tokenExpired = false;
+    String? nextRefreshAllowedAt;
+    String? refreshGuardReason;
+    String? msgCd;
+    String? msg1;
+
+    for (final error in errors.whereType<ApiRequestException>()) {
+      final detail = error.detail ?? _apiErrorDetailFromMessage(error.message);
+      final code = _readNullableString(detail['msg_cd']);
+      final message = _readNullableString(detail['msg1']);
+      if (msgCd == null && code != null) msgCd = code;
+      if (msg1 == null && message != null) msg1 = message;
+      if (nextRefreshAllowedAt == null) {
+        nextRefreshAllowedAt =
+            _readNullableString(detail['next_refresh_allowed_at']);
+      }
+      if (refreshGuardReason == null) {
+        refreshGuardReason =
+            _readNullableString(detail['refresh_guard_reason']);
+      }
+      tokenExpired = tokenExpired ||
+          code == 'EGW00123' ||
+          _looksLikeTokenExpired(message) ||
+          _looksLikeTokenExpired(error.message);
+    }
+
+    if (!tokenExpired && msgCd == null && msg1 == null) {
+      return const _KrPortfolioAuthDetails();
+    }
+
+    final message = tokenExpired
+        ? 'KIS token expired. Portfolio data is unavailable until token refresh succeeds.'
+        : [msgCd, msg1].whereType<String>().join(' ').trim();
+    return _KrPortfolioAuthDetails(
+      message: message.isEmpty ? 'KIS portfolio data is unavailable.' : message,
+      nextRefreshAllowedAt:
+          refreshGuardReason == 'too_recent' ? nextRefreshAllowedAt : null,
+      tokenExpired: tokenExpired,
     );
   }
 
@@ -1245,6 +1340,91 @@ class ApiClient {
       reason: 'weak_final_score_gap',
       triggerSource: 'manual',
     );
+  }
+}
+
+class _KrPortfolioEndpointResult {
+  const _KrPortfolioEndpointResult._({this.payload, this.error});
+
+  factory _KrPortfolioEndpointResult.success(Map<String, dynamic> payload) =>
+      _KrPortfolioEndpointResult._(payload: payload);
+
+  factory _KrPortfolioEndpointResult.failure(ApiRequestException error) =>
+      _KrPortfolioEndpointResult._(error: error);
+
+  final Map<String, dynamic>? payload;
+  final ApiRequestException? error;
+}
+
+class _KrPortfolioAuthDetails {
+  const _KrPortfolioAuthDetails({
+    this.message,
+    this.nextRefreshAllowedAt,
+    this.tokenExpired = false,
+  });
+
+  final String? message;
+  final String? nextRefreshAllowedAt;
+  final bool tokenExpired;
+}
+
+ApiRequestException _apiRequestExceptionFromResponse(http.Response response) {
+  final detail = _apiErrorDetailFromBody(response.body);
+  return ApiRequestException(
+    'HTTP ${response.statusCode}: ${response.body}',
+    statusCode: response.statusCode,
+    detail: detail,
+  );
+}
+
+Map<String, dynamic> _apiErrorDetailFromMessage(String message) {
+  final marker = RegExp(r'^HTTP\s+\d+:\s*');
+  final body = message.replaceFirst(marker, '');
+  return _apiErrorDetailFromBody(body);
+}
+
+Map<String, dynamic> _apiErrorDetailFromBody(String body) {
+  final result = <String, dynamic>{};
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is! Map) return result;
+    final root = Map<String, dynamic>.from(decoded);
+    final detail = root['detail'];
+    if (detail is Map) {
+      final detailMap = Map<String, dynamic>.from(detail);
+      _copyKnownKisErrorFields(result, detailMap);
+      final nested = detailMap['details'];
+      if (nested is Map) {
+        _copyKnownKisErrorFields(result, Map<String, dynamic>.from(nested));
+      }
+    } else if (detail is String) {
+      result['msg1'] = detail;
+    }
+    _copyKnownKisErrorFields(result, root);
+  } catch (_) {
+    return result;
+  }
+  return result;
+}
+
+void _copyKnownKisErrorFields(
+  Map<String, dynamic> target,
+  Map<String, dynamic> source,
+) {
+  const keys = [
+    'msg_cd',
+    'msg1',
+    'rt_cd',
+    'token_expired',
+    'refresh_guard_reason',
+    'next_refresh_allowed_at',
+    'refresh_attempted',
+    'refresh_guard_bypassed_for_token_expired',
+    'retry_failed',
+  ];
+  for (final key in keys) {
+    final value = source[key];
+    if (value != null && target[key] == null) target[key] = value;
   }
 }
 

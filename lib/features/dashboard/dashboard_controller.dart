@@ -1043,7 +1043,7 @@ class DashboardController extends ChangeNotifier {
     if (kosdaqTop50Updating) {
       return const ActionResult(
         success: false,
-        message: 'KOSDAQ top 50 watchlist update already in progress.',
+        message: 'KR top 50 watchlist update already in progress.',
       );
     }
 
@@ -1059,7 +1059,7 @@ class DashboardController extends ChangeNotifier {
       }
       return const ActionResult(
         success: true,
-        message: 'KOSDAQ top 50 watchlist updated.',
+        message: 'KR top 50 watchlist updated.',
       );
     } catch (e) {
       kosdaqTop50UpdateError = ApiErrorFormatter.format(e.toString());
@@ -2527,11 +2527,26 @@ class DashboardController extends ChangeNotifier {
   Future<void> _refreshKrPortfolioSummary() async {
     try {
       krPortfolioSummary = await apiClient.fetchKrPortfolioSummary();
-      krPortfolioUnavailable = false;
-      krPortfolioError = null;
-      await _refreshKisManagedPositions();
+      krPortfolioUnavailable = krPortfolioSummary.hasUnavailableKisData;
+      krPortfolioError = krPortfolioUnavailable
+          ? krPortfolioSummary.kisAuthErrorMessage ??
+              'KIS account data partially unavailable'
+          : null;
+      if (krPortfolioSummary.positionsUnavailable) {
+        kisManagedPositions = const [];
+        kisManagedPositionsError = null;
+      } else {
+        await _refreshKisManagedPositions();
+      }
     } catch (_) {
-      krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+      krPortfolioSummary = PortfolioSummary.empty(
+        currency: 'KRW',
+        cashKnown: false,
+        balanceUnavailable: true,
+        positionsUnavailable: true,
+        openOrdersUnavailable: true,
+        kisAuthErrorMessage: 'KIS account data unavailable',
+      );
       kisManagedPositions = const [];
       krPortfolioUnavailable = true;
       krPortfolioError = 'KIS account data unavailable';

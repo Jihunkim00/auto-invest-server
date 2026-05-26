@@ -35,6 +35,67 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Portfolio Snapshot shows KIS token expired warning',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krTokenExpiredSummary);
+
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+          'KIS token expired. Portfolio data is unavailable until token refresh succeeds.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+          'Token refresh is temporarily blocked until 2026-05-27T01:00:00+00:00.'),
+      findsOneWidget,
+    );
+    expect(find.text('Unavailable'), findsOneWidget);
+    expect(find.text('KIS positions unavailable'), findsOneWidget);
+    expect(find.text('No open KR positions'), findsNothing);
+    expect(find.text('??'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Portfolio Snapshot keeps cash when KIS positions fail',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krCashOnlySummary);
+
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('30,000'), findsOneWidget);
+    expect(find.text('Unavailable'), findsNothing);
+    expect(find.text('KIS positions unavailable'), findsOneWidget);
+    expect(find.text('No open KR positions'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Portfolio Snapshot keeps holdings when KIS balance fails',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, krSummary: _krPositionsOnlySummary);
+
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Unavailable'), findsOneWidget);
+    expect(find.textContaining('005930'), findsOneWidget);
+    expect(find.text('KIS positions unavailable'), findsNothing);
+    expect(find.text('No open KR positions'), findsNothing);
+
+    controller.dispose();
+  });
+
   testWidgets('KIS portfolio profit percent uses cost basis and P/L amount',
       (tester) async {
     final controller =
@@ -309,6 +370,69 @@ const _krSummary = PortfolioSummary(
       submittedAt: '09:30:00',
     ),
   ],
+);
+
+const _krTokenExpiredSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 0,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 0,
+  totalUnrealizedPl: 0,
+  totalUnrealizedPlpc: 0,
+  cash: 0,
+  positions: [],
+  pendingOrders: [],
+  cashKnown: false,
+  balanceUnavailable: true,
+  positionsUnavailable: true,
+  openOrdersUnavailable: true,
+  kisAuthErrorMessage:
+      'KIS token expired. Portfolio data is unavailable until token refresh succeeds.',
+  nextRefreshAllowedAt: '2026-05-27T01:00:00+00:00',
+  tokenExpired: true,
+);
+
+const _krCashOnlySummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 0,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 0,
+  totalUnrealizedPl: 0,
+  totalUnrealizedPlpc: 0,
+  cash: 30000,
+  positions: [],
+  pendingOrders: [],
+  positionsUnavailable: true,
+);
+
+const _krPositionsOnlySummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 1000000,
+  totalMarketValue: 1200000,
+  totalUnrealizedPl: 200000,
+  totalUnrealizedPlpc: 0.2,
+  cash: 0,
+  positions: [
+    PositionSummary(
+      symbol: '005930',
+      name: '?쇱꽦?꾩옄',
+      side: 'long',
+      qty: 2,
+      avgEntryPrice: 500000,
+      costBasis: 1000000,
+      currentPrice: 600000,
+      marketValue: 1200000,
+      unrealizedPl: 200000,
+      unrealizedPlpc: 0.2,
+    ),
+  ],
+  pendingOrders: [],
+  cashKnown: false,
+  balanceUnavailable: true,
 );
 
 const _krSmallProfitSummary = PortfolioSummary(

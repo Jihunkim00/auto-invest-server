@@ -148,8 +148,8 @@ class WatchlistSection extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.update),
               label: Text(controller.kosdaqTop50Updating
-                  ? 'Updating KOSDAQ Top 50...'
-                  : 'Update KOSDAQ Top 50'),
+                  ? 'Updating KR Top 50...'
+                  : 'Update KR Top 50'),
             ),
         ]),
         if (isKr) ...[
@@ -165,6 +165,12 @@ class WatchlistSection extends StatelessWidget {
           _StateLine(
             text: _primaryLine(controller.kosdaqTop50UpdateError!),
             color: Colors.redAccent,
+          ),
+        ],
+        if (isKr && controller.latestKosdaqTop50Update != null) ...[
+          const SizedBox(height: 10),
+          _KosdaqUpdateResultSummary(
+            payload: controller.latestKosdaqTop50Update!,
           ),
         ],
         const SizedBox(height: 12),
@@ -239,9 +245,9 @@ Future<bool?> _confirmKosdaqTop50Update(BuildContext context) {
   return showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
-      title: const Text('Update KOSDAQ Top 50'),
+      title: const Text('Update KR Top 50'),
       content: const Text(
-        'This will replace the KR watchlist with KOSDAQ top 50 by market cap. No order will be submitted.',
+        'This will rebuild the KR watchlist as 코스피 Top 30 + 코스닥 Top 20. No order will be submitted.',
       ),
       actions: [
         TextButton(
@@ -255,6 +261,145 @@ Future<bool?> _confirmKosdaqTop50Update(BuildContext context) {
       ],
     ),
   );
+}
+
+class _KosdaqUpdateResultSummary extends StatelessWidget {
+  const _KosdaqUpdateResultSummary({required this.payload});
+
+  final Map<String, dynamic> payload;
+
+  @override
+  Widget build(BuildContext context) {
+    final groupLabel = _watchlistGroupLabel(payload);
+    final count = _intFromPayload(payload, 'count');
+    final targetCount = _intFromPayload(payload, 'target_count');
+    final added = _listFromPayload(payload, 'added_symbols');
+    final removed = _listFromPayload(payload, 'removed_symbols');
+    final kept = _listFromPayload(payload, 'kept_symbols');
+    final groups = _listFromPayload(payload, 'groups');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.playlist_add_check, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(groupLabel,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w800)),
+          ),
+          _SoftBadge(
+            text: targetCount == null
+                ? '$count symbols'
+                : '$count / $targetCount',
+            color: Colors.lightBlueAccent,
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'added ${added.length}', color: Colors.greenAccent),
+          _SoftBadge(
+              text: 'removed ${removed.length}', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'kept ${kept.length}', color: Colors.lightBlueAccent),
+        ]),
+        if (groups.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final group in groups)
+              _SoftBadge(
+                text: _groupCountLabel(group),
+                color: Colors.cyanAccent,
+              ),
+          ]),
+        ],
+        if (removed.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const _StateLine(
+            text: '50개 제한으로 일부 기존 종목이 제외되었습니다.',
+            color: Colors.amberAccent,
+          ),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: EdgeInsets.zero,
+            title: const Text('Excluded Symbols',
+                style: TextStyle(color: Colors.white70)),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final item in removed.take(20))
+                      _RemovedSymbolChip(item: item),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Developer Raw Payload',
+              style: TextStyle(color: Colors.white70)),
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: SelectableText(
+                const JsonEncoder.withIndent('  ').convert(payload),
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontFamily: 'monospace'),
+              ),
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+}
+
+class _RemovedSymbolChip extends StatelessWidget {
+  const _RemovedSymbolChip({required this.item});
+
+  final Map<String, dynamic> item;
+
+  @override
+  Widget build(BuildContext context) {
+    final symbol = item['symbol']?.toString() ?? '';
+    final name = item['name']?.toString() ?? '';
+    final market = _displayMarketLabel(item);
+    final label = [
+      symbol,
+      if (name.isNotEmpty) name,
+      if (market.isNotEmpty) market,
+    ].join(' - ');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Text(label, style: const TextStyle(color: Colors.white70)),
+    );
+  }
 }
 
 class _WatchlistRunResultSummary extends StatelessWidget {
@@ -8297,8 +8442,11 @@ class _SymbolChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final marketLabel = item.marketLabel.isNotEmpty
+        ? item.marketLabel
+        : _marketCodeLabel(item.market);
     final label = isKr && item.name.isNotEmpty
-        ? '${item.symbol} - ${item.name} - ${item.market}'
+        ? '${item.symbol} - ${item.name} - $marketLabel'
         : item.symbol;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -8312,6 +8460,70 @@ class _SymbolChip extends StatelessWidget {
               color: Colors.white70, fontWeight: FontWeight.w700)),
     );
   }
+}
+
+String _watchlistGroupLabel(Map<String, dynamic> payload) {
+  final direct = payload['group_label']?.toString().trim();
+  if (direct != null && direct.isNotEmpty) return direct;
+  final mode = payload['mode']?.toString().trim();
+  if (mode != null && mode.contains('balanced')) {
+    return '코스피 Top 30 + 코스닥 Top 20';
+  }
+  final sourceLabel = _displayMarketLabel(payload);
+  return sourceLabel.isEmpty ? 'Watchlist Update' : '$sourceLabel Top 50';
+}
+
+String _displayMarketLabel(Map<String, dynamic> payload) {
+  final direct = payload['market_label']?.toString().trim();
+  if (direct != null && direct.isNotEmpty) return direct;
+  final source = payload['source_market_label']?.toString().trim();
+  if (source != null && source.isNotEmpty) return source;
+  final market = payload['market'] ?? payload['source_market'];
+  return _marketCodeLabel(market?.toString() ?? '');
+}
+
+String _marketCodeLabel(String value) {
+  switch (value.trim().toUpperCase()) {
+    case 'KOSPI':
+      return '코스피';
+    case 'KOSDAQ':
+      return '코스닥';
+    case 'KONEX':
+      return '코넥스';
+    case 'KR':
+      return '한국';
+    case 'US':
+      return '미국';
+    default:
+      return value;
+  }
+}
+
+String _groupCountLabel(Map<String, dynamic> group) {
+  final label = _displayMarketLabel(group);
+  final count = _intFromPayload(group, 'count');
+  final target = _intFromPayload(group, 'target_count');
+  if (count != null && target != null) return '$label $count / $target';
+  if (count != null) return '$label $count';
+  return label.isEmpty ? 'Group' : label;
+}
+
+int? _intFromPayload(Map<String, dynamic> payload, String key) {
+  final value = payload[key];
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+List<Map<String, dynamic>> _listFromPayload(
+  Map<String, dynamic> payload,
+  String key,
+) {
+  final raw = payload[key];
+  if (raw is! List) return const [];
+  return [
+    for (final item in raw)
+      if (item is Map) Map<String, dynamic>.from(item.cast<String, dynamic>()),
+  ];
 }
 
 class _StateLine extends StatelessWidget {
@@ -8433,10 +8645,11 @@ String _candidateMarketProviderLabel(
     candidate.provider,
     fallback: isKr ? 'KIS' : 'Alpaca',
   );
-  final market = presentation.displayText(
-    candidate.market,
+  final rawMarket = presentation.displayText(
+    candidate.marketLabel.isNotEmpty ? candidate.marketLabel : candidate.market,
     fallback: isKr ? 'KR' : 'US',
   );
+  final market = _marketCodeLabel(rawMarket);
   return '${_providerLabel(provider)} / $market';
 }
 

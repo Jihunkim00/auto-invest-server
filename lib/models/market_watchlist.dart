@@ -46,6 +46,7 @@ class WatchlistSymbol {
     required this.symbol,
     required this.name,
     required this.market,
+    this.marketLabel = '',
   });
 
   factory WatchlistSymbol.fromJson(Map<String, dynamic> json) {
@@ -53,12 +54,14 @@ class WatchlistSymbol {
       symbol: _readString(json['symbol'], ''),
       name: _readString(json['name'], ''),
       market: _readString(json['market'], ''),
+      marketLabel: _readString(json['market_label'], ''),
     );
   }
 
   final String symbol;
   final String name;
   final String market;
+  final String marketLabel;
 }
 
 int _readInt(Object? value, int fallback) {

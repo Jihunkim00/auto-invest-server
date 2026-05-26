@@ -597,7 +597,7 @@ void main() {
     expect(find.text('COMPANY'), findsOneWidget);
     expect(find.text('Samsung Electronics'), findsWidgets);
     expect(find.text('MARKET / PROVIDER'), findsOneWidget);
-    expect(find.text('KIS / KOSPI'), findsWidgets);
+    expect(find.text('KIS / 코스피'), findsWidgets);
     expect(find.text('Score Detail'), findsOneWidget);
     expect(find.text('REQUIRED THRESHOLD'), findsOneWidget);
     expect(find.text('Technical Snapshot'), findsOneWidget);

@@ -52,6 +52,10 @@ ACCOUNT_FIELD_KEYS = {
 }
 
 ACCOUNT_PRODUCT_KEYS = {"acnt_prdt_cd"}
+SAFE_AUTH_DIAGNOSTIC_KEYS = {
+    "token_expired",
+    "refresh_guard_bypassed_for_token_expired",
+}
 SECRET_KEY_TOKENS = ("token", "secret", "key", "auth", "password")
 
 PHONE_RE = re.compile(
@@ -79,6 +83,8 @@ def sanitize_kis_payload(
     normalized_key = _normalize_key(key)
     if _is_personal_key(normalized_key):
         return REDACTED if value is not None else None
+    if normalized_key in SAFE_AUTH_DIAGNOSTIC_KEYS:
+        return value
     if _is_secret_key(normalized_key):
         return SECRET_REDACTED if value is not None else None
     if _is_account_key(normalized_key):
@@ -115,6 +121,8 @@ def sanitize_kis_text(
     normalized_key = _normalize_key(key)
     if _is_personal_key(normalized_key):
         return REDACTED
+    if normalized_key in SAFE_AUTH_DIAGNOSTIC_KEYS:
+        return value
     if _is_secret_key(normalized_key):
         return SECRET_REDACTED
     if _is_account_key(normalized_key):

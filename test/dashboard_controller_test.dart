@@ -136,8 +136,7 @@ void main() {
     controller.dispose();
   });
 
-  test('KOSDAQ top 50 update calls backend and refreshes KR watchlist',
-      () async {
+  test('KR top 50 update calls backend and refreshes KR watchlist', () async {
     final updatedWatchlist = _watchlist('KR', const ['100001', '100002']);
     final api = _FakeApiClient(updatedKosdaqWatchlist: updatedWatchlist);
     final controller = DashboardController(api, autoload: false)
@@ -146,7 +145,7 @@ void main() {
     final result = await controller.updateKosdaqTop50Watchlist();
 
     expect(result.success, isTrue);
-    expect(result.message, 'KOSDAQ top 50 watchlist updated.');
+    expect(result.message, 'KR top 50 watchlist updated.');
     expect(api.updateKosdaqTop50WatchlistCalls, 1);
     expect(controller.latestKosdaqTop50Update?['updated'], isTrue);
     expect(controller.krWatchlist.symbols.first.symbol, '100001');
@@ -1304,10 +1303,27 @@ class _FakeApiClient extends ApiClient {
     return {
       'provider': 'kis',
       'market': 'KR',
-      'source_market': 'KOSDAQ',
-      'mode': 'watchlist_update_applied',
+      'source_market': 'KR',
+      'source_market_label': '한국',
+      'group_label': '코스피 Top 30 + 코스닥 Top 20',
+      'mode': 'kr_watchlist_balanced_update_applied',
       'updated': true,
       'count': 50,
+      'target_count': 50,
+      'groups': [
+        {
+          'market': 'KOSPI',
+          'market_label': '코스피',
+          'target_count': 30,
+          'count': 30,
+        },
+        {
+          'market': 'KOSDAQ',
+          'market_label': '코스닥',
+          'target_count': 20,
+          'count': 20,
+        },
+      ],
       'real_order_submitted': false,
       'broker_submit_called': false,
       'manual_submit_called': false,

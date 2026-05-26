@@ -2,93 +2,153 @@ market: KR
 currency: KRW
 timezone: Asia/Seoul
 symbols:
-- symbol: '247540'
-  name: 에코프로비엠
-  market: KOSDAQ
-- symbol: 086520
-  name: 에코프로
-  market: KOSDAQ
-- symbol: '196170'
-  name: 알테오젠
-  market: KOSDAQ
-- symbol: '277810'
-  name: 레인보우로보틱스
-  market: KOSDAQ
-- symbol: 036930
-  name: 주성엔지니어링
-  market: KOSDAQ
-- symbol: '000250'
-  name: 삼천당제약
-  market: KOSDAQ
-- symbol: 058470
-  name: 리노공업
-  market: KOSDAQ
-- symbol: 028300
-  name: HLB
-  market: KOSDAQ
-- symbol: '298380'
-  name: 에이비엘바이오
-  market: KOSDAQ
-- symbol: 039030
-  name: 이오테크닉스
-  market: KOSDAQ
-- symbol: 087010
-  name: 펩트론
-  market: KOSDAQ
-- symbol: '240810'
-  name: 원익IPS
-  market: KOSDAQ
-- symbol: '440110'
-  name: 파두
-  market: KOSDAQ
-- symbol: '141080'
-  name: 리가켐바이오
-  market: KOSDAQ
-- symbol: 095340
-  name: ISC
-  market: KOSDAQ
-- symbol: '222800'
-  name: 심텍
-  market: KOSDAQ
-- symbol: '403870'
-  name: HPSP
-  market: KOSDAQ
-- symbol: '214370'
-  name: 케어젠
-  market: KOSDAQ
-- symbol: '310210'
-  name: 보로노이
-  market: KOSDAQ
-- symbol: '178320'
-  name: 서진시스템
-  market: KOSDAQ
-- symbol: '108490'
-  name: 로보티즈
-  market: KOSDAQ
-- symbol: '319400'
-  name: 현대무벡스
-  market: KOSDAQ
-- symbol: 080220
-  name: 제주반도체
-  market: KOSDAQ
-- symbol: '010170'
-  name: 대한광통신
-  market: KOSDAQ
-- symbol: '357780'
-  name: 솔브레인
-  market: KOSDAQ
-- symbol: '067310'
-  name: 하나마이크론
-  market: KOSDAQ
-- symbol: '319660'
-  name: 피에스케이
-  market: KOSDAQ
-- symbol: 005290
-  name: 동진쎄미켐
-  market: KOSDAQ
-- symbol: '064760'
-  name: 티씨케이
-  market: KOSDAQ
-- symbol: 084370
-  name: 유진테크
-  market: KOSDAQ
+  - symbol: "005930"
+    name: "삼성전자"
+    market: "KOSPI"
+  - symbol: "000660"
+    name: "SK하이닉스"
+    market: "KOSPI"
+  - symbol: "035420"
+    name: "NAVER"
+    market: "KOSPI"
+  - symbol: "207940"
+    name: "삼성바이오로직스"
+    market: "KOSPI"
+  - symbol: "005380"
+    name: "현대차"
+    market: "KOSPI"
+  - symbol: "068270"
+    name: "셀트리온"
+    market: "KOSPI"
+  - symbol: "035720"
+    name: "카카오"
+    market: "KOSPI"
+  - symbol: "051910"
+    name: "LG화학"
+    market: "KOSPI"
+  - symbol: "000270"
+    name: "기아"
+    market: "KOSPI"
+  - symbol: "105560"
+    name: "KB금융"
+    market: "KOSPI"
+  - symbol: "055550"
+    name: "신한지주"
+    market: "KOSPI"
+  - symbol: "012330"
+    name: "현대모비스"
+    market: "KOSPI"
+  - symbol: "005490"
+    name: "POSCO홀딩스"
+    market: "KOSPI"
+  - symbol: "028260"
+    name: "삼성물산"
+    market: "KOSPI"
+  - symbol: "096770"
+    name: "SK이노베이션"
+    market: "KOSPI"
+  - symbol: "066570"
+    name: "LG전자"
+    market: "KOSPI"
+  - symbol: "003550"
+    name: "LG"
+    market: "KOSPI"
+  - symbol: "032830"
+    name: "삼성생명"
+    market: "KOSPI"
+  - symbol: "086790"
+    name: "하나금융지주"
+    market: "KOSPI"
+  - symbol: "138040"
+    name: "메리츠금융지주"
+    market: "KOSPI"
+  - symbol: "015760"
+    name: "한국전력"
+    market: "KOSPI"
+  - symbol: "034730"
+    name: "SK"
+    market: "KOSPI"
+  - symbol: "003670"
+    name: "포스코퓨처엠"
+    market: "KOSPI"
+  - symbol: "009150"
+    name: "삼성전기"
+    market: "KOSPI"
+  - symbol: "018260"
+    name: "삼성에스디에스"
+    market: "KOSPI"
+  - symbol: "011200"
+    name: "HMM"
+    market: "KOSPI"
+  - symbol: "034020"
+    name: "두산에너빌리티"
+    market: "KOSPI"
+  - symbol: "010130"
+    name: "고려아연"
+    market: "KOSPI"
+  - symbol: "316140"
+    name: "우리금융지주"
+    market: "KOSPI"
+  - symbol: "024110"
+    name: "기업은행"
+    market: "KOSPI"
+  - symbol: "094360"
+    name: "칩스앤미디어"
+    market: "KOSDAQ"
+  - symbol: "196170"
+    name: "알테오젠"
+    market: "KOSDAQ"
+  - symbol: "247540"
+    name: "에코프로비엠"
+    market: "KOSDAQ"
+  - symbol: "086520"
+    name: "에코프로"
+    market: "KOSDAQ"
+  - symbol: "028300"
+    name: "HLB"
+    market: "KOSDAQ"
+  - symbol: "141080"
+    name: "리가켐바이오"
+    market: "KOSDAQ"
+  - symbol: "277810"
+    name: "레인보우로보틱스"
+    market: "KOSDAQ"
+  - symbol: "214450"
+    name: "파마리서치"
+    market: "KOSDAQ"
+  - symbol: "403870"
+    name: "HPSP"
+    market: "KOSDAQ"
+  - symbol: "263750"
+    name: "펄어비스"
+    market: "KOSDAQ"
+  - symbol: "058470"
+    name: "리노공업"
+    market: "KOSDAQ"
+  - symbol: "145020"
+    name: "휴젤"
+    market: "KOSDAQ"
+  - symbol: "214150"
+    name: "클래시스"
+    market: "KOSDAQ"
+  - symbol: "068760"
+    name: "셀트리온제약"
+    market: "KOSDAQ"
+  - symbol: "000250"
+    name: "삼천당제약"
+    market: "KOSDAQ"
+  - symbol: "039030"
+    name: "이오테크닉스"
+    market: "KOSDAQ"
+  - symbol: "240810"
+    name: "원익IPS"
+    market: "KOSDAQ"
+  - symbol: "036930"
+    name: "주성엔지니어링"
+    market: "KOSDAQ"
+  - symbol: "005290"
+    name: "동진쎄미켐"
+    market: "KOSDAQ"
+  - symbol: "357780"
+    name: "솔브레인"
+    market: "KOSDAQ"

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.brokers.base import KisConfigurationError
+from app.brokers.base import KisAuthError, KisConfigurationError
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.config import Settings
 from app.db.models import BrokerAuthToken
@@ -117,6 +117,23 @@ def test_force_refresh_bypasses_cached_access_token(db_session, monkeypatch):
     assert calls[0]["data"]["grant_type"] == "client_credentials"
     assert calls[0]["data"]["appkey"] == "kis-app-key"
     assert calls[0]["data"]["appsecret"] == "kis-app-secret"
+
+
+def test_pytest_blocks_unmocked_real_kis_access_token_issue(db_session):
+    manager = KisAuthManager(
+        _settings(
+            kis_env="prod",
+            kis_base_url="https://openapi.koreainvestment.com:9443",
+        ),
+        db_session,
+    )
+
+    with pytest.raises(KisAuthError) as exc_info:
+        manager.get_valid_access_token(force_refresh=True)
+
+    assert "real KIS access_token HTTP calls are blocked during pytest" in str(
+        exc_info.value
+    )
 
 
 def test_expired_access_token_triggers_refresh(db_session, monkeypatch):

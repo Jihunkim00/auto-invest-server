@@ -29,10 +29,20 @@ class PortfolioSnapshotSection extends StatelessWidget {
     final isKr = selectedMarket == PortfolioMarket.kr;
     final marketTitle =
         isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';
-    final noPositionsText =
-        isKr ? 'No open KR positions' : 'No open US positions';
-    final noOrdersText = isKr ? 'No pending KR orders' : 'No pending US orders';
+    final noPositionsText = isKr && summary.positionsUnavailable
+        ? 'KIS positions unavailable'
+        : isKr
+            ? 'No open KR positions'
+            : 'No open US positions';
+    final noOrdersText = isKr && summary.openOrdersUnavailable
+        ? 'KIS open orders unavailable'
+        : isKr
+            ? 'No pending KR orders'
+            : 'No pending US orders';
     final plColor = _valueColor(summary.totalUnrealizedPl);
+    final countText = isKr && summary.hasUnavailableKisData
+        ? '${summary.positionsUnavailable ? '--' : summary.positionsCount} held / ${summary.openOrdersUnavailable ? '--' : summary.pendingOrdersCount} pending'
+        : '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending';
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -43,9 +53,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
             child: Text('Portfolio Snapshot',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
-          _CountPill(
-              text:
-                  '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending'),
+          _CountPill(text: countText),
         ]),
         const SizedBox(height: 12),
         Wrap(
@@ -67,9 +75,20 @@ class PortfolioSnapshotSection extends StatelessWidget {
                     text: 'TRADING DISABLED', color: Colors.amberAccent),
               ],
             ]),
-        if (controller.selectedPortfolioUnavailable) ...[
+        if (isKr && summary.tokenExpired) ...[
           const SizedBox(height: 10),
-          const _EmptyLine(text: 'KIS account data unavailable'),
+          _WarningNote(
+            text: summary.kisAuthErrorMessage ??
+                'KIS token expired. Portfolio data is unavailable until token refresh succeeds.',
+            detail: summary.nextRefreshAllowedAt == null
+                ? null
+                : 'Token refresh is temporarily blocked until ${summary.nextRefreshAllowedAt}.',
+          ),
+        ] else if (controller.selectedPortfolioUnavailable) ...[
+          const SizedBox(height: 10),
+          _EmptyLine(
+              text: controller.krPortfolioError ??
+                  'KIS account data unavailable'),
         ],
         const SizedBox(height: 14),
         LayoutBuilder(builder: (context, constraints) {
@@ -103,7 +122,9 @@ class PortfolioSnapshotSection extends StatelessWidget {
             _MetricTile(
                 width: tileWidth,
                 label: isKr ? 'Available Cash' : 'Cash',
-                value: _money(summary.cash, currency: summary.currency),
+                value: isKr && !summary.cashKnown
+                    ? 'Unavailable'
+                    : _money(summary.cash, currency: summary.currency),
                 color: Colors.white70),
           ]);
         }),
@@ -624,6 +645,35 @@ class _EmptyLine extends StatelessWidget {
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Text(text, style: const TextStyle(color: Colors.white60)),
+    );
+  }
+}
+
+class _WarningNote extends StatelessWidget {
+  const _WarningNote({required this.text, this.detail});
+
+  final String text;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      decoration: BoxDecoration(
+        color: Colors.amberAccent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.28)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(text,
+            style: const TextStyle(
+                color: Colors.amberAccent, fontWeight: FontWeight.w800)),
+        if (detail != null) ...[
+          const SizedBox(height: 4),
+          Text(detail!, style: const TextStyle(color: Colors.white70)),
+        ],
+      ]),
     );
   }
 }
