@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     kis_confirmation_phrase: str = "I UNDERSTAND THIS WILL PLACE A REAL KIS ORDER"
     kis_scheduler_enabled: bool = False
     kis_scheduler_dry_run: bool = True
-    kis_scheduler_allow_real_orders: bool = False
+    kis_scheduler_allow_real_orders: bool = True
     kr_scheduler_enabled: bool = False
     kr_scheduler_allow_real_orders: bool = False
 
