@@ -161,7 +161,7 @@ class TradingLogItem {
       !isKisSchedulerLive;
   String get sourceLabel {
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
-    if (isKisSingleSymbolAnalyzeBuy) return 'KIS Analyze & Buy';
+    if (isKisSingleSymbolAnalyzeBuy) return 'Single Symbol Analyze & Buy';
     if (isKisSchedulerLive) return 'KIS SCHEDULER LIVE';
     if (isKisLimitedAutoBuy) return 'KIS LIMITED AUTO BUY';
     if (isKisLimitedAutoSell) return 'KIS LIMITED AUTO SELL';

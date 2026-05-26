@@ -43,7 +43,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Trading exposes only KIS Analyze & Buy for KIS selection',
+  testWidgets(
+      'Trading exposes only Single Symbol Analyze & Buy for KIS selection',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -76,15 +77,25 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(find.text('KIS Analyze & Buy'), findsOneWidget);
+    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
     expect(find.text('KIS Guarded Trading'), findsNothing);
     expect(find.text('KIS Analysis Preview'), findsNothing);
     expect(find.text('KIS Guarded Check Result'), findsNothing);
     expect(find.text('KIS Live Guarded Run Result'), findsNothing);
     expect(find.text('KIS Live Manual Order'), findsNothing);
-    expect(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'), findsOneWidget);
-    expect(find.text('Analyze & Buy KIS'), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
+    expect(find.text('Watchlist Analyze & Buy'), findsNothing);
+    expect(find.text('Position Management'), findsNothing);
+    expect(find.text('Scheduled Position Management'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Buy'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Sell'), findsNothing);
+    expect(
+      find.text(
+        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Analyze Symbol & Buy'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
@@ -93,7 +104,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy requires checkbox before final dialog',
+  testWidgets(
+      'Single Symbol Analyze & Buy requires checkbox before final dialog',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
     tester.view.devicePixelRatio = 1.0;
@@ -107,20 +119,25 @@ void main() {
     await tester.pumpWidget(_wrapTrading(controller));
 
     expect(find.byType(CheckboxListTile), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
-    expect(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'), findsOneWidget);
-    await tester.tap(find.text('Analyze & Buy KIS'));
+    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
+    expect(
+      find.text(
+        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Analyze Symbol & Buy'));
     await tester.pumpAndSettle();
 
     expect(api.kisBuyShadowCalls, 0);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
-    expect(find.text('Confirm KIS Order'), findsNothing);
+    expect(find.text('Analyze Symbol & Buy'), findsOneWidget);
 
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy uses one checkbox and final dialog',
+  testWidgets('Single Symbol Analyze & Buy uses one checkbox and final dialog',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
     tester.view.devicePixelRatio = 1.0;
@@ -142,19 +159,21 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isFalse);
-    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
+    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
+    await tester.tap(find.text(
+      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+    ));
     await tester.pumpAndSettle();
 
-    expect(_filledButtonEnabled(tester, 'Analyze & Buy KIS'), isTrue);
-    await tester.tap(find.text('Analyze & Buy KIS'));
+    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isTrue);
+    await tester.tap(find.text('Analyze Symbol & Buy'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Confirm KIS Order'), findsWidgets);
+    expect(find.text('Analyze Symbol & Buy'), findsWidgets);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
 
-    await tester.tap(find.text('확인'));
+    await tester.tap(find.text('Confirm Analyze & Buy'));
     await tester.pumpAndSettle();
 
     expect(api.kisSingleSymbolCalls, 1);
@@ -166,7 +185,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy renders dry-run and score-missing results',
+  testWidgets(
+      'Single Symbol Analyze & Buy renders dry-run and score-missing results',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -196,11 +216,13 @@ void main() {
       ..selectedProvider = SelectedProvider.kis;
 
     await tester.pumpWidget(_wrapTrading(controller));
-    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
+    await tester.tap(find.text(
+      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+    ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze & Buy KIS'));
+    await tester.tap(find.text('Analyze Symbol & Buy'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('확인'));
+    await tester.tap(find.text('Confirm Analyze & Buy'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Dry-run'), findsWidgets);
@@ -211,7 +233,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy warns when returned symbol mismatches',
+  testWidgets(
+      'Single Symbol Analyze & Buy warns when returned symbol mismatches',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -243,11 +266,13 @@ void main() {
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(
         find.widgetWithText(TextField, 'KR Symbol'), '005380');
-    await tester.tap(find.text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'));
+    await tester.tap(find.text(
+      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+    ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze & Buy KIS'));
+    await tester.tap(find.text('Analyze Symbol & Buy'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('확인'));
+    await tester.tap(find.text('Confirm Analyze & Buy'));
     await tester.pumpAndSettle();
 
     expect(api.lastKisSingleSymbol, '005380');
@@ -265,7 +290,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy normalizes completed low-score analysis',
+  testWidgets(
+      'Single Symbol Analyze & Buy normalizes completed low-score analysis',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2800);
     tester.view.devicePixelRatio = 1.0;
@@ -337,7 +363,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy uses one card structure across KR symbols',
+  testWidgets(
+      'Single Symbol Analyze & Buy uses one card structure across KR symbols',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 3000);
     tester.view.devicePixelRatio = 1.0;
@@ -428,7 +455,7 @@ void main() {
     }
   });
 
-  testWidgets('KIS Analyze & Buy keeps raw reason inside raw payload',
+  testWidgets('Single Symbol Analyze & Buy keeps raw reason inside raw payload',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 3000);
     tester.view.devicePixelRatio = 1.0;
@@ -478,7 +505,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy does not fall back to watchlist top candidate',
+  testWidgets(
+      'Single Symbol Analyze & Buy does not fall back to watchlist top candidate',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2800);
     tester.view.devicePixelRatio = 1.0;
@@ -533,7 +561,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('KIS Analyze & Buy shows insufficient cash amounts',
+  testWidgets('Single Symbol Analyze & Buy shows insufficient cash amounts',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 3200);
     tester.view.devicePixelRatio = 1.0;
@@ -763,12 +791,9 @@ Future<void> _submitKisAnalyzeBuy(
   await tester.enterText(find.widgetWithText(TextField, 'KR Symbol'), symbol);
   await tester.tap(find.byType(CheckboxListTile));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Analyze & Buy KIS'));
+  await tester.tap(find.text('Analyze Symbol & Buy'));
   await tester.pumpAndSettle();
-  await tester.tap(find.descendant(
-    of: find.byType(AlertDialog),
-    matching: find.byType(FilledButton),
-  ));
+  await tester.tap(find.text('Confirm Analyze & Buy'));
   await tester.pumpAndSettle();
 }
 

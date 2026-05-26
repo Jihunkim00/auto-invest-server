@@ -1071,7 +1071,7 @@ class _RunHistoryCard extends StatelessWidget {
           children: [
             _HistoryHeader(
               title: isKisAnalyzeBuy
-                  ? 'KIS Analyze & Buy \u00B7 ${run.symbol}'
+                  ? 'Single Symbol Analyze & Buy \u00B7 ${run.symbol}'
                   : '${run.symbol} - ${run.statusLine}',
               subtitle: isKisAnalyzeBuy
                   ? '${_runResultLabel(run)} \u00B7 ${_runOrderLabel(run)}'
@@ -1729,7 +1729,7 @@ class _StatePanel extends StatelessWidget {
 
 String _runTimelineSentence(TradingLogItem run) {
   if (run.isKisSingleSymbolAnalyzeBuy) {
-    return '${run.symbol} KIS Analyze & Buy completed. ${_runOrderLabel(run)}.';
+    return '${run.symbol} Single Symbol Analyze & Buy completed. ${_runOrderLabel(run)}.';
   }
   if (run.isKisBuyShadow) {
     return 'KIS buy shadow scan completed. No order submitted.';

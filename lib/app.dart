@@ -61,7 +61,7 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
             TradingScreen(controller: _controller),
             LogsScreen(controller: _controller),
             SettingsScreen(controller: _controller),
-            TestLabScreen(controller: _controller),
+            KisAutomationScreen(controller: _controller),
           ],
         ),
         bottomNavigationBar: NavigationBar(
@@ -93,9 +93,9 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                 selectedIcon: Icon(Icons.settings),
                 label: 'Settings'),
             NavigationDestination(
-                icon: Icon(Icons.science_outlined),
-                selectedIcon: Icon(Icons.science),
-                label: 'Test Lab'),
+                icon: Icon(Icons.tune_outlined),
+                selectedIcon: Icon(Icons.tune),
+                label: 'KIS Automation'),
           ],
         ),
       ),

@@ -72,7 +72,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Logs screen renders KIS Analyze & Buy runs readably',
+  testWidgets('Logs screen renders Single Symbol Analyze & Buy runs readably',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -111,7 +111,10 @@ void main() {
 
     await _pumpLogs(tester, controller);
 
-    expect(find.text('KIS Analyze & Buy \u00B7 005930'), findsOneWidget);
+    expect(
+      find.text('Single Symbol Analyze & Buy \u00B7 005930'),
+      findsOneWidget,
+    );
     expect(find.text('Blocked \u00B7 No order created'), findsOneWidget);
     expect(find.text('Reason: New buy entries are blocked after 15:00'),
         findsOneWidget);

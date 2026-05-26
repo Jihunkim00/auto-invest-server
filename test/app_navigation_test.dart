@@ -21,7 +21,7 @@ void main() {
     expect(find.text('Analysis'), findsOneWidget);
     expect(find.text('Logs'), findsOneWidget);
     expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('Test Lab'), findsOneWidget);
+    expect(find.text('KIS Automation'), findsOneWidget);
     expect(find.text('Portfolio'), findsNothing);
   });
 
@@ -51,7 +51,7 @@ void main() {
 
     await tester.tap(find.text('Trading'));
     await tester.pumpAndSettle();
-    expect(find.text('KIS Analyze & Buy'), findsOneWidget);
+    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
     expect(find.text('KIS Guarded Trading'), findsNothing);
     expect(find.text('KIS / KR'), findsWidgets);
 

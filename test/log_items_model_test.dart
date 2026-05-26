@@ -82,7 +82,7 @@ void main() {
       'manual_submit_called': false,
     });
 
-    expect(item.sourceLabel, 'KIS Analyze & Buy');
+    expect(item.sourceLabel, 'Single Symbol Analyze & Buy');
     expect(item.isKisSingleSymbolAnalyzeBuy, isTrue);
     expect(item.isKisManualLive, isFalse);
     expect(item.finalBuyScore, 12);

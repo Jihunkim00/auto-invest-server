@@ -2221,7 +2221,7 @@ class DashboardController extends ChangeNotifier {
     if (kisSingleSymbolTradingLoading) {
       return const ActionResult(
         success: false,
-        message: 'KIS Analyze & Buy already in progress.',
+        message: 'Single Symbol Analyze & Buy already in progress.',
       );
     }
 
@@ -2247,7 +2247,7 @@ class DashboardController extends ChangeNotifier {
           result.result.trim().isEmpty ? 'blocked' : result.result.trim();
       return ActionResult(
         success: true,
-        message: 'KIS Analyze & Buy completed: $resultText.',
+        message: 'Single Symbol Analyze & Buy completed: $resultText.',
       );
     } catch (e) {
       kisSingleSymbolTradingError = ApiErrorFormatter.format(e.toString());

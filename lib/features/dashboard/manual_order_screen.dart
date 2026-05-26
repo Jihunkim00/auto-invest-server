@@ -105,12 +105,13 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     final result = controller.latestKisSingleSymbolTradingResult;
 
     return SectionCard(
+      key: const Key('kis_single_symbol_analyze_buy_card'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.verified_user_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Analyze & Buy',
+            child: Text('Single Symbol Analyze & Buy',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           const _SoftBadge(text: 'KIS LIVE', color: Colors.redAccent),
@@ -159,7 +160,9 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
               ? null
               : (value) =>
                   controller.setKisGuardedRunConfirmation(value == true),
-          title: const Text('실제 KIS 주문이 제출될 수 있음을 확인했습니다.'),
+          title: const Text(
+            'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+          ),
         ),
         FilledButton.icon(
           onPressed: canRequest
@@ -189,8 +192,8 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                   child: CircularProgressIndicator(strokeWidth: 2))
               : const Icon(Icons.play_arrow),
           label: Text(controller.kisSingleSymbolTradingLoading
-              ? 'Analyzing...'
-              : 'Analyze & Buy KIS'),
+              ? 'Analyzing symbol...'
+              : 'Analyze Symbol & Buy'),
         ),
         if (!canRequest) ...[
           const SizedBox(height: 8),
@@ -223,25 +226,27 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Confirm KIS Order'),
+        title: const Text('Analyze Symbol & Buy'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('실제 KIS 주문이 제출될 수 있습니다.'),
+            const Text(
+              'Analyze this KIS symbol and submit only if every guarded safety gate passes.',
+            ),
             const SizedBox(height: 12),
-            _DialogRow(label: '종목', value: symbol),
-            _DialogRow(label: '수량/금액', value: qty.toString()),
+            _DialogRow(label: 'Symbol', value: symbol),
+            _DialogRow(label: 'Quantity', value: qty.toString()),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('확인'),
+            child: const Text('Confirm Analyze & Buy'),
           ),
         ],
       ),
@@ -297,6 +302,15 @@ class _KisResultPanel extends StatelessWidget {
         ],
         _DataGrid(pairs: [
           _DataPairData(label: 'Symbol', value: selectedSymbol),
+          _DataPairData(
+            label: 'Requested / analyzed / returned',
+            value:
+                '${result.requestedSymbol ?? 'n/a'} / ${result.analyzedSymbol ?? 'n/a'} / ${result.returnedSymbol ?? 'n/a'}',
+          ),
+          _DataPairData(
+            label: 'Symbol match',
+            value: result.symbolMatch ? 'true' : 'false',
+          ),
           _DataPairData(
               label: 'Decision', value: _decisionLabel(result).toUpperCase()),
           _DataPairData(label: 'Result', value: _resultLabel(result)),

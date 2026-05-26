@@ -275,6 +275,9 @@ void main() {
     expect(find.text('Run Watchlist Analysis'), findsOneWidget);
     expect(find.text('Refresh Watchlist'), findsOneWidget);
     expect(find.text('Run Single Symbol'), findsNothing);
+    expect(find.text('Watchlist Analyze & Buy'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Buy'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Sell'), findsNothing);
     expect(find.text('Validate'), findsNothing);
     expect(find.text('Submit'), findsNothing);
     expect(find.text('Live Submit'), findsNothing);
@@ -292,6 +295,9 @@ void main() {
     expect(find.text('Refresh Watchlist'), findsOneWidget);
     expect(find.text('Run KIS Preview'), findsNothing);
     expect(find.text('Run Single Symbol'), findsNothing);
+    expect(find.text('Analyze Watchlist & Buy'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Buy'), findsNothing);
+    expect(find.text('KIS Scheduler Guarded Sell'), findsNothing);
 
     await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
@@ -754,7 +760,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Test Lab exposes advanced checks outside Watchlist',
+  testWidgets('KIS Automation exposes advanced checks outside Watchlist',
       (tester) async {
     final controller = DashboardController(_FakeApiClient(), autoload: false)
       ..selectedProvider = SelectedProvider.kis

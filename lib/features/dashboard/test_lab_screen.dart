@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'dashboard_controller.dart';
 import 'widgets/broker_context_controls.dart';
-import 'widgets/order_ticket_section.dart';
 import 'widgets/watchlist_section.dart';
 
-class TestLabScreen extends StatelessWidget {
-  const TestLabScreen({super.key, required this.controller});
+class KisAutomationScreen extends StatelessWidget {
+  const KisAutomationScreen({super.key, required this.controller});
 
   final DashboardController controller;
 
@@ -22,7 +21,7 @@ class TestLabScreen extends StatelessWidget {
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 const Expanded(
                   child: Text(
-                    'Test Lab',
+                    'KIS Automation',
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -31,18 +30,27 @@ class TestLabScreen extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 controller.selectedProvider == SelectedProvider.kis
-                    ? 'KIS shadow, dry-run, preview, and readiness diagnostics.'
-                    : 'Alpaca paper and watchlist diagnostics remain non-live here.',
+                    ? 'Primary KIS operations surface for readiness, buy review, position management, and scheduled management.'
+                    : 'Switch to KIS to use broker automation operations.',
                 style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 12),
-              OrderTicketSection(controller: controller),
-              const SizedBox(height: 12),
-              TestLabSection(controller: controller),
+              KisAutomationSection(controller: controller),
             ],
           ),
         );
       },
     );
+  }
+}
+
+class TestLabScreen extends StatelessWidget {
+  const TestLabScreen({super.key, required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return KisAutomationScreen(controller: controller);
   }
 }

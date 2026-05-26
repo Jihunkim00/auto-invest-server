@@ -836,8 +836,8 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
   }
 }
 
-class TestLabSection extends StatelessWidget {
-  const TestLabSection({
+class KisAutomationSection extends StatelessWidget {
+  const KisAutomationSection({
     super.key,
     required this.controller,
     this.advancedInitiallyExpanded = false,
@@ -848,7 +848,7 @@ class TestLabSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
+    return Column(key: const Key('kis_automation_main'), children: [
       SectionCard(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -889,6 +889,25 @@ class TestLabSection extends StatelessWidget {
         initiallyExpanded: advancedInitiallyExpanded,
       ),
     ]);
+  }
+}
+
+class TestLabSection extends StatelessWidget {
+  const TestLabSection({
+    super.key,
+    required this.controller,
+    this.advancedInitiallyExpanded = false,
+  });
+
+  final DashboardController controller;
+  final bool advancedInitiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return KisAutomationSection(
+      controller: controller,
+      advancedInitiallyExpanded: advancedInitiallyExpanded,
+    );
   }
 }
 
@@ -1188,8 +1207,14 @@ class _KisPositionManagementCard extends StatelessWidget {
         const Wrap(spacing: 8, runSpacing: 8, children: [
           _SoftBadge(text: 'MULTI-POSITION REVIEW', color: Colors.white70),
           _SoftBadge(text: 'STOP-LOSS / TAKE-PROFIT', color: Colors.white70),
-          _SoftBadge(text: 'MANUAL SELL ADVANCED', color: Colors.amberAccent),
+          _SoftBadge(
+              text: 'HELD POSITION STATUS', color: Colors.lightBlueAccent),
         ]),
+        const SizedBox(height: 10),
+        const _StateLine(
+          text:
+              'Position Management evaluates all held KIS positions. Scheduled Position Management uses the same sell-first logic at scheduled times.',
+        ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: controller.kisManagedPositionsLoading ||
@@ -1346,6 +1371,14 @@ class _ManagedPositionTile extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 10),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Advanced action',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 6),
           OutlinedButton.icon(
             onPressed: position.canPrepareManualSell
                 ? () async {
@@ -1414,7 +1447,7 @@ class _KisScheduledPositionManagementCard extends StatelessWidget {
         const SizedBox(height: 10),
         const _StateLine(
           text:
-              'Scheduler automation runs position management first. If sell-ready exists, buy is skipped or blocked.',
+              'Scheduled Position Management runs the position review first. Sell review comes before buy review. If a sell-ready position exists, new buy execution is skipped.',
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -1474,6 +1507,18 @@ class _KisScheduledPositionManagementCard extends StatelessWidget {
             value: _yesNo(dryRun?.realOrderSubmitAllowed ??
                 readiness?.realOrderSubmitAllowed ??
                 false),
+          ),
+          _ResultPair(
+            label: 'scheduler real orders',
+            value: _boolText(controller.settings.kisSchedulerAllowRealOrders),
+          ),
+          _ResultPair(
+            label: 'guarded sell enabled',
+            value: _boolText(controller.settings.kisSchedulerSellEnabled),
+          ),
+          _ResultPair(
+            label: 'guarded buy enabled',
+            value: _boolText(controller.settings.kisSchedulerBuyEnabled),
           ),
           _ResultPair(
             label: 'real order submitted',
@@ -1629,6 +1674,21 @@ class _AdvancedDetailsGroup extends StatelessWidget {
 
 class _OperationsReadinessCard extends StatelessWidget {
   const _OperationsReadinessCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('kis_operations_readiness_card'),
+      width: double.infinity,
+      child: _OperationsReadinessCardBody(controller: controller),
+    );
+  }
+}
+
+class _OperationsReadinessCardBody extends StatelessWidget {
+  const _OperationsReadinessCardBody({required this.controller});
 
   final DashboardController controller;
 

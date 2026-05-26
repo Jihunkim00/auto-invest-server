@@ -17,9 +17,11 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
+    expect(find.byKey(const Key('kis_automation_main')), findsOneWidget);
+    expect(
+        find.byKey(const Key('kis_operations_readiness_card')), findsOneWidget);
     for (final label in [
       'Operations Readiness',
-      'Watchlist',
       'Watchlist Analyze & Buy',
       'Single Symbol Analyze & Buy',
       'Position Management',
@@ -47,7 +49,6 @@ void main() {
 
     for (final label in [
       'Refresh Operations Readiness',
-      'Run Watchlist Analysis',
       'Analyze Watchlist & Buy',
       'Analyze Symbol & Buy',
       'Refresh Position Management',
@@ -107,7 +108,19 @@ void main() {
     expect(find.descendant(of: card, matching: find.text('035420 / NAVER')),
         findsOneWidget);
     expect(
-        find.descendant(of: card, matching: find.text('MANUAL SELL ADVANCED')),
+        find.descendant(of: card, matching: find.text('Prepare Manual Sell')),
+        findsNothing);
+
+    await tester.tap(find.descendant(
+      of: card,
+      matching: find.text('005930 / Samsung Electronics'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.descendant(of: card, matching: find.text('Advanced action')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('Prepare Manual Sell')),
         findsOneWidget);
 
     controller.dispose();
@@ -129,7 +142,7 @@ void main() {
       find.descendant(
         of: card,
         matching: find.textContaining(
-          'Scheduler automation runs position management first',
+          'Scheduled Position Management runs the position review first',
         ),
       ),
       findsOneWidget,
@@ -137,7 +150,9 @@ void main() {
     expect(
       find.descendant(
         of: card,
-        matching: find.textContaining('If sell-ready exists, buy is skipped'),
+        matching: find.textContaining(
+          'If a sell-ready position exists, new buy execution is skipped',
+        ),
       ),
       findsOneWidget,
     );
@@ -195,13 +210,7 @@ Widget _wrap(DashboardController controller) {
       body: SingleChildScrollView(
         child: AnimatedBuilder(
           animation: controller,
-          builder: (context, _) => Column(
-            children: [
-              WatchlistSection(controller: controller),
-              const SizedBox(height: 12),
-              TestLabSection(controller: controller),
-            ],
-          ),
+          builder: (context, _) => KisAutomationSection(controller: controller),
         ),
       ),
     ),
