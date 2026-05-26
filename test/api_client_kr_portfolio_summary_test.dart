@@ -155,4 +155,115 @@ void main() {
     expect(summary.positions.single.unrealizedPl, -200);
     expect(summary.positions.single.unrealizedPlpc, closeTo(-0.02, 0.0000001));
   });
+
+  test('fetchKrPortfolioSummary preserves token expired auth details',
+      () async {
+    final client = ApiClient(
+      client: MockClient((request) async {
+        return http.Response(jsonEncode(_tokenExpiredError), 502);
+      }),
+    );
+
+    final summary = await client.fetchKrPortfolioSummary();
+
+    expect(summary.tokenExpired, isTrue);
+    expect(summary.cashKnown, isFalse);
+    expect(summary.balanceUnavailable, isTrue);
+    expect(summary.positionsUnavailable, isTrue);
+    expect(summary.openOrdersUnavailable, isTrue);
+    expect(
+      summary.kisAuthErrorMessage,
+      'KIS token expired. Portfolio data is unavailable until token refresh succeeds.',
+    );
+    expect(summary.nextRefreshAllowedAt, '2026-05-27T01:00:00+00:00');
+  });
+
+  test('fetchKrPortfolioSummary keeps cash when positions fail', () async {
+    final client = ApiClient(
+      client: MockClient((request) async {
+        if (request.url.path == '/kis/account/balance') {
+          return http.Response(jsonEncode({'cash': 30000}), 200);
+        }
+        if (request.url.path == '/kis/account/positions') {
+          return http.Response(jsonEncode(_genericKisError), 502);
+        }
+        if (request.url.path == '/kis/account/open-orders') {
+          return http.Response(
+              jsonEncode({'count': 0, 'orders': const []}), 200);
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final summary = await client.fetchKrPortfolioSummary();
+
+    expect(summary.cash, 30000);
+    expect(summary.cashKnown, isTrue);
+    expect(summary.positionsUnavailable, isTrue);
+    expect(summary.balanceUnavailable, isFalse);
+  });
+
+  test('fetchKrPortfolioSummary keeps positions when balance fails', () async {
+    final client = ApiClient(
+      client: MockClient((request) async {
+        if (request.url.path == '/kis/account/balance') {
+          return http.Response(jsonEncode(_genericKisError), 502);
+        }
+        if (request.url.path == '/kis/account/positions') {
+          return http.Response(
+              jsonEncode({
+                'count': 1,
+                'positions': [
+                  {
+                    'symbol': '005930',
+                    'qty': 2,
+                    'avg_entry_price': 50000,
+                    'cost_basis': 100000,
+                    'current_price': 60000,
+                    'market_value': 120000,
+                    'unrealized_pl': 20000,
+                  }
+                ],
+              }),
+              200);
+        }
+        if (request.url.path == '/kis/account/open-orders') {
+          return http.Response(
+              jsonEncode({'count': 0, 'orders': const []}), 200);
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final summary = await client.fetchKrPortfolioSummary();
+
+    expect(summary.cashKnown, isFalse);
+    expect(summary.balanceUnavailable, isTrue);
+    expect(summary.positionsUnavailable, isFalse);
+    expect(summary.positions.single.symbol, '005930');
+    expect(summary.totalMarketValue, 120000);
+  });
 }
+
+const _tokenExpiredError = {
+  'detail': {
+    'message': 'KIS token refresh retry failed.',
+    'details': {
+      'msg_cd': 'EGW00123',
+      'msg1': 'token expired',
+      'token_expired': true,
+      'refresh_guard_reason': 'too_recent',
+      'next_refresh_allowed_at': '2026-05-27T01:00:00+00:00',
+    },
+  },
+};
+
+const _genericKisError = {
+  'detail': {
+    'message': 'KIS read-only API failed.',
+    'details': {
+      'msg_cd': 'EGW00001',
+      'msg1': 'temporary failure',
+    },
+  },
+};

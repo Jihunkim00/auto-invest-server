@@ -10,9 +10,26 @@ class PortfolioSummary {
     required this.cash,
     required this.positions,
     required this.pendingOrders,
+    this.cashKnown = true,
+    this.balanceUnavailable = false,
+    this.positionsUnavailable = false,
+    this.openOrdersUnavailable = false,
+    this.kisAuthErrorMessage,
+    this.nextRefreshAllowedAt,
+    this.tokenExpired = false,
   });
 
-  factory PortfolioSummary.empty({String currency = 'USD'}) => PortfolioSummary(
+  factory PortfolioSummary.empty({
+    String currency = 'USD',
+    bool cashKnown = true,
+    bool balanceUnavailable = false,
+    bool positionsUnavailable = false,
+    bool openOrdersUnavailable = false,
+    String? kisAuthErrorMessage,
+    String? nextRefreshAllowedAt,
+    bool tokenExpired = false,
+  }) =>
+      PortfolioSummary(
         currency: currency,
         positionsCount: 0,
         pendingOrdersCount: 0,
@@ -23,6 +40,13 @@ class PortfolioSummary {
         cash: 0,
         positions: [],
         pendingOrders: [],
+        cashKnown: cashKnown,
+        balanceUnavailable: balanceUnavailable,
+        positionsUnavailable: positionsUnavailable,
+        openOrdersUnavailable: openOrdersUnavailable,
+        kisAuthErrorMessage: kisAuthErrorMessage,
+        nextRefreshAllowedAt: nextRefreshAllowedAt,
+        tokenExpired: tokenExpired,
       );
 
   factory PortfolioSummary.fromJson(Map<String, dynamic> json) {
@@ -49,6 +73,14 @@ class PortfolioSummary {
           .map((item) => PendingOrderSummary.fromJson(
               Map<String, dynamic>.from(item.cast<String, dynamic>())))
           .toList(),
+      cashKnown: _readBool(json['cash_known'], true),
+      balanceUnavailable: _readBool(json['balance_unavailable'], false),
+      positionsUnavailable: _readBool(json['positions_unavailable'], false),
+      openOrdersUnavailable: _readBool(json['open_orders_unavailable'], false),
+      kisAuthErrorMessage: _readNullableString(json['kis_auth_error_message']),
+      nextRefreshAllowedAt:
+          _readNullableString(json['next_refresh_allowed_at']),
+      tokenExpired: _readBool(json['token_expired'], false),
     );
   }
 
@@ -62,6 +94,16 @@ class PortfolioSummary {
   final double cash;
   final List<PositionSummary> positions;
   final List<PendingOrderSummary> pendingOrders;
+  final bool cashKnown;
+  final bool balanceUnavailable;
+  final bool positionsUnavailable;
+  final bool openOrdersUnavailable;
+  final String? kisAuthErrorMessage;
+  final String? nextRefreshAllowedAt;
+  final bool tokenExpired;
+
+  bool get hasUnavailableKisData =>
+      balanceUnavailable || positionsUnavailable || openOrdersUnavailable;
 }
 
 class PositionSummary {
@@ -183,4 +225,12 @@ String? _readNullableString(Object? value) {
   final text = value?.toString();
   if (text == null || text.isEmpty) return null;
   return text;
+}
+
+bool _readBool(Object? value, bool fallback) {
+  if (value is bool) return value;
+  final text = value?.toString().trim().toLowerCase();
+  if (text == 'true') return true;
+  if (text == 'false') return false;
+  return fallback;
 }

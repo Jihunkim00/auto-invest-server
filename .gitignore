@@ -12,3 +12,5 @@ __pycache__/
 .pytest_cache/
 test_auto_invest.db
 *test*.db
+.pytest_tmp/
+.pytest_run_*/

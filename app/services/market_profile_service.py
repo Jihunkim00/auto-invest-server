@@ -9,6 +9,14 @@ import yaml
 
 from app.config import get_settings
 
+MARKET_LABELS = {
+    "KOSPI": "코스피",
+    "KOSDAQ": "코스닥",
+    "KONEX": "코넥스",
+    "KR": "한국",
+    "US": "미국",
+}
+
 
 class MarketProfileError(ValueError):
     """Raised when a market profile or market-specific symbol is invalid."""
@@ -198,13 +206,23 @@ class MarketProfileService:
             item = dict(raw)
             item["symbol"] = symbol
             item.setdefault("market", profile.market)
+            item.setdefault("market_label", _market_label(item.get("market")))
             return item
 
         if raw:
             symbol = self.normalize_symbol(str(raw), profile.market)
-            return {"symbol": symbol, "market": profile.market}
+            return {
+                "symbol": symbol,
+                "market": profile.market,
+                "market_label": _market_label(profile.market),
+            }
         return None
 
     @staticmethod
     def _normalize_market(market: str | None) -> str:
         return str(market or "US").strip().upper()
+
+
+def _market_label(market: Any) -> str:
+    normalized = str(market or "").strip().upper()
+    return MARKET_LABELS.get(normalized, normalized)

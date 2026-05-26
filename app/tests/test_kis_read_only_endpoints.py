@@ -212,8 +212,55 @@ def test_kis_request_retry_raises_safe_error_if_second_attempt_fails(
 
     assert len(call_headers) == 2
     assert exc_info.value.details["msg_cd"] == "EGW00123"
+    assert exc_info.value.details["refresh_attempted"] is True
+    assert exc_info.value.details["retry_failed"] is True
     assert "stale-token" not in str(exc_info.value)
     assert "fresh-token" not in str(exc_info.value)
+
+
+def test_kis_request_token_expired_refresh_failure_returns_safe_error(
+    monkeypatch, db_session
+):
+    _add_access_token(
+        db_session,
+        value="stale-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    def fake_get(url, params, headers, timeout):
+        return _FakeResponse(
+            {
+                "rt_cd": "1",
+                "msg_cd": "EGW00123",
+                "msg1": "기간이 만료된 token 입니다.",
+            }
+        )
+
+    def fake_auth_post(url, data, headers, timeout):
+        return _FakeResponse({"msg_cd": "AUTHFAIL", "msg1": "no token"}, status_code=500)
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    with pytest.raises(KisApiError) as exc_info:
+        kis_client.request_get(
+            KIS_PRICE_PATH,
+            tr_id=KIS_PRICE_TR_ID,
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+        )
+
+    assert "KIS token expired and refresh failed." in str(exc_info.value)
+    assert exc_info.value.details["refresh_attempted"] is True
+    assert exc_info.value.details["refresh_failed"] is True
+    assert exc_info.value.details["refresh_guard_bypassed_for_token_expired"] is True
+    assert exc_info.value.details["msg_cd"] == "EGW00123"
+    combined = json.dumps(exc_info.value.details, ensure_ascii=False) + str(exc_info.value)
+    assert "real-app-key" not in combined
+    assert "real-app-secret" not in combined
+    assert "stale-token" not in combined
+    assert "12345678" not in combined
 
 
 def test_kis_daily_bar_normalization_parses_and_sorts_rows():
@@ -720,7 +767,7 @@ def test_brokers_status_still_does_not_expose_secrets(monkeypatch, client, db_se
     assert "secret-status-token" not in response.text
 
 
-def test_kis_request_token_expired_refresh_guard_blocks_recent_issue(
+def test_kis_request_token_expired_bypasses_refresh_guard_for_read_only(
     monkeypatch, db_session
 ):
     _add_access_token(
@@ -735,9 +782,60 @@ def test_kis_request_token_expired_refresh_guard_blocks_recent_issue(
 
     def fake_get(url, params, headers, timeout):
         call_headers.append(headers)
-        return _FakeResponse({"rt_cd": "1", "msg_cd": "EGW00123", "msg1": "기간이 만료된 token 입니다."})
+        if len(call_headers) == 1:
+            return _FakeResponse(
+                {
+                    "rt_cd": "1",
+                    "msg_cd": "EGW00123",
+                    "msg1": "기간이 만료된 token 입니다.",
+                }
+            )
+        return _FakeResponse({"rt_cd": "0", "output": {"foo": "bar"}})
 
     auth_calls = []
+
+    def fake_auth_post(url, data, headers, timeout):
+        auth_calls.append(url)
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
+
+    monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
+
+    response = kis_client.request_get(
+        KIS_PRICE_PATH,
+        tr_id=KIS_PRICE_TR_ID,
+        params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+    )
+
+    assert response["output"] == {"foo": "bar"}
+    assert len(call_headers) == 2
+    assert auth_calls
+    assert call_headers[0]["authorization"] == "Bearer recent-token"
+    assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert "recent-token" not in str(response)
+
+
+def test_kis_request_non_token_error_does_not_bypass_refresh_guard(
+    monkeypatch, db_session
+):
+    _add_access_token(
+        db_session,
+        value="recent-token",
+        issued_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    settings = _settings()
+    kis_client = KisClient(settings=settings, auth_manager=KisAuthManager(settings, db=db_session))
+
+    auth_calls = []
+
+    def fake_get(url, params, headers, timeout):
+        return _FakeResponse(
+            {
+                "rt_cd": "1",
+                "msg_cd": "EGW00001",
+                "msg1": "non token failure",
+            }
+        )
 
     def fake_auth_post(url, data, headers, timeout):
         auth_calls.append(url)
@@ -753,11 +851,9 @@ def test_kis_request_token_expired_refresh_guard_blocks_recent_issue(
             params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
         )
 
-    assert len(call_headers) == 1
     assert auth_calls == []
-    assert exc_info.value.details["msg_cd"] == "EGW00123"
-    assert "last_token_issued_at" in exc_info.value.details
-    assert "next_refresh_allowed_at" in exc_info.value.details
+    assert exc_info.value.details["msg_cd"] == "EGW00001"
+    assert "refresh_guard_bypassed_for_token_expired" not in exc_info.value.details
     assert "recent-token" not in str(exc_info.value)
 
 
@@ -794,11 +890,14 @@ def test_kis_request_token_expired_retries_at_most_once(
     assert len(call_headers) == 2
     assert call_headers[0]["authorization"] == "Bearer old-token"
     assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert exc_info.value.details["refresh_attempted"] is True
+    assert exc_info.value.details["retry_failed"] is True
+    assert exc_info.value.details["refresh_guard_bypassed_for_token_expired"] is False
     assert "old-token" not in str(exc_info.value)
     assert "fresh-token" not in str(exc_info.value)
 
 
-def test_kis_http_500_with_token_expired_recent_token_blocks_refresh(
+def test_kis_http_500_with_token_expired_recent_token_bypasses_guard(
     monkeypatch, db_session
 ):
     _add_access_token(
@@ -813,28 +912,34 @@ def test_kis_http_500_with_token_expired_recent_token_blocks_refresh(
 
     def fake_get(url, params, headers, timeout):
         call_headers.append(headers)
-        return _FakeResponse(
-            {
-                "rt_cd": "1",
-                "msg_cd": "EGW00123",
-                "msg1": "기간이 만료된 token 입니다.",
-            },
-            status_code=500,
-        )
+        if len(call_headers) == 1:
+            return _FakeResponse(
+                {
+                    "rt_cd": "1",
+                    "msg_cd": "EGW00123",
+                    "msg1": "기간이 만료된 token 입니다.",
+                },
+                status_code=500,
+            )
+        return _FakeResponse({"rt_cd": "0", "output": {"foo": "bar"}})
+
+    def fake_auth_post(url, data, headers, timeout):
+        return _FakeResponse({"access_token": "fresh-token", "expires_in": 3600})
 
     monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr("app.brokers.kis_auth_manager.requests.post", fake_auth_post)
 
-    with pytest.raises(KisApiError) as exc_info:
-        kis_client.request_get(
-            KIS_PRICE_PATH,
-            tr_id=KIS_PRICE_TR_ID,
-            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
-        )
+    response = kis_client.request_get(
+        KIS_PRICE_PATH,
+        tr_id=KIS_PRICE_TR_ID,
+        params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": "005930"},
+    )
 
-    assert len(call_headers) == 1  # No retry
+    assert response["output"] == {"foo": "bar"}
+    assert len(call_headers) == 2
     assert call_headers[0]["authorization"] == "Bearer recent-token"
-    assert "KIS token expired, but refresh is blocked by daily token issuance guard." in str(exc_info.value)
-    assert "recent-token" not in str(exc_info.value)
+    assert call_headers[1]["authorization"] == "Bearer fresh-token"
+    assert "recent-token" not in str(response)
 
 
 def test_kis_http_500_with_token_expired_old_token_refreshes_and_succeeds(
@@ -923,6 +1028,9 @@ def test_kis_http_500_with_token_expired_old_token_retry_fails_raises_safe_error
     assert len(call_headers) == 2  # One initial, one retry
     assert call_headers[0]["authorization"] == "Bearer old-token"
     assert call_headers[1]["authorization"] == "Bearer fresh-token"
-    assert "KIS token refresh failed." in str(exc_info.value)
+    assert "KIS token refresh retry failed." in str(exc_info.value)
+    assert exc_info.value.details["refresh_attempted"] is True
+    assert exc_info.value.details["retry_failed"] is True
+    assert exc_info.value.details["msg_cd"] == "EGW00123"
     assert "old-token" not in str(exc_info.value)
     assert "fresh-token" not in str(exc_info.value)

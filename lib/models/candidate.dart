@@ -11,6 +11,7 @@ class Candidate {
     this.name = '',
     this.provider = '',
     this.market = '',
+    this.marketLabel = '',
     this.currency = '',
     this.currentPrice,
     this.indicatorStatus = '',
@@ -72,6 +73,7 @@ class Candidate {
   final String name;
   final String provider;
   final String market;
+  final String marketLabel;
   final String currency;
   final double? currentPrice;
   final String indicatorStatus;
@@ -197,6 +199,9 @@ class Candidate {
       ]),
       provider: _readNullableString(json['provider']) ?? '',
       market: _readNullableString(json['market']) ?? '',
+      marketLabel: _readNullableString(json['market_label']) ??
+          _readNullableString(json['source_market_label']) ??
+          '',
       currency: _readNullableString(json['currency']) ?? '',
       currentPrice: _readNullableDouble(json['current_price'] ??
           json['price'] ??

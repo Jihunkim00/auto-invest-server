@@ -637,102 +637,27 @@ class KisClient:
             return data, response.status_code
 
         response_data, status = send_request()
-        if status >= 400:
-            if self._is_token_expired_response(response_data):
-                allowed, diagnostics = self._token_refresh_guard_diagnostics()
-                if not allowed:
-                    details = self._sanitize_diagnostics(
-                        {
-                            **context,
-                            "http_status": status,
-                            "rt_cd": response_data.get("rt_cd"),
-                            "msg_cd": response_data.get("msg_cd"),
-                            "msg1": response_data.get("msg1"),
-                            **diagnostics,
-                        }
-                    )
-                    raise KisApiError(
-                        _format_kis_api_error(
-                            "KIS token expired, but refresh is blocked by daily token issuance guard.",
-                            details,
-                        ),
-                        details=details,
-                    )
-
-                refreshed_token = self.get_access_token(force_refresh=True)
-                response_data, status = send_request(access_token=refreshed_token.token)
-                if status >= 400 or self._is_token_expired_response(response_data):
-                    details = self._sanitize_diagnostics(
-                        {
-                            **context,
-                            "http_status": status,
-                            "rt_cd": response_data.get("rt_cd"),
-                            "msg_cd": response_data.get("msg_cd"),
-                            "msg1": response_data.get("msg1"),
-                            **diagnostics,
-                        }
-                    )
-                    raise KisApiError(
-                        _format_kis_api_error(
-                            "KIS token refresh failed.",
-                            details,
-                        ),
-                        details=details,
-                    )
-            else:
-                details = {
-                    **context,
-                    "http_status": status,
-                    "response_text": json.dumps(response_data),
-                }
-                raise KisApiError(
-                    _format_kis_api_error(
-                        "KIS read-only HTTP failure" if request_kind == "read_only" else "KIS order HTTP failure",
-                        details,
-                    ),
-                    details=details,
-                )
-
         if self._is_token_expired_response(response_data):
-            allowed, diagnostics = self._token_refresh_guard_diagnostics()
-            if not allowed:
-                details = self._sanitize_diagnostics(
-                    {
-                        **context,
-                        "rt_cd": response_data.get("rt_cd"),
-                        "msg_cd": response_data.get("msg_cd"),
-                        "msg1": response_data.get("msg1"),
-                        **diagnostics,
-                    }
-                )
-                raise KisApiError(
-                    _format_kis_api_error(
-                        "KIS token expired, but refresh is blocked by daily token issuance guard.",
-                        details,
-                    ),
-                    details=details,
-                )
-
-            refreshed_token = self.get_access_token(force_refresh=True)
-            response_data, status = send_request(access_token=refreshed_token.token)
-            if status >= 400 or self._is_token_expired_response(response_data):
-                details = self._sanitize_diagnostics(
-                    {
-                        **context,
-                        "http_status": status,
-                        "rt_cd": response_data.get("rt_cd"),
-                        "msg_cd": response_data.get("msg_cd"),
-                        "msg1": response_data.get("msg1"),
-                        **diagnostics,
-                    }
-                )
-                raise KisApiError(
-                    _format_kis_api_error(
-                        "KIS token refresh failed.",
-                        details,
-                    ),
-                    details=details,
-                )
+            response_data, status = self._refresh_and_retry_after_token_expired(
+                response_data=response_data,
+                status=status,
+                send_request=send_request,
+                context=context,
+                request_kind=request_kind,
+            )
+        elif status >= 400:
+            details = {
+                **context,
+                "http_status": status,
+                "response_text": json.dumps(response_data),
+            }
+            raise KisApiError(
+                _format_kis_api_error(
+                    "KIS read-only HTTP failure" if request_kind == "read_only" else "KIS order HTTP failure",
+                    details,
+                ),
+                details=details,
+            )
 
         rt_cd = str(response_data.get("rt_cd", "0"))
         if rt_cd not in ("0", ""):
@@ -753,6 +678,113 @@ class KisClient:
 
         return response_data
 
+    def _refresh_and_retry_after_token_expired(
+        self,
+        *,
+        response_data: dict,
+        status: int,
+        send_request,
+        context: dict,
+        request_kind: str,
+    ) -> tuple[dict, int]:
+        allowed, diagnostics = self._token_refresh_guard_diagnostics()
+        guard_bypassed = not allowed and request_kind == "read_only"
+        base_details = {
+            **context,
+            "http_status": status,
+            "rt_cd": response_data.get("rt_cd"),
+            "msg_cd": response_data.get("msg_cd"),
+            "msg1": response_data.get("msg1"),
+            "token_expired": True,
+            **diagnostics,
+            "refresh_guard_bypassed_for_token_expired": guard_bypassed,
+        }
+
+        if not allowed and not guard_bypassed:
+            details = self._sanitize_diagnostics(
+                {
+                    **base_details,
+                    "refresh_attempted": False,
+                }
+            )
+            raise KisApiError(
+                _format_kis_api_error(
+                    "KIS token expired, but refresh is blocked by daily token issuance guard.",
+                    details,
+                ),
+                details=details,
+            )
+
+        try:
+            refreshed_token = (
+                self.auth_manager.refresh_access_token_for_expired_api_token()
+            )
+        except Exception as exc:
+            details = self._sanitize_diagnostics(
+                {
+                    **base_details,
+                    "refresh_attempted": True,
+                    "refresh_failed": True,
+                    "refresh_error_type": type(exc).__name__,
+                    "refresh_error": str(exc),
+                }
+            )
+            raise KisApiError(
+                _format_kis_api_error(
+                    "KIS token expired and refresh failed.",
+                    details,
+                ),
+                details=details,
+            ) from exc
+
+        try:
+            retry_data, retry_status = send_request(
+                access_token=refreshed_token.token
+            )
+        except KisApiError as exc:
+            details = self._sanitize_diagnostics(
+                {
+                    **base_details,
+                    **exc.details,
+                    "refresh_attempted": True,
+                    "retry_failed": True,
+                }
+            )
+            raise KisApiError(
+                _format_kis_api_error(
+                    "KIS token refresh retry failed.",
+                    details,
+                ),
+                details=details,
+            ) from exc
+
+        if (
+            retry_status >= 400
+            or self._is_token_expired_response(retry_data)
+            or self._has_failed_rt_cd(retry_data)
+        ):
+            details = self._sanitize_diagnostics(
+                {
+                    **base_details,
+                    "http_status": retry_status,
+                    "rt_cd": retry_data.get("rt_cd", response_data.get("rt_cd")),
+                    "msg_cd": retry_data.get("msg_cd", response_data.get("msg_cd")),
+                    "msg1": retry_data.get("msg1", response_data.get("msg1")),
+                    "original_msg_cd": response_data.get("msg_cd"),
+                    "original_msg1": response_data.get("msg1"),
+                    "refresh_attempted": True,
+                    "retry_failed": True,
+                }
+            )
+            raise KisApiError(
+                _format_kis_api_error(
+                    "KIS token refresh retry failed.",
+                    details,
+                ),
+                details=details,
+            )
+
+        return retry_data, retry_status
 
     def _token_refresh_guard_diagnostics(self) -> tuple[bool, dict]:
         last_issued_at = self.auth_manager.get_latest_access_token_issue_time()
@@ -775,7 +807,10 @@ class KisClient:
             "refresh_guard_min_interval_seconds": int(min_interval.total_seconds()),
             "refresh_guard_reason": "allowed" if allowed else "too_recent",
         }
+
     def _is_token_expired_response(self, data: dict) -> bool:
+        if is_kis_token_expired_response(data):
+            return True
         if not isinstance(data, dict):
             return False
         msg_cd = str(data.get("msg_cd") or "").strip()
@@ -791,6 +826,12 @@ class KisClient:
             "토큰이 만료",
         ]
         return any(signature in msg1 for signature in token_expired_signatures)
+
+    def _has_failed_rt_cd(self, data: dict) -> bool:
+        if not isinstance(data, dict):
+            return True
+        rt_cd = str(data.get("rt_cd", "0"))
+        return rt_cd not in ("0", "")
 
     def _request_diagnostics(
         self,
@@ -1020,6 +1061,23 @@ def _safe_raw(response: dict) -> dict:
         "msg_cd": response.get("msg_cd"),
         "has_output": bool(response.get("output")),
     }
+
+
+def is_kis_token_expired_response(payload: dict) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    msg_cd = str(payload.get("msg_cd") or "").strip()
+    msg1 = str(payload.get("msg1") or "").strip().lower()
+    if msg_cd == "EGW00123":
+        return True
+
+    token_expired_signatures = [
+        "\uae30\uac04\uc774 \ub9cc\ub8cc\ub41c token",
+        "\ub9cc\ub8cc\ub41c token",
+        "token expired",
+        "expired token",
+    ]
+    return any(signature in msg1 for signature in token_expired_signatures)
 
 
 def _format_kis_api_error(prefix: str, details: dict) -> str:

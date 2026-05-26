@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Callable
+from urllib.parse import urlparse
 
 import requests
 from sqlalchemy.orm import Session
@@ -127,6 +129,10 @@ class KisAuthManager:
     def get_valid_access_token(self, force_refresh: bool = False) -> KisTokenResult:
         return self.issue_access_token(force_refresh=force_refresh)
 
+    def refresh_access_token_for_expired_api_token(self) -> KisTokenResult:
+        self.mark_access_token_stale()
+        return self.issue_access_token(force_refresh=True)
+
     def get_valid_approval_key(self, force_refresh: bool = False) -> KisTokenResult:
         return self.issue_approval_key(force_refresh=force_refresh)
 
@@ -154,6 +160,26 @@ class KisAuthManager:
             commit=True,
         )
 
+    def mark_access_token_stale(self) -> None:
+        stale_at = self._now() - timedelta(seconds=1)
+
+        def mark(db: Session):
+            row = (
+                db.query(BrokerAuthToken)
+                .filter(
+                    BrokerAuthToken.provider == "kis",
+                    BrokerAuthToken.token_type == "access_token",
+                    BrokerAuthToken.environment == self.settings.kis_env,
+                )
+                .order_by(BrokerAuthToken.updated_at.desc(), BrokerAuthToken.id.desc())
+                .first()
+            )
+            if row is None:
+                return None
+            row.expires_at = stale_at
+            return row
+
+        self._with_session(mark, commit=True)
 
     def get_latest_access_token_issue_time(self) -> datetime | None:
         row = self._get_latest_token("access_token")
@@ -193,6 +219,7 @@ class KisAuthManager:
 
     def _post_auth_json(self, path: str, payload: dict, token_type: str) -> dict:
         url = f"{str(self.settings.kis_base_url).rstrip('/')}{path}"
+        self._raise_if_real_kis_auth_call_blocked_in_pytest(url, token_type)
         headers = {
             "Content-Type": "application/json",
             "Accept": "text/plain",
@@ -222,6 +249,22 @@ class KisAuthManager:
         if not isinstance(data, dict):
             raise KisAuthError(f"KIS {token_type} response had an unexpected shape.")
         return data
+
+    def _raise_if_real_kis_auth_call_blocked_in_pytest(
+        self, url: str, token_type: str
+    ) -> None:
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        if os.environ.get("ALLOW_REAL_KIS_HTTP_IN_TESTS") == "1":
+            return
+        if not _is_official_kis_url(url):
+            return
+        if not _requests_post_is_real_requests():
+            return
+        raise KisAuthError(
+            f"Test safety: real KIS {token_type} HTTP calls are blocked during pytest. "
+            "Inject a fake KIS auth response instead."
+        )
 
     def _cached_result(self, token_type: str) -> KisTokenResult | None:
         row = self._get_cached_token(token_type)
@@ -408,3 +451,17 @@ class KisAuthManager:
 
     def _now(self) -> datetime:
         return datetime.now(UTC)
+
+
+def _is_official_kis_url(url: str) -> bool:
+    host = urlparse(url).hostname or ""
+    return host.lower() in {
+        "openapi.koreainvestment.com",
+        "openapivts.koreainvestment.com",
+    }
+
+
+def _requests_post_is_real_requests() -> bool:
+    post = requests.post
+    module = str(getattr(post, "__module__", ""))
+    return module.startswith("requests.")

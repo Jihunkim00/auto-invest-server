@@ -492,6 +492,7 @@ class KisWatchlistPreviewService:
         symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
         name = str(raw.get("name") or "")
         listing_market = str(raw.get("market") or "KR")
+        listing_market_label = str(raw.get("market_label") or "")
         warnings = _dedupe(KR_DISABLED_REASONS + session_warnings)
         block_reasons = list(KR_DISABLED_REASONS)
         risk_flags = ["kr_trading_disabled", "preview_only"]
@@ -637,6 +638,7 @@ class KisWatchlistPreviewService:
             "symbol": symbol,
             "name": name or None,
             "market": listing_market,
+            "market_label": listing_market_label or listing_market,
             "currency": "KRW",
             "current_price": current_price,
             "score": final_buy_score,
