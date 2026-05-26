@@ -247,6 +247,11 @@ class DashboardController extends ChangeNotifier {
   bool get hasPreparedKisExitSellTicket =>
       hasExitPreflightPreparedSellTicket || hasExitShadowPreparedSellTicket;
 
+  bool get hasPreparedKisManualSellTicket =>
+      selectedOrderMarket == PortfolioMarket.kr &&
+      orderTicketSide == 'sell' &&
+      orderTicketSourceMetadata != null;
+
   bool get currentOrderRequiresEntryWindow => orderTicketSide != 'sell';
 
   bool get kisCurrentOrderRuntimeGatesOpen {
@@ -799,6 +804,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
+    selectedProvider = SelectedProvider.kis;
     selectedOrderMarket = PortfolioMarket.kr;
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
@@ -856,7 +862,7 @@ class DashboardController extends ChangeNotifier {
     return const ActionResult(
       success: true,
       message:
-          'Manual sell ticket prepared from portfolio. Validate and confirm before submit.',
+          'Manual SELL ticket prepared. Open Trading to validate and submit.',
     );
   }
 
@@ -885,6 +891,7 @@ class DashboardController extends ChangeNotifier {
         );
       }
 
+      selectedProvider = SelectedProvider.kis;
       selectedOrderMarket = PortfolioMarket.kr;
       orderTicketSymbol = preparation.symbol;
       orderTicketSide = 'sell';
@@ -895,33 +902,31 @@ class DashboardController extends ChangeNotifier {
       kisLiveConfirmation = false;
       kisManualOrderError = null;
       kisManualOrderErrorRaw = null;
-      orderTicketSourceMetadata = preparation.sourceMetadata.isNotEmpty
-          ? preparation.sourceMetadata
-          : {
-              'source': 'kis_portfolio_manual_sell',
-              'source_type': 'operator_confirmed_position_exit',
-              'symbol': preparation.symbol,
-              'company_name': preparation.companyName,
-              'quantity': qty,
-              'suggested_quantity': qty,
-              'current_price': preparation.currentPrice,
-              'estimated_amount': preparation.estimatedAmount,
-              'exit_reason': preparation.exitReason,
-              'manual_confirm_required': true,
-              'auto_buy_enabled': false,
-              'auto_sell_enabled': false,
-              'scheduler_real_order_enabled': false,
-              'real_order_submit_allowed': false,
-              'real_order_submitted': false,
-              'broker_submit_called': false,
-              'manual_submit_called': false,
-            };
+      orderTicketSourceMetadata = {
+        'source': 'kis_portfolio_manual_sell',
+        'source_type': 'operator_confirmed_position_exit',
+        'symbol': preparation.symbol,
+        'company_name': preparation.companyName,
+        'quantity': qty,
+        'suggested_quantity': qty,
+        'current_price': preparation.currentPrice,
+        'estimated_amount': preparation.estimatedAmount,
+        'exit_reason': preparation.exitReason,
+        'manual_confirm_required': true,
+        'auto_buy_enabled': false,
+        'auto_sell_enabled': false,
+        'scheduler_real_order_enabled': false,
+        'real_order_submit_allowed': false,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        ...preparation.sourceMetadata,
+      };
       notifyListeners();
-      return ActionResult(
+      return const ActionResult(
         success: true,
-        message: preparation.canSubmit
-            ? 'Manual sell ticket prepared. Validate and confirm before submit.'
-            : 'Manual sell ticket prepared; backend safety may still block submit.',
+        message:
+            'Manual SELL ticket prepared. Open Trading to validate and submit.',
       );
     } catch (e) {
       final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
@@ -942,6 +947,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
+    selectedProvider = SelectedProvider.kis;
     selectedOrderMarket = PortfolioMarket.kr;
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
@@ -958,7 +964,7 @@ class DashboardController extends ChangeNotifier {
     return const ActionResult(
       success: true,
       message:
-          'Manual sell ticket prepared. Validate and confirm before submit.',
+          'Manual SELL ticket prepared. Open Trading to validate and submit.',
     );
   }
 
@@ -975,6 +981,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
+    selectedProvider = SelectedProvider.kis;
     selectedOrderMarket = PortfolioMarket.kr;
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
@@ -991,7 +998,7 @@ class DashboardController extends ChangeNotifier {
     return const ActionResult(
       success: true,
       message:
-          'Manual sell ticket prepared from shadow decision. Validate and confirm before submit.',
+          'Manual SELL ticket prepared. Open Trading to validate and submit.',
     );
   }
 

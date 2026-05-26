@@ -35,6 +35,8 @@ class RuntimeSettingService:
             "kis_live_auto_max_orders_per_day": 1,
             "kis_live_auto_max_notional_pct": 0.03,
             "kis_limited_auto_sell_enabled": False,
+            "kis_limited_auto_stop_loss_enabled": False,
+            "kis_limited_auto_take_profit_enabled": False,
             "kis_limited_auto_sell_stop_loss_enabled": False,
             "kis_limited_auto_sell_take_profit_enabled": False,
             "kis_limited_auto_sell_requires_queue_review": True,
@@ -60,8 +62,11 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_require_market_open": True,
             "kis_limited_auto_buy_no_new_entry_after": "14:50",
             "kis_limited_auto_buy_allow_gpt_hard_block": False,
+            "kis_scheduler_enabled": False,
+            "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
             "kis_scheduler_allow_real_orders": False,
+            "kis_scheduler_configured_allow_real_orders": False,
             "kis_scheduler_buy_enabled": False,
             "kis_scheduler_sell_enabled": False,
             "kis_scheduler_allow_limited_auto_buy": False,
@@ -113,6 +118,12 @@ class RuntimeSettingService:
             ),
             "kis_limited_auto_sell_enabled": bool(
                 row.kis_limited_auto_sell_enabled
+            ),
+            "kis_limited_auto_stop_loss_enabled": bool(
+                row.kis_limited_auto_stop_loss_enabled
+            ),
+            "kis_limited_auto_take_profit_enabled": bool(
+                row.kis_limited_auto_take_profit_enabled
             ),
             "kis_limited_auto_sell_stop_loss_enabled": bool(
                 row.kis_limited_auto_sell_stop_loss_enabled
@@ -187,9 +198,14 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_allow_gpt_hard_block": bool(
                 row.kis_limited_auto_buy_allow_gpt_hard_block
             ),
+            "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
+            "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
             "kis_scheduler_allow_real_orders": bool(
                 row.kis_scheduler_allow_real_orders
+            ),
+            "kis_scheduler_configured_allow_real_orders": bool(
+                row.kis_scheduler_configured_allow_real_orders
             ),
             "kis_scheduler_buy_enabled": bool(row.kis_scheduler_buy_enabled),
             "kis_scheduler_sell_enabled": bool(row.kis_scheduler_sell_enabled),
@@ -212,27 +228,24 @@ class RuntimeSettingService:
         }
         settings["trade_limits"] = self._trade_limits(settings)
         settings["kis_limited_auto_sell_requires_valid_cost_basis"] = True
-        settings["kis_limited_auto_stop_loss_enabled"] = settings[
-            "kis_limited_auto_sell_stop_loss_enabled"
-        ]
-        settings["kis_limited_auto_take_profit_enabled"] = settings[
-            "kis_limited_auto_sell_take_profit_enabled"
-        ]
+        stop_loss_enabled = bool(
+            settings["kis_limited_auto_stop_loss_enabled"]
+            or settings["kis_limited_auto_sell_stop_loss_enabled"]
+        )
+        take_profit_enabled = bool(
+            settings["kis_limited_auto_take_profit_enabled"]
+            or settings["kis_limited_auto_sell_take_profit_enabled"]
+        )
+        settings["kis_limited_auto_stop_loss_enabled"] = stop_loss_enabled
+        settings["kis_limited_auto_sell_stop_loss_enabled"] = stop_loss_enabled
+        settings["kis_limited_auto_take_profit_enabled"] = take_profit_enabled
+        settings["kis_limited_auto_sell_take_profit_enabled"] = take_profit_enabled
         settings["kis_limited_auto_take_profit_readiness_enabled"] = True
         settings["kis_limited_auto_sell_take_profit_readiness_enabled"] = True
         settings["kis_limited_auto_take_profit_requires_valid_cost_basis"] = True
         settings["kis_limited_auto_sell_take_profit_requires_valid_cost_basis"] = True
         settings["kis_limited_auto_take_profit_min_profit_pct"] = 0.03
         settings["kis_limited_auto_sell_take_profit_min_profit_pct"] = 0.03
-        settings["kis_scheduler_enabled"] = bool(
-            getattr(self.settings, "kis_scheduler_enabled", False)
-        )
-        settings["kis_scheduler_dry_run"] = bool(
-            getattr(self.settings, "kis_scheduler_dry_run", True)
-        )
-        settings["kis_scheduler_configured_allow_real_orders"] = bool(
-            getattr(self.settings, "kis_scheduler_allow_real_orders", False)
-        )
         return settings
 
     def get_trade_limits_for_market(
@@ -290,10 +303,16 @@ class RuntimeSettingService:
 
     def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         row = self.get_or_create(db)
-        if "kis_limited_auto_take_profit_enabled" in payload:
-            payload["kis_limited_auto_sell_take_profit_enabled"] = payload[
-                "kis_limited_auto_take_profit_enabled"
-            ]
+        _sync_bool_alias(
+            payload,
+            "kis_limited_auto_stop_loss_enabled",
+            "kis_limited_auto_sell_stop_loss_enabled",
+        )
+        _sync_bool_alias(
+            payload,
+            "kis_limited_auto_take_profit_enabled",
+            "kis_limited_auto_sell_take_profit_enabled",
+        )
 
         for key in (
             "bot_enabled",
@@ -316,6 +335,8 @@ class RuntimeSettingService:
             "kis_live_auto_max_orders_per_day",
             "kis_live_auto_max_notional_pct",
             "kis_limited_auto_sell_enabled",
+            "kis_limited_auto_stop_loss_enabled",
+            "kis_limited_auto_take_profit_enabled",
             "kis_limited_auto_sell_stop_loss_enabled",
             "kis_limited_auto_sell_take_profit_enabled",
             "kis_limited_auto_sell_requires_queue_review",
@@ -341,8 +362,11 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_require_market_open",
             "kis_limited_auto_buy_no_new_entry_after",
             "kis_limited_auto_buy_allow_gpt_hard_block",
+            "kis_scheduler_enabled",
+            "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
             "kis_scheduler_allow_real_orders",
+            "kis_scheduler_configured_allow_real_orders",
             "kis_scheduler_buy_enabled",
             "kis_scheduler_sell_enabled",
             "kis_scheduler_allow_limited_auto_buy",
@@ -371,3 +395,14 @@ class RuntimeSettingService:
 
     def set_scheduler_enabled(self, db: Session, enabled: bool) -> dict[str, Any]:
         return self.update_settings(db, {"scheduler_enabled": enabled})
+
+
+def _sync_bool_alias(payload: dict[str, Any], primary: str, alias: str) -> None:
+    primary_set = primary in payload
+    alias_set = alias in payload
+    if not primary_set and not alias_set:
+        return
+
+    value = payload[primary] if primary_set else payload[alias]
+    payload[primary] = bool(value)
+    payload[alias] = bool(value)
