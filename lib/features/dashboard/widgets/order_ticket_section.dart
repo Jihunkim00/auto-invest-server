@@ -57,6 +57,9 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    final title = controller.hasPreparedKisManualSellTicket
+        ? 'KIS Manual SELL Ticket'
+        : 'KIS Live Manual Order';
     _syncTextControllers(controller);
 
     return SectionCard(
@@ -65,8 +68,7 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
           const Icon(Icons.request_quote_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Live Manual Order',
-                style: Theme.of(context).textTheme.titleMedium),
+            child: Text(title, style: Theme.of(context).textTheme.titleMedium),
           ),
         ]),
         const SizedBox(height: 12),
@@ -161,9 +163,9 @@ class _KrOrderTicket extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       _RuntimeSafetyStatusCard(controller: controller),
-      if (controller.hasPreparedKisExitSellTicket) ...[
+      if (controller.hasPreparedKisManualSellTicket) ...[
         const SizedBox(height: 12),
-        _ExitPreflightPreparedNotice(controller: controller),
+        _PreparedManualSellNotice(controller: controller),
       ],
       const SizedBox(height: 12),
       LayoutBuilder(builder: (context, constraints) {
@@ -298,7 +300,7 @@ class _KrOrderTicket extends StatelessWidget {
           label: Text(controller.kisManualSubmitLoading
               ? 'Submitting...'
               : controller.orderTicketSide == 'sell'
-                  ? 'Submit Manual Sell'
+                  ? 'Submit SELL'
                   : 'Submit Live KIS Order'),
         ),
         if (controller.latestKisManualOrder?.isSyncable == true &&
@@ -388,8 +390,8 @@ class _KrOrderTicket extends StatelessWidget {
   }
 }
 
-class _ExitPreflightPreparedNotice extends StatelessWidget {
-  const _ExitPreflightPreparedNotice({required this.controller});
+class _PreparedManualSellNotice extends StatelessWidget {
+  const _PreparedManualSellNotice({required this.controller});
 
   final DashboardController controller;
 
@@ -398,7 +400,17 @@ class _ExitPreflightPreparedNotice extends StatelessWidget {
     final metadata = controller.orderTicketSourceMetadata ?? const {};
     final trigger = metadata['exit_trigger']?.toString();
     final triggerSource = metadata['trigger_source']?.toString();
+    final source = metadata['source']?.toString();
+    final sourceType = metadata['source_type']?.toString();
     final fromShadow = metadata['source'] == 'kis_exit_shadow_decision';
+    final fromExitPreflight = metadata['source'] == 'kis_live_exit_preflight';
+    final subtitle = fromShadow
+        ? 'Prepared from exit shadow decision'
+        : fromExitPreflight
+            ? 'Prepared from exit preflight'
+            : 'Prepared Manual Sell';
+    final estimated = _preparedEstimatedNotional(controller, metadata);
+    final reason = _orderReason(controller);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -408,15 +420,15 @@ class _ExitPreflightPreparedNotice extends StatelessWidget {
         border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.28)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(
-          fromShadow
-              ? 'Prepared from exit shadow decision'
-              : 'Prepared from exit preflight',
+        const Text(
+          'KIS Manual SELL Ticket',
           style: TextStyle(
             color: Colors.greenAccent,
             fontWeight: FontWeight.w800,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(subtitle, style: const TextStyle(color: Colors.white70)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           const _SoftBadge(
@@ -433,14 +445,25 @@ class _ExitPreflightPreparedNotice extends StatelessWidget {
             const _SoftBadge(
                 text: 'NO MANUAL SUBMIT YET', color: Colors.orangeAccent),
         ]),
-        if (trigger != null || triggerSource != null) ...[
-          const SizedBox(height: 8),
-          Wrap(spacing: 14, runSpacing: 8, children: [
-            if (trigger != null) _DataPair(label: 'trigger', value: trigger),
-            if (triggerSource != null)
-              _DataPair(label: 'trigger_source', value: triggerSource),
-          ]),
-        ],
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          const _DataPair(label: 'provider', value: 'KIS'),
+          const _DataPair(label: 'side', value: 'SELL'),
+          _DataPair(label: 'symbol', value: controller.orderTicketSymbol),
+          _DataPair(
+              label: 'quantity',
+              value:
+                  (controller.parsedOrderTicketQty ?? controller.orderTicketQty)
+                      .toString()),
+          _DataPair(label: 'estimated notional', value: estimated),
+          _DataPair(label: 'reason', value: reason),
+          if (source != null) _DataPair(label: 'source', value: source),
+          if (sourceType != null)
+            _DataPair(label: 'source_type', value: sourceType),
+          if (trigger != null) _DataPair(label: 'trigger', value: trigger),
+          if (triggerSource != null)
+            _DataPair(label: 'trigger_source', value: triggerSource),
+        ]),
       ]),
     );
   }
@@ -454,6 +477,7 @@ class _RuntimeSafetyStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = controller.kisSafetyStatus;
+    final isSell = controller.orderTicketSide == 'sell';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -494,10 +518,17 @@ class _RuntimeSafetyStatusCard extends StatelessWidget {
               label: 'kis_real_order_enabled',
               value: status.kisRealOrderEnabled.toString()),
           _DataPair(label: 'market_open', value: status.marketOpen.toString()),
-          _DataPair(
-              label: 'entry_allowed_now',
-              value: status.entryAllowedNow.toString()),
-          _DataPair(label: 'no_new_entry_after', value: status.noNewEntryAfter),
+          if (isSell)
+            _DataPair(
+                label: 'sell_session_allowed',
+                value: status.marketOpen.toString())
+          else ...[
+            _DataPair(
+                label: 'entry_allowed_now',
+                value: status.entryAllowedNow.toString()),
+            _DataPair(
+                label: 'no_new_entry_after', value: status.noNewEntryAfter),
+          ],
         ]),
         const SizedBox(height: 10),
         _StateLine(
@@ -1008,6 +1039,7 @@ class _ValidationResultCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final blocked = !result.validatedForSubmission;
+    final isSell = result.side.toLowerCase() == 'sell';
     final closureLabel = result.marketSession.closureName?.isNotEmpty == true
         ? result.marketSession.closureName!
         : result.marketSession.closureReason;
@@ -1052,7 +1084,8 @@ class _ValidationResultCard extends StatelessWidget {
             _DataPair(
                 label: 'Effective Close',
                 value: result.marketSession.effectiveClose!),
-          if (result.marketSession.noNewEntryAfter?.isNotEmpty == true)
+          if (!isSell &&
+              result.marketSession.noNewEntryAfter?.isNotEmpty == true)
             _DataPair(
                 label: 'No New Entry After',
                 value: result.marketSession.noNewEntryAfter!),
@@ -1076,13 +1109,22 @@ class _ValidationResultCard extends StatelessWidget {
               color: result.marketSession.isMarketOpen
                   ? Colors.greenAccent
                   : Colors.redAccent),
-          _SoftBadge(
-              text: result.marketSession.isEntryAllowedNow
-                  ? 'ENTRY ALLOWED'
-                  : 'ENTRY BLOCKED',
-              color: result.marketSession.isEntryAllowedNow
-                  ? Colors.greenAccent
-                  : Colors.amberAccent),
+          if (isSell)
+            _SoftBadge(
+                text: result.marketSession.isMarketOpen
+                    ? 'SELL SESSION ALLOWED'
+                    : 'SELL SESSION BLOCKED',
+                color: result.marketSession.isMarketOpen
+                    ? Colors.greenAccent
+                    : Colors.amberAccent)
+          else
+            _SoftBadge(
+                text: result.marketSession.isEntryAllowedNow
+                    ? 'ENTRY ALLOWED'
+                    : 'ENTRY BLOCKED',
+                color: result.marketSession.isEntryAllowedNow
+                    ? Colors.greenAccent
+                    : Colors.amberAccent),
           if (result.marketSession.isNearClose)
             const _SoftBadge(text: 'NEAR CLOSE', color: Colors.amberAccent),
         ]),
@@ -1343,6 +1385,34 @@ Future<bool> _confirmSubmitKisOrder(
   return confirmed == true;
 }
 
+String _preparedEstimatedNotional(
+  DashboardController controller,
+  Map<dynamic, dynamic> metadata,
+) {
+  final validationAmount = controller.orderValidationResult?.estimatedAmount;
+  if (validationAmount != null) return _krw(validationAmount);
+
+  final direct = _doubleValue(
+    metadata['estimated_amount'] ??
+        metadata['estimated_notional'] ??
+        metadata['current_value'],
+  );
+  if (direct != null) return _krw(direct);
+
+  final price = _doubleValue(metadata['current_price']);
+  final quantity = controller.parsedOrderTicketQty ?? controller.orderTicketQty;
+  if (price != null && quantity > 0) return _krw(price * quantity);
+
+  final snapshot = metadata['position_snapshot'];
+  if (snapshot is Map) {
+    final snapshotAmount = _doubleValue(
+      snapshot['estimated_amount'] ?? snapshot['current_value'],
+    );
+    if (snapshotAmount != null) return _krw(snapshotAmount);
+  }
+  return 'n/a';
+}
+
 String _orderCompanyName(DashboardController controller) {
   final metadata = controller.orderTicketSourceMetadata ?? const {};
   final direct = metadata['company_name'] ?? metadata['name'];
@@ -1391,6 +1461,14 @@ String _humanReason(String value) {
     default:
       return value.replaceAll('_', ' ');
   }
+}
+
+double? _doubleValue(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  final text = value.toString().trim().replaceAll(',', '');
+  if (text.isEmpty || text == 'null') return null;
+  return double.tryParse(text);
 }
 
 class _ConfirmRow extends StatelessWidget {

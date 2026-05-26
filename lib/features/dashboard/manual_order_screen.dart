@@ -7,6 +7,7 @@ import '../../models/kis_single_symbol_trading_result.dart';
 import 'dashboard_controller.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/manual_trading_run_section.dart';
+import 'widgets/order_ticket_section.dart';
 import 'widgets/result_presentation_helpers.dart' as presentation;
 
 class TradingScreen extends StatelessWidget {
@@ -41,9 +42,13 @@ class TradingScreen extends StatelessWidget {
                 style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 12),
-              if (isKis)
-                _KisAnalyzeAndBuyCard(controller: controller)
-              else
+              if (isKis) ...[
+                if (controller.hasPreparedKisManualSellTicket) ...[
+                  OrderTicketSection(controller: controller),
+                  const SizedBox(height: 12),
+                ],
+                _KisAnalyzeAndBuyCard(controller: controller),
+              ] else
                 ManualTradingRunSection(controller: controller),
             ],
           ),

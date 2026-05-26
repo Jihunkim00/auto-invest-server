@@ -8,6 +8,7 @@ import 'package:auto_invest_dashboard/models/kis_buy_shadow_decision.dart';
 import 'package:auto_invest_dashboard/models/kis_limited_auto_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_limited_auto_sell.dart';
 import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_live.dart';
@@ -15,6 +16,7 @@ import 'package:auto_invest_dashboard/models/kis_shadow_exit_review.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review_queue.dart';
 import 'package:auto_invest_dashboard/models/kis_single_symbol_trading_result.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
+import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
@@ -403,6 +405,106 @@ void main() {
     controller.dispose();
   });
 
+  test('KIS position management prepares manual sell ticket read-only',
+      () async {
+    final api = _FakeApiClient(
+      manualSellPreparation: const ManualSellPreparation(
+        provider: 'kis',
+        market: 'KR',
+        symbol: '005930',
+        companyName: 'Samsung Electronics',
+        quantity: 2,
+        currentPrice: 72000,
+        estimatedAmount: 144000,
+        exitReason: 'stop_loss_triggered',
+        humanReason: 'Stop loss triggered',
+        holdingStatus: 'SELL_READY',
+        canPrepare: true,
+        canSubmit: true,
+        blockReasons: [],
+        sourceMetadata: {'source': 'portfolio_position'},
+        rawPayload: {'symbol': '005930'},
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedOrderMarket = PortfolioMarket.us
+      ..orderTicketSymbol = 'AAPL'
+      ..orderTicketSide = 'buy'
+      ..orderTicketQty = 9
+      ..orderTicketQtyInput = '9'
+      ..kisLiveConfirmation = true
+      ..orderValidationResult = _validationResult()
+      ..orderValidationError = 'previous error'
+      ..kisManualOrderError = 'previous submit error';
+
+    final result = await controller.prepareKisManualSellFromManagedPosition(
+      _managedPosition(),
+    );
+
+    expect(result.success, isTrue);
+    expect(result.message,
+        'Manual SELL ticket prepared. Open Trading to validate and submit.');
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'sell');
+    expect(controller.orderTicketQty, 2);
+    expect(controller.orderTicketQtyInput, '2');
+    expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.orderValidationError, isNull);
+    expect(controller.kisManualOrderError, isNull);
+    expect(controller.hasPreparedKisManualSellTicket, isTrue);
+    expect(
+        controller.orderTicketSourceMetadata?['source'], 'portfolio_position');
+    expect(controller.orderTicketSourceMetadata?['source_type'],
+        'operator_confirmed_position_exit');
+    expect(controller.orderTicketSourceMetadata?['estimated_amount'], 144000);
+    expect(api.prepareManualSellCalls, 1);
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('KIS prepared manual sell validates through existing sell path',
+      () async {
+    final api = _FakeApiClient(
+      manualSellPreparation: const ManualSellPreparation(
+        provider: 'kis',
+        market: 'KR',
+        symbol: '005930',
+        companyName: 'Samsung Electronics',
+        quantity: 1,
+        currentPrice: 72000,
+        estimatedAmount: 72000,
+        exitReason: 'operator_selected_position_exit',
+        humanReason: 'Operator-selected position exit',
+        holdingStatus: 'SELL_READY',
+        canPrepare: true,
+        canSubmit: true,
+        blockReasons: [],
+        sourceMetadata: {},
+        rawPayload: {},
+      ),
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.prepareKisManualSellFromManagedPosition(
+      _managedPosition(quantity: 1),
+    );
+    final result = await controller.validateKisOrder();
+
+    expect(result.success, isTrue);
+    expect(api.validationCalls, 1);
+    expect(api.lastValidationSide, 'sell');
+    expect(controller.orderValidationResult?.side, 'sell');
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
   test('KIS auto readiness refresh stores blocked result', () async {
     final api = _FakeApiClient(autoReadiness: _autoReadiness());
     final controller = DashboardController(api, autoload: false);
@@ -701,6 +803,45 @@ KisManualOrderSafetyStatus _safetyStatus({
     marketOpen: marketOpen,
     entryAllowedNow: entryAllowedNow,
     noNewEntryAfter: '15:00',
+  );
+}
+
+ManagedPosition _managedPosition({double quantity = 2}) {
+  return ManagedPosition(
+    provider: 'kis',
+    market: 'KR',
+    symbol: '005930',
+    companyName: 'Samsung Electronics',
+    quantity: quantity,
+    averagePrice: 70000,
+    costBasis: 140000,
+    currentPrice: 72000,
+    currentValue: 144000,
+    unrealizedPl: 4000,
+    unrealizedPlPct: 0.028,
+    holdingStatus: 'SELL_READY',
+    exitReason: 'stop_loss_triggered',
+    humanReason: 'Stop loss triggered',
+    stopLossTriggered: true,
+    takeProfitTriggered: false,
+    weakTrendTriggered: false,
+    sellPressureTriggered: false,
+    manualReviewRequired: true,
+    finalSellScore: 80,
+    finalBuyScore: 20,
+    quantSellScore: 78,
+    quantBuyScore: 18,
+    aiSellScore: 82,
+    aiBuyScore: 22,
+    confidence: 0.9,
+    technicalSnapshot: const {},
+    riskFlags: const [],
+    gatingNotes: const [],
+    blockReasons: const [],
+    canPrepareManualSell: true,
+    canSubmitManualSell: true,
+    latestManualSellOrder: null,
+    rawPayload: const {},
   );
 }
 
@@ -1016,6 +1157,7 @@ class _FakeApiClient extends ApiClient {
     this.kisSingle,
     this.schedulerLive,
     this.updatedKosdaqWatchlist,
+    this.manualSellPreparation,
   });
 
   final WatchlistRunResult? latest;
@@ -1044,6 +1186,7 @@ class _FakeApiClient extends ApiClient {
   final KisSingleSymbolTradingResult? kisSingle;
   final KisSchedulerLiveResult? schedulerLive;
   final MarketWatchlist? updatedKosdaqWatchlist;
+  final ManualSellPreparation? manualSellPreparation;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
@@ -1061,9 +1204,12 @@ class _FakeApiClient extends ApiClient {
   int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
   int updateKosdaqTop50WatchlistCalls = 0;
+  int prepareManualSellCalls = 0;
+  int submitCalls = 0;
   String? lastQueueNote;
   Map<String, dynamic>? lastSettingsUpdate;
   int validationCalls = 0;
+  String? lastValidationSide;
   String? lastProvider;
   int? lastGateLevel;
   int? lastKisGateLevel;
@@ -1339,8 +1485,53 @@ class _FakeApiClient extends ApiClient {
     Map<String, dynamic>? sourceMetadata,
   }) async {
     validationCalls += 1;
+    lastValidationSide = side;
     return validationResult ??
         _validationResult(symbol: symbol, side: side, qty: qty);
+  }
+
+  @override
+  Future<ManualSellPreparation> prepareKisManualSell(String symbol) async {
+    prepareManualSellCalls += 1;
+    return manualSellPreparation ??
+        ManualSellPreparation(
+          provider: 'kis',
+          market: 'KR',
+          symbol: symbol,
+          companyName: 'Samsung Electronics',
+          quantity: 1,
+          currentPrice: 72000,
+          estimatedAmount: 72000,
+          exitReason: 'operator_selected_position_exit',
+          humanReason: 'Operator-selected position exit',
+          holdingStatus: 'SELL_READY',
+          canPrepare: true,
+          canSubmit: true,
+          blockReasons: const [],
+          sourceMetadata: const {},
+          rawPayload: const {},
+        );
+  }
+
+  @override
+  Future<KisManualOrderResult> submitKisManualOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+    required bool confirmLive,
+    Map<String, dynamic>? sourceMetadata,
+  }) async {
+    submitCalls += 1;
+    return KisManualOrderResult.fromJson({
+      'order_id': 1,
+      'symbol': symbol,
+      'side': side,
+      'qty': qty,
+      'internal_status': 'SUBMITTED',
+      'created_at': '2026-05-17T00:00:00',
+      'updated_at': '2026-05-17T00:00:00',
+    });
   }
 
   @override

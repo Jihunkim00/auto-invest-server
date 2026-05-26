@@ -232,8 +232,6 @@ def _checks(
     )
     configured_allow_real_orders = bool(
         runtime.get("kis_scheduler_configured_allow_real_orders", False)
-        or getattr(settings, "kis_scheduler_allow_real_orders", False)
-        or getattr(settings, "kr_scheduler_allow_real_orders", False)
     )
     scheduler_buy_enabled = bool(
         runtime.get(
@@ -276,7 +274,9 @@ def _checks(
             runtime.get("kis_live_auto_sell_enabled", False)
         ),
         "kis_limited_auto_stop_loss_enabled": stop_loss_enabled,
+        "kis_limited_auto_sell_stop_loss_enabled": stop_loss_enabled,
         "kis_limited_auto_take_profit_enabled": take_profit_enabled,
+        "kis_limited_auto_sell_take_profit_enabled": take_profit_enabled,
         "sell_trigger_enabled": stop_loss_enabled or take_profit_enabled,
     }
 

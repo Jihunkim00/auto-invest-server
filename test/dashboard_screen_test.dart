@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_screen.dart';
+import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 
@@ -149,6 +150,38 @@ void main() {
     expect(controller.orderValidationError, isNull);
     expect(
         controller.orderTicketSourceMetadata?['source'], 'portfolio_position');
+  });
+
+  testWidgets('Trading shows a prepared KIS manual sell ticket',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..kisManagedPositions = const [_krManagedPosition];
+
+    final result = await controller.prepareKisManualSellFromManagedPosition(
+      _krManagedPosition,
+    );
+    expect(result.success, isTrue);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) => TradingScreen(controller: controller),
+        ),
+      ),
+    ));
+
+    expect(find.text('KIS Manual SELL Ticket'), findsWidgets);
+    expect(find.text('Prepared Manual Sell'), findsOneWidget);
+    expect(find.text('SELL'), findsWidgets);
+    expect(find.text('005930'), findsWidgets);
+    expect(find.text('Validate Sell'), findsOneWidget);
+    expect(find.text('Submit SELL'), findsOneWidget);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
   });
 }
 

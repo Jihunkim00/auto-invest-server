@@ -41,6 +41,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_live_auto_max_orders_per_day: int | None = Field(default=None, ge=1, le=20)
     kis_live_auto_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
     kis_limited_auto_sell_enabled: bool | None = None
+    kis_limited_auto_stop_loss_enabled: bool | None = None
     kis_limited_auto_sell_stop_loss_enabled: bool | None = None
     kis_limited_auto_sell_take_profit_enabled: bool | None = None
     kis_limited_auto_take_profit_enabled: bool | None = None
@@ -67,8 +68,11 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_buy_require_market_open: bool | None = None
     kis_limited_auto_buy_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     kis_limited_auto_buy_allow_gpt_hard_block: bool | None = None
+    kis_scheduler_enabled: bool | None = None
+    kis_scheduler_dry_run: bool | None = None
     kis_scheduler_live_enabled: bool | None = None
     kis_scheduler_allow_real_orders: bool | None = None
+    kis_scheduler_configured_allow_real_orders: bool | None = None
     kis_scheduler_buy_enabled: bool | None = None
     kis_scheduler_sell_enabled: bool | None = None
     kis_scheduler_allow_limited_auto_buy: bool | None = None

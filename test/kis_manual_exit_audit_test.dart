@@ -158,6 +158,10 @@ void main() {
     ));
 
     expect(find.text('Prepared from exit preflight'), findsOneWidget);
+    expect(find.text('KIS Manual SELL Ticket'), findsWidgets);
+    expect(find.text('SELL'), findsWidgets);
+    expect(find.text('005930'), findsWidgets);
+    expect(find.text('2'), findsWidgets);
     expect(find.text('MANUAL CONFIRMATION REQUIRED'), findsOneWidget);
     expect(find.text('NO AUTO SELL'), findsOneWidget);
     expect(find.text('VALIDATE BEFORE SUBMIT'), findsOneWidget);
@@ -206,10 +210,10 @@ void main() {
       find.text('I understand this may submit a real KIS sell order.'),
       findsOneWidget,
     );
-    expect(find.text('Submit Manual Sell'), findsOneWidget);
+    expect(find.text('Submit SELL'), findsOneWidget);
     expect(controller.canSubmitLiveKisOrder, isTrue);
 
-    await tester.tap(find.text('Submit Manual Sell'));
+    await tester.tap(find.text('Submit SELL'));
     await tester.pumpAndSettle();
 
     expect(find.text('Confirm Submit'), findsWidgets);
