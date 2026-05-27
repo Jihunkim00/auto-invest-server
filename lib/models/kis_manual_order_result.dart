@@ -24,6 +24,7 @@ class KisManualOrderResult {
     required this.isSyncable,
     required this.isTerminal,
     this.sourceMetadata = const {},
+    this.companyName,
     this.source,
     this.sourceType,
     this.exitTrigger,
@@ -59,6 +60,7 @@ class KisManualOrderResult {
   final bool isSyncable;
   final bool isTerminal;
   final Map<String, dynamic> sourceMetadata;
+  final String? companyName;
   final String? source;
   final String? sourceType;
   final String? exitTrigger;
@@ -88,6 +90,8 @@ class KisManualOrderResult {
 
   factory KisManualOrderResult.fromJson(Map<String, dynamic> json) {
     final internalStatus = _readString(json['internal_status'], 'UNKNOWN');
+    final sourceMetadata =
+        Map<String, dynamic>.from((json['source_metadata'] as Map?) ?? {});
     return KisManualOrderResult(
       orderId: _readInt(json['order_id'], 0),
       broker: _readString(json['broker'], 'kis'),
@@ -117,8 +121,13 @@ class KisManualOrderResult {
           json['is_syncable'] == true || isSyncableKisStatus(internalStatus),
       isTerminal:
           json['is_terminal'] == true || isTerminalKisStatus(internalStatus),
-      sourceMetadata:
-          Map<String, dynamic>.from((json['source_metadata'] as Map?) ?? {}),
+      sourceMetadata: sourceMetadata,
+      companyName: _readNullableString(
+        json['company_name'] ??
+            json['name'] ??
+            sourceMetadata['company_name'] ??
+            sourceMetadata['name'],
+      ),
       source: _readNullableString(json['source']),
       sourceType: _readNullableString(json['source_type']),
       exitTrigger: _readNullableString(json['exit_trigger']),

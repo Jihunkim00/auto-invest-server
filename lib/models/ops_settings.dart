@@ -17,6 +17,8 @@ class OpsSettings {
     this.kisLiveAutoMaxOrdersPerDay = 1,
     this.kisLiveAutoMaxNotionalPct = 0.03,
     this.kisLimitedAutoSellEnabled = false,
+    this.kisLimitedAutoStopLossEnabled = false,
+    this.kisLimitedAutoTakeProfitEnabled = false,
     this.kisLimitedAutoSellStopLossEnabled = false,
     this.kisLimitedAutoSellTakeProfitEnabled = false,
     this.kisLimitedAutoSellRequiresQueueReview = true,
@@ -42,8 +44,11 @@ class OpsSettings {
     this.kisLimitedAutoBuyRequireMarketOpen = true,
     this.kisLimitedAutoBuyNoNewEntryAfter = '14:50',
     this.kisLimitedAutoBuyAllowGptHardBlock = false,
+    this.kisSchedulerEnabled = false,
+    this.kisSchedulerDryRun = true,
     this.kisSchedulerLiveEnabled = false,
     this.kisSchedulerAllowRealOrders = false,
+    this.kisSchedulerConfiguredAllowRealOrders = false,
     this.kisSchedulerBuyEnabled = false,
     this.kisSchedulerSellEnabled = false,
     this.kisSchedulerAllowLimitedAutoBuy = false,
@@ -70,6 +75,8 @@ class OpsSettings {
   final int kisLiveAutoMaxOrdersPerDay;
   final double kisLiveAutoMaxNotionalPct;
   final bool kisLimitedAutoSellEnabled;
+  final bool kisLimitedAutoStopLossEnabled;
+  final bool kisLimitedAutoTakeProfitEnabled;
   final bool kisLimitedAutoSellStopLossEnabled;
   final bool kisLimitedAutoSellTakeProfitEnabled;
   final bool kisLimitedAutoSellRequiresQueueReview;
@@ -95,8 +102,11 @@ class OpsSettings {
   final bool kisLimitedAutoBuyRequireMarketOpen;
   final String kisLimitedAutoBuyNoNewEntryAfter;
   final bool kisLimitedAutoBuyAllowGptHardBlock;
+  final bool kisSchedulerEnabled;
+  final bool kisSchedulerDryRun;
   final bool kisSchedulerLiveEnabled;
   final bool kisSchedulerAllowRealOrders;
+  final bool kisSchedulerConfiguredAllowRealOrders;
   final bool kisSchedulerBuyEnabled;
   final bool kisSchedulerSellEnabled;
   final bool kisSchedulerAllowLimitedAutoBuy;
@@ -123,6 +133,8 @@ class OpsSettings {
     int? kisLiveAutoMaxOrdersPerDay,
     double? kisLiveAutoMaxNotionalPct,
     bool? kisLimitedAutoSellEnabled,
+    bool? kisLimitedAutoStopLossEnabled,
+    bool? kisLimitedAutoTakeProfitEnabled,
     bool? kisLimitedAutoSellStopLossEnabled,
     bool? kisLimitedAutoSellTakeProfitEnabled,
     bool? kisLimitedAutoSellRequiresQueueReview,
@@ -148,8 +160,11 @@ class OpsSettings {
     bool? kisLimitedAutoBuyRequireMarketOpen,
     String? kisLimitedAutoBuyNoNewEntryAfter,
     bool? kisLimitedAutoBuyAllowGptHardBlock,
+    bool? kisSchedulerEnabled,
+    bool? kisSchedulerDryRun,
     bool? kisSchedulerLiveEnabled,
     bool? kisSchedulerAllowRealOrders,
+    bool? kisSchedulerConfiguredAllowRealOrders,
     bool? kisSchedulerBuyEnabled,
     bool? kisSchedulerSellEnabled,
     bool? kisSchedulerAllowLimitedAutoBuy,
@@ -182,6 +197,10 @@ class OpsSettings {
           kisLiveAutoMaxNotionalPct ?? this.kisLiveAutoMaxNotionalPct,
       kisLimitedAutoSellEnabled:
           kisLimitedAutoSellEnabled ?? this.kisLimitedAutoSellEnabled,
+      kisLimitedAutoStopLossEnabled:
+          kisLimitedAutoStopLossEnabled ?? this.kisLimitedAutoStopLossEnabled,
+      kisLimitedAutoTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled ??
+          this.kisLimitedAutoTakeProfitEnabled,
       kisLimitedAutoSellStopLossEnabled: kisLimitedAutoSellStopLossEnabled ??
           this.kisLimitedAutoSellStopLossEnabled,
       kisLimitedAutoSellTakeProfitEnabled:
@@ -242,10 +261,15 @@ class OpsSettings {
           this.kisLimitedAutoBuyNoNewEntryAfter,
       kisLimitedAutoBuyAllowGptHardBlock: kisLimitedAutoBuyAllowGptHardBlock ??
           this.kisLimitedAutoBuyAllowGptHardBlock,
+      kisSchedulerEnabled: kisSchedulerEnabled ?? this.kisSchedulerEnabled,
+      kisSchedulerDryRun: kisSchedulerDryRun ?? this.kisSchedulerDryRun,
       kisSchedulerLiveEnabled:
           kisSchedulerLiveEnabled ?? this.kisSchedulerLiveEnabled,
       kisSchedulerAllowRealOrders:
           kisSchedulerAllowRealOrders ?? this.kisSchedulerAllowRealOrders,
+      kisSchedulerConfiguredAllowRealOrders:
+          kisSchedulerConfiguredAllowRealOrders ??
+              this.kisSchedulerConfiguredAllowRealOrders,
       kisSchedulerBuyEnabled:
           kisSchedulerBuyEnabled ?? this.kisSchedulerBuyEnabled,
       kisSchedulerSellEnabled:

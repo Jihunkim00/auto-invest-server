@@ -9,6 +9,8 @@ import '../../../models/kis_manual_order_result.dart';
 import '../../../models/order_validation_result.dart';
 import '../../dashboard/dashboard_controller.dart';
 
+const int defaultVisibleKisOrderHistoryCount = 3;
+
 class OrderTicketSection extends StatefulWidget {
   const OrderTicketSection({super.key, required this.controller});
 
@@ -665,6 +667,10 @@ class _KisOrderStatusPanel extends StatelessWidget {
     final history = controller.visibleKisOrders
         .where((order) => order.orderId != detail?.orderId)
         .toList();
+    final visibleHistory =
+        history.take(defaultVisibleKisOrderHistoryCount).toList();
+    final olderHistory =
+        history.skip(defaultVisibleKisOrderHistoryCount).toList();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -788,10 +794,24 @@ class _KisOrderStatusPanel extends StatelessWidget {
                   fontSize: 10,
                   fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
-          for (final order in history)
+          for (final order in visibleHistory)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _RecentKisOrderRow(order: order, controller: controller),
+            ),
+          if (olderHistory.isNotEmpty)
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: Text('Older order history (${olderHistory.length})'),
+              children: [
+                for (final order in olderHistory)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _RecentKisOrderRow(
+                        order: order, controller: controller),
+                  ),
+              ],
             ),
         ],
       ]),
@@ -876,7 +896,10 @@ class _RecentKisOrderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final title = _compactOrderTitle(order);
+    final subtitle = _compactOrderSubtitle(order);
     return InkWell(
+      key: ValueKey('kis-order-history-row-${order.orderId}'),
       onTap: () => controller.selectKisOrder(order.orderId),
       child: Container(
         width: double.infinity,
@@ -890,7 +913,7 @@ class _RecentKisOrderRow extends StatelessWidget {
           Row(children: [
             Expanded(
               child: Text(
-                '${order.symbol} ${order.side.toUpperCase()} ${_nullableQuantity(order.requestedQty)}',
+                title,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                     color: Colors.white70, fontWeight: FontWeight.w700),
@@ -899,25 +922,31 @@ class _RecentKisOrderRow extends StatelessWidget {
             const SizedBox(width: 8),
             _ClearStatusPill(order: order),
           ]),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
           const SizedBox(height: 8),
-          Wrap(spacing: 12, runSpacing: 8, children: [
-            _DataPair(label: 'Order ID', value: order.orderId.toString()),
-            _DataPair(label: 'KIS ODNO', value: order.kisOdno ?? 'n/a'),
-            _DataPair(label: 'Symbol', value: order.symbol),
-            _DataPair(label: 'Side', value: order.side.toUpperCase()),
-            _DataPair(
-                label: 'Qty', value: _nullableQuantity(order.requestedQty)),
-            _DataPair(label: 'internal_status', value: order.internalStatus),
-            _DataPair(
-                label: 'broker_status',
-                value: order.brokerOrderStatus ?? 'n/a'),
-            _DataPair(label: 'created_at', value: order.createdAt ?? 'n/a'),
-            _DataPair(
-                label: 'last_synced_at', value: order.lastSyncedAt ?? 'n/a'),
-            _DataPair(label: 'State', value: _syncState(order)),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _SoftBadge(
+              text: order.side.toUpperCase() == 'SELL' ? 'SELL' : 'BUY',
+              color: order.side.toUpperCase() == 'SELL'
+                  ? Colors.orangeAccent
+                  : Colors.lightBlueAccent,
+            ),
+            _SoftBadge(
+              text: 'FILLED ${_quantity(order.filledQty)}',
+              color: order.filledQty > 0 ? Colors.greenAccent : Colors.white54,
+            ),
+            if (order.brokerOrderStatus?.isNotEmpty == true)
+              _SoftBadge(
+                text: order.brokerOrderStatus!.toUpperCase(),
+                color: Colors.white70,
+              ),
           ]),
-          const SizedBox(height: 8),
-          _OrderTimeline(order: order),
           if (!order.isTerminal && order.isSyncable) ...[
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
@@ -1287,6 +1316,53 @@ String _syncState(KisManualOrderResult order) {
   if (order.isTerminal) return 'terminal';
   if (order.isSyncable) return 'syncable';
   return 'non-syncable';
+}
+
+String _compactOrderTitle(KisManualOrderResult order) {
+  final name = _orderDisplayName(order);
+  final side = order.side.toUpperCase() == 'SELL' ? 'SELL' : 'BUY';
+  final qty = _nullableQuantity(order.requestedQty);
+  return '$name · $side $qty · ${order.clearStatusLabel}';
+}
+
+String _compactOrderSubtitle(KisManualOrderResult order) {
+  return '${order.symbol} · ${_orderIdentifier(order)} · ${_compactKstTime(order.createdAt)}';
+}
+
+String _orderDisplayName(KisManualOrderResult order) {
+  final direct = order.companyName;
+  if (direct != null && direct.trim().isNotEmpty) return direct.trim();
+  final metadata = order.sourceMetadata;
+  final metadataName = metadata['company_name'] ?? metadata['name'];
+  if (metadataName != null && metadataName.toString().trim().isNotEmpty) {
+    return metadataName.toString().trim();
+  }
+  final snapshot = metadata['position_snapshot'];
+  if (snapshot is Map) {
+    final snapshotName = snapshot['company_name'] ?? snapshot['name'];
+    if (snapshotName != null && snapshotName.toString().trim().isNotEmpty) {
+      return snapshotName.toString().trim();
+    }
+  }
+  return order.symbol;
+}
+
+String _orderIdentifier(KisManualOrderResult order) {
+  final odno = order.kisOdno?.trim();
+  if (odno != null && odno.isNotEmpty) return 'ODNO $odno';
+  return 'ODNO n/a';
+}
+
+String _compactKstTime(String? value) {
+  final text = value?.trim();
+  if (text == null || text.isEmpty) return 'KST n/a';
+  final parsed = DateTime.tryParse(text);
+  if (parsed == null) return 'KST $text';
+  final kst =
+      parsed.isUtc ? parsed.toUtc().add(const Duration(hours: 9)) : parsed;
+  final hour = kst.hour.toString().padLeft(2, '0');
+  final minute = kst.minute.toString().padLeft(2, '0');
+  return 'KST $hour:$minute';
 }
 
 String _filterLabel(KisOrderHistoryFilter filter) {

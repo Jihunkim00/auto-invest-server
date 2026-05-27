@@ -358,6 +358,7 @@ class DashboardController extends ChangeNotifier {
   bool botLoading = false;
   bool killSwitchLoading = false;
   bool dryRunLoading = false;
+  bool kisAutomationSettingsLoading = false;
   bool runOnceLoading = false;
   bool manualRunLoading = false;
   String? manualRunSymbol;
@@ -621,6 +622,62 @@ class DashboardController extends ChangeNotifier {
     } finally {
       dryRunLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<ActionResult> updateKisAutomationSettings(
+    Map<String, dynamic> values, {
+    String label = 'KIS automation setting',
+  }) async {
+    final previousSettings = settings;
+    settings = _opsSettingsWithPayload(settings, values);
+    kisSafetyStatus = kisSafetyStatusFromSettings();
+    kisAutomationSettingsLoading = true;
+    error = null;
+    notifyListeners();
+
+    try {
+      await apiClient.updateOpsSettings(values);
+      settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
+      return ActionResult(
+        success: true,
+        message: '$label updated successfully.',
+      );
+    } catch (e) {
+      settings = previousSettings;
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      final message =
+          '$label update failed: ${ApiErrorFormatter.format(e.toString())}';
+      try {
+        settings = await apiClient.getOpsSettings();
+        kisSafetyStatus = kisSafetyStatusFromSettings();
+      } catch (_) {
+        // Keep the rollback state when the backend refresh is unavailable.
+      }
+      error = message;
+      return ActionResult(success: false, message: error!);
+    } finally {
+      kisAutomationSettingsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate() async {
+    try {
+      latestKisSchedulerGuardedSellResult =
+          await apiClient.fetchKisSchedulerGuardedSellStatus();
+      kisSchedulerGuardedSellError = null;
+    } catch (_) {
+      // Settings update should not fail only because status refresh is unavailable.
+    }
+    try {
+      latestKisSchedulerGuardedBuyResult =
+          await apiClient.fetchKisSchedulerGuardedBuyStatus();
+      kisSchedulerGuardedBuyError = null;
+    } catch (_) {
+      // Settings update should not fail only because status refresh is unavailable.
     }
   }
 
@@ -2824,6 +2881,95 @@ class DashboardController extends ChangeNotifier {
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
   }
+}
+
+OpsSettings _opsSettingsWithPayload(
+  OpsSettings settings,
+  Map<String, dynamic> values,
+) {
+  final stopLoss = _payloadBool(
+    values,
+    'kis_limited_auto_stop_loss_enabled',
+    fallbackKey: 'kis_limited_auto_sell_stop_loss_enabled',
+  );
+  final takeProfit = _payloadBool(
+    values,
+    'kis_limited_auto_take_profit_enabled',
+    fallbackKey: 'kis_limited_auto_sell_take_profit_enabled',
+  );
+  return settings.copyWith(
+    schedulerEnabled:
+        _payloadBool(values, 'scheduler_enabled') ?? settings.schedulerEnabled,
+    dryRun: _payloadBool(values, 'dry_run') ?? settings.dryRun,
+    killSwitch: _payloadBool(values, 'kill_switch') ?? settings.killSwitch,
+    kisSchedulerEnabled: _payloadBool(values, 'kis_scheduler_enabled') ??
+        settings.kisSchedulerEnabled,
+    kisSchedulerDryRun: _payloadBool(values, 'kis_scheduler_dry_run') ??
+        settings.kisSchedulerDryRun,
+    kisSchedulerAllowRealOrders:
+        _payloadBool(values, 'kis_scheduler_allow_real_orders') ??
+            settings.kisSchedulerAllowRealOrders,
+    kisSchedulerConfiguredAllowRealOrders:
+        _payloadBool(values, 'kis_scheduler_configured_allow_real_orders') ??
+            settings.kisSchedulerConfiguredAllowRealOrders,
+    kisSchedulerSellEnabled:
+        _payloadBool(values, 'kis_scheduler_sell_enabled') ??
+            settings.kisSchedulerSellEnabled,
+    kisSchedulerBuyEnabled: _payloadBool(values, 'kis_scheduler_buy_enabled') ??
+        settings.kisSchedulerBuyEnabled,
+    kisLiveAutoSellEnabled:
+        _payloadBool(values, 'kis_live_auto_sell_enabled') ??
+            settings.kisLiveAutoSellEnabled,
+    kisLiveAutoBuyEnabled: _payloadBool(values, 'kis_live_auto_buy_enabled') ??
+        settings.kisLiveAutoBuyEnabled,
+    kisLimitedAutoStopLossEnabled:
+        stopLoss ?? settings.kisLimitedAutoStopLossEnabled,
+    kisLimitedAutoSellStopLossEnabled:
+        stopLoss ?? settings.kisLimitedAutoSellStopLossEnabled,
+    kisLimitedAutoTakeProfitEnabled:
+        takeProfit ?? settings.kisLimitedAutoTakeProfitEnabled,
+    kisLimitedAutoSellTakeProfitEnabled:
+        takeProfit ?? settings.kisLimitedAutoSellTakeProfitEnabled,
+    kisLimitedAutoSellAllowTakeProfitTrigger: _payloadBool(
+            values, 'kis_limited_auto_sell_allow_take_profit_trigger') ??
+        settings.kisLimitedAutoSellAllowTakeProfitTrigger,
+    kisLimitedAutoBuyEnabled:
+        _payloadBool(values, 'kis_limited_auto_buy_enabled') ??
+            settings.kisLimitedAutoBuyEnabled,
+    kisLimitedAutoBuyRequiresShadowReview: _payloadBool(
+          values,
+          'kis_limited_auto_buy_requires_shadow_review',
+        ) ??
+        settings.kisLimitedAutoBuyRequiresShadowReview,
+    kisSchedulerAllowLimitedAutoSell:
+        _payloadBool(values, 'kis_scheduler_allow_limited_auto_sell') ??
+            settings.kisSchedulerAllowLimitedAutoSell,
+    kisSchedulerAllowLimitedAutoBuy:
+        _payloadBool(values, 'kis_scheduler_allow_limited_auto_buy') ??
+            settings.kisSchedulerAllowLimitedAutoBuy,
+  );
+}
+
+bool? _payloadBool(
+  Map<String, dynamic> values,
+  String key, {
+  String? fallbackKey,
+}) {
+  if (values.containsKey(key)) return _dynamicBool(values[key]);
+  if (fallbackKey != null && values.containsKey(fallbackKey)) {
+    return _dynamicBool(values[fallbackKey]);
+  }
+  return null;
+}
+
+bool? _dynamicBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
 }
 
 int? _parseOrderTicketQty(String value) {
