@@ -173,12 +173,14 @@ void main() {
       ),
     ));
 
-    expect(find.text('KIS Manual SELL Ticket'), findsWidgets);
+    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
+    expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
+    expect(find.text('KIS Manual SELL Ticket'), findsOneWidget);
     expect(find.text('Prepared Manual Sell'), findsOneWidget);
     expect(find.text('SELL'), findsWidgets);
     expect(find.text('005930'), findsWidgets);
     expect(find.text('Validate Sell'), findsOneWidget);
-    expect(find.text('Submit SELL'), findsOneWidget);
+    expect(find.text('Submit Manual Sell'), findsOneWidget);
     expect(controller.kisLiveConfirmation, isFalse);
 
     controller.dispose();

@@ -157,8 +157,9 @@ void main() {
       home: Scaffold(body: OrderTicketSection(controller: controller)),
     ));
 
+    expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
     expect(find.text('Prepared from exit preflight'), findsOneWidget);
-    expect(find.text('KIS Manual SELL Ticket'), findsWidgets);
+    expect(find.text('KIS Manual SELL Ticket'), findsOneWidget);
     expect(find.text('SELL'), findsWidgets);
     expect(find.text('005930'), findsWidgets);
     expect(find.text('2'), findsWidgets);
@@ -210,10 +211,10 @@ void main() {
       find.text('I understand this may submit a real KIS sell order.'),
       findsOneWidget,
     );
-    expect(find.text('Submit SELL'), findsOneWidget);
+    expect(find.text('Submit Manual Sell'), findsOneWidget);
     expect(controller.canSubmitLiveKisOrder, isTrue);
 
-    await tester.tap(find.text('Submit SELL'));
+    await tester.tap(find.text('Submit Manual Sell'));
     await tester.pumpAndSettle();
 
     expect(find.text('Confirm Submit'), findsWidgets);

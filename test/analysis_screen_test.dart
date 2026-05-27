@@ -44,7 +44,7 @@ void main() {
   });
 
   testWidgets(
-      'Trading exposes only Single Symbol Analyze & Buy for KIS selection',
+      'Trading exposes Single Symbol Analyze & Buy and KIS manual ticket',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
@@ -78,11 +78,13 @@ void main() {
     await tester.pumpWidget(_wrapTrading(controller));
 
     expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
+    expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
+    expect(find.text('Buy'), findsOneWidget);
+    expect(find.text('Sell'), findsOneWidget);
     expect(find.text('KIS Guarded Trading'), findsNothing);
     expect(find.text('KIS Analysis Preview'), findsNothing);
     expect(find.text('KIS Guarded Check Result'), findsNothing);
     expect(find.text('KIS Live Guarded Run Result'), findsNothing);
-    expect(find.text('KIS Live Manual Order'), findsNothing);
     expect(find.text('Watchlist Analyze & Buy'), findsNothing);
     expect(find.text('Position Management'), findsNothing);
     expect(find.text('Scheduled Position Management'), findsNothing);
@@ -118,7 +120,13 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(find.byType(CheckboxListTile), findsOneWidget);
+    expect(
+      find.widgetWithText(
+        CheckboxListTile,
+        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      ),
+      findsOneWidget,
+    );
     expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
     expect(
       find.text(
@@ -789,7 +797,10 @@ Future<void> _submitKisAnalyzeBuy(
   String symbol = '005930',
 }) async {
   await tester.enterText(find.widgetWithText(TextField, 'KR Symbol'), symbol);
-  await tester.tap(find.byType(CheckboxListTile));
+  await tester.tap(find.widgetWithText(
+    CheckboxListTile,
+    'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+  ));
   await tester.pumpAndSettle();
   await tester.tap(find.text('Analyze Symbol & Buy'));
   await tester.pumpAndSettle();

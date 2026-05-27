@@ -57,9 +57,7 @@ class _OrderTicketSectionState extends State<OrderTicketSection> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    final title = controller.hasPreparedKisManualSellTicket
-        ? 'KIS Manual SELL Ticket'
-        : 'KIS Live Manual Order';
+    const title = 'KIS Manual Buy/Sell Ticket';
     _syncTextControllers(controller);
 
     return SectionCard(
@@ -163,7 +161,8 @@ class _KrOrderTicket extends StatelessWidget {
       ]),
       const SizedBox(height: 12),
       _RuntimeSafetyStatusCard(controller: controller),
-      if (controller.hasPreparedKisManualSellTicket) ...[
+      if (controller.hasPreparedKisManualSellTicket ||
+          controller.hasPreparedKisExitSellTicket) ...[
         const SizedBox(height: 12),
         _PreparedManualSellNotice(controller: controller),
       ],
@@ -300,7 +299,7 @@ class _KrOrderTicket extends StatelessWidget {
           label: Text(controller.kisManualSubmitLoading
               ? 'Submitting...'
               : controller.orderTicketSide == 'sell'
-                  ? 'Submit SELL'
+                  ? 'Submit Manual Sell'
                   : 'Submit Live KIS Order'),
         ),
         if (controller.latestKisManualOrder?.isSyncable == true &&
