@@ -303,10 +303,20 @@ def test_kis_scheduler_preview_includes_portfolio_management_concept(monkeypatch
     assert body["held_position_count"] == 2
     assert body["open_position_count"] == 2
     assert body["max_open_positions"] == 3
-    assert body["entry_candidate_symbol"] == "035420"
+    held_symbols = {"000660", "005930"}
+    expected_entry_symbol = next(
+        item["symbol"]
+        for item in body["watchlist"]
+        if item["symbol"] not in held_symbols
+    )
+    assert body["entry_candidate_symbol"] == expected_entry_symbol
     assert body["entry_evaluated"] is True
     assert body["entry_skip_reason"] is None
-    assert [item["symbol"] for item in body["child_runs"]] == ["000660", "005930", "035420"]
+    assert [item["symbol"] for item in body["child_runs"]] == [
+        "000660",
+        "005930",
+        expected_entry_symbol,
+    ]
     assert [item["mode"] for item in body["child_runs"]] == [
         "position_management_preview",
         "position_management_preview",

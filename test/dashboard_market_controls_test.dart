@@ -1120,6 +1120,113 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('KIS order history shows three recent rows and hides older rows',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final orders = [
+      _kisOrder(
+        orderId: 5,
+        status: 'SUBMITTED',
+        symbol: '005935',
+        side: 'buy',
+        qty: 5,
+        companyName: 'Latest Co',
+        kisOdno: '0021629005',
+        createdAt: '2026-05-08T05:05:00Z',
+      ),
+      _kisOrder(
+        orderId: 4,
+        status: 'FILLED',
+        symbol: '091810',
+        side: 'sell',
+        qty: 1,
+        companyName: 'Ceelab',
+        kisOdno: '0021629004',
+        createdAt: '2026-05-08T05:03:00Z',
+      ),
+      _kisOrder(
+        orderId: 3,
+        status: 'SUBMITTED',
+        symbol: '005932',
+        side: 'buy',
+        qty: 2,
+        companyName: null,
+        kisOdno: '0021629003',
+        createdAt: '2026-05-08T04:59:00Z',
+      ),
+      _kisOrder(
+        orderId: 2,
+        status: 'CANCELED',
+        symbol: '005931',
+        side: 'sell',
+        qty: 4,
+        companyName: 'Second Older',
+        kisOdno: '0021629002',
+        createdAt: '2026-05-08T04:45:00Z',
+      ),
+      _kisOrder(
+        orderId: 1,
+        status: 'REJECTED_BY_SAFETY_GATE',
+        symbol: '000001',
+        side: 'sell',
+        qty: 7,
+        companyName: 'Hidden Older',
+        kisOdno: '0021629001',
+        createdAt: '2026-05-08T04:30:00Z',
+      ),
+    ];
+    final api = _FakeApiClient(orders: orders);
+    final controller = DashboardController(api, autoload: false)
+      ..latestKisManualOrder = orders.first
+      ..selectedKisOrder = orders.first
+      ..kisOrders = orders;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
+    expect(find.text('ORDER HISTORY'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('kis-order-history-row-4')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('kis-order-history-row-3')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('kis-order-history-row-2')), findsOneWidget);
+    expect(find.byKey(const ValueKey('kis-order-history-row-1')), findsNothing);
+    expect(find.text('Ceelab · SELL 1 · FILLED'), findsOneWidget);
+    expect(find.text('091810 · ODNO 0021629004 · KST 14:03'), findsOneWidget);
+    expect(find.text('005932 · BUY 2 · SUBMITTED'), findsOneWidget);
+    expect(find.textContaining('ODNO 0021629003'), findsOneWidget);
+    expect(find.text('Older order history (1)'), findsOneWidget);
+    expect(find.text('Hidden Older · SELL 7 · REJECTED'), findsNothing);
+
+    await tester.tap(find.text('Older order history (1)'));
+    await tester.pumpAndSettle();
+
+    expect(
+        find.byKey(const ValueKey('kis-order-history-row-1')), findsOneWidget);
+    expect(find.text('Hidden Older · SELL 7 · REJECTED'), findsOneWidget);
+
+    await tester.tap(find.text('Older order history (1)'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('kis-order-history-row-1')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('kis-order-history-row-4')));
+    await tester.pumpAndSettle();
+
+    expect(api.fetchKisOrderDetailCalls, 1);
+    expect(controller.selectedKisOrder?.orderId, 4);
+
+    controller.dispose();
+  });
+
   test('duplicate KIS cancel requests are ignored while in progress', () async {
     final openOrder = _kisOrder(orderId: 1, status: 'SUBMITTED');
     final canceledOrder = _kisOrder(orderId: 1, status: 'CANCELED');
@@ -1928,18 +2035,23 @@ KisManualOrderResult _kisOrder({
   required String status,
   String? kisOdno = '0001234567',
   String createdAt = '2026-05-08T00:00:00',
+  String symbol = '005930',
+  String side = 'buy',
+  double qty = 3,
+  String? companyName,
 }) {
   final internalStatus = status.toUpperCase();
   return KisManualOrderResult.fromJson({
     'order_id': orderId,
     'broker': 'kis',
     'market': 'KR',
-    'symbol': '005930',
-    'side': 'buy',
+    'symbol': symbol,
+    'company_name': companyName,
+    'side': side,
     'order_type': 'market',
-    'requested_qty': 3,
-    'filled_qty': internalStatus == 'FILLED' ? 3 : 0,
-    'remaining_qty': internalStatus == 'FILLED' ? 0 : 3,
+    'requested_qty': qty,
+    'filled_qty': internalStatus == 'FILLED' ? qty : 0,
+    'remaining_qty': internalStatus == 'FILLED' ? 0 : qty,
     'avg_fill_price': internalStatus == 'FILLED' ? 72000 : null,
     'kis_odno': kisOdno,
     'internal_status': internalStatus,

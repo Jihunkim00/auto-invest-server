@@ -956,10 +956,18 @@ class ApiClient {
         kisLiveAutoMaxNotionalPct:
             _readNullableDouble(j['kis_live_auto_max_notional_pct']) ?? 0.03,
         kisLimitedAutoSellEnabled: j['kis_limited_auto_sell_enabled'] == true,
+        kisLimitedAutoStopLossEnabled:
+            j['kis_limited_auto_stop_loss_enabled'] == true ||
+                j['kis_limited_auto_sell_stop_loss_enabled'] == true,
+        kisLimitedAutoTakeProfitEnabled:
+            j['kis_limited_auto_take_profit_enabled'] == true ||
+                j['kis_limited_auto_sell_take_profit_enabled'] == true,
         kisLimitedAutoSellStopLossEnabled:
-            j['kis_limited_auto_sell_stop_loss_enabled'] == true,
+            j['kis_limited_auto_stop_loss_enabled'] == true ||
+                j['kis_limited_auto_sell_stop_loss_enabled'] == true,
         kisLimitedAutoSellTakeProfitEnabled:
-            j['kis_limited_auto_sell_take_profit_enabled'] == true,
+            j['kis_limited_auto_take_profit_enabled'] == true ||
+                j['kis_limited_auto_sell_take_profit_enabled'] == true,
         kisLimitedAutoSellRequiresQueueReview:
             j['kis_limited_auto_sell_requires_queue_review'] != false,
         kisLimitedAutoSellMaxOrdersPerDay:
@@ -1011,9 +1019,13 @@ class ApiClient {
                 .toString(),
         kisLimitedAutoBuyAllowGptHardBlock:
             j['kis_limited_auto_buy_allow_gpt_hard_block'] == true,
+        kisSchedulerEnabled: j['kis_scheduler_enabled'] == true,
+        kisSchedulerDryRun: j['kis_scheduler_dry_run'] != false,
         kisSchedulerLiveEnabled: j['kis_scheduler_live_enabled'] == true,
         kisSchedulerAllowRealOrders:
             j['kis_scheduler_allow_real_orders'] == true,
+        kisSchedulerConfiguredAllowRealOrders:
+            j['kis_scheduler_configured_allow_real_orders'] == true,
         kisSchedulerBuyEnabled: j['kis_scheduler_buy_enabled'] == true,
         kisSchedulerSellEnabled: j['kis_scheduler_sell_enabled'] == true,
         kisSchedulerAllowLimitedAutoBuy:
