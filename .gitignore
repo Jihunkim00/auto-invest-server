@@ -14,3 +14,17 @@ test_auto_invest.db
 *test*.db
 .pytest_tmp/
 .pytest_run_*/
+Add-Content .gitignore "`nconfig/watchlist_kr.backup*.yaml"
+.pytest_runs/backend_pr33c/test_balanced_update_aborts_wh0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_dedupes_a0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_dedupes_a0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_does_not_0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_does_not_0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_injects_r0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_injects_r0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_reports_r0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_reports_r0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_uses_curr0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_uses_curr0/watchlist_kr.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_writes_ex0/watchlist_kr.backup.20260527_145913.yaml
+.pytest_runs/backend_pr33c/test_balanced_update_writes_ex0/watchlist_kr.yaml
