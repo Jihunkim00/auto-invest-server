@@ -37,17 +37,15 @@ class TradingScreen extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 isKis
-                    ? 'Selected broker: KIS live. Analyze the selected KR symbol only.'
+                    ? 'Selected broker: KIS live. Analyze the selected KR symbol or use manual BUY/SELL ticket.'
                     : 'Selected broker: Alpaca paper. Analyze and paper-buy one US symbol.',
                 style: const TextStyle(color: Colors.white70),
               ),
               const SizedBox(height: 12),
               if (isKis) ...[
-                if (controller.hasPreparedKisManualSellTicket) ...[
-                  OrderTicketSection(controller: controller),
-                  const SizedBox(height: 12),
-                ],
                 _KisAnalyzeAndBuyCard(controller: controller),
+                const SizedBox(height: 12),
+                OrderTicketSection(controller: controller),
               ] else
                 ManualTradingRunSection(controller: controller),
             ],
