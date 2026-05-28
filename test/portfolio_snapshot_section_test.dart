@@ -197,7 +197,7 @@ void main() {
     await tester.tap(find.text('005930 · Samsung Electronics'));
     await tester.pumpAndSettle();
 
-    expect(find.text('HOLD'), findsOneWidget);
+    expect(find.text('HOLD'), findsWidgets);
     expect(find.text('Prepare Manual Sell'), findsNothing);
 
     controller.dispose();

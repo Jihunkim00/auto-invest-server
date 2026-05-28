@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
+import '../../models/automation_runtime_monitor.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
@@ -25,6 +26,7 @@ import '../../models/kis_scheduler_guarded_sell_review.dart';
 import '../../models/kis_scheduler_readiness.dart';
 import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
+import '../../models/log_items.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/managed_position.dart';
 import '../../models/manual_trading_run_result.dart';
@@ -103,6 +105,15 @@ class DashboardController extends ChangeNotifier {
     minScoreGap: 3,
   );
   SchedulerStatus schedulerStatus = SchedulerStatus.safeDefault();
+  AutomationRuntimeMonitor? automationRuntimeMonitor;
+  bool automationRuntimeMonitorLoading = false;
+  String? automationRuntimeMonitorError;
+  List<TradingLogItem> automationRecentRuns = const [];
+  List<OrderLogItem> automationRecentOrders = const [];
+  List<SignalLogItem> automationRecentSignals = const [];
+  List<PortfolioPositionManagementItem> portfolioManagementItems = const [];
+  bool portfolioManagementLoading = false;
+  String? portfolioManagementError;
   bool opsProductionReadinessLoading = false;
   OpsProductionReadiness? latestOpsProductionReadiness;
   String? opsProductionReadinessError;
@@ -318,6 +329,26 @@ class DashboardController extends ChangeNotifier {
           ? krPortfolioSummary
           : usPortfolioSummary;
 
+  List<PortfolioPositionManagementItem> get selectedPortfolioManagementItems =>
+      portfolioManagementItemsForMarket(selectedPortfolioMarket);
+
+  List<PortfolioPositionManagementItem> portfolioManagementItemsForMarket(
+    PortfolioMarket market,
+  ) {
+    final marketCode = market == PortfolioMarket.kr ? 'KR' : 'US';
+    final existing = portfolioManagementItems
+        .where((item) => item.market.toUpperCase() == marketCode)
+        .toList();
+    if (existing.isNotEmpty) return existing;
+
+    final items = _buildPortfolioManagementItemsFor(
+      market == PortfolioMarket.kr ? krPortfolioSummary : usPortfolioSummary,
+      isKr: market == PortfolioMarket.kr,
+    );
+    items.sort(PortfolioPositionManagementItem.comparePriority);
+    return items;
+  }
+
   bool get selectedPortfolioUnavailable =>
       selectedPortfolioMarket == PortfolioMarket.kr && krPortfolioUnavailable;
 
@@ -376,6 +407,7 @@ class DashboardController extends ChangeNotifier {
       await refreshKisSchedulerStatus(silent: true);
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
+      _rebuildPortfolioManagementItems();
       try {
         final latestRun = await apiClient.fetchLatestWatchlistRunResult();
         if (latestRun == null) {
@@ -398,10 +430,177 @@ class DashboardController extends ChangeNotifier {
             : 'Backend latest watchlist run unavailable; keeping current result.';
       }
       recentRuns = await apiClient.getRecentTradingRuns();
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
     } catch (e) {
       error = e.toString();
     } finally {
       loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAllOperationsOverview() async {
+    final monitor = await refreshAutomationRuntimeMonitor(silent: true);
+    final portfolio = await refreshPortfolioManagement(silent: true);
+    notifyListeners();
+    if (!monitor.success) return monitor;
+    if (!portfolio.success) return portfolio;
+    return const ActionResult(
+      success: true,
+      message: 'Operations overview refreshed.',
+    );
+  }
+
+  Future<ActionResult> refreshAutomationRuntimeMonitor({
+    bool silent = false,
+  }) async {
+    if (automationRuntimeMonitorLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Automation runtime monitor refresh already in progress.',
+      );
+    }
+
+    automationRuntimeMonitorLoading = true;
+    automationRuntimeMonitorError = null;
+    if (!silent) notifyListeners();
+
+    final warnings = <String>[];
+    var nextSettings = settings;
+    var nextSchedulerStatus = schedulerStatus;
+    var nextKisSchedulerStatus = kisSchedulerStatus;
+    var nextRuns = automationRecentRuns;
+    var nextOrders = automationRecentOrders;
+    var nextSignals = automationRecentSignals;
+    var nextGuardedSell = latestKisSchedulerGuardedSellResult;
+    var nextGuardedBuy = latestKisSchedulerGuardedBuyResult;
+
+    try {
+      nextSettings = await apiClient.getOpsSettings();
+      settings = nextSettings;
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+    } catch (e) {
+      warnings.add('ops settings unavailable');
+    }
+
+    try {
+      nextSchedulerStatus = await apiClient.fetchSchedulerStatus();
+      schedulerStatus = nextSchedulerStatus;
+    } catch (e) {
+      warnings.add('scheduler status unavailable');
+    }
+
+    try {
+      nextKisSchedulerStatus = await apiClient.fetchKisSchedulerStatus();
+      kisSchedulerStatus = nextKisSchedulerStatus;
+      kisSchedulerStatusLoaded = true;
+      kisSchedulerStatusError = null;
+    } catch (e) {
+      warnings.add('KIS scheduler status unavailable');
+      kisSchedulerStatusError = ApiErrorFormatter.format(e.toString());
+    }
+
+    try {
+      nextRuns = await apiClient.fetchRecentRuns(limit: 50);
+      automationRecentRuns = nextRuns;
+      recentRuns = nextRuns.map(_tradingRunFromLog).toList();
+    } catch (e) {
+      warnings.add('recent runs unavailable');
+    }
+
+    try {
+      nextOrders = await apiClient.fetchRecentOrders(limit: 50);
+      automationRecentOrders = nextOrders;
+    } catch (e) {
+      warnings.add('recent orders unavailable');
+    }
+
+    try {
+      nextSignals = await apiClient.fetchRecentSignals(limit: 50);
+      automationRecentSignals = nextSignals;
+    } catch (e) {
+      warnings.add('recent signals unavailable');
+    }
+
+    try {
+      nextGuardedSell = await apiClient.fetchKisSchedulerGuardedSellStatus();
+      latestKisSchedulerGuardedSellResult = nextGuardedSell;
+      kisSchedulerGuardedSellError = null;
+    } catch (e) {
+      warnings.add('KIS guarded sell status unavailable');
+      kisSchedulerGuardedSellError = ApiErrorFormatter.format(e.toString());
+    }
+
+    try {
+      nextGuardedBuy = await apiClient.fetchKisSchedulerGuardedBuyStatus();
+      latestKisSchedulerGuardedBuyResult = nextGuardedBuy;
+      kisSchedulerGuardedBuyError = null;
+    } catch (e) {
+      warnings.add('KIS guarded buy status unavailable');
+      kisSchedulerGuardedBuyError = ApiErrorFormatter.format(e.toString());
+    }
+
+    automationRuntimeMonitor = AutomationRuntimeMonitor.fromSources(
+      settings: nextSettings,
+      schedulerStatus: nextSchedulerStatus,
+      selectedProvider: selectedBrokerLabel,
+      currentLocalTime: _localTimestampNow(),
+      lastRefreshTime: _localTimestampNow(),
+      kisSchedulerStatus: nextKisSchedulerStatus,
+      guardedSell: nextGuardedSell,
+      guardedBuy: nextGuardedBuy,
+      runs: nextRuns,
+      orders: nextOrders,
+      signals: nextSignals,
+      warnings: warnings,
+    );
+    automationRuntimeMonitorError =
+        warnings.isEmpty ? null : warnings.join(' | ');
+    automationRuntimeMonitorLoading = false;
+    notifyListeners();
+
+    if (warnings.isNotEmpty) {
+      return ActionResult(
+        success: false,
+        message: 'Automation monitor refreshed with partial data.',
+      );
+    }
+    return const ActionResult(
+      success: true,
+      message: 'Automation monitor refreshed.',
+    );
+  }
+
+  Future<ActionResult> refreshPortfolioManagement({
+    bool silent = false,
+  }) async {
+    if (portfolioManagementLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Portfolio management refresh already in progress.',
+      );
+    }
+
+    portfolioManagementLoading = true;
+    portfolioManagementError = null;
+    if (!silent) notifyListeners();
+    try {
+      await _refreshPortfolioSummaries();
+      _rebuildPortfolioManagementItems();
+      return const ActionResult(
+        success: true,
+        message: 'Portfolio management refreshed.',
+      );
+    } catch (e) {
+      portfolioManagementError =
+          'Portfolio management unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      _rebuildPortfolioManagementItems();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(portfolioManagementError!),
+      );
+    } finally {
+      portfolioManagementLoading = false;
       notifyListeners();
     }
   }
@@ -2631,6 +2830,47 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  void _rebuildPortfolioManagementItems() {
+    final items = <PortfolioPositionManagementItem>[
+      ..._buildPortfolioManagementItemsFor(usPortfolioSummary, isKr: false),
+      ..._buildPortfolioManagementItemsFor(krPortfolioSummary, isKr: true),
+    ]..sort(PortfolioPositionManagementItem.comparePriority);
+    portfolioManagementItems = items;
+  }
+
+  List<PortfolioPositionManagementItem> _buildPortfolioManagementItemsFor(
+    PortfolioSummary summary, {
+    required bool isKr,
+  }) {
+    return [
+      for (final position in summary.positions)
+        PortfolioPositionManagementItem.fromPosition(
+          position: position,
+          managedPosition:
+              isKr ? kisManagedPositionForSymbol(position.symbol) : null,
+          isKr: isKr,
+        ),
+    ];
+  }
+
+  void _rebuildAutomationRuntimeMonitorFromCurrentState() {
+    automationRuntimeMonitor = AutomationRuntimeMonitor.fromSources(
+      settings: settings,
+      schedulerStatus: schedulerStatus,
+      selectedProvider: selectedBrokerLabel,
+      currentLocalTime: _localTimestampNow(),
+      lastRefreshTime:
+          automationRuntimeMonitor?.global.lastRefreshTime ?? 'Not refreshed',
+      kisSchedulerStatus: kisSchedulerStatus,
+      guardedSell: latestKisSchedulerGuardedSellResult,
+      guardedBuy: latestKisSchedulerGuardedBuyResult,
+      runs: automationRecentRuns,
+      orders: automationRecentOrders,
+      signals: automationRecentSignals,
+      warnings: automationRuntimeMonitor?.warnings ?? const [],
+    );
+  }
+
   void setSelectedGateLevel(int gateLevel) {
     selectedGateLevel = _safeGateLevel(gateLevel);
     notifyListeners();
@@ -3028,6 +3268,25 @@ DateTime _createdAtForSort(KisManualOrderResult order) {
 
 bool _isPollableKisOrder(KisManualOrderResult? order) {
   return order != null && order.isSyncable && !order.isTerminal;
+}
+
+TradingRun _tradingRunFromLog(TradingLogItem item) {
+  return TradingRun(
+    timestamp: item.createdAt,
+    triggerSource: item.triggerSource,
+    symbol: item.symbol,
+    result: item.result,
+    reason: item.reason,
+    bestScore: 0,
+    orderId: item.relatedOrderId,
+    action: item.action,
+    gateLevel: item.gateLevel,
+  );
+}
+
+String _localTimestampNow() {
+  final now = DateTime.now();
+  return now.toIso8601String();
 }
 
 Map<String, dynamic> _exitPreflightSourceMetadata(

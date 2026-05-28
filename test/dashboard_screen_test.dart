@@ -5,10 +5,120 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
+import 'package:auto_invest_dashboard/models/automation_runtime_monitor.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
+import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
+import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
+import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 
 class FakeKisApiClient extends ApiClient {
+  int fetchRecentRunsCalls = 0;
+
+  @override
+  Future<OpsSettings> getOpsSettings() async {
+    return const OpsSettings(
+      schedulerEnabled: true,
+      botEnabled: true,
+      dryRun: true,
+      killSwitch: false,
+      brokerMode: 'Paper',
+      defaultGateLevel: 2,
+      maxDailyTrades: 5,
+      maxDailyEntries: 2,
+      minEntryScore: 65,
+      minScoreGap: 3,
+    );
+  }
+
+  @override
+  Future<SchedulerStatus> fetchSchedulerStatus() async {
+    return const SchedulerStatus(
+      runtimeSchedulerEnabled: true,
+      us: MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'America/New_York',
+        slots: [],
+      ),
+      kr: MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'Asia/Seoul',
+        slots: [],
+        previewOnly: true,
+        realOrdersAllowed: false,
+      ),
+    );
+  }
+
+  @override
+  Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
+    return KisSchedulerSimulationStatus.safeDefault();
+  }
+
+  @override
+  Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
+    fetchRecentRunsCalls += 1;
+    return const [
+      TradingLogItem(
+        id: 1,
+        runKey: 'alpaca-run',
+        provider: 'alpaca',
+        market: 'US',
+        symbol: 'AAPL',
+        triggerSource: 'scheduler',
+        mode: 'watchlist_run',
+        action: 'hold',
+        result: 'skipped',
+        reason: 'weak_final_score_gap',
+        relatedOrderId: null,
+        createdAt: '2026-05-28T01:00:00Z',
+        gateLevel: 2,
+      ),
+    ];
+  }
+
+  @override
+  Future<List<OrderLogItem>> fetchRecentOrders({int limit = 20}) async {
+    return const [];
+  }
+
+  @override
+  Future<List<SignalLogItem>> fetchRecentSignals({int limit = 20}) async {
+    return const [];
+  }
+
+  @override
+  Future<KisSchedulerGuardedSellResult>
+      fetchKisSchedulerGuardedSellStatus() async {
+    return KisSchedulerGuardedSellResult.fromJson({
+      'status': 'ok',
+      'result': 'blocked',
+      'action': 'sell',
+      'reason': 'market_closed',
+      'trigger': 'take_profit',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    });
+  }
+
+  @override
+  Future<KisSchedulerGuardedBuyResult>
+      fetchKisSchedulerGuardedBuyStatus() async {
+    return KisSchedulerGuardedBuyResult.fromJson({
+      'status': 'ok',
+      'result': 'blocked',
+      'action': 'hold',
+      'reason': 'scheduler_buy_disabled',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    });
+  }
+
   @override
   Future<ManualSellPreparation> prepareKisManualSell(String symbol) async {
     return const ManualSellPreparation(
@@ -69,6 +179,68 @@ const _krManagedPosition = ManagedPosition(
 );
 
 void main() {
+  testWidgets('Automation Runtime Monitor renders global safety',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor()
+      ..selectedProvider = SelectedProvider.alpaca;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(find.text('Automation Runtime Monitor'), findsOneWidget);
+    expect(find.text('Global Safety'), findsOneWidget);
+    expect(find.text('DRY RUN ON'), findsOneWidget);
+    expect(find.text('Kill Switch OFF'), findsOneWidget);
+    expect(find.text('Scheduler ON'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Automation Runtime Monitor renders Alpaca and KIS status',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor()
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(find.text('Alpaca Paper Scheduler'), findsOneWidget);
+    expect(find.textContaining('weak_final_score_gap'), findsWidgets);
+    expect(find.text('KIS Live Scheduler'), findsOneWidget);
+    expect(find.text('TAKE_PROFIT'), findsWidgets);
+    expect(find.text('REAL ORDER SUBMITTED'), findsOneWidget);
+    expect(find.text('false'), findsWidgets);
+    expect(find.textContaining('market_closed'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Automation Runtime Monitor refresh button calls controller path',
+      (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await tester.tap(find.byKey(const ValueKey('automation-runtime-refresh')));
+    await tester.pumpAndSettle();
+
+    expect(api.fetchRecentRunsCalls, 1);
+    expect(controller.automationRuntimeMonitor?.alpaca.lastResult, 'skipped');
+
+    controller.dispose();
+  });
+
   testWidgets('Home dashboard includes Portfolio Snapshot and holdings',
       (tester) async {
     final controller = DashboardController(FakeKisApiClient(), autoload: false)
@@ -225,3 +397,110 @@ const _krSummary = PortfolioSummary(
   ],
   pendingOrders: [],
 );
+
+AutomationRuntimeMonitor _runtimeMonitor() {
+  return AutomationRuntimeMonitor.fromSources(
+    settings: const OpsSettings(
+      schedulerEnabled: true,
+      botEnabled: true,
+      dryRun: true,
+      killSwitch: false,
+      brokerMode: 'Paper',
+      defaultGateLevel: 2,
+      maxDailyTrades: 5,
+      maxDailyEntries: 2,
+      minEntryScore: 65,
+      minScoreGap: 3,
+      kisSchedulerEnabled: true,
+      kisSchedulerDryRun: true,
+      kisSchedulerAllowRealOrders: false,
+      kisSchedulerBuyEnabled: false,
+      kisSchedulerSellEnabled: true,
+      kisLiveAutoBuyEnabled: false,
+      kisLiveAutoSellEnabled: false,
+      kisLimitedAutoStopLossEnabled: true,
+      kisLimitedAutoTakeProfitEnabled: true,
+    ),
+    schedulerStatus: const SchedulerStatus(
+      runtimeSchedulerEnabled: true,
+      us: MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'America/New_York',
+        slots: [],
+      ),
+      kr: MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'Asia/Seoul',
+        slots: [],
+        previewOnly: true,
+        realOrdersAllowed: false,
+      ),
+    ),
+    selectedProvider: 'KIS / KR',
+    currentLocalTime: '2026-05-28T12:00:00+09:00',
+    lastRefreshTime: '2026-05-28T12:01:00+09:00',
+    kisSchedulerStatus: KisSchedulerSimulationStatus.safeDefault(),
+    guardedSell: KisSchedulerGuardedSellResult.fromJson({
+      'status': 'ok',
+      'result': 'blocked',
+      'action': 'sell',
+      'reason': 'market_closed',
+      'primary_block_reason': 'market_closed',
+      'trigger': 'take_profit',
+      'symbol': '005930',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'daily_limit': {
+        'today_submitted_count': 0,
+        'max_live_orders_per_day': 2,
+        'remaining': 2,
+      },
+      'created_at': '2026-05-28T02:30:00Z',
+    }),
+    guardedBuy: KisSchedulerGuardedBuyResult.fromJson({
+      'status': 'ok',
+      'result': 'blocked',
+      'action': 'hold',
+      'reason': 'scheduler_buy_disabled',
+      'primary_block_reason': 'scheduler_buy_disabled',
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'created_at': '2026-05-28T02:31:00Z',
+    }),
+    runs: const [
+      TradingLogItem(
+        id: 1,
+        runKey: 'alpaca-run',
+        provider: 'alpaca',
+        market: 'US',
+        symbol: 'AAPL',
+        triggerSource: 'scheduler',
+        mode: 'watchlist_run',
+        action: 'hold',
+        result: 'skipped',
+        reason: 'weak_final_score_gap',
+        relatedOrderId: null,
+        createdAt: '2026-05-28T01:00:00Z',
+        gateLevel: 2,
+      ),
+      TradingLogItem(
+        id: 2,
+        runKey: 'kis-sell',
+        provider: 'kis',
+        market: 'KR',
+        symbol: '005930',
+        triggerSource: 'scheduler_guarded_sell',
+        mode: 'kis_scheduler_guarded_sell',
+        action: 'sell',
+        result: 'blocked',
+        reason: 'market_closed',
+        relatedOrderId: null,
+        createdAt: '2026-05-28T02:30:00Z',
+        gateLevel: 2,
+        exitTrigger: 'take_profit',
+      ),
+    ],
+  );
+}

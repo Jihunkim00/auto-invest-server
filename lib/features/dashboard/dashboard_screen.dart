@@ -5,6 +5,7 @@ import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
+import 'widgets/automation_runtime_monitor_card.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/portfolio_snapshot_section.dart';
 
@@ -53,6 +54,8 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
                 _SafetySummary(controller: controller),
+                const SizedBox(height: 12),
+                AutomationRuntimeMonitorCard(controller: controller),
                 const SizedBox(height: 12),
                 PortfolioSnapshotSection(
                   controller: controller,
