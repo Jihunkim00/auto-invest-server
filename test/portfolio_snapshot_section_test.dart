@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/portfolio_snapshot_section.dart';
+import 'package:auto_invest_dashboard/models/automation_runtime_monitor.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 
@@ -111,8 +112,7 @@ void main() {
     expect(find.text('+37.00%'), findsNothing);
     expect(find.text('0.00%'), findsNothing);
 
-    await tester.tap(find.textContaining('091810 ·'));
-    await tester.pumpAndSettle();
+    await _expandPositionCard(tester, '091810');
     expect(find.text('₩9,830'), findsWidgets);
 
     controller.dispose();
@@ -169,8 +169,7 @@ void main() {
     expect(find.text('Technical Snapshot'), findsNothing);
     expect(find.textContaining('raw_marker'), findsNothing);
 
-    await tester.tap(find.text('005930 · Samsung Electronics'));
-    await tester.pumpAndSettle();
+    await _expandPositionCard(tester, '005930');
 
     expect(find.text('Technical Snapshot'), findsOneWidget);
     expect(find.text('SELL SCORE'), findsOneWidget);
@@ -178,6 +177,121 @@ void main() {
     expect(find.text('Prepare Manual Sell'), findsOneWidget);
     expect(find.text('Developer Raw Payload'), findsOneWidget);
     expect(find.textContaining('raw_marker'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Portfolio position card shows latest related event',
+      (tester) async {
+    final now = DateTime.now().toIso8601String();
+    final controller = await _pumpSnapshot(
+      tester,
+      krSummary: _krSummary,
+      managedPositions: [_takeProfitManagedPosition],
+      managementMode: true,
+      monitor: _monitorWithEvents([
+        AutomationEvent(
+          id: 'trigger-005930',
+          timestamp: now,
+          provider: 'kis',
+          market: 'KR',
+          category: 'trigger_detected',
+          severity: 'warning',
+          symbol: '005930',
+          companyName: 'Samsung Electronics',
+          action: 'sell',
+          trigger: 'take_profit',
+          result: 'blocked',
+          reason: 'market_closed',
+          blockReason: 'market_closed',
+          orderId: null,
+          brokerOrderId: null,
+          kisOdno: null,
+          realOrderSubmitted: false,
+          brokerSubmitCalled: false,
+          manualSubmitCalled: false,
+          source: 'kis_scheduler_guarded_sell',
+          mode: 'kis_scheduler_guarded_sell',
+          triggerSource: 'scheduler',
+          relatedRunId: 'run-1',
+          relatedSignalId: null,
+          relatedOrderId: null,
+          developerPayload: const {},
+        ),
+      ]),
+    );
+
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    await _expandPositionCard(tester, '005930');
+
+    expect(find.text('Latest Event'), findsOneWidget);
+    expect(find.text('TAKE_PROFIT detected'), findsOneWidget);
+    expect(find.text('Trigger Today'), findsOneWidget);
+    expect(find.text('yes'), findsWidgets);
+    expect(find.text('Block Reason'), findsOneWidget);
+    expect(find.text('market_closed'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Portfolio position card warns when filled sell order conflicts with holdings',
+      (tester) async {
+    final controller = await _pumpSnapshot(
+      tester,
+      krSummary: _krSummary,
+      managedPositions: [_sellReadyManagedPosition],
+      managementMode: true,
+      monitor: _monitorWithEvents(const [
+        AutomationEvent(
+          id: 'filled-005930',
+          timestamp: '2026-05-28T02:00:00Z',
+          provider: 'kis',
+          market: 'KR',
+          category: 'order_filled',
+          severity: 'success',
+          symbol: '005930',
+          companyName: 'Samsung Electronics',
+          action: 'sell',
+          trigger: 'take_profit',
+          result: 'FILLED',
+          reason: 'FILLED',
+          blockReason: null,
+          orderId: '77',
+          brokerOrderId: null,
+          kisOdno: '0021651600',
+          realOrderSubmitted: true,
+          brokerSubmitCalled: true,
+          manualSubmitCalled: false,
+          source: 'kis_scheduler_guarded_sell',
+          mode: 'kis_scheduler_guarded_sell',
+          triggerSource: 'scheduler',
+          relatedRunId: null,
+          relatedSignalId: null,
+          relatedOrderId: '77',
+          developerPayload: {},
+        ),
+      ]),
+    );
+
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    await _expandPositionCard(tester, '005930');
+
+    expect(find.text('Position/order state may need sync'), findsOneWidget);
+    expect(
+      find.text(
+          'Latest sell order appears filled, but the position still shows holdings.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('refresh-position-sync-005930')),
+        findsOneWidget);
+    expect(find.text('Refresh Positions'), findsOneWidget);
 
     controller.dispose();
   });
@@ -194,8 +308,7 @@ void main() {
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('005930 · Samsung Electronics'));
-    await tester.pumpAndSettle();
+    await _expandPositionCard(tester, '005930');
 
     expect(find.text('HOLD'), findsWidgets);
     expect(find.text('Prepare Manual Sell'), findsNothing);
@@ -265,6 +378,7 @@ Future<DashboardController> _pumpSnapshot(
   PortfolioSummary krSummary = _krSummary,
   List<ManagedPosition> managedPositions = const [],
   bool managementMode = false,
+  AutomationRuntimeMonitor? monitor,
 }) async {
   final controller = DashboardController(
     _NoopApiClient(usSummary: usSummary, krSummary: krSummary),
@@ -272,7 +386,8 @@ Future<DashboardController> _pumpSnapshot(
   )
     ..usPortfolioSummary = usSummary
     ..krPortfolioSummary = krSummary
-    ..kisManagedPositions = managedPositions;
+    ..kisManagedPositions = managedPositions
+    ..automationRuntimeMonitor = monitor;
 
   await tester.pumpWidget(MaterialApp(
     theme: ThemeData.dark(),
@@ -289,6 +404,87 @@ Future<DashboardController> _pumpSnapshot(
     ),
   ));
   return controller;
+}
+
+Future<void> _expandPositionCard(WidgetTester tester, String symbol) async {
+  final card = find.byKey(ValueKey('portfolio-position-card-$symbol'));
+  expect(card, findsOneWidget);
+  await tester.ensureVisible(card);
+  await tester.pumpAndSettle();
+  await tester.tap(card);
+  await tester.pumpAndSettle();
+}
+
+AutomationRuntimeMonitor _monitorWithEvents(List<AutomationEvent> events) {
+  return AutomationRuntimeMonitor(
+    readOnly: true,
+    global: const GlobalAutomationStatus(
+      botEnabled: false,
+      dryRun: true,
+      killSwitch: false,
+      schedulerEnabled: false,
+      selectedProvider: 'KIS / KR',
+      currentLocalTime: '2026-05-28T12:00:00+09:00',
+      lastRefreshTime: '2026-05-28T12:01:00+09:00',
+    ),
+    alpaca: const ProviderAutomationStatus(
+      provider: 'Alpaca',
+      market: 'US',
+      schedulerEnabled: false,
+      botEnabled: false,
+      dryRun: true,
+      paperMode: true,
+      lastRunAt: null,
+      lastResult: null,
+      lastSymbol: null,
+      lastAction: null,
+      lastBlockReason: null,
+      orderSubmitted: false,
+      orderId: null,
+      mode: '',
+      lastSingleRunAt: null,
+      lastSingleSymbol: null,
+      lastSingleAction: null,
+      lastSingleResult: null,
+      lastSingleBlockReason: null,
+      todayPaperOrderCount: 0,
+    ),
+    kis: const KisAutomationStatus(
+      schedulerEnabled: false,
+      schedulerDryRun: true,
+      schedulerAllowRealOrders: false,
+      schedulerBuyEnabled: false,
+      schedulerSellEnabled: false,
+      liveAutoBuyEnabled: false,
+      liveAutoSellEnabled: false,
+      stopLossEnabled: false,
+      takeProfitEnabled: false,
+      limitedAutoBuyEnabled: false,
+      schedulerStatus: null,
+      guardedSell: null,
+      guardedBuy: null,
+      lastSellRunAt: null,
+      lastBuyRunAt: null,
+      lastSellRunResult: null,
+      lastBuyRunResult: null,
+      lastTriggerDetected: 'none',
+      lastBlockReason: null,
+      realOrderSubmitted: false,
+      brokerSubmitCalled: false,
+      manualSubmitCalled: false,
+      kisOdno: null,
+      orderId: null,
+      todaySubmittedCount: null,
+      dailyLimitMax: null,
+      dailyLimitRemaining: null,
+    ),
+    lastRuns: const [],
+    lastOrders: const [],
+    lastSignals: const [],
+    events: events,
+    warnings: const [],
+    diagnostics: const {},
+  );
 }
 
 const _usSummary = PortfolioSummary(
@@ -342,7 +538,7 @@ const _krSummary = PortfolioSummary(
   positions: [
     PositionSummary(
       symbol: '005930',
-      name: '삼성전자',
+      name: '?쇱꽦?꾩옄',
       side: 'long',
       qty: 2,
       avgEntryPrice: 500000,
@@ -357,7 +553,7 @@ const _krSummary = PortfolioSummary(
     PendingOrderSummary(
       id: 'order-1',
       symbol: '005930',
-      name: '삼성전자',
+      name: '?쇱꽦?꾩옄',
       side: 'buy',
       type: '',
       status: 'pending',
@@ -419,7 +615,7 @@ const _krPositionsOnlySummary = PortfolioSummary(
   positions: [
     PositionSummary(
       symbol: '005930',
-      name: '?쇱꽦?꾩옄',
+      name: '??깃쉐?袁⑹쁽',
       side: 'long',
       qty: 2,
       avgEntryPrice: 500000,
@@ -578,6 +774,30 @@ final _sellReadyManagedPosition = ManagedPosition.fromJson({
   'can_prepare_manual_sell': true,
   'can_submit_manual_sell': true,
   'raw_marker': 'raw payload hidden until expanded',
+});
+
+final _takeProfitManagedPosition = ManagedPosition.fromJson({
+  'provider': 'kis',
+  'market': 'KR',
+  'symbol': '005930',
+  'company_name': 'Samsung Electronics',
+  'quantity': 2,
+  'average_price': 500000,
+  'cost_basis': 1000000,
+  'current_price': 600000,
+  'current_value': 1200000,
+  'unrealized_pl': 200000,
+  'unrealized_pl_pct': 0.2,
+  'holding_status': 'SELL_READY',
+  'exit_reason': 'take_profit_triggered',
+  'human_reason': 'Take-profit threshold reached.',
+  'take_profit_triggered': true,
+  'technical_snapshot': {},
+  'risk_flags': ['take_profit_triggered'],
+  'gating_notes': [],
+  'block_reasons': [],
+  'can_prepare_manual_sell': true,
+  'can_submit_manual_sell': true,
 });
 
 final _holdManagedPosition = ManagedPosition.fromJson({

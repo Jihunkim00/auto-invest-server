@@ -19,6 +19,7 @@ class AutomationRuntimeMonitorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final monitor = controller.automationRuntimeMonitor;
     return SectionCard(
+      key: const Key('automation_runtime_monitor_card'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.monitor_heart_outlined, size: 20),
@@ -95,6 +96,18 @@ class AutomationRuntimeMonitorCard extends StatelessWidget {
                     _Line('Order Submitted',
                         monitor.alpaca.orderSubmitted ? 'yes' : 'no'),
                     _Line('Order ID', _valueOrNone(monitor.alpaca.orderId)),
+                    _Line('Last Single Run',
+                        _timestampOrNone(monitor.alpaca.lastSingleRunAt)),
+                    _Line('Single Symbol',
+                        _valueOrNone(monitor.alpaca.lastSingleSymbol)),
+                    _Line('Single Action',
+                        _valueOrNone(monitor.alpaca.lastSingleAction)),
+                    _Line('Single Result',
+                        _valueOrNone(monitor.alpaca.lastSingleResult)),
+                    _Line('Single Block',
+                        _valueOrNone(monitor.alpaca.lastSingleBlockReason)),
+                    _Line('Today Paper Orders',
+                        monitor.alpaca.todayPaperOrderCount.toString()),
                   ],
                   summary:
                       'Alpaca: ${monitor.alpaca.statusLabel} | last run ${_valueOrNone(monitor.alpaca.lastResult)}: ${_valueOrNone(monitor.alpaca.lastBlockReason)}',

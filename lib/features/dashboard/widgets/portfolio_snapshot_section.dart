@@ -47,6 +47,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
         : '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending';
 
     return SectionCard(
+      key: const Key('portfolio_snapshot_section'),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.account_balance_wallet_outlined, size: 20),
@@ -156,44 +157,54 @@ class PortfolioSnapshotSection extends StatelessWidget {
           ]);
         }),
         const SizedBox(height: 16),
-        const _SubsectionTitle('Position Management'),
-        const SizedBox(height: 4),
-        const _StateNote(
-            text: 'Held positions with trigger state and manual-prep actions.'),
-        const SizedBox(height: 8),
-        const _SubsectionTitle('Current Holdings'),
-        if (isKr && controller.kisManagedPositionsLoading) ...[
-          const SizedBox(height: 6),
-          const _StateNote(text: 'Loading KIS position management...'),
-        ],
-        if (isKr && controller.kisManagedPositionsError != null) ...[
-          const SizedBox(height: 6),
-          _StateNote(text: controller.kisManagedPositionsError!),
-        ],
-        if (controller.portfolioManagementError != null) ...[
-          const SizedBox(height: 6),
-          _StateNote(text: controller.portfolioManagementError!),
-        ],
-        const SizedBox(height: 8),
-        if (summary.positions.isEmpty)
-          _EmptyLine(text: noPositionsText)
-        else
-          Column(children: [
-            for (final item in managementItems) ...[
-              _PositionTile(
-                controller: controller,
-                position: item.position,
-                managementItem: item,
-                managedPosition: item.managedPosition,
-                currency: summary.currency,
-                isKr: isKr,
-                managementMode: managementMode,
-                onOpenManualOrder: onOpenManualOrder,
-                onReviewPosition: onReviewPosition,
+        KeyedSubtree(
+          key: const Key('portfolio_position_management_section'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _SubsectionTitle('Position Management'),
+              const SizedBox(height: 4),
+              const _StateNote(
+                text:
+                    'Held positions with trigger state and manual-prep actions.',
               ),
-              if (item != managementItems.last) const SizedBox(height: 8),
+              const SizedBox(height: 8),
+              const _SubsectionTitle('Current Holdings'),
+              if (isKr && controller.kisManagedPositionsLoading) ...[
+                const SizedBox(height: 6),
+                const _StateNote(text: 'Loading KIS position management...'),
+              ],
+              if (isKr && controller.kisManagedPositionsError != null) ...[
+                const SizedBox(height: 6),
+                _StateNote(text: controller.kisManagedPositionsError!),
+              ],
+              if (controller.portfolioManagementError != null) ...[
+                const SizedBox(height: 6),
+                _StateNote(text: controller.portfolioManagementError!),
+              ],
+              const SizedBox(height: 8),
+              if (summary.positions.isEmpty)
+                _EmptyLine(text: noPositionsText)
+              else
+                Column(children: [
+                  for (final item in managementItems) ...[
+                    _PositionTile(
+                      controller: controller,
+                      position: item.position,
+                      managementItem: item,
+                      managedPosition: item.managedPosition,
+                      currency: summary.currency,
+                      isKr: isKr,
+                      managementMode: managementMode,
+                      onOpenManualOrder: onOpenManualOrder,
+                      onReviewPosition: onReviewPosition,
+                    ),
+                    if (item != managementItems.last) const SizedBox(height: 8),
+                  ],
+                ]),
             ],
-          ]),
+          ),
+        ),
         const SizedBox(height: 16),
         const _SubsectionTitle('Pending Orders'),
         const SizedBox(height: 8),
@@ -363,6 +374,7 @@ class _PositionTile extends StatelessWidget {
           ),
           children: [
             _PositionDetail(
+              controller: controller,
               position: position,
               managementItem: managementItem,
               managedPosition: managedPosition,
@@ -421,6 +433,7 @@ class _PositionTile extends StatelessWidget {
 
 class _PositionDetail extends StatelessWidget {
   const _PositionDetail({
+    required this.controller,
     required this.position,
     required this.managementItem,
     required this.managedPosition,
@@ -428,6 +441,7 @@ class _PositionDetail extends StatelessWidget {
     required this.isKr,
   });
 
+  final DashboardController controller;
   final PositionSummary position;
   final PortfolioPositionManagementItem managementItem;
   final ManagedPosition? managedPosition;
@@ -519,12 +533,19 @@ class _PositionDetail extends StatelessWidget {
             label: 'Latest Order',
             value: managementItem.latestRelatedOrder ?? 'none'),
         _DataPair(
+            label: 'Current Holding',
+            value: '${_quantity(managementItem.quantity)} share'),
+        _DataPair(
             label: 'Scheduler Eligible',
             value: managementItem.schedulerEligible ? 'yes' : 'no'),
         _DataPair(
             label: 'Manual Sell',
             value: managementItem.manualSellAvailable ? 'available' : 'no'),
       ]),
+      if (managementItem.latestRelatedEvent != null) ...[
+        const SizedBox(height: 12),
+        _LatestEventSection(managementItem: managementItem),
+      ],
       const SizedBox(height: 12),
       const _SubsectionTitle('Technical Snapshot'),
       const SizedBox(height: 8),
@@ -567,6 +588,25 @@ class _PositionDetail extends StatelessWidget {
         const SizedBox(height: 12),
         _StateNote(
             text: 'Latest manual sell order is available in KIS Orders.'),
+      ],
+      if (managementItem.positionOrderSyncWarning) ...[
+        const SizedBox(height: 12),
+        _WarningNote(
+          text: 'Position/order state may need sync',
+          detail:
+              'Latest sell order appears filled, but the position still shows holdings.',
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: ValueKey('refresh-position-sync-${position.symbol}'),
+          onPressed: controller.portfolioManagementLoading
+              ? null
+              : () async {
+                  await controller.refreshPortfolioManagement();
+                },
+          icon: const Icon(Icons.refresh, size: 18),
+          label: const Text('Refresh Positions'),
+        ),
       ],
       if (managed != null) ...[
         const SizedBox(height: 12),
@@ -757,6 +797,128 @@ class _StateNote extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(text,
         style: const TextStyle(color: Colors.white60, fontSize: 12));
+  }
+}
+
+class _LatestEventSection extends StatelessWidget {
+  const _LatestEventSection({required this.managementItem});
+
+  final PortfolioPositionManagementItem managementItem;
+
+  @override
+  Widget build(BuildContext context) {
+    final event = managementItem.latestRelatedEvent;
+    if (event == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Latest Event',
+          style: TextStyle(
+            color: Colors.white70,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 14,
+          runSpacing: 8,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Event',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _eventSummary(event),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Trigger Today',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  managementItem.triggerDetectedToday ? 'yes' : 'no',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Latest Blocked',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  managementItem.latestTriggerBlocked ? 'yes' : 'no',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Block Reason',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  managementItem.latestTriggerBlockReason ?? 'none',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }
 
@@ -1005,6 +1167,18 @@ String _threshold(double? value) {
 String _yesNoUnknown(bool? value) {
   if (value == null) return 'unknown';
   return value ? 'yes' : 'no';
+}
+
+String _eventSummary(AutomationEvent? event) {
+  if (event == null) return 'none';
+  if (event.category == 'trigger_detected') {
+    return '${event.trigger.toUpperCase()} detected';
+  }
+  if (event.isOrderEvent) {
+    final id = event.kisOdno ?? event.brokerOrderId ?? event.orderId;
+    return id == null ? event.result : '${event.result} $id';
+  }
+  return event.result.isEmpty ? event.category : event.result;
 }
 
 String _quantity(double value) {

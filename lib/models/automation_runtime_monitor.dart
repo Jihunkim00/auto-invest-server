@@ -16,6 +16,7 @@ class AutomationRuntimeMonitor {
     required this.lastRuns,
     required this.lastOrders,
     required this.lastSignals,
+    required this.events,
     required this.warnings,
     required this.diagnostics,
   });
@@ -32,13 +33,26 @@ class AutomationRuntimeMonitor {
     List<TradingLogItem> runs = const [],
     List<OrderLogItem> orders = const [],
     List<SignalLogItem> signals = const [],
+    List<AutomationEvent> localEvents = const [],
     List<String> warnings = const [],
   }) {
     final summaries = runs.map(LastAutomationRunSummary.fromRun).toList();
     final alpacaRun =
         summaries.where((run) => run.isAlpacaScheduler).firstOrNull;
+    final alpacaSingleRun = summaries
+        .where((run) =>
+            run.isAlpaca &&
+            !run.isAlpacaScheduler &&
+            (run.mode.toLowerCase().contains('single') ||
+                run.mode.toLowerCase().contains('trading')))
+        .firstOrNull;
     final alpacaOrder =
         orders.where((order) => order.providerKey == 'alpaca').firstOrNull;
+    final todayKey = DateTime.now().toIso8601String().substring(0, 10);
+    final todayAlpacaOrderCount = orders.where((order) {
+      return order.providerKey == 'alpaca' &&
+          order.createdAt.startsWith(todayKey);
+    }).length;
 
     final kisSellRun = _latestKisSellRun(summaries);
     final kisBuyRun = _latestKisBuyRun(summaries);
@@ -92,6 +106,12 @@ class AutomationRuntimeMonitor {
           alpacaOrder?.orderId?.toString(),
         ]),
         mode: alpacaRun?.mode ?? '',
+        lastSingleRunAt: alpacaSingleRun?.createdAt,
+        lastSingleSymbol: alpacaSingleRun?.symbol,
+        lastSingleAction: alpacaSingleRun?.action,
+        lastSingleResult: alpacaSingleRun?.result,
+        lastSingleBlockReason: alpacaSingleRun?.reason,
+        todayPaperOrderCount: todayAlpacaOrderCount,
       ),
       kis: KisAutomationStatus(
         schedulerEnabled: settings.kisSchedulerEnabled,
@@ -165,6 +185,12 @@ class AutomationRuntimeMonitor {
       lastRuns: summaries,
       lastOrders: orders,
       lastSignals: signals,
+      events: _buildAutomationEvents(
+        runs: runs,
+        orders: orders,
+        signals: signals,
+        localEvents: localEvents,
+      ),
       warnings: warnings,
       diagnostics: {
         'read_only': true,
@@ -184,6 +210,7 @@ class AutomationRuntimeMonitor {
   final List<LastAutomationRunSummary> lastRuns;
   final List<OrderLogItem> lastOrders;
   final List<SignalLogItem> lastSignals;
+  final List<AutomationEvent> events;
   final List<String> warnings;
   final Map<String, dynamic> diagnostics;
 
@@ -232,6 +259,12 @@ class ProviderAutomationStatus {
     required this.orderSubmitted,
     required this.orderId,
     required this.mode,
+    required this.lastSingleRunAt,
+    required this.lastSingleSymbol,
+    required this.lastSingleAction,
+    required this.lastSingleResult,
+    required this.lastSingleBlockReason,
+    required this.todayPaperOrderCount,
   });
 
   final String provider;
@@ -248,6 +281,12 @@ class ProviderAutomationStatus {
   final bool orderSubmitted;
   final String? orderId;
   final String mode;
+  final String? lastSingleRunAt;
+  final String? lastSingleSymbol;
+  final String? lastSingleAction;
+  final String? lastSingleResult;
+  final String? lastSingleBlockReason;
+  final int todayPaperOrderCount;
 
   bool get hasRecentRun => lastRunAt != null && lastRunAt!.trim().isNotEmpty;
 
@@ -441,6 +480,139 @@ class LastAutomationRunSummary {
   }
 }
 
+class AutomationEvent {
+  const AutomationEvent({
+    required this.id,
+    required this.timestamp,
+    required this.provider,
+    required this.market,
+    required this.category,
+    required this.severity,
+    required this.symbol,
+    required this.companyName,
+    required this.action,
+    required this.trigger,
+    required this.result,
+    required this.reason,
+    required this.blockReason,
+    required this.orderId,
+    required this.brokerOrderId,
+    required this.kisOdno,
+    required this.realOrderSubmitted,
+    required this.brokerSubmitCalled,
+    required this.manualSubmitCalled,
+    required this.source,
+    required this.mode,
+    required this.triggerSource,
+    required this.relatedRunId,
+    required this.relatedSignalId,
+    required this.relatedOrderId,
+    required this.developerPayload,
+  });
+
+  factory AutomationEvent.settingsChanged({
+    required String id,
+    required String timestamp,
+    required String title,
+    required String reason,
+    required Map<String, dynamic> payload,
+  }) {
+    return AutomationEvent(
+      id: id,
+      timestamp: timestamp,
+      provider: 'system',
+      market: '',
+      category: 'settings_changed',
+      severity: 'info',
+      symbol: null,
+      companyName: null,
+      action: 'settings_changed',
+      trigger: 'none',
+      result: title,
+      reason: reason,
+      blockReason: null,
+      orderId: null,
+      brokerOrderId: null,
+      kisOdno: null,
+      realOrderSubmitted: false,
+      brokerSubmitCalled: false,
+      manualSubmitCalled: false,
+      source: 'flutter_settings',
+      mode: 'local_ui_event',
+      triggerSource: 'operator',
+      relatedRunId: null,
+      relatedSignalId: null,
+      relatedOrderId: null,
+      developerPayload: payload,
+    );
+  }
+
+  final String id;
+  final String timestamp;
+  final String provider;
+  final String market;
+  final String category;
+  final String severity;
+  final String? symbol;
+  final String? companyName;
+  final String action;
+  final String trigger;
+  final String result;
+  final String reason;
+  final String? blockReason;
+  final String? orderId;
+  final String? brokerOrderId;
+  final String? kisOdno;
+  final bool realOrderSubmitted;
+  final bool brokerSubmitCalled;
+  final bool manualSubmitCalled;
+  final String source;
+  final String mode;
+  final String triggerSource;
+  final String? relatedRunId;
+  final String? relatedSignalId;
+  final String? relatedOrderId;
+  final Map<String, dynamic> developerPayload;
+
+  String get providerLabel {
+    final normalized = provider.trim().toLowerCase();
+    if (normalized == 'kis' || market.toUpperCase() == 'KR') {
+      return 'KIS LIVE';
+    }
+    if (normalized == 'system') return 'SYSTEM';
+    return 'ALPACA PAPER';
+  }
+
+  bool get isTriggerDetected =>
+      trigger != 'none' &&
+      (category == 'trigger_detected' ||
+          trigger == 'stop_loss' ||
+          trigger == 'take_profit' ||
+          trigger == 'buy_candidate');
+
+  bool get isBlocked =>
+      category == 'blocked' ||
+      blockReason != null ||
+      result.toLowerCase().contains('block') ||
+      reason.toLowerCase().contains('market_closed') ||
+      reason.toLowerCase().contains('market closed');
+
+  bool get isFilled =>
+      category == 'order_filled' ||
+      result.toLowerCase().contains('filled') ||
+      reason.toLowerCase().contains('filled');
+
+  bool get isRejected =>
+      category == 'order_rejected' ||
+      result.toLowerCase().contains('reject') ||
+      reason.toLowerCase().contains('reject');
+
+  bool get isOrderEvent =>
+      category == 'order_submitted' ||
+      category == 'order_filled' ||
+      category == 'order_rejected';
+}
+
 class PortfolioPositionManagementItem {
   const PortfolioPositionManagementItem({
     required this.provider,
@@ -460,6 +632,12 @@ class PortfolioPositionManagementItem {
     required this.takeProfitThreshold,
     required this.duplicateOpenSellOrder,
     required this.latestRelatedOrder,
+    required this.latestRelatedEvent,
+    required this.latestRelatedOrderEvent,
+    required this.triggerDetectedToday,
+    required this.latestTriggerBlocked,
+    required this.latestTriggerBlockReason,
+    required this.positionOrderSyncWarning,
     required this.schedulerEligible,
     required this.manualSellAvailable,
     required this.position,
@@ -470,8 +648,33 @@ class PortfolioPositionManagementItem {
     required PositionSummary position,
     ManagedPosition? managedPosition,
     required bool isKr,
+    List<AutomationEvent> events = const [],
+    List<OrderLogItem> orders = const [],
   }) {
     final managed = managedPosition;
+    final normalizedSymbol = position.symbol.trim().toUpperCase();
+    final symbolEvents = events
+        .where(
+            (event) => event.symbol?.trim().toUpperCase() == normalizedSymbol)
+        .toList();
+    final latestEvent = symbolEvents.firstOrNull;
+    final latestOrderEvent =
+        symbolEvents.where((event) => event.isOrderEvent).firstOrNull;
+    final symbolOrders = orders
+        .where((order) => order.symbol.trim().toUpperCase() == normalizedSymbol)
+        .toList();
+    final latestOrder = symbolOrders.firstOrNull;
+    final todayKey = DateTime.now().toIso8601String().substring(0, 10);
+    final triggerDetectedToday = symbolEvents.any((event) {
+      return event.timestamp.startsWith(todayKey) && event.isTriggerDetected;
+    });
+    final latestTriggerEvent =
+        symbolEvents.where((event) => event.isTriggerDetected).firstOrNull;
+    final filledSellExists = symbolEvents.any((event) =>
+            event.isFilled && event.action.toLowerCase() == 'sell') ||
+        symbolOrders.any((order) =>
+            order.side.toLowerCase() == 'sell' &&
+            order.statusLabel.toLowerCase().contains('filled'));
     final triggerStatus = _triggerStatusFor(managed, isKr: isKr);
     final duplicateOpenSellOrder = _rawBool(managed?.rawPayload, const [
       'duplicate_open_sell_order',
@@ -519,7 +722,21 @@ class PortfolioPositionManagementItem {
         'take_profit_pct',
       ]),
       duplicateOpenSellOrder: duplicateOpenSellOrder,
-      latestRelatedOrder: _latestRelatedOrder(managed),
+      latestRelatedOrder: _firstText([
+        _latestRelatedOrder(managed),
+        latestOrder?.kisOdno,
+        latestOrder?.brokerOrderId,
+        latestOrder?.orderId,
+        latestOrderEvent?.kisOdno,
+        latestOrderEvent?.brokerOrderId,
+        latestOrderEvent?.orderId,
+      ]),
+      latestRelatedEvent: latestEvent,
+      latestRelatedOrderEvent: latestOrderEvent,
+      triggerDetectedToday: triggerDetectedToday,
+      latestTriggerBlocked: latestTriggerEvent?.isBlocked ?? false,
+      latestTriggerBlockReason: latestTriggerEvent?.blockReason,
+      positionOrderSyncWarning: filledSellExists && position.qty > 0,
       schedulerEligible: schedulerEligible,
       manualSellAvailable:
           isKr && (managed?.canPrepareManualSell ?? position.qty.floor() > 0),
@@ -545,6 +762,12 @@ class PortfolioPositionManagementItem {
   final double? takeProfitThreshold;
   final bool? duplicateOpenSellOrder;
   final String? latestRelatedOrder;
+  final AutomationEvent? latestRelatedEvent;
+  final AutomationEvent? latestRelatedOrderEvent;
+  final bool triggerDetectedToday;
+  final bool latestTriggerBlocked;
+  final String? latestTriggerBlockReason;
+  final bool positionOrderSyncWarning;
   final bool schedulerEligible;
   final bool manualSellAvailable;
   final PositionSummary position;
@@ -772,4 +995,298 @@ String? _latestRelatedOrder(ManagedPosition? managed) {
     order['order_id'],
     order['id'],
   ]);
+}
+
+List<AutomationEvent> _buildAutomationEvents({
+  required List<TradingLogItem> runs,
+  required List<OrderLogItem> orders,
+  required List<SignalLogItem> signals,
+  required List<AutomationEvent> localEvents,
+}) {
+  final events = <AutomationEvent>[
+    ...localEvents,
+    for (final run in runs) _eventFromRun(run),
+    for (final order in orders) _eventFromOrder(order),
+    for (final signal in signals) _eventFromSignal(signal),
+  ];
+  events.sort((a, b) => _eventTime(b).compareTo(_eventTime(a)));
+  return events;
+}
+
+AutomationEvent _eventFromRun(TradingLogItem run) {
+  final trigger = _triggerFromRun(
+    trigger: run.exitTrigger,
+    action: run.action,
+    reason: run.reason,
+    mode: run.mode,
+    source: run.source,
+  );
+  final blockReason = _blockReason(run.reason, run.result);
+  final orderSubmitted = run.realOrderSubmitted == true ||
+      run.brokerSubmitCalled == true ||
+      run.relatedOrderId != null;
+  final category = run.simulated || run.dryRun == true || run.previewOnly
+      ? 'dry_run_simulated'
+      : orderSubmitted
+          ? 'order_submitted'
+          : trigger != 'none'
+              ? 'trigger_detected'
+              : blockReason != null
+                  ? 'blocked'
+                  : 'scheduler_run';
+  final severity = _severityFor(
+    category: category,
+    result: run.result,
+    reason: run.reason,
+    orderSubmitted: orderSubmitted,
+  );
+  return AutomationEvent(
+    id: 'run-${run.id}',
+    timestamp: run.createdAt,
+    provider: run.provider,
+    market: run.market,
+    category: category,
+    severity: severity,
+    symbol: run.symbol,
+    companyName: null,
+    action: _eventAction(run.action, fallback: run.result),
+    trigger: trigger,
+    result: run.result,
+    reason: run.reason,
+    blockReason: blockReason,
+    orderId: run.relatedOrderId,
+    brokerOrderId: null,
+    kisOdno: null,
+    realOrderSubmitted:
+        run.realOrderSubmitted == true || run.relatedOrderId != null,
+    brokerSubmitCalled: run.brokerSubmitCalled == true,
+    manualSubmitCalled: run.manualSubmitCalled == true,
+    source: run.source,
+    mode: run.mode,
+    triggerSource: run.triggerSource,
+    relatedRunId: run.id.toString(),
+    relatedSignalId: run.signalId,
+    relatedOrderId: run.relatedOrderId,
+    developerPayload: {
+      'type': 'run',
+      'id': run.id,
+      'run_key': run.runKey,
+      'mode': run.mode,
+      'trigger_source': run.triggerSource,
+      'risk_flags': run.riskFlags,
+      'gating_notes': run.gatingNotes,
+    },
+  );
+}
+
+AutomationEvent _eventFromOrder(OrderLogItem order) {
+  final status = order.statusLabel;
+  final lowerStatus = status.toLowerCase();
+  final rejected = lowerStatus.contains('reject') ||
+      lowerStatus.contains('failed') ||
+      lowerStatus.contains('error');
+  final filled = lowerStatus.contains('filled');
+  final simulated =
+      order.simulated || order.internalStatus == 'DRY_RUN_SIMULATED';
+  final category = simulated
+      ? 'dry_run_simulated'
+      : rejected
+          ? 'order_rejected'
+          : filled
+              ? 'order_filled'
+              : 'order_submitted';
+  return AutomationEvent(
+    id: 'order-${order.orderId ?? order.id}',
+    timestamp: order.submittedAt ?? order.createdAt,
+    provider: order.provider,
+    market: order.market,
+    category: category,
+    severity: rejected
+        ? 'danger'
+        : filled || category == 'order_submitted'
+            ? 'success'
+            : 'warning',
+    symbol: order.symbol,
+    companyName: null,
+    action: _eventAction(order.side, fallback: order.action),
+    trigger: _normalizeTrigger(order.exitTrigger ?? order.exitTriggerSource),
+    result: status,
+    reason: _firstText([order.rejectedReason, order.reason, status]) ?? '',
+    blockReason:
+        rejected ? _firstText([order.rejectedReason, order.reason]) : null,
+    orderId: order.orderId?.toString(),
+    brokerOrderId: order.brokerOrderId,
+    kisOdno: order.kisOdno,
+    realOrderSubmitted:
+        order.realOrderSubmitted == true || order.brokerOrderId != null,
+    brokerSubmitCalled: order.brokerSubmitCalled == true ||
+        order.brokerOrderId != null ||
+        order.kisOdno != null,
+    manualSubmitCalled: order.manualSubmitCalled == true,
+    source: order.source,
+    mode: order.mode,
+    triggerSource: order.triggerSource,
+    relatedRunId: null,
+    relatedSignalId: order.signalId,
+    relatedOrderId: order.orderId?.toString(),
+    developerPayload: {
+      'type': 'order',
+      'id': order.id,
+      'order_id': order.orderId,
+      'broker_order_id': order.brokerOrderId,
+      'kis_odno': order.kisOdno,
+      'internal_status': order.internalStatus,
+      'broker_status': order.brokerStatus,
+      'source': order.source,
+      'source_type': order.sourceType,
+    },
+  );
+}
+
+AutomationEvent _eventFromSignal(SignalLogItem signal) {
+  final trigger = _triggerFromRun(
+    trigger: null,
+    action: signal.action,
+    reason: signal.reason,
+    mode: signal.mode,
+    source: signal.triggerSource,
+  );
+  final blockReason = _blockReason(signal.reason, signal.result);
+  final category = signal.simulated || signal.dryRun == true
+      ? 'dry_run_simulated'
+      : trigger != 'none'
+          ? 'trigger_detected'
+          : blockReason != null
+              ? 'blocked'
+              : 'scheduler_run';
+  return AutomationEvent(
+    id: 'signal-${signal.id}',
+    timestamp: signal.createdAt,
+    provider: signal.provider,
+    market: signal.market,
+    category: category,
+    severity: _severityFor(
+      category: category,
+      result: signal.result,
+      reason: signal.reason,
+      orderSubmitted: signal.relatedOrderId != null,
+    ),
+    symbol: signal.symbol,
+    companyName: null,
+    action: _eventAction(signal.action, fallback: signal.signalStatus),
+    trigger: trigger,
+    result: signal.signalStatus,
+    reason: signal.reason,
+    blockReason: blockReason,
+    orderId: signal.relatedOrderId,
+    brokerOrderId: null,
+    kisOdno: null,
+    realOrderSubmitted:
+        signal.realOrderSubmitted == true || signal.relatedOrderId != null,
+    brokerSubmitCalled: signal.brokerSubmitCalled == true,
+    manualSubmitCalled: signal.manualSubmitCalled == true,
+    source: '',
+    mode: signal.mode,
+    triggerSource: signal.triggerSource,
+    relatedRunId: signal.runKey,
+    relatedSignalId: signal.id.toString(),
+    relatedOrderId: signal.relatedOrderId,
+    developerPayload: {
+      'type': 'signal',
+      'id': signal.id,
+      'buy_score': signal.buyScore,
+      'sell_score': signal.sellScore,
+      'confidence': signal.confidence,
+      'risk_flags': signal.riskFlags,
+      'gating_notes': signal.gatingNotes,
+    },
+  );
+}
+
+String _triggerFromRun({
+  required String? trigger,
+  required String action,
+  required String reason,
+  required String mode,
+  required String source,
+}) {
+  final normalized = _normalizeTrigger(trigger);
+  if (normalized != 'none') return normalized;
+  final hint = '$action $reason $mode $source'.toLowerCase();
+  if (hint.contains('stop_loss') || hint.contains('stop loss')) {
+    return 'stop_loss';
+  }
+  if (hint.contains('take_profit') || hint.contains('take profit')) {
+    return 'take_profit';
+  }
+  if (hint.contains('buy') &&
+      (hint.contains('candidate') ||
+          hint.contains('ready') ||
+          hint.contains('shadow'))) {
+    return 'buy_candidate';
+  }
+  if (hint.contains('weak') || hint.contains('hold_signal')) {
+    return 'weak_signal';
+  }
+  if (hint.contains('market_closed') || hint.contains('market closed')) {
+    return 'market_closed';
+  }
+  return 'none';
+}
+
+String? _blockReason(String reason, String result) {
+  final text = _firstText([reason, result]) ?? '';
+  final lower = text.toLowerCase();
+  if (lower.contains('block') ||
+      lower.contains('skip') ||
+      lower.contains('weak') ||
+      lower.contains('hold_signal') ||
+      lower.contains('market_closed') ||
+      lower.contains('market closed') ||
+      lower.contains('disabled') ||
+      lower.contains('dry_run')) {
+    return text;
+  }
+  return null;
+}
+
+String _eventAction(String action, {required String fallback}) {
+  final text = action.trim().toLowerCase();
+  if (text == 'buy' || text == 'sell' || text == 'hold') return text;
+  if (text == 'blocked' || text == 'skipped') return text;
+  final fallbackText = fallback.trim().toLowerCase();
+  if (fallbackText.contains('block')) return 'blocked';
+  if (fallbackText.contains('skip')) return 'skipped';
+  return text.isEmpty ? 'hold' : text;
+}
+
+String _severityFor({
+  required String category,
+  required String result,
+  required String reason,
+  required bool orderSubmitted,
+}) {
+  final hint = '$category $result $reason'.toLowerCase();
+  if (hint.contains('reject') ||
+      hint.contains('failed') ||
+      hint.contains('error')) {
+    return 'danger';
+  }
+  if (category == 'order_filled' ||
+      category == 'order_submitted' ||
+      orderSubmitted) {
+    return 'success';
+  }
+  if (category == 'blocked' ||
+      category == 'dry_run_simulated' ||
+      hint.contains('market_closed') ||
+      hint.contains('market closed')) {
+    return 'warning';
+  }
+  return 'info';
+}
+
+DateTime _eventTime(AutomationEvent event) {
+  return DateTime.tryParse(event.timestamp) ??
+      DateTime.fromMillisecondsSinceEpoch(0);
 }
