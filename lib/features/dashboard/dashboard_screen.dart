@@ -5,8 +5,10 @@ import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
+import 'widgets/automation_event_timeline_card.dart';
 import 'widgets/automation_runtime_monitor_card.dart';
 import 'widgets/broker_context_controls.dart';
+import 'widgets/operation_rehearsal_panel.dart';
 import 'widgets/portfolio_snapshot_section.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -30,6 +32,7 @@ class DashboardScreen extends StatelessWidget {
           child: RefreshIndicator(
             onRefresh: controller.load,
             child: ListView(
+              key: const Key('dashboard_home_scroll_view'),
               padding: const EdgeInsets.all(16),
               children: [
                 Row(
@@ -56,6 +59,10 @@ class DashboardScreen extends StatelessWidget {
                 _SafetySummary(controller: controller),
                 const SizedBox(height: 12),
                 AutomationRuntimeMonitorCard(controller: controller),
+                const SizedBox(height: 12),
+                OperationRehearsalPanel(controller: controller),
+                const SizedBox(height: 12),
+                AutomationEventTimelineCard(controller: controller),
                 const SizedBox(height: 12),
                 PortfolioSnapshotSection(
                   controller: controller,

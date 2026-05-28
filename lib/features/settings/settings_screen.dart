@@ -220,6 +220,10 @@ class _KisAutomationControlsCard extends StatelessWidget {
             label: const Text('Enable KIS Sell-Only Test Mode'),
           ),
         ]),
+        if (controller.latestSettingsChangeSummary != null) ...[
+          const SizedBox(height: 12),
+          _SettingsChangeSummary(text: controller.latestSettingsChangeSummary!),
+        ],
         const Divider(height: 24),
         _KisAutomationSwitch(
           title: 'KIS Scheduler Enabled',
@@ -420,6 +424,79 @@ class _KisAutomationSwitch extends StatelessWidget {
                     result.success ? Colors.green : Colors.redAccent,
               ));
             },
+    );
+  }
+}
+
+class _SettingsChangeSummary extends StatelessWidget {
+  const _SettingsChangeSummary({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = text.split('|').map((item) => item.trim()).toList();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.lightBlueAccent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border:
+            Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.24)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text(
+          'Settings Change Result',
+          style: TextStyle(
+            color: Colors.lightBlueAccent,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final part in parts)
+            if (part.isNotEmpty)
+              _SummaryBadge(
+                text: part,
+                color: part.endsWith('ON') &&
+                        !part.startsWith('dry_run') &&
+                        !part.startsWith('KIS scheduler') &&
+                        !part.startsWith('KIS sell') &&
+                        !part.startsWith('stop-loss') &&
+                        !part.startsWith('take-profit')
+                    ? Colors.orangeAccent
+                    : Colors.white70,
+              ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _SummaryBadge extends StatelessWidget {
+  const _SummaryBadge({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
     );
   }
 }

@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/models/automation_runtime_monitor.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_dry_run_orchestration.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
@@ -14,9 +15,17 @@ import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
+import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 class FakeKisApiClient extends ApiClient {
   int fetchRecentRunsCalls = 0;
+  int guardedSellStatusCalls = 0;
+  int guardedBuyStatusCalls = 0;
+  int dryRunOrchestrationCalls = 0;
+  int guardedSellRunCalls = 0;
+  int guardedBuyRunCalls = 0;
+  int alpacaWatchlistCalls = 0;
+  String? lastWatchlistProvider;
 
   @override
   Future<OpsSettings> getOpsSettings() async {
@@ -93,6 +102,7 @@ class FakeKisApiClient extends ApiClient {
   @override
   Future<KisSchedulerGuardedSellResult>
       fetchKisSchedulerGuardedSellStatus() async {
+    guardedSellStatusCalls += 1;
     return KisSchedulerGuardedSellResult.fromJson({
       'status': 'ok',
       'result': 'blocked',
@@ -108,6 +118,7 @@ class FakeKisApiClient extends ApiClient {
   @override
   Future<KisSchedulerGuardedBuyResult>
       fetchKisSchedulerGuardedBuyStatus() async {
+    guardedBuyStatusCalls += 1;
     return KisSchedulerGuardedBuyResult.fromJson({
       'status': 'ok',
       'result': 'blocked',
@@ -117,6 +128,113 @@ class FakeKisApiClient extends ApiClient {
       'broker_submit_called': false,
       'manual_submit_called': false,
     });
+  }
+
+  @override
+  Future<KisSchedulerDryRunOrchestration>
+      runKisSchedulerDryRunOrchestrationOnce({
+    String? slotLabel,
+    bool includeBuy = true,
+    bool includeSell = true,
+    bool includeRaw = false,
+  }) async {
+    dryRunOrchestrationCalls += 1;
+    return KisSchedulerDryRunOrchestration.fromJson({
+      'provider': 'kis',
+      'market': 'KR',
+      'mode': 'kis_scheduler_dry_run_orchestration',
+      'trigger_source': 'scheduler_dry_run_orchestration',
+      'slot_label': slotLabel ?? 'manual_dry_run',
+      'result': 'blocked',
+      'readiness_only': true,
+      'dry_run': true,
+      'scheduler_real_orders_enabled': false,
+      'real_order_submit_allowed': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'summary': {
+        'modules_requested': ['sell', 'buy'],
+        'modules_completed': ['sell', 'buy'],
+        'modules_blocked': [],
+        'sell_candidates_reviewed': 1,
+        'buy_candidates_reviewed': 0,
+        'sell_ready_count': 0,
+        'buy_ready_count': 0,
+        'submitted_order_count': 0,
+        'broker_submit_count': 0,
+        'manual_submit_count': 0,
+        'real_order_submit_allowed': false,
+        'primary_block_reason': 'dry_run_only',
+      },
+      'child_runs': [],
+      'safety': {
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      },
+      'diagnostics': {},
+    });
+  }
+
+  @override
+  Future<KisSchedulerGuardedSellResult> runKisSchedulerGuardedSellOnce({
+    String? slotLabel,
+    bool includeRaw = false,
+    String triggerSource = 'scheduler_manual_test',
+  }) async {
+    guardedSellRunCalls += 1;
+    return fetchKisSchedulerGuardedSellStatus();
+  }
+
+  @override
+  Future<KisSchedulerGuardedBuyResult> runKisSchedulerGuardedBuyOnce({
+    String? slotLabel,
+    bool includeRaw = false,
+    String triggerSource = 'scheduler_manual_test',
+  }) async {
+    guardedBuyRunCalls += 1;
+    return fetchKisSchedulerGuardedBuyStatus();
+  }
+
+  @override
+  Future<WatchlistRunResult> runWatchlistForProvider({
+    required String provider,
+    required int gateLevel,
+  }) async {
+    lastWatchlistProvider = provider;
+    if (provider.trim().toLowerCase() == 'alpaca') {
+      alpacaWatchlistCalls += 1;
+    }
+    return const WatchlistRunResult(
+      configuredSymbolCount: 1,
+      analyzedSymbolCount: 1,
+      quantCandidatesCount: 1,
+      researchedCandidatesCount: 1,
+      finalBestCandidate: 'AAPL',
+      secondFinalCandidate: '',
+      tiedFinalCandidates: [],
+      nearTiedCandidates: [],
+      tieBreakerApplied: false,
+      finalCandidateSelectionReason: 'paper check',
+      bestScore: 62,
+      finalScoreGap: 1,
+      minEntryScore: 65,
+      minScoreGap: 3,
+      shouldTrade: false,
+      triggeredSymbol: null,
+      triggerBlockReason: 'weak_final_score_gap',
+      finalEntryReady: false,
+      finalActionHint: 'watch',
+      action: 'hold',
+      orderId: null,
+      topQuantCandidates: [],
+      researchedCandidates: [],
+      finalRankedCandidates: [],
+      result: 'skipped',
+      reason: 'weak_final_score_gap',
+      triggerSource: 'manual',
+    );
   }
 
   @override
@@ -241,6 +359,417 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Automation Event Timeline shows latest 10 events by default',
+      (tester) async {
+    final events = [
+      for (var i = 0; i < 12; i++)
+        _event(
+          id: 'timeline-$i',
+          timestamp: '2026-05-28T02:${(30 - i).toString().padLeft(2, '0')}:00Z',
+          provider: 'kis',
+          market: 'KR',
+          symbol: 'EV${i.toString().padLeft(2, '0')}',
+          category: 'scheduler_run',
+          result: 'hold',
+        ),
+    ];
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        runs: const [],
+        localEvents: events,
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_event_timeline_card'),
+    );
+
+    expect(find.text('EV00'), findsOneWidget);
+    expect(find.text('EV09'), findsOneWidget);
+    expect(find.text('EV10'), findsNothing);
+    expect(find.text('EV11'), findsNothing);
+
+    final showOlderButton =
+        find.byKey(const ValueKey('automation-events-show-older'));
+    await _showDashboardFinder(tester, showOlderButton);
+    await tester.tap(showOlderButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text('EV10'), findsOneWidget);
+    expect(find.text('EV11'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Automation Event Timeline renders KIS trigger with block reason and KST time',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        runs: const [],
+        localEvents: const [
+          AutomationEvent(
+            id: 'kis-trigger',
+            timestamp: '2026-05-28T00:16:00Z',
+            provider: 'kis',
+            market: 'KR',
+            category: 'trigger_detected',
+            severity: 'warning',
+            symbol: '036540',
+            companyName: null,
+            action: 'sell',
+            trigger: 'take_profit',
+            result: 'blocked',
+            reason: 'market_closed',
+            blockReason: 'market_closed',
+            orderId: null,
+            brokerOrderId: null,
+            kisOdno: null,
+            realOrderSubmitted: false,
+            brokerSubmitCalled: false,
+            manualSubmitCalled: false,
+            source: 'kis_scheduler_guarded_sell',
+            mode: 'kis_scheduler_guarded_sell',
+            triggerSource: 'scheduler',
+            relatedRunId: '10',
+            relatedSignalId: null,
+            relatedOrderId: null,
+            developerPayload: {},
+          ),
+        ],
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_event_timeline_card'),
+    );
+
+    expect(find.text('KIS LIVE'), findsOneWidget);
+    expect(find.text('036540'), findsOneWidget);
+    expect(find.text('TRIGGER DETECTED'), findsOneWidget);
+    expect(find.text('TAKE_PROFIT'), findsOneWidget);
+    expect(find.text('market_closed'), findsWidgets);
+    expect(find.textContaining('KST 09:16'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Automation Event Timeline renders KIS filled sell ODNO',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        runs: const [],
+        localEvents: const [
+          AutomationEvent(
+            id: 'kis-filled',
+            timestamp: '2026-05-28T00:25:00Z',
+            provider: 'kis',
+            market: 'KR',
+            category: 'order_filled',
+            severity: 'success',
+            symbol: '091810',
+            companyName: null,
+            action: 'sell',
+            trigger: 'take_profit',
+            result: 'FILLED',
+            reason: 'FILLED',
+            blockReason: null,
+            orderId: '88',
+            brokerOrderId: null,
+            kisOdno: '0021651600',
+            realOrderSubmitted: true,
+            brokerSubmitCalled: true,
+            manualSubmitCalled: false,
+            source: 'kis_scheduler_guarded_sell',
+            mode: 'kis_scheduler_guarded_sell',
+            triggerSource: 'scheduler',
+            relatedRunId: null,
+            relatedSignalId: null,
+            relatedOrderId: '88',
+            developerPayload: {},
+          ),
+        ],
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_event_timeline_card'),
+    );
+
+    expect(find.text('FILLED'), findsWidgets);
+    expect(find.text('ODNO'), findsOneWidget);
+    expect(find.text('0021651600'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Automation Event Timeline renders Alpaca skipped block reason',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        runs: const [],
+        localEvents: const [
+          AutomationEvent(
+            id: 'alpaca-skip',
+            timestamp: '2026-05-28T00:35:00Z',
+            provider: 'alpaca',
+            market: 'US',
+            category: 'blocked',
+            severity: 'info',
+            symbol: 'AAPL',
+            companyName: null,
+            action: 'skipped',
+            trigger: 'weak_signal',
+            result: 'skipped',
+            reason: 'weak_final_score_gap',
+            blockReason: 'weak_final_score_gap',
+            orderId: null,
+            brokerOrderId: null,
+            kisOdno: null,
+            realOrderSubmitted: false,
+            brokerSubmitCalled: false,
+            manualSubmitCalled: false,
+            source: 'watchlist',
+            mode: 'watchlist_run',
+            triggerSource: 'scheduler',
+            relatedRunId: '11',
+            relatedSignalId: null,
+            relatedOrderId: null,
+            developerPayload: {},
+          ),
+        ],
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_event_timeline_card'),
+    );
+
+    expect(find.text('ALPACA PAPER'), findsOneWidget);
+    expect(find.text('AAPL'), findsOneWidget);
+    expect(find.text('weak_final_score_gap'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Automation Event Timeline handles partial data without crash',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        runs: const [],
+        localEvents: const [
+          AutomationEvent(
+            id: 'partial',
+            timestamp: '',
+            provider: 'system',
+            market: '',
+            category: 'portfolio_check',
+            severity: 'info',
+            symbol: null,
+            companyName: null,
+            action: 'hold',
+            trigger: 'none',
+            result: '',
+            reason: '',
+            blockReason: null,
+            orderId: null,
+            brokerOrderId: null,
+            kisOdno: null,
+            realOrderSubmitted: false,
+            brokerSubmitCalled: false,
+            manualSubmitCalled: false,
+            source: '',
+            mode: '',
+            triggerSource: '',
+            relatedRunId: null,
+            relatedSignalId: null,
+            relatedOrderId: null,
+            developerPayload: {},
+          ),
+        ],
+      );
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_event_timeline_card'),
+    );
+
+    expect(find.text('Latest Automation Events'), findsOneWidget);
+    expect(find.text('SYSTEM'), findsOneWidget);
+    expect(find.text('PORTFOLIO CHECK'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Operation Rehearsal panel shows read-only checks',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('operation_rehearsal_panel'),
+    );
+
+    final operationPanel = find.byKey(const Key('operation_rehearsal_panel'));
+    expect(find.text('SAFE CHECKS'), findsOneWidget);
+    expect(find.text('Refresh Monitor'), findsOneWidget);
+    expect(find.text('Check KIS Sell Gates'), findsOneWidget);
+    expect(find.text('Check KIS Buy Gates'), findsOneWidget);
+    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: operationPanel, matching: find.text('ALPACA PAPER')),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Check KIS Sell Gates calls status endpoint only',
+      (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    final button = find.byKey(const ValueKey('operation-check-kis-sell'));
+    await _showDashboardFinder(tester, button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    expect(api.guardedSellStatusCalls, 1);
+    expect(api.guardedBuyStatusCalls, 0);
+    expect(api.guardedSellRunCalls, 0);
+    expect(api.guardedBuyRunCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('Check KIS Buy Gates calls status endpoint only', (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    final button = find.byKey(const ValueKey('operation-check-kis-buy'));
+    await _showDashboardFinder(tester, button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    expect(api.guardedBuyStatusCalls, 1);
+    expect(api.guardedSellStatusCalls, 0);
+    expect(api.guardedSellRunCalls, 0);
+    expect(api.guardedBuyRunCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Dry-run orchestration button is labeled and avoids live guarded endpoints',
+      (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('operation_rehearsal_panel'),
+    );
+    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
+    final button = find.byKey(const ValueKey('operation-run-kis-dry-run'));
+    await _showDashboardFinder(tester, button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    expect(api.dryRunOrchestrationCalls, 1);
+    expect(api.guardedSellRunCalls, 0);
+    expect(api.guardedBuyRunCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('Dangerous guarded actions require confirmation', (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(
+        find.byKey(const ValueKey('operation-run-guarded-sell')), findsNothing);
+
+    final advanced = find.byKey(const ValueKey('operation-advanced-actions'));
+    await _showDashboardFinder(tester, advanced);
+    await tester.tap(advanced);
+    await tester.pumpAndSettle();
+
+    final sellButton = find.byKey(const ValueKey('operation-run-guarded-sell'));
+    await _showDashboardFinder(tester, sellButton);
+    await tester.tap(sellButton);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('This may submit a real KIS SELL order if all gates pass.'),
+      findsOneWidget,
+    );
+    expect(api.guardedSellRunCalls, 0);
+
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(api.guardedSellRunCalls, 0);
+    expect(find.byKey(const ValueKey('operation-run-guarded-buy')),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
   testWidgets('Home dashboard includes Portfolio Snapshot and holdings',
       (tester) async {
     final controller = DashboardController(FakeKisApiClient(), autoload: false)
@@ -264,7 +793,12 @@ void main() {
       ),
     ));
 
+    await _showDashboardSection(
+        tester, const Key('portfolio_snapshot_section'));
+
     expect(find.text('Portfolio Snapshot'), findsOneWidget);
+    expect(find.byKey(const Key('portfolio_position_management_section')),
+        findsOneWidget);
     expect(find.text('Current Holdings'), findsOneWidget);
     expect(find.byKey(const ValueKey('portfolio-position-card-005930')),
         findsOneWidget);
@@ -297,18 +831,18 @@ void main() {
       ),
     ));
 
-    await tester.ensureVisible(
-      find.textContaining('005930 · Samsung Electronics'),
-    );
-    await tester.pumpAndSettle();
+    await _showDashboardSection(
+        tester, const Key('portfolio_snapshot_section'));
 
-    await tester.tap(find.textContaining('005930 · Samsung Electronics'));
+    final positionCard =
+        find.byKey(const ValueKey('portfolio-position-card-005930'));
+    await _showDashboardFinder(tester, positionCard);
+    await tester.tap(positionCard);
     await tester.pumpAndSettle();
 
     final prepareSellButton =
         find.byKey(const ValueKey('prepare-manual-sell-005930'));
-    await tester.ensureVisible(prepareSellButton);
-    await tester.pumpAndSettle();
+    await _showDashboardFinder(tester, prepareSellButton);
 
     expect(prepareSellButton, findsOneWidget);
     await tester.tap(prepareSellButton);
@@ -359,6 +893,24 @@ void main() {
   });
 }
 
+Future<void> _showDashboardSection(WidgetTester tester, Key sectionKey) {
+  return _showDashboardFinder(tester, find.byKey(sectionKey));
+}
+
+Future<void> _showDashboardFinder(WidgetTester tester, Finder finder) async {
+  final scrollable = find.byKey(const Key('dashboard_home_scroll_view'));
+  expect(scrollable, findsOneWidget);
+  await tester.dragUntilVisible(
+    finder,
+    scrollable,
+    const Offset(0, -350),
+    maxIteration: 30,
+  );
+  expect(finder, findsOneWidget);
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+}
+
 const _usSummary = PortfolioSummary(
   currency: 'USD',
   positionsCount: 0,
@@ -398,7 +950,45 @@ const _krSummary = PortfolioSummary(
   pendingOrders: [],
 );
 
-AutomationRuntimeMonitor _runtimeMonitor() {
+AutomationRuntimeMonitor _runtimeMonitor({
+  List<AutomationEvent> localEvents = const [],
+  List<OrderLogItem> orders = const [],
+  List<TradingLogItem>? runs,
+}) {
+  final sourceRuns = runs ??
+      const [
+        TradingLogItem(
+          id: 1,
+          runKey: 'alpaca-run',
+          provider: 'alpaca',
+          market: 'US',
+          symbol: 'AAPL',
+          triggerSource: 'scheduler',
+          mode: 'watchlist_run',
+          action: 'hold',
+          result: 'skipped',
+          reason: 'weak_final_score_gap',
+          relatedOrderId: null,
+          createdAt: '2026-05-28T01:00:00Z',
+          gateLevel: 2,
+        ),
+        TradingLogItem(
+          id: 2,
+          runKey: 'kis-sell',
+          provider: 'kis',
+          market: 'KR',
+          symbol: '005930',
+          triggerSource: 'scheduler_guarded_sell',
+          mode: 'kis_scheduler_guarded_sell',
+          action: 'sell',
+          result: 'blocked',
+          reason: 'market_closed',
+          relatedOrderId: null,
+          createdAt: '2026-05-28T02:30:00Z',
+          gateLevel: 2,
+          exitTrigger: 'take_profit',
+        ),
+      ];
   return AutomationRuntimeMonitor.fromSources(
     settings: const OpsSettings(
       schedulerEnabled: true,
@@ -469,38 +1059,52 @@ AutomationRuntimeMonitor _runtimeMonitor() {
       'manual_submit_called': false,
       'created_at': '2026-05-28T02:31:00Z',
     }),
-    runs: const [
-      TradingLogItem(
-        id: 1,
-        runKey: 'alpaca-run',
-        provider: 'alpaca',
-        market: 'US',
-        symbol: 'AAPL',
-        triggerSource: 'scheduler',
-        mode: 'watchlist_run',
-        action: 'hold',
-        result: 'skipped',
-        reason: 'weak_final_score_gap',
-        relatedOrderId: null,
-        createdAt: '2026-05-28T01:00:00Z',
-        gateLevel: 2,
-      ),
-      TradingLogItem(
-        id: 2,
-        runKey: 'kis-sell',
-        provider: 'kis',
-        market: 'KR',
-        symbol: '005930',
-        triggerSource: 'scheduler_guarded_sell',
-        mode: 'kis_scheduler_guarded_sell',
-        action: 'sell',
-        result: 'blocked',
-        reason: 'market_closed',
-        relatedOrderId: null,
-        createdAt: '2026-05-28T02:30:00Z',
-        gateLevel: 2,
-        exitTrigger: 'take_profit',
-      ),
-    ],
+    runs: sourceRuns,
+    orders: orders,
+    localEvents: localEvents,
+  );
+}
+
+AutomationEvent _event({
+  required String id,
+  required String timestamp,
+  required String provider,
+  required String market,
+  required String? symbol,
+  required String category,
+  String severity = 'info',
+  String action = 'hold',
+  String trigger = 'none',
+  String result = '',
+  String reason = '',
+  String? blockReason,
+}) {
+  return AutomationEvent(
+    id: id,
+    timestamp: timestamp,
+    provider: provider,
+    market: market,
+    category: category,
+    severity: severity,
+    symbol: symbol,
+    companyName: null,
+    action: action,
+    trigger: trigger,
+    result: result,
+    reason: reason,
+    blockReason: blockReason,
+    orderId: null,
+    brokerOrderId: null,
+    kisOdno: null,
+    realOrderSubmitted: false,
+    brokerSubmitCalled: false,
+    manualSubmitCalled: false,
+    source: 'test',
+    mode: 'test',
+    triggerSource: 'test',
+    relatedRunId: null,
+    relatedSignalId: null,
+    relatedOrderId: null,
+    developerPayload: const {},
   );
 }

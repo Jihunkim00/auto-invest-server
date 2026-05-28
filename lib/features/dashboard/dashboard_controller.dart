@@ -111,9 +111,11 @@ class DashboardController extends ChangeNotifier {
   List<TradingLogItem> automationRecentRuns = const [];
   List<OrderLogItem> automationRecentOrders = const [];
   List<SignalLogItem> automationRecentSignals = const [];
+  List<AutomationEvent> localAutomationEvents = const [];
   List<PortfolioPositionManagementItem> portfolioManagementItems = const [];
   bool portfolioManagementLoading = false;
   String? portfolioManagementError;
+  String? latestSettingsChangeSummary;
   bool opsProductionReadinessLoading = false;
   OpsProductionReadiness? latestOpsProductionReadiness;
   String? opsProductionReadinessError;
@@ -431,6 +433,7 @@ class DashboardController extends ChangeNotifier {
       }
       recentRuns = await apiClient.getRecentTradingRuns();
       _rebuildAutomationRuntimeMonitorFromCurrentState();
+      _rebuildPortfolioManagementItems();
     } catch (e) {
       error = e.toString();
     } finally {
@@ -552,8 +555,10 @@ class DashboardController extends ChangeNotifier {
       runs: nextRuns,
       orders: nextOrders,
       signals: nextSignals,
+      localEvents: localAutomationEvents,
       warnings: warnings,
     );
+    _rebuildPortfolioManagementItems();
     automationRuntimeMonitorError =
         warnings.isEmpty ? null : warnings.join(' | ');
     automationRuntimeMonitorLoading = false;
@@ -623,6 +628,41 @@ class DashboardController extends ChangeNotifier {
           success: true, message: 'Watchlist analysis completed.');
     } catch (e) {
       error = 'Run request failed: $e';
+      return ActionResult(success: false, message: error!);
+    } finally {
+      runOnceLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAlpacaWatchlistCheck() async {
+    if (runOnceLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Alpaca watchlist check already in progress.',
+      );
+    }
+
+    runOnceLoading = true;
+    error = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runWatchlistForProvider(
+        provider: 'alpaca',
+        gateLevel: selectedGateLevel,
+      );
+      runResult = result;
+      hasLatestRunResult = true;
+      showingOfflineFallback = false;
+      recentRuns = await apiClient.getRecentTradingRuns();
+      await _refreshUsPortfolioSummary();
+      return ActionResult(
+        success: true,
+        message:
+            'Alpaca paper watchlist check completed: ${result.reason.isEmpty ? result.result : result.reason}.',
+      );
+    } catch (e) {
+      error = 'Alpaca paper watchlist check failed: $e';
       return ActionResult(success: false, message: error!);
     } finally {
       runOnceLoading = false;
@@ -800,6 +840,8 @@ class DashboardController extends ChangeNotifier {
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
+      _recordSettingsChangeEvent('Dry Run', {'dry_run': v});
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
       return ActionResult(
           success: true,
           message:
@@ -840,9 +882,12 @@ class DashboardController extends ChangeNotifier {
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
+      _recordSettingsChangeEvent(label, values);
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
+      _rebuildPortfolioManagementItems();
       return ActionResult(
         success: true,
-        message: '$label updated successfully.',
+        message: '$label updated successfully. Monitor refreshed.',
       );
     } catch (e) {
       settings = previousSettings;
@@ -878,6 +923,23 @@ class DashboardController extends ChangeNotifier {
     } catch (_) {
       // Settings update should not fail only because status refresh is unavailable.
     }
+  }
+
+  void _recordSettingsChangeEvent(String label, Map<String, dynamic> values) {
+    final summary = _settingsChangeSummary(label, settings);
+    latestSettingsChangeSummary = summary;
+    final event = AutomationEvent.settingsChanged(
+      id: 'settings-${DateTime.now().microsecondsSinceEpoch}',
+      timestamp: _localTimestampNow(),
+      title: label,
+      reason: summary,
+      payload: {
+        'label': label,
+        'updated_values': Map<String, dynamic>.from(values),
+        'settings_summary': summary,
+      },
+    );
+    localAutomationEvents = [event, ...localAutomationEvents].take(20).toList();
   }
 
   void selectPortfolioMarket(PortfolioMarket market) {
@@ -2849,6 +2911,8 @@ class DashboardController extends ChangeNotifier {
           managedPosition:
               isKr ? kisManagedPositionForSymbol(position.symbol) : null,
           isKr: isKr,
+          events: automationRuntimeMonitor?.events ?? const [],
+          orders: automationRecentOrders,
         ),
     ];
   }
@@ -2867,6 +2931,7 @@ class DashboardController extends ChangeNotifier {
       runs: automationRecentRuns,
       orders: automationRecentOrders,
       signals: automationRecentSignals,
+      localEvents: localAutomationEvents,
       warnings: automationRuntimeMonitor?.warnings ?? const [],
     );
   }
@@ -3288,6 +3353,43 @@ String _localTimestampNow() {
   final now = DateTime.now();
   return now.toIso8601String();
 }
+
+String _settingsChangeSummary(String label, OpsSettings settings) {
+  final normalized = label.toLowerCase();
+  if (normalized.contains('sell-only')) {
+    return [
+      'Sell-Only Test Mode enabled',
+      'dry_run ${_onOff(settings.dryRun)}',
+      'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
+      'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+      'stop-loss ${_onOff(settings.kisLimitedAutoStopLossEnabled || settings.kisLimitedAutoSellStopLossEnabled)}',
+      'take-profit ${_onOff(settings.kisLimitedAutoTakeProfitEnabled || settings.kisLimitedAutoSellTakeProfitEnabled)}',
+      'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+      'limited auto buy ${_onOff(settings.kisLimitedAutoBuyEnabled)}',
+    ].join(' | ');
+  }
+  if (normalized.contains('safe mode')) {
+    return [
+      'Safe Mode enabled',
+      'dry_run ${_onOff(settings.dryRun)}',
+      'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
+      'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+      'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+      'stop-loss ${_onOff(settings.kisLimitedAutoStopLossEnabled || settings.kisLimitedAutoSellStopLossEnabled)}',
+      'take-profit ${_onOff(settings.kisLimitedAutoTakeProfitEnabled || settings.kisLimitedAutoSellTakeProfitEnabled)}',
+      'limited auto buy ${_onOff(settings.kisLimitedAutoBuyEnabled)}',
+    ].join(' | ');
+  }
+  return [
+    '$label settings updated',
+    'dry_run ${_onOff(settings.dryRun)}',
+    'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
+    'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+    'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+  ].join(' | ');
+}
+
+String _onOff(bool enabled) => enabled ? 'ON' : 'OFF';
 
 Map<String, dynamic> _exitPreflightSourceMetadata(
   KisLiveExitCandidate candidate, {

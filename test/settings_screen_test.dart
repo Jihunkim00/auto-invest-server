@@ -240,6 +240,15 @@ void main() {
     expect(api.lastSettingsUpdate?['kis_live_auto_sell_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_live_auto_buy_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_limited_auto_buy_enabled'], isFalse);
+    expect(find.text('Settings Change Result'), findsOneWidget);
+    expect(find.text('Safe Mode enabled'), findsOneWidget);
+    expect(find.text('dry_run ON'), findsOneWidget);
+    expect(find.text('KIS scheduler OFF'), findsOneWidget);
+    expect(find.text('KIS buy OFF'), findsOneWidget);
+    expect(find.text('KIS sell OFF'), findsOneWidget);
+    expect(find.text('stop-loss OFF'), findsOneWidget);
+    expect(find.text('take-profit OFF'), findsOneWidget);
+    expect(find.text('limited auto buy OFF'), findsOneWidget);
 
     controller.dispose();
   });
@@ -279,6 +288,15 @@ void main() {
         isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_allow_limited_auto_sell'],
         isTrue);
+    expect(find.text('Settings Change Result'), findsOneWidget);
+    expect(find.text('Sell-Only Test Mode enabled'), findsOneWidget);
+    expect(find.text('dry_run OFF'), findsOneWidget);
+    expect(find.text('KIS scheduler ON'), findsOneWidget);
+    expect(find.text('KIS sell ON'), findsOneWidget);
+    expect(find.text('stop-loss ON'), findsOneWidget);
+    expect(find.text('take-profit ON'), findsOneWidget);
+    expect(find.text('KIS buy OFF'), findsOneWidget);
+    expect(find.text('limited auto buy OFF'), findsOneWidget);
 
     controller.dispose();
   });
