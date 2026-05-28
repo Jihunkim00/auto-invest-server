@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
+import '../../../models/automation_runtime_monitor.dart';
 import '../../../models/portfolio_summary.dart';
 import '../../../models/managed_position.dart';
 import '../../dashboard/dashboard_controller.dart';
@@ -27,6 +28,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
     final summary = controller.selectedPortfolioSummary;
     final selectedMarket = controller.selectedPortfolioMarket;
     final isKr = selectedMarket == PortfolioMarket.kr;
+    final managementItems = controller.selectedPortfolioManagementItems;
     final marketTitle =
         isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';
     final noPositionsText = isKr && summary.positionsUnavailable
@@ -53,6 +55,31 @@ class PortfolioSnapshotSection extends StatelessWidget {
             child: Text('Portfolio Snapshot',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
+          if (managementMode) ...[
+            IconButton(
+              key: const ValueKey('portfolio-management-refresh'),
+              tooltip: 'Refresh positions',
+              onPressed: controller.portfolioManagementLoading
+                  ? null
+                  : () async {
+                      final result =
+                          await controller.refreshPortfolioManagement();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(result.message),
+                        backgroundColor:
+                            result.success ? Colors.green : Colors.orange,
+                      ));
+                    },
+              icon: controller.portfolioManagementLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh, size: 20),
+            ),
+          ],
           _CountPill(text: countText),
         ]),
         const SizedBox(height: 12),
@@ -129,6 +156,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
           ]);
         }),
         const SizedBox(height: 16),
+        const _SubsectionTitle('Position Management'),
+        const SizedBox(height: 4),
+        const _StateNote(
+            text: 'Held positions with trigger state and manual-prep actions.'),
+        const SizedBox(height: 8),
         const _SubsectionTitle('Current Holdings'),
         if (isKr && controller.kisManagedPositionsLoading) ...[
           const SizedBox(height: 6),
@@ -138,25 +170,28 @@ class PortfolioSnapshotSection extends StatelessWidget {
           const SizedBox(height: 6),
           _StateNote(text: controller.kisManagedPositionsError!),
         ],
+        if (controller.portfolioManagementError != null) ...[
+          const SizedBox(height: 6),
+          _StateNote(text: controller.portfolioManagementError!),
+        ],
         const SizedBox(height: 8),
         if (summary.positions.isEmpty)
           _EmptyLine(text: noPositionsText)
         else
           Column(children: [
-            for (final position in summary.positions) ...[
+            for (final item in managementItems) ...[
               _PositionTile(
                 controller: controller,
-                position: position,
-                managedPosition: isKr
-                    ? controller.kisManagedPositionForSymbol(position.symbol)
-                    : null,
+                position: item.position,
+                managementItem: item,
+                managedPosition: item.managedPosition,
                 currency: summary.currency,
                 isKr: isKr,
                 managementMode: managementMode,
                 onOpenManualOrder: onOpenManualOrder,
                 onReviewPosition: onReviewPosition,
               ),
-              if (position != summary.positions.last) const SizedBox(height: 8),
+              if (item != managementItems.last) const SizedBox(height: 8),
             ],
           ]),
         const SizedBox(height: 16),
@@ -234,6 +269,7 @@ class _PositionTile extends StatelessWidget {
   const _PositionTile({
     required this.controller,
     required this.position,
+    required this.managementItem,
     this.managedPosition,
     required this.currency,
     required this.isKr,
@@ -244,6 +280,7 @@ class _PositionTile extends StatelessWidget {
 
   final DashboardController controller;
   final PositionSummary position;
+  final PortfolioPositionManagementItem managementItem;
   final ManagedPosition? managedPosition;
   final String currency;
   final bool isKr;
@@ -255,16 +292,15 @@ class _PositionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final unrealizedPl = managedPosition?.unrealizedPl ?? position.unrealizedPl;
     final plColor = _valueColor(unrealizedPl);
-    final status =
-        managedPosition?.statusLabel ?? _positionStatus(position, isKr: isKr);
+    final status = managementItem.triggerStatus.label;
     final reason = managedPosition?.humanReason ??
         _positionStatusReason(position, isKr: isKr);
     final company = _companyLabel(position, managedPosition);
     final canPrepareManualSell = isKr &&
         managementMode &&
-        managedPosition != null &&
-        !managedPosition!.isHold &&
-        managedPosition!.canPrepareManualSell;
+        managementItem.manualSellAvailable &&
+        managementItem.triggerStatus != TriggerStatus.hold &&
+        managementItem.triggerStatus != TriggerStatus.noData;
 
     return Container(
       width: double.infinity,
@@ -289,6 +325,14 @@ class _PositionTile extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             _SoftBadge(text: status, color: _positionStatusColor(status)),
+            if (managedPosition != null &&
+                managedPosition!.statusLabel != status) ...[
+              const SizedBox(width: 6),
+              _SoftBadge(
+                text: managedPosition!.statusLabel,
+                color: _positionStatusColor(managedPosition!.statusLabel),
+              ),
+            ],
           ]),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -320,6 +364,7 @@ class _PositionTile extends StatelessWidget {
           children: [
             _PositionDetail(
               position: position,
+              managementItem: managementItem,
               managedPosition: managedPosition,
               currency: currency,
               isKr: isKr,
@@ -377,12 +422,14 @@ class _PositionTile extends StatelessWidget {
 class _PositionDetail extends StatelessWidget {
   const _PositionDetail({
     required this.position,
+    required this.managementItem,
     required this.managedPosition,
     required this.currency,
     required this.isKr,
   });
 
   final PositionSummary position;
+  final PortfolioPositionManagementItem managementItem;
   final ManagedPosition? managedPosition;
   final String currency;
   final bool isKr;
@@ -402,6 +449,11 @@ class _PositionDetail extends StatelessWidget {
           ];
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 14, runSpacing: 8, children: [
+        _DataPair(label: 'Provider', value: managementItem.provider),
+        _DataPair(label: 'Market', value: managementItem.market),
+        _DataPair(
+            label: 'Trigger Status', value: managementItem.triggerStatus.label),
+        _DataPair(label: 'Trigger Source', value: managementItem.triggerSource),
         _DataPair(
             label: 'Avg Buy / Share',
             value: _money(managed?.averagePrice ?? position.avgEntryPrice,
@@ -454,6 +506,24 @@ class _PositionDetail extends StatelessWidget {
         _DataPair(
             label: 'Bars',
             value: _technicalText(technical, 'indicator_bar_count')),
+        _DataPair(
+            label: 'Stop-loss Threshold',
+            value: _threshold(managementItem.stopLossThreshold)),
+        _DataPair(
+            label: 'Take-profit Threshold',
+            value: _threshold(managementItem.takeProfitThreshold)),
+        _DataPair(
+            label: 'Open Sell Order',
+            value: _yesNoUnknown(managementItem.duplicateOpenSellOrder)),
+        _DataPair(
+            label: 'Latest Order',
+            value: managementItem.latestRelatedOrder ?? 'none'),
+        _DataPair(
+            label: 'Scheduler Eligible',
+            value: managementItem.schedulerEligible ? 'yes' : 'no'),
+        _DataPair(
+            label: 'Manual Sell',
+            value: managementItem.manualSellAvailable ? 'available' : 'no'),
       ]),
       const SizedBox(height: 12),
       const _SubsectionTitle('Technical Snapshot'),
@@ -896,15 +966,6 @@ double? _positionProfitPercent(
   return unrealizedPl / position.costBasis;
 }
 
-String _positionStatus(PositionSummary position, {required bool isKr}) {
-  final profit = _positionProfitPercent(position, isKr: isKr);
-  if (profit == null) return 'REVIEW SELL';
-  if (profit <= -0.07) return 'SELL READY';
-  if (profit <= -0.03) return 'REVIEW SELL';
-  if (profit >= 0.10) return 'SELL READY';
-  return 'HOLD';
-}
-
 String _positionStatusReason(PositionSummary position, {required bool isKr}) {
   final profit = _positionProfitPercent(position, isKr: isKr);
   if (profit == null) return 'No reliable P/L percentage available.';
@@ -916,6 +977,16 @@ String _positionStatusReason(PositionSummary position, {required bool isKr}) {
 
 Color _positionStatusColor(String status) {
   switch (status) {
+    case 'STOP_LOSS_READY':
+      return Colors.redAccent;
+    case 'TAKE_PROFIT_READY':
+      return Colors.greenAccent;
+    case 'SELL_READY':
+      return Colors.redAccent;
+    case 'MANUAL_REVIEW':
+      return Colors.amberAccent;
+    case 'NO_DATA':
+      return Colors.white70;
     case 'SELL READY':
       return Colors.redAccent;
     case 'REVIEW SELL':
@@ -923,6 +994,17 @@ Color _positionStatusColor(String status) {
     default:
       return Colors.lightBlueAccent;
   }
+}
+
+String _threshold(double? value) {
+  if (value == null) return '--';
+  if (value.abs() <= 1) return _percent(value, signed: true);
+  return '${value.toStringAsFixed(value == value.roundToDouble() ? 0 : 2)}%';
+}
+
+String _yesNoUnknown(bool? value) {
+  if (value == null) return 'unknown';
+  return value ? 'yes' : 'no';
 }
 
 String _quantity(double value) {

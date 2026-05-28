@@ -11,10 +11,13 @@ import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
+import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_live.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review.dart';
 import 'package:auto_invest_dashboard/models/kis_shadow_exit_review_queue.dart';
 import 'package:auto_invest_dashboard/models/kis_single_symbol_trading_result.dart';
+import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
@@ -65,6 +68,120 @@ void main() {
     expect(controller.showingOfflineFallback, isTrue);
     expect(controller.runResult.finalBestCandidate, 'MOCK');
     expect(api.mockCalls, greaterThanOrEqualTo(1));
+
+    controller.dispose();
+  });
+
+  test('refreshAutomationRuntimeMonitor tolerates partial endpoint failure',
+      () async {
+    final api = _FakeApiClient(
+      recentRuns: [_alpacaSchedulerRun()],
+      throwRecentOrders: true,
+      guardedSell: _guardedSellStatus(),
+      guardedBuy: _guardedBuyStatus(),
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshAutomationRuntimeMonitor();
+
+    expect(result.success, isFalse);
+    expect(controller.automationRuntimeMonitor, isNotNull);
+    expect(controller.automationRuntimeMonitorError,
+        contains('recent orders unavailable'));
+    expect(controller.automationRuntimeMonitor!.alpaca.lastResult, 'skipped');
+    expect(controller.automationRuntimeMonitor!.kis.lastTriggerDetected,
+        'take_profit');
+    expect(api.fetchRecentRunsCalls, 1);
+    expect(api.fetchRecentOrdersCalls, 1);
+    expect(api.fetchRecentSignalsCalls, 1);
+
+    controller.dispose();
+  });
+
+  test('refreshPortfolioManagement builds sorted held-position items',
+      () async {
+    final api = _FakeApiClient(
+      krPortfolio: PortfolioSummary(
+        currency: 'KRW',
+        positionsCount: 3,
+        pendingOrdersCount: 0,
+        totalCostBasis: 3000,
+        totalMarketValue: 2900,
+        totalUnrealizedPl: -100,
+        totalUnrealizedPlpc: -0.03,
+        cash: 0,
+        positions: const [
+          PositionSummary(
+            symbol: '000003',
+            name: 'Hold',
+            side: 'long',
+            qty: 1,
+            avgEntryPrice: 1000,
+            costBasis: 1000,
+            currentPrice: 1000,
+            marketValue: 1000,
+            unrealizedPl: 0,
+            unrealizedPlpc: 0,
+          ),
+          PositionSummary(
+            symbol: '000002',
+            name: 'Take Profit',
+            side: 'long',
+            qty: 1,
+            avgEntryPrice: 1000,
+            costBasis: 1000,
+            currentPrice: 1200,
+            marketValue: 1200,
+            unrealizedPl: 200,
+            unrealizedPlpc: 0.2,
+          ),
+          PositionSummary(
+            symbol: '000001',
+            name: 'Stop Loss',
+            side: 'long',
+            qty: 1,
+            avgEntryPrice: 1000,
+            costBasis: 1000,
+            currentPrice: 700,
+            marketValue: 700,
+            unrealizedPl: -300,
+            unrealizedPlpc: -0.3,
+          ),
+        ],
+        pendingOrders: const [],
+      ),
+      managedPositions: [
+        _managedPosition(
+          symbol: '000003',
+          holdingStatus: 'HOLD',
+          stopLossTriggered: false,
+          manualReviewRequired: false,
+        ),
+        _managedPosition(
+          symbol: '000002',
+          stopLossTriggered: false,
+          takeProfitTriggered: true,
+          holdingStatus: 'SELL_READY',
+        ),
+        _managedPosition(
+          symbol: '000001',
+          stopLossTriggered: true,
+          holdingStatus: 'SELL_READY',
+        ),
+      ],
+    );
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.refreshPortfolioManagement();
+
+    expect(result.success, isTrue);
+    final krItems = controller.portfolioManagementItemsForMarket(
+      PortfolioMarket.kr,
+    );
+    expect(krItems.map((item) => item.symbol), ['000001', '000002', '000003']);
+    expect(krItems.first.triggerStatus.label, 'STOP_LOSS_READY');
+    expect(krItems[1].triggerStatus.label, 'TAKE_PROFIT_READY');
+    expect(krItems.last.triggerStatus.label, 'HOLD');
 
     controller.dispose();
   });
@@ -806,11 +923,18 @@ KisManualOrderSafetyStatus _safetyStatus({
   );
 }
 
-ManagedPosition _managedPosition({double quantity = 2}) {
+ManagedPosition _managedPosition({
+  String symbol = '005930',
+  double quantity = 2,
+  String holdingStatus = 'SELL_READY',
+  bool stopLossTriggered = true,
+  bool takeProfitTriggered = false,
+  bool manualReviewRequired = true,
+}) {
   return ManagedPosition(
     provider: 'kis',
     market: 'KR',
-    symbol: '005930',
+    symbol: symbol,
     companyName: 'Samsung Electronics',
     quantity: quantity,
     averagePrice: 70000,
@@ -819,14 +943,14 @@ ManagedPosition _managedPosition({double quantity = 2}) {
     currentValue: 144000,
     unrealizedPl: 4000,
     unrealizedPlPct: 0.028,
-    holdingStatus: 'SELL_READY',
+    holdingStatus: holdingStatus,
     exitReason: 'stop_loss_triggered',
     humanReason: 'Stop loss triggered',
-    stopLossTriggered: true,
-    takeProfitTriggered: false,
+    stopLossTriggered: stopLossTriggered,
+    takeProfitTriggered: takeProfitTriggered,
     weakTrendTriggered: false,
     sellPressureTriggered: false,
-    manualReviewRequired: true,
+    manualReviewRequired: manualReviewRequired,
     finalSellScore: 80,
     finalBuyScore: 20,
     quantSellScore: 78,
@@ -1156,6 +1280,11 @@ class _FakeApiClient extends ApiClient {
     this.limitedAutoBuy,
     this.kisSingle,
     this.schedulerLive,
+    this.recentRuns = const [],
+    this.throwRecentOrders = false,
+    this.guardedSell,
+    this.guardedBuy,
+    this.managedPositions = const [],
     this.updatedKosdaqWatchlist,
     this.manualSellPreparation,
   });
@@ -1185,6 +1314,11 @@ class _FakeApiClient extends ApiClient {
   final KisLimitedAutoBuy? limitedAutoBuy;
   final KisSingleSymbolTradingResult? kisSingle;
   final KisSchedulerLiveResult? schedulerLive;
+  final List<TradingLogItem> recentRuns;
+  final bool throwRecentOrders;
+  final KisSchedulerGuardedSellResult? guardedSell;
+  final KisSchedulerGuardedBuyResult? guardedBuy;
+  final List<ManagedPosition> managedPositions;
   final MarketWatchlist? updatedKosdaqWatchlist;
   final ManualSellPreparation? manualSellPreparation;
   int mockCalls = 0;
@@ -1203,6 +1337,11 @@ class _FakeApiClient extends ApiClient {
   int runKisLimitedAutoBuyCalls = 0;
   int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
+  int fetchRecentRunsCalls = 0;
+  int fetchRecentOrdersCalls = 0;
+  int fetchRecentSignalsCalls = 0;
+  int fetchKisGuardedSellStatusCalls = 0;
+  int fetchKisGuardedBuyStatusCalls = 0;
   int updateKosdaqTop50WatchlistCalls = 0;
   int prepareManualSellCalls = 0;
   int submitCalls = 0;
@@ -1266,12 +1405,60 @@ class _FakeApiClient extends ApiClient {
   }
 
   @override
-  Future<SchedulerStatus> fetchSchedulerStatus() async =>
-      SchedulerStatus.safeDefault();
+  Future<SchedulerStatus> fetchSchedulerStatus() async => const SchedulerStatus(
+        runtimeSchedulerEnabled: true,
+        us: MarketSchedulerStatus(
+          enabledForScheduler: true,
+          timezone: 'America/New_York',
+          slots: [],
+        ),
+        kr: MarketSchedulerStatus(
+          enabledForScheduler: true,
+          timezone: 'Asia/Seoul',
+          slots: [],
+          previewOnly: true,
+          realOrdersAllowed: false,
+        ),
+      );
 
   @override
   Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async =>
       KisSchedulerSimulationStatus.safeDefault();
+
+  @override
+  Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
+    fetchRecentRunsCalls += 1;
+    return recentRuns;
+  }
+
+  @override
+  Future<List<OrderLogItem>> fetchRecentOrders({int limit = 20}) async {
+    fetchRecentOrdersCalls += 1;
+    if (throwRecentOrders) {
+      throw const ApiRequestException('orders unavailable');
+    }
+    return const [];
+  }
+
+  @override
+  Future<List<SignalLogItem>> fetchRecentSignals({int limit = 20}) async {
+    fetchRecentSignalsCalls += 1;
+    return const [];
+  }
+
+  @override
+  Future<KisSchedulerGuardedSellResult>
+      fetchKisSchedulerGuardedSellStatus() async {
+    fetchKisGuardedSellStatusCalls += 1;
+    return guardedSell ?? _guardedSellStatus();
+  }
+
+  @override
+  Future<KisSchedulerGuardedBuyResult>
+      fetchKisSchedulerGuardedBuyStatus() async {
+    fetchKisGuardedBuyStatusCalls += 1;
+    return guardedBuy ?? _guardedBuyStatus();
+  }
 
   @override
   Future<KisAutoReadiness> fetchKisAutoReadiness() async {
@@ -1429,6 +1616,11 @@ class _FakeApiClient extends ApiClient {
       throw const ApiRequestException('KIS unavailable');
     }
     return krPortfolio ?? PortfolioSummary.empty(currency: 'KRW');
+  }
+
+  @override
+  Future<List<ManagedPosition>> fetchKisManagedPositions() async {
+    return managedPositions;
   }
 
   @override
@@ -1680,4 +1872,57 @@ WatchlistRunResult _resultFor(String symbol) {
     reason: 'weak_final_score_gap',
     triggerSource: 'manual',
   );
+}
+
+TradingLogItem _alpacaSchedulerRun() {
+  return const TradingLogItem(
+    id: 100,
+    runKey: 'alpaca-scheduler',
+    provider: 'alpaca',
+    market: 'US',
+    symbol: 'AAPL',
+    triggerSource: 'scheduler',
+    mode: 'watchlist_run',
+    action: 'hold',
+    result: 'skipped',
+    reason: 'weak_final_score_gap',
+    relatedOrderId: null,
+    createdAt: '2026-05-28T01:00:00Z',
+    gateLevel: 2,
+  );
+}
+
+KisSchedulerGuardedSellResult _guardedSellStatus() {
+  return KisSchedulerGuardedSellResult.fromJson({
+    'status': 'ok',
+    'result': 'blocked',
+    'action': 'sell',
+    'reason': 'market_closed',
+    'primary_block_reason': 'market_closed',
+    'trigger': 'take_profit',
+    'symbol': '005930',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'daily_limit': {
+      'today_submitted_count': 0,
+      'max_live_orders_per_day': 2,
+      'remaining': 2,
+    },
+    'created_at': '2026-05-28T02:30:00Z',
+  });
+}
+
+KisSchedulerGuardedBuyResult _guardedBuyStatus() {
+  return KisSchedulerGuardedBuyResult.fromJson({
+    'status': 'ok',
+    'result': 'blocked',
+    'action': 'hold',
+    'reason': 'scheduler_buy_disabled',
+    'primary_block_reason': 'scheduler_buy_disabled',
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'created_at': '2026-05-28T02:31:00Z',
+  });
 }
