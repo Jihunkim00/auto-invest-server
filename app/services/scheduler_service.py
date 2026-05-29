@@ -63,8 +63,8 @@ class SchedulerService:
     def _run_scheduled_once(self, slot_name: str):
         db = SessionLocal()
         try:
-            settings = self.runtime_settings.get_settings(db)
-            if not settings.get("scheduler_enabled", False):
+            runtime_state = self.runtime_settings.get_kis_scheduler_runtime_state(db)
+            if not runtime_state.get("scheduler_enabled", False):
                 run_log = self.orchestrator._create_run_log(
                     db,
                     run_key=f"scheduler_{datetime.now(NY_TZ).strftime('%Y%m%d_%H%M%S')}_{slot_name}",
@@ -96,14 +96,20 @@ class SchedulerService:
             )
             settings_obj = get_settings()
             kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
-            KisSchedulerSimulationService(kis_client).run_once(
+            KisSchedulerSimulationService(
+                kis_client,
+                runtime_settings=self.runtime_settings,
+            ).run_once(
                 db,
                 gate_level=DEFAULT_GATE_LEVEL,
                 scheduler_slot=slot_name,
                 require_enabled=True,
             )
-            if settings.get("kis_scheduler_live_enabled", False):
-                KisSchedulerLiveService(kis_client).run_once(
+            if runtime_state.get("kis_scheduler_live_enabled", False):
+                KisSchedulerLiveService(
+                    kis_client,
+                    runtime_settings=self.runtime_settings,
+                ).run_once(
                     db,
                     gate_level=DEFAULT_GATE_LEVEL,
                 )

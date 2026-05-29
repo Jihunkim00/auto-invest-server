@@ -54,39 +54,50 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     )
     live_scheduler_ready = bool(runtime_state["live_scheduler_ready"])
     real_orders_allowed = bool(runtime_state["real_orders_allowed"])
-    kr_live_scheduler_enabled_effective = kr_session_enabled and bool(
-        runtime_state["real_order_scheduler_enabled"]
-    )
-    kr_dry_run_scheduler_enabled_effective = (
-        kr_session_enabled
-        and bool(runtime_state["scheduler_enabled"])
+    real_order_scheduler_enabled = bool(runtime_state["real_order_scheduler_enabled"])
+
+    kr_live_scheduler_enabled_effective = real_order_scheduler_enabled
+
+    kr_dry_run_scheduler_enabled_effective = bool(
+        runtime_state["scheduler_enabled"]
         and kr_scheduler_enabled
         and kr_scheduler_dry_run
     )
-    kr_enabled_for_scheduler = (
-        bool(runtime_state["scheduler_enabled"])
-        and kr_session_enabled
-        and kr_scheduler_enabled
-        and (kr_live_scheduler_enabled_effective or kr_dry_run_scheduler_enabled_effective)
+
+    kr_scheduler_any_enabled = bool(
+        kr_live_scheduler_enabled_effective
+        or kr_dry_run_scheduler_enabled_effective
+    )
+
+    kr_enabled_for_scheduler = bool(
+        runtime_state["scheduler_enabled"]
+        and kr_scheduler_any_enabled
     )
     kr_enabled_for_scheduler_block_reasons: list[str] = []
+
     if not kr_enabled_for_scheduler:
         if not bool(runtime_state["scheduler_enabled"]):
             kr_enabled_for_scheduler_block_reasons.append("runtime_scheduler_disabled")
+
         if not kr_scheduler_enabled:
             kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_disabled")
-        if kr_scheduler_dry_run and not kr_dry_run_scheduler_enabled_effective:
-            kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_dry_run_true")
-        if not kis_scheduler_live_enabled:
-            kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_live_disabled")
-        if not kr_scheduler_allow_real_orders:
-            kr_enabled_for_scheduler_block_reasons.append(
-                "kis_scheduler_allow_real_orders_false"
-            )
-        if not kr_scheduler_configured_allow_real_orders:
-            kr_enabled_for_scheduler_block_reasons.append(
-                "configured_allow_real_orders_false"
-            )
+
+        if not kr_live_scheduler_enabled_effective and not kr_dry_run_scheduler_enabled_effective:
+            kr_enabled_for_scheduler_block_reasons.append("no_kr_scheduler_mode_enabled")
+
+        if not kr_live_scheduler_enabled_effective:
+            if not kis_scheduler_live_enabled:
+                kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_live_disabled")
+            if kr_scheduler_dry_run:
+                kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_dry_run_true")
+            if not kr_scheduler_allow_real_orders:
+                kr_enabled_for_scheduler_block_reasons.append(
+                    "kis_scheduler_allow_real_orders_false"
+              )
+            if not kr_scheduler_configured_allow_real_orders:
+                kr_enabled_for_scheduler_block_reasons.append(
+                    "configured_allow_real_orders_false"
+              )
 
     return {
         "runtime_scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
@@ -97,7 +108,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         },
         "KR": {
             "enabled_for_scheduler": kr_enabled_for_scheduler,
-            "kr_scheduler_any_enabled": kr_enabled_for_scheduler,
+            "kr_scheduler_any_enabled": kr_scheduler_any_enabled,
             "kr_live_scheduler_enabled_effective": kr_live_scheduler_enabled_effective,
             "kr_dry_run_scheduler_enabled_effective": kr_dry_run_scheduler_enabled_effective,
             "enabled_for_scheduler_block_reasons": kr_enabled_for_scheduler_block_reasons,

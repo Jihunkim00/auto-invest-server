@@ -272,6 +272,83 @@ class RuntimeSettingService:
             }
         return limits
 
+    def get_kis_scheduler_runtime_state(self, db: Session) -> dict[str, Any]:
+        settings = self.get_settings(db)
+        kis_enabled = bool(getattr(self.settings, "kis_enabled", False))
+        kis_real_order_enabled = bool(
+            getattr(self.settings, "kis_real_order_enabled", False)
+        )
+        scheduler_enabled = bool(settings["scheduler_enabled"])
+        kis_scheduler_enabled = bool(settings["kis_scheduler_enabled"])
+        kis_scheduler_dry_run = bool(settings["kis_scheduler_dry_run"])
+        kis_scheduler_allow_real_orders = bool(
+            settings["kis_scheduler_allow_real_orders"]
+        )
+        kis_scheduler_configured_allow_real_orders = bool(
+            settings["kis_scheduler_configured_allow_real_orders"]
+        )
+        kis_scheduler_buy_enabled = bool(settings["kis_scheduler_buy_enabled"])
+        kis_scheduler_sell_enabled = bool(settings["kis_scheduler_sell_enabled"])
+        kis_scheduler_allow_limited_auto_buy = bool(
+            settings["kis_scheduler_allow_limited_auto_buy"]
+        )
+        kis_scheduler_allow_limited_auto_sell = bool(
+            settings["kis_scheduler_allow_limited_auto_sell"]
+        )
+        kis_scheduler_live_enabled = bool(settings["kis_scheduler_live_enabled"])
+        kis_scheduler_max_live_orders_per_day = int(
+            settings["kis_scheduler_max_live_orders_per_day"] or 2
+        )
+        dry_run = bool(settings["dry_run"])
+        kill_switch = bool(settings["kill_switch"])
+        real_orders_allowed = (
+            kis_scheduler_allow_real_orders
+            and kis_scheduler_configured_allow_real_orders
+            and kis_enabled
+            and kis_real_order_enabled
+            and not kis_scheduler_dry_run
+            and not dry_run
+            and not kill_switch
+        )
+        live_scheduler_ready = (
+            kis_scheduler_live_enabled
+            and scheduler_enabled
+            and kis_scheduler_enabled
+            and real_orders_allowed
+            and (
+                kis_scheduler_allow_limited_auto_buy
+                or kis_scheduler_allow_limited_auto_sell
+            )
+        )
+        return {
+            "scheduler_enabled": scheduler_enabled,
+            "kis_scheduler_enabled": kis_scheduler_enabled,
+            "kis_scheduler_dry_run": kis_scheduler_dry_run,
+            "kis_scheduler_allow_real_orders": kis_scheduler_allow_real_orders,
+            "kis_scheduler_configured_allow_real_orders": (
+                kis_scheduler_configured_allow_real_orders
+            ),
+            "kis_scheduler_buy_enabled": kis_scheduler_buy_enabled,
+            "kis_scheduler_sell_enabled": kis_scheduler_sell_enabled,
+            "kis_scheduler_allow_limited_auto_buy": kis_scheduler_allow_limited_auto_buy,
+            "kis_scheduler_allow_limited_auto_sell": kis_scheduler_allow_limited_auto_sell,
+            "kis_scheduler_max_live_orders_per_day": kis_scheduler_max_live_orders_per_day,
+            "kis_scheduler_live_enabled": kis_scheduler_live_enabled,
+            "kis_scheduler_live_requires_dry_run_false": bool(
+                settings["kis_scheduler_live_requires_dry_run_false"]
+            ),
+            "kis_scheduler_live_respect_kill_switch": bool(
+                settings["kis_scheduler_live_respect_kill_switch"]
+            ),
+            "dry_run": dry_run,
+            "kill_switch": kill_switch,
+            "kis_enabled": kis_enabled,
+            "kis_real_order_enabled": kis_real_order_enabled,
+            "real_orders_allowed": real_orders_allowed,
+            "live_scheduler_ready": live_scheduler_ready,
+            "real_order_scheduler_enabled": live_scheduler_ready,
+        }
+
     def _trade_limits(self, settings: dict[str, Any]) -> dict[str, Any]:
         base = {
             "global_daily_entry_limit": settings["global_daily_entry_limit"],
