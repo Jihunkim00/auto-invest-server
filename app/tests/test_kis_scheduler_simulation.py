@@ -524,7 +524,11 @@ def test_kis_scheduler_disabled_skips_scheduled_run(monkeypatch, db_session):
     monkeypatch.setattr(
         KisSchedulerSimulationService,
         "_scheduler_settings",
-        lambda self: {"enabled": False, "dry_run": True, "allow_real_orders": False},
+        lambda self, db: {
+            "enabled": False,
+            "dry_run": True,
+            "allow_real_orders": False,
+        },
     )
     service = KisSchedulerSimulationService(client=object())
 

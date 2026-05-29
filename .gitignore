@@ -33,3 +33,6 @@ Add-Content .gitignore "`nconfig/watchlist_kr.backup*.yaml"
 
 .pytest_run*/
 .pytest_runs/
+
+.pytest_run*/
+.pytest_runs/

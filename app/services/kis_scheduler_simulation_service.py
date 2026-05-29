@@ -58,8 +58,7 @@ class KisSchedulerSimulationService:
         self.session_service = session_service or MarketSessionService()
 
     def status(self, db: Session) -> dict[str, Any]:
-        settings = self._scheduler_settings()
-        runtime = self.runtime_settings.get_settings(db)
+        runtime_state = self.runtime_settings.get_kis_scheduler_runtime_state(db)
         try:
             market_session = self.session_service.get_session_status(MARKET)
         except Exception as exc:
@@ -68,28 +67,30 @@ class KisSchedulerSimulationService:
         return {
             "provider": PROVIDER,
             "market": MARKET,
-            "enabled": settings["enabled"],
+            "enabled": runtime_state["kis_scheduler_enabled"],
             "dry_run": True,
-            "scheduler_dry_run": settings["dry_run"],
+            "scheduler_dry_run": runtime_state["kis_scheduler_dry_run"],
             "allow_real_orders": False,
-            "configured_allow_real_orders": settings["allow_real_orders"],
+            "configured_allow_real_orders": runtime_state[
+                "kis_scheduler_configured_allow_real_orders"
+            ],
             "real_orders_allowed": False,
-            "runtime_scheduler_enabled": bool(runtime.get("scheduler_enabled", False)),
-            "runtime_dry_run": bool(runtime.get("dry_run", True)),
-            "kill_switch": bool(runtime.get("kill_switch", False)),
-            "kis_scheduler_live_enabled": bool(
-                runtime.get("kis_scheduler_live_enabled", False)
-            ),
-            "kis_scheduler_allow_limited_auto_buy": bool(
-                runtime.get("kis_scheduler_allow_limited_auto_buy", False)
-            ),
-            "kis_scheduler_allow_limited_auto_sell": bool(
-                runtime.get("kis_scheduler_allow_limited_auto_sell", False)
-            ),
+            "runtime_scheduler_enabled": runtime_state["scheduler_enabled"],
+            "runtime_dry_run": runtime_state["dry_run"],
+            "kill_switch": runtime_state["kill_switch"],
+            "kis_scheduler_live_enabled": runtime_state[
+                "kis_scheduler_live_enabled"
+            ],
+            "kis_scheduler_allow_limited_auto_buy": runtime_state[
+                "kis_scheduler_allow_limited_auto_buy"
+            ],
+            "kis_scheduler_allow_limited_auto_sell": runtime_state[
+                "kis_scheduler_allow_limited_auto_sell"
+            ],
             "kis_scheduler_max_live_orders_per_day": int(
-                runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+                runtime_state["kis_scheduler_max_live_orders_per_day"]
             ),
-            "live_scheduler_ready": False,
+            "live_scheduler_ready": runtime_state["live_scheduler_ready"],
             "trigger_source": SCHEDULER_TRIGGER_SOURCE,
             "portfolio_trigger_source": SCHEDULER_PORTFOLIO_TRIGGER_SOURCE,
             "market_session": market_session,
@@ -109,7 +110,7 @@ class KisSchedulerSimulationService:
         scheduler_slot: str | None = None,
         require_enabled: bool = False,
     ) -> dict[str, Any]:
-        settings = self._scheduler_settings()
+        settings = self._scheduler_settings(db)
         runtime = self.runtime_settings.get_settings(db)
         if require_enabled and not settings["enabled"]:
             return self._persist_skip(
@@ -166,21 +167,12 @@ class KisSchedulerSimulationService:
         )
         return sanitize_kis_payload(result)
 
-    def _scheduler_settings(self) -> dict[str, bool]:
-        settings = get_settings()
-        enabled = bool(
-            getattr(settings, "kis_scheduler_enabled", False)
-            or getattr(settings, "kr_scheduler_enabled", False)
-        )
-        dry_run = bool(getattr(settings, "kis_scheduler_dry_run", True))
-        allow_real_orders = bool(
-            getattr(settings, "kis_scheduler_allow_real_orders", False)
-            or getattr(settings, "kr_scheduler_allow_real_orders", False)
-        )
+    def _scheduler_settings(self, db: Session) -> dict[str, bool]:
+        runtime_state = self.runtime_settings.get_kis_scheduler_runtime_state(db)
         return {
-            "enabled": enabled,
-            "dry_run": dry_run,
-            "allow_real_orders": allow_real_orders,
+            "enabled": bool(runtime_state["kis_scheduler_enabled"]),
+            "dry_run": bool(runtime_state["kis_scheduler_dry_run"]),
+            "allow_real_orders": bool(runtime_state["kis_scheduler_allow_real_orders"]),
         }
 
     def _fetch_account_state(self, db: Session) -> dict[str, Any]:

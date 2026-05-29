@@ -25,62 +25,82 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us = sessions.get("US", {})
     kr = sessions.get("KR", {})
     kr_profile = profiles.get("KR", {})
-    kr_scheduler_enabled = bool(
-        getattr(settings, "kis_scheduler_enabled", False)
-        or getattr(settings, "kr_scheduler_enabled", False)
-    )
-    kr_scheduler_dry_run = bool(getattr(settings, "kis_scheduler_dry_run", True))
+    runtime_state = RuntimeSettingService().get_kis_scheduler_runtime_state(db)
+    kr_scheduler_enabled = bool(runtime_state["kis_scheduler_enabled"])
+    kr_scheduler_dry_run = bool(runtime_state["kis_scheduler_dry_run"])
     kr_scheduler_allow_real_orders = bool(
-        getattr(settings, "kis_scheduler_allow_real_orders", False)
-        or getattr(settings, "kr_scheduler_allow_real_orders", False)
+        runtime_state["kis_scheduler_allow_real_orders"]
     )
+    kr_scheduler_configured_allow_real_orders = bool(
+        runtime_state["kis_scheduler_configured_allow_real_orders"]
+    )
+    kr_session_enabled = bool(kr.get("enabled_for_scheduler", False))
     kr_live_order_prereqs_met = all(
         [
-            kr_scheduler_allow_real_orders,
-            bool(getattr(settings, "kis_real_order_enabled", False)),
-            bool(getattr(settings, "kis_enabled", False)),
-            bool(runtime.get("dry_run", True)) is False,
-            bool(runtime.get("kill_switch", False)) is False,
-            kr_scheduler_enabled,
-            bool(kr.get("enabled_for_scheduler", False)),
+            runtime_state["real_orders_allowed"],
+            bool(runtime_state["kis_enabled"]),
+            bool(runtime_state["kis_real_order_enabled"]),
+            bool(runtime_state["scheduler_enabled"]),
+            kr_session_enabled,
             bool(kr_profile.get("enabled_for_trading", False)),
         ]
     )
-    kis_scheduler_live_enabled = bool(
-        runtime.get("kis_scheduler_live_enabled", False)
-    )
-    kis_scheduler_runtime_allow_real_orders = bool(
-        runtime.get("kis_scheduler_allow_real_orders", False)
-    )
+    kis_scheduler_live_enabled = bool(runtime_state["kis_scheduler_live_enabled"])
     kis_scheduler_allow_limited_auto_buy = bool(
-        runtime.get("kis_scheduler_allow_limited_auto_buy", False)
+        runtime_state["kis_scheduler_allow_limited_auto_buy"]
     )
     kis_scheduler_allow_limited_auto_sell = bool(
-        runtime.get("kis_scheduler_allow_limited_auto_sell", False)
+        runtime_state["kis_scheduler_allow_limited_auto_sell"]
     )
-    live_scheduler_ready = all(
-        [
-            kis_scheduler_live_enabled,
-            kis_scheduler_runtime_allow_real_orders,
-            bool(getattr(settings, "kis_real_order_enabled", False)),
-            bool(getattr(settings, "kis_enabled", False)),
-            bool(runtime.get("dry_run", True)) is False,
-            bool(runtime.get("kill_switch", False)) is False,
-            kis_scheduler_allow_limited_auto_buy
-            or kis_scheduler_allow_limited_auto_sell,
-        ]
+    live_scheduler_ready = bool(runtime_state["live_scheduler_ready"])
+    real_orders_allowed = bool(runtime_state["real_orders_allowed"])
+    kr_live_scheduler_enabled_effective = kr_session_enabled and bool(
+        runtime_state["real_order_scheduler_enabled"]
     )
+    kr_dry_run_scheduler_enabled_effective = (
+        kr_session_enabled
+        and bool(runtime_state["scheduler_enabled"])
+        and kr_scheduler_enabled
+        and kr_scheduler_dry_run
+    )
+    kr_enabled_for_scheduler = (
+        bool(runtime_state["scheduler_enabled"])
+        and kr_session_enabled
+        and kr_scheduler_enabled
+        and (kr_live_scheduler_enabled_effective or kr_dry_run_scheduler_enabled_effective)
+    )
+    kr_enabled_for_scheduler_block_reasons: list[str] = []
+    if not kr_enabled_for_scheduler:
+        if not bool(runtime_state["scheduler_enabled"]):
+            kr_enabled_for_scheduler_block_reasons.append("runtime_scheduler_disabled")
+        if not kr_scheduler_enabled:
+            kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_disabled")
+        if kr_scheduler_dry_run and not kr_dry_run_scheduler_enabled_effective:
+            kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_dry_run_true")
+        if not kis_scheduler_live_enabled:
+            kr_enabled_for_scheduler_block_reasons.append("kis_scheduler_live_disabled")
+        if not kr_scheduler_allow_real_orders:
+            kr_enabled_for_scheduler_block_reasons.append(
+                "kis_scheduler_allow_real_orders_false"
+            )
+        if not kr_scheduler_configured_allow_real_orders:
+            kr_enabled_for_scheduler_block_reasons.append(
+                "configured_allow_real_orders_false"
+            )
 
     return {
-        "runtime_scheduler_enabled": bool(runtime.get("scheduler_enabled", False)),
+        "runtime_scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
         "US": {
             "enabled_for_scheduler": bool(us.get("enabled_for_scheduler", False)),
             "timezone": us.get("timezone", "America/New_York"),
             "slots": us.get("entry_slots", []),
         },
         "KR": {
-            "enabled_for_scheduler": bool(kr.get("enabled_for_scheduler", False))
-            and kr_scheduler_enabled,
+            "enabled_for_scheduler": kr_enabled_for_scheduler,
+            "kr_scheduler_any_enabled": kr_enabled_for_scheduler,
+            "kr_live_scheduler_enabled_effective": kr_live_scheduler_enabled_effective,
+            "kr_dry_run_scheduler_enabled_effective": kr_dry_run_scheduler_enabled_effective,
+            "enabled_for_scheduler_block_reasons": kr_enabled_for_scheduler_block_reasons,
             "timezone": kr.get("timezone", "Asia/Seoul"),
             "slots": kr.get("entry_slots", []),
             "preview_only": True,
@@ -88,17 +108,25 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "kis_scheduler_enabled": kr_scheduler_enabled,
             "kis_scheduler_dry_run": kr_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kr_scheduler_allow_real_orders,
+            "kis_scheduler_configured_allow_real_orders": kr_scheduler_configured_allow_real_orders,
+            "kis_scheduler_sell_enabled": bool(
+                runtime_state["kis_scheduler_sell_enabled"]
+            ),
+            "kis_scheduler_buy_enabled": bool(
+                runtime_state["kis_scheduler_buy_enabled"]
+            ),
             "kis_scheduler_live_enabled": kis_scheduler_live_enabled,
-            "kis_scheduler_runtime_allow_real_orders": kis_scheduler_runtime_allow_real_orders,
             "kis_scheduler_allow_limited_auto_buy": kis_scheduler_allow_limited_auto_buy,
             "kis_scheduler_allow_limited_auto_sell": kis_scheduler_allow_limited_auto_sell,
             "kis_scheduler_max_live_orders_per_day": int(
-                runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+                runtime_state["kis_scheduler_max_live_orders_per_day"]
             ),
             "live_scheduler_ready": live_scheduler_ready,
-            "configured_live_order_prereqs_met": kr_live_order_prereqs_met,
-            "dry_run_validation_scheduler_enabled": False,
-            "real_orders_allowed": False,
-            "real_order_scheduler_enabled": False,
+            "configured_live_order_prereqs_met": real_orders_allowed,
+            "dry_run_validation_scheduler_enabled": kr_dry_run_scheduler_enabled_effective,
+            "real_orders_allowed": real_orders_allowed,
+            "real_order_scheduler_enabled": bool(
+                runtime_state["real_order_scheduler_enabled"]
+            ),
         },
     }
