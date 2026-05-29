@@ -58,6 +58,54 @@ def test_scheduler_skips_when_disabled():
         assert latest.result == "skipped"
 
 
+def test_kr_scheduler_skips_when_kis_scheduler_disabled():
+    with SessionLocal() as db:
+        from app.services.runtime_setting_service import RuntimeSettingService
+
+        RuntimeSettingService().update_settings(
+            db,
+            {
+                "scheduler_enabled": True,
+                "kis_scheduler_enabled": False,
+            },
+        )
+        initial_runs = db.query(TradeRunLog).count()
+
+    scheduler_service._run_kr_scheduled_once("midday")
+
+    with SessionLocal() as db:
+        rows = db.query(TradeRunLog).order_by(TradeRunLog.id.desc()).all()
+        assert len(rows) == initial_runs + 1
+        latest = rows[0]
+        assert latest.trigger_source == "scheduler"
+        assert latest.reason == "kis_scheduler_disabled"
+        assert latest.result == "skipped"
+
+
+def test_kr_scheduler_skips_when_global_scheduler_disabled():
+    with SessionLocal() as db:
+        from app.services.runtime_setting_service import RuntimeSettingService
+
+        RuntimeSettingService().update_settings(
+            db,
+            {
+                "scheduler_enabled": False,
+                "kis_scheduler_enabled": True,
+            },
+        )
+        initial_runs = db.query(TradeRunLog).count()
+
+    scheduler_service._run_kr_scheduled_once("midday")
+
+    with SessionLocal() as db:
+        rows = db.query(TradeRunLog).order_by(TradeRunLog.id.desc()).all()
+        assert len(rows) == initial_runs + 1
+        latest = rows[0]
+        assert latest.trigger_source == "scheduler"
+        assert latest.reason == "scheduler_disabled"
+        assert latest.result == "skipped"
+
+
 def test_manual_watchlist_run_still_works_when_scheduler_disabled(monkeypatch):
     calls = []
 
@@ -339,10 +387,6 @@ def test_scheduler_service_uses_runtime_settings_for_kis_live_gate(monkeypatch):
 
     calls = []
 
-    class FakeWatchlistRunService:
-        def run_once(self, db, **kwargs):
-            calls.append("watchlist")
-
     class FakeSimulationService:
         def __init__(self, *args, **kwargs):
             pass
@@ -375,10 +419,35 @@ def test_scheduler_service_uses_runtime_settings_for_kis_live_gate(monkeypatch):
         "app.services.scheduler_service.KisAuthManager",
         lambda *args, **kwargs: None,
     )
-    scheduler_service.watchlist_run_service = FakeWatchlistRunService()
 
-    scheduler_service._run_scheduled_once("midday")
+    scheduler_service._run_kr_scheduled_once("midday")
 
-    assert "watchlist" in calls
     assert "simulation" in calls
     assert "live" in calls
+
+
+def test_us_scheduler_does_not_run_kis_services(monkeypatch):
+    calls = []
+
+    class FakeWatchlistRunService:
+        def run_once(self, db, **kwargs):
+            calls.append("watchlist")
+
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisSchedulerSimulationService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("US scheduler must not call KIS simulation")),
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisSchedulerLiveService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("US scheduler must not call KIS live service")),
+    )
+    scheduler_service.watchlist_run_service = FakeWatchlistRunService()
+
+    with SessionLocal() as db:
+        from app.services.runtime_setting_service import RuntimeSettingService
+
+        RuntimeSettingService().update_settings(db, {"scheduler_enabled": True})
+
+    scheduler_service._run_us_scheduled_once("midday")
+
+    assert calls == ["watchlist"]
