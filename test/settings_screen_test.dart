@@ -8,6 +8,7 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 
 void main() {
   testWidgets('dry-run switch success persists and refreshes settings',
@@ -168,6 +169,7 @@ void main() {
     expect(api.updateOpsSettingsCalls, 1);
     expect(api.lastSettingsUpdate, {'kis_live_auto_sell_enabled': true});
     expect(api.getOpsSettingsCalls, 1);
+    expect(api.schedulerStatusCalls, 1);
     expect(api.guardedSellStatusCalls, 1);
     expect(api.guardedBuyStatusCalls, 1);
 
@@ -236,19 +238,20 @@ void main() {
     expect(api.lastSettingsUpdate?['kill_switch'], isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_dry_run'], isTrue);
+    expect(api.lastSettingsUpdate?['kis_scheduler_live_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_allow_real_orders'], isFalse);
     expect(api.lastSettingsUpdate?['kis_live_auto_sell_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_live_auto_buy_enabled'], isFalse);
+    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_limited_auto_buy_enabled'], isFalse);
     expect(find.text('Settings Change Result'), findsOneWidget);
     expect(find.text('Safe Mode enabled'), findsOneWidget);
-    expect(find.text('dry_run ON'), findsOneWidget);
-    expect(find.text('KIS scheduler OFF'), findsOneWidget);
-    expect(find.text('KIS buy OFF'), findsOneWidget);
-    expect(find.text('KIS sell OFF'), findsOneWidget);
-    expect(find.text('stop-loss OFF'), findsOneWidget);
-    expect(find.text('take-profit OFF'), findsOneWidget);
-    expect(find.text('limited auto buy OFF'), findsOneWidget);
+    expect(find.text('KIS Scheduler Effective OFF'), findsOneWidget);
+    expect(find.text('KIS Real Order Scheduler OFF'), findsOneWidget);
+    expect(find.text('KIS Sell OFF'), findsOneWidget);
+    expect(find.text('KIS Buy OFF'), findsOneWidget);
+    expect(find.text('Dry Run ON'), findsOneWidget);
+    expect(find.text('Kill Switch OFF'), findsOneWidget);
 
     controller.dispose();
   });
@@ -274,6 +277,7 @@ void main() {
     expect(api.lastSettingsUpdate?['scheduler_enabled'], isTrue);
     expect(api.lastSettingsUpdate?['kis_scheduler_enabled'], isTrue);
     expect(api.lastSettingsUpdate?['kis_scheduler_dry_run'], isFalse);
+    expect(api.lastSettingsUpdate?['kis_scheduler_live_enabled'], isTrue);
     expect(api.lastSettingsUpdate?['kis_scheduler_allow_real_orders'], isTrue);
     expect(api.lastSettingsUpdate?['kis_scheduler_sell_enabled'], isTrue);
     expect(api.lastSettingsUpdate?['kis_live_auto_sell_enabled'], isTrue);
@@ -290,13 +294,12 @@ void main() {
         isTrue);
     expect(find.text('Settings Change Result'), findsOneWidget);
     expect(find.text('Sell-Only Test Mode enabled'), findsOneWidget);
-    expect(find.text('dry_run OFF'), findsOneWidget);
-    expect(find.text('KIS scheduler ON'), findsOneWidget);
-    expect(find.text('KIS sell ON'), findsOneWidget);
-    expect(find.text('stop-loss ON'), findsOneWidget);
-    expect(find.text('take-profit ON'), findsOneWidget);
-    expect(find.text('KIS buy OFF'), findsOneWidget);
-    expect(find.text('limited auto buy OFF'), findsOneWidget);
+    expect(find.text('KIS Scheduler Effective ON'), findsOneWidget);
+    expect(find.text('KIS Real Order Scheduler ON'), findsOneWidget);
+    expect(find.text('KIS Sell ON'), findsOneWidget);
+    expect(find.text('KIS Buy OFF'), findsOneWidget);
+    expect(find.text('Dry Run OFF'), findsOneWidget);
+    expect(find.text('Kill Switch OFF'), findsOneWidget);
 
     controller.dispose();
   });
@@ -335,6 +338,7 @@ class _SettingsFakeApiClient extends ApiClient {
   OpsSettings currentSettings;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
+  int schedulerStatusCalls = 0;
   int guardedSellStatusCalls = 0;
   int guardedBuyStatusCalls = 0;
   Map<String, dynamic>? lastSettingsUpdate;
@@ -371,6 +375,50 @@ class _SettingsFakeApiClient extends ApiClient {
   }
 
   @override
+  Future<SchedulerStatus> fetchSchedulerStatus() async {
+    schedulerStatusCalls += 1;
+    final effective = currentSettings.schedulerEnabled &&
+        currentSettings.kisSchedulerEnabled &&
+        (currentSettings.kisSchedulerDryRun ||
+            (currentSettings.kisSchedulerLiveEnabled &&
+                currentSettings.kisSchedulerAllowRealOrders &&
+                currentSettings.kisSchedulerConfiguredAllowRealOrders &&
+                currentSettings.kisSchedulerAllowLimitedAutoSell &&
+                !currentSettings.dryRun &&
+                !currentSettings.killSwitch));
+    final realOrder = effective &&
+        currentSettings.kisSchedulerLiveEnabled &&
+        currentSettings.kisSchedulerAllowRealOrders &&
+        currentSettings.kisSchedulerConfiguredAllowRealOrders &&
+        currentSettings.kisSchedulerAllowLimitedAutoSell &&
+        !currentSettings.kisSchedulerDryRun &&
+        !currentSettings.dryRun &&
+        !currentSettings.killSwitch;
+    return SchedulerStatus(
+      runtimeSchedulerEnabled: currentSettings.schedulerEnabled,
+      us: const MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'America/New_York',
+        slots: ['midday 12:00'],
+      ),
+      kr: MarketSchedulerStatus(
+        enabledForScheduler: effective,
+        timezone: 'Asia/Seoul',
+        slots: const ['midday 11:30'],
+        realOrdersAllowed: realOrder,
+        realOrderSchedulerEnabled: realOrder,
+        liveSchedulerReady: realOrder,
+        krSchedulerAnyEnabled: effective,
+        krLiveSchedulerEnabledEffective: realOrder,
+        krDryRunSchedulerEnabledEffective:
+            effective && currentSettings.kisSchedulerDryRun,
+        enabledForSchedulerBlockReasons:
+            effective ? const [] : const ['kis_scheduler_disabled'],
+      ),
+    );
+  }
+
+  @override
   Future<KisSchedulerGuardedSellResult>
       fetchKisSchedulerGuardedSellStatus() async {
     guardedSellStatusCalls += 1;
@@ -396,6 +444,7 @@ OpsSettings _opsSettings({
   bool killSwitch = false,
   bool kisSchedulerEnabled = false,
   bool kisSchedulerDryRun = true,
+  bool kisSchedulerLiveEnabled = false,
   bool kisSchedulerAllowRealOrders = false,
   bool kisSchedulerConfiguredAllowRealOrders = false,
   bool kisSchedulerSellEnabled = false,
@@ -421,6 +470,7 @@ OpsSettings _opsSettings({
     minScoreGap: 3,
     kisSchedulerEnabled: kisSchedulerEnabled,
     kisSchedulerDryRun: kisSchedulerDryRun,
+    kisSchedulerLiveEnabled: kisSchedulerLiveEnabled,
     kisSchedulerAllowRealOrders: kisSchedulerAllowRealOrders,
     kisSchedulerConfiguredAllowRealOrders:
         kisSchedulerConfiguredAllowRealOrders,
@@ -428,6 +478,7 @@ OpsSettings _opsSettings({
     kisSchedulerBuyEnabled: kisSchedulerBuyEnabled,
     kisLiveAutoSellEnabled: kisLiveAutoSellEnabled,
     kisLiveAutoBuyEnabled: kisLiveAutoBuyEnabled,
+    kisLimitedAutoSellEnabled: false,
     kisLimitedAutoStopLossEnabled: kisLimitedAutoStopLossEnabled,
     kisLimitedAutoSellStopLossEnabled: kisLimitedAutoStopLossEnabled,
     kisLimitedAutoTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled,
@@ -461,6 +512,8 @@ OpsSettings _settingsWithPayload(
         settings.kisSchedulerEnabled,
     kisSchedulerDryRun: _valueBool(values, 'kis_scheduler_dry_run') ??
         settings.kisSchedulerDryRun,
+    kisSchedulerLiveEnabled: _valueBool(values, 'kis_scheduler_live_enabled') ??
+        settings.kisSchedulerLiveEnabled,
     kisSchedulerAllowRealOrders:
         _valueBool(values, 'kis_scheduler_allow_real_orders') ??
             settings.kisSchedulerAllowRealOrders,
@@ -475,6 +528,9 @@ OpsSettings _settingsWithPayload(
         settings.kisLiveAutoSellEnabled,
     kisLiveAutoBuyEnabled: _valueBool(values, 'kis_live_auto_buy_enabled') ??
         settings.kisLiveAutoBuyEnabled,
+    kisLimitedAutoSellEnabled:
+        _valueBool(values, 'kis_limited_auto_sell_enabled') ??
+            settings.kisLimitedAutoSellEnabled,
     kisLimitedAutoStopLossEnabled:
         stopLoss ?? settings.kisLimitedAutoStopLossEnabled,
     kisLimitedAutoSellStopLossEnabled:

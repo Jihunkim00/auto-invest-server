@@ -228,11 +228,13 @@ void main() {
     await _expandPositionCard(tester, '005930');
 
     expect(find.text('Latest Event'), findsOneWidget);
-    expect(find.text('TAKE_PROFIT detected'), findsOneWidget);
+    expect(find.text('Latest Scheduler Event'.toUpperCase()), findsOneWidget);
+    expect(find.text('TAKE_PROFIT detected'), findsWidgets);
     expect(find.text('Trigger Today'), findsOneWidget);
     expect(find.text('yes'), findsWidgets);
+    expect(find.text('Latest Block Reason'.toUpperCase()), findsOneWidget);
     expect(find.text('Block Reason'), findsOneWidget);
-    expect(find.text('market_closed'), findsOneWidget);
+    expect(find.text('market_closed'), findsWidgets);
 
     controller.dispose();
   });
@@ -291,7 +293,7 @@ void main() {
     );
     expect(find.byKey(const ValueKey('refresh-position-sync-005930')),
         findsOneWidget);
-    expect(find.text('Refresh Positions'), findsOneWidget);
+    expect(find.text('Refresh Positions'), findsWidgets);
 
     controller.dispose();
   });
@@ -434,11 +436,14 @@ AutomationRuntimeMonitor _monitorWithEvents(List<AutomationEvent> events) {
       botEnabled: false,
       dryRun: true,
       paperMode: true,
+      nextSlotName: null,
+      nextSlotTimeLocal: null,
       lastRunAt: null,
       lastResult: null,
       lastSymbol: null,
       lastAction: null,
       lastBlockReason: null,
+      lastRunId: null,
       orderSubmitted: false,
       orderId: null,
       mode: '',
@@ -451,10 +456,15 @@ AutomationRuntimeMonitor _monitorWithEvents(List<AutomationEvent> events) {
     ),
     kis: const KisAutomationStatus(
       schedulerEnabled: false,
+      schedulerConfigEnabled: false,
       schedulerDryRun: true,
       schedulerAllowRealOrders: false,
+      realOrderSchedulerEnabled: false,
+      liveSchedulerReady: false,
       schedulerBuyEnabled: false,
       schedulerSellEnabled: false,
+      schedulerAllowLimitedAutoBuy: false,
+      schedulerAllowLimitedAutoSell: false,
       liveAutoBuyEnabled: false,
       liveAutoSellEnabled: false,
       stopLossEnabled: false,
@@ -463,12 +473,21 @@ AutomationRuntimeMonitor _monitorWithEvents(List<AutomationEvent> events) {
       schedulerStatus: null,
       guardedSell: null,
       guardedBuy: null,
+      nextSlotName: null,
+      nextSlotTimeLocal: null,
+      lastSchedulerRunAt: null,
+      lastSchedulerRunResult: null,
+      lastSchedulerRunReason: null,
+      lastSchedulerRunId: null,
+      lastSchedulerRunMode: null,
+      lastSchedulerRunTriggerSource: null,
       lastSellRunAt: null,
       lastBuyRunAt: null,
       lastSellRunResult: null,
       lastBuyRunResult: null,
       lastTriggerDetected: 'none',
       lastBlockReason: null,
+      blockReasons: [],
       realOrderSubmitted: false,
       brokerSubmitCalled: false,
       manualSubmitCalled: false,

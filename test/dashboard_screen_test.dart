@@ -312,7 +312,7 @@ void main() {
     expect(find.text('Global Safety'), findsOneWidget);
     expect(find.text('DRY RUN ON'), findsOneWidget);
     expect(find.text('Kill Switch OFF'), findsOneWidget);
-    expect(find.text('Scheduler ON'), findsOneWidget);
+    expect(find.text('Global Scheduler ON'), findsOneWidget);
 
     controller.dispose();
   });
@@ -335,6 +335,49 @@ void main() {
     expect(find.text('REAL ORDER SUBMITTED'), findsOneWidget);
     expect(find.text('false'), findsWidgets);
     expect(find.textContaining('market_closed'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Automation Runtime Monitor separates global and KIS effective scheduler state',
+      (tester) async {
+    const status = SchedulerStatus(
+      runtimeSchedulerEnabled: true,
+      us: MarketSchedulerStatus(
+        enabledForScheduler: true,
+        timezone: 'America/New_York',
+        slots: [],
+      ),
+      kr: MarketSchedulerStatus(
+        enabledForScheduler: false,
+        timezone: 'Asia/Seoul',
+        slots: [],
+        realOrderSchedulerEnabled: false,
+        enabledForSchedulerBlockReasons: ['kis_scheduler_disabled'],
+      ),
+    );
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(schedulerStatus: status)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(find.text('Global Scheduler ON'), findsOneWidget);
+    expect(
+      find.textContaining('KIS Scheduler Effective: OFF'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('KIS Real Order Scheduler: OFF'),
+      findsOneWidget,
+    );
+    expect(find.text('KIS SCHEDULER CONFIG'), findsOneWidget);
+    expect(find.text('BLOCK REASONS'), findsOneWidget);
+    expect(find.textContaining('kis_scheduler_disabled'), findsWidgets);
 
     controller.dispose();
   });
@@ -954,6 +997,42 @@ AutomationRuntimeMonitor _runtimeMonitor({
   List<AutomationEvent> localEvents = const [],
   List<OrderLogItem> orders = const [],
   List<TradingLogItem>? runs,
+  OpsSettings settings = const OpsSettings(
+    schedulerEnabled: true,
+    botEnabled: true,
+    dryRun: true,
+    killSwitch: false,
+    brokerMode: 'Paper',
+    defaultGateLevel: 2,
+    maxDailyTrades: 5,
+    maxDailyEntries: 2,
+    minEntryScore: 65,
+    minScoreGap: 3,
+    kisSchedulerEnabled: true,
+    kisSchedulerDryRun: true,
+    kisSchedulerAllowRealOrders: false,
+    kisSchedulerBuyEnabled: false,
+    kisSchedulerSellEnabled: true,
+    kisLiveAutoBuyEnabled: false,
+    kisLiveAutoSellEnabled: false,
+    kisLimitedAutoStopLossEnabled: true,
+    kisLimitedAutoTakeProfitEnabled: true,
+  ),
+  SchedulerStatus schedulerStatus = const SchedulerStatus(
+    runtimeSchedulerEnabled: true,
+    us: MarketSchedulerStatus(
+      enabledForScheduler: true,
+      timezone: 'America/New_York',
+      slots: [],
+    ),
+    kr: MarketSchedulerStatus(
+      enabledForScheduler: true,
+      timezone: 'Asia/Seoul',
+      slots: [],
+      previewOnly: true,
+      realOrdersAllowed: false,
+    ),
+  ),
 }) {
   final sourceRuns = runs ??
       const [
@@ -990,42 +1069,8 @@ AutomationRuntimeMonitor _runtimeMonitor({
         ),
       ];
   return AutomationRuntimeMonitor.fromSources(
-    settings: const OpsSettings(
-      schedulerEnabled: true,
-      botEnabled: true,
-      dryRun: true,
-      killSwitch: false,
-      brokerMode: 'Paper',
-      defaultGateLevel: 2,
-      maxDailyTrades: 5,
-      maxDailyEntries: 2,
-      minEntryScore: 65,
-      minScoreGap: 3,
-      kisSchedulerEnabled: true,
-      kisSchedulerDryRun: true,
-      kisSchedulerAllowRealOrders: false,
-      kisSchedulerBuyEnabled: false,
-      kisSchedulerSellEnabled: true,
-      kisLiveAutoBuyEnabled: false,
-      kisLiveAutoSellEnabled: false,
-      kisLimitedAutoStopLossEnabled: true,
-      kisLimitedAutoTakeProfitEnabled: true,
-    ),
-    schedulerStatus: const SchedulerStatus(
-      runtimeSchedulerEnabled: true,
-      us: MarketSchedulerStatus(
-        enabledForScheduler: true,
-        timezone: 'America/New_York',
-        slots: [],
-      ),
-      kr: MarketSchedulerStatus(
-        enabledForScheduler: true,
-        timezone: 'Asia/Seoul',
-        slots: [],
-        previewOnly: true,
-        realOrdersAllowed: false,
-      ),
-    ),
+    settings: settings,
+    schedulerStatus: schedulerStatus,
     selectedProvider: 'KIS / KR',
     currentLocalTime: '2026-05-28T12:00:00+09:00',
     lastRefreshTime: '2026-05-28T12:01:00+09:00',
