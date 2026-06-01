@@ -78,16 +78,25 @@ class AutomationRuntimeMonitorCard extends StatelessWidget {
                   status: monitor.alpaca.statusLabel,
                   color: _statusColor(monitor.alpaca.statusLabel),
                   lines: [
-                    _Line('Scheduler',
-                        monitor.alpaca.schedulerEnabled ? 'ACTIVE' : 'OFF'),
+                    _Line('US Scheduler',
+                        monitor.alpaca.schedulerEnabled ? 'ON' : 'OFF'),
+                    _Line(
+                      'Next US Slot',
+                      _slotText(
+                        monitor.alpaca.nextSlotName,
+                        monitor.alpaca.nextSlotTimeLocal,
+                      ),
+                    ),
                     _Line('Bot',
                         monitor.alpaca.botEnabled ? 'enabled' : 'disabled'),
                     _Line('Dry Run', monitor.alpaca.dryRun ? 'on' : 'off'),
                     _Line('Mode', monitor.alpaca.paperMode ? 'paper' : 'live'),
                     _Line(
-                      'Last Run',
+                      'Last US Scheduler Run',
                       _timestampOrNone(monitor.alpaca.lastRunAt),
                     ),
+                    _Line(
+                        'Last Run ID', _valueOrNone(monitor.alpaca.lastRunId)),
                     _Line('Result', _valueOrNone(monitor.alpaca.lastResult)),
                     _Line('Symbol', _valueOrNone(monitor.alpaca.lastSymbol)),
                     _Line('Action', _valueOrNone(monitor.alpaca.lastAction)),
@@ -159,7 +168,9 @@ class _GlobalSafetyLine extends StatelessWidget {
           color: global.killSwitch ? Colors.redAccent : Colors.greenAccent,
         ),
         _Badge(
-          text: global.schedulerEnabled ? 'Scheduler ON' : 'Scheduler OFF',
+          text: global.schedulerEnabled
+              ? 'Global Scheduler ON'
+              : 'Global Scheduler OFF',
           color: global.schedulerEnabled ? Colors.greenAccent : Colors.white70,
         ),
         _Badge(
@@ -188,29 +199,60 @@ class _KisPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = monitor.realOrderSubmitted
         ? 'ORDER SUBMITTED'
-        : monitor.schedulerDryRun
-            ? 'DRY RUN'
+        : monitor.realOrderSchedulerEnabled
+            ? 'READY'
             : monitor.schedulerEnabled
-                ? 'READY'
+                ? (monitor.schedulerDryRun ? 'DRY RUN' : 'ACTIVE')
                 : 'OFF';
     return _ProviderPanel(
       title: 'KIS Live Scheduler',
       status: status,
       color: _statusColor(status),
       summary:
-          'KIS Sell: ${monitor.sellStatusLabel} | last trigger ${monitor.lastTriggerDetected.toUpperCase()} | blocked: ${_valueOrNone(monitor.lastBlockReason)}',
+          'KIS Scheduler Effective: ${monitor.schedulerEnabled ? 'ON' : 'OFF'} | KIS Real Order Scheduler: ${monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'} | blocked: ${_valueOrNone(monitor.lastBlockReason)}',
       lines: [
+        _Line('KIS Scheduler Config',
+            monitor.schedulerConfigEnabled ? 'ON' : 'OFF'),
         _Line(
-            'KIS Scheduler', monitor.schedulerEnabled ? 'enabled' : 'disabled'),
+            'KIS Scheduler Effective', monitor.schedulerEnabled ? 'ON' : 'OFF'),
+        _Line('KIS Real Order Scheduler',
+            monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'),
+        _Line('KIS Live Ready', monitor.liveSchedulerReady ? 'true' : 'false'),
+        _Line(
+          'Next KR Slot',
+          _slotText(monitor.nextSlotName, monitor.nextSlotTimeLocal),
+        ),
+        _Line('Last KR Scheduler Run',
+            _timestampOrNone(monitor.lastSchedulerRunAt)),
+        _Line('Last Scheduler Result',
+            _valueOrNone(monitor.lastSchedulerRunResult)),
+        _Line('Last Scheduler Reason',
+            _valueOrNone(monitor.lastSchedulerRunReason)),
+        _Line('Last Scheduler ID', _valueOrNone(monitor.lastSchedulerRunId)),
+        _Line(
+            'Last Scheduler Mode', _valueOrNone(monitor.lastSchedulerRunMode)),
+        _Line('Last Scheduler Source',
+            _valueOrNone(monitor.lastSchedulerRunTriggerSource)),
+        _Line(
+          'Block Reasons',
+          monitor.blockReasons.isEmpty
+              ? 'none'
+              : monitor.blockReasons.join(', '),
+        ),
         _Line('Scheduler Dry Run', monitor.schedulerDryRun ? 'on' : 'off'),
         _Line('Real Orders Allowed',
             monitor.schedulerAllowRealOrders ? 'yes' : 'no'),
-        _Line('Scheduler Buy', monitor.schedulerBuyEnabled ? 'on' : 'off'),
-        _Line('Scheduler Sell', monitor.schedulerSellEnabled ? 'on' : 'off'),
+        _Line('KIS Sell Enabled',
+            monitor.schedulerSellEnabled ? 'true' : 'false'),
+        _Line(
+            'KIS Buy Enabled', monitor.schedulerBuyEnabled ? 'true' : 'false'),
+        _Line('KIS Sell Gate', monitor.sellGateReady ? 'READY' : 'OFF'),
+        _Line('KIS Buy Gate', monitor.buyGateReady ? 'READY' : 'OFF'),
         _Line('Live Auto Buy', monitor.liveAutoBuyEnabled ? 'on' : 'off'),
         _Line('Live Auto Sell', monitor.liveAutoSellEnabled ? 'on' : 'off'),
-        _Line('Stop-loss', monitor.stopLossEnabled ? 'enabled' : 'off'),
-        _Line('Take-profit', monitor.takeProfitEnabled ? 'enabled' : 'off'),
+        _Line('Stop-loss Enabled', monitor.stopLossEnabled ? 'true' : 'false'),
+        _Line('Take-profit Enabled',
+            monitor.takeProfitEnabled ? 'true' : 'false'),
         _Line('Limited Auto Buy',
             monitor.limitedAutoBuyEnabled ? 'enabled' : 'off'),
         _Line('Last Sell Run', _timestampOrNone(monitor.lastSellRunAt)),
@@ -435,6 +477,15 @@ Color _statusColor(String status) {
 String _timestampOrNone(String? value) {
   if (value == null || value.trim().isEmpty) return 'NO RECENT RUN';
   return formatTimestampWithKst(value);
+}
+
+String _slotText(String? name, String? timeLocal) {
+  final slotName = _valueOrNone(name);
+  final slotTime = timeLocal == null || timeLocal.trim().isEmpty
+      ? 'time unknown'
+      : formatTimestampWithKst(timeLocal);
+  if (slotName == 'none') return slotTime;
+  return '$slotName @ $slotTime';
 }
 
 String _valueOrNone(String? value) {

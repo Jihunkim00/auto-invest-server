@@ -92,11 +92,20 @@ class AutomationRuntimeMonitor {
         botEnabled: settings.botEnabled,
         dryRun: settings.dryRun,
         paperMode: true,
-        lastRunAt: alpacaRun?.createdAt,
-        lastResult: alpacaRun?.result,
+        nextSlotName: schedulerStatus.us.nextSlotName,
+        nextSlotTimeLocal: schedulerStatus.us.nextSlotTimeLocal,
+        lastRunAt:
+            schedulerStatus.us.lastSchedulerRunAt ?? alpacaRun?.createdAt,
+        lastResult:
+            schedulerStatus.us.lastSchedulerRunResult ?? alpacaRun?.result,
         lastSymbol: alpacaRun?.symbol,
         lastAction: alpacaRun?.action,
-        lastBlockReason: _firstText([alpacaRun?.reason, alpacaOrder?.reason]),
+        lastBlockReason: _firstText([
+          schedulerStatus.us.lastSchedulerRunReason,
+          alpacaRun?.reason,
+          alpacaOrder?.reason,
+        ]),
+        lastRunId: schedulerStatus.us.lastSchedulerRunId ?? alpacaRun?.orderId,
         orderSubmitted: alpacaRun?.orderSubmitted == true ||
             alpacaOrder?.realOrderSubmitted == true ||
             alpacaOrder?.brokerOrderId != null,
@@ -114,11 +123,17 @@ class AutomationRuntimeMonitor {
         todayPaperOrderCount: todayAlpacaOrderCount,
       ),
       kis: KisAutomationStatus(
-        schedulerEnabled: settings.kisSchedulerEnabled,
+        schedulerEnabled: schedulerStatus.kr.enabledForScheduler,
+        schedulerConfigEnabled: settings.kisSchedulerEnabled,
         schedulerDryRun: settings.kisSchedulerDryRun,
         schedulerAllowRealOrders: settings.kisSchedulerAllowRealOrders,
+        realOrderSchedulerEnabled: schedulerStatus.kr.realOrderSchedulerEnabled,
+        liveSchedulerReady: schedulerStatus.kr.liveSchedulerReady,
         schedulerBuyEnabled: settings.kisSchedulerBuyEnabled,
         schedulerSellEnabled: settings.kisSchedulerSellEnabled,
+        schedulerAllowLimitedAutoBuy: settings.kisSchedulerAllowLimitedAutoBuy,
+        schedulerAllowLimitedAutoSell:
+            settings.kisSchedulerAllowLimitedAutoSell,
         liveAutoBuyEnabled: settings.kisLiveAutoBuyEnabled,
         liveAutoSellEnabled: settings.kisLiveAutoSellEnabled,
         stopLossEnabled: settings.kisLimitedAutoStopLossEnabled ||
@@ -129,12 +144,25 @@ class AutomationRuntimeMonitor {
         schedulerStatus: kisSchedulerStatus,
         guardedSell: guardedSell,
         guardedBuy: guardedBuy,
+        nextSlotName: schedulerStatus.kr.nextSlotName,
+        nextSlotTimeLocal: schedulerStatus.kr.nextSlotTimeLocal,
+        lastSchedulerRunAt: schedulerStatus.kr.lastSchedulerRunAt,
+        lastSchedulerRunResult: schedulerStatus.kr.lastSchedulerRunResult,
+        lastSchedulerRunReason: schedulerStatus.kr.lastSchedulerRunReason,
+        lastSchedulerRunId: schedulerStatus.kr.lastSchedulerRunId,
+        lastSchedulerRunMode: schedulerStatus.kr.lastSchedulerRunMode,
+        lastSchedulerRunTriggerSource:
+            schedulerStatus.kr.lastSchedulerRunTriggerSource,
         lastSellRunAt: guardedSell?.createdAt ?? kisSellRun?.createdAt,
         lastBuyRunAt: guardedBuy?.createdAt ?? kisBuyRun?.createdAt,
         lastSellRunResult: guardedSell?.result ?? kisSellRun?.result,
         lastBuyRunResult: guardedBuy?.result ?? kisBuyRun?.result,
         lastTriggerDetected: lastKisTrigger,
-        lastBlockReason: kisBlockReason,
+        lastBlockReason: _firstText([
+          ...schedulerStatus.kr.enabledForSchedulerBlockReasons,
+          kisBlockReason,
+        ]),
+        blockReasons: schedulerStatus.kr.enabledForSchedulerBlockReasons,
         realOrderSubmitted: guardedSell?.realOrderSubmitted == true ||
             guardedBuy?.realOrderSubmitted == true ||
             kisSellRun?.orderSubmitted == true ||
@@ -251,11 +279,14 @@ class ProviderAutomationStatus {
     required this.botEnabled,
     required this.dryRun,
     required this.paperMode,
+    required this.nextSlotName,
+    required this.nextSlotTimeLocal,
     required this.lastRunAt,
     required this.lastResult,
     required this.lastSymbol,
     required this.lastAction,
     required this.lastBlockReason,
+    required this.lastRunId,
     required this.orderSubmitted,
     required this.orderId,
     required this.mode,
@@ -273,11 +304,14 @@ class ProviderAutomationStatus {
   final bool botEnabled;
   final bool dryRun;
   final bool paperMode;
+  final String? nextSlotName;
+  final String? nextSlotTimeLocal;
   final String? lastRunAt;
   final String? lastResult;
   final String? lastSymbol;
   final String? lastAction;
   final String? lastBlockReason;
+  final String? lastRunId;
   final bool orderSubmitted;
   final String? orderId;
   final String mode;
@@ -308,10 +342,15 @@ class ProviderAutomationStatus {
 class KisAutomationStatus {
   const KisAutomationStatus({
     required this.schedulerEnabled,
+    required this.schedulerConfigEnabled,
     required this.schedulerDryRun,
     required this.schedulerAllowRealOrders,
+    required this.realOrderSchedulerEnabled,
+    required this.liveSchedulerReady,
     required this.schedulerBuyEnabled,
     required this.schedulerSellEnabled,
+    required this.schedulerAllowLimitedAutoBuy,
+    required this.schedulerAllowLimitedAutoSell,
     required this.liveAutoBuyEnabled,
     required this.liveAutoSellEnabled,
     required this.stopLossEnabled,
@@ -320,12 +359,21 @@ class KisAutomationStatus {
     required this.schedulerStatus,
     required this.guardedSell,
     required this.guardedBuy,
+    required this.nextSlotName,
+    required this.nextSlotTimeLocal,
+    required this.lastSchedulerRunAt,
+    required this.lastSchedulerRunResult,
+    required this.lastSchedulerRunReason,
+    required this.lastSchedulerRunId,
+    required this.lastSchedulerRunMode,
+    required this.lastSchedulerRunTriggerSource,
     required this.lastSellRunAt,
     required this.lastBuyRunAt,
     required this.lastSellRunResult,
     required this.lastBuyRunResult,
     required this.lastTriggerDetected,
     required this.lastBlockReason,
+    required this.blockReasons,
     required this.realOrderSubmitted,
     required this.brokerSubmitCalled,
     required this.manualSubmitCalled,
@@ -337,10 +385,15 @@ class KisAutomationStatus {
   });
 
   final bool schedulerEnabled;
+  final bool schedulerConfigEnabled;
   final bool schedulerDryRun;
   final bool schedulerAllowRealOrders;
+  final bool realOrderSchedulerEnabled;
+  final bool liveSchedulerReady;
   final bool schedulerBuyEnabled;
   final bool schedulerSellEnabled;
+  final bool schedulerAllowLimitedAutoBuy;
+  final bool schedulerAllowLimitedAutoSell;
   final bool liveAutoBuyEnabled;
   final bool liveAutoSellEnabled;
   final bool stopLossEnabled;
@@ -349,12 +402,21 @@ class KisAutomationStatus {
   final KisSchedulerSimulationStatus? schedulerStatus;
   final KisSchedulerGuardedSellResult? guardedSell;
   final KisSchedulerGuardedBuyResult? guardedBuy;
+  final String? nextSlotName;
+  final String? nextSlotTimeLocal;
+  final String? lastSchedulerRunAt;
+  final String? lastSchedulerRunResult;
+  final String? lastSchedulerRunReason;
+  final String? lastSchedulerRunId;
+  final String? lastSchedulerRunMode;
+  final String? lastSchedulerRunTriggerSource;
   final String? lastSellRunAt;
   final String? lastBuyRunAt;
   final String? lastSellRunResult;
   final String? lastBuyRunResult;
   final String lastTriggerDetected;
   final String? lastBlockReason;
+  final List<String> blockReasons;
   final bool realOrderSubmitted;
   final bool brokerSubmitCalled;
   final bool manualSubmitCalled;
@@ -363,6 +425,17 @@ class KisAutomationStatus {
   final int? todaySubmittedCount;
   final int? dailyLimitMax;
   final int? dailyLimitRemaining;
+
+  bool get sellGateReady =>
+      schedulerSellEnabled &&
+      liveAutoSellEnabled &&
+      schedulerAllowLimitedAutoSell;
+
+  bool get buyGateReady =>
+      schedulerBuyEnabled &&
+      liveAutoBuyEnabled &&
+      schedulerAllowLimitedAutoBuy &&
+      limitedAutoBuyEnabled;
 
   String get sellStatusLabel => _kisLegStatus(
         schedulerEnabled: schedulerEnabled,
@@ -611,6 +684,11 @@ class AutomationEvent {
       category == 'order_submitted' ||
       category == 'order_filled' ||
       category == 'order_rejected';
+
+  bool get isSchedulerOrigin {
+    final hint = '$mode $triggerSource $source $category'.toLowerCase();
+    return hint.contains('scheduler');
+  }
 }
 
 class PortfolioPositionManagementItem {
@@ -633,10 +711,14 @@ class PortfolioPositionManagementItem {
     required this.duplicateOpenSellOrder,
     required this.latestRelatedOrder,
     required this.latestRelatedEvent,
+    required this.latestSchedulerEvent,
     required this.latestRelatedOrderEvent,
     required this.triggerDetectedToday,
     required this.latestTriggerBlocked,
     required this.latestTriggerBlockReason,
+    required this.latestBlockReason,
+    required this.latestFilledSellExists,
+    required this.holdingExistsAfterLatestFilledSell,
     required this.positionOrderSyncWarning,
     required this.schedulerEligible,
     required this.manualSellAvailable,
@@ -658,6 +740,8 @@ class PortfolioPositionManagementItem {
             (event) => event.symbol?.trim().toUpperCase() == normalizedSymbol)
         .toList();
     final latestEvent = symbolEvents.firstOrNull;
+    final latestSchedulerEvent =
+        symbolEvents.where((event) => event.isSchedulerOrigin).firstOrNull;
     final latestOrderEvent =
         symbolEvents.where((event) => event.isOrderEvent).firstOrNull;
     final symbolOrders = orders
@@ -670,11 +754,26 @@ class PortfolioPositionManagementItem {
     });
     final latestTriggerEvent =
         symbolEvents.where((event) => event.isTriggerDetected).firstOrNull;
-    final filledSellExists = symbolEvents.any((event) =>
+    final latestBlockEvent =
+        symbolEvents.where((event) => event.isBlocked).firstOrNull;
+    final latestFilledSellEvent = symbolEvents
+        .where(
+            (event) => event.isFilled && event.action.toLowerCase() == 'sell')
+        .firstOrNull;
+    final latestFilledSellOrder = symbolOrders
+        .where((order) =>
+            order.side.toLowerCase() == 'sell' &&
+            order.statusLabel.toLowerCase().contains('filled'))
+        .firstOrNull;
+    final filledSellExists = latestFilledSellEvent != null ||
+        latestFilledSellOrder != null ||
+        symbolEvents.any((event) =>
             event.isFilled && event.action.toLowerCase() == 'sell') ||
         symbolOrders.any((order) =>
             order.side.toLowerCase() == 'sell' &&
             order.statusLabel.toLowerCase().contains('filled'));
+    final holdingExistsAfterLatestFilledSell =
+        filledSellExists && position.qty > 0;
     final triggerStatus = _triggerStatusFor(managed, isKr: isKr);
     final duplicateOpenSellOrder = _rawBool(managed?.rawPayload, const [
       'duplicate_open_sell_order',
@@ -732,11 +831,18 @@ class PortfolioPositionManagementItem {
         latestOrderEvent?.orderId,
       ]),
       latestRelatedEvent: latestEvent,
+      latestSchedulerEvent: latestSchedulerEvent,
       latestRelatedOrderEvent: latestOrderEvent,
       triggerDetectedToday: triggerDetectedToday,
       latestTriggerBlocked: latestTriggerEvent?.isBlocked ?? false,
       latestTriggerBlockReason: latestTriggerEvent?.blockReason,
-      positionOrderSyncWarning: filledSellExists && position.qty > 0,
+      latestBlockReason: _firstText([
+        latestBlockEvent?.blockReason,
+        latestBlockEvent?.reason,
+      ]),
+      latestFilledSellExists: filledSellExists,
+      holdingExistsAfterLatestFilledSell: holdingExistsAfterLatestFilledSell,
+      positionOrderSyncWarning: holdingExistsAfterLatestFilledSell,
       schedulerEligible: schedulerEligible,
       manualSellAvailable:
           isKr && (managed?.canPrepareManualSell ?? position.qty.floor() > 0),
@@ -763,10 +869,14 @@ class PortfolioPositionManagementItem {
   final bool? duplicateOpenSellOrder;
   final String? latestRelatedOrder;
   final AutomationEvent? latestRelatedEvent;
+  final AutomationEvent? latestSchedulerEvent;
   final AutomationEvent? latestRelatedOrderEvent;
   final bool triggerDetectedToday;
   final bool latestTriggerBlocked;
   final String? latestTriggerBlockReason;
+  final String? latestBlockReason;
+  final bool latestFilledSellExists;
+  final bool holdingExistsAfterLatestFilledSell;
   final bool positionOrderSyncWarning;
   final bool schedulerEligible;
   final bool manualSellAvailable;
