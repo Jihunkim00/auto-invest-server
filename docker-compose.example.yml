@@ -1,0 +1,16 @@
+services:
+  auto-invest-server:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/auto_invest.db
+      LOG_DIR: /app/logs
+      CONFIG_DIR: /app/config
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000

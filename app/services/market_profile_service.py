@@ -41,6 +41,7 @@ class MarketProfile:
 class MarketProfileService:
     def __init__(self, config_path: str | None = None):
         settings = get_settings()
+        self._settings = settings
         self.config_path = config_path or settings.market_profiles_config_path
         self._root = Path(__file__).resolve().parents[2]
 
@@ -69,7 +70,12 @@ class MarketProfileService:
         return self.get_profile(None)
 
     def get_watchlist_path(self, market: str | None = None) -> str:
-        return self.get_profile(market).watchlist_file
+        profile = self.get_profile(market)
+        override = {
+            "US": self._settings.watchlist_us_path,
+            "KR": self._settings.watchlist_kr_path,
+        }.get(profile.market)
+        return override or profile.watchlist_file
 
     def get_reference_sites_path(self, market: str | None = None) -> str:
         return self.get_profile(market).reference_sites_file
@@ -98,7 +104,8 @@ class MarketProfileService:
 
     def load_watchlist(self, market: str | None = None) -> dict[str, Any]:
         profile = self.get_profile(market)
-        payload = self._load_yaml_file(profile.watchlist_file)
+        watchlist_path = self.get_watchlist_path(profile.market)
+        payload = self._load_yaml_file(watchlist_path)
         raw_symbols = []
         if isinstance(payload, dict):
             raw_symbols = payload.get("symbols") or payload.get("watchlist") or []
@@ -116,7 +123,7 @@ class MarketProfileService:
             "market": profile.market,
             "currency": profile.currency,
             "timezone": profile.timezone,
-            "watchlist_file": profile.watchlist_file,
+            "watchlist_file": watchlist_path,
             "count": len(symbols),
             "symbols": symbols,
         }

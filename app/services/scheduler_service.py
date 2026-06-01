@@ -51,6 +51,9 @@ class SchedulerService:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2)
 
+    def is_running(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
     def _run_loop(self):
         while not self._stop_event.is_set():
             now_ny = datetime.now(NY_TZ)

@@ -6,6 +6,8 @@ __pycache__/
 build/
 auto_invest.db
 *.db
+data/
+logs/
 .tmp_pytest*/
 tmp_pytest*/
 __pycache__/

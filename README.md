@@ -51,6 +51,9 @@ Important variables:
 - `DEFAULT_US_SYMBOL` - default US symbol, defaults to `AAPL`
 - `DEFAULT_KR_SYMBOL` - default Korean symbol, defaults to `005930`
 - `DATABASE_URL` - SQLite database connection string
+- `LOG_DIR` - runtime log directory
+- `CONFIG_DIR` - base config directory for YAML config defaults
+- `WATCHLIST_US_PATH` / `WATCHLIST_KR_PATH` - market watchlist YAML paths
 - `REFERENCE_SITES_CONFIG_PATH` - path to reference site YAML config
 - `OPENAI_API_KEY` - OpenAI API key
 
@@ -116,6 +119,7 @@ python -m pytest
 
 - `docs/OPERATIONS.md` - operator guide, safety model, flows, and emergency procedure.
 - `docs/PRODUCTION_CHECKLIST.md` - production and live-order checklist.
+- `docs/CLOUD_DEPLOYMENT.md` - cloud/VPS runtime configuration and deployment prep.
 
 ## Notes
 
