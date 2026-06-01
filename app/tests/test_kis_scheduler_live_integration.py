@@ -205,12 +205,23 @@ def _service(*, sell=None, buy=None, client=None):
 def _enable_runtime(db_session, **overrides):
     db_session.query(RuntimeSetting).delete()
     values = {
+        "scheduler_enabled": True,
+        "kis_scheduler_enabled": True,
         "dry_run": False,
         "kill_switch": False,
         "kis_scheduler_live_enabled": True,
         "kis_scheduler_allow_real_orders": True,
+        "kis_scheduler_configured_allow_real_orders": True,
         "kis_scheduler_allow_limited_auto_buy": True,
         "kis_scheduler_allow_limited_auto_sell": True,
+        "kis_scheduler_sell_enabled": True,
+        "kis_scheduler_buy_enabled": False,
+        "kis_scheduler_dry_run": False,
+        "kis_live_auto_sell_enabled": True,
+        "kis_limited_auto_stop_loss_enabled": True,
+        "kis_limited_auto_take_profit_enabled": False,
+        "kis_limited_auto_sell_stop_loss_enabled": True,
+        "kis_limited_auto_sell_take_profit_enabled": False,
         "kis_scheduler_max_live_orders_per_day": 1,
         "kis_scheduler_live_requires_dry_run_false": True,
         "kis_scheduler_live_respect_kill_switch": True,
