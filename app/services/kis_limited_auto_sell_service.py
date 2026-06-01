@@ -1506,10 +1506,6 @@ def _status_block_reasons(context: _Context) -> list[str]:
         reasons.append("stop_loss_auto_sell_disabled")
     if not context.take_profit_enabled:
         reasons.append("take_profit_auto_sell_disabled")
-    if context.scheduler_real_orders_configured:
-        reasons.append("scheduler_real_orders_must_remain_disabled")
-    if context.scheduler_limited_auto_sell_configured:
-        reasons.append("scheduler_limited_auto_sell_must_remain_disabled")
     if not context.sell_session_allowed:
         reasons.append("sell_session_not_allowed")
     return _dedupe(reasons)
@@ -1533,10 +1529,6 @@ def _common_runtime_block_reasons(
         reasons.append("live_auto_buy_must_remain_disabled")
     if not context.live_auto_sell_enabled:
         reasons.append("kis_live_auto_sell_disabled")
-    if context.scheduler_real_orders_configured:
-        reasons.append("scheduler_real_orders_must_remain_disabled")
-    if context.scheduler_limited_auto_sell_configured:
-        reasons.append("scheduler_limited_auto_sell_must_remain_disabled")
     if not context.sell_session_allowed:
         reasons.append("sell_session_not_allowed")
     return _dedupe(reasons)

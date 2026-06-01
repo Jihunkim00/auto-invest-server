@@ -20,6 +20,7 @@ from app.services.kis_limited_auto_sell_service import (
     MODE as LIMITED_AUTO_SELL_MODE,
     KisLimitedAutoSellService,
 )
+from app.services.kis_scheduler_guarded_sell_service import KisSchedulerGuardedSellService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.runtime_setting_service import RuntimeSettingService
 
@@ -42,6 +43,7 @@ class KisSchedulerLiveService:
         *,
         limited_auto_sell_service: KisLimitedAutoSellService | None = None,
         limited_auto_buy_service: KisLimitedAutoBuyService | None = None,
+        guarded_sell_service: KisSchedulerGuardedSellService | None = None,
         runtime_settings: RuntimeSettingService | None = None,
     ):
         self.client = client
@@ -49,6 +51,12 @@ class KisSchedulerLiveService:
         self.limited_auto_sell_service = limited_auto_sell_service or KisLimitedAutoSellService(
             client,
             runtime_settings=self.runtime_settings,
+            allow_scheduler_guarded_sell=True,
+        )
+        self.guarded_sell_service = guarded_sell_service or KisSchedulerGuardedSellService(
+            client,
+            runtime_settings=self.runtime_settings,
+            limited_auto_sell_service=self.limited_auto_sell_service,
         )
         self.limited_auto_buy_service = limited_auto_buy_service or KisLimitedAutoBuyService(
             client,
@@ -129,13 +137,17 @@ class KisSchedulerLiveService:
         buy_result: dict[str, Any] | None = None
         if checks["kis_scheduler_allow_limited_auto_sell"]:
             sell_result = sanitize_kis_payload(
-                self.limited_auto_sell_service.run_once(db, now=now_utc)
+                self.guarded_sell_service.run_once(
+                    db,
+                    trigger_source="scheduler",
+                    now=now_utc,
+                )
             )
             if sell_result.get("real_order_submitted") is True:
                 return self._persist(
                     db,
                     result="submitted",
-                    reason=str(sell_result.get("reason") or "limited_auto_sell_submitted"),
+                    reason=str(sell_result.get("reason") or "scheduler_guarded_sell_submitted"),
                     checks=checks,
                     safety={**safety, "real_order_submitted": True, "broker_submit_called": True},
                     created_at=created_at,

@@ -986,7 +986,28 @@ def test_scheduler_real_orders_and_live_auto_buy_remain_disabled(db_session):
     assert result["scheduler_real_orders_enabled"] is False
     assert result["take_profit_auto_sell_enabled"] is False
     assert "live_auto_buy_must_remain_disabled" in result["block_reasons"]
-    assert "scheduler_real_orders_must_remain_disabled" in result["block_reasons"]
+    assert "scheduler_real_orders_must_remain_disabled" not in result["block_reasons"]
+    assert "scheduler_limited_auto_sell_must_remain_disabled" not in result["block_reasons"]
+
+
+def test_scheduler_origin_sell_does_not_block_on_scheduler_configured_flags(
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        kis_live_auto_buy_enabled=False,
+        kis_limited_auto_sell_stop_loss_enabled=True,
+        kis_limited_auto_sell_take_profit_enabled=False,
+        kis_scheduler_allow_real_orders=True,
+        kis_scheduler_configured_allow_real_orders=True,
+        kis_scheduler_allow_limited_auto_sell=True,
+        kis_scheduler_sell_enabled=True,
+    )
+
+    result = _service(allow_scheduler_guarded_sell=True).status(db_session)
+
+    assert "scheduler_real_orders_must_remain_disabled" not in result["block_reasons"]
+    assert "scheduler_limited_auto_sell_must_remain_disabled" not in result["block_reasons"]
 
 
 def test_limited_auto_sell_service_has_no_direct_broker_submit_calls():
@@ -999,10 +1020,11 @@ def test_limited_auto_sell_service_has_no_direct_broker_submit_calls():
     assert "self.broker.submit" not in source
 
 
-def _service(client=None):
+def _service(client=None, *, allow_scheduler_guarded_sell=False):
     return KisLimitedAutoSellService(
         client or _FakeClient(),
         session_service=_OpenSessionService(),
+        allow_scheduler_guarded_sell=allow_scheduler_guarded_sell,
     )
 
 
