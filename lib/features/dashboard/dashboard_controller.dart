@@ -881,6 +881,7 @@ class DashboardController extends ChangeNotifier {
       await apiClient.updateOpsSettings(values);
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
       _recordSettingsChangeEvent(label, values);
       _rebuildAutomationRuntimeMonitorFromCurrentState();
@@ -926,7 +927,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _recordSettingsChangeEvent(String label, Map<String, dynamic> values) {
-    final summary = _settingsChangeSummary(label, settings);
+    final summary = _settingsChangeSummary(label, settings, schedulerStatus);
     latestSettingsChangeSummary = summary;
     final event = AutomationEvent.settingsChanged(
       id: 'settings-${DateTime.now().microsecondsSinceEpoch}',
@@ -3211,6 +3212,9 @@ OpsSettings _opsSettingsWithPayload(
         settings.kisSchedulerEnabled,
     kisSchedulerDryRun: _payloadBool(values, 'kis_scheduler_dry_run') ??
         settings.kisSchedulerDryRun,
+    kisSchedulerLiveEnabled:
+        _payloadBool(values, 'kis_scheduler_live_enabled') ??
+            settings.kisSchedulerLiveEnabled,
     kisSchedulerAllowRealOrders:
         _payloadBool(values, 'kis_scheduler_allow_real_orders') ??
             settings.kisSchedulerAllowRealOrders,
@@ -3227,6 +3231,9 @@ OpsSettings _opsSettingsWithPayload(
             settings.kisLiveAutoSellEnabled,
     kisLiveAutoBuyEnabled: _payloadBool(values, 'kis_live_auto_buy_enabled') ??
         settings.kisLiveAutoBuyEnabled,
+    kisLimitedAutoSellEnabled:
+        _payloadBool(values, 'kis_limited_auto_sell_enabled') ??
+            settings.kisLimitedAutoSellEnabled,
     kisLimitedAutoStopLossEnabled:
         stopLoss ?? settings.kisLimitedAutoStopLossEnabled,
     kisLimitedAutoSellStopLossEnabled:
@@ -3354,38 +3361,56 @@ String _localTimestampNow() {
   return now.toIso8601String();
 }
 
-String _settingsChangeSummary(String label, OpsSettings settings) {
+String _settingsChangeSummary(
+  String label,
+  OpsSettings settings,
+  SchedulerStatus schedulerStatus,
+) {
   final normalized = label.toLowerCase();
   if (normalized.contains('sell-only')) {
-    return [
+    final parts = [
       'Sell-Only Test Mode enabled',
-      'dry_run ${_onOff(settings.dryRun)}',
-      'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
-      'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
-      'stop-loss ${_onOff(settings.kisLimitedAutoStopLossEnabled || settings.kisLimitedAutoSellStopLossEnabled)}',
-      'take-profit ${_onOff(settings.kisLimitedAutoTakeProfitEnabled || settings.kisLimitedAutoSellTakeProfitEnabled)}',
-      'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
-      'limited auto buy ${_onOff(settings.kisLimitedAutoBuyEnabled)}',
-    ].join(' | ');
+      'KIS Scheduler Effective ${_onOff(schedulerStatus.kr.enabledForScheduler)}',
+      'KIS Real Order Scheduler ${_onOff(schedulerStatus.kr.realOrderSchedulerEnabled)}',
+      'KIS Sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+      'KIS Buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+      'Dry Run ${_onOff(settings.dryRun)}',
+      'Kill Switch ${_onOff(settings.killSwitch)}',
+    ];
+    if (!schedulerStatus.kr.enabledForScheduler &&
+        schedulerStatus.kr.enabledForSchedulerBlockReasons.isNotEmpty) {
+      parts.add(
+        'Block Reasons ${schedulerStatus.kr.enabledForSchedulerBlockReasons.join(', ')}',
+      );
+    }
+    return parts.join(' | ');
   }
   if (normalized.contains('safe mode')) {
-    return [
+    final parts = [
       'Safe Mode enabled',
-      'dry_run ${_onOff(settings.dryRun)}',
-      'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
-      'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
-      'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
-      'stop-loss ${_onOff(settings.kisLimitedAutoStopLossEnabled || settings.kisLimitedAutoSellStopLossEnabled)}',
-      'take-profit ${_onOff(settings.kisLimitedAutoTakeProfitEnabled || settings.kisLimitedAutoSellTakeProfitEnabled)}',
-      'limited auto buy ${_onOff(settings.kisLimitedAutoBuyEnabled)}',
-    ].join(' | ');
+      'KIS Scheduler Effective ${_onOff(schedulerStatus.kr.enabledForScheduler)}',
+      'KIS Real Order Scheduler ${_onOff(schedulerStatus.kr.realOrderSchedulerEnabled)}',
+      'KIS Sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+      'KIS Buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+      'Dry Run ${_onOff(settings.dryRun)}',
+      'Kill Switch ${_onOff(settings.killSwitch)}',
+    ];
+    if (!schedulerStatus.kr.enabledForScheduler &&
+        schedulerStatus.kr.enabledForSchedulerBlockReasons.isNotEmpty) {
+      parts.add(
+        'Block Reasons ${schedulerStatus.kr.enabledForSchedulerBlockReasons.join(', ')}',
+      );
+    }
+    return parts.join(' | ');
   }
   return [
     '$label settings updated',
-    'dry_run ${_onOff(settings.dryRun)}',
-    'KIS scheduler ${_onOff(settings.kisSchedulerEnabled)}',
-    'KIS sell ${_onOff(settings.kisSchedulerSellEnabled)}',
-    'KIS buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
+    'Dry Run ${_onOff(settings.dryRun)}',
+    'KIS Scheduler Config ${_onOff(settings.kisSchedulerEnabled)}',
+    'KIS Scheduler Effective ${_onOff(schedulerStatus.kr.enabledForScheduler)}',
+    'KIS Real Order Scheduler ${_onOff(schedulerStatus.kr.realOrderSchedulerEnabled)}',
+    'KIS Sell ${_onOff(settings.kisSchedulerSellEnabled)}',
+    'KIS Buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
   ].join(' | ');
 }
 

@@ -90,6 +90,18 @@ class RuntimeSettingService:
 
     def get_settings(self, db: Session) -> dict[str, Any]:
         row = self.get_or_create(db)
+        return self._settings_from_row(row)
+
+    def get_settings_read_only(self, db: Session) -> dict[str, Any]:
+        row = db.query(RuntimeSetting).first()
+        if row:
+            return self._settings_from_row(row)
+
+        settings = self._defaults()
+        settings["updated_at"] = None
+        return self._finalize_settings(settings)
+
+    def _settings_from_row(self, row: RuntimeSetting) -> dict[str, Any]:
         settings = {
             "bot_enabled": bool(row.bot_enabled),
             "dry_run": bool(row.dry_run),
@@ -226,6 +238,9 @@ class RuntimeSettingService:
             ),
             "updated_at": row.updated_at,
         }
+        return self._finalize_settings(settings)
+
+    def _finalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         settings["trade_limits"] = self._trade_limits(settings)
         settings["kis_limited_auto_sell_requires_valid_cost_basis"] = True
         stop_loss_enabled = bool(
@@ -274,6 +289,16 @@ class RuntimeSettingService:
 
     def get_kis_scheduler_runtime_state(self, db: Session) -> dict[str, Any]:
         settings = self.get_settings(db)
+        return self._kis_scheduler_runtime_state(settings)
+
+    def get_kis_scheduler_runtime_state_read_only(
+        self,
+        db: Session,
+    ) -> dict[str, Any]:
+        settings = self.get_settings_read_only(db)
+        return self._kis_scheduler_runtime_state(settings)
+
+    def _kis_scheduler_runtime_state(self, settings: dict[str, Any]) -> dict[str, Any]:
         kis_enabled = bool(getattr(self.settings, "kis_enabled", False))
         kis_real_order_enabled = bool(
             getattr(self.settings, "kis_real_order_enabled", False)

@@ -459,12 +459,7 @@ class _SettingsChangeSummary extends StatelessWidget {
             if (part.isNotEmpty)
               _SummaryBadge(
                 text: part,
-                color: part.endsWith('ON') &&
-                        !part.startsWith('dry_run') &&
-                        !part.startsWith('KIS scheduler') &&
-                        !part.startsWith('KIS sell') &&
-                        !part.startsWith('stop-loss') &&
-                        !part.startsWith('take-profit')
+                color: _summaryBadgeIsAlert(part)
                     ? Colors.orangeAccent
                     : Colors.white70,
               ),
@@ -472,6 +467,16 @@ class _SettingsChangeSummary extends StatelessWidget {
       ]),
     );
   }
+}
+
+bool _summaryBadgeIsAlert(String part) {
+  final text = part.toLowerCase();
+  if (!text.endsWith('on')) return false;
+  return !(text.startsWith('dry run') ||
+      text.startsWith('kis scheduler effective') ||
+      text.startsWith('kis sell') ||
+      text.startsWith('stop-loss') ||
+      text.startsWith('take-profit'));
 }
 
 class _SummaryBadge extends StatelessWidget {
@@ -550,6 +555,7 @@ const Map<String, dynamic> _kisSellOnlyTestModePayload = {
   'scheduler_enabled': true,
   'kis_scheduler_enabled': true,
   'kis_scheduler_dry_run': false,
+  'kis_scheduler_live_enabled': true,
   'kis_scheduler_allow_real_orders': true,
   'kis_scheduler_configured_allow_real_orders': true,
   'kis_scheduler_sell_enabled': true,
@@ -572,12 +578,14 @@ const Map<String, dynamic> _safeModePayload = {
   'scheduler_enabled': true,
   'kis_scheduler_enabled': false,
   'kis_scheduler_dry_run': true,
+  'kis_scheduler_live_enabled': false,
   'kis_scheduler_allow_real_orders': false,
   'kis_scheduler_configured_allow_real_orders': false,
   'kis_scheduler_sell_enabled': false,
   'kis_scheduler_buy_enabled': false,
   'kis_live_auto_sell_enabled': false,
   'kis_live_auto_buy_enabled': false,
+  'kis_limited_auto_sell_enabled': false,
   'kis_limited_auto_stop_loss_enabled': false,
   'kis_limited_auto_sell_stop_loss_enabled': false,
   'kis_limited_auto_take_profit_enabled': false,
@@ -633,13 +641,14 @@ class _RuntimeDiagnosticsCard extends StatelessWidget {
             alert: settings.kisLiveAutoSellEnabled,
           ),
           _PermissionLine(
-            label: 'Scheduler real orders',
-            value: scheduler.realOrdersAllowed ||
-                    settings.kisSchedulerAllowRealOrders
-                ? 'Allowed'
-                : 'Disabled',
-            alert: scheduler.realOrdersAllowed ||
-                settings.kisSchedulerAllowRealOrders,
+            label: 'KIS scheduler effective',
+            value: scheduler.enabledForScheduler ? 'ON' : 'OFF',
+            alert: scheduler.enabledForScheduler,
+          ),
+          _PermissionLine(
+            label: 'KIS real order scheduler',
+            value: scheduler.realOrderSchedulerEnabled ? 'ON' : 'OFF',
+            alert: scheduler.realOrderSchedulerEnabled,
           ),
           _PermissionLine(
             label: 'Manual confirmation',

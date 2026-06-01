@@ -385,6 +385,23 @@ class _PositionTile extends StatelessWidget {
               const SizedBox(height: 12),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 OutlinedButton.icon(
+                  key: ValueKey('refresh-position-${position.symbol}'),
+                  onPressed: controller.portfolioManagementLoading
+                      ? null
+                      : () async {
+                          final result =
+                              await controller.refreshPortfolioManagement();
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(result.message),
+                            backgroundColor:
+                                result.success ? Colors.green : Colors.orange,
+                          ));
+                        },
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Refresh Positions'),
+                ),
+                OutlinedButton.icon(
                   onPressed: onReviewPosition,
                   icon: const Icon(Icons.rate_review_outlined, size: 18),
                   label: const Text('Review'),
@@ -532,6 +549,25 @@ class _PositionDetail extends StatelessWidget {
         _DataPair(
             label: 'Latest Order',
             value: managementItem.latestRelatedOrder ?? 'none'),
+        _DataPair(
+            label: 'Latest Scheduler Event',
+            value: _eventSummary(managementItem.latestSchedulerEvent)),
+        _DataPair(
+            label: 'Trigger Today',
+            value: managementItem.triggerDetectedToday ? 'true' : 'false'),
+        _DataPair(
+            label: 'Latest Block Reason',
+            value: managementItem.latestBlockReason ??
+                managementItem.latestTriggerBlockReason ??
+                'none'),
+        _DataPair(
+          label: 'Holding After Filled Sell',
+          value: managementItem.latestFilledSellExists
+              ? (managementItem.holdingExistsAfterLatestFilledSell
+                  ? 'true'
+                  : 'false')
+              : 'no filled sell',
+        ),
         _DataPair(
             label: 'Current Holding',
             value: '${_quantity(managementItem.quantity)} share'),

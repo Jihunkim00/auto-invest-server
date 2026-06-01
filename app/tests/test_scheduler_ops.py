@@ -1,9 +1,11 @@
+import json
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from app.db.database import SessionLocal
-from app.db.models import TradeRunLog
+from app.db.models import RuntimeSetting, TradeRunLog
 from app.main import app
 from app.services.scheduler_service import scheduler_service
 
@@ -135,11 +137,113 @@ def test_scheduler_status_keeps_kr_disabled_by_default():
     assert body["US"]["enabled_for_scheduler"] is True
     assert body["US"]["timezone"] == "America/New_York"
     assert body["US"]["slots"]
+    assert body["US"]["next_slot_name"] in {"open_phase", "midday", "before_close"}
+    assert body["US"]["next_slot_time_local"]
+    assert body["US"]["last_scheduler_run_at"] is None
+    assert body["US"]["last_scheduler_run_result"] is None
+    assert body["US"]["last_scheduler_run_reason"] is None
+    assert body["US"]["last_scheduler_run_id"] is None
     assert body["KR"]["enabled_for_scheduler"] is False
     assert body["KR"]["timezone"] == "Asia/Seoul"
     assert body["KR"]["slots"]
+    assert body["KR"]["next_slot_name"] in {"open_phase", "midday", "before_close"}
+    assert body["KR"]["next_slot_time_local"]
+    assert body["KR"]["last_scheduler_run_at"] is None
+    assert body["KR"]["last_scheduler_run_result"] is None
+    assert body["KR"]["last_scheduler_run_reason"] is None
+    assert body["KR"]["last_scheduler_run_id"] is None
+    assert body["KR"]["last_scheduler_run_mode"] is None
+    assert body["KR"]["last_scheduler_run_trigger_source"] is None
     assert body["KR"]["preview_only"] is True
+    assert body["KR"]["kr_scheduler_any_enabled"] is False
+    assert body["KR"]["kr_live_scheduler_enabled_effective"] is False
+    assert body["KR"]["kr_dry_run_scheduler_enabled_effective"] is False
+    assert body["KR"]["real_order_scheduler_enabled"] is False
     assert body["KR"]["real_orders_allowed"] is False
+
+
+def test_scheduler_status_returns_last_scheduler_run_fields_when_logs_exist():
+    with SessionLocal() as db:
+        us_run = TradeRunLog(
+            run_key="scheduler_us_midday",
+            trigger_source="scheduler",
+            symbol="WATCHLIST",
+            mode="watchlist_trade_trigger",
+            stage="done",
+            result="skipped",
+            reason="scheduler_disabled",
+            request_payload=json.dumps(
+                {
+                    "provider": "alpaca",
+                    "market": "US",
+                    "scheduler_slot": "midday",
+                }
+            ),
+            response_payload=json.dumps(
+                {
+                    "provider": "alpaca",
+                    "market": "US",
+                    "scheduler_slot": "midday",
+                }
+            ),
+            created_at=datetime(2026, 1, 2, 3, 4, 5),
+        )
+        kr_run = TradeRunLog(
+            run_key="kis_scheduler_live_midday",
+            trigger_source="kis_scheduler_live",
+            symbol="WATCHLIST",
+            mode="kis_scheduler_live_once",
+            stage="done",
+            result="blocked",
+            reason="kill_switch_enabled",
+            request_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "scheduler_slot": "midday",
+                }
+            ),
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "scheduler_slot": "midday",
+                }
+            ),
+            created_at=datetime(2026, 1, 2, 4, 4, 5),
+        )
+        db.add_all([us_run, kr_run])
+        db.commit()
+        us_id = us_run.id
+        kr_id = kr_run.id
+
+    with TestClient(app) as client:
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["US"]["last_scheduler_run_id"] == us_id
+    assert body["US"]["last_scheduler_run_result"] == "skipped"
+    assert body["US"]["last_scheduler_run_reason"] == "scheduler_disabled"
+    assert body["KR"]["last_scheduler_run_id"] == kr_id
+    assert body["KR"]["last_scheduler_run_result"] == "blocked"
+    assert body["KR"]["last_scheduler_run_reason"] == "kill_switch_enabled"
+    assert body["KR"]["last_scheduler_run_mode"] == "kis_scheduler_live_once"
+    assert body["KR"]["last_scheduler_run_trigger_source"] == "kis_scheduler_live"
+
+
+def test_scheduler_status_is_read_only_when_no_runtime_row_exists():
+    with SessionLocal() as db:
+        assert db.query(RuntimeSetting).count() == 0
+        assert db.query(TradeRunLog).count() == 0
+
+    with TestClient(app) as client:
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    with SessionLocal() as db:
+        assert db.query(RuntimeSetting).count() == 0
+        assert db.query(TradeRunLog).count() == 0
 
 
 def test_kis_scheduler_preview_once_is_preview_only(monkeypatch):
