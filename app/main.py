@@ -20,6 +20,10 @@ from app.routes.portfolio import router as portfolio_router
 from app.routes.scheduler import router as scheduler_router
 from app.routes.signals import router as signals_router
 from app.routes.trading import router as trading_router
+from app.services.runtime_diagnostics import (
+    configure_runtime_logging,
+    log_startup_state,
+)
 from app.services.scheduler_service import scheduler_service
 
 settings = get_settings()
@@ -40,8 +44,10 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
+    configure_runtime_logging(settings)
     init_db()
     scheduler_service.start()
+    log_startup_state(settings, scheduler_service)
 
 
 @app.on_event("shutdown")

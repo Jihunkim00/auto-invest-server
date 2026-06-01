@@ -1,12 +1,22 @@
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+DEFAULT_CONFIG_DIR = "config"
+
+
+def _config_path(config_dir: str, filename: str) -> str:
+    return str(Path(config_dir) / filename).replace("\\", "/")
 
 
 class Settings(BaseSettings):
     app_name: str = "Auto Invest Server"
     app_debug: bool = True
     app_env: str = "dev"
+    app_version: str | None = None
     default_symbol: str = "AAPL"
     default_us_symbol: str = "AAPL"
     default_kr_symbol: str = "005930"
@@ -41,6 +51,8 @@ class Settings(BaseSettings):
     kr_scheduler_allow_real_orders: bool = False
 
     database_url: str = "sqlite:///./auto_invest.db"
+    log_dir: str = "logs"
+    config_dir: str = DEFAULT_CONFIG_DIR
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
@@ -49,9 +61,12 @@ class Settings(BaseSettings):
     reference_sites_config_path: str = "config/reference_sites.yaml"
     event_sources_config_path: str = "config/event_sources.yaml"
     watchlist_config_path: str = "config/watchlist.yaml"
+    watchlist_us_path: str = "config/watchlist_us.yaml"
+    watchlist_kr_path: str = "config/watchlist_kr.yaml"
     market_profiles_config_path: str = "config/market_profiles.yaml"
     market_sessions_config_path: str = "config/market_sessions.yaml"
     market_holidays_config_path: str = "config/market_holidays.yaml"
+    kis_token_cache_path: str | None = None
     max_watchlist_size: int = 50
     watchlist_top_candidates_for_research: int = 5
     watchlist_min_entry_score: int = 65
@@ -72,6 +87,24 @@ class Settings(BaseSettings):
         env_file=".env",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def apply_config_dir_defaults(self):
+        config_paths = {
+            "reference_sites_config_path": "reference_sites.yaml",
+            "event_sources_config_path": "event_sources.yaml",
+            "watchlist_config_path": "watchlist.yaml",
+            "watchlist_us_path": "watchlist_us.yaml",
+            "watchlist_kr_path": "watchlist_kr.yaml",
+            "market_profiles_config_path": "market_profiles.yaml",
+            "market_sessions_config_path": "market_sessions.yaml",
+            "market_holidays_config_path": "market_holidays.yaml",
+        }
+        for field_name, filename in config_paths.items():
+            default_value = _config_path(DEFAULT_CONFIG_DIR, filename)
+            if getattr(self, field_name) == default_value:
+                setattr(self, field_name, _config_path(self.config_dir, filename))
+        return self
 
 
 @lru_cache
