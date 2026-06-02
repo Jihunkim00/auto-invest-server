@@ -134,7 +134,7 @@ class KisSchedulerLiveService:
             )
 
         sell_result: dict[str, Any] | None = None
-        buy_result: dict[str, Any] | None = None
+        buy_result: dict[str, Any] | None = _skipped_buy_result()
         if checks["kis_scheduler_allow_limited_auto_sell"]:
             sell_result = sanitize_kis_payload(
                 self.guarded_sell_service.run_once(
@@ -144,50 +144,48 @@ class KisSchedulerLiveService:
                 )
             )
             if sell_result.get("real_order_submitted") is True:
-                return self._persist(
-                    db,
-                    result="submitted",
-                    reason=str(sell_result.get("reason") or "scheduler_guarded_sell_submitted"),
-                    checks=checks,
-                    safety={**safety, "real_order_submitted": True, "broker_submit_called": True},
-                    created_at=created_at,
-                    sell_result=sell_result,
-                    buy_result=None,
-                    order_id=_int_or_none(sell_result.get("order_id")),
-                    gate_level=gate_level,
-                )
+                order_log = _find_order_log(db, sell_result)
+                if order_log is not None:
+                    if not sell_result.get("symbol"):
+                        sell_result["symbol"] = order_log.symbol
+                    sell_result["broker_order_id"] = (
+                        sell_result.get("broker_order_id") or order_log.broker_order_id
+                    )
+                    sell_result["kis_odno"] = sell_result.get("kis_odno") or order_log.kis_odno
+                    return self._persist(
+                        db,
+                        result="submitted",
+                        reason=_clean_submitted_reason(
+                            sell_result.get("reason") or "scheduler_guarded_sell_submitted"
+                        ),
+                        checks=checks,
+                        safety={**safety, "real_order_submitted": True, "broker_submit_called": True},
+                        created_at=created_at,
+                        sell_result=sell_result,
+                        buy_result=buy_result,
+                        order_id=order_log.id,
+                        related_order_id=order_log.id,
+                        gate_level=gate_level,
+                    )
 
-        if checks["kis_scheduler_allow_limited_auto_buy"]:
-            buy_result = sanitize_kis_payload(
-                self.limited_auto_buy_service.run_once(
-                    db,
-                    gate_level=gate_level,
-                    now=now_utc,
-                    scheduler_context=True,
-                )
-            )
-            if buy_result.get("real_order_submitted") is True:
                 return self._persist(
                     db,
-                    result="submitted",
-                    reason=str(buy_result.get("reason") or "limited_auto_buy_submitted"),
+                    result="error",
+                    reason="scheduler_live_missing_order_log",
                     checks=checks,
-                    safety={**safety, "real_order_submitted": True, "broker_submit_called": True},
+                    safety=safety,
                     created_at=created_at,
                     sell_result=sell_result,
                     buy_result=buy_result,
-                    order_id=_int_or_none(buy_result.get("order_id")),
+                    order_id=None,
                     gate_level=gate_level,
                 )
 
-        reason = (
-            str((sell_result or {}).get("reason") or "")
-            or str((buy_result or {}).get("reason") or "")
-            or "no_limited_auto_action"
-        )
+        reason = _final_reason(sell_result, buy_result)
+        result = _final_result(sell_result)
         return self._persist(
             db,
-            result="no_action",
+            result=result,
             reason=reason,
             checks=checks,
             safety=safety,
@@ -211,33 +209,48 @@ class KisSchedulerLiveService:
         buy_result: dict[str, Any] | None,
         order_id: int | None,
         gate_level: int,
+        related_order_id: int | None = None,
     ) -> dict[str, Any]:
-        submitted = result == "submitted"
+        sell_submitted = bool(
+            result == "submitted"
+            and sell_result
+            and sell_result.get("real_order_submitted") is True
+            and order_id is not None
+        )
+        action = (
+            "sell"
+            if sell_submitted
+            else "blocked_sell"
+            if result == "blocked"
+            else "hold"
+        )
+        selected_result = sell_result or {}
         payload = sanitize_kis_payload(
             {
                 "status": "ok",
                 "provider": PROVIDER,
                 "market": MARKET,
                 "mode": MODE,
+                "source": selected_result.get("source") or MODE,
+                "source_type": selected_result.get("source_type"),
                 "trigger_source": TRIGGER_SOURCE,
                 "result": result,
-                "action": "buy"
-                if (buy_result or {}).get("real_order_submitted") is True
-                else (
-                    "sell"
-                    if (sell_result or {}).get("real_order_submitted") is True
-                    else "hold"
-                ),
+                "action": action,
+                "symbol": str(selected_result.get("symbol") or "WATCHLIST"),
                 "reason": reason,
-                "real_order_submitted": submitted,
-                "broker_submit_called": submitted,
+                "real_order_submitted": sell_submitted,
+                "broker_submit_called": sell_submitted,
                 "manual_submit_called": False,
-                "scheduler_real_order_enabled": submitted,
+                "scheduler_real_order_enabled": sell_submitted,
                 "sell_result": sell_result,
                 "buy_result": buy_result,
                 "checks": checks,
                 "safety": safety,
                 "order_id": order_id,
+                "related_order_id": related_order_id,
+                "broker_order_id": selected_result.get("broker_order_id"),
+                "kis_odno": selected_result.get("kis_odno"),
+                "exit_trigger": selected_result.get("exit_trigger"),
                 "created_at": created_at,
             }
         )
@@ -257,8 +270,8 @@ class KisSchedulerLiveService:
                     "market": MARKET,
                     "mode": MODE,
                     "trigger_source": TRIGGER_SOURCE,
-                    "real_order_submitted": submitted,
-                    "broker_submit_called": submitted,
+                    "real_order_submitted": sell_submitted,
+                    "broker_submit_called": sell_submitted,
                     "manual_submit_called": False,
                 },
                 ensure_ascii=False,
@@ -406,3 +419,53 @@ def _int_or_none(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _skipped_buy_result() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "mode": "limited_auto_buy",
+        "result": "skipped",
+        "action": "hold",
+        "reason": "buy_scheduler_execution_disabled",
+        "skipped_for_sell_only_scheduler": True,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "validation_called": False,
+    }
+
+
+def _find_order_log(db: Session, result: dict[str, Any] | None) -> OrderLog | None:
+    if not result:
+        return None
+    order_id = _int_or_none(result.get("order_id") or result.get("order_log_id"))
+    if order_id is None:
+        return None
+    return db.query(OrderLog).filter(OrderLog.id == order_id).first()
+
+
+def _clean_submitted_reason(reason: Any | None) -> str:
+    reason_text = str(reason or "").strip()
+    if reason_text == "test" or not reason_text:
+        return "scheduler_guarded_sell_submitted"
+    return reason_text
+
+
+def _final_reason(
+    sell_result: dict[str, Any] | None,
+    buy_result: dict[str, Any] | None,
+) -> str:
+    return str(
+        (sell_result or {}).get("reason")
+        or (buy_result or {}).get("reason")
+        or "no_limited_auto_action"
+    )
+
+
+def _final_result(sell_result: dict[str, Any] | None) -> str:
+    if sell_result and sell_result.get("real_order_submitted") is True:
+        return "submitted"
+    if sell_result and str(sell_result.get("result") or "") == "blocked":
+        return "blocked"
+    return "no_action"

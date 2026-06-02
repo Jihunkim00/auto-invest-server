@@ -139,33 +139,153 @@ def test_scheduler_live_requires_a_limited_path_enabled(db_session):
 
 def test_scheduler_live_tries_sell_before_buy_and_stops_after_submit(db_session):
     _enable_runtime(db_session)
-    sell = _FakeLimitedService(_submitted_child("sell", order_id=11))
+    row = OrderLog(
+        broker="kis",
+        market="KR",
+        symbol="005930",
+        side="sell",
+        order_type="market",
+        qty=1,
+        requested_qty=1,
+        internal_status=InternalOrderStatus.SUBMITTED.value,
+        broker_order_id="SCHED-11",
+        kis_odno="SCHED-11",
+        submitted_at=datetime.now(UTC).replace(tzinfo=None),
+        request_payload=json.dumps({"mode": "limited_auto_sell"}),
+        response_payload=json.dumps({"mode": "limited_auto_sell"}),
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    sell = _FakeLimitedService(_submitted_child("sell", order_id=row.id))
     buy = _FakeLimitedService(_submitted_child("buy", order_id=12))
 
     result = _service(sell=sell, buy=buy).run_once(db_session)
 
     assert result["result"] == "submitted"
     assert result["action"] == "sell"
-    assert result["order_id"] == 11
+    assert result["order_id"] == row.id
     assert sell.calls == 1
     assert buy.calls == 0
     assert result["real_order_submitted"] is True
     assert db_session.query(TradeRunLog).filter(TradeRunLog.mode == MODE).count() == 1
 
 
-def test_scheduler_live_runs_buy_after_sell_no_action(db_session):
+def test_scheduler_live_skips_buy_service_when_sell_only_scheduler(db_session):
     _enable_runtime(db_session)
     sell = _FakeLimitedService(_blocked_child("sell", reason="no_stop_loss_candidate"))
     buy = _FakeLimitedService(_submitted_child("buy", order_id=22))
 
     result = _service(sell=sell, buy=buy).run_once(db_session)
 
-    assert result["result"] == "submitted"
-    assert result["action"] == "buy"
-    assert result["order_id"] == 22
+    assert result["result"] == "blocked"
+    assert result["action"] == "blocked_sell"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["reason"] == "no_stop_loss_candidate"
     assert sell.calls == 1
-    assert buy.calls == 1
-    assert buy.kwargs[0]["scheduler_context"] is True
+    assert buy.calls == 0
+
+
+def test_scheduler_live_submitted_without_order_log_becomes_error(db_session):
+    _enable_runtime(db_session)
+    sell = _FakeLimitedService(_submitted_child("sell", order_id=11))
+    buy = _FakeLimitedService(_blocked_child("buy"))
+
+    result = _service(sell=sell, buy=buy).run_once(db_session)
+
+    assert result["result"] == "error"
+    assert result["reason"] == "scheduler_live_missing_order_log"
+    assert result["order_id"] is None
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert sell.calls == 1
+    assert buy.calls == 0
+
+
+def test_scheduler_live_submitted_with_order_log_records_sell(db_session):
+    _enable_runtime(db_session)
+    row = OrderLog(
+        broker="kis",
+        market="KR",
+        symbol="005930",
+        side="sell",
+        order_type="market",
+        qty=1,
+        requested_qty=1,
+        internal_status=InternalOrderStatus.SUBMITTED.value,
+        broker_order_id="SCHED-123",
+        kis_odno="SCHED-123",
+        submitted_at=datetime.now(UTC).replace(tzinfo=None),
+        request_payload=json.dumps({"mode": "limited_auto_sell"}),
+        response_payload=json.dumps({"mode": "limited_auto_sell"}),
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    sell = _FakeLimitedService(_submitted_child("sell", order_id=row.id))
+    buy = _FakeLimitedService(_blocked_child("buy"))
+
+    result = _service(sell=sell, buy=buy).run_once(db_session)
+
+    assert result["result"] == "submitted"
+    assert result["action"] == "sell"
+    assert result["order_id"] == row.id
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result["manual_submit_called"] is False
+    assert result["symbol"] == "005930"
+    assert result["broker_order_id"] == "SCHED-123"
+    assert result["kis_odno"] == "SCHED-123"
+    assert sell.calls == 1
+    assert buy.calls == 0
+
+
+def test_scheduler_live_submitted_test_reason_is_replaced(db_session):
+    _enable_runtime(db_session)
+    row = OrderLog(
+        broker="kis",
+        market="KR",
+        symbol="005930",
+        side="sell",
+        order_type="market",
+        qty=1,
+        requested_qty=1,
+        internal_status=InternalOrderStatus.SUBMITTED.value,
+        broker_order_id="SCHED-456",
+        kis_odno="SCHED-456",
+        submitted_at=datetime.now(UTC).replace(tzinfo=None),
+        request_payload=json.dumps({"mode": "limited_auto_sell"}),
+        response_payload=json.dumps({"mode": "limited_auto_sell"}),
+    )
+    db_session.add(row)
+    db_session.commit()
+
+    sell = _FakeLimitedService(
+        {
+            "status": "ok",
+            "mode": "limited_auto_sell",
+            "result": "submitted",
+            "action": "sell",
+            "reason": "test",
+            "symbol": "005930",
+            "order_id": row.id,
+            "real_order_submitted": True,
+            "broker_submit_called": True,
+            "manual_submit_called": False,
+        }
+    )
+    buy = _FakeLimitedService(_blocked_child("buy"))
+
+    result = _service(sell=sell, buy=buy).run_once(db_session)
+
+    assert result["result"] == "submitted"
+    assert result["reason"] == "scheduler_guarded_sell_submitted"
+    assert result["order_id"] == row.id
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert buy.calls == 0
 
 
 def test_scheduler_live_daily_max_blocks(db_session):
