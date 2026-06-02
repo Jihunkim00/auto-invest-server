@@ -339,6 +339,78 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Dashboard shows Live Sell Armed warning', (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        schedulerStatus: _schedulerStatusWithRisk(_armedSellOnlyRisk),
+      )
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(
+      find.text(
+        'KIS live sell automation is armed. Stop-loss sell may submit real KIS orders.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('ARMED_SELL_ONLY'), findsNothing);
+    expect(find.text('armed_sell_only'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Dashboard shows high-severity Live Buy Armed warning',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        schedulerStatus: _schedulerStatusWithRisk(_dangerousBuyRisk),
+      )
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(
+      find.text(
+        'KIS live buy automation is enabled. This should remain OFF unless explicitly testing.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Dangerous mixed KIS automation settings detected.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('kis_scheduler_buy_enabled'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Dashboard shows Safe Mode when risk summary is safe',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..automationRuntimeMonitor = _runtimeMonitor(
+        schedulerStatus:
+            _schedulerStatusWithRisk(const SchedulerRiskSummary.safe()),
+      )
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: DashboardScreen(controller: controller)),
+    ));
+
+    expect(find.text('Safe Mode / Live automation off.'), findsOneWidget);
+    expect(find.text('safe'), findsWidgets);
+
+    controller.dispose();
+  });
+
   testWidgets(
       'Automation Runtime Monitor separates global and KIS effective scheduler state',
       (tester) async {
@@ -1109,6 +1181,61 @@ AutomationRuntimeMonitor _runtimeMonitor({
     localEvents: localEvents,
   );
 }
+
+SchedulerStatus _schedulerStatusWithRisk(SchedulerRiskSummary risk) {
+  return SchedulerStatus(
+    runtimeSchedulerEnabled: true,
+    us: const MarketSchedulerStatus(
+      enabledForScheduler: true,
+      timezone: 'America/New_York',
+      slots: [],
+    ),
+    kr: MarketSchedulerStatus(
+      enabledForScheduler: risk.liveSellArmed || risk.liveBuyArmed,
+      timezone: 'Asia/Seoul',
+      slots: const [],
+      previewOnly: true,
+      realOrdersAllowed: risk.liveSellArmed || risk.liveBuyArmed,
+      realOrderSchedulerEnabled: risk.liveSellArmed || risk.liveBuyArmed,
+      liveSchedulerReady: risk.liveSellArmed || risk.liveBuyArmed,
+      riskSummary: risk,
+    ),
+  );
+}
+
+const _armedSellOnlyRisk = SchedulerRiskSummary(
+  liveSellArmed: true,
+  liveBuyArmed: false,
+  sellOnlyMode: true,
+  dailyLiveOrderLimit: 1,
+  dailyLiveOrderRemaining: 1,
+  maxNotionalPct: 0.03,
+  dryRun: false,
+  killSwitch: false,
+  safeModeActive: false,
+  riskyFlags: [],
+  blockingFlags: [],
+  warningLevel: 'armed_sell_only',
+  sellGateEnabled: true,
+  buyGateEnabled: false,
+);
+
+const _dangerousBuyRisk = SchedulerRiskSummary(
+  liveSellArmed: true,
+  liveBuyArmed: true,
+  sellOnlyMode: false,
+  dailyLiveOrderLimit: 1,
+  dailyLiveOrderRemaining: 1,
+  maxNotionalPct: 0.03,
+  dryRun: false,
+  killSwitch: false,
+  safeModeActive: false,
+  riskyFlags: ['kis_scheduler_buy_enabled'],
+  blockingFlags: [],
+  warningLevel: 'dangerous_mixed',
+  sellGateEnabled: true,
+  buyGateEnabled: true,
+);
 
 AutomationEvent _event({
   required String id,

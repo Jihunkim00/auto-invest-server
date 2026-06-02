@@ -47,16 +47,34 @@ def client(db_session):
 def test_ops_settings_defaults_remain_safe(db_session):
     settings = RuntimeSettingService().get_settings(db_session)
 
+    assert settings["dry_run"] is True
+    assert settings["kill_switch"] is False
     assert settings["kis_scheduler_enabled"] is False
     assert settings["kis_scheduler_dry_run"] is True
+    assert settings["kis_scheduler_live_enabled"] is False
     assert settings["kis_scheduler_allow_real_orders"] is False
     assert settings["kis_scheduler_configured_allow_real_orders"] is False
     assert settings["kis_scheduler_sell_enabled"] is False
+    assert settings["kis_scheduler_buy_enabled"] is False
+    assert settings["kis_scheduler_allow_limited_auto_sell"] is False
+    assert settings["kis_scheduler_allow_limited_auto_buy"] is False
     assert settings["kis_live_auto_sell_enabled"] is False
+    assert settings["kis_live_auto_buy_enabled"] is False
+    assert settings["kis_limited_auto_buy_enabled"] is False
     assert settings["kis_limited_auto_stop_loss_enabled"] is False
     assert settings["kis_limited_auto_sell_stop_loss_enabled"] is False
     assert settings["kis_limited_auto_take_profit_enabled"] is False
     assert settings["kis_limited_auto_sell_take_profit_enabled"] is False
+    assert settings["kis_limited_auto_sell_allow_take_profit_trigger"] is False
+    assert settings["kis_scheduler_max_live_orders_per_day"] == 1
+    assert settings["kis_limited_auto_sell_max_orders_per_day"] == 1
+    assert settings["kis_limited_auto_sell_max_notional_pct"] == 0.03
+    assert settings["kis_live_auto_max_orders_per_day"] == 1
+    assert settings["kis_live_auto_max_notional_pct"] == 0.03
+    assert settings["max_trades_per_day"] == 3
+    assert settings["per_symbol_daily_entry_limit"] == 1
+    assert settings["per_slot_new_entry_limit"] == 1
+    assert settings["max_open_positions"] == 3
 
 
 def test_ops_settings_persists_kis_scheduler_sell_fields(client):

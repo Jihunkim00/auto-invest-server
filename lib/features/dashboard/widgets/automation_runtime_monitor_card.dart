@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/automation_runtime_monitor.dart';
+import '../../../models/scheduler_status.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class AutomationRuntimeMonitorCard extends StatelessWidget {
@@ -197,6 +198,8 @@ class _KisPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final risk = monitor.riskSummary;
+    final warnings = _kisRiskWarnings(risk);
     final status = monitor.realOrderSubmitted
         ? 'ORDER SUBMITTED'
         : monitor.realOrderSchedulerEnabled
@@ -204,78 +207,100 @@ class _KisPanel extends StatelessWidget {
             : monitor.schedulerEnabled
                 ? (monitor.schedulerDryRun ? 'DRY RUN' : 'ACTIVE')
                 : 'OFF';
-    return _ProviderPanel(
-      title: 'KIS Live Scheduler',
-      status: status,
-      color: _statusColor(status),
-      summary:
-          'KIS Scheduler Effective: ${monitor.schedulerEnabled ? 'ON' : 'OFF'} | KIS Real Order Scheduler: ${monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'} | blocked: ${_valueOrNone(monitor.lastBlockReason)}',
-      lines: [
-        _Line('KIS Scheduler Config',
-            monitor.schedulerConfigEnabled ? 'ON' : 'OFF'),
-        _Line(
-            'KIS Scheduler Effective', monitor.schedulerEnabled ? 'ON' : 'OFF'),
-        _Line('KIS Real Order Scheduler',
-            monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'),
-        _Line('KIS Live Ready', monitor.liveSchedulerReady ? 'true' : 'false'),
-        _Line(
-          'Next KR Slot',
-          _slotText(monitor.nextSlotName, monitor.nextSlotTimeLocal),
-        ),
-        _Line('Last KR Scheduler Run',
-            _timestampOrNone(monitor.lastSchedulerRunAt)),
-        _Line('Last Scheduler Result',
-            _valueOrNone(monitor.lastSchedulerRunResult)),
-        _Line('Last Scheduler Reason',
-            _valueOrNone(monitor.lastSchedulerRunReason)),
-        _Line('Last Scheduler ID', _valueOrNone(monitor.lastSchedulerRunId)),
-        _Line(
-            'Last Scheduler Mode', _valueOrNone(monitor.lastSchedulerRunMode)),
-        _Line('Last Scheduler Source',
-            _valueOrNone(monitor.lastSchedulerRunTriggerSource)),
-        _Line(
-          'Block Reasons',
-          monitor.blockReasons.isEmpty
-              ? 'none'
-              : monitor.blockReasons.join(', '),
-        ),
-        _Line('Scheduler Dry Run', monitor.schedulerDryRun ? 'on' : 'off'),
-        _Line('Real Orders Allowed',
-            monitor.schedulerAllowRealOrders ? 'yes' : 'no'),
-        _Line('KIS Sell Enabled',
-            monitor.schedulerSellEnabled ? 'true' : 'false'),
-        _Line(
-            'KIS Buy Enabled', monitor.schedulerBuyEnabled ? 'true' : 'false'),
-        _Line('KIS Sell Gate', monitor.sellGateReady ? 'READY' : 'OFF'),
-        _Line('KIS Buy Gate', monitor.buyGateReady ? 'READY' : 'OFF'),
-        _Line('Live Auto Buy', monitor.liveAutoBuyEnabled ? 'on' : 'off'),
-        _Line('Live Auto Sell', monitor.liveAutoSellEnabled ? 'on' : 'off'),
-        _Line('Stop-loss Enabled', monitor.stopLossEnabled ? 'true' : 'false'),
-        _Line('Take-profit Enabled',
-            monitor.takeProfitEnabled ? 'true' : 'false'),
-        _Line('Limited Auto Buy',
-            monitor.limitedAutoBuyEnabled ? 'enabled' : 'off'),
-        _Line('Last Sell Run', _timestampOrNone(monitor.lastSellRunAt)),
-        _Line('Sell Result', _valueOrNone(monitor.lastSellRunResult)),
-        _Line('Last Buy Run', _timestampOrNone(monitor.lastBuyRunAt)),
-        _Line('Buy Result', _valueOrNone(monitor.lastBuyRunResult)),
-        _Line('Last Trigger', monitor.lastTriggerDetected.toUpperCase()),
-        _Line('Block Reason', _valueOrNone(monitor.lastBlockReason)),
-        _Line('Real Order Submitted',
-            monitor.realOrderSubmitted ? 'true' : 'false'),
-        _Line('Broker Submit Called',
-            monitor.brokerSubmitCalled ? 'true' : 'false'),
-        _Line('Manual Submit Called',
-            monitor.manualSubmitCalled ? 'true' : 'false'),
-        _Line('KIS ODNO', _valueOrNone(monitor.kisOdno)),
-        _Line(
-            'Today Submitted', monitor.todaySubmittedCount?.toString() ?? '--'),
-        _Line('Daily Limit Remaining',
-            monitor.dailyLimitRemaining?.toString() ?? '--'),
-        _Line('KIS Buy',
-            '${monitor.buyStatusLabel} | ${monitor.schedulerBuyEnabled ? 'enabled' : 'scheduler buy disabled'}'),
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      for (final warning in warnings) ...[
+        _RiskWarningLine(text: warning.text, color: warning.color),
+        const SizedBox(height: 8),
       ],
-    );
+      _ProviderPanel(
+        title: 'KIS Live Scheduler',
+        status: status,
+        color: _statusColor(status),
+        summary:
+            'KIS Scheduler Effective: ${monitor.schedulerEnabled ? 'ON' : 'OFF'} | KIS Real Order Scheduler: ${monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'} | warning: ${risk.warningLevel}',
+        lines: [
+          _Line('Warning Level', risk.warningLevel),
+          _Line('Live Sell Armed', risk.liveSellArmed ? 'true' : 'false'),
+          _Line('Live Buy Armed', risk.liveBuyArmed ? 'true' : 'false'),
+          _Line('Dry Run', risk.dryRun ? 'on' : 'off'),
+          _Line('Kill Switch', risk.killSwitch ? 'on' : 'off'),
+          _Line('KIS Scheduler Config',
+              monitor.schedulerConfigEnabled ? 'ON' : 'OFF'),
+          _Line('KIS Scheduler Effective',
+              monitor.schedulerEnabled ? 'ON' : 'OFF'),
+          _Line('KIS Real Order Scheduler',
+              monitor.realOrderSchedulerEnabled ? 'ON' : 'OFF'),
+          _Line(
+              'KIS Live Ready', monitor.liveSchedulerReady ? 'true' : 'false'),
+          _Line(
+            'Next KR Slot',
+            _slotText(monitor.nextSlotName, monitor.nextSlotTimeLocal),
+          ),
+          _Line('Last KR Scheduler Run',
+              _timestampOrNone(monitor.lastSchedulerRunAt)),
+          _Line('Last Scheduler Result',
+              _valueOrNone(monitor.lastSchedulerRunResult)),
+          _Line('Last Scheduler Reason',
+              _valueOrNone(monitor.lastSchedulerRunReason)),
+          _Line('Last Scheduler ID', _valueOrNone(monitor.lastSchedulerRunId)),
+          _Line('Last Scheduler Mode',
+              _valueOrNone(monitor.lastSchedulerRunMode)),
+          _Line('Last Scheduler Source',
+              _valueOrNone(monitor.lastSchedulerRunTriggerSource)),
+          _Line(
+            'Block Reasons',
+            monitor.blockReasons.isEmpty
+                ? 'none'
+                : monitor.blockReasons.join(', '),
+          ),
+          _Line(
+              'Blocking Flags',
+              risk.blockingFlags.isEmpty
+                  ? 'none'
+                  : risk.blockingFlags.join(', ')),
+          _Line('Risky Flags',
+              risk.riskyFlags.isEmpty ? 'none' : risk.riskyFlags.join(', ')),
+          _Line('Scheduler Dry Run', monitor.schedulerDryRun ? 'on' : 'off'),
+          _Line('Real Orders Allowed',
+              monitor.schedulerAllowRealOrders ? 'yes' : 'no'),
+          _Line('KIS Sell Enabled',
+              monitor.schedulerSellEnabled ? 'true' : 'false'),
+          _Line('KIS Buy Enabled',
+              monitor.schedulerBuyEnabled ? 'true' : 'false'),
+          _Line('KIS Sell Gate', risk.sellGateEnabled ? 'READY' : 'OFF'),
+          _Line('KIS Buy Gate', risk.buyGateEnabled ? 'READY' : 'OFF'),
+          _Line('Daily Live Order Limit', risk.dailyLiveOrderLimit.toString()),
+          _Line('Daily Limit Remaining',
+              risk.dailyLiveOrderRemaining?.toString() ?? '--'),
+          _Line('Max Notional %', _percent(risk.maxNotionalPct)),
+          _Line('Live Auto Buy', monitor.liveAutoBuyEnabled ? 'on' : 'off'),
+          _Line('Live Auto Sell', monitor.liveAutoSellEnabled ? 'on' : 'off'),
+          _Line(
+              'Stop-loss Enabled', monitor.stopLossEnabled ? 'true' : 'false'),
+          _Line('Take-profit Enabled',
+              monitor.takeProfitEnabled ? 'true' : 'false'),
+          _Line('Limited Auto Buy',
+              monitor.limitedAutoBuyEnabled ? 'enabled' : 'off'),
+          _Line('Last Sell Run', _timestampOrNone(monitor.lastSellRunAt)),
+          _Line('Sell Result', _valueOrNone(monitor.lastSellRunResult)),
+          _Line('Last Buy Run', _timestampOrNone(monitor.lastBuyRunAt)),
+          _Line('Buy Result', _valueOrNone(monitor.lastBuyRunResult)),
+          _Line('Last Trigger', monitor.lastTriggerDetected.toUpperCase()),
+          _Line('Block Reason', _valueOrNone(monitor.lastBlockReason)),
+          _Line('Real Order Submitted',
+              monitor.realOrderSubmitted ? 'true' : 'false'),
+          _Line('Broker Submit Called',
+              monitor.brokerSubmitCalled ? 'true' : 'false'),
+          _Line('Manual Submit Called',
+              monitor.manualSubmitCalled ? 'true' : 'false'),
+          _Line('KIS ODNO', _valueOrNone(monitor.kisOdno)),
+          _Line('Today Submitted',
+              monitor.todaySubmittedCount?.toString() ?? '--'),
+          _Line('KIS Buy',
+              '${monitor.buyStatusLabel} | ${monitor.schedulerBuyEnabled ? 'enabled' : 'scheduler buy disabled'}'),
+        ],
+      ),
+    ]);
   }
 }
 
@@ -408,6 +433,75 @@ class _WarningLine extends StatelessWidget {
   }
 }
 
+class _RiskWarningLine extends StatelessWidget {
+  const _RiskWarningLine({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: color, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}
+
+class _KisRiskWarning {
+  const _KisRiskWarning(this.text, this.color);
+
+  final String text;
+  final Color color;
+}
+
+List<_KisRiskWarning> _kisRiskWarnings(SchedulerRiskSummary risk) {
+  final items = <_KisRiskWarning>[];
+  if (risk.liveSellArmed) {
+    items.add(const _KisRiskWarning(
+      'KIS live sell automation is armed. Stop-loss sell may submit real KIS orders.',
+      Colors.orangeAccent,
+    ));
+  }
+  if (risk.liveBuyArmed) {
+    items.add(const _KisRiskWarning(
+      'KIS live buy automation is enabled. This should remain OFF unless explicitly testing.',
+      Colors.redAccent,
+    ));
+  }
+  if (risk.warningLevel == 'dangerous_mixed') {
+    final flags = risk.riskyFlags.isEmpty ? 'none' : risk.riskyFlags.join(', ');
+    items.add(_KisRiskWarning(
+      'Dangerous mixed KIS automation settings detected. Risky flags: $flags',
+      Colors.redAccent,
+    ));
+  }
+  if (risk.warningLevel == 'blocked') {
+    final flags =
+        risk.blockingFlags.isEmpty ? 'none' : risk.blockingFlags.join(', ');
+    items.add(_KisRiskWarning(
+      'KIS live automation request is blocked. Blocking flags: $flags',
+      Colors.orangeAccent,
+    ));
+  }
+  if (risk.warningLevel == 'safe' || risk.safeModeActive) {
+    items.add(const _KisRiskWarning(
+      'Safe Mode / Live automation off.',
+      Colors.greenAccent,
+    ));
+  }
+  return items;
+}
+
 class _StateNote extends StatelessWidget {
   const _StateNote({required this.text});
 
@@ -493,3 +587,5 @@ String _valueOrNone(String? value) {
   if (text == null || text.isEmpty) return 'none';
   return text;
 }
+
+String _percent(double value) => '${(value * 100).toStringAsFixed(2)}%';

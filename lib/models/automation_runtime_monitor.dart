@@ -142,6 +142,7 @@ class AutomationRuntimeMonitor {
             settings.kisLimitedAutoSellTakeProfitEnabled,
         limitedAutoBuyEnabled: settings.kisLimitedAutoBuyEnabled,
         schedulerStatus: kisSchedulerStatus,
+        riskSummary: schedulerStatus.kr.riskSummary,
         guardedSell: guardedSell,
         guardedBuy: guardedBuy,
         nextSlotName: schedulerStatus.kr.nextSlotName,
@@ -196,19 +197,14 @@ class AutomationRuntimeMonitor {
           'current_count',
           'orders_today',
         ]),
-        dailyLimitMax:
+        dailyLimitMax: schedulerStatus.kr.riskSummary.dailyLiveOrderLimit,
+        dailyLimitRemaining: schedulerStatus
+                .kr.riskSummary.dailyLiveOrderRemaining ??
             _dailyLimitInt(guardedSell?.dailyLimit, guardedBuy?.dailyLimit, [
-                  'max_live_orders_per_day',
-                  'max_orders_per_day',
-                  'limit',
-                ]) ??
-                settings.kisSchedulerMaxLiveOrdersPerDay,
-        dailyLimitRemaining:
-            _dailyLimitInt(guardedSell?.dailyLimit, guardedBuy?.dailyLimit, [
-          'remaining',
-          'remaining_today',
-          'daily_limit_remaining',
-        ]),
+              'remaining',
+              'remaining_today',
+              'daily_limit_remaining',
+            ]),
       ),
       lastRuns: summaries,
       lastOrders: orders,
@@ -357,6 +353,7 @@ class KisAutomationStatus {
     required this.takeProfitEnabled,
     required this.limitedAutoBuyEnabled,
     required this.schedulerStatus,
+    this.riskSummary = const SchedulerRiskSummary.safe(),
     required this.guardedSell,
     required this.guardedBuy,
     required this.nextSlotName,
@@ -400,6 +397,7 @@ class KisAutomationStatus {
   final bool takeProfitEnabled;
   final bool limitedAutoBuyEnabled;
   final KisSchedulerSimulationStatus? schedulerStatus;
+  final SchedulerRiskSummary riskSummary;
   final KisSchedulerGuardedSellResult? guardedSell;
   final KisSchedulerGuardedBuyResult? guardedBuy;
   final String? nextSlotName;

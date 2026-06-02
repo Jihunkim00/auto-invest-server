@@ -472,6 +472,106 @@ def test_scheduler_status_kr_enabled_for_scheduler_is_true_in_dry_run_validation
     assert body["KR"]["enabled_for_scheduler_block_reasons"] == []
 
 
+def test_scheduler_status_risk_summary_safe_defaults():
+    with TestClient(app) as client:
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    summary = response.json()["KR"]["risk_summary"]
+    assert summary["live_sell_armed"] is False
+    assert summary["live_buy_armed"] is False
+    assert summary["warning_level"] == "safe"
+    assert summary["safe_mode_active"] is True
+    assert summary["daily_live_order_limit"] == 1
+    assert summary["max_notional_pct"] == 0.03
+
+
+def test_scheduler_status_risk_summary_sell_only_armed(monkeypatch):
+    _patch_kis_enabled(monkeypatch)
+
+    with TestClient(app) as client:
+        client.put("/ops/settings", json=_sell_only_settings())
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    summary = response.json()["KR"]["risk_summary"]
+    assert summary["live_sell_armed"] is True
+    assert summary["live_buy_armed"] is False
+    assert summary["sell_only_mode"] is True
+    assert summary["warning_level"] == "armed_sell_only"
+    assert summary["daily_live_order_limit"] == 1
+    assert summary["daily_live_order_remaining"] == 1
+    assert summary["max_notional_pct"] == 0.03
+    assert summary["blocking_flags"] == []
+    assert "kis_scheduler_buy_enabled" not in summary["risky_flags"]
+    assert "kis_scheduler_allow_limited_auto_buy" not in summary["risky_flags"]
+    assert "kis_live_auto_buy_enabled" not in summary["risky_flags"]
+    assert "kis_limited_auto_buy_enabled" not in summary["risky_flags"]
+
+
+def test_scheduler_status_risk_summary_buy_flag_is_dangerous(monkeypatch):
+    _patch_kis_enabled(monkeypatch)
+
+    with TestClient(app) as client:
+        client.put(
+            "/ops/settings",
+            json={**_sell_only_settings(), "kis_scheduler_buy_enabled": True},
+        )
+        response = client.get("/scheduler/status")
+
+    summary = response.json()["KR"]["risk_summary"]
+    assert summary["live_buy_armed"] is True
+    assert summary["warning_level"] == "dangerous_mixed"
+    assert "kis_scheduler_buy_enabled" in summary["risky_flags"]
+
+
+def test_scheduler_status_risk_summary_dry_run_blocks_live_request(monkeypatch):
+    _patch_kis_enabled(monkeypatch)
+
+    with TestClient(app) as client:
+        client.put("/ops/settings", json={**_sell_only_settings(), "dry_run": True})
+        response = client.get("/scheduler/status")
+
+    summary = response.json()["KR"]["risk_summary"]
+    assert summary["live_sell_armed"] is False
+    assert summary["warning_level"] == "blocked"
+    assert "dry_run_true" in summary["blocking_flags"]
+
+
+def test_scheduler_status_risk_summary_kill_switch_blocks_live_request(monkeypatch):
+    _patch_kis_enabled(monkeypatch)
+
+    with TestClient(app) as client:
+        client.put("/ops/settings", json={**_sell_only_settings(), "kill_switch": True})
+        response = client.get("/scheduler/status")
+
+    summary = response.json()["KR"]["risk_summary"]
+    assert summary["live_sell_armed"] is False
+    assert summary["warning_level"] == "blocked"
+    assert "kill_switch_enabled" in summary["blocking_flags"]
+
+
+def test_scheduler_status_risk_summary_safe_mode_clears_live_flags(monkeypatch):
+    _patch_kis_enabled(monkeypatch)
+
+    with TestClient(app) as client:
+        client.put("/ops/settings", json=_sell_only_settings())
+        client.put("/ops/settings", json=_safe_mode_settings())
+        response = client.get("/scheduler/status")
+        settings = client.get("/ops/settings").json()
+
+    body = response.json()
+    summary = body["KR"]["risk_summary"]
+    assert body["KR"]["enabled_for_scheduler"] is False
+    assert body["KR"]["real_order_scheduler_enabled"] is False
+    assert summary["warning_level"] == "safe"
+    assert summary["live_sell_armed"] is False
+    assert summary["live_buy_armed"] is False
+    for key in _safe_mode_settings():
+        if key not in {"dry_run", "kis_scheduler_dry_run"}:
+            assert settings[key] is False
+
+
 def test_scheduler_service_uses_runtime_settings_for_kis_live_gate(monkeypatch):
     with SessionLocal() as db:
         from app.services.runtime_setting_service import RuntimeSettingService
@@ -555,3 +655,60 @@ def test_us_scheduler_does_not_run_kis_services(monkeypatch):
     scheduler_service._run_us_scheduled_once("midday")
 
     assert calls == ["watchlist"]
+
+
+def _patch_kis_enabled(monkeypatch):
+    settings = _settings(kis_enabled=True, kis_real_order_enabled=True)
+    monkeypatch.setattr("app.routes.scheduler.get_settings", lambda: settings)
+    monkeypatch.setattr("app.services.runtime_setting_service.get_settings", lambda: settings)
+
+
+def _sell_only_settings():
+    return {
+        "dry_run": False,
+        "kill_switch": False,
+        "scheduler_enabled": True,
+        "kis_scheduler_enabled": True,
+        "kis_scheduler_dry_run": False,
+        "kis_scheduler_live_enabled": True,
+        "kis_scheduler_allow_real_orders": True,
+        "kis_scheduler_configured_allow_real_orders": True,
+        "kis_scheduler_sell_enabled": True,
+        "kis_scheduler_buy_enabled": False,
+        "kis_scheduler_allow_limited_auto_sell": True,
+        "kis_scheduler_allow_limited_auto_buy": False,
+        "kis_live_auto_sell_enabled": True,
+        "kis_live_auto_buy_enabled": False,
+        "kis_limited_auto_buy_enabled": False,
+        "kis_limited_auto_stop_loss_enabled": True,
+        "kis_limited_auto_sell_stop_loss_enabled": True,
+        "kis_limited_auto_take_profit_enabled": False,
+        "kis_limited_auto_sell_take_profit_enabled": False,
+        "kis_limited_auto_sell_allow_take_profit_trigger": False,
+        "kis_scheduler_max_live_orders_per_day": 1,
+        "kis_limited_auto_sell_max_orders_per_day": 1,
+        "kis_limited_auto_sell_max_notional_pct": 0.03,
+    }
+
+
+def _safe_mode_settings():
+    return {
+        "dry_run": True,
+        "kis_scheduler_enabled": False,
+        "kis_scheduler_dry_run": True,
+        "kis_scheduler_live_enabled": False,
+        "kis_scheduler_allow_real_orders": False,
+        "kis_scheduler_configured_allow_real_orders": False,
+        "kis_scheduler_sell_enabled": False,
+        "kis_scheduler_buy_enabled": False,
+        "kis_scheduler_allow_limited_auto_sell": False,
+        "kis_scheduler_allow_limited_auto_buy": False,
+        "kis_live_auto_sell_enabled": False,
+        "kis_live_auto_buy_enabled": False,
+        "kis_limited_auto_buy_enabled": False,
+        "kis_limited_auto_stop_loss_enabled": False,
+        "kis_limited_auto_sell_stop_loss_enabled": False,
+        "kis_limited_auto_take_profit_enabled": False,
+        "kis_limited_auto_sell_take_profit_enabled": False,
+        "kis_limited_auto_sell_allow_take_profit_trigger": False,
+    }

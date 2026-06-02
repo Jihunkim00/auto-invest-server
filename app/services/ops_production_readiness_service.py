@@ -884,10 +884,10 @@ def _today_summary(
             for reason, count in block_counter.most_common(10)
         ],
         "daily_limit": {
-            "max_orders": int(runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2),
+            "max_orders": int(runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 1),
             "remaining": max(
                 0,
-                int(runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2)
+                int(runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 1)
                 - len(order_rows),
             ),
         },

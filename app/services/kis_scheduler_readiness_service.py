@@ -680,7 +680,7 @@ def _daily_limits(
     )
     scheduler_limit = max(
         0,
-        int(runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 0),
+        int(runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 0),
     )
     return {
         "buy": {

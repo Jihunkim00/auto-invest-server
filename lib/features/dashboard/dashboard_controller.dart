@@ -3245,6 +3245,12 @@ OpsSettings _opsSettingsWithPayload(
     kisLimitedAutoSellAllowTakeProfitTrigger: _payloadBool(
             values, 'kis_limited_auto_sell_allow_take_profit_trigger') ??
         settings.kisLimitedAutoSellAllowTakeProfitTrigger,
+    kisLimitedAutoSellMaxOrdersPerDay:
+        _payloadInt(values, 'kis_limited_auto_sell_max_orders_per_day') ??
+            settings.kisLimitedAutoSellMaxOrdersPerDay,
+    kisLimitedAutoSellMaxNotionalPct:
+        _payloadDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
+            settings.kisLimitedAutoSellMaxNotionalPct,
     kisLimitedAutoBuyEnabled:
         _payloadBool(values, 'kis_limited_auto_buy_enabled') ??
             settings.kisLimitedAutoBuyEnabled,
@@ -3259,6 +3265,9 @@ OpsSettings _opsSettingsWithPayload(
     kisSchedulerAllowLimitedAutoBuy:
         _payloadBool(values, 'kis_scheduler_allow_limited_auto_buy') ??
             settings.kisSchedulerAllowLimitedAutoBuy,
+    kisSchedulerMaxLiveOrdersPerDay:
+        _payloadInt(values, 'kis_scheduler_max_live_orders_per_day') ??
+            settings.kisSchedulerMaxLiveOrdersPerDay,
   );
 }
 
@@ -3282,6 +3291,20 @@ bool? _dynamicBool(Object? value) {
   if (text == 'true' || text == '1' || text == 'yes') return true;
   if (text == 'false' || text == '0' || text == 'no') return false;
   return null;
+}
+
+int? _payloadInt(Map<String, dynamic> values, String key) {
+  if (!values.containsKey(key)) return null;
+  final value = values[key];
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+double? _payloadDouble(Map<String, dynamic> values, String key) {
+  if (!values.containsKey(key)) return null;
+  final value = values[key];
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '');
 }
 
 int? _parseOrderTicketQty(String value) {
@@ -3367,22 +3390,30 @@ String _settingsChangeSummary(
   SchedulerStatus schedulerStatus,
 ) {
   final normalized = label.toLowerCase();
+  final risk = schedulerStatus.kr.riskSummary;
+  final riskParts = [
+    'Live Sell Armed ${_onOff(risk.liveSellArmed)}',
+    'Live Buy Armed ${_onOff(risk.liveBuyArmed)}',
+    'Daily Live Order Limit ${risk.dailyLiveOrderLimit}',
+    'Max Notional ${_formatPct(risk.maxNotionalPct)}',
+    'Warning Level ${risk.warningLevel}',
+    if (risk.blockingFlags.isNotEmpty)
+      'Block Reasons ${risk.blockingFlags.join(', ')}'
+    else if (!schedulerStatus.kr.enabledForScheduler &&
+        schedulerStatus.kr.enabledForSchedulerBlockReasons.isNotEmpty)
+      'Block Reasons ${schedulerStatus.kr.enabledForSchedulerBlockReasons.join(', ')}',
+  ];
   if (normalized.contains('sell-only')) {
     final parts = [
       'Sell-Only Test Mode enabled',
       'KIS Scheduler Effective ${_onOff(schedulerStatus.kr.enabledForScheduler)}',
       'KIS Real Order Scheduler ${_onOff(schedulerStatus.kr.realOrderSchedulerEnabled)}',
+      ...riskParts,
       'KIS Sell ${_onOff(settings.kisSchedulerSellEnabled)}',
       'KIS Buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
       'Dry Run ${_onOff(settings.dryRun)}',
       'Kill Switch ${_onOff(settings.killSwitch)}',
     ];
-    if (!schedulerStatus.kr.enabledForScheduler &&
-        schedulerStatus.kr.enabledForSchedulerBlockReasons.isNotEmpty) {
-      parts.add(
-        'Block Reasons ${schedulerStatus.kr.enabledForSchedulerBlockReasons.join(', ')}',
-      );
-    }
     return parts.join(' | ');
   }
   if (normalized.contains('safe mode')) {
@@ -3390,17 +3421,12 @@ String _settingsChangeSummary(
       'Safe Mode enabled',
       'KIS Scheduler Effective ${_onOff(schedulerStatus.kr.enabledForScheduler)}',
       'KIS Real Order Scheduler ${_onOff(schedulerStatus.kr.realOrderSchedulerEnabled)}',
+      ...riskParts,
       'KIS Sell ${_onOff(settings.kisSchedulerSellEnabled)}',
       'KIS Buy ${_onOff(settings.kisSchedulerBuyEnabled)}',
       'Dry Run ${_onOff(settings.dryRun)}',
       'Kill Switch ${_onOff(settings.killSwitch)}',
     ];
-    if (!schedulerStatus.kr.enabledForScheduler &&
-        schedulerStatus.kr.enabledForSchedulerBlockReasons.isNotEmpty) {
-      parts.add(
-        'Block Reasons ${schedulerStatus.kr.enabledForSchedulerBlockReasons.join(', ')}',
-      );
-    }
     return parts.join(' | ');
   }
   return [
@@ -3415,6 +3441,8 @@ String _settingsChangeSummary(
 }
 
 String _onOff(bool enabled) => enabled ? 'ON' : 'OFF';
+
+String _formatPct(double value) => '${(value * 100).toStringAsFixed(2)}%';
 
 Map<String, dynamic> _exitPreflightSourceMetadata(
   KisLiveExitCandidate candidate, {

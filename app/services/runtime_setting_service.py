@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL, MAX_TRADES_PER_DAY, NEAR_CLOSE_MINUTES
-from app.db.models import RuntimeSetting
+from app.db.models import OrderLog, RuntimeSetting
+
+
+KR_TZ = ZoneInfo("Asia/Seoul")
+CONSERVATIVE_LIVE_ORDER_LIMIT = 1
+CONSERVATIVE_MAX_NOTIONAL_PCT = 0.03
+KIS_BUY_EXECUTION_FLAGS = (
+    "kis_scheduler_buy_enabled",
+    "kis_scheduler_allow_limited_auto_buy",
+    "kis_live_auto_buy_enabled",
+    "kis_limited_auto_buy_enabled",
+)
 
 
 class RuntimeSettingService:
@@ -71,7 +85,7 @@ class RuntimeSettingService:
             "kis_scheduler_sell_enabled": False,
             "kis_scheduler_allow_limited_auto_buy": False,
             "kis_scheduler_allow_limited_auto_sell": False,
-            "kis_scheduler_max_live_orders_per_day": 2,
+            "kis_scheduler_max_live_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
             "kis_scheduler_live_requires_dry_run_false": True,
             "kis_scheduler_live_respect_kill_switch": True,
         }
@@ -298,6 +312,13 @@ class RuntimeSettingService:
         settings = self.get_settings_read_only(db)
         return self._kis_scheduler_runtime_state(settings)
 
+    def get_kis_risk_summary_read_only(self, db: Session) -> dict[str, Any]:
+        settings = self.get_settings_read_only(db)
+        return self._kis_risk_summary(
+            settings,
+            daily_live_order_count=self._daily_kis_live_order_count(db),
+        )
+
     def _kis_scheduler_runtime_state(self, settings: dict[str, Any]) -> dict[str, Any]:
         kis_enabled = bool(getattr(self.settings, "kis_enabled", False))
         kis_real_order_enabled = bool(
@@ -322,7 +343,8 @@ class RuntimeSettingService:
         )
         kis_scheduler_live_enabled = bool(settings["kis_scheduler_live_enabled"])
         kis_scheduler_max_live_orders_per_day = int(
-            settings["kis_scheduler_max_live_orders_per_day"] or 2
+            settings["kis_scheduler_max_live_orders_per_day"]
+            or CONSERVATIVE_LIVE_ORDER_LIMIT
         )
         dry_run = bool(settings["dry_run"])
         kill_switch = bool(settings["kill_switch"])
@@ -373,6 +395,227 @@ class RuntimeSettingService:
             "live_scheduler_ready": live_scheduler_ready,
             "real_order_scheduler_enabled": live_scheduler_ready,
         }
+
+    def _kis_risk_summary(
+        self,
+        settings: dict[str, Any],
+        *,
+        daily_live_order_count: int | None,
+    ) -> dict[str, Any]:
+        dry_run = bool(settings["dry_run"])
+        kill_switch = bool(settings["kill_switch"])
+        scheduler_enabled = bool(settings["scheduler_enabled"])
+        kis_scheduler_enabled = bool(settings["kis_scheduler_enabled"])
+        kis_scheduler_dry_run = bool(settings["kis_scheduler_dry_run"])
+        kis_scheduler_live_enabled = bool(settings["kis_scheduler_live_enabled"])
+        allow_real_orders = bool(settings["kis_scheduler_allow_real_orders"])
+        configured_allow_real_orders = bool(
+            settings["kis_scheduler_configured_allow_real_orders"]
+        )
+        scheduler_sell_enabled = bool(settings["kis_scheduler_sell_enabled"])
+        scheduler_allow_limited_auto_sell = bool(
+            settings["kis_scheduler_allow_limited_auto_sell"]
+        )
+        live_auto_sell_enabled = bool(settings["kis_live_auto_sell_enabled"])
+        limited_auto_sell_enabled = bool(settings["kis_limited_auto_sell_enabled"])
+        stop_loss_enabled = bool(
+            settings["kis_limited_auto_stop_loss_enabled"]
+            or settings["kis_limited_auto_sell_stop_loss_enabled"]
+        )
+        take_profit_enabled = bool(
+            settings["kis_limited_auto_take_profit_enabled"]
+            or settings["kis_limited_auto_sell_take_profit_enabled"]
+        )
+        sell_gate_enabled = bool(stop_loss_enabled or take_profit_enabled)
+
+        buy_flags = {
+            name: bool(settings.get(name, False)) for name in KIS_BUY_EXECUTION_FLAGS
+        }
+        enabled_buy_flags = [name for name, enabled in buy_flags.items() if enabled]
+        buy_gate_enabled = bool(enabled_buy_flags)
+
+        scheduler_live_requested = bool(
+            kis_scheduler_live_enabled
+            or allow_real_orders
+            or configured_allow_real_orders
+            or scheduler_sell_enabled
+            or scheduler_allow_limited_auto_sell
+            or bool(settings["kis_scheduler_buy_enabled"])
+            or bool(settings["kis_scheduler_allow_limited_auto_buy"])
+        )
+        live_requested = bool(
+            scheduler_live_requested
+            or live_auto_sell_enabled
+            or limited_auto_sell_enabled
+            or buy_gate_enabled
+        )
+        scheduler_path_enabled = bool(
+            scheduler_enabled and kis_scheduler_enabled and kis_scheduler_live_enabled
+        )
+        sell_execution_configured = bool(
+            scheduler_path_enabled
+            and scheduler_sell_enabled
+            and scheduler_allow_limited_auto_sell
+            and live_auto_sell_enabled
+            and sell_gate_enabled
+        )
+        kis_enabled = bool(getattr(self.settings, "kis_enabled", False))
+        kis_real_order_enabled = bool(
+            getattr(self.settings, "kis_real_order_enabled", False)
+        )
+        real_order_prereqs_met = bool(
+            allow_real_orders
+            and configured_allow_real_orders
+            and not kis_scheduler_dry_run
+            and not dry_run
+            and not kill_switch
+            and kis_enabled
+            and kis_real_order_enabled
+        )
+        live_sell_armed = bool(sell_execution_configured and real_order_prereqs_met)
+        live_buy_armed = bool(
+            buy_gate_enabled and not dry_run and not kill_switch and kis_enabled
+        )
+        sell_only_mode = bool(sell_execution_configured and not buy_gate_enabled)
+
+        daily_live_order_limit = max(
+            0,
+            int(
+                settings["kis_scheduler_max_live_orders_per_day"]
+                or CONSERVATIVE_LIVE_ORDER_LIMIT
+            ),
+        )
+        daily_live_order_remaining = (
+            max(0, daily_live_order_limit - daily_live_order_count)
+            if daily_live_order_count is not None
+            else None
+        )
+        max_notional_pct = float(
+            settings["kis_limited_auto_sell_max_notional_pct"]
+            or CONSERVATIVE_MAX_NOTIONAL_PCT
+        )
+
+        risky_flags: list[str] = list(enabled_buy_flags)
+        if (
+            kis_scheduler_live_enabled
+            and (bool(settings["kis_scheduler_buy_enabled"]) or buy_gate_enabled)
+        ):
+            risky_flags.append("scheduler_live_with_buy_execution_enabled")
+        if daily_live_order_limit > CONSERVATIVE_LIVE_ORDER_LIMIT:
+            risky_flags.append("kis_scheduler_max_live_orders_per_day_high")
+        if (
+            int(settings["kis_limited_auto_sell_max_orders_per_day"] or 0)
+            > CONSERVATIVE_LIVE_ORDER_LIMIT
+        ):
+            risky_flags.append("kis_limited_auto_sell_max_orders_per_day_high")
+        if (
+            int(settings["kis_live_auto_max_orders_per_day"] or 0)
+            > CONSERVATIVE_LIVE_ORDER_LIMIT
+        ):
+            risky_flags.append("kis_live_auto_max_orders_per_day_high")
+        if (
+            float(settings["kis_limited_auto_sell_max_notional_pct"] or 0)
+            > CONSERVATIVE_MAX_NOTIONAL_PCT
+        ):
+            risky_flags.append("kis_limited_auto_sell_max_notional_pct_high")
+        if (
+            float(settings["kis_live_auto_max_notional_pct"] or 0)
+            > CONSERVATIVE_MAX_NOTIONAL_PCT
+        ):
+            risky_flags.append("kis_live_auto_max_notional_pct_high")
+        risky_flags = _dedupe(risky_flags)
+
+        blocking_flags: list[str] = []
+        if live_requested:
+            if dry_run:
+                blocking_flags.append("dry_run_true")
+            if scheduler_live_requested and kis_scheduler_dry_run:
+                blocking_flags.append("kis_scheduler_dry_run_true")
+            if kill_switch:
+                blocking_flags.append("kill_switch_enabled")
+            if scheduler_live_requested and not scheduler_enabled:
+                blocking_flags.append("runtime_scheduler_disabled")
+            if scheduler_live_requested and not kis_scheduler_enabled:
+                blocking_flags.append("kis_scheduler_disabled")
+            if scheduler_live_requested and not allow_real_orders:
+                blocking_flags.append("kis_scheduler_allow_real_orders_false")
+            if scheduler_live_requested and not configured_allow_real_orders:
+                blocking_flags.append("configured_allow_real_orders_false")
+            if scheduler_live_requested and not kis_enabled:
+                blocking_flags.append("kis_disabled")
+            if scheduler_live_requested and not kis_real_order_enabled:
+                blocking_flags.append("kis_real_order_disabled")
+        blocking_flags = _dedupe(blocking_flags)
+
+        all_live_flags_off = not any(
+            [
+                kis_scheduler_live_enabled,
+                allow_real_orders,
+                configured_allow_real_orders,
+                scheduler_sell_enabled,
+                scheduler_allow_limited_auto_sell,
+                live_auto_sell_enabled,
+                limited_auto_sell_enabled,
+                stop_loss_enabled,
+                take_profit_enabled,
+                buy_gate_enabled,
+            ]
+        )
+        safe_mode_active = bool(dry_run and all_live_flags_off)
+        if blocking_flags:
+            warning_level = "blocked"
+        elif buy_gate_enabled:
+            warning_level = "dangerous_mixed"
+        elif live_sell_armed and sell_only_mode:
+            warning_level = "armed_sell_only"
+        else:
+            warning_level = "safe"
+
+        return {
+            "live_sell_armed": live_sell_armed,
+            "live_buy_armed": live_buy_armed,
+            "sell_only_mode": sell_only_mode,
+            "daily_live_order_limit": daily_live_order_limit,
+            "daily_live_order_remaining": daily_live_order_remaining,
+            "max_notional_pct": max_notional_pct,
+            "dry_run": dry_run,
+            "kill_switch": kill_switch,
+            "safe_mode_active": safe_mode_active,
+            "risky_flags": risky_flags,
+            "blocking_flags": blocking_flags,
+            "warning_level": warning_level,
+            "sell_gate_enabled": sell_gate_enabled,
+            "buy_gate_enabled": buy_gate_enabled,
+        }
+
+    def _daily_kis_live_order_count(self, db: Session) -> int:
+        start_utc, end_utc = _kr_day_bounds_utc(datetime.now(UTC))
+        submitted_statuses = [
+            "SUBMITTED",
+            "ACCEPTED",
+            "PENDING",
+            "PARTIALLY_FILLED",
+            "FILLED",
+        ]
+        return int(
+            db.query(OrderLog)
+            .filter(OrderLog.broker == "kis")
+            .filter(OrderLog.created_at >= start_utc)
+            .filter(OrderLog.created_at < end_utc)
+            .filter(OrderLog.internal_status.in_(submitted_statuses))
+            .filter(
+                or_(
+                    OrderLog.request_payload.like("%limited_auto_buy%"),
+                    OrderLog.request_payload.like("%limited_auto_sell%"),
+                    OrderLog.request_payload.like("%kis_limited_auto%"),
+                    OrderLog.response_payload.like("%limited_auto_buy%"),
+                    OrderLog.response_payload.like("%limited_auto_sell%"),
+                    OrderLog.response_payload.like("%kis_limited_auto%"),
+                )
+            )
+            .count()
+            or 0
+        )
 
     def _trade_limits(self, settings: dict[str, Any]) -> dict[str, Any]:
         base = {
@@ -508,3 +751,24 @@ def _sync_bool_alias(payload: dict[str, Any], primary: str, alias: str) -> None:
     value = payload[primary] if primary_set else payload[alias]
     payload[primary] = bool(value)
     payload[alias] = bool(value)
+
+
+def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:
+    local = now_utc.astimezone(KR_TZ)
+    start_local = datetime.combine(local.date(), time.min, tzinfo=KR_TZ)
+    end_local = start_local + timedelta(days=1)
+    return _naive_utc(start_local), _naive_utc(end_local)
+
+
+def _naive_utc(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        value = value.astimezone(UTC)
+    return value.replace(tzinfo=None)
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result

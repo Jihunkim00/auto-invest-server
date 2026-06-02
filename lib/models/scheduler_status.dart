@@ -61,6 +61,7 @@ class MarketSchedulerStatus {
     this.lastSchedulerRunId,
     this.lastSchedulerRunMode,
     this.lastSchedulerRunTriggerSource,
+    this.riskSummary = const SchedulerRiskSummary.safe(),
   });
 
   factory MarketSchedulerStatus.fromJson(
@@ -95,6 +96,9 @@ class MarketSchedulerStatus {
       lastSchedulerRunTriggerSource: isKr
           ? _readNullableString(json['last_scheduler_run_trigger_source'])
           : null,
+      riskSummary: SchedulerRiskSummary.fromJson(
+        Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
+      ),
     );
   }
 
@@ -117,6 +121,78 @@ class MarketSchedulerStatus {
   final String? lastSchedulerRunId;
   final String? lastSchedulerRunMode;
   final String? lastSchedulerRunTriggerSource;
+  final SchedulerRiskSummary riskSummary;
+}
+
+class SchedulerRiskSummary {
+  const SchedulerRiskSummary({
+    required this.liveSellArmed,
+    required this.liveBuyArmed,
+    required this.sellOnlyMode,
+    required this.dailyLiveOrderLimit,
+    required this.dailyLiveOrderRemaining,
+    required this.maxNotionalPct,
+    required this.dryRun,
+    required this.killSwitch,
+    required this.safeModeActive,
+    required this.riskyFlags,
+    required this.blockingFlags,
+    required this.warningLevel,
+    required this.sellGateEnabled,
+    required this.buyGateEnabled,
+  });
+
+  const SchedulerRiskSummary.safe()
+      : liveSellArmed = false,
+        liveBuyArmed = false,
+        sellOnlyMode = false,
+        dailyLiveOrderLimit = 1,
+        dailyLiveOrderRemaining = null,
+        maxNotionalPct = 0.03,
+        dryRun = true,
+        killSwitch = false,
+        safeModeActive = true,
+        riskyFlags = const [],
+        blockingFlags = const [],
+        warningLevel = 'safe',
+        sellGateEnabled = false,
+        buyGateEnabled = false;
+
+  factory SchedulerRiskSummary.fromJson(Map<String, dynamic> json) {
+    if (json.isEmpty) return const SchedulerRiskSummary.safe();
+    return SchedulerRiskSummary(
+      liveSellArmed: json['live_sell_armed'] == true,
+      liveBuyArmed: json['live_buy_armed'] == true,
+      sellOnlyMode: json['sell_only_mode'] == true,
+      dailyLiveOrderLimit: _readInt(json['daily_live_order_limit'], 1),
+      dailyLiveOrderRemaining:
+          _readNullableInt(json['daily_live_order_remaining']),
+      maxNotionalPct: _readDouble(json['max_notional_pct'], 0.03),
+      dryRun: json['dry_run'] != false,
+      killSwitch: json['kill_switch'] == true,
+      safeModeActive: json['safe_mode_active'] == true,
+      riskyFlags: _readStringList(json['risky_flags']),
+      blockingFlags: _readStringList(json['blocking_flags']),
+      warningLevel: _readString(json['warning_level'], 'safe'),
+      sellGateEnabled: json['sell_gate_enabled'] == true,
+      buyGateEnabled: json['buy_gate_enabled'] == true,
+    );
+  }
+
+  final bool liveSellArmed;
+  final bool liveBuyArmed;
+  final bool sellOnlyMode;
+  final int dailyLiveOrderLimit;
+  final int? dailyLiveOrderRemaining;
+  final double maxNotionalPct;
+  final bool dryRun;
+  final bool killSwitch;
+  final bool safeModeActive;
+  final List<String> riskyFlags;
+  final List<String> blockingFlags;
+  final String warningLevel;
+  final bool sellGateEnabled;
+  final bool buyGateEnabled;
 }
 
 String _readString(Object? value, String fallback) {
@@ -154,4 +230,20 @@ List<String> _readStringList(Object? value) {
       .map((item) => item.toString().trim())
       .where((item) => item.isNotEmpty && item != 'null')
       .toList();
+}
+
+int _readInt(Object? value, int fallback) {
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+int? _readNullableInt(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toInt();
+  return int.tryParse(value.toString());
+}
+
+double _readDouble(Object? value, double fallback) {
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '') ?? fallback;
 }

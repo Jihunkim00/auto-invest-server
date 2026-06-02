@@ -186,7 +186,7 @@ def _create_runtime_settings_table_if_missing():
                     kis_scheduler_sell_enabled BOOLEAN NOT NULL DEFAULT 0,
                     kis_scheduler_allow_limited_auto_buy BOOLEAN NOT NULL DEFAULT 0,
                     kis_scheduler_allow_limited_auto_sell BOOLEAN NOT NULL DEFAULT 0,
-                    kis_scheduler_max_live_orders_per_day INTEGER NOT NULL DEFAULT 2,
+                    kis_scheduler_max_live_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     kis_scheduler_live_requires_dry_run_false BOOLEAN NOT NULL DEFAULT 1,
                     kis_scheduler_live_respect_kill_switch BOOLEAN NOT NULL DEFAULT 1,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -398,7 +398,7 @@ def init_db():
         "kis_scheduler_sell_enabled": "BOOLEAN DEFAULT 0",
         "kis_scheduler_allow_limited_auto_buy": "BOOLEAN DEFAULT 0",
         "kis_scheduler_allow_limited_auto_sell": "BOOLEAN DEFAULT 0",
-        "kis_scheduler_max_live_orders_per_day": "INTEGER DEFAULT 2",
+        "kis_scheduler_max_live_orders_per_day": "INTEGER DEFAULT 1",
         "kis_scheduler_live_requires_dry_run_false": "BOOLEAN DEFAULT 1",
         "kis_scheduler_live_respect_kill_switch": "BOOLEAN DEFAULT 1",
     }

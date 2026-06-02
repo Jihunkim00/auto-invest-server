@@ -469,6 +469,7 @@ class _PositionDetail extends StatelessWidget {
   Widget build(BuildContext context) {
     final managed = managedPosition;
     final technical = managed?.technicalSnapshot ?? const <String, dynamic>{};
+    final risk = controller.schedulerStatus.kr.riskSummary;
     final flags = managed == null
         ? const <String>[]
         : [
@@ -482,6 +483,16 @@ class _PositionDetail extends StatelessWidget {
       Wrap(spacing: 14, runSpacing: 8, children: [
         _DataPair(label: 'Provider', value: managementItem.provider),
         _DataPair(label: 'Market', value: managementItem.market),
+        if (isKr)
+          _DataPair(
+            label: 'Live Sell Armed',
+            value: risk.liveSellArmed ? 'true' : 'false',
+          ),
+        if (isKr)
+          _DataPair(
+            label: 'Daily Limit Remaining',
+            value: risk.dailyLiveOrderRemaining?.toString() ?? '--',
+          ),
         _DataPair(
             label: 'Trigger Status', value: managementItem.triggerStatus.label),
         _DataPair(label: 'Trigger Source', value: managementItem.triggerSource),
@@ -553,6 +564,9 @@ class _PositionDetail extends StatelessWidget {
             label: 'Latest Scheduler Event',
             value: _eventSummary(managementItem.latestSchedulerEvent)),
         _DataPair(
+            label: 'Latest Order Event',
+            value: _eventSummary(managementItem.latestRelatedOrderEvent)),
+        _DataPair(
             label: 'Trigger Today',
             value: managementItem.triggerDetectedToday ? 'true' : 'false'),
         _DataPair(
@@ -581,6 +595,22 @@ class _PositionDetail extends StatelessWidget {
       if (managementItem.latestRelatedEvent != null) ...[
         const SizedBox(height: 12),
         _LatestEventSection(managementItem: managementItem),
+      ],
+      if (isKr && risk.liveSellArmed) ...[
+        const SizedBox(height: 12),
+        const _WarningNote(
+          text: 'KIS live sell automation is armed',
+          detail:
+              'Stop-loss sell may submit real KIS orders through the guarded scheduler path.',
+        ),
+      ],
+      if (managementItem.duplicateOpenSellOrder == true) ...[
+        const SizedBox(height: 12),
+        const _WarningNote(
+          text: 'Duplicate sell order warning',
+          detail:
+              'An open or recent sell order is already known for this symbol.',
+        ),
       ],
       const SizedBox(height: 12),
       const _SubsectionTitle('Technical Snapshot'),

@@ -81,7 +81,7 @@ class KisSchedulerLiveService:
                 "kis_scheduler_allow_limited_auto_sell"
             ],
             "kis_scheduler_max_live_orders_per_day": int(
-                runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+                runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 1
             ),
             "live_scheduler_ready": _first_block_reason(checks, runtime) is None,
             "checks": checks,
@@ -115,7 +115,7 @@ class KisSchedulerLiveService:
                 gate_level=gate_level,
             )
 
-        max_orders = max(0, int(runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 0))
+        max_orders = max(0, int(runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 0))
         live_count = _daily_scheduler_live_order_count(db, now_utc=now_utc)
         checks["scheduler_live_order_count_today"] = live_count
         checks["scheduler_live_daily_limit_ok"] = live_count < max_orders
@@ -320,6 +320,10 @@ def _first_block_reason(checks: dict[str, Any], runtime: dict[str, Any]) -> str 
     ordered = [
         ("kis_scheduler_live_enabled", "kis_scheduler_live_disabled"),
         ("kis_scheduler_allow_real_orders", "kis_scheduler_real_orders_disabled"),
+        (
+            "configured_kis_scheduler_allow_real_orders",
+            "configured_scheduler_real_orders_disabled",
+        ),
         ("dry_run_false", "runtime_dry_run_true"),
         ("kill_switch_false", "kill_switch_enabled"),
         ("kis_enabled", "kis_disabled"),
@@ -333,7 +337,7 @@ def _first_block_reason(checks: dict[str, Any], runtime: dict[str, Any]) -> str 
         or checks.get("kis_scheduler_allow_limited_auto_sell") is True
     ):
         return "scheduler_limited_auto_paths_disabled"
-    if int(runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 0) <= 0:
+    if int(runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 0) <= 0:
         return "scheduler_daily_live_order_limit_reached"
     return None
 
@@ -345,7 +349,7 @@ def _safety(runtime: dict[str, Any]) -> dict[str, Any]:
         "manual_submit_called": False,
         "scheduler_real_order_enabled": False,
         "max_live_orders_per_day": int(
-            runtime.get("kis_scheduler_max_live_orders_per_day", 2) or 2
+            runtime.get("kis_scheduler_max_live_orders_per_day", 1) or 1
         ),
         "buy_sell_limited": True,
         "kill_switch_protected": bool(
