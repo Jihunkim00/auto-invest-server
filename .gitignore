@@ -38,3 +38,7 @@ Add-Content .gitignore "`nconfig/watchlist_kr.backup*.yaml"
 
 .pytest_run*/
 .pytest_runs/
+
+.dart_appdata/
+.dart_tool/
+
