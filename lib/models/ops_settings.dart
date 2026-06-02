@@ -53,7 +53,7 @@ class OpsSettings {
     this.kisSchedulerSellEnabled = false,
     this.kisSchedulerAllowLimitedAutoBuy = false,
     this.kisSchedulerAllowLimitedAutoSell = false,
-    this.kisSchedulerMaxLiveOrdersPerDay = 2,
+    this.kisSchedulerMaxLiveOrdersPerDay = 1,
     this.kisSchedulerLiveRequiresDryRunFalse = true,
     this.kisSchedulerLiveRespectKillSwitch = true,
   });

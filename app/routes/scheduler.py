@@ -57,6 +57,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     )
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
+    kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
 
     kr_live_scheduler_enabled_effective = real_order_scheduler_enabled
 
@@ -179,6 +180,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "real_order_scheduler_enabled": bool(
                 runtime_state["real_order_scheduler_enabled"]
             ),
+            "risk_summary": kr_risk_summary,
         },
     }
 

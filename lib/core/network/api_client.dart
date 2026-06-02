@@ -1033,7 +1033,7 @@ class ApiClient {
         kisSchedulerAllowLimitedAutoSell:
             j['kis_scheduler_allow_limited_auto_sell'] == true,
         kisSchedulerMaxLiveOrdersPerDay:
-            _readInt(j['kis_scheduler_max_live_orders_per_day'], 2),
+            _readInt(j['kis_scheduler_max_live_orders_per_day'], 1),
         kisSchedulerLiveRequiresDryRunFalse:
             j['kis_scheduler_live_requires_dry_run_false'] != false,
         kisSchedulerLiveRespectKillSwitch:

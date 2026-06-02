@@ -245,7 +245,7 @@ class RuntimeSetting(Base):
     kis_scheduler_sell_enabled = Column(Boolean, nullable=False, default=False)
     kis_scheduler_allow_limited_auto_buy = Column(Boolean, nullable=False, default=False)
     kis_scheduler_allow_limited_auto_sell = Column(Boolean, nullable=False, default=False)
-    kis_scheduler_max_live_orders_per_day = Column(Integer, nullable=False, default=2)
+    kis_scheduler_max_live_orders_per_day = Column(Integer, nullable=False, default=1)
     kis_scheduler_live_requires_dry_run_false = Column(Boolean, nullable=False, default=True)
     kis_scheduler_live_respect_kill_switch = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

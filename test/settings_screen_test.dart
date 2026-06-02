@@ -235,7 +235,8 @@ void main() {
 
     expect(api.updateOpsSettingsCalls, 1);
     expect(api.lastSettingsUpdate?['dry_run'], isTrue);
-    expect(api.lastSettingsUpdate?['kill_switch'], isFalse);
+    expect(api.lastSettingsUpdate?.containsKey('kill_switch'), isFalse);
+    expect(api.lastSettingsUpdate?.containsKey('scheduler_enabled'), isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_scheduler_dry_run'], isTrue);
     expect(api.lastSettingsUpdate?['kis_scheduler_live_enabled'], isFalse);
@@ -248,6 +249,11 @@ void main() {
     expect(find.text('Safe Mode enabled'), findsOneWidget);
     expect(find.text('KIS Scheduler Effective OFF'), findsOneWidget);
     expect(find.text('KIS Real Order Scheduler OFF'), findsOneWidget);
+    expect(find.text('Live Sell Armed OFF'), findsOneWidget);
+    expect(find.text('Live Buy Armed OFF'), findsOneWidget);
+    expect(find.text('Daily Live Order Limit 1'), findsOneWidget);
+    expect(find.text('Max Notional 3.00%'), findsOneWidget);
+    expect(find.text('Warning Level safe'), findsOneWidget);
     expect(find.text('KIS Sell OFF'), findsOneWidget);
     expect(find.text('KIS Buy OFF'), findsOneWidget);
     expect(find.text('Dry Run ON'), findsOneWidget);
@@ -284,7 +290,18 @@ void main() {
     expect(
         api.lastSettingsUpdate?['kis_limited_auto_stop_loss_enabled'], isTrue);
     expect(api.lastSettingsUpdate?['kis_limited_auto_take_profit_enabled'],
-        isTrue);
+        isFalse);
+    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_take_profit_enabled'],
+        isFalse);
+    expect(
+        api.lastSettingsUpdate?[
+            'kis_limited_auto_sell_allow_take_profit_trigger'],
+        isFalse);
+    expect(api.lastSettingsUpdate?['kis_scheduler_max_live_orders_per_day'], 1);
+    expect(
+        api.lastSettingsUpdate?['kis_limited_auto_sell_max_orders_per_day'], 1);
+    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_max_notional_pct'],
+        0.03);
     expect(api.lastSettingsUpdate?['kis_scheduler_buy_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_live_auto_buy_enabled'], isFalse);
     expect(api.lastSettingsUpdate?['kis_limited_auto_buy_enabled'], isFalse);
@@ -296,6 +313,11 @@ void main() {
     expect(find.text('Sell-Only Test Mode enabled'), findsOneWidget);
     expect(find.text('KIS Scheduler Effective ON'), findsOneWidget);
     expect(find.text('KIS Real Order Scheduler ON'), findsOneWidget);
+    expect(find.text('Live Sell Armed ON'), findsOneWidget);
+    expect(find.text('Live Buy Armed OFF'), findsOneWidget);
+    expect(find.text('Daily Live Order Limit 1'), findsOneWidget);
+    expect(find.text('Max Notional 3.00%'), findsOneWidget);
+    expect(find.text('Warning Level armed_sell_only'), findsOneWidget);
     expect(find.text('KIS Sell ON'), findsOneWidget);
     expect(find.text('KIS Buy OFF'), findsOneWidget);
     expect(find.text('Dry Run OFF'), findsOneWidget);
@@ -414,6 +436,7 @@ class _SettingsFakeApiClient extends ApiClient {
             effective && currentSettings.kisSchedulerDryRun,
         enabledForSchedulerBlockReasons:
             effective ? const [] : const ['kis_scheduler_disabled'],
+        riskSummary: _riskSummaryForSettings(currentSettings),
       ),
     );
   }
@@ -539,6 +562,15 @@ OpsSettings _settingsWithPayload(
         takeProfit ?? settings.kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoSellTakeProfitEnabled:
         takeProfit ?? settings.kisLimitedAutoSellTakeProfitEnabled,
+    kisLimitedAutoSellAllowTakeProfitTrigger:
+        _valueBool(values, 'kis_limited_auto_sell_allow_take_profit_trigger') ??
+            settings.kisLimitedAutoSellAllowTakeProfitTrigger,
+    kisLimitedAutoSellMaxOrdersPerDay:
+        _valueInt(values, 'kis_limited_auto_sell_max_orders_per_day') ??
+            settings.kisLimitedAutoSellMaxOrdersPerDay,
+    kisLimitedAutoSellMaxNotionalPct:
+        _valueDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
+            settings.kisLimitedAutoSellMaxNotionalPct,
     kisLimitedAutoBuyEnabled:
         _valueBool(values, 'kis_limited_auto_buy_enabled') ??
             settings.kisLimitedAutoBuyEnabled,
@@ -548,6 +580,81 @@ OpsSettings _settingsWithPayload(
     kisSchedulerAllowLimitedAutoBuy:
         _valueBool(values, 'kis_scheduler_allow_limited_auto_buy') ??
             settings.kisSchedulerAllowLimitedAutoBuy,
+    kisSchedulerMaxLiveOrdersPerDay:
+        _valueInt(values, 'kis_scheduler_max_live_orders_per_day') ??
+            settings.kisSchedulerMaxLiveOrdersPerDay,
+  );
+}
+
+SchedulerRiskSummary _riskSummaryForSettings(OpsSettings settings) {
+  final sellGate = settings.kisLimitedAutoStopLossEnabled ||
+      settings.kisLimitedAutoSellStopLossEnabled ||
+      settings.kisLimitedAutoTakeProfitEnabled ||
+      settings.kisLimitedAutoSellTakeProfitEnabled;
+  final buyFlags = [
+    if (settings.kisSchedulerBuyEnabled) 'kis_scheduler_buy_enabled',
+    if (settings.kisSchedulerAllowLimitedAutoBuy)
+      'kis_scheduler_allow_limited_auto_buy',
+    if (settings.kisLiveAutoBuyEnabled) 'kis_live_auto_buy_enabled',
+    if (settings.kisLimitedAutoBuyEnabled) 'kis_limited_auto_buy_enabled',
+  ];
+  final liveSellArmed = settings.schedulerEnabled &&
+      settings.kisSchedulerEnabled &&
+      settings.kisSchedulerLiveEnabled &&
+      settings.kisSchedulerAllowRealOrders &&
+      settings.kisSchedulerConfiguredAllowRealOrders &&
+      settings.kisSchedulerSellEnabled &&
+      settings.kisSchedulerAllowLimitedAutoSell &&
+      settings.kisLiveAutoSellEnabled &&
+      sellGate &&
+      !settings.kisSchedulerDryRun &&
+      !settings.dryRun &&
+      !settings.killSwitch;
+  final liveBuyArmed =
+      buyFlags.isNotEmpty && !settings.dryRun && !settings.killSwitch;
+  final blockingFlags = <String>[
+    if ((settings.kisSchedulerLiveEnabled ||
+            settings.kisSchedulerAllowRealOrders ||
+            settings.kisSchedulerConfiguredAllowRealOrders ||
+            settings.kisLiveAutoSellEnabled ||
+            buyFlags.isNotEmpty) &&
+        settings.dryRun)
+      'dry_run_true',
+    if (settings.killSwitch) 'kill_switch_enabled',
+  ];
+  final warningLevel = blockingFlags.isNotEmpty
+      ? 'blocked'
+      : buyFlags.isNotEmpty
+          ? 'dangerous_mixed'
+          : liveSellArmed
+              ? 'armed_sell_only'
+              : 'safe';
+  return SchedulerRiskSummary(
+    liveSellArmed: liveSellArmed,
+    liveBuyArmed: liveBuyArmed,
+    sellOnlyMode: liveSellArmed && buyFlags.isEmpty,
+    dailyLiveOrderLimit: settings.kisSchedulerMaxLiveOrdersPerDay,
+    dailyLiveOrderRemaining: liveSellArmed ? 1 : null,
+    maxNotionalPct: settings.kisLimitedAutoSellMaxNotionalPct,
+    dryRun: settings.dryRun,
+    killSwitch: settings.killSwitch,
+    safeModeActive: settings.dryRun &&
+        !settings.kisSchedulerLiveEnabled &&
+        !settings.kisSchedulerAllowRealOrders &&
+        !settings.kisSchedulerConfiguredAllowRealOrders &&
+        !settings.kisSchedulerSellEnabled &&
+        !settings.kisSchedulerBuyEnabled &&
+        !settings.kisSchedulerAllowLimitedAutoSell &&
+        !settings.kisSchedulerAllowLimitedAutoBuy &&
+        !settings.kisLiveAutoSellEnabled &&
+        !settings.kisLiveAutoBuyEnabled &&
+        !settings.kisLimitedAutoBuyEnabled &&
+        !sellGate,
+    riskyFlags: buyFlags,
+    blockingFlags: blockingFlags,
+    warningLevel: warningLevel,
+    sellGateEnabled: sellGate,
+    buyGateEnabled: buyFlags.isNotEmpty,
   );
 }
 
@@ -561,4 +668,18 @@ bool? _valueBool(
     return values[fallbackKey] == true;
   }
   return null;
+}
+
+int? _valueInt(Map<String, dynamic> values, String key) {
+  if (!values.containsKey(key)) return null;
+  final value = values[key];
+  if (value is num) return value.toInt();
+  return int.tryParse(value?.toString() ?? '');
+}
+
+double? _valueDouble(Map<String, dynamic> values, String key) {
+  if (!values.containsKey(key)) return null;
+  final value = values[key];
+  if (value is num) return value.toDouble();
+  return double.tryParse(value?.toString() ?? '');
 }
