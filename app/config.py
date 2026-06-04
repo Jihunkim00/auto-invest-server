@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     market_sessions_config_path: str = "config/market_sessions.yaml"
     market_holidays_config_path: str = "config/market_holidays.yaml"
     kis_token_cache_path: str | None = None
+    # KIS read-only rate limiting and account state cache
+    kis_read_only_min_interval_seconds: float = 1.0
+    kis_read_only_rate_limit_retry_seconds: float = 1.2
+    kis_account_state_cache_ttl_seconds: float = 2.0
+    kis_account_state_max_stale_seconds: float = 5.0
     max_watchlist_size: int = 50
     watchlist_top_candidates_for_research: int = 5
     watchlist_min_entry_score: int = 65
