@@ -71,6 +71,37 @@ class _FakeClient:
     def list_open_orders(self):
         return self.open_orders
 
+    def _request_balance(self):
+        return {
+            "output2": {
+                "dnca_tot_amt": self.balance.get("cash"),
+                "nass_amt": self.balance.get("total_asset_value"),
+                "tot_asst_amt": self.balance.get("total_asset_value"),
+                "cash": self.balance.get("cash"),
+                "scts_evlu_amt": self.balance.get("stock_evaluation_amount", 0),
+            },
+            "output1": [
+                {
+                    "hldg_qty": pos.get("qty"),
+                    "prpr": pos.get("current_price"),
+                    "pchs_avg_pric": pos.get("avg_entry_price"),
+                    "pchs_amt": pos.get("cost_basis"),
+                    "pdno": pos.get("symbol"),
+                    "prdt_name": pos.get("name"),
+                    "evlu_amt": pos.get("market_value"),
+                    "evlu_pfls_amt": pos.get("unrealized_pl"),
+                    "evlu_pfls_rt": pos.get("unrealized_plpc"),
+                }
+                for pos in self.positions
+            ],
+        }
+
+    def _request_positions(self):
+        return self.positions
+
+    def _request_open_orders(self):
+        return self.open_orders
+
 
 class _OpenSessionService:
     def get_session_status(self, market, **kwargs):
@@ -161,17 +192,24 @@ def test_preflight_endpoint_never_submits_orders(
             market, **kwargs
         ),
     )
+    class FakeCache:
+        def get_account_state(self, *, read_only=True, require_fresh=False):
+            return {
+                "provider": "kis",
+                "market": "KR",
+                "source": "fresh",
+                "fetch_success": True,
+                "cache_age_seconds": 0.0,
+                "rate_limited": False,
+                "warnings": [],
+                "balance": {"cash": 1_000_000, "total_asset_value": 10_000_000},
+                "positions": [_stop_loss_position()],
+                "open_orders": [],
+            }
+
     monkeypatch.setattr(
-        "app.brokers.kis_client.KisClient.get_account_balance",
-        lambda self: {"total_asset_value": 10_000_000, "cash": 1_000_000},
-    )
-    monkeypatch.setattr(
-        "app.brokers.kis_client.KisClient.list_positions",
-        lambda self: [_stop_loss_position()],
-    )
-    monkeypatch.setattr(
-        "app.brokers.kis_client.KisClient.list_open_orders",
-        lambda self: [],
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FakeCache(),
     )
     monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
@@ -731,6 +769,95 @@ def test_run_once_take_profit_all_gates_true_submits_through_guarded_path(
         .count()
         == 1
     )
+
+
+def test_rate_limited_without_cache_blocks_as_kis_rate_limited(monkeypatch, db_session):
+    # Simulate account state rate limit with no cache
+
+    class FakeCache:
+        def get_account_state(self, *, read_only=True, require_fresh=False):
+            return {"fetch_success": False, "rate_limited": True, "warnings": ["kis_rate_limited"]}
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FakeCache(),
+    )
+
+    _enable_runtime(db_session)
+    service = _service()
+    result = service.run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert "kis_rate_limited" in result.get("block_reasons", []) or result.get("reason") == "kis_rate_limited"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+
+
+def test_rate_limited_with_recent_cache_allows_evaluation(monkeypatch, db_session):
+    # Simulate rate limit but with recent cache available
+
+    class FakeCache:
+        def get_account_state(self, *, read_only=True, require_fresh=False):
+            return {
+                "source": "cache_after_rate_limit",
+                "cache_age_seconds": 1.0,
+                "fetch_success": True,
+                "rate_limited": True,
+                "warnings": ["kis_rate_limited"],
+                "balance": {"cash": 1000000},
+                "positions": [
+                    {
+                        "symbol": "005930",
+                        "qty": 1,
+                        "avg_entry_price": 100000,
+                        "current_price": 96000,
+                        "cost_basis": 100000,
+                    }
+                ],
+                "open_orders": [],
+            }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FakeCache(),
+    )
+
+    # preflight should proceed with evaluation using cached account state
+    service = _service()
+    result = service.preflight_once(db_session)
+    assert result.get("state_source") == "cache_after_rate_limit"
+    assert result.get("rate_limited") is True
+    assert result.get("cache_age_seconds") == 1.0
+    assert result.get("state_meta", {}).get("source") == "cache_after_rate_limit"
+    assert "kis_rate_limited" in result.get("state_meta", {}).get("warnings", [])
+
+
+def test_stale_cache_exceeded_blocks_submission(monkeypatch, db_session):
+
+    class FakeCache:
+        def get_account_state(self, *, read_only=True, require_fresh=False):
+            # Simulate stale cache beyond max stale TTL
+            return {"fetch_success": False, "warnings": ["kis_rate_limited"], "rate_limited": True}
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FakeCache(),
+    )
+
+    _enable_runtime(db_session)
+    service = _service()
+    result = service.run_once(db_session)
+    assert result["result"] == "blocked"
+    assert (
+        result.get("reason") == "kis_account_state_cache_expired"
+        or result.get("reason") == "kis_rate_limited"
+        or "kis_rate_limited" in result.get("block_reasons", [])
+    )
+    assert result["rate_limited"] is True or result.get("state_meta", {}).get("rate_limited") is True
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
 
 
 def test_run_once_prioritizes_stop_loss_when_take_profit_flag_also_present(

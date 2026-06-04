@@ -35,6 +35,7 @@ from app.services.kis_order_validation_service import (
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 
 
 STATUS_MODE = "kis_limited_auto_stop_loss_status"
@@ -158,7 +159,7 @@ class KisLimitedAutoSellService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         context = self._context(db, now=now)
-        account_state = self._fetch_account_state(db)
+        account_state = self._fetch_account_state(db, read_only=True)
         candidates = self._evaluate_candidates(
             db, context=context, account_state=account_state
         )
@@ -186,7 +187,8 @@ class KisLimitedAutoSellService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         context = self._context(db, now=now)
-        account_state = self._fetch_account_state(db)
+        # For live run, prefer fresh account state to avoid trading on stale data
+        account_state = self._fetch_account_state(db, read_only=False)
         candidates = self._evaluate_candidates(
             db, context=context, account_state=account_state
         )
@@ -336,36 +338,11 @@ class KisLimitedAutoSellService:
                 "error": _safe_error(exc),
             }
 
-    def _fetch_account_state(self, db: Session) -> dict[str, Any]:
-        state: dict[str, Any] = {
-            "provider": PROVIDER,
-            "market": MARKET,
-            "balance": None,
-            "positions": [],
-            "open_orders": [],
-            "recent_orders": [],
-            "warnings": [],
-            "fetch_success": True,
-        }
-        try:
-            state["balance"] = self.client.get_account_balance()
-        except Exception as exc:
-            state["fetch_success"] = False
-            state["warnings"].append(f"balance_unavailable:{exc.__class__.__name__}")
-        try:
-            state["positions"] = [
-                _normalize_position(item) for item in self.client.list_positions()
-            ]
-        except Exception as exc:
-            state["fetch_success"] = False
-            state["warnings"].append(f"positions_unavailable:{exc.__class__.__name__}")
-        try:
-            state["open_orders"] = [
-                _normalize_order(item) for item in self.client.list_open_orders()
-            ]
-        except Exception as exc:
-            state["fetch_success"] = False
-            state["warnings"].append(f"open_orders_unavailable:{exc.__class__.__name__}")
+    def _fetch_account_state(self, db: Session, *, read_only: bool = True) -> dict[str, Any]:
+        cache_service = KisAccountStateCacheService.get_or_create(self.client)
+        # For read_only callers (status/preflight) allow short-lived cache; for live runs require fresh
+        state = cache_service.get_account_state(read_only=read_only, require_fresh=not read_only)
+        # attach recent orders separately (DB-only)
         try:
             rows = KisOrderSyncService.recent_orders(
                 db,
@@ -374,7 +351,11 @@ class KisLimitedAutoSellService:
             )
             state["recent_orders"] = [serialize_kis_order(row) for row in rows]
         except Exception as exc:
-            state["warnings"].append(f"recent_orders_unavailable:{exc.__class__.__name__}")
+            state.setdefault("warnings", []).append(f"recent_orders_unavailable:{exc.__class__.__name__}")
+
+        # Normalize positions and open orders to existing format
+        state["positions"] = [_normalize_position(item) for item in state.get("positions") or []]
+        state["open_orders"] = [_normalize_order(item) for item in state.get("open_orders") or []]
         return sanitize_kis_payload(state)
 
     def _evaluate_candidates(
@@ -547,7 +528,10 @@ class KisLimitedAutoSellService:
     ) -> list[str]:
         reasons: list[str] = []
         if account_state.get("fetch_success") is not True:
-            reasons.append("broker_account_state_unavailable")
+            if account_state.get("rate_limited"):
+                reasons.append("kis_rate_limited")
+            else:
+                reasons.append("broker_account_state_unavailable")
         if not candidates:
             reasons.append("no_held_position")
         if final_candidate is None:
@@ -1195,6 +1179,18 @@ class KisLimitedAutoSellService:
             "source_metadata": metadata,
             "market_session": _public_market_session(context.market_session),
             "account_state": _account_state_summary(account_state or {}),
+            "state_source": account_state.get("source") if account_state else None,
+            "state_fetch_success": bool(account_state.get("fetch_success")) if account_state else False,
+            "state_warning": (
+                _string_list(account_state.get("warnings"))[0]
+                if account_state and _string_list(account_state.get("warnings"))
+                else None
+            ),
+            "cache_age_seconds": account_state.get("cache_age_seconds"),
+            "rate_limited": bool(account_state.get("rate_limited")) if account_state else False,
+            "failed_endpoint": account_state.get("failed_endpoint") if account_state else None,
+            "tr_id": account_state.get("tr_id") if account_state else None,
+            "state_meta": _account_state_meta(account_state or {}),
             "readiness_labels": _readiness_labels(
                 read_only=read_only,
                 submitted=result == "submitted",
@@ -2266,6 +2262,20 @@ def _account_state_summary(account_state: dict[str, Any]) -> dict[str, Any]:
         "open_order_count": len(account_state.get("open_orders") or []),
         "recent_order_count": len(account_state.get("recent_orders") or []),
         "warnings": _string_list(account_state.get("warnings")),
+    }
+
+
+def _account_state_meta(account_state: dict[str, Any]) -> dict[str, Any]:
+    warnings = _string_list(account_state.get("warnings"))
+    return {
+        "source": account_state.get("source"),
+        "fetch_success": bool(account_state.get("fetch_success")),
+        "cache_age_seconds": account_state.get("cache_age_seconds"),
+        "rate_limited": bool(account_state.get("rate_limited")),
+        "failed_endpoint": account_state.get("failed_endpoint"),
+        "tr_id": account_state.get("tr_id"),
+        "warnings": warnings,
+        "warning": warnings[0] if warnings else None,
     }
 
 

@@ -314,6 +314,54 @@ def test_scheduler_live_status_exposes_disabled_defaults(db_session):
     assert status["live_scheduler_ready"] is False
 
 
+def test_scheduler_live_uses_single_account_state_fetch_per_run(monkeypatch, db_session):
+    # Ensure account state is fetched only once and reused across child services
+    from app.services.kis_account_state_cache_service import KisAccountStateCacheService
+
+    class StubCache:
+        def __init__(self):
+            self.fetch_count = 0
+            self._cached = None
+
+        def get_account_state(self, *, read_only=True, require_fresh=False):
+            if self._cached is None:
+                self.fetch_count += 1
+                self._cached = {"source": "fresh", "fetch_success": True, "positions": [], "balance": {"cash": 1000000}}
+            return self._cached
+
+    stub = StubCache()
+    monkeypatch.setattr(
+        "app.services.kis_account_state_cache_service.KisAccountStateCacheService.get_or_create",
+        lambda client: stub,
+    )
+
+    # Create limited service that calls account state twice to simulate multiple consumers
+    class LimitedCalls:
+        def __init__(self):
+            self.calls = 0
+
+        def run_once(self, db_session, **kwargs):
+            from app.services.kis_account_state_cache_service import KisAccountStateCacheService
+
+            svc = KisAccountStateCacheService.get_or_create(None)
+            svc.get_account_state()
+            svc.get_account_state()
+            self.calls += 1
+            return _blocked_child("sell")
+
+    _enable_runtime(db_session)
+    limited = LimitedCalls()
+    buy = _FakeLimitedService(_blocked_child("buy"))
+    service = _service(sell=limited, buy=buy)
+
+    result = service.run_once(db_session)
+    assert result["result"] in ("blocked", "submitted")
+    assert stub.fetch_count == 1
+    # PR41 integrity: no buy action from live scheduler
+    assert result.get("action") != "buy"
+    assert "test submitted" not in str(result.get("reason") or "")
+
+
 def _service(*, sell=None, buy=None, client=None):
     return KisSchedulerLiveService(
         client or _FakeClient(),

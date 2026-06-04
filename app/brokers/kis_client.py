@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+import threading
 from datetime import UTC, date, datetime, timedelta
 
 import requests
@@ -55,6 +57,9 @@ class KisClient:
     def __init__(self, settings=None, auth_manager: KisAuthManager | None = None):
         self.settings = settings or get_settings()
         self.auth_manager = auth_manager or KisAuthManager(self.settings)
+        # simple in-process read-only rate limiter
+        self._read_only_lock = threading.Lock()
+        self._last_read_only_request_time = 0.0
 
     def is_configured(self) -> bool:
         return self.auth_manager.is_configured()
@@ -636,6 +641,18 @@ class KisClient:
 
             return data, response.status_code
 
+        # Enforce a simple read-only spacing to avoid short bursts before sending
+        if request_kind == "read_only":
+            min_interval = float(getattr(self.settings, "kis_read_only_min_interval_seconds", 1.0) or 1.0)
+            with self._read_only_lock:
+                now = time.monotonic()
+                elapsed = now - float(self._last_read_only_request_time or 0.0)
+                if elapsed < min_interval:
+                    to_sleep = float(min_interval - elapsed)
+                    time.sleep(to_sleep)
+                # record timestamp of this request
+                self._last_read_only_request_time = time.monotonic()
+
         response_data, status = send_request()
         if self._is_token_expired_response(response_data):
             response_data, status = self._refresh_and_retry_after_token_expired(
@@ -667,6 +684,21 @@ class KisClient:
                 "msg_cd": response_data.get("msg_cd"),
                 "msg1": response_data.get("msg1"),
             }
+            # Detect KIS per-second rate limit (EGW00201) and map to structured reason
+            msg_cd = str(response_data.get("msg_cd") or "").strip()
+            msg1 = str(response_data.get("msg1") or "").strip()
+            if msg_cd == "EGW00201" or "초당 거래건수" in msg1 or "허용 가능한 초당 거래건수" in msg1:
+                retry_after = float(getattr(self.settings, "kis_read_only_rate_limit_retry_seconds", 1.2) or 1.2)
+                details.update(
+                    {
+                        "kis_rate_limited": True,
+                        "reason": "kis_rate_limited",
+                        "retry_after_seconds": retry_after,
+                        "tr_id": tr_id,
+                        "request_kind": request_kind,
+                        "path": path,
+                    }
+                )
             details = self._sanitize_diagnostics(details)
             raise KisApiError(
                 _format_kis_api_error(

@@ -164,7 +164,7 @@ class KisLiveExitPreflightService:
         check(
             "broker_account_state_fetched_successfully",
             account_fetch_success,
-            "broker_account_state_unavailable",
+            "kis_rate_limited" if account_state.get("rate_limited") else "broker_account_state_unavailable",
             detail=account_state.get("warnings"),
         )
         check(

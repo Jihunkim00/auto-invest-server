@@ -295,6 +295,46 @@ def test_scheduler_guarded_sell_service_has_no_direct_order_submission_calls():
         assert forbidden not in source
 
 
+def test_guarded_sell_preserves_account_state_metadata(db_session):
+    # limited service returns state metadata and guarded sell should preserve it
+    state_meta = {
+        "source": "cache_after_rate_limit",
+        "cache_age_seconds": 1.2,
+        "rate_limited": True,
+        "warnings": ["kis_rate_limited"],
+    }
+    limited = _FakeLimitedSellService({
+        "status": "ok",
+        "result": "blocked",
+        "reason": "no_exit_candidate",
+        "real_order_submitted": False,
+        "state_source": "cache_after_rate_limit",
+        "state_meta": state_meta,
+    })
+
+    result = _service(limited=limited).run_once(db_session, slot_label="position_management", trigger_source="scheduler")
+    assert limited.calls == 1
+    sell_result = result.get("sell_result") or {}
+    assert sell_result.get("state_source") == "cache_after_rate_limit"
+    assert sell_result.get("state_meta") == state_meta
+
+
+def test_guarded_sell_rate_limit_reason_propagates(db_session):
+    # limited service indicates rate limit; guarded sell should report kis_rate_limited
+    limited = _FakeLimitedSellService({
+        "status": "ok",
+        "result": "blocked",
+        "reason": "kis_rate_limited",
+        "block_reasons": ["kis_rate_limited"],
+        "real_order_submitted": False,
+    })
+
+    result = _service(limited=limited).run_once(db_session, slot_label="position_management", trigger_source="scheduler")
+    assert limited.calls == 1
+    assert result["result"] == "blocked"
+    assert "kis_rate_limited" in result.get("block_reasons", []) or result.get("reason") == "kis_rate_limited"
+
+
 def _service(*, settings=None, runtime=None, limited=None):
     return KisSchedulerGuardedSellService(
         _FakeClient(settings=settings),
