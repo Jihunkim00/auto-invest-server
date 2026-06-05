@@ -384,6 +384,41 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
     return payload
 
 
+def reconcile_kis_order_by_id(db: Session, order_ref: int | str | None) -> dict[str, Any]:
+    """Given an OrderLog id (or value that can be cast to int), load the order
+    and return light reconciliation metadata useful for scheduler/limited-auto
+    result normalization. Returns empty dict when no matching order found.
+    """
+    if order_ref is None:
+        return {}
+    try:
+        order_id = int(order_ref)
+    except Exception:
+        return {}
+    order = db.get(OrderLog, order_id)
+    if order is None:
+        return {}
+    status = str(order.internal_status or "").upper()
+    submitted_like = status in {
+        InternalOrderStatus.SUBMITTED.value,
+        InternalOrderStatus.ACCEPTED.value,
+        InternalOrderStatus.PENDING.value,
+        InternalOrderStatus.PARTIALLY_FILLED.value,
+        InternalOrderStatus.FILLED.value,
+    }
+    broker_id = order.broker_order_id or order.kis_odno
+    return {
+        "reconciled_order_found": True,
+        "reconciled_order_id": order.id,
+        "reconciled_order_status": order.internal_status,
+        "reconciled_internal_status": status,
+        "reconciled_kis_odno": order.kis_odno,
+        "reconciled_broker_order_id": order.broker_order_id,
+        "reconciled_real_order_submitted": bool(submitted_like and broker_id),
+        "reconciliation_reason": f"order_found_status_{status}",
+    }
+
+
 def _display_status(internal_status: str) -> str:
     mapping = {
         "FILLED": "Filled",
