@@ -13,6 +13,7 @@ from app.db.database import get_db
 from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
 from app.main import app
 from app.services.kis_scheduler_live_service import MODE, KisSchedulerLiveService
+from app.tests.test_kis_limited_auto_sell import _enable_runtime
 
 
 def _settings(**overrides):
@@ -167,6 +168,69 @@ def test_scheduler_live_tries_sell_before_buy_and_stops_after_submit(db_session)
     assert result["order_id"] == row.id
     assert sell.calls == 1
     assert buy.calls == 0
+
+
+def test_live_run_reconciles_guarded_sell_with_existing_filled_order(monkeypatch, db_session):
+    _enable_runtime(db_session)
+    # Do not pre-seed OrderLog; fake submit will create it during submission
+
+    # Monkeypatch manual submit to create OrderLog during submit and return its id
+    def fake_submit(self, db, request, *, now=None):
+        row2 = OrderLog(
+            broker="kis",
+            market="KR",
+            symbol="005930",
+            side="sell",
+            order_type="market",
+            qty=1,
+            requested_qty=1,
+            internal_status=InternalOrderStatus.FILLED.value,
+            broker_order_id="LIVE-FILL",
+            kis_odno="LIVE-FILL",
+            submitted_at=datetime.now(UTC).replace(tzinfo=None),
+            request_payload=json.dumps({"mode": "manual_live"}),
+            response_payload=json.dumps({"mode": "manual_live", "real_order_submitted": True}),
+        )
+        db.add(row2)
+        db.commit()
+        db.refresh(row2)
+        return 200, {"order_id": row2.id, "order_log_id": row2.id, "broker_order_id": row2.broker_order_id, "kis_odno": row2.kis_odno}
+
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit,
+    )
+    # Ensure validation passes so limited sell will submit
+    from app.tests.test_kis_limited_auto_sell import _FakeValidationResult
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda self, request, *, now=None: _FakeValidationResult(validated=True),
+    )
+
+    # Use real services to exercise reconciliation path
+    client = _FakeClient(settings=SimpleNamespace(kis_enabled=True, kis_real_order_enabled=True, kis_scheduler_allow_real_orders=True, kr_scheduler_allow_real_orders=True))
+    # Use a real limited auto sell service (with positions and open market)
+    from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
+    from app.tests.test_kis_limited_auto_sell import _FakeClient as LimitedFakeClient, _OpenSessionService
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.MarketSessionService.get_session_status",
+        lambda self, market, **kwargs: _OpenSessionService().get_session_status(market, **kwargs),
+    )
+    limited_real = KisLimitedAutoSellService(LimitedFakeClient(), runtime_settings=None, session_service=None, allow_scheduler_guarded_sell=False)
+    service = _service(sell=limited_real, client=client)
+    # prevent daily limit blocking due to seeded order
+    _enable_runtime(db_session, kis_limited_auto_sell_max_orders_per_day=2)
+    result = service.run_once(db_session)
+
+    assert result["result"] != "blocked"
+    assert result["action"] == "sell"
+    created = db_session.query(OrderLog).order_by(OrderLog.id.desc()).first()
+    assert result["order_id"] == created.id
+    assert result.get("related_order_id") == created.id
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result.get("kis_odno") == created.kis_odno
+    assert result["reason"] != "manual_submit_blocked"
     assert result["real_order_submitted"] is True
     assert db_session.query(TradeRunLog).filter(TradeRunLog.mode == MODE).count() == 1
 

@@ -397,7 +397,7 @@ def test_run_once_kill_switch_blocks(db_session):
 
 
 def test_run_once_take_profit_candidate_blocks_when_disabled(monkeypatch, db_session):
-    _enable_runtime(db_session)
+    _enable_runtime(db_session, kis_limited_auto_sell_max_orders_per_day=2)
     monkeypatch.setattr(
         "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
         lambda *args, **kwargs: pytest.fail("disabled take-profit must not validate"),
@@ -769,6 +769,76 @@ def test_run_once_take_profit_all_gates_true_submits_through_guarded_path(
         .count()
         == 1
     )
+
+
+def test_manual_submit_returning_existing_filled_order_is_reconciled(monkeypatch, db_session):
+    # Simulate manual submit creating a FILLED OrderLog and returning its id
+    _enable_runtime(db_session, kis_limited_auto_sell_max_orders_per_day=2)
+
+    def fake_submit(self, db, request, *, now=None):
+        row = OrderLog(
+            broker="kis",
+            market="KR",
+            symbol="005930",
+            side="sell",
+            order_type="market",
+            qty=1,
+            requested_qty=1,
+            internal_status=InternalOrderStatus.FILLED.value,
+            broker_order_id="SEED-1",
+            kis_odno="SEED-1",
+            submitted_at=datetime.now(UTC).replace(tzinfo=None),
+            request_payload=json.dumps({"mode": "manual_live"}),
+            response_payload=json.dumps({"mode": "manual_live", "real_order_submitted": True}),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return 200, {
+            "order_id": row.id,
+            "order_log_id": row.id,
+            "broker_order_id": row.broker_order_id,
+            "kis_odno": row.kis_odno,
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit,
+    )
+    # Ensure order validation passes so submit path is reached
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda self, request, *, now=None: _FakeValidationResult(validated=True),
+    )
+
+    result = _service().run_once(db_session)
+    assert result["result"] != "blocked"
+    assert result["action"] == "sell"
+    created = db_session.query(OrderLog).order_by(OrderLog.id.desc()).first()
+    assert result["order_id"] == created.id
+    assert result.get("kis_odno") == created.kis_odno
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result.get("execution_path") == "limited_auto_sell_via_manual_order_service"
+    assert result.get("scheduler_origin") in (True, False)
+
+
+def test_manual_submit_returning_missing_order_does_not_reconcile(monkeypatch, db_session):
+    _enable_runtime(db_session)
+
+    def fake_submit_missing(self, db, request, *, now=None):
+        return 200, {"order_id": 9999999, "order_log_id": 9999999}
+
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        fake_submit_missing,
+    )
+
+    result = _service().run_once(db_session)
+
+    # No real OrderLog -> should remain blocked/error according to flow
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
 
 
 def test_rate_limited_without_cache_blocks_as_kis_rate_limited(monkeypatch, db_session):

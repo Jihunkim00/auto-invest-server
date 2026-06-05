@@ -808,23 +808,64 @@ class KisLimitedAutoSellService:
             session_service=self.session_service,
         ).submit_manual(db, request, now=context.now_utc)
         submitted = bool(manual_payload.get("real_order_submitted") is True)
+        # Reconcile when manual path returned an order id but flags were not set.
+        if not submitted:
+            order_ref = manual_payload.get("order_id") or manual_payload.get("order_log_id")
+            if order_ref is not None:
+                try:
+                    from app.services.kis_order_sync_service import reconcile_kis_order_by_id
+
+                    recon = reconcile_kis_order_by_id(db, order_ref)
+                except Exception:
+                    recon = {}
+                if recon.get("reconciled_order_found") and recon.get("reconciled_real_order_submitted"):
+                    # Treat as submitted/filled depending on order status
+                    submitted = True
+                    # Normalize manual_payload with broker ids
+                    manual_payload["real_order_submitted"] = True
+                    manual_payload["broker_submit_called"] = True
+                    # mark manual path used since we called the manual service
+                    manual_payload["manual_submit_called"] = True
+                    if recon.get("reconciled_broker_order_id"):
+                        manual_payload["broker_order_id"] = recon.get("reconciled_broker_order_id")
+                    if recon.get("reconciled_kis_odno"):
+                        manual_payload["kis_odno"] = recon.get("reconciled_kis_odno")
+                    # set reason/result depending on filled state
+                    internal = str(recon.get("reconciled_internal_status") or "").upper()
+                    if internal == "FILLED":
+                        manual_payload["broker_status"] = "FILLED"
+                        manual_payload["broker_order_status"] = "FILLED"
+                        manual_payload["real_order_status"] = "FILLED"
+                        manual_payload["reconciliation_reason"] = recon.get("reconciliation_reason")
+                    else:
+                        manual_payload["reconciliation_reason"] = recon.get("reconciliation_reason")
         block_reasons = [] if submitted else _string_list(manual_payload.get("block_reasons"))
         submitted_reason = (
             "take_profit_auto_sell_submitted"
             if run_source_type == TAKE_PROFIT_RUN_SOURCE_TYPE
             else "stop_loss_auto_sell_submitted"
         )
-        reason = (
-            submitted_reason
-            if submitted
-            else block_reasons[0] if block_reasons else "manual_submit_blocked"
-        )
+        # If submitted due to reconciliation and order is FILLED, prefer filled reason
+        if submitted:
+            # If reconciliation indicated filled status, prefer kis_sell_filled
+            try:
+                internal_status = str(manual_payload.get("real_order_status") or manual_payload.get("broker_status") or manual_payload.get("broker_order_status") or "").upper()
+            except Exception:
+                internal_status = ""
+            if internal_status == "FILLED":
+                reason = "kis_sell_filled"
+                result_label = "filled"
+            else:
+                reason = submitted_reason
+                result_label = "submitted"
+        else:
+            reason = block_reasons[0] if block_reasons else "manual_submit_blocked"
         payload = self._decision_payload(
             db,
             context=context,
             mode=run_mode,
             source_type=run_source_type,
-            result="submitted" if submitted else "blocked",
+            result=result_label if submitted else "blocked",
             action="sell" if submitted else _run_blocked_action(final_candidate),
             reason=reason,
             account_state=account_state,
@@ -854,6 +895,9 @@ class KisLimitedAutoSellService:
                 "kis_odno": manual_payload.get("kis_odno"),
             }
         )
+        # Add reconciliation/execution metadata
+        payload["execution_path"] = "limited_auto_sell_via_manual_order_service"
+        payload["scheduler_origin"] = bool(self.allow_scheduler_guarded_sell)
         payload["source_metadata"] = _source_metadata(
             context=context,
             candidate=final_candidate,
