@@ -101,6 +101,49 @@ def test_kis_single_symbol_run_once_requires_symbol(client):
     assert response.status_code == 422
 
 
+def test_kis_single_symbol_analyze_only_accepts_symbol_without_order_size(
+    monkeypatch,
+    client,
+    db_session,
+):
+    _runtime(db_session, dry_run=False, kill_switch=False)
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_domestic_cash_order",
+        lambda *args, **kwargs: pytest.fail("analyze-only must not submit"),
+    )
+
+    response = client.post(
+        "/kis/trading/run-once",
+        json={
+            "symbol": "005930",
+            "gate_level": 1,
+            "confirm_live": False,
+            "requested_action": "analyze_only",
+            "source_endpoint": "flutter_trading",
+            "source_context": {
+                "source": "watchlist_candidate",
+                "candidate_rank": 1,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["requested_symbol"] == "005930"
+    assert body["analyzed_symbol"] == "005930"
+    assert body["symbol_match"] is True
+    assert body["requested_action"] == "analyze_only"
+    assert body["source_endpoint"] == "flutter_trading"
+    assert body["request_source"] == "watchlist_candidate"
+    assert body["source_context"]["candidate_rank"] == 1
+    assert body["result"] == "skipped"
+    assert body["reason"] == "analysis_only"
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["manual_submit_called"] is False
+    assert db_session.query(KisOrderValidationLog).count() == 0
+
+
 def test_kis_single_symbol_dry_run_returns_no_real_submit(
     monkeypatch,
     client,
@@ -128,8 +171,9 @@ def test_kis_single_symbol_dry_run_returns_no_real_submit(
     assert body["requested_symbol"] == "005930"
     assert body["analyzed_symbol"] == "005930"
     assert body["symbol_match"] is True
-    assert body["result"] == "dry_run"
-    assert body["reason"] == "dry_run_mode"
+    assert body["result"] == "blocked"
+    assert body["reason"] == "dry_run_enabled"
+    assert body["action"] == "hold"
     assert body["real_order_submitted"] is False
     assert body["broker_submit_called"] is False
     assert body["manual_submit_called"] is False
@@ -175,7 +219,7 @@ def test_kis_single_symbol_confirm_live_false_blocks_submit(
         ({"kill_switch": True}, {}, {}, "kill_switch_enabled"),
         ({}, {"kis_real_order_enabled": False}, {}, "kis_real_order_disabled"),
         ({}, {}, {"is_market_open": False, "is_entry_allowed_now": False}, "market_closed"),
-        ({}, {}, {"is_entry_allowed_now": False}, "buy_entry_not_allowed_now"),
+        ({}, {}, {"is_entry_allowed_now": False}, "after_no_new_entry_time"),
     ],
 )
 def test_kis_single_symbol_safety_gates_block_submit(
@@ -285,7 +329,7 @@ def test_kis_single_symbol_success_uses_existing_manual_submit_path(
     assert body["mode"] == MODE
     assert body["source"] == SOURCE
     assert body["trigger_source"] == TRIGGER_SOURCE
-    assert body["result"] == "executed"
+    assert body["result"] == "submitted"
     assert body["action"] == "buy"
     assert body["real_order_submitted"] is True
     assert body["broker_submit_called"] is True
@@ -357,8 +401,9 @@ def test_kis_single_symbol_uses_gate_profile_threshold_without_watchlist_floor(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["result"] == "dry_run"
-    assert body["reason"] == "dry_run_mode"
+    assert body["result"] == "blocked"
+    assert body["reason"] == "dry_run_enabled"
+    assert body["action"] == "hold"
     assert body["entry_ready"] is True
     assert body["readiness"]["effective_min_entry_score"] == expected_threshold
     assert body["final_buy_score"] == final_buy_score

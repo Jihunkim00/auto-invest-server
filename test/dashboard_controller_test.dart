@@ -864,6 +864,70 @@ void main() {
     controller.dispose();
   });
 
+  test('KIS single-symbol Analyze button sends analysis-only request',
+      () async {
+    final api = _FakeApiClient(kisSingle: _kisSingleResult());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = await controller.runKisSingleSymbolAnalyzeBuy(
+      symbol: '005930',
+      gateLevel: 2,
+      confirmLive: false,
+      requestedAction: 'analyze_only',
+    );
+
+    expect(result.success, isTrue);
+    expect(api.runKisSingleCalls, 1);
+    expect(api.lastKisSingleSymbol, '005930');
+    expect(api.lastKisSingleQuantity, isNull);
+    expect(api.lastKisSingleConfirmLive, isFalse);
+    expect(api.lastKisSingleRequestedAction, 'analyze_only');
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('watchlist candidate prepares KIS Trading without submit', () {
+    final api = _FakeApiClient(kisSingle: _kisSingleResult());
+    final controller = DashboardController(api, autoload: false);
+
+    final result = controller.prepareKisTradingFromWatchlistCandidate(
+      const Candidate(
+        symbol: '005930',
+        name: 'Samsung Electronics',
+        score: 64,
+        note: 'watchlist preview',
+        entryReady: false,
+        actionHint: 'watch',
+        blockReason: 'score_threshold_not_met',
+        finalBuyScore: 64,
+        finalSellScore: 18,
+        riskFlags: ['preview_only'],
+        gatingNotes: ['watchlist_click_does_not_submit'],
+      ),
+      candidateRank: 1,
+    );
+
+    expect(result.success, isTrue);
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.kisGuardedRunSymbol, '005930');
+    expect(controller.kisGuardedRunConfirmation, isFalse);
+    expect(controller.latestKisSingleSymbolTradingResult, isNull);
+    expect(
+        controller.kisTradingSourceContext?['source'], 'watchlist_candidate');
+    expect(controller.kisTradingSourceContext?['candidate_rank'], 1);
+    expect(
+      controller.kisTradingSourceContext?['watchlist_click_submits_order'],
+      isFalse,
+    );
+    expect(api.runKisSingleCalls, 0);
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
   test('KIS scheduler live run stores guarded result without manual calls',
       () async {
     final api = _FakeApiClient(schedulerLive: _schedulerLive());
@@ -1356,6 +1420,8 @@ class _FakeApiClient extends ApiClient {
   int? lastKisSingleGateLevel;
   int? lastKisSingleQuantity;
   bool? lastKisSingleConfirmLive;
+  String? lastKisSingleRequestedAction;
+  Map<String, dynamic>? lastKisSingleSourceContext;
 
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
@@ -1584,12 +1650,18 @@ class _FakeApiClient extends ApiClient {
     int? quantity,
     double? amount,
     required bool confirmLive,
+    bool? dryRun,
+    String requestedAction = 'analyze_then_maybe_buy',
+    String sourceEndpoint = 'flutter_trading',
+    Map<String, dynamic>? sourceContext,
   }) async {
     runKisSingleCalls += 1;
     lastKisSingleSymbol = symbol;
     lastKisSingleGateLevel = gateLevel;
     lastKisSingleQuantity = quantity;
     lastKisSingleConfirmLive = confirmLive;
+    lastKisSingleRequestedAction = requestedAction;
+    lastKisSingleSourceContext = sourceContext;
     return kisSingle ?? _kisSingleResult(symbol: symbol);
   }
 

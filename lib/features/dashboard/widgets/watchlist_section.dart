@@ -49,6 +49,19 @@ class WatchlistSection extends StatelessWidget {
     final watchlist = isKr ? controller.krWatchlist : controller.usWatchlist;
     final title = isKr ? 'KR watchlist / KIS' : 'US watchlist / Alpaca';
     final topCandidate = _topWatchlistCandidate(controller.runResult);
+    void prepareAnalyzeInTrading(Candidate candidate, int? rank) {
+      final result = controller.prepareKisTradingFromWatchlistCandidate(
+        candidate,
+        candidateRank: rank,
+      );
+      if (result.success) {
+        onOpenManualOrder?.call();
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.success ? Colors.green : Colors.redAccent,
+      ));
+    }
 
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -199,6 +212,9 @@ class WatchlistSection extends StatelessWidget {
                       backgroundColor: Colors.green,
                     ));
                   },
+            onAnalyzeInTrading: isKr
+                ? (candidate, rank) => prepareAnalyzeInTrading(candidate, rank)
+                : null,
           ),
           const SizedBox(height: 12),
         ],
@@ -222,6 +238,9 @@ class WatchlistSection extends StatelessWidget {
           _WatchlistAdvancedDetails(
             runResult: controller.runResult,
             isKr: isKr,
+            onAnalyzeInTrading: isKr
+                ? (candidate, rank) => prepareAnalyzeInTrading(candidate, rank)
+                : null,
           ),
         ],
         const SizedBox(height: 12),
@@ -410,6 +429,7 @@ class _WatchlistRunResultSummary extends StatelessWidget {
     required this.providerLabel,
     required this.marketLabel,
     this.onPrepareBuyTicket,
+    this.onAnalyzeInTrading,
   });
 
   final WatchlistRunResult runResult;
@@ -418,6 +438,7 @@ class _WatchlistRunResultSummary extends StatelessWidget {
   final String providerLabel;
   final String marketLabel;
   final VoidCallback? onPrepareBuyTicket;
+  final void Function(Candidate candidate, int? rank)? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -532,6 +553,9 @@ class _WatchlistRunResultSummary extends StatelessWidget {
           isKr: isKr,
           threshold: runResult.minEntryScore,
           onPrepareBuyTicket: onPrepareBuyTicket,
+          onAnalyzeInTrading: onAnalyzeInTrading == null
+              ? null
+              : () => onAnalyzeInTrading!(candidate!, 1),
         ),
         if (previewCandidates.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -539,6 +563,7 @@ class _WatchlistRunResultSummary extends StatelessWidget {
             candidates: previewCandidates,
             isKr: isKr,
             threshold: runResult.minEntryScore,
+            onAnalyzeInTrading: onAnalyzeInTrading,
           ),
         ],
         if (noOrder) ...[
@@ -559,11 +584,13 @@ class _WatchlistCandidatePreview extends StatelessWidget {
     required this.candidates,
     required this.isKr,
     required this.threshold,
+    this.onAnalyzeInTrading,
   });
 
   final List<Candidate> candidates;
   final bool isKr;
   final int? threshold;
+  final void Function(Candidate candidate, int? rank)? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -571,13 +598,15 @@ class _WatchlistCandidatePreview extends StatelessWidget {
       const Text('Top Watchlist Candidates',
           style: TextStyle(fontWeight: FontWeight.w700)),
       const SizedBox(height: 8),
-      for (final candidate in candidates)
+      for (final entry in candidates.asMap().entries)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: _ExpandableWatchlistCandidateCard(
-            candidate: candidate,
+            candidate: entry.value,
             isKr: isKr,
             threshold: threshold,
+            candidateRank: entry.key + 1,
+            onAnalyzeInTrading: onAnalyzeInTrading,
           ),
         ),
     ]);
@@ -627,10 +656,12 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
   const _WatchlistAdvancedDetails({
     required this.runResult,
     required this.isKr,
+    this.onAnalyzeInTrading,
   });
 
   final WatchlistRunResult runResult;
   final bool isKr;
+  final void Function(Candidate candidate, int? rank)? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -710,6 +741,7 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
           candidates: candidates,
           isKr: isKr,
           threshold: runResult.minEntryScore,
+          onAnalyzeInTrading: onAnalyzeInTrading,
         ),
         ExpansionTile(
           tilePadding: EdgeInsets.zero,
@@ -767,12 +799,14 @@ class _AdvancedCandidateList extends StatelessWidget {
     required this.candidates,
     required this.isKr,
     required this.threshold,
+    this.onAnalyzeInTrading,
   });
 
   final String title;
   final List<Candidate> candidates;
   final bool isKr;
   final int? threshold;
+  final void Function(Candidate candidate, int? rank)? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -784,13 +818,15 @@ class _AdvancedCandidateList extends StatelessWidget {
         if (candidates.isEmpty)
           const _StateLine(text: 'No candidates.')
         else
-          for (final candidate in candidates)
+          for (final entry in candidates.asMap().entries)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _ExpandableWatchlistCandidateCard(
-                candidate: candidate,
+                candidate: entry.value,
                 isKr: isKr,
                 threshold: threshold,
+                candidateRank: entry.key + 1,
+                onAnalyzeInTrading: onAnalyzeInTrading,
               ),
             ),
       ],
@@ -803,11 +839,15 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
     required this.candidate,
     required this.isKr,
     required this.threshold,
+    this.candidateRank,
+    this.onAnalyzeInTrading,
   });
 
   final Candidate candidate;
   final bool isKr;
   final int? threshold;
+  final int? candidateRank;
+  final void Function(Candidate candidate, int? rank)? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -868,6 +908,17 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
                   value: _nullableYesNo(candidate.tradeAllowed)),
             ],
           ),
+          if (isKr && onAnalyzeInTrading != null) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => onAnalyzeInTrading!(candidate, candidateRank),
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Analyze in Trading'),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           _ReadableDetailGroup(
             title: 'Score Detail',
@@ -2214,12 +2265,14 @@ class _TopCandidateCard extends StatelessWidget {
     required this.isKr,
     required this.threshold,
     this.onPrepareBuyTicket,
+    this.onAnalyzeInTrading,
   });
 
   final Candidate? candidate;
   final bool isKr;
   final int? threshold;
   final VoidCallback? onPrepareBuyTicket;
+  final VoidCallback? onAnalyzeInTrading;
 
   @override
   Widget build(BuildContext context) {
@@ -2318,13 +2371,22 @@ class _TopCandidateCard extends StatelessWidget {
           const SizedBox(height: 8),
           _StateLine(text: 'Risk notes: ${riskNotes.join(' / ')}'),
         ],
-        if (onPrepareBuyTicket != null) ...[
+        if (onAnalyzeInTrading != null || onPrepareBuyTicket != null) ...[
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onPrepareBuyTicket,
-            icon: const Icon(Icons.input, size: 18),
-            label: const Text('Prepare Buy Ticket'),
-          ),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (onAnalyzeInTrading != null)
+              OutlinedButton.icon(
+                onPressed: onAnalyzeInTrading,
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Analyze in Trading'),
+              ),
+            if (onPrepareBuyTicket != null)
+              OutlinedButton.icon(
+                onPressed: onPrepareBuyTicket,
+                icon: const Icon(Icons.input, size: 18),
+                label: const Text('Prepare Buy Ticket'),
+              ),
+          ]),
         ],
       ]),
     );

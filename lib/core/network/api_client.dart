@@ -818,6 +818,10 @@ class ApiClient {
     int? quantity,
     double? amount,
     required bool confirmLive,
+    bool? dryRun,
+    String requestedAction = 'analyze_then_maybe_buy',
+    String sourceEndpoint = 'flutter_trading',
+    Map<String, dynamic>? sourceContext,
   }) async {
     final body = {
       'symbol': symbol.trim(),
@@ -825,6 +829,11 @@ class ApiClient {
       if (quantity != null) 'quantity': quantity,
       if (amount != null) 'amount': amount,
       'confirm_live': confirmLive,
+      if (dryRun != null) 'dry_run': dryRun,
+      'requested_action': requestedAction,
+      'source_endpoint': sourceEndpoint,
+      if (sourceContext != null && sourceContext.isNotEmpty)
+        'source_context': sourceContext,
       'trigger_source': 'manual_kis_single_symbol',
       'mode': 'kis_single_symbol_analyze_buy',
     };

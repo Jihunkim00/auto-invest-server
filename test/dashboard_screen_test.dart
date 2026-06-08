@@ -983,6 +983,14 @@ void main() {
       _krManagedPosition,
     );
     expect(result.success, isTrue);
+    expect(controller.selectedOrderMarket, PortfolioMarket.kr);
+    expect(controller.orderTicketSymbol, '005930');
+    expect(controller.orderTicketSide, 'sell');
+    expect(controller.orderTicketQtyInput, '1');
+    expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.orderValidationError, isNull);
+    expect(controller.latestKisManualOrder, isNull);
 
     await tester.pumpWidget(MaterialApp(
       theme: ThemeData.dark(),
@@ -994,7 +1002,14 @@ void main() {
       ),
     ));
 
-    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
+    expect(find.text('KIS Analyze & Order'), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('KIS Manual Buy/Sell Ticket'),
+      find.byType(ListView),
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
+
     expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
     expect(find.text('KIS Manual SELL Ticket'), findsOneWidget);
     expect(find.text('Prepared Manual Sell'), findsOneWidget);
@@ -1003,6 +1018,8 @@ void main() {
     expect(find.text('Validate Sell'), findsOneWidget);
     expect(find.text('Submit Manual Sell'), findsOneWidget);
     expect(controller.kisLiveConfirmation, isFalse);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.latestKisManualOrder, isNull);
 
     controller.dispose();
   });

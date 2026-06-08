@@ -194,6 +194,7 @@ class DashboardController extends ChangeNotifier {
   bool kisSingleSymbolTradingLoading = false;
   KisSingleSymbolTradingResult? latestKisSingleSymbolTradingResult;
   String? kisSingleSymbolTradingError;
+  Map<String, dynamic>? kisTradingSourceContext;
   bool kisSchedulerLiveLoading = false;
   KisSchedulerLiveResult? latestKisSchedulerLiveResult;
   String? kisSchedulerLiveError;
@@ -962,6 +963,7 @@ class DashboardController extends ChangeNotifier {
     manualRunResult = null;
     krWatchlistPreview = null;
     latestKisSingleSymbolTradingResult = null;
+    kisTradingSourceContext = null;
     kisSingleSymbolTradingError = null;
     kisGuardedRunConfirmation = false;
     kisLiveConfirmation = false;
@@ -1025,6 +1027,7 @@ class DashboardController extends ChangeNotifier {
     latestKisLimitedAutoBuyExecutionReview = null;
     kisLimitedAutoBuyExecutionReviewError = null;
     latestKisSingleSymbolTradingResult = null;
+    kisTradingSourceContext = null;
     kisSingleSymbolTradingError = null;
     notifyListeners();
   }
@@ -1066,6 +1069,60 @@ class DashboardController extends ChangeNotifier {
       'manual_submit_called': false,
     };
     notifyListeners();
+  }
+
+  ActionResult prepareKisTradingFromWatchlistCandidate(
+    Candidate candidate, {
+    int? candidateRank,
+  }) {
+    final normalizedSymbol = candidate.symbol.trim().toUpperCase();
+    if (normalizedSymbol.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'Watchlist candidate is missing a KIS symbol.',
+      );
+    }
+
+    selectedProvider = SelectedProvider.kis;
+    selectedPortfolioMarket = PortfolioMarket.kr;
+    selectedWatchlistMarket = PortfolioMarket.kr;
+    selectedOrderMarket = PortfolioMarket.kr;
+    kisGuardedRunSymbol = normalizedSymbol;
+    kisGuardedRunConfirmation = false;
+    kisSingleSymbolTradingError = null;
+    latestKisSingleSymbolTradingResult = null;
+    kisTradingSourceContext = {
+      'source': 'watchlist_candidate',
+      'source_type': 'click_to_trade_prefill',
+      'symbol': normalizedSymbol,
+      if (candidateRank != null) 'candidate_rank': candidateRank,
+      'candidate_score': candidate.finalBuyScore ??
+          candidate.finalEntryScore ??
+          candidate.entryScore ??
+          candidate.score,
+      'candidate_reason': _firstNonEmpty([
+        candidate.noOrderReason,
+        candidate.skipReason,
+        candidate.blockReason,
+        candidate.reason,
+        candidate.note,
+      ]),
+      'candidate_action_hint': candidate.actionHint,
+      'candidate_entry_ready': candidate.entryReady,
+      'candidate_block_reason': candidate.blockReason,
+      'risk_flags': candidate.riskFlags,
+      'gating_notes': candidate.gatingNotes,
+      'manual_confirm_required': true,
+      'watchlist_click_submits_order': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
+    notifyListeners();
+    return ActionResult(
+      success: true,
+      message: '$normalizedSymbol prepared in KIS Trading. No order submitted.',
+    );
   }
 
   ActionResult prepareKisManualBuyTicketFromSymbol(
@@ -2535,14 +2592,18 @@ class DashboardController extends ChangeNotifier {
       quantity: quantity,
       gateLevel: gateLevel,
       confirmLive: confirmLive,
+      requestedAction: 'analyze_then_maybe_buy',
     );
   }
 
   Future<ActionResult> runKisSingleSymbolAnalyzeBuy({
     required String symbol,
-    required int quantity,
+    int? quantity,
     required int gateLevel,
     required bool confirmLive,
+    String requestedAction = 'analyze_then_maybe_buy',
+    bool? dryRun,
+    Map<String, dynamic>? sourceContext,
   }) async {
     if (kisSingleSymbolTradingLoading) {
       return const ActionResult(
@@ -2562,6 +2623,9 @@ class DashboardController extends ChangeNotifier {
         gateLevel: gateLevel,
         quantity: quantity,
         confirmLive: confirmLive,
+        requestedAction: requestedAction,
+        dryRun: dryRun,
+        sourceContext: sourceContext ?? kisTradingSourceContext,
       );
       latestKisSingleSymbolTradingResult = result;
       recentRuns = await apiClient.getRecentTradingRuns();
@@ -3321,6 +3385,14 @@ String _primaryMessage(String value) {
       .map((line) => line.trim())
       .where((line) => line.isNotEmpty);
   return lines.isEmpty ? value.trim() : lines.first;
+}
+
+String _firstNonEmpty(List<Object?> values) {
+  for (final value in values) {
+    final text = value?.toString().trim();
+    if (text != null && text.isNotEmpty && text != 'null') return text;
+  }
+  return '';
 }
 
 String _payloadMessage(Map<String, dynamic> payload, String fallback) {
