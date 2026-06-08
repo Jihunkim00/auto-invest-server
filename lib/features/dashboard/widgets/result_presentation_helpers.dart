@@ -77,7 +77,7 @@ String translateReason(Object? value,
   }
   if (normalized == 'kr_trading_disabled') {
     return singleSymbolContext
-        ? 'New buy entries are currently not allowed'
+        ? 'KIS trading is disabled'
         : 'KR preview only / trading disabled';
   }
   if (normalized == 'market_closed') {

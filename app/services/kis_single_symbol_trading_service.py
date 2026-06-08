@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.brokers.kis_client import KisClient
@@ -47,6 +47,10 @@ class KisSingleSymbolTradingRequest(BaseModel):
     quantity: int | None = Field(default=None, gt=0)
     amount: float | None = Field(default=None, gt=0)
     confirm_live: bool = Field(default=False)
+    dry_run: bool | None = Field(default=None)
+    requested_action: str | None = Field(default="analyze_then_maybe_buy")
+    source_endpoint: str | None = Field(default="flutter_trading")
+    source_context: dict[str, Any] | None = Field(default=None)
     trigger_source: str | None = Field(default=TRIGGER_SOURCE)
     mode: str | None = Field(default=MODE)
 
@@ -57,12 +61,6 @@ class KisSingleSymbolTradingRequest(BaseModel):
         if not re.fullmatch(r"\d{1,6}", symbol):
             raise ValueError("KIS symbol must be numeric.")
         return symbol.zfill(6)
-
-    @model_validator(mode="after")
-    def validate_size(self) -> "KisSingleSymbolTradingRequest":
-        if self.quantity is None and self.amount is None:
-            raise ValueError("quantity or amount is required for KIS Analyze & Buy.")
-        return self
 
 
 class KisSingleSymbolTradingService:
@@ -127,11 +125,13 @@ class KisSingleSymbolTradingService:
         analyzed_symbol = _symbol(analysis) or requested_symbol
         symbol_match = analyzed_symbol == requested_symbol
         quantity = self._quantity_from_request(request, analysis)
+        live_submit_requested = _live_submit_requested(request, quantity)
         validation_payload: dict[str, Any] | None = None
         validation_error: str | None = None
-        if quantity is not None and quantity > 0:
+        if live_submit_requested and quantity is not None and quantity > 0:
             validation_payload, validation_error = self._validate_order(
                 db,
+                request=request,
                 symbol=requested_symbol,
                 quantity=quantity,
                 gate_level=gate_level,
@@ -153,6 +153,8 @@ class KisSingleSymbolTradingService:
             confirm_live=request.confirm_live,
             quantity=quantity,
             validation=validation_payload,
+            request_dry_run=request.dry_run,
+            live_submit_requested=live_submit_requested,
         )
         block_reason = self._block_reason(
             request=request,
@@ -164,40 +166,45 @@ class KisSingleSymbolTradingService:
             readiness=readiness,
             validation=validation_payload,
             validation_error=validation_error,
+            live_submit_requested=live_submit_requested,
         )
-        action = "buy" if readiness.get("entry_ready") and block_reason is None else "hold"
+        action = (
+            "buy"
+            if readiness.get("entry_ready") and block_reason is None
+            else "hold"
+        )
         result = "blocked" if block_reason else "skipped"
-        reason = block_reason or str(readiness.get("block_reason") or "hold_signal")
+        reason = block_reason or str(
+            "analysis_only"
+            if not live_submit_requested
+            else readiness.get("block_reason") or "hold_signal"
+        )
         order_result: dict[str, Any] | None = None
 
-        if block_reason is None:
-            if bool(runtime.get("dry_run", True)):
-                result = "dry_run"
+        if block_reason is None and live_submit_requested:
+            status_code, order_result = self._submit_manual(
+                db,
+                request=request,
+                symbol=requested_symbol,
+                quantity=quantity or 0,
+                gate_level=gate_level,
+                confirm_live=request.confirm_live,
+                runtime=runtime,
+                analysis=analysis,
+            )
+            if status_code == 200 and order_result.get("real_order_submitted"):
+                result = "submitted"
                 action = "buy"
-                reason = "dry_run_mode"
+                reason = "submitted"
             else:
-                status_code, order_result = self._submit_manual(
-                    db,
-                    symbol=requested_symbol,
-                    quantity=quantity or 0,
-                    gate_level=gate_level,
-                    confirm_live=request.confirm_live,
-                    runtime=runtime,
-                    analysis=analysis,
+                result = "blocked"
+                action = "hold"
+                reason = str(
+                    order_result.get("primary_block_reason")
+                    or order_result.get("reason")
+                    or order_result.get("message")
+                    or "manual_submit_rejected"
                 )
-                if status_code == 200 and order_result.get("real_order_submitted"):
-                    result = "executed"
-                    action = "buy"
-                    reason = "submitted"
-                else:
-                    result = "rejected"
-                    action = "buy"
-                    reason = str(
-                        order_result.get("primary_block_reason")
-                        or order_result.get("reason")
-                        or order_result.get("message")
-                        or "manual_submit_rejected"
-                    )
 
         payload = self._payload(
             request=request,
@@ -218,6 +225,7 @@ class KisSingleSymbolTradingService:
             runtime=runtime,
             market_session=market_session,
             created_at=created_at,
+            live_submit_requested=live_submit_requested,
         )
         signal = self._create_signal(
             db,
@@ -373,6 +381,7 @@ class KisSingleSymbolTradingService:
         self,
         db: Session,
         *,
+        request: KisSingleSymbolTradingRequest,
         symbol: str,
         quantity: int,
         gate_level: int,
@@ -382,6 +391,7 @@ class KisSingleSymbolTradingService:
         now: datetime,
     ) -> tuple[dict[str, Any] | None, str | None]:
         metadata = _audit_metadata(
+            request=request,
             symbol=symbol,
             quantity=quantity,
             gate_level=gate_level,
@@ -419,10 +429,11 @@ class KisSingleSymbolTradingService:
         readiness: dict[str, Any],
         validation: dict[str, Any] | None,
         validation_error: str | None,
+        live_submit_requested: bool,
     ) -> str | None:
         if not symbol_match:
             return "symbol_mismatch"
-        if quantity is None or quantity <= 0:
+        if live_submit_requested and (quantity is None or quantity <= 0):
             return "quantity_or_amount_required"
         if bool(runtime.get("kill_switch", False)):
             return "kill_switch_enabled"
@@ -433,17 +444,17 @@ class KisSingleSymbolTradingService:
         if market_session.get("is_market_open") is not True:
             return "market_closed"
         if market_session.get("is_entry_allowed_now") is not True:
-            return "buy_entry_not_allowed_now"
+            return "after_no_new_entry_time"
         if readiness.get("entry_ready") is not True:
             return str(readiness.get("block_reason") or "backend_risk_gate_blocked")
         if validation_error:
-            return "order_validation_failed"
+            return "validation_failed"
         if validation and validation.get("validated_for_submission") is not True:
             reasons = _string_list(validation.get("block_reasons"))
-            return reasons[0] if reasons else "order_validation_failed"
-        if bool(runtime.get("dry_run", True)):
-            return None
-        if request.confirm_live is not True:
+            return reasons[0] if reasons else "validation_failed"
+        if _effective_dry_run(request, runtime):
+            return "dry_run_enabled" if live_submit_requested else None
+        if live_submit_requested and request.confirm_live is not True:
             return "confirm_live_required"
         return None
 
@@ -451,6 +462,7 @@ class KisSingleSymbolTradingService:
         self,
         db: Session,
         *,
+        request: KisSingleSymbolTradingRequest,
         symbol: str,
         quantity: int,
         gate_level: int,
@@ -474,6 +486,7 @@ class KisSingleSymbolTradingService:
             confirmation=confirmation if confirm_live else None,
             reason="KIS single-symbol Analyze & Buy",
             source_metadata=_audit_metadata(
+                request=request,
                 symbol=symbol,
                 quantity=quantity,
                 gate_level=gate_level,
@@ -507,13 +520,20 @@ class KisSingleSymbolTradingService:
         runtime: dict[str, Any],
         market_session: dict[str, Any],
         created_at: str,
+        live_submit_requested: bool,
     ) -> dict[str, Any]:
         order = order_result or {}
         real_order_submitted = order.get("real_order_submitted") is True
         broker_submit_called = order.get("broker_submit_called") is True
         manual_submit_called = order_result is not None or order.get("manual_submit_called") is True
+        approved_by_risk = (
+            action == "buy"
+            and readiness.get("entry_ready") is True
+            and (validation is None or validation.get("validated_for_submission") is True)
+        )
         safety_payload = {
             **safety,
+            "approved_by_risk": approved_by_risk,
             "real_order_submitted": real_order_submitted,
             "broker_submit_called": broker_submit_called,
             "manual_submit_called": manual_submit_called,
@@ -535,7 +555,12 @@ class KisSingleSymbolTradingService:
             "mode": MODE,
             "source": SOURCE,
             "source_type": SOURCE_TYPE,
-            "trigger_source": TRIGGER_SOURCE,
+            "source_endpoint": _source_endpoint(request),
+            "request_source": _request_source(request),
+            "source_context": _source_context(request),
+            "trigger_source": _trigger_source(request),
+            "requested_action": _requested_action(request),
+            "live_submit_requested": live_submit_requested,
             "requested_symbol": requested_symbol,
             "analyzed_symbol": analyzed_symbol,
             "returned_symbol": analyzed_symbol,
@@ -558,6 +583,8 @@ class KisSingleSymbolTradingService:
             "final_sell_score": _score(analysis, "final_sell_score"),
             "quant_buy_score": _score(analysis, "quant_buy_score", "quant_score"),
             "quant_sell_score": _score(analysis, "quant_sell_score"),
+            "quant_score": _score(analysis, "quant_buy_score", "quant_score"),
+            "quant_details": analysis.get("quant_details") or {},
             "ai_buy_score": _score(analysis, "ai_buy_score"),
             "ai_sell_score": _score(analysis, "ai_sell_score"),
             "gpt_buy_score": _score(analysis, "gpt_buy_score", "ai_buy_score"),
@@ -565,16 +592,21 @@ class KisSingleSymbolTradingService:
             "confidence": _score(analysis, "confidence"),
             "gpt_reason": analysis.get("gpt_reason"),
             "gpt_context": analysis.get("gpt_context") or {},
+            "indicator_payload": analysis.get("indicator_payload") or {},
             "risk_flags": risk_flags,
             "gating_notes": gating_notes,
             "block_reason": reason if result in {"blocked", "skipped"} else None,
-            "no_order_reason": None if result == "executed" else reason,
+            "no_order_reason": None if result == "submitted" else reason,
+            "user_facing_block_reason": None
+            if result == "submitted"
+            else _message(reason, result=result),
             "entry_ready": readiness.get("entry_ready") is True,
-            "trade_allowed": result == "executed",
+            "trade_allowed": result == "submitted",
+            "approved_by_risk": approved_by_risk,
             "real_order_submitted": real_order_submitted,
             "broker_submit_called": broker_submit_called,
             "manual_submit_called": manual_submit_called,
-            "dry_run": bool(runtime.get("dry_run", True)),
+            "dry_run": _effective_dry_run(request, runtime),
             "order_id": order.get("order_id") or order.get("order_log_id"),
             "broker_order_id": order.get("broker_order_id"),
             "kis_odno": order.get("kis_odno"),
@@ -590,9 +622,17 @@ class KisSingleSymbolTradingService:
                 else False,
                 "confirm_live": request.confirm_live,
                 "runtime_dry_run": bool(runtime.get("dry_run", True)),
+                "request_dry_run": request.dry_run,
+                "effective_dry_run": _effective_dry_run(request, runtime),
                 "kill_switch": bool(runtime.get("kill_switch", False)),
+                "kis_enabled": bool(getattr(get_settings(), "kis_enabled", False)),
+                "kis_real_order_enabled": bool(
+                    getattr(get_settings(), "kis_real_order_enabled", False)
+                ),
                 "market_open": market_session.get("is_market_open") is True,
                 "entry_allowed_now": market_session.get("is_entry_allowed_now") is True,
+                "approved_by_risk": approved_by_risk,
+                "live_submit_requested": live_submit_requested,
             },
             "validation": validation,
             "validation_error": validation_error,
@@ -601,6 +641,7 @@ class KisSingleSymbolTradingService:
             "readiness": readiness,
             "market_session": _public_market_session(market_session),
             "audit_metadata": _audit_metadata(
+                request=request,
                 symbol=requested_symbol,
                 quantity=quantity,
                 gate_level=gate_level,
@@ -609,7 +650,7 @@ class KisSingleSymbolTradingService:
                 analysis=analysis,
                 submitted=order.get("real_order_submitted") is True,
             ),
-            "real_order_submit_allowed": result == "executed",
+            "real_order_submit_allowed": result == "submitted",
             "auto_buy_enabled": False,
             "auto_sell_enabled": False,
             "scheduler_real_order_enabled": False,
@@ -643,10 +684,10 @@ class KisSingleSymbolTradingService:
             quant_reason=analysis.get("quant_reason"),
             ai_reason=analysis.get("gpt_reason"),
             risk_flags=_json(payload.get("risk_flags") or []),
-            approved_by_risk=payload.get("result") == "executed",
+            approved_by_risk=payload.get("approved_by_risk") is True,
             related_order_id=_order_id(payload),
             signal_status=str(payload.get("result") or "blocked"),
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=str(payload.get("trigger_source") or TRIGGER_SOURCE)[:30],
             gate_level=gate_level,
             hard_block_reason=readiness.get("block_reason"),
             hard_blocked=readiness.get("block_reason") in {"hard_blocked", "gpt_hard_block_new_buy"},
@@ -668,7 +709,7 @@ class KisSingleSymbolTradingService:
     ) -> TradeRunLog:
         run = TradeRunLog(
             run_key=f"{SOURCE}_{uuid.uuid4().hex[:12]}",
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=str(payload.get("trigger_source") or TRIGGER_SOURCE)[:40],
             symbol=str(payload.get("symbol") or ""),
             mode=MODE,
             gate_level=gate_level,
@@ -684,12 +725,17 @@ class KisSingleSymbolTradingService:
                     "mode": MODE,
                     "source": SOURCE,
                     "source_type": SOURCE_TYPE,
+                    "source_endpoint": payload.get("source_endpoint"),
+                    "request_source": payload.get("request_source"),
+                    "source_context": payload.get("source_context"),
                     "symbol": payload.get("requested_symbol"),
                     "gate_level": gate_level,
                     "quantity": payload.get("quantity"),
                     "amount": payload.get("amount"),
                     "confirm_live": payload.get("checks", {}).get("confirm_live"),
-                    "trigger_source": TRIGGER_SOURCE,
+                    "requested_action": payload.get("requested_action"),
+                    "live_submit_requested": payload.get("live_submit_requested"),
+                    "trigger_source": payload.get("trigger_source"),
                 }
             ),
             response_payload=_json(payload),
@@ -702,6 +748,7 @@ class KisSingleSymbolTradingService:
 
 def _audit_metadata(
     *,
+    request: KisSingleSymbolTradingRequest,
     symbol: str,
     quantity: int | None,
     gate_level: int,
@@ -714,12 +761,18 @@ def _audit_metadata(
         {
             "source": SOURCE,
             "source_type": SOURCE_TYPE,
-            "trigger_source": TRIGGER_SOURCE,
+            "source_endpoint": _source_endpoint(request),
+            "request_source": _request_source(request),
+            "source_context": _source_context(request),
+            "trigger_source": _trigger_source(request),
+            "requested_action": _requested_action(request),
             "symbol": symbol,
             "quantity": quantity,
             "gate_level": gate_level,
             "confirm_live": confirm_live,
-            "dry_run": bool(runtime.get("dry_run", True)),
+            "runtime_dry_run": bool(runtime.get("dry_run", True)),
+            "request_dry_run": request.dry_run,
+            "dry_run": _effective_dry_run(request, runtime),
             "manual_confirm_required": True,
             "auto_buy_enabled": False,
             "auto_sell_enabled": False,
@@ -744,11 +797,15 @@ def _safety_summary(
     confirm_live: bool,
     quantity: int | None,
     validation: dict[str, Any] | None,
+    request_dry_run: bool | None,
+    live_submit_requested: bool,
 ) -> dict[str, Any]:
+    effective_dry_run = bool(runtime.get("dry_run", True)) or request_dry_run is True
     return sanitize_kis_payload(
         {
             "runtime_dry_run": bool(runtime.get("dry_run", True)),
-            "dry_run": bool(runtime.get("dry_run", True)),
+            "request_dry_run": request_dry_run,
+            "dry_run": effective_dry_run,
             "kill_switch": bool(runtime.get("kill_switch", False)),
             "kis_enabled": bool(getattr(settings, "kis_enabled", False)),
             "kis_real_order_enabled": bool(
@@ -759,6 +816,7 @@ def _safety_summary(
             "no_new_entry_after": market_session.get("no_new_entry_after"),
             "confirm_live": confirm_live,
             "quantity": quantity,
+            "live_submit_requested": live_submit_requested,
             "validation_passed": validation.get("validated_for_submission")
             if validation
             else False,
@@ -773,20 +831,21 @@ def _safety_summary(
 
 
 def _message(reason: str, *, result: str) -> str:
-    if result == "executed":
+    if result == "submitted":
         return "KIS order submitted."
-    if result == "dry_run":
-        return "Dry-run mode: no real order submitted."
     messages = {
+        "analysis_only": "Analysis completed. No live submit was requested.",
         "confirm_live_required": "Live confirmation is required before submit.",
+        "dry_run_enabled": "Dry-run is ON, so no real KIS order was submitted.",
         "kill_switch_enabled": "Kill switch is ON.",
         "kis_disabled": "KIS trading is disabled.",
         "kis_real_order_disabled": "KIS real order disabled.",
         "market_closed": "Market is closed.",
-        "buy_entry_not_allowed_now": "New buy entries are not allowed now.",
+        "after_no_new_entry_time": "New buy entries are not allowed now.",
         "score_threshold_not_met": "Score below entry threshold.",
         "symbol_mismatch": "Returned candidate does not match selected symbol.",
         "quantity_or_amount_required": "Quantity or amount is required.",
+        "validation_failed": "KIS order validation failed.",
     }
     return messages.get(reason, reason)
 
@@ -794,11 +853,63 @@ def _message(reason: str, *, result: str) -> str:
 def _order_status(order: dict[str, Any], *, result: str) -> str:
     if order.get("real_order_submitted") is True:
         return "Real order submitted"
-    if result == "dry_run":
-        return "Dry-run, no real order submitted"
-    if result == "rejected":
-        return "Rejected"
+    if result == "blocked":
+        return "Blocked, no order submitted"
     return "No order created"
+
+
+def _requested_action(request: KisSingleSymbolTradingRequest) -> str:
+    text = str(request.requested_action or "analyze_then_maybe_buy").strip().lower()
+    aliases = {
+        "analyze": "analyze_only",
+        "analysis_only": "analyze_only",
+        "analyze_only": "analyze_only",
+        "analyze_then_maybe_buy": "analyze_then_maybe_buy",
+        "analyze_and_submit": "analyze_then_maybe_buy",
+        "analyze_and_buy": "analyze_then_maybe_buy",
+        "submit": "analyze_then_maybe_buy",
+        "buy": "analyze_then_maybe_buy",
+    }
+    return aliases.get(text, "analyze_then_maybe_buy")
+
+
+def _live_submit_requested(
+    request: KisSingleSymbolTradingRequest,
+    quantity: int | None,
+) -> bool:
+    if _requested_action(request) == "analyze_only":
+        return False
+    return request.confirm_live is True or request.quantity is not None or request.amount is not None or quantity is not None
+
+
+def _effective_dry_run(
+    request: KisSingleSymbolTradingRequest,
+    runtime: dict[str, Any],
+) -> bool:
+    return bool(runtime.get("dry_run", True)) or request.dry_run is True
+
+
+def _source_endpoint(request: KisSingleSymbolTradingRequest) -> str:
+    text = str(request.source_endpoint or "flutter_trading").strip()
+    return (text or "flutter_trading")[:80]
+
+
+def _source_context(request: KisSingleSymbolTradingRequest) -> dict[str, Any]:
+    value = request.source_context
+    if not isinstance(value, dict):
+        return {}
+    return sanitize_kis_payload(value)
+
+
+def _request_source(request: KisSingleSymbolTradingRequest) -> str:
+    context = _source_context(request)
+    source = str(context.get("source") or _source_endpoint(request)).strip()
+    return (source or "flutter_trading")[:80]
+
+
+def _trigger_source(request: KisSingleSymbolTradingRequest) -> str:
+    text = str(request.trigger_source or TRIGGER_SOURCE).strip()
+    return (text or TRIGGER_SOURCE)[:40]
 
 
 def _public_market_session(session: dict[str, Any]) -> dict[str, Any]:

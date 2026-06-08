@@ -85,7 +85,8 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     super.initState();
     _symbolController =
         TextEditingController(text: widget.controller.kisGuardedRunSymbol);
-    _qtyController = TextEditingController(text: '1');
+    _qtyController =
+        TextEditingController(text: widget.controller.orderTicketQtyInput);
   }
 
   @override
@@ -98,14 +99,18 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    _syncFromController(controller);
     final symbol = _symbolController.text.trim().toUpperCase();
     final qty = int.tryParse(_qtyController.text.trim());
-    final canRequest = symbol.isNotEmpty &&
+    final canAnalyze =
+        symbol.isNotEmpty && !controller.kisSingleSymbolTradingLoading;
+    final canSubmit = symbol.isNotEmpty &&
         qty != null &&
         qty > 0 &&
         controller.kisGuardedRunConfirmation &&
         !controller.kisSingleSymbolTradingLoading;
     final result = controller.latestKisSingleSymbolTradingResult;
+    final sourceContext = controller.kisTradingSourceContext;
 
     return SectionCard(
       key: const Key('kis_single_symbol_analyze_buy_card'),
@@ -114,11 +119,60 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           const Icon(Icons.verified_user_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('Single Symbol Analyze & Buy',
+            child: Text('KIS Analyze & Order',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
-          const _SoftBadge(text: 'KIS LIVE', color: Colors.redAccent),
+          _SoftBadge(
+            text: controller.kisGuardedRunConfirmation
+                ? 'LIVE ORDER POSSIBLE'
+                : 'MANUAL CONFIRM REQUIRED',
+            color: controller.kisGuardedRunConfirmation
+                ? Colors.redAccent
+                : Colors.amberAccent,
+          ),
         ]),
+        const SizedBox(height: 12),
+        _KisSafetyLabelWrap(controller: controller),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(
+              text: 'Single Symbol Analyze & Buy',
+              color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'REQUESTED SYMBOL ONLY', color: Colors.white70),
+          _SoftBadge(text: 'NO WATCHLIST FALLBACK', color: Colors.white70),
+        ]),
+        if (sourceContext != null) ...[
+          const SizedBox(height: 12),
+          _KisSourceContextPanel(sourceContext: sourceContext),
+        ],
+        if (controller.krWatchlist.symbols.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: controller.krWatchlist.symbols
+                    .any((item) => item.symbol == symbol)
+                ? symbol
+                : null,
+            decoration: const InputDecoration(
+              labelText: 'Common KR symbol',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              for (final item in controller.krWatchlist.symbols.take(30))
+                DropdownMenuItem<String>(
+                  value: item.symbol,
+                  child: Text('${item.symbol} ${item.name}'.trim()),
+                ),
+            ],
+            onChanged: controller.kisSingleSymbolTradingLoading
+                ? null
+                : (value) {
+                    if (value == null) return;
+                    _symbolController.text = value;
+                    controller.setKisGuardedRunSymbol(value);
+                    setState(() {});
+                  },
+          ),
+        ],
         const SizedBox(height: 12),
         TextField(
           controller: _symbolController,
@@ -167,38 +221,65 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
             'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
           ),
         ),
-        FilledButton.icon(
-          onPressed: canRequest
-              ? () async {
-                  final confirmed =
-                      await _confirmKisLiveRun(context, symbol, qty);
-                  if (!confirmed || !context.mounted) return;
-                  final actionResult =
-                      await controller.runKisAnalyzeAndBuySelectedSymbol(
-                    symbol: symbol,
-                    quantity: qty,
-                    gateLevel: controller.selectedGateLevel,
-                    confirmLive: controller.kisGuardedRunConfirmation,
-                  );
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(actionResult.message),
-                    backgroundColor:
-                        actionResult.success ? Colors.green : Colors.redAccent,
-                  ));
-                }
-              : null,
-          icon: controller.kisSingleSymbolTradingLoading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.play_arrow),
-          label: Text(controller.kisSingleSymbolTradingLoading
-              ? 'Analyzing symbol...'
-              : 'Analyze Symbol & Buy'),
-        ),
-        if (!canRequest) ...[
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            key: const Key('kis_trading_analyze_button'),
+            onPressed: canAnalyze
+                ? () async {
+                    final actionResult =
+                        await controller.runKisSingleSymbolAnalyzeBuy(
+                      symbol: symbol,
+                      gateLevel: controller.selectedGateLevel,
+                      confirmLive: false,
+                      requestedAction: 'analyze_only',
+                    );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  }
+                : null,
+            icon: controller.kisSingleSymbolTradingLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.search),
+            label: Text(controller.kisSingleSymbolTradingLoading
+                ? 'Analyzing symbol...'
+                : 'Analyze'),
+          ),
+          FilledButton.icon(
+            key: const Key('kis_trading_analyze_submit_button'),
+            onPressed: canSubmit
+                ? () async {
+                    final confirmed =
+                        await _confirmKisLiveRun(context, symbol, qty);
+                    if (!confirmed || !context.mounted) return;
+                    final actionResult =
+                        await controller.runKisAnalyzeAndBuySelectedSymbol(
+                      symbol: symbol,
+                      quantity: qty,
+                      gateLevel: controller.selectedGateLevel,
+                      confirmLive: controller.kisGuardedRunConfirmation,
+                    );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(actionResult.message),
+                      backgroundColor: actionResult.success
+                          ? Colors.green
+                          : Colors.redAccent,
+                    ));
+                  }
+                : null,
+            icon: const Icon(Icons.verified_outlined),
+            label: const Text('Analyze & Submit'),
+          ),
+        ]),
+        if (!canSubmit) ...[
           const SizedBox(height: 8),
           _ReasonBanner(
             text: controller.kisGuardedRunConfirmation
@@ -224,12 +305,24 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     );
   }
 
+  void _syncFromController(DashboardController controller) {
+    final desiredSymbol = controller.kisGuardedRunSymbol.trim().toUpperCase();
+    if (desiredSymbol.isNotEmpty &&
+        _symbolController.text.trim().toUpperCase() != desiredSymbol) {
+      _symbolController.text = desiredSymbol;
+    }
+    final desiredQty = controller.orderTicketQtyInput.trim();
+    if (desiredQty.isNotEmpty && _qtyController.text.trim() != desiredQty) {
+      _qtyController.text = desiredQty;
+    }
+  }
+
   Future<bool> _confirmKisLiveRun(
       BuildContext context, String symbol, int qty) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Analyze Symbol & Buy'),
+        title: const Text('Analyze & Submit KIS Order'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -249,12 +342,100 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Confirm Analyze & Buy'),
+            child: const Text('Confirm Analyze & Submit'),
           ),
         ],
       ),
     );
     return confirmed == true;
+  }
+}
+
+class _KisSafetyLabelWrap extends StatelessWidget {
+  const _KisSafetyLabelWrap({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final safety = controller.kisSafetyStatus;
+    return Wrap(spacing: 8, runSpacing: 8, children: [
+      _SoftBadge(
+        text: safety.runtimeDryRun ? 'DRY RUN ON' : 'DRY RUN OFF',
+        color: safety.runtimeDryRun ? Colors.amberAccent : Colors.greenAccent,
+      ),
+      _SoftBadge(
+        text: safety.killSwitch ? 'KILL SWITCH ON' : 'KILL SWITCH OFF',
+        color: safety.killSwitch ? Colors.redAccent : Colors.greenAccent,
+      ),
+      _SoftBadge(
+        text: safety.kisRealOrderEnabled
+            ? 'KIS REAL ORDERS ENABLED'
+            : 'KIS REAL ORDERS DISABLED',
+        color:
+            safety.kisRealOrderEnabled ? Colors.redAccent : Colors.amberAccent,
+      ),
+      _SoftBadge(
+        text: safety.marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED',
+        color: safety.marketOpen ? Colors.greenAccent : Colors.amberAccent,
+      ),
+      const _SoftBadge(
+          text: 'MANUAL CONFIRM REQUIRED', color: Colors.amberAccent),
+      const _SoftBadge(
+          text: 'SCHEDULER BUY AUTO DISABLED', color: Colors.lightBlueAccent),
+      const _SoftBadge(
+          text: 'WATCHLIST CLICK DOES NOT SUBMIT', color: Colors.white70),
+    ]);
+  }
+}
+
+class _KisSourceContextPanel extends StatelessWidget {
+  const _KisSourceContextPanel({required this.sourceContext});
+
+  final Map<String, dynamic> sourceContext;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.lightBlueAccent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.lightBlueAccent.withValues(alpha: 0.18),
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Watchlist Candidate Context',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(
+            label: 'Source',
+            value: _contextValue(sourceContext, 'source'),
+          ),
+          _DataPairData(
+            label: 'Rank',
+            value: _contextValue(sourceContext, 'candidate_rank'),
+          ),
+          _DataPairData(
+            label: 'Score',
+            value: _contextValue(sourceContext, 'candidate_score'),
+          ),
+          _DataPairData(
+            label: 'Block reason',
+            value: _contextReasonValue(sourceContext, 'candidate_block_reason'),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        _ReasonBanner(
+          text: _contextValue(sourceContext, 'candidate_reason',
+              fallback: 'No watchlist reason returned.'),
+          color: Colors.lightBlueAccent,
+        ),
+      ]),
+    );
   }
 }
 
@@ -385,6 +566,67 @@ class _KisResultPanel extends StatelessWidget {
           _DataPairData(
               label: 'Recent return', value: _recentReturnLabel(result)),
         ]),
+        if (result.gptReason != null) ...[
+          const SizedBox(height: 12),
+          const Text('GPT Context',
+              style: TextStyle(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          _ReasonBanner(text: result.gptReason!),
+        ],
+        const SizedBox(height: 12),
+        const Text('Safety Gates',
+            style: TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        _DataGrid(pairs: [
+          _DataPairData(
+            label: 'Dry run',
+            value: result.safetyFlag('dry_run') ||
+                    result.safetyFlag('runtime_dry_run')
+                ? 'ON'
+                : 'OFF',
+          ),
+          _DataPairData(
+            label: 'Kill switch',
+            value: result.safetyFlag('kill_switch') ? 'ON' : 'OFF',
+          ),
+          _DataPairData(
+            label: 'KIS enabled',
+            value: result.safetyFlag('kis_enabled') ? 'Yes' : 'No',
+          ),
+          _DataPairData(
+            label: 'Real orders',
+            value: result.safetyFlag('kis_real_order_enabled')
+                ? 'Enabled'
+                : 'Disabled',
+          ),
+          _DataPairData(
+            label: 'Market',
+            value: result.safetyFlag('market_open') ? 'Open' : 'Closed',
+          ),
+          _DataPairData(
+            label: 'Entry window',
+            value:
+                result.safetyFlag('entry_allowed_now') ? 'Allowed' : 'Blocked',
+          ),
+          _DataPairData(
+            label: 'Risk approval',
+            value: result.safetyFlag('approved_by_risk') ? 'Yes' : 'No',
+          ),
+        ]),
+        if (result.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _BulletList(
+            title: 'Risk Flags',
+            items: _translatedVisibleNotes(result.riskFlags),
+          ),
+        ],
+        if (result.gatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          _BulletList(
+            title: 'Gating Notes',
+            items: _translatedVisibleNotes(result.gatingNotes),
+          ),
+        ],
         const SizedBox(height: 12),
         const Text('Why No Order?',
             style: TextStyle(fontWeight: FontWeight.w800)),
@@ -618,9 +860,31 @@ String _mainReason(KisSingleSymbolTradingResult result) {
   return 'Backend risk gate blocked this order';
 }
 
+String _contextValue(
+  Map<String, dynamic> payload,
+  String key, {
+  String fallback = 'n/a',
+}) {
+  final value = payload[key];
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return fallback;
+  return text;
+}
+
+String _contextReasonValue(
+  Map<String, dynamic> payload,
+  String key, {
+  String fallback = 'n/a',
+}) {
+  final text = _contextValue(payload, key, fallback: fallback);
+  if (text == fallback) return fallback;
+  return _translateSingleSymbolReason(text);
+}
+
 String _decisionLabel(KisSingleSymbolTradingResult result) {
   final action = result.action.trim().toLowerCase();
   if (action == 'buy') return 'BUY';
+  if (action == 'sell') return 'SELL';
   if (action == 'hold') return 'HOLD';
   if (_analysisStatus(result) == 'Blocked before analysis') return 'BLOCKED';
   final resultText = result.result.trim().toLowerCase();
@@ -631,7 +895,7 @@ String _decisionLabel(KisSingleSymbolTradingResult result) {
 String _resultLabel(KisSingleSymbolTradingResult result) {
   final normalized = result.result.trim().toLowerCase();
   if (result.realOrderSubmitted || normalized == 'submitted') {
-    return 'executed';
+    return 'submitted';
   }
   if (normalized.contains('dry')) return 'dry-run';
   if (normalized.contains('reject')) return 'rejected';
@@ -764,6 +1028,16 @@ String _translateSingleSymbolReason(String reason) {
   if (_looksLikeRawReasonCode(translated))
     return _humanizeReasonCode(translated);
   return translated;
+}
+
+List<String> _translatedVisibleNotes(List<String> values) {
+  final notes = <String>[];
+  for (final value in values) {
+    final translated = _translateSingleSymbolReason(value);
+    if (!_isReadableSummaryText(translated)) continue;
+    if (!notes.contains(translated)) notes.add(translated);
+  }
+  return notes;
 }
 
 bool _hasReasonCode(KisSingleSymbolTradingResult result, String code) {

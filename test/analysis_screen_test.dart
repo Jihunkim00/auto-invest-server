@@ -96,8 +96,8 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Analyze Symbol & Buy'), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
+    expect(find.text('Analyze & Submit'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
@@ -127,20 +127,45 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
     expect(
       find.text(
         'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
       ),
       findsOneWidget,
     );
-    await tester.tap(find.text('Analyze Symbol & Buy'));
+    await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
 
     expect(api.kisBuyShadowCalls, 0);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
-    expect(find.text('Analyze Symbol & Buy'), findsOneWidget);
+    expect(find.text('Analyze & Submit'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Analyze button calls analysis-only endpoint',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi();
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+
+    await tester.tap(find.byKey(const Key('kis_trading_analyze_button')));
+    await tester.pumpAndSettle();
+
+    expect(api.kisSingleSymbolCalls, 1);
+    expect(api.lastKisSingleSymbol, '005930');
+    expect(api.lastKisSingleQuantity, isNull);
+    expect(api.lastKisSingleConfirmLive, isFalse);
+    expect(api.lastKisSingleRequestedAction, 'analyze_only');
 
     controller.dispose();
   });
@@ -167,21 +192,21 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
     await tester.tap(find.text(
       'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
     ));
     await tester.pumpAndSettle();
 
-    expect(_filledButtonEnabled(tester, 'Analyze Symbol & Buy'), isTrue);
-    await tester.tap(find.text('Analyze Symbol & Buy'));
+    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isTrue);
+    await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Analyze Symbol & Buy'), findsWidgets);
+    expect(find.text('Analyze & Submit'), findsWidgets);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
 
-    await tester.tap(find.text('Confirm Analyze & Buy'));
+    await tester.tap(find.text('Confirm Analyze & Submit'));
     await tester.pumpAndSettle();
 
     expect(api.kisSingleSymbolCalls, 1);
@@ -228,9 +253,9 @@ void main() {
       'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze Symbol & Buy'));
+    await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Analyze & Buy'));
+    await tester.tap(find.text('Confirm Analyze & Submit'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Dry-run'), findsWidgets);
@@ -278,9 +303,9 @@ void main() {
       'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze Symbol & Buy'));
+    await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Analyze & Buy'));
+    await tester.tap(find.text('Confirm Analyze & Submit'));
     await tester.pumpAndSettle();
 
     expect(api.lastKisSingleSymbol, '005380');
@@ -500,8 +525,7 @@ void main() {
     await tester.pumpWidget(_wrapTrading(controller));
     await _submitKisAnalyzeBuy(tester, symbol: '091810');
 
-    expect(find.textContaining('New buy entries are currently not allowed'),
-        findsWidgets);
+    expect(find.textContaining('KIS trading is disabled'), findsWidgets);
     expect(find.textContaining('KR_trading_disabled'), findsNothing);
 
     await tester.ensureVisible(find.text('Developer Raw Payload'));
@@ -802,9 +826,9 @@ Future<void> _submitKisAnalyzeBuy(
     'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
   ));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Analyze Symbol & Buy'));
+  await tester.tap(find.text('Analyze & Submit'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Confirm Analyze & Buy'));
+  await tester.tap(find.text('Confirm Analyze & Submit'));
   await tester.pumpAndSettle();
 }
 
@@ -844,6 +868,8 @@ class _AnalysisFakeApi extends ApiClient {
   int? lastKisSingleGateLevel;
   int? lastKisSingleQuantity;
   bool? lastKisSingleConfirmLive;
+  String? lastKisSingleRequestedAction;
+  Map<String, dynamic>? lastKisSingleSourceContext;
 
   @override
   Future<ManualTradingRunResult> runTradingOnce({
@@ -1021,12 +1047,18 @@ class _AnalysisFakeApi extends ApiClient {
     int? quantity,
     double? amount,
     required bool confirmLive,
+    bool? dryRun,
+    String requestedAction = 'analyze_then_maybe_buy',
+    String sourceEndpoint = 'flutter_trading',
+    Map<String, dynamic>? sourceContext,
   }) async {
     kisSingleSymbolCalls += 1;
     lastKisSingleSymbol = symbol;
     lastKisSingleGateLevel = gateLevel;
     lastKisSingleQuantity = quantity;
     lastKisSingleConfirmLive = confirmLive;
+    lastKisSingleRequestedAction = requestedAction;
+    lastKisSingleSourceContext = sourceContext;
     return kisSingleResult;
   }
 
