@@ -412,6 +412,50 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Analyze in Trading only prefills KIS Trading state',
+      (tester) async {
+    final api = _FakeApiClient(scoredPreview: true);
+    var openedTrading = false;
+    final controller = DashboardController(api, autoload: false)
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(
+        controller: controller,
+        onOpenManualOrder: () => openedTrading = true,
+      ),
+    ));
+
+    controller.setProvider(SelectedProvider.kis);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Run Watchlist Analysis'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('Analyze in Trading').first,
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.tap(find.text('Analyze in Trading').first);
+    await tester.pumpAndSettle();
+
+    expect(openedTrading, isTrue);
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.kisGuardedRunSymbol, '005930');
+    expect(controller.kisGuardedRunConfirmation, isFalse);
+    expect(
+      controller.kisTradingSourceContext?['source'],
+      'watchlist_candidate',
+    );
+    expect(controller.kisTradingSourceContext?['candidate_rank'], 1);
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
   testWidgets(
       'Watchlist Run Watchlist Analysis shows Alpaca summary and no order created',
       (tester) async {
