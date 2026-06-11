@@ -910,6 +910,61 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> applyOperationModePreset(
+    String preset, {
+    bool confirmDangerous = false,
+  }) async {
+    final previousSettings = settings;
+    kisAutomationSettingsLoading = true;
+    error = null;
+    notifyListeners();
+
+    try {
+      final payload = await apiClient.applyOpsSettingsPreset(
+        preset: preset,
+        confirmDangerous: confirmDangerous,
+      );
+      if (payload['requires_confirmation'] == true &&
+          payload['applied'] != true) {
+        return const ActionResult(
+          success: false,
+          message: 'Full Live Test Mode requires confirmation.',
+        );
+      }
+      settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
+      _recordSettingsChangeEvent(_operationModeLabel(preset), {
+        'operation_mode': preset,
+        'confirm_dangerous': confirmDangerous,
+      });
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
+      _rebuildPortfolioManagementItems();
+      return ActionResult(
+        success: true,
+        message: '${_operationModeLabel(preset)} applied.',
+      );
+    } catch (e) {
+      settings = previousSettings;
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+      final message =
+          '${_operationModeLabel(preset)} failed: ${ApiErrorFormatter.format(e.toString())}';
+      try {
+        settings = await apiClient.getOpsSettings();
+        kisSafetyStatus = kisSafetyStatusFromSettings();
+        schedulerStatus = await apiClient.fetchSchedulerStatus();
+      } catch (_) {
+        // Keep the rollback state when backend refresh is unavailable.
+      }
+      error = message;
+      return ActionResult(success: false, message: error!);
+    } finally {
+      kisAutomationSettingsLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate() async {
     try {
       latestKisSchedulerGuardedSellResult =
@@ -3272,6 +3327,36 @@ OpsSettings _opsSettingsWithPayload(
         _payloadBool(values, 'scheduler_enabled') ?? settings.schedulerEnabled,
     dryRun: _payloadBool(values, 'dry_run') ?? settings.dryRun,
     killSwitch: _payloadBool(values, 'kill_switch') ?? settings.killSwitch,
+    currentOperationMode:
+        _payloadString(values, 'operation_mode') ?? settings.currentOperationMode,
+    maxDailyTrades:
+        _payloadInt(values, 'max_trades_per_day') ?? settings.maxDailyTrades,
+    maxLiveOrdersPerDay:
+        _payloadInt(values, 'max_live_orders_per_day') ??
+            _payloadInt(values, 'kis_scheduler_max_live_orders_per_day') ??
+            settings.maxLiveOrdersPerDay,
+    maxPositions:
+        _payloadInt(values, 'max_positions') ??
+            _payloadInt(values, 'max_open_positions') ??
+            _payloadInt(values, 'kis_limited_auto_buy_max_positions') ??
+            settings.maxPositions,
+    maxPositionPct:
+        _payloadDouble(values, 'max_position_pct') ?? settings.maxPositionPct,
+    maxOrderNotionalPct:
+        _payloadDouble(values, 'max_order_notional_pct') ??
+            _payloadDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
+            settings.maxOrderNotionalPct,
+    dailyMaxLossPct:
+        _payloadDouble(values, 'daily_max_loss_pct') ??
+            settings.dailyMaxLossPct,
+    noNewEntryAfter:
+        _payloadString(values, 'no_new_entry_after') ??
+            _payloadString(values, 'kis_limited_auto_buy_no_new_entry_after') ??
+            settings.noNewEntryAfter,
+    stopLossPct:
+        _payloadDouble(values, 'stop_loss_pct') ?? settings.stopLossPct,
+    takeProfitPct:
+        _payloadDouble(values, 'take_profit_pct') ?? settings.takeProfitPct,
     kisSchedulerEnabled: _payloadBool(values, 'kis_scheduler_enabled') ??
         settings.kisSchedulerEnabled,
     kisSchedulerDryRun: _payloadBool(values, 'kis_scheduler_dry_run') ??
@@ -3331,6 +3416,7 @@ OpsSettings _opsSettingsWithPayload(
             settings.kisSchedulerAllowLimitedAutoBuy,
     kisSchedulerMaxLiveOrdersPerDay:
         _payloadInt(values, 'kis_scheduler_max_live_orders_per_day') ??
+            _payloadInt(values, 'max_live_orders_per_day') ??
             settings.kisSchedulerMaxLiveOrdersPerDay,
   );
 }
@@ -3369,6 +3455,13 @@ double? _payloadDouble(Map<String, dynamic> values, String key) {
   final value = values[key];
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '');
+}
+
+String? _payloadString(Map<String, dynamic> values, String key) {
+  if (!values.containsKey(key)) return null;
+  final text = values[key]?.toString().trim();
+  if (text == null || text.isEmpty) return null;
+  return text;
 }
 
 int? _parseOrderTicketQty(String value) {
@@ -3515,6 +3608,22 @@ String _settingsChangeSummary(
 String _onOff(bool enabled) => enabled ? 'ON' : 'OFF';
 
 String _formatPct(double value) => '${(value * 100).toStringAsFixed(2)}%';
+
+String _operationModeLabel(String preset) {
+  switch (preset) {
+    case 'safe_mode':
+      return 'Safe Mode';
+    case 'dry_run_simulation':
+      return 'Dry-run Simulation';
+    case 'manual_live_trading':
+      return 'Manual Live Trading';
+    case 'kis_sell_only_automation':
+      return 'KIS Sell-only Automation';
+    case 'full_live_test_mode':
+      return 'Full Live Test Mode';
+  }
+  return preset;
+}
 
 Map<String, dynamic> _exitPreflightSourceMetadata(
   KisLiveExitCandidate candidate, {

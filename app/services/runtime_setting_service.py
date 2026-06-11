@@ -21,6 +21,19 @@ KIS_BUY_EXECUTION_FLAGS = (
     "kis_live_auto_buy_enabled",
     "kis_limited_auto_buy_enabled",
 )
+OPERATION_MODE_PRESETS = {
+    "safe_mode",
+    "dry_run_simulation",
+    "manual_live_trading",
+    "kis_sell_only_automation",
+    "full_live_test_mode",
+}
+KR_SCHEDULER_MODES = {
+    "disabled",
+    "dry_run",
+    "sell_only_live",
+    "full_live_test",
+}
 
 
 class RuntimeSettingService:
@@ -275,7 +288,51 @@ class RuntimeSettingService:
         settings["kis_limited_auto_sell_take_profit_requires_valid_cost_basis"] = True
         settings["kis_limited_auto_take_profit_min_profit_pct"] = 0.03
         settings["kis_limited_auto_sell_take_profit_min_profit_pct"] = 0.03
+        settings.update(self._simplified_settings(settings))
         return settings
+
+    def _simplified_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        stop_loss_enabled = bool(
+            settings["kis_limited_auto_stop_loss_enabled"]
+            or settings["kis_limited_auto_sell_stop_loss_enabled"]
+        )
+        take_profit_enabled = bool(
+            settings["kis_limited_auto_take_profit_enabled"]
+            or settings["kis_limited_auto_sell_take_profit_enabled"]
+        )
+        max_order_notional_pct = min(
+            max(
+                float(settings["kis_live_auto_max_notional_pct"] or 0),
+                float(settings["kis_limited_auto_sell_max_notional_pct"] or 0),
+                float(settings["kis_limited_auto_buy_max_notional_pct"] or 0),
+            ),
+            1.0,
+        )
+        return {
+            "current_operation_mode": self.current_operation_mode(settings),
+            "us_scheduler_enabled": bool(settings["scheduler_enabled"]),
+            "kr_scheduler_enabled": bool(settings["kis_scheduler_enabled"]),
+            "kr_scheduler_mode": self.kr_scheduler_mode(settings),
+            "max_live_orders_per_day": int(
+                settings["kis_scheduler_max_live_orders_per_day"]
+                or CONSERVATIVE_LIVE_ORDER_LIMIT
+            ),
+            "max_positions": int(settings["max_open_positions"] or 0),
+            "max_position_pct": float(
+                settings["kis_limited_auto_buy_max_notional_pct"]
+                or CONSERVATIVE_MAX_NOTIONAL_PCT
+            ),
+            "max_order_notional_pct": max_order_notional_pct
+            or CONSERVATIVE_MAX_NOTIONAL_PCT,
+            "daily_max_loss_pct": 0.0,
+            "no_new_entry_after": str(
+                settings["kis_limited_auto_buy_no_new_entry_after"] or "14:50"
+            ),
+            "stop_loss_enabled": stop_loss_enabled,
+            "stop_loss_pct": 0.015,
+            "take_profit_enabled": take_profit_enabled,
+            "take_profit_pct": 0.03,
+        }
 
     def get_trade_limits_for_market(
         self,
@@ -646,7 +703,434 @@ class RuntimeSettingService:
             },
         }
 
+    def current_operation_mode(self, settings: dict[str, Any]) -> str:
+        risk = self._kis_risk_summary(settings, daily_live_order_count=None)
+        if risk["live_sell_armed"] and risk["live_buy_armed"]:
+            return "full_live_test_mode"
+        if risk["live_sell_armed"] and risk["sell_only_mode"]:
+            return "kis_sell_only_automation"
+        if (
+            bool(settings["dry_run"])
+            and bool(settings["scheduler_enabled"])
+            and bool(settings["kis_scheduler_enabled"])
+            and bool(settings["kis_scheduler_dry_run"])
+            and not bool(settings["kis_scheduler_live_enabled"])
+        ):
+            return "dry_run_simulation"
+        if risk["safe_mode_active"]:
+            return "safe_mode"
+        scheduler_live_flags = any(
+            bool(settings.get(key, False))
+            for key in (
+                "kis_scheduler_live_enabled",
+                "kis_scheduler_allow_real_orders",
+                "kis_scheduler_configured_allow_real_orders",
+                "kis_scheduler_sell_enabled",
+                "kis_scheduler_buy_enabled",
+                "kis_scheduler_allow_limited_auto_sell",
+                "kis_scheduler_allow_limited_auto_buy",
+                "kis_live_auto_sell_enabled",
+                "kis_live_auto_buy_enabled",
+                "kis_limited_auto_buy_enabled",
+            )
+        )
+        if not bool(settings["dry_run"]) and not scheduler_live_flags:
+            return "manual_live_trading"
+        return "custom"
+
+    def current_operation_mode_read_only(self, db: Session) -> str:
+        return self.current_operation_mode(self.get_settings_read_only(db))
+
+    def kr_scheduler_mode(self, settings: dict[str, Any]) -> str:
+        if not bool(settings["kis_scheduler_enabled"]):
+            return "disabled"
+        if bool(settings["kis_scheduler_dry_run"]) and not bool(
+            settings["kis_scheduler_live_enabled"]
+        ):
+            return "dry_run"
+        if (
+            bool(settings["kis_scheduler_live_enabled"])
+            and bool(settings["kis_scheduler_sell_enabled"])
+            and bool(settings["kis_scheduler_allow_limited_auto_sell"])
+            and not bool(settings["kis_scheduler_buy_enabled"])
+            and not bool(settings["kis_scheduler_allow_limited_auto_buy"])
+            and not bool(settings["kis_live_auto_buy_enabled"])
+            and not bool(settings["kis_limited_auto_buy_enabled"])
+        ):
+            return "sell_only_live"
+        if bool(settings["kis_scheduler_live_enabled"]) and any(
+            bool(settings.get(key, False)) for key in KIS_BUY_EXECUTION_FLAGS
+        ):
+            return "full_live_test"
+        return "custom"
+
+    def apply_preset(
+        self,
+        db: Session,
+        *,
+        preset: str,
+        confirm_dangerous: bool = False,
+    ) -> dict[str, Any]:
+        normalized = str(preset or "").strip()
+        if normalized not in OPERATION_MODE_PRESETS:
+            raise ValueError(f"unsupported operation mode preset: {preset}")
+
+        if normalized == "full_live_test_mode" and not confirm_dangerous:
+            settings = self.get_settings(db)
+            risk_summary = self._kis_risk_summary(
+                settings,
+                daily_live_order_count=self._daily_kis_live_order_count(db),
+            )
+            return {
+                "preset": normalized,
+                "applied": False,
+                "settings": settings,
+                "risk_summary": risk_summary,
+                "requires_confirmation": True,
+                "warning_level": "dangerous_mixed",
+            }
+
+        settings = self.update_settings(db, self._preset_payload(normalized))
+        risk_summary = self._kis_risk_summary(
+            settings,
+            daily_live_order_count=self._daily_kis_live_order_count(db),
+        )
+        return {
+            "preset": normalized,
+            "applied": True,
+            "settings": settings,
+            "risk_summary": risk_summary,
+            "requires_confirmation": False,
+            "warning_level": risk_summary["warning_level"],
+        }
+
+    def settings_catalog(self, db: Session) -> dict[str, Any]:
+        settings = self.get_settings(db)
+        defaults = self._finalize_settings(self._defaults())
+        items = [
+            _catalog_item(
+                "current_operation_mode",
+                "Operation mode",
+                "Single high-level runtime mode used by the Settings UI.",
+                "operation_mode",
+                "enum",
+                settings["current_operation_mode"],
+                defaults["current_operation_mode"],
+                options=sorted(OPERATION_MODE_PRESETS),
+            ),
+            _catalog_item(
+                "scheduler_enabled",
+                "Scheduler",
+                "Global scheduler switch for automated checks.",
+                "schedule",
+                "bool",
+                settings["scheduler_enabled"],
+                defaults["scheduler_enabled"],
+            ),
+            _catalog_item(
+                "us_scheduler_enabled",
+                "US schedule",
+                "US scheduled checks use the global scheduler switch.",
+                "schedule",
+                "bool",
+                settings["us_scheduler_enabled"],
+                defaults["us_scheduler_enabled"],
+            ),
+            _catalog_item(
+                "kr_scheduler_enabled",
+                "KR schedule",
+                "KIS scheduler runtime switch.",
+                "schedule",
+                "bool",
+                settings["kr_scheduler_enabled"],
+                defaults["kr_scheduler_enabled"],
+            ),
+            _catalog_item(
+                "kr_scheduler_mode",
+                "KR scheduler mode",
+                "Simplified KIS scheduler mode mapped to runtime flags.",
+                "schedule",
+                "enum",
+                settings["kr_scheduler_mode"],
+                defaults["kr_scheduler_mode"],
+                options=sorted(KR_SCHEDULER_MODES),
+            ),
+            _catalog_item(
+                "max_trades_per_day",
+                "Max trades per day",
+                "Global daily trade cap.",
+                "risk_limits",
+                "int",
+                settings["max_trades_per_day"],
+                defaults["max_trades_per_day"],
+                minimum=1,
+                maximum=20,
+                unit="orders",
+            ),
+            _catalog_item(
+                "max_live_orders_per_day",
+                "Max live orders per day",
+                "KIS scheduler live order cap.",
+                "risk_limits",
+                "int",
+                settings["max_live_orders_per_day"],
+                defaults["max_live_orders_per_day"],
+                minimum=0,
+                maximum=20,
+                unit="orders",
+                is_dangerous=settings["max_live_orders_per_day"]
+                > CONSERVATIVE_LIVE_ORDER_LIMIT,
+            ),
+            _catalog_item(
+                "max_positions",
+                "Max positions",
+                "Global open-position cap and KIS buy-position cap.",
+                "risk_limits",
+                "int",
+                settings["max_positions"],
+                defaults["max_positions"],
+                minimum=1,
+                maximum=100,
+                unit="positions",
+            ),
+            _catalog_item(
+                "max_position_pct",
+                "Max position %",
+                "Position sizing cap mapped to KIS notional caps.",
+                "risk_limits",
+                "float",
+                settings["max_position_pct"],
+                defaults["max_position_pct"],
+                minimum=0.0,
+                maximum=1.0,
+                unit="pct",
+            ),
+            _catalog_item(
+                "max_order_notional_pct",
+                "Max order notional %",
+                "Order notional cap mapped to KIS live/sell/buy notional caps.",
+                "risk_limits",
+                "float",
+                settings["max_order_notional_pct"],
+                defaults["max_order_notional_pct"],
+                minimum=0.0,
+                maximum=1.0,
+                unit="pct",
+                is_dangerous=settings["max_order_notional_pct"]
+                > CONSERVATIVE_MAX_NOTIONAL_PCT,
+            ),
+            _catalog_item(
+                "daily_max_loss_pct",
+                "Daily max loss %",
+                "Displayed for UI consistency; no runtime executor currently consumes it.",
+                "risk_limits",
+                "float",
+                settings["daily_max_loss_pct"],
+                defaults["daily_max_loss_pct"],
+                minimum=0.0,
+                maximum=1.0,
+                unit="pct",
+                is_advanced=True,
+            ),
+            _catalog_item(
+                "no_new_entry_after",
+                "No new entry after",
+                "KIS limited auto-buy cutoff.",
+                "risk_limits",
+                "time",
+                settings["no_new_entry_after"],
+                defaults["no_new_entry_after"],
+            ),
+            _catalog_item(
+                "stop_loss_enabled",
+                "Stop-loss",
+                "Stop-loss auto-sell gate.",
+                "exit_rules",
+                "bool",
+                settings["stop_loss_enabled"],
+                defaults["stop_loss_enabled"],
+            ),
+            _catalog_item(
+                "stop_loss_pct",
+                "Stop-loss %",
+                "Current fixed stop-loss threshold used by risk metadata.",
+                "exit_rules",
+                "float",
+                settings["stop_loss_pct"],
+                defaults["stop_loss_pct"],
+                minimum=0.0,
+                maximum=1.0,
+                unit="pct",
+            ),
+            _catalog_item(
+                "take_profit_enabled",
+                "Take-profit",
+                "Take-profit auto-sell gate.",
+                "exit_rules",
+                "bool",
+                settings["take_profit_enabled"],
+                defaults["take_profit_enabled"],
+                is_dangerous=bool(settings["take_profit_enabled"]),
+            ),
+            _catalog_item(
+                "take_profit_pct",
+                "Take-profit %",
+                "Current fixed take-profit threshold used by KIS readiness metadata.",
+                "exit_rules",
+                "float",
+                settings["take_profit_pct"],
+                defaults["take_profit_pct"],
+                minimum=0.0,
+                maximum=1.0,
+                unit="pct",
+            ),
+        ]
+        for key in _advanced_runtime_keys():
+            items.append(
+                _catalog_item(
+                    key,
+                    _humanize_key(key),
+                    "Raw runtime flag for diagnostics.",
+                    "advanced",
+                    "bool" if isinstance(settings.get(key), bool) else "value",
+                    settings.get(key),
+                    defaults.get(key),
+                    is_advanced=True,
+                    is_dangerous=key in _dangerous_runtime_keys()
+                    and bool(settings.get(key)),
+                )
+            )
+
+        groups = []
+        for group_key, label in (
+            ("operation_mode", "Operation Mode"),
+            ("schedule", "Schedule Control"),
+            ("risk_limits", "Risk Limits"),
+            ("exit_rules", "Exit Rules"),
+            ("advanced", "Advanced Flags / Diagnostics"),
+        ):
+            groups.append(
+                {
+                    "key": group_key,
+                    "label": label,
+                    "items": [item for item in items if item["group"] == group_key],
+                }
+            )
+        return {
+            "current_operation_mode": settings["current_operation_mode"],
+            "groups": groups,
+            "items": items,
+        }
+
+    def _preset_payload(self, preset: str) -> dict[str, Any]:
+        if preset == "safe_mode":
+            return {
+                "dry_run": True,
+                "scheduler_enabled": False,
+                "kis_scheduler_enabled": False,
+                "kis_scheduler_dry_run": True,
+                "kis_scheduler_live_enabled": False,
+                "kis_scheduler_allow_real_orders": False,
+                "kis_scheduler_configured_allow_real_orders": False,
+                "kis_scheduler_sell_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": False,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_sell_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+                "kis_limited_auto_stop_loss_enabled": False,
+                "kis_limited_auto_sell_stop_loss_enabled": False,
+                "kis_limited_auto_take_profit_enabled": False,
+                "kis_limited_auto_sell_take_profit_enabled": False,
+                "kis_limited_auto_sell_allow_take_profit_trigger": False,
+            }
+        if preset == "dry_run_simulation":
+            return {
+                "dry_run": True,
+                "scheduler_enabled": True,
+                "kis_scheduler_enabled": True,
+                "kis_scheduler_dry_run": True,
+                "kis_scheduler_live_enabled": False,
+                "kis_scheduler_allow_real_orders": False,
+                "kis_scheduler_configured_allow_real_orders": False,
+                "kis_scheduler_sell_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": False,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_sell_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+                "kis_limited_auto_stop_loss_enabled": False,
+                "kis_limited_auto_sell_stop_loss_enabled": False,
+                "kis_limited_auto_take_profit_enabled": False,
+                "kis_limited_auto_sell_take_profit_enabled": False,
+                "kis_limited_auto_sell_allow_take_profit_trigger": False,
+            }
+        if preset == "manual_live_trading":
+            return {
+                "dry_run": False,
+                "kis_scheduler_live_enabled": False,
+                "kis_scheduler_allow_real_orders": False,
+                "kis_scheduler_configured_allow_real_orders": False,
+                "kis_scheduler_sell_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": False,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+            }
+        if preset == "kis_sell_only_automation":
+            return {
+                "dry_run": False,
+                "kill_switch": False,
+                "scheduler_enabled": True,
+                "kis_scheduler_enabled": True,
+                "kis_scheduler_dry_run": False,
+                "kis_scheduler_live_enabled": True,
+                "kis_scheduler_allow_real_orders": True,
+                "kis_scheduler_configured_allow_real_orders": True,
+                "kis_scheduler_sell_enabled": True,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": True,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": True,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+                "kis_limited_auto_stop_loss_enabled": True,
+                "kis_limited_auto_sell_stop_loss_enabled": True,
+                "kis_limited_auto_take_profit_enabled": False,
+                "kis_limited_auto_sell_take_profit_enabled": False,
+                "kis_limited_auto_sell_allow_take_profit_trigger": False,
+                "kis_scheduler_max_live_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
+                "kis_limited_auto_sell_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
+                "kis_limited_auto_sell_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+                "kis_live_auto_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
+                "kis_live_auto_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+            }
+        if preset == "full_live_test_mode":
+            payload = self._preset_payload("kis_sell_only_automation")
+            payload.update(
+                {
+                    "kis_scheduler_buy_enabled": True,
+                    "kis_scheduler_allow_limited_auto_buy": True,
+                    "kis_live_auto_buy_enabled": True,
+                    "kis_limited_auto_buy_enabled": True,
+                    "kis_limited_auto_buy_requires_shadow_review": True,
+                    "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
+                    "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+                    "kis_limited_auto_buy_max_positions": 3,
+                }
+            )
+            return payload
+        raise ValueError(f"unsupported operation mode preset: {preset}")
+
     def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        self._normalize_simplified_payload(payload)
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -732,6 +1216,91 @@ class RuntimeSettingService:
         db.refresh(row)
         return self.get_settings(db)
 
+    def _normalize_simplified_payload(self, payload: dict[str, Any]) -> None:
+        if "us_scheduler_enabled" in payload and "scheduler_enabled" not in payload:
+            payload["scheduler_enabled"] = bool(payload["us_scheduler_enabled"])
+        if "kr_scheduler_enabled" in payload and "kis_scheduler_enabled" not in payload:
+            payload["kis_scheduler_enabled"] = bool(payload["kr_scheduler_enabled"])
+        if "max_live_orders_per_day" in payload:
+            value = payload["max_live_orders_per_day"]
+            payload.setdefault("kis_scheduler_max_live_orders_per_day", value)
+            payload.setdefault("kis_live_auto_max_orders_per_day", value)
+            payload.setdefault("kis_limited_auto_sell_max_orders_per_day", value)
+            payload.setdefault("kis_limited_auto_buy_max_orders_per_day", value)
+        if "max_positions" in payload:
+            payload.setdefault("max_open_positions", payload["max_positions"])
+            payload.setdefault(
+                "kis_limited_auto_buy_max_positions",
+                payload["max_positions"],
+            )
+        notional_value = payload.get("max_order_notional_pct")
+        if notional_value is None:
+            notional_value = payload.get("max_position_pct")
+        if notional_value is not None:
+            payload.setdefault("kis_live_auto_max_notional_pct", notional_value)
+            payload.setdefault("kis_limited_auto_sell_max_notional_pct", notional_value)
+            payload.setdefault("kis_limited_auto_buy_max_notional_pct", notional_value)
+        if "no_new_entry_after" in payload:
+            payload.setdefault(
+                "kis_limited_auto_buy_no_new_entry_after",
+                payload["no_new_entry_after"],
+            )
+        if "stop_loss_enabled" in payload:
+            value = bool(payload["stop_loss_enabled"])
+            payload.setdefault("kis_limited_auto_stop_loss_enabled", value)
+            payload.setdefault("kis_limited_auto_sell_stop_loss_enabled", value)
+        if "take_profit_enabled" in payload:
+            value = bool(payload["take_profit_enabled"])
+            payload.setdefault("kis_limited_auto_take_profit_enabled", value)
+            payload.setdefault("kis_limited_auto_sell_take_profit_enabled", value)
+            payload.setdefault(
+                "kis_limited_auto_sell_allow_take_profit_trigger",
+                value,
+            )
+        mode = str(payload.get("kr_scheduler_mode") or "").strip()
+        if mode:
+            if mode not in KR_SCHEDULER_MODES:
+                raise ValueError(f"unsupported KR scheduler mode: {mode}")
+            payload.update(self._kr_scheduler_mode_payload(mode))
+
+    def _kr_scheduler_mode_payload(self, mode: str) -> dict[str, Any]:
+        if mode == "disabled":
+            return {
+                "kis_scheduler_enabled": False,
+                "kis_scheduler_dry_run": True,
+                "kis_scheduler_live_enabled": False,
+                "kis_scheduler_allow_real_orders": False,
+                "kis_scheduler_configured_allow_real_orders": False,
+                "kis_scheduler_sell_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": False,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+            }
+        if mode == "dry_run":
+            return {
+                "scheduler_enabled": True,
+                "kis_scheduler_enabled": True,
+                "kis_scheduler_dry_run": True,
+                "kis_scheduler_live_enabled": False,
+                "kis_scheduler_allow_real_orders": False,
+                "kis_scheduler_configured_allow_real_orders": False,
+                "kis_scheduler_sell_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_sell": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "kis_live_auto_sell_enabled": False,
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+            }
+        if mode == "sell_only_live":
+            return self._preset_payload("kis_sell_only_automation")
+        if mode == "full_live_test":
+            return self._preset_payload("full_live_test_mode")
+        raise ValueError(f"unsupported KR scheduler mode: {mode}")
+
     def set_bot_enabled(self, db: Session, enabled: bool) -> dict[str, Any]:
         return self.update_settings(db, {"bot_enabled": enabled})
 
@@ -751,6 +1320,83 @@ def _sync_bool_alias(payload: dict[str, Any], primary: str, alias: str) -> None:
     value = payload[primary] if primary_set else payload[alias]
     payload[primary] = bool(value)
     payload[alias] = bool(value)
+
+
+def _catalog_item(
+    key: str,
+    label: str,
+    description: str,
+    group: str,
+    value_type: str,
+    current_value: Any,
+    default_value: Any,
+    *,
+    minimum: Any | None = None,
+    maximum: Any | None = None,
+    unit: str | None = None,
+    options: list[str] | None = None,
+    is_advanced: bool = False,
+    is_dangerous: bool = False,
+    requires_restart: bool = False,
+) -> dict[str, Any]:
+    item = {
+        "key": key,
+        "label": label,
+        "description": description,
+        "group": group,
+        "value_type": value_type,
+        "current_value": current_value,
+        "default_value": default_value,
+        "unit": unit,
+        "is_advanced": is_advanced,
+        "is_dangerous": is_dangerous,
+        "requires_restart": requires_restart,
+    }
+    if minimum is not None:
+        item["min"] = minimum
+    if maximum is not None:
+        item["max"] = maximum
+    if options is not None:
+        item["options"] = options
+    return item
+
+
+def _advanced_runtime_keys() -> tuple[str, ...]:
+    return (
+        "dry_run",
+        "kill_switch",
+        "kis_scheduler_live_enabled",
+        "kis_scheduler_allow_real_orders",
+        "kis_scheduler_configured_allow_real_orders",
+        "kis_scheduler_sell_enabled",
+        "kis_scheduler_buy_enabled",
+        "kis_scheduler_allow_limited_auto_sell",
+        "kis_scheduler_allow_limited_auto_buy",
+        "kis_live_auto_sell_enabled",
+        "kis_live_auto_buy_enabled",
+        "kis_limited_auto_sell_enabled",
+        "kis_limited_auto_buy_enabled",
+        "kis_limited_auto_buy_requires_shadow_review",
+        "kis_limited_auto_sell_allow_take_profit_trigger",
+    )
+
+
+def _dangerous_runtime_keys() -> set[str]:
+    return {
+        "kill_switch",
+        "kis_scheduler_live_enabled",
+        "kis_scheduler_allow_real_orders",
+        "kis_scheduler_configured_allow_real_orders",
+        "kis_scheduler_buy_enabled",
+        "kis_scheduler_allow_limited_auto_buy",
+        "kis_live_auto_buy_enabled",
+        "kis_limited_auto_buy_enabled",
+        "kis_limited_auto_sell_allow_take_profit_trigger",
+    }
+
+
+def _humanize_key(key: str) -> str:
+    return key.replace("_", " ").capitalize()
 
 
 def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:

@@ -10,6 +10,15 @@ class OpsSettings {
     required this.maxDailyEntries,
     required this.minEntryScore,
     required this.minScoreGap,
+    this.currentOperationMode = 'safe_mode',
+    this.maxLiveOrdersPerDay = 1,
+    this.maxPositions = 3,
+    this.maxPositionPct = 0.03,
+    this.maxOrderNotionalPct = 0.03,
+    this.dailyMaxLossPct = 0,
+    this.noNewEntryAfter = '14:50',
+    this.stopLossPct = 0.015,
+    this.takeProfitPct = 0.03,
     this.kisLiveAutoEnabled = false,
     this.kisLiveAutoBuyEnabled = false,
     this.kisLiveAutoSellEnabled = false,
@@ -68,6 +77,15 @@ class OpsSettings {
   final int maxDailyEntries;
   final int minEntryScore;
   final int minScoreGap;
+  final String currentOperationMode;
+  final int maxLiveOrdersPerDay;
+  final int maxPositions;
+  final double maxPositionPct;
+  final double maxOrderNotionalPct;
+  final double dailyMaxLossPct;
+  final String noNewEntryAfter;
+  final double stopLossPct;
+  final double takeProfitPct;
   final bool kisLiveAutoEnabled;
   final bool kisLiveAutoBuyEnabled;
   final bool kisLiveAutoSellEnabled;
@@ -126,6 +144,15 @@ class OpsSettings {
     int? maxDailyEntries,
     int? minEntryScore,
     int? minScoreGap,
+    String? currentOperationMode,
+    int? maxLiveOrdersPerDay,
+    int? maxPositions,
+    double? maxPositionPct,
+    double? maxOrderNotionalPct,
+    double? dailyMaxLossPct,
+    String? noNewEntryAfter,
+    double? stopLossPct,
+    double? takeProfitPct,
     bool? kisLiveAutoEnabled,
     bool? kisLiveAutoBuyEnabled,
     bool? kisLiveAutoSellEnabled,
@@ -184,6 +211,17 @@ class OpsSettings {
       maxDailyEntries: maxDailyEntries ?? this.maxDailyEntries,
       minEntryScore: minEntryScore ?? this.minEntryScore,
       minScoreGap: minScoreGap ?? this.minScoreGap,
+      currentOperationMode:
+          currentOperationMode ?? this.currentOperationMode,
+      maxLiveOrdersPerDay: maxLiveOrdersPerDay ?? this.maxLiveOrdersPerDay,
+      maxPositions: maxPositions ?? this.maxPositions,
+      maxPositionPct: maxPositionPct ?? this.maxPositionPct,
+      maxOrderNotionalPct:
+          maxOrderNotionalPct ?? this.maxOrderNotionalPct,
+      dailyMaxLossPct: dailyMaxLossPct ?? this.dailyMaxLossPct,
+      noNewEntryAfter: noNewEntryAfter ?? this.noNewEntryAfter,
+      stopLossPct: stopLossPct ?? this.stopLossPct,
+      takeProfitPct: takeProfitPct ?? this.takeProfitPct,
       kisLiveAutoEnabled: kisLiveAutoEnabled ?? this.kisLiveAutoEnabled,
       kisLiveAutoBuyEnabled:
           kisLiveAutoBuyEnabled ?? this.kisLiveAutoBuyEnabled,
