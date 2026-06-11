@@ -942,6 +942,13 @@ class ApiClient {
   Future<OpsSettings> getOpsSettings() async {
     try {
       final j = await _getJson('/ops/settings');
+      final krNoNewEntryAfter = (j['kr_no_new_entry_after'] ??
+              j['no_new_entry_after'] ??
+              j['kis_limited_auto_buy_no_new_entry_after'] ??
+              '14:50')
+          .toString();
+      final usNoNewEntryAfter =
+          (j['us_no_new_entry_after'] ?? '15:45').toString();
       return OpsSettings(
         schedulerEnabled: j['scheduler_enabled'] == true,
         botEnabled: j['bot_enabled'] == true,
@@ -966,16 +973,16 @@ class ApiClient {
                 j['max_open_positions'] ??
                 j['kis_limited_auto_buy_max_positions'],
             3),
-        maxPositionPct:
-            _readNullableDouble(j['max_position_pct']) ?? 0.03,
+        maxPositionPct: _readNullableDouble(j['max_position_pct']) ?? 0.03,
         maxOrderNotionalPct:
             _readNullableDouble(j['max_order_notional_pct']) ?? 0.03,
-        dailyMaxLossPct:
-            _readNullableDouble(j['daily_max_loss_pct']) ?? 0,
-        noNewEntryAfter: (j['no_new_entry_after'] ??
-                j['kis_limited_auto_buy_no_new_entry_after'] ??
-                '14:50')
-            .toString(),
+        dailyMaxLossPct: _readNullableDouble(j['daily_max_loss_pct']) ?? 0,
+        noNewEntryAfter: krNoNewEntryAfter,
+        krNoNewEntryAfter: krNoNewEntryAfter,
+        usNoNewEntryAfter: usNoNewEntryAfter,
+        usNoNewEntryAfterReadOnly:
+            j['us_no_new_entry_after_read_only'] != false,
+        usNoNewEntryAfterDerived: j['us_no_new_entry_after_derived'] != false,
         stopLossPct: _readNullableDouble(j['stop_loss_pct']) ?? 0.015,
         takeProfitPct: _readNullableDouble(j['take_profit_pct']) ?? 0.03,
         kisLiveAutoEnabled: j['kis_live_auto_enabled'] == true,
@@ -1047,7 +1054,7 @@ class ApiClient {
         kisLimitedAutoBuyRequireMarketOpen:
             j['kis_limited_auto_buy_require_market_open'] != false,
         kisLimitedAutoBuyNoNewEntryAfter:
-            (j['kis_limited_auto_buy_no_new_entry_after'] ?? '14:50')
+            (j['kis_limited_auto_buy_no_new_entry_after'] ?? krNoNewEntryAfter)
                 .toString(),
         kisLimitedAutoBuyAllowGptHardBlock:
             j['kis_limited_auto_buy_allow_gpt_hard_block'] == true,

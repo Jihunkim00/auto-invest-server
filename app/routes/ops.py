@@ -41,6 +41,8 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     max_position_pct: float | None = Field(default=None, ge=0, le=1)
     max_order_notional_pct: float | None = Field(default=None, ge=0, le=1)
     daily_max_loss_pct: float | None = Field(default=None, ge=0, le=1)
+    kr_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    us_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     stop_loss_enabled: bool | None = None
     stop_loss_pct: float | None = Field(default=None, ge=0, le=1)
@@ -140,11 +142,28 @@ def get_settings_catalog(db: Session = Depends(get_db)):
 @router.put("/settings")
 def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends(get_db)):
     svc = RuntimeSettingService()
+    payload_values = payload.model_dump(exclude_none=True)
+    deprecation_warnings: list[dict[str, str]] = []
+    if "no_new_entry_after" in payload_values:
+        deprecation_warnings.append(
+            {
+                "key": "no_new_entry_after",
+                "replacement_key": "kr_no_new_entry_after",
+                "message": (
+                    "no_new_entry_after is deprecated. "
+                    "Use kr_no_new_entry_after instead."
+                ),
+            }
+        )
     try:
-        settings = svc.update_settings(db, payload.model_dump(exclude_none=True))
+        settings = svc.update_settings(db, payload_values)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"result": "updated", "settings": settings}
+    response: dict[str, Any] = {"result": "updated", "settings": settings}
+    if deprecation_warnings:
+        response["deprecation_warnings"] = deprecation_warnings
+        response["warning_message"] = deprecation_warnings[0]["message"]
+    return response
 
 
 @router.post("/settings/apply-preset")

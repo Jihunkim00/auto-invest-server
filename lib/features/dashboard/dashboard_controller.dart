@@ -3322,37 +3322,34 @@ OpsSettings _opsSettingsWithPayload(
     'kis_limited_auto_take_profit_enabled',
     fallbackKey: 'kis_limited_auto_sell_take_profit_enabled',
   );
+  final krNoNewEntryAfter = _payloadString(values, 'kr_no_new_entry_after') ??
+      _payloadString(values, 'no_new_entry_after') ??
+      _payloadString(values, 'kis_limited_auto_buy_no_new_entry_after');
   return settings.copyWith(
     schedulerEnabled:
         _payloadBool(values, 'scheduler_enabled') ?? settings.schedulerEnabled,
     dryRun: _payloadBool(values, 'dry_run') ?? settings.dryRun,
     killSwitch: _payloadBool(values, 'kill_switch') ?? settings.killSwitch,
-    currentOperationMode:
-        _payloadString(values, 'operation_mode') ?? settings.currentOperationMode,
+    currentOperationMode: _payloadString(values, 'operation_mode') ??
+        settings.currentOperationMode,
     maxDailyTrades:
         _payloadInt(values, 'max_trades_per_day') ?? settings.maxDailyTrades,
-    maxLiveOrdersPerDay:
-        _payloadInt(values, 'max_live_orders_per_day') ??
-            _payloadInt(values, 'kis_scheduler_max_live_orders_per_day') ??
-            settings.maxLiveOrdersPerDay,
-    maxPositions:
-        _payloadInt(values, 'max_positions') ??
-            _payloadInt(values, 'max_open_positions') ??
-            _payloadInt(values, 'kis_limited_auto_buy_max_positions') ??
-            settings.maxPositions,
+    maxLiveOrdersPerDay: _payloadInt(values, 'max_live_orders_per_day') ??
+        _payloadInt(values, 'kis_scheduler_max_live_orders_per_day') ??
+        settings.maxLiveOrdersPerDay,
+    maxPositions: _payloadInt(values, 'max_positions') ??
+        _payloadInt(values, 'max_open_positions') ??
+        _payloadInt(values, 'kis_limited_auto_buy_max_positions') ??
+        settings.maxPositions,
     maxPositionPct:
         _payloadDouble(values, 'max_position_pct') ?? settings.maxPositionPct,
-    maxOrderNotionalPct:
-        _payloadDouble(values, 'max_order_notional_pct') ??
-            _payloadDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
-            settings.maxOrderNotionalPct,
-    dailyMaxLossPct:
-        _payloadDouble(values, 'daily_max_loss_pct') ??
-            settings.dailyMaxLossPct,
-    noNewEntryAfter:
-        _payloadString(values, 'no_new_entry_after') ??
-            _payloadString(values, 'kis_limited_auto_buy_no_new_entry_after') ??
-            settings.noNewEntryAfter,
+    maxOrderNotionalPct: _payloadDouble(values, 'max_order_notional_pct') ??
+        _payloadDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
+        settings.maxOrderNotionalPct,
+    dailyMaxLossPct: _payloadDouble(values, 'daily_max_loss_pct') ??
+        settings.dailyMaxLossPct,
+    noNewEntryAfter: krNoNewEntryAfter ?? settings.noNewEntryAfter,
+    krNoNewEntryAfter: krNoNewEntryAfter ?? settings.krNoNewEntryAfter,
     stopLossPct:
         _payloadDouble(values, 'stop_loss_pct') ?? settings.stopLossPct,
     takeProfitPct:
@@ -3408,6 +3405,8 @@ OpsSettings _opsSettingsWithPayload(
           'kis_limited_auto_buy_requires_shadow_review',
         ) ??
         settings.kisLimitedAutoBuyRequiresShadowReview,
+    kisLimitedAutoBuyNoNewEntryAfter:
+        krNoNewEntryAfter ?? settings.kisLimitedAutoBuyNoNewEntryAfter,
     kisSchedulerAllowLimitedAutoSell:
         _payloadBool(values, 'kis_scheduler_allow_limited_auto_sell') ??
             settings.kisSchedulerAllowLimitedAutoSell,

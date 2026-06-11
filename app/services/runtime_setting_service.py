@@ -10,9 +10,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL, MAX_TRADES_PER_DAY, NEAR_CLOSE_MINUTES
 from app.db.models import OrderLog, RuntimeSetting
+from app.services.market_session_service import MarketSessionService
 
 
 KR_TZ = ZoneInfo("Asia/Seoul")
+NY_TZ = ZoneInfo("America/New_York")
 CONSERVATIVE_LIVE_ORDER_LIMIT = 1
 CONSERVATIVE_MAX_NOTIONAL_PCT = 0.03
 KIS_BUY_EXECUTION_FLAGS = (
@@ -308,6 +310,10 @@ class RuntimeSettingService:
             ),
             1.0,
         )
+        kr_no_new_entry_after = str(
+            settings["kis_limited_auto_buy_no_new_entry_after"] or "14:50"
+        )
+        us_no_new_entry_after = self._us_no_new_entry_after()
         return {
             "current_operation_mode": self.current_operation_mode(settings),
             "us_scheduler_enabled": bool(settings["scheduler_enabled"]),
@@ -325,14 +331,26 @@ class RuntimeSettingService:
             "max_order_notional_pct": max_order_notional_pct
             or CONSERVATIVE_MAX_NOTIONAL_PCT,
             "daily_max_loss_pct": 0.0,
-            "no_new_entry_after": str(
-                settings["kis_limited_auto_buy_no_new_entry_after"] or "14:50"
-            ),
+            "kr_no_new_entry_after": kr_no_new_entry_after,
+            "us_no_new_entry_after": us_no_new_entry_after,
+            # Backward compatibility only. Prefer kr_no_new_entry_after.
+            "no_new_entry_after": kr_no_new_entry_after,
+            "us_no_new_entry_after_read_only": True,
+            "us_no_new_entry_after_derived": True,
+            "us_no_new_entry_after_source": "market_sessions",
             "stop_loss_enabled": stop_loss_enabled,
             "stop_loss_pct": 0.015,
             "take_profit_enabled": take_profit_enabled,
             "take_profit_pct": 0.03,
         }
+
+    def _us_no_new_entry_after(self) -> str:
+        # TODO(PR47): replace this derived value if Alpaca gets a writable
+        # runtime no-new-entry setting separate from market_sessions.yaml.
+        try:
+            return str(MarketSessionService().get_session("US").no_new_entry_after)
+        except Exception:
+            return "15:45"
 
     def get_trade_limits_for_market(
         self,
@@ -775,6 +793,7 @@ class RuntimeSettingService:
         if normalized not in OPERATION_MODE_PRESETS:
             raise ValueError(f"unsupported operation mode preset: {preset}")
 
+        preset_payload = self._preset_payload(normalized)
         if normalized == "full_live_test_mode" and not confirm_dangerous:
             settings = self.get_settings(db)
             risk_summary = self._kis_risk_summary(
@@ -788,12 +807,26 @@ class RuntimeSettingService:
                 "risk_summary": risk_summary,
                 "requires_confirmation": True,
                 "warning_level": "dangerous_mixed",
+                "changed_keys": [],
+                "unchanged_keys": sorted(preset_payload),
+                **self._preset_response_metadata(
+                    normalized,
+                    warning_level="dangerous_mixed",
+                    applied=False,
+                ),
             }
 
-        settings = self.update_settings(db, self._preset_payload(normalized))
+        before = self.get_settings(db)
+        settings = self.update_settings(db, preset_payload)
         risk_summary = self._kis_risk_summary(
             settings,
             daily_live_order_count=self._daily_kis_live_order_count(db),
+        )
+        changed_keys = sorted(
+            key for key in preset_payload if before.get(key) != settings.get(key)
+        )
+        unchanged_keys = sorted(
+            key for key in preset_payload if before.get(key) == settings.get(key)
         )
         return {
             "preset": normalized,
@@ -802,6 +835,58 @@ class RuntimeSettingService:
             "risk_summary": risk_summary,
             "requires_confirmation": False,
             "warning_level": risk_summary["warning_level"],
+            "changed_keys": changed_keys,
+            "unchanged_keys": unchanged_keys,
+            **self._preset_response_metadata(
+                normalized,
+                warning_level=str(risk_summary["warning_level"]),
+                applied=True,
+            ),
+        }
+
+    def _preset_response_metadata(
+        self,
+        preset: str,
+        *,
+        warning_level: str,
+        applied: bool,
+    ) -> dict[str, Any]:
+        if preset in {"kis_sell_only_automation", "full_live_test_mode"}:
+            scope = "kis"
+            brokers = ["kis"]
+            markets = ["KR"]
+        else:
+            scope = "global"
+            brokers = ["alpaca", "kis"]
+            markets = ["US", "KR"]
+
+        if preset == "safe_mode":
+            warning_message = "Safe Mode affects Alpaca/US and KIS/KR automation."
+        elif preset == "kis_sell_only_automation":
+            warning_message = (
+                "KIS/KR sell-only scheduler automation is armed; live buy remains off."
+            )
+        elif preset == "full_live_test_mode":
+            warning_message = (
+                "KIS/KR full live test mode can arm live buy and live sell automation."
+            )
+            if not applied:
+                warning_message += " Confirmation is required before applying."
+        elif preset == "manual_live_trading":
+            warning_message = (
+                "Manual live trading does not arm scheduler live order automation."
+            )
+        else:
+            warning_message = (
+                "Dry-run scheduler simulation affects both broker scheduler checks."
+            )
+
+        return {
+            "preset_scope": scope,
+            "affected_brokers": brokers,
+            "affected_markets": markets,
+            "warning_message": warning_message,
+            "warning_level": warning_level,
         }
 
     def settings_catalog(self, db: Session) -> dict[str, Any]:
@@ -812,48 +897,161 @@ class RuntimeSettingService:
                 "current_operation_mode",
                 "Operation mode",
                 "Single high-level runtime mode used by the Settings UI.",
-                "operation_mode",
+                "global_safety",
                 "enum",
                 settings["current_operation_mode"],
                 defaults["current_operation_mode"],
                 options=sorted(OPERATION_MODE_PRESETS),
+                affects=["Global safety posture", "Operation mode presets"],
+            ),
+            _catalog_item(
+                "dry_run",
+                "Dry-run",
+                "Global dry-run guard. When enabled, live scheduler order paths stay blocked.",
+                "global_safety",
+                "bool",
+                settings["dry_run"],
+                defaults["dry_run"],
+                affects=["Alpaca/US live order guard", "KIS/KR live order guard"],
+            ),
+            _catalog_item(
+                "kill_switch",
+                "Kill switch",
+                "Global emergency stop for manual and scheduler order paths.",
+                "global_safety",
+                "bool",
+                settings["kill_switch"],
+                defaults["kill_switch"],
+                is_dangerous=bool(settings["kill_switch"]),
+                affects=["Manual trading", "Scheduler automation"],
             ),
             _catalog_item(
                 "scheduler_enabled",
-                "Scheduler",
-                "Global scheduler switch for automated checks.",
-                "schedule",
+                "Global scheduler",
+                "Global scheduler switch required before any broker scheduler can run.",
+                "global_safety",
                 "bool",
                 settings["scheduler_enabled"],
                 defaults["scheduler_enabled"],
+                affects=["Alpaca/US scheduler", "KIS/KR scheduler"],
+                automation_scope="scheduler",
             ),
             _catalog_item(
                 "us_scheduler_enabled",
-                "US schedule",
-                "US scheduled checks use the global scheduler switch.",
-                "schedule",
+                "US scheduler enabled",
+                "Alpaca/US scheduler checks use the global scheduler switch.",
+                "alpaca_us_trading",
                 "bool",
                 settings["us_scheduler_enabled"],
                 defaults["us_scheduler_enabled"],
+                scope="alpaca",
+                market="US",
+                broker="alpaca",
+                timezone=str(NY_TZ.key),
+                affects=["Alpaca/US scheduler entry checks", "Global scheduler switch"],
+                automation_scope="scheduler",
+            ),
+            _catalog_item(
+                "us_no_new_entry_after",
+                "US no new entry after",
+                (
+                    "Displayed from current US schedule/near-close behavior; "
+                    "not yet a separate runtime setting."
+                ),
+                "alpaca_us_trading",
+                "time",
+                settings["us_no_new_entry_after"],
+                defaults["us_no_new_entry_after"],
+                scope="alpaca",
+                market="US",
+                broker="alpaca",
+                timezone=str(NY_TZ.key),
+                affects=["Alpaca/US entry checks", "US market session cutoff"],
+                automation_scope="scheduler",
+                read_only=True,
+                derived=True,
             ),
             _catalog_item(
                 "kr_scheduler_enabled",
-                "KR schedule",
+                "KIS scheduler enabled",
                 "KIS scheduler runtime switch.",
-                "schedule",
+                "kis_kr_trading",
                 "bool",
                 settings["kr_scheduler_enabled"],
                 defaults["kr_scheduler_enabled"],
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR scheduler"],
+                automation_scope="scheduler",
             ),
             _catalog_item(
                 "kr_scheduler_mode",
                 "KR scheduler mode",
                 "Simplified KIS scheduler mode mapped to runtime flags.",
-                "schedule",
+                "kis_kr_trading",
                 "enum",
                 settings["kr_scheduler_mode"],
                 defaults["kr_scheduler_mode"],
                 options=sorted(KR_SCHEDULER_MODES),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR scheduler buy/sell arming"],
+                automation_scope="scheduler",
+            ),
+            _catalog_item(
+                "kr_no_new_entry_after",
+                "KR no new entry after",
+                "KIS/KR new-entry cutoff in Asia/Seoul time.",
+                "kis_kr_trading",
+                "time",
+                settings["kr_no_new_entry_after"],
+                defaults["kr_no_new_entry_after"],
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS limited auto-buy", "KR scheduler entry"],
+                automation_scope="scheduler",
+            ),
+            _catalog_item(
+                "near_close_block_minutes",
+                "US near-close block minutes",
+                "Alpaca/US new-entry guard window before the New York close.",
+                "schedule",
+                "int",
+                settings["near_close_block_minutes"],
+                defaults["near_close_block_minutes"],
+                minimum=0,
+                maximum=120,
+                unit="minutes",
+                scope="alpaca",
+                market="US",
+                broker="alpaca",
+                timezone=str(NY_TZ.key),
+                affects=["Alpaca/US entry guard", "US scheduler entry"],
+                automation_scope="manual_and_scheduler",
+            ),
+            _catalog_item(
+                "same_direction_cooldown_minutes",
+                "US same-direction cooldown",
+                "Alpaca/US cooldown before another same-direction entry signal.",
+                "schedule",
+                "int",
+                settings["same_direction_cooldown_minutes"],
+                defaults["same_direction_cooldown_minutes"],
+                minimum=0,
+                maximum=1440,
+                unit="minutes",
+                scope="alpaca",
+                market="US",
+                broker="alpaca",
+                timezone=str(NY_TZ.key),
+                affects=["Alpaca/US entry guard"],
+                automation_scope="manual_and_scheduler",
             ),
             _catalog_item(
                 "max_trades_per_day",
@@ -866,6 +1064,7 @@ class RuntimeSettingService:
                 minimum=1,
                 maximum=20,
                 unit="orders",
+                affects=["Global risk limits"],
             ),
             _catalog_item(
                 "max_live_orders_per_day",
@@ -880,6 +1079,12 @@ class RuntimeSettingService:
                 unit="orders",
                 is_dangerous=settings["max_live_orders_per_day"]
                 > CONSERVATIVE_LIVE_ORDER_LIMIT,
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR scheduler live order cap"],
+                automation_scope="scheduler",
             ),
             _catalog_item(
                 "max_positions",
@@ -892,6 +1097,7 @@ class RuntimeSettingService:
                 minimum=1,
                 maximum=100,
                 unit="positions",
+                affects=["Global position limits", "KIS/KR buy-position cap"],
             ),
             _catalog_item(
                 "max_position_pct",
@@ -904,6 +1110,11 @@ class RuntimeSettingService:
                 minimum=0.0,
                 maximum=1.0,
                 unit="pct",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR buy notional cap"],
             ),
             _catalog_item(
                 "max_order_notional_pct",
@@ -918,6 +1129,11 @@ class RuntimeSettingService:
                 unit="pct",
                 is_dangerous=settings["max_order_notional_pct"]
                 > CONSERVATIVE_MAX_NOTIONAL_PCT,
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR live order notional cap"],
             ),
             _catalog_item(
                 "daily_max_loss_pct",
@@ -931,15 +1147,27 @@ class RuntimeSettingService:
                 maximum=1.0,
                 unit="pct",
                 is_advanced=True,
+                affects=["Displayed diagnostics"],
+                read_only=True,
+                derived=True,
             ),
             _catalog_item(
                 "no_new_entry_after",
-                "No new entry after",
-                "KIS limited auto-buy cutoff.",
-                "risk_limits",
+                "Deprecated no new entry after",
+                "Deprecated alias for kr_no_new_entry_after.",
+                "advanced_diagnostics",
                 "time",
                 settings["no_new_entry_after"],
                 defaults["no_new_entry_after"],
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS limited auto-buy", "KR scheduler entry"],
+                automation_scope="scheduler",
+                is_advanced=True,
+                deprecated=True,
+                replacement_key="kr_no_new_entry_after",
             ),
             _catalog_item(
                 "stop_loss_enabled",
@@ -949,6 +1177,12 @@ class RuntimeSettingService:
                 "bool",
                 settings["stop_loss_enabled"],
                 defaults["stop_loss_enabled"],
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR sell automation"],
+                automation_scope="manual_and_scheduler",
             ),
             _catalog_item(
                 "stop_loss_pct",
@@ -961,6 +1195,12 @@ class RuntimeSettingService:
                 minimum=0.0,
                 maximum=1.0,
                 unit="pct",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR sell automation"],
+                automation_scope="manual_and_scheduler",
             ),
             _catalog_item(
                 "take_profit_enabled",
@@ -971,6 +1211,12 @@ class RuntimeSettingService:
                 settings["take_profit_enabled"],
                 defaults["take_profit_enabled"],
                 is_dangerous=bool(settings["take_profit_enabled"]),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR sell automation"],
+                automation_scope="manual_and_scheduler",
             ),
             _catalog_item(
                 "take_profit_pct",
@@ -983,31 +1229,43 @@ class RuntimeSettingService:
                 minimum=0.0,
                 maximum=1.0,
                 unit="pct",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS/KR sell automation"],
+                automation_scope="manual_and_scheduler",
             ),
         ]
+        existing_keys = {item["key"] for item in items}
         for key in _advanced_runtime_keys():
+            if key in existing_keys:
+                continue
             items.append(
                 _catalog_item(
                     key,
                     _humanize_key(key),
                     "Raw runtime flag for diagnostics.",
-                    "advanced",
+                    "advanced_diagnostics",
                     "bool" if isinstance(settings.get(key), bool) else "value",
                     settings.get(key),
                     defaults.get(key),
                     is_advanced=True,
                     is_dangerous=key in _dangerous_runtime_keys()
                     and bool(settings.get(key)),
+                    automation_scope="diagnostics",
                 )
             )
 
         groups = []
         for group_key, label in (
-            ("operation_mode", "Operation Mode"),
+            ("global_safety", "Global Safety"),
+            ("alpaca_us_trading", "Alpaca / US Trading"),
+            ("kis_kr_trading", "KIS / KR Trading"),
             ("schedule", "Schedule Control"),
             ("risk_limits", "Risk Limits"),
             ("exit_rules", "Exit Rules"),
-            ("advanced", "Advanced Flags / Diagnostics"),
+            ("advanced_diagnostics", "Advanced Diagnostics"),
         ):
             groups.append(
                 {
@@ -1217,6 +1475,11 @@ class RuntimeSettingService:
         return self.get_settings(db)
 
     def _normalize_simplified_payload(self, payload: dict[str, Any]) -> None:
+        if "us_no_new_entry_after" in payload:
+            raise ValueError(
+                "us_no_new_entry_after is read-only/derived from current "
+                "US schedule behavior; it is not a separate runtime setting yet."
+            )
         if "us_scheduler_enabled" in payload and "scheduler_enabled" not in payload:
             payload["scheduler_enabled"] = bool(payload["us_scheduler_enabled"])
         if "kr_scheduler_enabled" in payload and "kis_scheduler_enabled" not in payload:
@@ -1240,11 +1503,12 @@ class RuntimeSettingService:
             payload.setdefault("kis_live_auto_max_notional_pct", notional_value)
             payload.setdefault("kis_limited_auto_sell_max_notional_pct", notional_value)
             payload.setdefault("kis_limited_auto_buy_max_notional_pct", notional_value)
-        if "no_new_entry_after" in payload:
-            payload.setdefault(
-                "kis_limited_auto_buy_no_new_entry_after",
-                payload["no_new_entry_after"],
-            )
+        if "no_new_entry_after" in payload and "kr_no_new_entry_after" not in payload:
+            payload["kr_no_new_entry_after"] = payload["no_new_entry_after"]
+        if "kr_no_new_entry_after" in payload:
+            payload["kis_limited_auto_buy_no_new_entry_after"] = payload[
+                "kr_no_new_entry_after"
+            ]
         if "stop_loss_enabled" in payload:
             value = bool(payload["stop_loss_enabled"])
             payload.setdefault("kis_limited_auto_stop_loss_enabled", value)
@@ -1338,12 +1602,37 @@ def _catalog_item(
     is_advanced: bool = False,
     is_dangerous: bool = False,
     requires_restart: bool = False,
+    scope: str | None = None,
+    market: str | None = None,
+    broker: str | None = None,
+    timezone: str | None = None,
+    affects: list[str] | None = None,
+    automation_scope: str | None = None,
+    read_only: bool = False,
+    derived: bool = False,
+    deprecated: bool = False,
+    replacement_key: str | None = None,
 ) -> dict[str, Any]:
+    scope_metadata = _catalog_scope_metadata(
+        key,
+        group,
+        scope=scope,
+        market=market,
+        broker=broker,
+        timezone=timezone,
+        automation_scope=automation_scope,
+    )
     item = {
         "key": key,
         "label": label,
         "description": description,
         "group": group,
+        "scope": scope_metadata["scope"],
+        "market": scope_metadata["market"],
+        "broker": scope_metadata["broker"],
+        "timezone": scope_metadata["timezone"],
+        "automation_scope": scope_metadata["automation_scope"],
+        "affects": affects or scope_metadata["affects"],
         "value_type": value_type,
         "current_value": current_value,
         "default_value": default_value,
@@ -1351,7 +1640,12 @@ def _catalog_item(
         "is_advanced": is_advanced,
         "is_dangerous": is_dangerous,
         "requires_restart": requires_restart,
+        "read_only": read_only,
+        "derived": derived,
+        "deprecated": deprecated,
     }
+    if replacement_key is not None:
+        item["replacement_key"] = replacement_key
     if minimum is not None:
         item["min"] = minimum
     if maximum is not None:
@@ -1361,10 +1655,60 @@ def _catalog_item(
     return item
 
 
+def _catalog_scope_metadata(
+    key: str,
+    group: str,
+    *,
+    scope: str | None,
+    market: str | None,
+    broker: str | None,
+    timezone: str | None,
+    automation_scope: str | None,
+) -> dict[str, Any]:
+    if scope is None:
+        if key.startswith(("kis_", "kr_")) or group == "kis_kr_trading":
+            scope = "kis"
+        elif key.startswith("us_") or group == "alpaca_us_trading":
+            scope = "alpaca"
+        else:
+            scope = "global"
+
+    if scope == "kis":
+        market = market or "KR"
+        broker = broker or "kis"
+        timezone = timezone or str(KR_TZ.key)
+        default_affects = ["KIS/KR runtime settings"]
+    elif scope == "alpaca":
+        market = market or "US"
+        broker = broker or "alpaca"
+        timezone = timezone or str(NY_TZ.key)
+        default_affects = ["Alpaca/US runtime settings"]
+    else:
+        market = market
+        broker = broker
+        timezone = timezone
+        default_affects = ["Global system settings"]
+
+    if automation_scope is None:
+        if group == "advanced_diagnostics":
+            automation_scope = "diagnostics"
+        elif "scheduler" in key or "schedule" in key or "no_new_entry_after" in key:
+            automation_scope = "scheduler"
+        else:
+            automation_scope = "manual_and_scheduler"
+
+    return {
+        "scope": scope,
+        "market": market,
+        "broker": broker,
+        "timezone": timezone,
+        "automation_scope": automation_scope,
+        "affects": default_affects,
+    }
+
+
 def _advanced_runtime_keys() -> tuple[str, ...]:
     return (
-        "dry_run",
-        "kill_switch",
         "kis_scheduler_live_enabled",
         "kis_scheduler_allow_real_orders",
         "kis_scheduler_configured_allow_real_orders",

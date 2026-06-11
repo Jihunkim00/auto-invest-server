@@ -17,6 +17,10 @@ class OpsSettings {
     this.maxOrderNotionalPct = 0.03,
     this.dailyMaxLossPct = 0,
     this.noNewEntryAfter = '14:50',
+    this.krNoNewEntryAfter = '14:50',
+    this.usNoNewEntryAfter = '15:45',
+    this.usNoNewEntryAfterReadOnly = true,
+    this.usNoNewEntryAfterDerived = true,
     this.stopLossPct = 0.015,
     this.takeProfitPct = 0.03,
     this.kisLiveAutoEnabled = false,
@@ -84,6 +88,10 @@ class OpsSettings {
   final double maxOrderNotionalPct;
   final double dailyMaxLossPct;
   final String noNewEntryAfter;
+  final String krNoNewEntryAfter;
+  final String usNoNewEntryAfter;
+  final bool usNoNewEntryAfterReadOnly;
+  final bool usNoNewEntryAfterDerived;
   final double stopLossPct;
   final double takeProfitPct;
   final bool kisLiveAutoEnabled;
@@ -151,6 +159,10 @@ class OpsSettings {
     double? maxOrderNotionalPct,
     double? dailyMaxLossPct,
     String? noNewEntryAfter,
+    String? krNoNewEntryAfter,
+    String? usNoNewEntryAfter,
+    bool? usNoNewEntryAfterReadOnly,
+    bool? usNoNewEntryAfterDerived,
     double? stopLossPct,
     double? takeProfitPct,
     bool? kisLiveAutoEnabled,
@@ -211,15 +223,19 @@ class OpsSettings {
       maxDailyEntries: maxDailyEntries ?? this.maxDailyEntries,
       minEntryScore: minEntryScore ?? this.minEntryScore,
       minScoreGap: minScoreGap ?? this.minScoreGap,
-      currentOperationMode:
-          currentOperationMode ?? this.currentOperationMode,
+      currentOperationMode: currentOperationMode ?? this.currentOperationMode,
       maxLiveOrdersPerDay: maxLiveOrdersPerDay ?? this.maxLiveOrdersPerDay,
       maxPositions: maxPositions ?? this.maxPositions,
       maxPositionPct: maxPositionPct ?? this.maxPositionPct,
-      maxOrderNotionalPct:
-          maxOrderNotionalPct ?? this.maxOrderNotionalPct,
+      maxOrderNotionalPct: maxOrderNotionalPct ?? this.maxOrderNotionalPct,
       dailyMaxLossPct: dailyMaxLossPct ?? this.dailyMaxLossPct,
       noNewEntryAfter: noNewEntryAfter ?? this.noNewEntryAfter,
+      krNoNewEntryAfter: krNoNewEntryAfter ?? this.krNoNewEntryAfter,
+      usNoNewEntryAfter: usNoNewEntryAfter ?? this.usNoNewEntryAfter,
+      usNoNewEntryAfterReadOnly:
+          usNoNewEntryAfterReadOnly ?? this.usNoNewEntryAfterReadOnly,
+      usNoNewEntryAfterDerived:
+          usNoNewEntryAfterDerived ?? this.usNoNewEntryAfterDerived,
       stopLossPct: stopLossPct ?? this.stopLossPct,
       takeProfitPct: takeProfitPct ?? this.takeProfitPct,
       kisLiveAutoEnabled: kisLiveAutoEnabled ?? this.kisLiveAutoEnabled,

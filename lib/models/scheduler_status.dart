@@ -14,17 +14,24 @@ class SchedulerStatus {
   });
 
   factory SchedulerStatus.fromJson(Map<String, dynamic> json) {
+    final global = Map<String, dynamic>.from((json['global'] as Map?) ?? {});
     final kr = MarketSchedulerStatus.fromJson(
-      Map<String, dynamic>.from((json['KR'] as Map?) ?? {}),
+      Map<String, dynamic>.from(
+        (json['kis'] as Map?) ?? (json['KR'] as Map?) ?? {},
+      ),
       isKr: true,
     );
     final riskSummary = SchedulerRiskSummary.fromJson(
       Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
     );
     return SchedulerStatus(
-      runtimeSchedulerEnabled: json['runtime_scheduler_enabled'] == true,
+      runtimeSchedulerEnabled: json['runtime_scheduler_enabled'] == true ||
+          global['scheduler_enabled'] == true,
       us: MarketSchedulerStatus.fromJson(
-          Map<String, dynamic>.from((json['US'] as Map?) ?? {})),
+        Map<String, dynamic>.from(
+          (json['alpaca'] as Map?) ?? (json['US'] as Map?) ?? {},
+        ),
+      ),
       kr: kr,
       currentOperationMode:
           _readString(json['current_operation_mode'], 'safe_mode'),
@@ -98,6 +105,7 @@ class MarketSchedulerStatus {
     this.lastSchedulerRunId,
     this.lastSchedulerRunMode,
     this.lastSchedulerRunTriggerSource,
+    this.noNewEntryAfter,
     this.riskSummary = const SchedulerRiskSummary.safe(),
   });
 
@@ -106,7 +114,8 @@ class MarketSchedulerStatus {
     bool isKr = false,
   }) {
     return MarketSchedulerStatus(
-      enabledForScheduler: json['enabled_for_scheduler'] == true,
+      enabledForScheduler: json['enabled_for_scheduler'] == true ||
+          json['scheduler_enabled'] == true,
       timezone: _readString(json['timezone'], ''),
       slots: _readSlots(json['slots']),
       previewOnly: json['preview_only'] == true,
@@ -121,7 +130,8 @@ class MarketSchedulerStatus {
       enabledForSchedulerBlockReasons:
           _readStringList(json['enabled_for_scheduler_block_reasons']),
       nextSlotName: _readNullableString(json['next_slot_name']),
-      nextSlotTimeLocal: _readNullableString(json['next_slot_time_local']),
+      nextSlotTimeLocal:
+          _readNullableString(json['next_slot_time_local'] ?? json['next_run']),
       lastSchedulerRunAt: _readNullableString(json['last_scheduler_run_at']),
       lastSchedulerRunResult:
           _readNullableString(json['last_scheduler_run_result']),
@@ -133,6 +143,8 @@ class MarketSchedulerStatus {
       lastSchedulerRunTriggerSource: isKr
           ? _readNullableString(json['last_scheduler_run_trigger_source'])
           : null,
+      noNewEntryAfter: _readNullableString(
+          json['no_new_entry_after'] ?? json['kr_no_new_entry_after']),
       riskSummary: SchedulerRiskSummary.fromJson(
         Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
       ),
@@ -158,6 +170,7 @@ class MarketSchedulerStatus {
   final String? lastSchedulerRunId;
   final String? lastSchedulerRunMode;
   final String? lastSchedulerRunTriggerSource;
+  final String? noNewEntryAfter;
   final SchedulerRiskSummary riskSummary;
 }
 
