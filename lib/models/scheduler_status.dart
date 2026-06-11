@@ -3,17 +3,42 @@ class SchedulerStatus {
     required this.runtimeSchedulerEnabled,
     required this.us,
     required this.kr,
+    this.currentOperationMode = 'safe_mode',
+    this.userFriendlySummary = '',
+    this.riskSummary = const SchedulerRiskSummary.safe(),
+    this.liveOrderPossible = false,
+    this.liveBuyPossible = false,
+    this.liveSellPossible = false,
+    this.dailyLiveOrderRemaining,
+    this.warningMessage = '',
   });
 
   factory SchedulerStatus.fromJson(Map<String, dynamic> json) {
+    final kr = MarketSchedulerStatus.fromJson(
+      Map<String, dynamic>.from((json['KR'] as Map?) ?? {}),
+      isKr: true,
+    );
+    final riskSummary = SchedulerRiskSummary.fromJson(
+      Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
+    );
     return SchedulerStatus(
       runtimeSchedulerEnabled: json['runtime_scheduler_enabled'] == true,
       us: MarketSchedulerStatus.fromJson(
           Map<String, dynamic>.from((json['US'] as Map?) ?? {})),
-      kr: MarketSchedulerStatus.fromJson(
-        Map<String, dynamic>.from((json['KR'] as Map?) ?? {}),
-        isKr: true,
-      ),
+      kr: kr,
+      currentOperationMode:
+          _readString(json['current_operation_mode'], 'safe_mode'),
+      userFriendlySummary: _readString(json['user_friendly_summary'], ''),
+      riskSummary:
+          riskSummary.warningLevel == 'safe' && json['risk_summary'] == null
+              ? kr.riskSummary
+              : riskSummary,
+      liveOrderPossible: json['live_order_possible'] == true,
+      liveBuyPossible: json['live_buy_possible'] == true,
+      liveSellPossible: json['live_sell_possible'] == true,
+      dailyLiveOrderRemaining:
+          _readNullableInt(json['daily_live_order_remaining']),
+      warningMessage: _readString(json['warning_message'], ''),
     );
   }
 
@@ -32,12 +57,24 @@ class SchedulerStatus {
         previewOnly: true,
         realOrdersAllowed: false,
       ),
+      currentOperationMode: 'safe_mode',
+      userFriendlySummary:
+          'Safe mode is active. Scheduler live buy and sell automation are disabled.',
+      warningMessage: 'No scheduler live buy or sell automation is armed.',
     );
   }
 
   final bool runtimeSchedulerEnabled;
   final MarketSchedulerStatus us;
   final MarketSchedulerStatus kr;
+  final String currentOperationMode;
+  final String userFriendlySummary;
+  final SchedulerRiskSummary riskSummary;
+  final bool liveOrderPossible;
+  final bool liveBuyPossible;
+  final bool liveSellPossible;
+  final int? dailyLiveOrderRemaining;
+  final String warningMessage;
 }
 
 class MarketSchedulerStatus {

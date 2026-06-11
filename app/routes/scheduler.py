@@ -58,6 +58,22 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
     kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
+    current_operation_mode = runtime_service.current_operation_mode_read_only(db)
+    daily_live_order_remaining = kr_risk_summary.get("daily_live_order_remaining")
+    live_order_remaining_ok = (
+        daily_live_order_remaining is None or int(daily_live_order_remaining) > 0
+    )
+    live_buy_possible = bool(
+        kr_risk_summary.get("live_buy_armed") and live_order_remaining_ok
+    )
+    live_sell_possible = bool(
+        kr_risk_summary.get("live_sell_armed") and live_order_remaining_ok
+    )
+    user_friendly_summary = _user_friendly_summary(
+        current_operation_mode,
+        kr_risk_summary,
+    )
+    warning_message = _warning_message(current_operation_mode, kr_risk_summary)
 
     kr_live_scheduler_enabled_effective = real_order_scheduler_enabled
 
@@ -127,6 +143,18 @@ def get_scheduler_status(db: Session = Depends(get_db)):
                 )
 
     return {
+        "current_operation_mode": current_operation_mode,
+        "user_friendly_summary": user_friendly_summary,
+        "risk_summary": kr_risk_summary,
+        "next_run": {
+            "US": us_next_slot,
+            "KR": kr_next_slot,
+        },
+        "live_order_possible": bool(live_buy_possible or live_sell_possible),
+        "live_buy_possible": live_buy_possible,
+        "live_sell_possible": live_sell_possible,
+        "daily_live_order_remaining": daily_live_order_remaining,
+        "warning_message": warning_message,
         "runtime_scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
         "US": {
             "enabled_for_scheduler": bool(us.get("enabled_for_scheduler", False)),
@@ -181,8 +209,47 @@ def get_scheduler_status(db: Session = Depends(get_db)):
                 runtime_state["real_order_scheduler_enabled"]
             ),
             "risk_summary": kr_risk_summary,
+            "current_operation_mode": current_operation_mode,
+            "user_friendly_summary": user_friendly_summary,
+            "live_order_possible": bool(live_buy_possible or live_sell_possible),
+            "live_buy_possible": live_buy_possible,
+            "live_sell_possible": live_sell_possible,
+            "daily_live_order_remaining": daily_live_order_remaining,
+            "warning_message": warning_message,
         },
     }
+
+
+def _user_friendly_summary(mode: str, risk_summary: dict[str, Any]) -> str:
+    warning_level = str(risk_summary.get("warning_level") or "safe")
+    if mode == "kis_sell_only_automation":
+        return "KIS sell-only live automation is armed. Auto-buy is disabled."
+    if mode == "full_live_test_mode":
+        return "Full live test mode is armed. Live buy and live sell automation are enabled."
+    if mode == "dry_run_simulation":
+        return "Dry-run simulation is enabled. Scheduler checks can run without real orders."
+    if mode == "manual_live_trading":
+        return "Manual live trading is available while scheduler live orders are disabled."
+    if warning_level == "blocked":
+        blockers = ", ".join(risk_summary.get("blocking_flags") or [])
+        return f"Live automation is requested but blocked: {blockers}."
+    return "Safe mode is active. Scheduler live buy and sell automation are disabled."
+
+
+def _warning_message(mode: str, risk_summary: dict[str, Any]) -> str:
+    warning_level = str(risk_summary.get("warning_level") or "safe")
+    if warning_level == "dangerous_mixed":
+        return "LIVE BUY ARMED and LIVE SELL ARMED may be possible. Full live test mode is dangerous."
+    if warning_level == "armed_sell_only":
+        remaining = risk_summary.get("daily_live_order_remaining")
+        remaining_text = "unknown" if remaining is None else str(remaining)
+        return f"LIVE SELL ARMED. Auto-buy is disabled. Daily live orders remaining: {remaining_text}."
+    if warning_level == "blocked":
+        blockers = ", ".join(risk_summary.get("blocking_flags") or [])
+        return f"Live automation is blocked by: {blockers}."
+    if mode == "manual_live_trading":
+        return "Manual KIS live order submit still requires explicit confirmation and backend validation."
+    return "No scheduler live buy or sell automation is armed."
 
 
 def _next_slot(slots: Any, timezone: str) -> dict[str, str | None]:

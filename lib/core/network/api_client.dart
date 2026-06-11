@@ -955,6 +955,29 @@ class ApiClient {
             j['max_daily_entries'] ?? j['global_daily_entry_limit'], 2),
         minEntryScore: _readInt(j['min_entry_score'], 65),
         minScoreGap: _readInt(j['min_score_gap'], 3),
+        currentOperationMode:
+            (j['current_operation_mode'] ?? 'safe_mode').toString(),
+        maxLiveOrdersPerDay: _readInt(
+            j['max_live_orders_per_day'] ??
+                j['kis_scheduler_max_live_orders_per_day'],
+            1),
+        maxPositions: _readInt(
+            j['max_positions'] ??
+                j['max_open_positions'] ??
+                j['kis_limited_auto_buy_max_positions'],
+            3),
+        maxPositionPct:
+            _readNullableDouble(j['max_position_pct']) ?? 0.03,
+        maxOrderNotionalPct:
+            _readNullableDouble(j['max_order_notional_pct']) ?? 0.03,
+        dailyMaxLossPct:
+            _readNullableDouble(j['daily_max_loss_pct']) ?? 0,
+        noNewEntryAfter: (j['no_new_entry_after'] ??
+                j['kis_limited_auto_buy_no_new_entry_after'] ??
+                '14:50')
+            .toString(),
+        stopLossPct: _readNullableDouble(j['stop_loss_pct']) ?? 0.015,
+        takeProfitPct: _readNullableDouble(j['take_profit_pct']) ?? 0.03,
         kisLiveAutoEnabled: j['kis_live_auto_enabled'] == true,
         kisLiveAutoBuyEnabled: j['kis_live_auto_buy_enabled'] == true,
         kisLiveAutoSellEnabled: j['kis_live_auto_sell_enabled'] == true,
@@ -1066,6 +1089,16 @@ class ApiClient {
 
   Future<void> updateOpsSettings(Map<String, dynamic> values) async {
     await _putJsonBody('/ops/settings', values);
+  }
+
+  Future<Map<String, dynamic>> applyOpsSettingsPreset({
+    required String preset,
+    bool confirmDangerous = false,
+  }) async {
+    return _postJsonBody('/ops/settings/apply-preset', {
+      'preset': preset,
+      'confirm_dangerous': confirmDangerous,
+    });
   }
 
   Future<SchedulerStatus> fetchSchedulerStatus() async {

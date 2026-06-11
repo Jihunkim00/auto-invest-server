@@ -11,320 +11,202 @@ import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 
 void main() {
-  testWidgets('dry-run switch success persists and refreshes settings',
-      (tester) async {
-    final api = _SettingsFakeApiClient(refreshedDryRun: false);
-    final controller = DashboardController(api, autoload: false);
+  testWidgets('Settings shows Operation Mode card', (tester) async {
+    final controller = _controller();
 
     await tester.pumpWidget(_wrap(controller));
 
-    expect(_dryRunTile(tester).value, isTrue);
+    expect(find.text('Operation Mode'), findsOneWidget);
+    expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Dry Run'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
 
-    expect(api.updateOpsSettingsCalls, 1);
-    expect(api.lastSettingsUpdate, {'dry_run': false});
-    expect(api.getOpsSettingsCalls, 1);
-    expect(controller.settings.dryRun, isFalse);
-    expect(_dryRunTile(tester).value, isFalse);
-    expect(
-      find.descendant(
-        of: find.byType(SnackBar),
-        matching: find.text('Dry run disabled successfully.'),
-      ),
-      findsOneWidget,
+    expect(find.text('Safe Mode'), findsWidgets);
+    expect(find.text('Dry-run Simulation'), findsWidgets);
+    expect(find.text('Manual Live Trading'), findsWidgets);
+    expect(find.text('KIS Sell-only Automation'), findsWidgets);
+    expect(find.text('Full Live Test Mode'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('selecting Safe Mode calls apply preset and updates UI',
+      (tester) async {
+    final api = _SettingsFakeApiClient(
+      initialSettings: _opsSettingsForPreset('kis_sell_only_automation'),
     );
-
-    controller.dispose();
-  });
-
-  testWidgets('dry-run switch failure rolls back and refreshes settings',
-      (tester) async {
-    final api = _SettingsFakeApiClient(throwUpdateOpsSettings: true);
-    final controller = DashboardController(api, autoload: false);
+    final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
 
-    expect(_dryRunTile(tester).value, isTrue);
+    await _selectOperationMode(tester, 'Safe Mode');
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Dry Run'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
-    await tester.pumpAndSettle();
-
-    expect(api.updateOpsSettingsCalls, 1);
-    expect(api.lastSettingsUpdate, {'dry_run': false});
-    expect(api.getOpsSettingsCalls, 1);
-    expect(controller.settings.dryRun, isTrue);
-    expect(_dryRunTile(tester).value, isTrue);
-    expect(
-      find.descendant(
-        of: find.byType(SnackBar),
-        matching: find.textContaining('Dry run update failed:'),
-      ),
-      findsOneWidget,
-    );
+    expect(api.applyPresetCalls, 1);
+    expect(api.lastPreset, 'safe_mode');
+    expect(controller.settings.currentOperationMode, 'safe_mode');
+    expect(find.text('Safe Mode applied.'), findsOneWidget);
 
     controller.dispose();
   });
 
-  testWidgets('KIS settings expose editable automation controls',
+  testWidgets('selecting KIS Sell-only Automation shows sell-only armed summary',
       (tester) async {
-    _useTallSettingsViewport(tester);
-    final controller =
-        DashboardController(_SettingsFakeApiClient(), autoload: false)
-          ..selectedProvider = SelectedProvider.kis
-          ..settings = _opsSettings();
-
-    await tester.pumpWidget(_wrap(controller));
-
-    expect(find.text('KIS Automation Controls'), findsWidgets);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Scheduler Enabled'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Scheduler Dry Run'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Scheduler Real Orders'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Scheduler Sell Enabled'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Scheduler Buy Enabled'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Live Auto Sell'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'KIS Live Auto Buy'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'Stop-loss Auto Sell'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'Take-profit Auto Sell'),
-        findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'Limited Auto Buy'),
-        findsOneWidget);
-    expect(
-        find.widgetWithText(
-            SwitchListTile, 'Limited Auto Buy Shadow Review Required'),
-        findsOneWidget);
-    expect(
-        find.widgetWithText(
-            SwitchListTile, 'Scheduler Allow Limited Auto Sell'),
-        findsOneWidget);
-    expect(
-        find.widgetWithText(SwitchListTile, 'Scheduler Allow Limited Auto Buy'),
-        findsOneWidget);
-    expect(find.text('KIS Runtime Diagnostics'), findsWidgets);
-    expect(find.widgetWithText(SwitchListTile, 'Dry Run'), findsOneWidget);
-    expect(find.widgetWithText(SwitchListTile, 'Kill Switch'), findsOneWidget);
-
-    controller.dispose();
-  });
-
-  testWidgets('dangerous KIS ON toggle confirms before API call',
-      (tester) async {
-    _useTallSettingsViewport(tester);
     final api = _SettingsFakeApiClient();
-    final controller = DashboardController(api, autoload: false)
-      ..selectedProvider = SelectedProvider.kis
-      ..settings = _opsSettings();
+    final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
 
-    await tester
-        .tap(find.widgetWithText(SwitchListTile, 'KIS Scheduler Real Orders'));
-    await tester.pumpAndSettle();
+    await _selectOperationMode(tester, 'KIS Sell-only Automation');
 
-    expect(find.text('KIS Scheduler Real Orders'), findsWidgets);
+    expect(api.lastPreset, 'kis_sell_only_automation');
     expect(
-      find.textContaining(
-          'This may allow real KIS orders when all backend gates pass.'),
+      find.text('KIS sell-only live automation is armed. Auto-buy is disabled.'),
       findsOneWidget,
     );
-    expect(api.updateOpsSettingsCalls, 0);
+    expect(find.text('LIVE SELL ARMED ON'), findsOneWidget);
+    expect(find.text('LIVE BUY ARMED OFF'), findsOneWidget);
 
+    controller.dispose();
+  });
+
+  testWidgets('selecting Full Live Test Mode opens danger confirmation dialog',
+      (tester) async {
+    final api = _SettingsFakeApiClient();
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await _selectOperationMode(tester, 'Full Live Test Mode');
+
+    expect(find.text('Full Live Test Mode'), findsWidgets);
+    expect(find.text('This enables live buy and live sell automation.'),
+        findsWidgets);
+    expect(api.applyPresetCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('canceling Full Live Test Mode does not apply preset',
+      (tester) async {
+    final api = _SettingsFakeApiClient();
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+    await _selectOperationMode(tester, 'Full Live Test Mode');
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
 
-    expect(api.updateOpsSettingsCalls, 0);
-    expect(controller.settings.kisSchedulerAllowRealOrders, isFalse);
+    expect(api.applyPresetCalls, 0);
+    expect(controller.settings.currentOperationMode, 'safe_mode');
 
     controller.dispose();
   });
 
-  testWidgets('confirmed KIS ON toggle sends expected settings field',
-      (tester) async {
+  testWidgets('confirming Full Live Test Mode applies preset', (tester) async {
+    final api = _SettingsFakeApiClient();
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+    await _selectOperationMode(tester, 'Full Live Test Mode');
+    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.pumpAndSettle();
+
+    expect(api.applyPresetCalls, 1);
+    expect(api.lastPreset, 'full_live_test_mode');
+    expect(api.lastConfirmDangerous, isTrue);
+    expect(controller.settings.currentOperationMode, 'full_live_test_mode');
+    expect(find.text('LIVE BUY ARMED ON'), findsOneWidget);
+    expect(find.text('LIVE SELL ARMED ON'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Risk Limits card edits numeric values', (tester) async {
     _useTallSettingsViewport(tester);
     final api = _SettingsFakeApiClient();
-    final controller = DashboardController(api, autoload: false)
-      ..selectedProvider = SelectedProvider.kis
-      ..settings = _opsSettings();
+    final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
 
-    await tester.tap(find.widgetWithText(SwitchListTile, 'KIS Live Auto Sell'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
-    await tester.pumpAndSettle();
-
-    expect(api.updateOpsSettingsCalls, 1);
-    expect(api.lastSettingsUpdate, {'kis_live_auto_sell_enabled': true});
-    expect(api.getOpsSettingsCalls, 1);
-    expect(api.schedulerStatusCalls, 1);
-    expect(api.guardedSellStatusCalls, 1);
-    expect(api.guardedBuyStatusCalls, 1);
-
-    controller.dispose();
-  });
-
-  testWidgets('KIS automation failure rolls back and refreshes settings',
-      (tester) async {
-    _useTallSettingsViewport(tester);
-    final api = _SettingsFakeApiClient(throwUpdateOpsSettings: true);
-    final controller = DashboardController(api, autoload: false)
-      ..selectedProvider = SelectedProvider.kis
-      ..settings = _opsSettings();
-
-    await tester.pumpWidget(_wrap(controller));
-
-    await tester.tap(find.widgetWithText(SwitchListTile, 'KIS Live Auto Sell'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
-    await tester.pumpAndSettle();
-
-    expect(api.updateOpsSettingsCalls, 1);
-    expect(api.getOpsSettingsCalls, 1);
-    expect(controller.settings.kisLiveAutoSellEnabled, isFalse);
-    expect(
-      tester
-          .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, 'KIS Live Auto Sell'))
-          .value,
-      isFalse,
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Max trades per day'),
+      '7',
     );
-    expect(
-      find.descendant(
-        of: find.byType(SnackBar),
-        matching: find.textContaining('KIS Live Auto Sell update failed:'),
-      ),
-      findsOneWidget,
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Max live orders per day'),
+      '2',
     );
-
-    controller.dispose();
-  });
-
-  testWidgets('Safe Mode preset sends safe payload', (tester) async {
-    _useTallSettingsViewport(tester);
-    final api = _SettingsFakeApiClient();
-    final controller = DashboardController(api, autoload: false)
-      ..selectedProvider = SelectedProvider.kis
-      ..settings = _opsSettings(
-        dryRun: false,
-        kisSchedulerEnabled: true,
-        kisSchedulerAllowRealOrders: true,
-        kisSchedulerConfiguredAllowRealOrders: true,
-        kisLiveAutoSellEnabled: true,
-        kisLiveAutoBuyEnabled: true,
-      );
-
-    await tester.pumpWidget(_wrap(controller));
-
-    await tester.tap(find.text('Return to Safe Mode'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Max order notional %'),
+      '4.5',
+    );
+    await tester.tap(find.text('Save Risk Limits'));
     await tester.pumpAndSettle();
 
     expect(api.updateOpsSettingsCalls, 1);
-    expect(api.lastSettingsUpdate?['dry_run'], isTrue);
-    expect(api.lastSettingsUpdate?.containsKey('kill_switch'), isFalse);
-    expect(api.lastSettingsUpdate?.containsKey('scheduler_enabled'), isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_dry_run'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_scheduler_live_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_allow_real_orders'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_live_auto_sell_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_live_auto_buy_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_buy_enabled'], isFalse);
-    expect(find.text('Settings Change Result'), findsOneWidget);
-    expect(find.text('Safe Mode enabled'), findsOneWidget);
-    expect(find.text('KIS Scheduler Effective OFF'), findsOneWidget);
-    expect(find.text('KIS Real Order Scheduler OFF'), findsOneWidget);
-    expect(find.text('Live Sell Armed OFF'), findsOneWidget);
-    expect(find.text('Live Buy Armed OFF'), findsOneWidget);
-    expect(find.text('Daily Live Order Limit 1'), findsOneWidget);
-    expect(find.text('Max Notional 3.00%'), findsOneWidget);
-    expect(find.text('Warning Level safe'), findsOneWidget);
-    expect(find.text('KIS Sell OFF'), findsOneWidget);
-    expect(find.text('KIS Buy OFF'), findsOneWidget);
-    expect(find.text('Dry Run ON'), findsOneWidget);
-    expect(find.text('Kill Switch OFF'), findsOneWidget);
+    expect(api.lastSettingsUpdate?['max_trades_per_day'], 7);
+    expect(api.lastSettingsUpdate?['max_live_orders_per_day'], 2);
+    expect(api.lastSettingsUpdate?['max_order_notional_pct'], 0.045);
+    expect(controller.settings.maxDailyTrades, 7);
+    expect(controller.settings.maxLiveOrdersPerDay, 2);
 
     controller.dispose();
   });
 
-  testWidgets('Sell-only Test Mode preset keeps buy flags false',
+  testWidgets('Schedule Control card displays next KR and US run',
       (tester) async {
     _useTallSettingsViewport(tester);
-    final api = _SettingsFakeApiClient();
-    final controller = DashboardController(api, autoload: false)
-      ..selectedProvider = SelectedProvider.kis
-      ..settings = _opsSettings();
+    final controller = _controller();
 
     await tester.pumpWidget(_wrap(controller));
 
-    await tester.tap(find.text('Enable KIS Sell-Only Test Mode'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
-    await tester.pumpAndSettle();
-
-    expect(api.updateOpsSettingsCalls, 1);
-    expect(api.lastSettingsUpdate?['dry_run'], isFalse);
-    expect(api.lastSettingsUpdate?['kill_switch'], isFalse);
-    expect(api.lastSettingsUpdate?['scheduler_enabled'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_scheduler_enabled'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_scheduler_dry_run'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_live_enabled'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_scheduler_allow_real_orders'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_scheduler_sell_enabled'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_live_auto_sell_enabled'], isTrue);
-    expect(
-        api.lastSettingsUpdate?['kis_limited_auto_stop_loss_enabled'], isTrue);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_take_profit_enabled'],
-        isFalse);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_take_profit_enabled'],
-        isFalse);
-    expect(
-        api.lastSettingsUpdate?[
-            'kis_limited_auto_sell_allow_take_profit_trigger'],
-        isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_max_live_orders_per_day'], 1);
-    expect(
-        api.lastSettingsUpdate?['kis_limited_auto_sell_max_orders_per_day'], 1);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_sell_max_notional_pct'],
-        0.03);
-    expect(api.lastSettingsUpdate?['kis_scheduler_buy_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_live_auto_buy_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_limited_auto_buy_enabled'], isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_allow_limited_auto_buy'],
-        isFalse);
-    expect(api.lastSettingsUpdate?['kis_scheduler_allow_limited_auto_sell'],
-        isTrue);
-    expect(find.text('Settings Change Result'), findsOneWidget);
-    expect(find.text('Sell-Only Test Mode enabled'), findsOneWidget);
-    expect(find.text('KIS Scheduler Effective ON'), findsOneWidget);
-    expect(find.text('KIS Real Order Scheduler ON'), findsOneWidget);
-    expect(find.text('Live Sell Armed ON'), findsOneWidget);
-    expect(find.text('Live Buy Armed OFF'), findsOneWidget);
-    expect(find.text('Daily Live Order Limit 1'), findsOneWidget);
-    expect(find.text('Max Notional 3.00%'), findsOneWidget);
-    expect(find.text('Warning Level armed_sell_only'), findsOneWidget);
-    expect(find.text('KIS Sell ON'), findsOneWidget);
-    expect(find.text('KIS Buy OFF'), findsOneWidget);
-    expect(find.text('Dry Run OFF'), findsOneWidget);
-    expect(find.text('Kill Switch OFF'), findsOneWidget);
+    expect(find.text('Schedule Control'), findsOneWidget);
+    expect(find.text('Next US run'), findsOneWidget);
+    expect(find.textContaining('open_phase 2026-06-11T09:30'),
+        findsOneWidget);
+    expect(find.text('Next KR run'), findsOneWidget);
+    expect(find.textContaining('midday 2026-06-12T11:30'), findsOneWidget);
 
     controller.dispose();
   });
+
+  testWidgets('Advanced Flags collapsed by default', (tester) async {
+    _useTallSettingsViewport(tester);
+    final controller = _controller();
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.text('Advanced Flags / Diagnostics'), findsOneWidget);
+    expect(find.text('kis_scheduler_live_enabled'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('dangerous_mixed renders red warning', (tester) async {
+    final api = _SettingsFakeApiClient(
+      initialSettings: _opsSettingsForPreset('full_live_test_mode'),
+    );
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.byKey(const Key('settings-warning-dangerous_mixed')),
+        findsOneWidget);
+    expect(find.text('FULL LIVE TEST MODE ON'), findsOneWidget);
+    expect(find.text('LIVE BUY ARMED ON'), findsOneWidget);
+
+    controller.dispose();
+  });
+}
+
+DashboardController _controller([_SettingsFakeApiClient? api]) {
+  final fake = api ?? _SettingsFakeApiClient();
+  return DashboardController(fake, autoload: false)
+    ..selectedProvider = SelectedProvider.kis
+    ..settings = fake.currentSettings
+    ..schedulerStatus = fake.currentStatus
+    ..kisSafetyStatus = fake.safetyStatus;
 }
 
 Widget _wrap(DashboardController controller) {
@@ -335,35 +217,46 @@ Widget _wrap(DashboardController controller) {
 }
 
 void _useTallSettingsViewport(WidgetTester tester) {
-  tester.view.physicalSize = const Size(1200, 3200);
+  tester.view.physicalSize = const Size(1200, 6000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-SwitchListTile _dryRunTile(WidgetTester tester) {
-  return tester.widget<SwitchListTile>(
-    find.widgetWithText(SwitchListTile, 'Dry Run'),
-  );
+Future<void> _selectOperationMode(WidgetTester tester, String label) async {
+  await tester.tap(find.byType(DropdownButtonFormField<String>));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+  await tester.pumpAndSettle();
 }
 
 class _SettingsFakeApiClient extends ApiClient {
-  _SettingsFakeApiClient({
-    this.refreshedDryRun = true,
-    this.throwUpdateOpsSettings = false,
-    OpsSettings? initialSettings,
-  }) : currentSettings =
-            initialSettings ?? _opsSettings(dryRun: refreshedDryRun);
+  _SettingsFakeApiClient({OpsSettings? initialSettings})
+      : currentSettings = initialSettings ?? _opsSettings() {
+    currentStatus = _schedulerStatusForSettings(currentSettings);
+  }
 
-  final bool refreshedDryRun;
-  final bool throwUpdateOpsSettings;
   OpsSettings currentSettings;
+  late SchedulerStatus currentStatus;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
+  int applyPresetCalls = 0;
   int schedulerStatusCalls = 0;
   int guardedSellStatusCalls = 0;
   int guardedBuyStatusCalls = 0;
+  String? lastPreset;
+  bool? lastConfirmDangerous;
   Map<String, dynamic>? lastSettingsUpdate;
+
+  KisManualOrderSafetyStatus get safetyStatus => KisManualOrderSafetyStatus(
+        runtimeDryRun: currentSettings.dryRun,
+        killSwitch: currentSettings.killSwitch,
+        kisEnabled: true,
+        kisRealOrderEnabled: true,
+        marketOpen: true,
+        entryAllowedNow: true,
+        noNewEntryAfter: '15:00',
+      );
 
   @override
   Future<OpsSettings> getOpsSettings() async {
@@ -375,70 +268,45 @@ class _SettingsFakeApiClient extends ApiClient {
   Future<void> updateOpsSettings(Map<String, dynamic> values) async {
     updateOpsSettingsCalls += 1;
     lastSettingsUpdate = Map<String, dynamic>.from(values);
-    if (throwUpdateOpsSettings) {
-      throw const ApiRequestException(
-        'HTTP 500: {"message":"settings failed"}',
-      );
-    }
     currentSettings = _settingsWithPayload(currentSettings, values);
+    currentStatus = _schedulerStatusForSettings(currentSettings);
   }
 
   @override
-  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
-    return KisManualOrderSafetyStatus(
-      runtimeDryRun: currentSettings.dryRun,
-      killSwitch: currentSettings.killSwitch,
-      kisEnabled: true,
-      kisRealOrderEnabled: true,
-      marketOpen: true,
-      entryAllowedNow: true,
-      noNewEntryAfter: '15:00',
-    );
+  Future<Map<String, dynamic>> applyOpsSettingsPreset({
+    required String preset,
+    bool confirmDangerous = false,
+  }) async {
+    applyPresetCalls += 1;
+    lastPreset = preset;
+    lastConfirmDangerous = confirmDangerous;
+    if (preset == 'full_live_test_mode' && !confirmDangerous) {
+      return {
+        'preset': preset,
+        'applied': false,
+        'requires_confirmation': true,
+        'warning_level': 'dangerous_mixed',
+      };
+    }
+    currentSettings = _opsSettingsForPreset(preset);
+    currentStatus = _schedulerStatusForSettings(currentSettings);
+    return {
+      'preset': preset,
+      'applied': true,
+      'requires_confirmation': false,
+      'warning_level': currentStatus.riskSummary.warningLevel,
+    };
   }
 
   @override
   Future<SchedulerStatus> fetchSchedulerStatus() async {
     schedulerStatusCalls += 1;
-    final effective = currentSettings.schedulerEnabled &&
-        currentSettings.kisSchedulerEnabled &&
-        (currentSettings.kisSchedulerDryRun ||
-            (currentSettings.kisSchedulerLiveEnabled &&
-                currentSettings.kisSchedulerAllowRealOrders &&
-                currentSettings.kisSchedulerConfiguredAllowRealOrders &&
-                currentSettings.kisSchedulerAllowLimitedAutoSell &&
-                !currentSettings.dryRun &&
-                !currentSettings.killSwitch));
-    final realOrder = effective &&
-        currentSettings.kisSchedulerLiveEnabled &&
-        currentSettings.kisSchedulerAllowRealOrders &&
-        currentSettings.kisSchedulerConfiguredAllowRealOrders &&
-        currentSettings.kisSchedulerAllowLimitedAutoSell &&
-        !currentSettings.kisSchedulerDryRun &&
-        !currentSettings.dryRun &&
-        !currentSettings.killSwitch;
-    return SchedulerStatus(
-      runtimeSchedulerEnabled: currentSettings.schedulerEnabled,
-      us: const MarketSchedulerStatus(
-        enabledForScheduler: true,
-        timezone: 'America/New_York',
-        slots: ['midday 12:00'],
-      ),
-      kr: MarketSchedulerStatus(
-        enabledForScheduler: effective,
-        timezone: 'Asia/Seoul',
-        slots: const ['midday 11:30'],
-        realOrdersAllowed: realOrder,
-        realOrderSchedulerEnabled: realOrder,
-        liveSchedulerReady: realOrder,
-        krSchedulerAnyEnabled: effective,
-        krLiveSchedulerEnabledEffective: realOrder,
-        krDryRunSchedulerEnabledEffective:
-            effective && currentSettings.kisSchedulerDryRun,
-        enabledForSchedulerBlockReasons:
-            effective ? const [] : const ['kis_scheduler_disabled'],
-        riskSummary: _riskSummaryForSettings(currentSettings),
-      ),
-    );
+    return currentStatus;
+  }
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
+    return safetyStatus;
   }
 
   @override
@@ -463,6 +331,8 @@ class _SettingsFakeApiClient extends ApiClient {
 }
 
 OpsSettings _opsSettings({
+  String currentOperationMode = 'safe_mode',
+  bool schedulerEnabled = false,
   bool dryRun = true,
   bool killSwitch = false,
   bool kisSchedulerEnabled = false,
@@ -472,25 +342,39 @@ OpsSettings _opsSettings({
   bool kisSchedulerConfiguredAllowRealOrders = false,
   bool kisSchedulerSellEnabled = false,
   bool kisSchedulerBuyEnabled = false,
+  bool kisSchedulerAllowLimitedAutoSell = false,
+  bool kisSchedulerAllowLimitedAutoBuy = false,
   bool kisLiveAutoSellEnabled = false,
   bool kisLiveAutoBuyEnabled = false,
   bool kisLimitedAutoStopLossEnabled = false,
   bool kisLimitedAutoTakeProfitEnabled = false,
   bool kisLimitedAutoBuyEnabled = false,
-  bool kisSchedulerAllowLimitedAutoSell = false,
-  bool kisSchedulerAllowLimitedAutoBuy = false,
+  int maxDailyTrades = 5,
+  int maxLiveOrdersPerDay = 1,
+  int maxPositions = 3,
+  double maxOrderNotionalPct = 0.03,
+  double maxPositionPct = 0.03,
+  double dailyMaxLossPct = 0,
+  String noNewEntryAfter = '14:50',
 }) {
   return OpsSettings(
-    schedulerEnabled: false,
+    schedulerEnabled: schedulerEnabled,
     botEnabled: false,
     dryRun: dryRun,
     killSwitch: killSwitch,
     brokerMode: 'Paper',
     defaultGateLevel: 2,
-    maxDailyTrades: 5,
+    maxDailyTrades: maxDailyTrades,
     maxDailyEntries: 2,
     minEntryScore: 65,
     minScoreGap: 3,
+    currentOperationMode: currentOperationMode,
+    maxLiveOrdersPerDay: maxLiveOrdersPerDay,
+    maxPositions: maxPositions,
+    maxOrderNotionalPct: maxOrderNotionalPct,
+    maxPositionPct: maxPositionPct,
+    dailyMaxLossPct: dailyMaxLossPct,
+    noNewEntryAfter: noNewEntryAfter,
     kisSchedulerEnabled: kisSchedulerEnabled,
     kisSchedulerDryRun: kisSchedulerDryRun,
     kisSchedulerLiveEnabled: kisSchedulerLiveEnabled,
@@ -499,17 +383,67 @@ OpsSettings _opsSettings({
         kisSchedulerConfiguredAllowRealOrders,
     kisSchedulerSellEnabled: kisSchedulerSellEnabled,
     kisSchedulerBuyEnabled: kisSchedulerBuyEnabled,
+    kisSchedulerAllowLimitedAutoSell: kisSchedulerAllowLimitedAutoSell,
+    kisSchedulerAllowLimitedAutoBuy: kisSchedulerAllowLimitedAutoBuy,
     kisLiveAutoSellEnabled: kisLiveAutoSellEnabled,
     kisLiveAutoBuyEnabled: kisLiveAutoBuyEnabled,
-    kisLimitedAutoSellEnabled: false,
     kisLimitedAutoStopLossEnabled: kisLimitedAutoStopLossEnabled,
     kisLimitedAutoSellStopLossEnabled: kisLimitedAutoStopLossEnabled,
     kisLimitedAutoTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoSellTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoBuyEnabled: kisLimitedAutoBuyEnabled,
-    kisSchedulerAllowLimitedAutoSell: kisSchedulerAllowLimitedAutoSell,
-    kisSchedulerAllowLimitedAutoBuy: kisSchedulerAllowLimitedAutoBuy,
   );
+}
+
+OpsSettings _opsSettingsForPreset(String preset) {
+  switch (preset) {
+    case 'kis_sell_only_automation':
+      return _opsSettings(
+        currentOperationMode: preset,
+        schedulerEnabled: true,
+        dryRun: false,
+        kisSchedulerEnabled: true,
+        kisSchedulerDryRun: false,
+        kisSchedulerLiveEnabled: true,
+        kisSchedulerAllowRealOrders: true,
+        kisSchedulerConfiguredAllowRealOrders: true,
+        kisSchedulerSellEnabled: true,
+        kisSchedulerAllowLimitedAutoSell: true,
+        kisLiveAutoSellEnabled: true,
+        kisLimitedAutoStopLossEnabled: true,
+      );
+    case 'full_live_test_mode':
+      return _opsSettings(
+        currentOperationMode: preset,
+        schedulerEnabled: true,
+        dryRun: false,
+        kisSchedulerEnabled: true,
+        kisSchedulerDryRun: false,
+        kisSchedulerLiveEnabled: true,
+        kisSchedulerAllowRealOrders: true,
+        kisSchedulerConfiguredAllowRealOrders: true,
+        kisSchedulerSellEnabled: true,
+        kisSchedulerBuyEnabled: true,
+        kisSchedulerAllowLimitedAutoSell: true,
+        kisSchedulerAllowLimitedAutoBuy: true,
+        kisLiveAutoSellEnabled: true,
+        kisLiveAutoBuyEnabled: true,
+        kisLimitedAutoStopLossEnabled: true,
+        kisLimitedAutoBuyEnabled: true,
+      );
+    case 'manual_live_trading':
+      return _opsSettings(currentOperationMode: preset, dryRun: false);
+    case 'dry_run_simulation':
+      return _opsSettings(
+        currentOperationMode: preset,
+        schedulerEnabled: true,
+        kisSchedulerEnabled: true,
+        kisSchedulerDryRun: true,
+      );
+    case 'safe_mode':
+    default:
+      return _opsSettings(currentOperationMode: 'safe_mode');
+  }
 }
 
 OpsSettings _settingsWithPayload(
@@ -518,42 +452,36 @@ OpsSettings _settingsWithPayload(
 ) {
   final stopLoss = _valueBool(
     values,
-    'kis_limited_auto_stop_loss_enabled',
-    fallbackKey: 'kis_limited_auto_sell_stop_loss_enabled',
+    'stop_loss_enabled',
+    fallbackKey: 'kis_limited_auto_stop_loss_enabled',
   );
   final takeProfit = _valueBool(
     values,
-    'kis_limited_auto_take_profit_enabled',
-    fallbackKey: 'kis_limited_auto_sell_take_profit_enabled',
+    'take_profit_enabled',
+    fallbackKey: 'kis_limited_auto_take_profit_enabled',
   );
   return settings.copyWith(
     schedulerEnabled:
         _valueBool(values, 'scheduler_enabled') ?? settings.schedulerEnabled,
     dryRun: _valueBool(values, 'dry_run') ?? settings.dryRun,
-    killSwitch: _valueBool(values, 'kill_switch') ?? settings.killSwitch,
-    kisSchedulerEnabled: _valueBool(values, 'kis_scheduler_enabled') ??
+    maxDailyTrades:
+        _valueInt(values, 'max_trades_per_day') ?? settings.maxDailyTrades,
+    maxLiveOrdersPerDay:
+        _valueInt(values, 'max_live_orders_per_day') ??
+            settings.maxLiveOrdersPerDay,
+    maxPositions: _valueInt(values, 'max_positions') ?? settings.maxPositions,
+    maxOrderNotionalPct:
+        _valueDouble(values, 'max_order_notional_pct') ??
+            settings.maxOrderNotionalPct,
+    maxPositionPct:
+        _valueDouble(values, 'max_position_pct') ?? settings.maxPositionPct,
+    dailyMaxLossPct:
+        _valueDouble(values, 'daily_max_loss_pct') ?? settings.dailyMaxLossPct,
+    noNewEntryAfter:
+        _valueString(values, 'no_new_entry_after') ?? settings.noNewEntryAfter,
+    kisSchedulerEnabled: _valueBool(values, 'kr_scheduler_enabled') ??
+        _valueBool(values, 'kis_scheduler_enabled') ??
         settings.kisSchedulerEnabled,
-    kisSchedulerDryRun: _valueBool(values, 'kis_scheduler_dry_run') ??
-        settings.kisSchedulerDryRun,
-    kisSchedulerLiveEnabled: _valueBool(values, 'kis_scheduler_live_enabled') ??
-        settings.kisSchedulerLiveEnabled,
-    kisSchedulerAllowRealOrders:
-        _valueBool(values, 'kis_scheduler_allow_real_orders') ??
-            settings.kisSchedulerAllowRealOrders,
-    kisSchedulerConfiguredAllowRealOrders:
-        _valueBool(values, 'kis_scheduler_configured_allow_real_orders') ??
-            settings.kisSchedulerConfiguredAllowRealOrders,
-    kisSchedulerSellEnabled: _valueBool(values, 'kis_scheduler_sell_enabled') ??
-        settings.kisSchedulerSellEnabled,
-    kisSchedulerBuyEnabled: _valueBool(values, 'kis_scheduler_buy_enabled') ??
-        settings.kisSchedulerBuyEnabled,
-    kisLiveAutoSellEnabled: _valueBool(values, 'kis_live_auto_sell_enabled') ??
-        settings.kisLiveAutoSellEnabled,
-    kisLiveAutoBuyEnabled: _valueBool(values, 'kis_live_auto_buy_enabled') ??
-        settings.kisLiveAutoBuyEnabled,
-    kisLimitedAutoSellEnabled:
-        _valueBool(values, 'kis_limited_auto_sell_enabled') ??
-            settings.kisLimitedAutoSellEnabled,
     kisLimitedAutoStopLossEnabled:
         stopLoss ?? settings.kisLimitedAutoStopLossEnabled,
     kisLimitedAutoSellStopLossEnabled:
@@ -562,43 +490,64 @@ OpsSettings _settingsWithPayload(
         takeProfit ?? settings.kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoSellTakeProfitEnabled:
         takeProfit ?? settings.kisLimitedAutoSellTakeProfitEnabled,
-    kisLimitedAutoSellAllowTakeProfitTrigger:
-        _valueBool(values, 'kis_limited_auto_sell_allow_take_profit_trigger') ??
-            settings.kisLimitedAutoSellAllowTakeProfitTrigger,
-    kisLimitedAutoSellMaxOrdersPerDay:
-        _valueInt(values, 'kis_limited_auto_sell_max_orders_per_day') ??
-            settings.kisLimitedAutoSellMaxOrdersPerDay,
-    kisLimitedAutoSellMaxNotionalPct:
-        _valueDouble(values, 'kis_limited_auto_sell_max_notional_pct') ??
-            settings.kisLimitedAutoSellMaxNotionalPct,
-    kisLimitedAutoBuyEnabled:
-        _valueBool(values, 'kis_limited_auto_buy_enabled') ??
-            settings.kisLimitedAutoBuyEnabled,
-    kisSchedulerAllowLimitedAutoSell:
-        _valueBool(values, 'kis_scheduler_allow_limited_auto_sell') ??
-            settings.kisSchedulerAllowLimitedAutoSell,
-    kisSchedulerAllowLimitedAutoBuy:
-        _valueBool(values, 'kis_scheduler_allow_limited_auto_buy') ??
-            settings.kisSchedulerAllowLimitedAutoBuy,
-    kisSchedulerMaxLiveOrdersPerDay:
-        _valueInt(values, 'kis_scheduler_max_live_orders_per_day') ??
-            settings.kisSchedulerMaxLiveOrdersPerDay,
+  );
+}
+
+SchedulerStatus _schedulerStatusForSettings(OpsSettings settings) {
+  final risk = _riskSummaryForSettings(settings);
+  final mode = settings.currentOperationMode;
+  final summary = switch (mode) {
+    'kis_sell_only_automation' =>
+      'KIS sell-only live automation is armed. Auto-buy is disabled.',
+    'full_live_test_mode' =>
+      'Full live test mode is armed. Live buy and live sell automation are enabled.',
+    _ =>
+      'Safe mode is active. Scheduler live buy and sell automation are disabled.',
+  };
+  final warningMessage = risk.warningLevel == 'armed_sell_only'
+      ? 'LIVE SELL ARMED. Auto-buy is disabled. Daily live orders remaining: 1.'
+      : risk.warningLevel == 'dangerous_mixed'
+          ? 'LIVE BUY ARMED and LIVE SELL ARMED may be possible. Full live test mode is dangerous.'
+          : 'No scheduler live buy or sell automation is armed.';
+  return SchedulerStatus(
+    runtimeSchedulerEnabled: settings.schedulerEnabled,
+    currentOperationMode: mode,
+    userFriendlySummary: summary,
+    riskSummary: risk,
+    liveOrderPossible: risk.liveBuyArmed || risk.liveSellArmed,
+    liveBuyPossible: risk.liveBuyArmed,
+    liveSellPossible: risk.liveSellArmed,
+    dailyLiveOrderRemaining: risk.dailyLiveOrderRemaining,
+    warningMessage: warningMessage,
+    us: const MarketSchedulerStatus(
+      enabledForScheduler: true,
+      timezone: 'America/New_York',
+      slots: ['open_phase 09:30'],
+      nextSlotName: 'open_phase',
+      nextSlotTimeLocal: '2026-06-11T09:30',
+    ),
+    kr: MarketSchedulerStatus(
+      enabledForScheduler: settings.kisSchedulerEnabled,
+      timezone: 'Asia/Seoul',
+      slots: const ['midday 11:30'],
+      nextSlotName: 'midday',
+      nextSlotTimeLocal: '2026-06-12T11:30',
+      realOrderSchedulerEnabled: risk.liveSellArmed || risk.liveBuyArmed,
+      riskSummary: risk,
+    ),
   );
 }
 
 SchedulerRiskSummary _riskSummaryForSettings(OpsSettings settings) {
-  final sellGate = settings.kisLimitedAutoStopLossEnabled ||
-      settings.kisLimitedAutoSellStopLossEnabled ||
-      settings.kisLimitedAutoTakeProfitEnabled ||
-      settings.kisLimitedAutoSellTakeProfitEnabled;
-  final buyFlags = [
-    if (settings.kisSchedulerBuyEnabled) 'kis_scheduler_buy_enabled',
-    if (settings.kisSchedulerAllowLimitedAutoBuy)
-      'kis_scheduler_allow_limited_auto_buy',
-    if (settings.kisLiveAutoBuyEnabled) 'kis_live_auto_buy_enabled',
-    if (settings.kisLimitedAutoBuyEnabled) 'kis_limited_auto_buy_enabled',
-  ];
-  final liveSellArmed = settings.schedulerEnabled &&
+  final buyArmed = !settings.dryRun &&
+      !settings.killSwitch &&
+      (settings.kisSchedulerBuyEnabled ||
+          settings.kisSchedulerAllowLimitedAutoBuy ||
+          settings.kisLiveAutoBuyEnabled ||
+          settings.kisLimitedAutoBuyEnabled);
+  final sellArmed = !settings.dryRun &&
+      !settings.killSwitch &&
+      settings.schedulerEnabled &&
       settings.kisSchedulerEnabled &&
       settings.kisSchedulerLiveEnabled &&
       settings.kisSchedulerAllowRealOrders &&
@@ -606,55 +555,27 @@ SchedulerRiskSummary _riskSummaryForSettings(OpsSettings settings) {
       settings.kisSchedulerSellEnabled &&
       settings.kisSchedulerAllowLimitedAutoSell &&
       settings.kisLiveAutoSellEnabled &&
-      sellGate &&
-      !settings.kisSchedulerDryRun &&
-      !settings.dryRun &&
-      !settings.killSwitch;
-  final liveBuyArmed =
-      buyFlags.isNotEmpty && !settings.dryRun && !settings.killSwitch;
-  final blockingFlags = <String>[
-    if ((settings.kisSchedulerLiveEnabled ||
-            settings.kisSchedulerAllowRealOrders ||
-            settings.kisSchedulerConfiguredAllowRealOrders ||
-            settings.kisLiveAutoSellEnabled ||
-            buyFlags.isNotEmpty) &&
-        settings.dryRun)
-      'dry_run_true',
-    if (settings.killSwitch) 'kill_switch_enabled',
-  ];
-  final warningLevel = blockingFlags.isNotEmpty
-      ? 'blocked'
-      : buyFlags.isNotEmpty
-          ? 'dangerous_mixed'
-          : liveSellArmed
-              ? 'armed_sell_only'
-              : 'safe';
+      settings.kisLimitedAutoStopLossEnabled;
+  final warningLevel = buyArmed
+      ? 'dangerous_mixed'
+      : sellArmed
+          ? 'armed_sell_only'
+          : 'safe';
   return SchedulerRiskSummary(
-    liveSellArmed: liveSellArmed,
-    liveBuyArmed: liveBuyArmed,
-    sellOnlyMode: liveSellArmed && buyFlags.isEmpty,
-    dailyLiveOrderLimit: settings.kisSchedulerMaxLiveOrdersPerDay,
-    dailyLiveOrderRemaining: liveSellArmed ? 1 : null,
-    maxNotionalPct: settings.kisLimitedAutoSellMaxNotionalPct,
+    liveSellArmed: sellArmed,
+    liveBuyArmed: buyArmed,
+    sellOnlyMode: sellArmed && !buyArmed,
+    dailyLiveOrderLimit: settings.maxLiveOrdersPerDay,
+    dailyLiveOrderRemaining: sellArmed || buyArmed ? 1 : null,
+    maxNotionalPct: settings.maxOrderNotionalPct,
     dryRun: settings.dryRun,
     killSwitch: settings.killSwitch,
-    safeModeActive: settings.dryRun &&
-        !settings.kisSchedulerLiveEnabled &&
-        !settings.kisSchedulerAllowRealOrders &&
-        !settings.kisSchedulerConfiguredAllowRealOrders &&
-        !settings.kisSchedulerSellEnabled &&
-        !settings.kisSchedulerBuyEnabled &&
-        !settings.kisSchedulerAllowLimitedAutoSell &&
-        !settings.kisSchedulerAllowLimitedAutoBuy &&
-        !settings.kisLiveAutoSellEnabled &&
-        !settings.kisLiveAutoBuyEnabled &&
-        !settings.kisLimitedAutoBuyEnabled &&
-        !sellGate,
-    riskyFlags: buyFlags,
-    blockingFlags: blockingFlags,
+    safeModeActive: warningLevel == 'safe',
+    riskyFlags: buyArmed ? const ['kis_scheduler_buy_enabled'] : const [],
+    blockingFlags: const [],
     warningLevel: warningLevel,
-    sellGateEnabled: sellGate,
-    buyGateEnabled: buyFlags.isNotEmpty,
+    sellGateEnabled: settings.kisLimitedAutoStopLossEnabled,
+    buyGateEnabled: buyArmed,
   );
 }
 
@@ -682,4 +603,10 @@ double? _valueDouble(Map<String, dynamic> values, String key) {
   final value = values[key];
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '');
+}
+
+String? _valueString(Map<String, dynamic> values, String key) {
+  final value = values[key]?.toString().trim();
+  if (value == null || value.isEmpty) return null;
+  return value;
 }

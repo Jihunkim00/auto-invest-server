@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -25,9 +25,27 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     dry_run: bool | None = None
     kill_switch: bool | None = None
     scheduler_enabled: bool | None = None
+    us_scheduler_enabled: bool | None = None
+    kr_scheduler_enabled: bool | None = None
+    kr_scheduler_mode: Literal[
+        "disabled",
+        "dry_run",
+        "sell_only_live",
+        "full_live_test",
+    ] | None = None
     default_symbol: str | None = Field(default=None, min_length=1, max_length=20)
     default_gate_level: int | None = Field(default=None, ge=1, le=4)
     max_trades_per_day: int | None = Field(default=None, ge=1, le=20)
+    max_live_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    max_positions: int | None = Field(default=None, ge=1, le=100)
+    max_position_pct: float | None = Field(default=None, ge=0, le=1)
+    max_order_notional_pct: float | None = Field(default=None, ge=0, le=1)
+    daily_max_loss_pct: float | None = Field(default=None, ge=0, le=1)
+    no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    stop_loss_enabled: bool | None = None
+    stop_loss_pct: float | None = Field(default=None, ge=0, le=1)
+    take_profit_enabled: bool | None = None
+    take_profit_pct: float | None = Field(default=None, ge=0, le=1)
     global_daily_entry_limit: int | None = Field(default=None, ge=0, le=20)
     per_symbol_daily_entry_limit: int | None = Field(default=None, ge=0, le=20)
     per_slot_new_entry_limit: int | None = Field(default=None, ge=0, le=20)
@@ -82,6 +100,17 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_scheduler_live_respect_kill_switch: bool | None = None
 
 
+class ApplyPresetRequest(BaseModel):
+    preset: Literal[
+        "safe_mode",
+        "dry_run_simulation",
+        "manual_live_trading",
+        "kis_sell_only_automation",
+        "full_live_test_mode",
+    ]
+    confirm_dangerous: bool = False
+
+
 class RunNowRequest(BaseModel):
     symbol: str | None = Field(default=None, min_length=1, max_length=20)
     gate_level: int | None = Field(default=None, ge=1, le=4)
@@ -102,11 +131,36 @@ def get_settings(db: Session = Depends(get_db)):
     return svc.get_settings(db)
 
 
+@router.get("/settings/catalog")
+def get_settings_catalog(db: Session = Depends(get_db)):
+    svc = RuntimeSettingService()
+    return svc.settings_catalog(db)
+
+
 @router.put("/settings")
 def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends(get_db)):
     svc = RuntimeSettingService()
-    settings = svc.update_settings(db, payload.model_dump(exclude_none=True))
+    try:
+        settings = svc.update_settings(db, payload.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"result": "updated", "settings": settings}
+
+
+@router.post("/settings/apply-preset")
+def apply_settings_preset(
+    payload: ApplyPresetRequest,
+    db: Session = Depends(get_db),
+):
+    svc = RuntimeSettingService()
+    try:
+        return svc.apply_preset(
+            db,
+            preset=payload.preset,
+            confirm_dangerous=payload.confirm_dangerous,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/production-readiness")
