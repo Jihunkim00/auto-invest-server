@@ -52,6 +52,16 @@ def test_scheduler_status_returns_operation_mode_and_summary(client):
     assert "US" in body["next_run"]
     assert "KR" in body["next_run"]
     assert body["warning_message"] == "No scheduler live buy or sell automation is armed."
+    assert body["global"]["scheduler_enabled"] is False
+    assert body["global"]["dry_run"] is True
+    assert body["global"]["kill_switch"] is False
+    assert body["alpaca"]["market"] == "US"
+    assert body["alpaca"]["timezone"] == "America/New_York"
+    assert body["alpaca"]["no_new_entry_after"] == "15:45"
+    assert body["kis"]["market"] == "KR"
+    assert body["kis"]["timezone"] == "Asia/Seoul"
+    assert body["kis"]["kr_no_new_entry_after"] == "14:50"
+    assert body["kis"]["warning_level"] == "safe"
 
 
 def test_scheduler_status_returns_sell_only_mode_summary(monkeypatch, client):
@@ -80,3 +90,7 @@ def test_scheduler_status_returns_sell_only_mode_summary(monkeypatch, client):
     assert body["daily_live_order_remaining"] == 1
     assert "LIVE SELL ARMED" in body["warning_message"]
     assert body["KR"]["current_operation_mode"] == "kis_sell_only_automation"
+    assert body["kis"]["scheduler_enabled"] is True
+    assert body["kis"]["live_sell_possible"] is True
+    assert body["kis"]["live_buy_possible"] is False
+    assert body["kis"]["warning_level"] == "armed_sell_only"

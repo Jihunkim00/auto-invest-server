@@ -247,6 +247,11 @@ def test_safe_mode_preset_disables_all_live_flags(client):
         assert settings[key] is False
     assert body["risk_summary"]["live_sell_armed"] is False
     assert body["risk_summary"]["live_buy_armed"] is False
+    assert body["preset_scope"] == "global"
+    assert body["affected_brokers"] == ["alpaca", "kis"]
+    assert body["affected_markets"] == ["US", "KR"]
+    assert "changed_keys" in body
+    assert "unchanged_keys" in body
 
 
 def test_dry_run_simulation_preset_disables_real_orders(client):
@@ -322,6 +327,12 @@ def test_kis_sell_only_automation_preset_arms_sell_not_buy(monkeypatch, client):
     assert body["risk_summary"]["live_sell_armed"] is True
     assert body["risk_summary"]["live_buy_armed"] is False
     assert body["warning_level"] == "armed_sell_only"
+    assert body["preset_scope"] == "kis"
+    assert body["affected_brokers"] == ["kis"]
+    assert body["affected_markets"] == ["KR"]
+    assert "kis_scheduler_buy_enabled" in body["changed_keys"] or (
+        "kis_scheduler_buy_enabled" in body["unchanged_keys"]
+    )
 
 
 def test_full_live_test_mode_requires_confirmation(client):
@@ -335,6 +346,10 @@ def test_full_live_test_mode_requires_confirmation(client):
     assert body["requires_confirmation"] is True
     assert body["warning_level"] == "dangerous_mixed"
     assert body["settings"]["kis_scheduler_buy_enabled"] is False
+    assert body["preset_scope"] == "kis"
+    assert body["affected_brokers"] == ["kis"]
+    assert body["affected_markets"] == ["KR"]
+    assert body["changed_keys"] == []
 
 
 def test_full_live_test_mode_sets_buy_and_sell_after_confirmation(
@@ -369,14 +384,98 @@ def test_settings_catalog_returns_grouped_metadata(client):
     body = response.json()
     groups = {item["key"]: item for item in body["groups"]}
     assert {
-        "operation_mode",
+        "global_safety",
+        "alpaca_us_trading",
+        "kis_kr_trading",
         "schedule",
         "risk_limits",
         "exit_rules",
-        "advanced",
+        "advanced_diagnostics",
     }.issubset(groups)
     flat_items = {item["key"]: item for item in body["items"]}
-    assert flat_items["current_operation_mode"]["group"] == "operation_mode"
+    assert flat_items["current_operation_mode"]["group"] == "global_safety"
     assert flat_items["kr_scheduler_mode"]["value_type"] == "enum"
     assert flat_items["max_live_orders_per_day"]["group"] == "risk_limits"
     assert flat_items["stop_loss_enabled"]["group"] == "exit_rules"
+    for item in body["items"]:
+        assert item["scope"] in {"global", "alpaca", "kis"}
+        assert "market" in item
+        assert "broker" in item
+        assert "timezone" in item
+        assert item["automation_scope"] in {
+            "manual",
+            "scheduler",
+            "manual_and_scheduler",
+            "diagnostics",
+        }
+        assert isinstance(item["affects"], list)
+
+
+def test_settings_catalog_exposes_broker_scoped_cutoffs(client):
+    body = client.get("/ops/settings/catalog").json()
+    flat_items = {item["key"]: item for item in body["items"]}
+
+    kr_cutoff = flat_items["kr_no_new_entry_after"]
+    assert kr_cutoff["current_value"] == "14:50"
+    assert kr_cutoff["scope"] == "kis"
+    assert kr_cutoff["market"] == "KR"
+    assert kr_cutoff["broker"] == "kis"
+    assert kr_cutoff["timezone"] == "Asia/Seoul"
+    assert kr_cutoff["automation_scope"] == "scheduler"
+
+    us_cutoff = flat_items["us_no_new_entry_after"]
+    assert us_cutoff["current_value"] == "15:45"
+    assert us_cutoff["scope"] == "alpaca"
+    assert us_cutoff["market"] == "US"
+    assert us_cutoff["broker"] == "alpaca"
+    assert us_cutoff["timezone"] == "America/New_York"
+    assert us_cutoff["read_only"] is True
+    assert us_cutoff["derived"] is True
+
+    deprecated = flat_items["no_new_entry_after"]
+    assert deprecated["deprecated"] is True
+    assert deprecated["replacement_key"] == "kr_no_new_entry_after"
+
+
+def test_kr_no_new_entry_after_maps_to_kis_limited_auto_buy_cutoff(client):
+    response = client.put(
+        "/ops/settings",
+        json={"kr_no_new_entry_after": "14:40"},
+    )
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["kr_no_new_entry_after"] == "14:40"
+    assert settings["no_new_entry_after"] == "14:40"
+    assert settings["kis_limited_auto_buy_no_new_entry_after"] == "14:40"
+
+
+def test_deprecated_no_new_entry_after_maps_to_kr_with_warning(client):
+    response = client.put(
+        "/ops/settings",
+        json={"no_new_entry_after": "14:35"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["settings"]["kr_no_new_entry_after"] == "14:35"
+    assert body["settings"]["kis_limited_auto_buy_no_new_entry_after"] == "14:35"
+    assert body["deprecation_warnings"][0]["key"] == "no_new_entry_after"
+    assert body["deprecation_warnings"][0]["replacement_key"] == (
+        "kr_no_new_entry_after"
+    )
+
+
+def test_us_no_new_entry_after_is_derived_read_only(client):
+    settings = client.get("/ops/settings").json()
+    assert settings["us_no_new_entry_after"] == "15:45"
+    assert settings["us_no_new_entry_after_read_only"] is True
+    assert settings["us_no_new_entry_after_derived"] is True
+
+    response = client.put(
+        "/ops/settings",
+        json={"us_no_new_entry_after": "15:40"},
+    )
+
+    assert response.status_code == 422
+    assert "read-only/derived" in response.json()["detail"]

@@ -4,7 +4,6 @@ import '../../core/widgets/confirm_action_dialog.dart';
 import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
-import 'widgets/safety_settings_section.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -39,6 +38,10 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _OperationModeCard(controller: controller),
               const SizedBox(height: 12),
+              _AlpacaUsTradingCard(controller: controller),
+              const SizedBox(height: 12),
+              _KisKrTradingCard(controller: controller),
+              const SizedBox(height: 12),
               _ScheduleControlCard(controller: controller),
               const SizedBox(height: 12),
               _RiskLimitsCard(controller: controller),
@@ -46,8 +49,6 @@ class SettingsScreen extends StatelessWidget {
               _ExitRulesCard(controller: controller),
               const SizedBox(height: 12),
               _AdvancedFlagsCard(controller: controller),
-              const SizedBox(height: 12),
-              SafetySettingsSection(controller: controller),
             ],
           ),
         );
@@ -69,7 +70,7 @@ class _OperationModeCard extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _CardHeader(
           icon: Icons.power_settings_new,
-          title: 'Operation Mode',
+          title: 'Global Safety',
           trailing: loading
               ? const SizedBox(
                   width: 18,
@@ -81,11 +82,19 @@ class _OperationModeCard extends StatelessWidget {
         const SizedBox(height: 10),
         _StatusBanner(controller: controller),
         const SizedBox(height: 10),
+        const Text(
+          'Operation Mode',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        _PresetScopeDetails(mode: mode),
+        const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           key: ValueKey('operation-mode-$mode'),
-          initialValue: _operationModeOptions.any((option) => option.value == mode)
-              ? mode
-              : null,
+          initialValue:
+              _operationModeOptions.any((option) => option.value == mode)
+                  ? mode
+                  : null,
           decoration: const InputDecoration(labelText: 'Operation mode'),
           items: [
             for (final option in _operationModeOptions)
@@ -101,10 +110,40 @@ class _OperationModeCard extends StatelessWidget {
                   _applyMode(context, controller, value);
                 },
         ),
+        const SizedBox(height: 8),
+        _ScopedSwitchTile(
+          scope: 'GLOBAL',
+          title: 'Dry-run',
+          subtitle: 'Applies to manual and scheduler live order guards.',
+          value: controller.settings.dryRun,
+          onChanged: loading ? null : (value) => controller.setDryRun(value),
+        ),
+        _ScopedSwitchTile(
+          scope: 'GLOBAL',
+          title: 'Kill switch',
+          subtitle: 'Blocks manual and scheduler order paths.',
+          value: controller.settings.killSwitch,
+          onChanged:
+              loading ? null : (value) => controller.toggleKillSwitch(value),
+        ),
+        _ScopedSwitchTile(
+          scope: 'GLOBAL',
+          title: 'Global scheduler',
+          subtitle: 'Required before Alpaca or KIS scheduler checks can run.',
+          value: controller.settings.schedulerEnabled,
+          onChanged: loading
+              ? null
+              : (value) => _saveSettings(
+                    context,
+                    controller,
+                    {'scheduler_enabled': value},
+                    'Global scheduler',
+                  ),
+        ),
         if (mode == 'full_live_test_mode') ...[
           const SizedBox(height: 6),
           const Text(
-            'This enables live buy and live sell automation.',
+            'KIS/KR live buy and live sell automation. Red confirmation required.',
             style: TextStyle(color: Colors.redAccent),
           ),
         ],
@@ -117,6 +156,198 @@ class _OperationModeCard extends StatelessWidget {
   }
 }
 
+class _AlpacaUsTradingCard extends StatelessWidget {
+  const _AlpacaUsTradingCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final status = controller.schedulerStatus;
+    final usCutoff = settings.usNoNewEntryAfter.isNotEmpty
+        ? settings.usNoNewEntryAfter
+        : status.us.noNewEntryAfter ?? '15:45';
+    final derivedLabel =
+        settings.usNoNewEntryAfterDerived ? 'derived / read-only' : 'runtime';
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const _CardHeader(
+          icon: Icons.public_outlined,
+          title: 'Alpaca / US Trading',
+        ),
+        const SizedBox(height: 8),
+        _InfoRow(
+          label: 'US scheduler enabled',
+          value: status.us.enabledForScheduler ? 'ON' : 'OFF',
+          scope: 'ALPACA / US',
+        ),
+        _InfoRow(
+          label: 'US next run',
+          value: _nextRun(status.us),
+          scope: 'ALPACA / US',
+        ),
+        _InfoRow(
+          label: 'US timezone',
+          value: 'America/New_York',
+          scope: 'ALPACA / US',
+        ),
+        _InfoRow(
+          label: 'US no new entry after',
+          value: '$usCutoff ET ($derivedLabel)',
+          scope: 'ALPACA / US',
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 6),
+          child: Text(
+            'Applied in America/New_York time for Alpaca/US entry checks.',
+            style: TextStyle(color: Colors.white60, fontSize: 12),
+          ),
+        ),
+        _InfoRow(
+          label: 'Alpaca status',
+          value: settings.brokerMode,
+          scope: 'ALPACA / US',
+        ),
+      ]),
+    );
+  }
+}
+
+class _KisKrTradingCard extends StatefulWidget {
+  const _KisKrTradingCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  State<_KisKrTradingCard> createState() => _KisKrTradingCardState();
+}
+
+class _KisKrTradingCardState extends State<_KisKrTradingCard> {
+  final _krNoNewEntryAfter = TextEditingController();
+  String _lastCutoff = '';
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncFromSettings(force: true);
+  }
+
+  @override
+  void didUpdateWidget(covariant _KisKrTradingCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncFromSettings();
+  }
+
+  @override
+  void dispose() {
+    _krNoNewEntryAfter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = widget.controller.settings;
+    final status = widget.controller.schedulerStatus;
+    final risk = status.riskSummary;
+    final loading = widget.controller.kisAutomationSettingsLoading;
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const _CardHeader(
+          icon: Icons.account_balance_outlined,
+          title: 'KIS / KR Trading',
+        ),
+        const SizedBox(height: 8),
+        _ScopedSwitchTile(
+          scope: 'KIS / KR',
+          title: 'KIS scheduler enabled',
+          subtitle: 'Controls KIS/KR scheduler automation only.',
+          value: settings.kisSchedulerEnabled,
+          onChanged: loading
+              ? null
+              : (value) => _saveSettings(
+                    context,
+                    widget.controller,
+                    {'kr_scheduler_enabled': value},
+                    'KIS scheduler',
+                  ),
+        ),
+        _InfoRow(
+          label: 'KR scheduler mode',
+          value: _krModeSummary(settings),
+          scope: 'KIS / KR',
+        ),
+        _InfoRow(
+          label: 'KR next run',
+          value: _nextRun(status.kr),
+          scope: 'KIS / KR',
+        ),
+        _InfoRow(
+          label: 'KR timezone',
+          value: 'Asia/Seoul',
+          scope: 'KIS / KR',
+        ),
+        _ScopedTextField(
+          scope: 'KIS / KR',
+          label: 'KR no new entry after',
+          controller: _krNoNewEntryAfter,
+          suffixText: 'KST',
+          helperText:
+              'Applied in Asia/Seoul time for KIS/KR scheduler entry checks.',
+          onChanged: () {
+            if (!_editing) setState(() => _editing = true);
+          },
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: loading ? null : _saveCutoff,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save KR Cutoff'),
+          ),
+        ),
+        _InfoRow(
+          label: 'KIS live buy armed',
+          value: risk.liveBuyArmed ? 'ON' : 'OFF',
+          scope: 'KIS / KR',
+        ),
+        _InfoRow(
+          label: 'KIS live sell armed',
+          value: risk.liveSellArmed ? 'ON' : 'OFF',
+          scope: 'KIS / KR',
+        ),
+        _InfoRow(
+          label: 'KIS warning level',
+          value: risk.warningLevel,
+          scope: 'KIS / KR',
+        ),
+      ]),
+    );
+  }
+
+  void _syncFromSettings({bool force = false}) {
+    final cutoff = widget.controller.settings.krNoNewEntryAfter.isNotEmpty
+        ? widget.controller.settings.krNoNewEntryAfter
+        : widget.controller.settings.noNewEntryAfter;
+    if (!force && (_editing || cutoff == _lastCutoff)) return;
+    _lastCutoff = cutoff;
+    _krNoNewEntryAfter.text = cutoff;
+  }
+
+  Future<void> _saveCutoff() async {
+    final result = await widget.controller.updateKisAutomationSettings(
+      {'kr_no_new_entry_after': _krNoNewEntryAfter.text.trim()},
+      label: 'KR no new entry after',
+    );
+    if (!mounted) return;
+    _editing = false;
+    _syncFromSettings(force: true);
+    _showResult(context, result);
+  }
+}
+
 class _ScheduleControlCard extends StatelessWidget {
   const _ScheduleControlCard({required this.controller});
 
@@ -126,7 +357,6 @@ class _ScheduleControlCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = controller.settings;
     final status = controller.schedulerStatus;
-    final loading = controller.kisAutomationSettingsLoading;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const _CardHeader(
@@ -134,39 +364,36 @@ class _ScheduleControlCard extends StatelessWidget {
           title: 'Schedule Control',
         ),
         const SizedBox(height: 8),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Scheduler ON/OFF'),
-          value: settings.schedulerEnabled,
-          onChanged: loading
-              ? null
-              : (value) => _saveSettings(
-                    context,
-                    controller,
-                    {'scheduler_enabled': value},
-                    'Scheduler',
-                  ),
+        _InfoRow(
+          label: 'Global scheduler',
+          value: settings.schedulerEnabled ? 'ON' : 'OFF',
+          scope: 'GLOBAL',
         ),
         _InfoRow(
           label: 'US schedule enabled',
           value: status.us.enabledForScheduler ? 'ON' : 'OFF',
+          scope: 'ALPACA / US',
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('KR schedule enabled'),
-          value: settings.kisSchedulerEnabled,
-          onChanged: loading
-              ? null
-              : (value) => _saveSettings(
-                    context,
-                    controller,
-                    {'kr_scheduler_enabled': value},
-                    'KR schedule',
-                  ),
+        _InfoRow(
+          label: 'KR schedule enabled',
+          value: settings.kisSchedulerEnabled ? 'ON' : 'OFF',
+          scope: 'KIS / KR',
         ),
-        _InfoRow(label: 'Next US run', value: _nextRun(status.us)),
-        _InfoRow(label: 'Next KR run', value: _nextRun(status.kr)),
-        _InfoRow(label: 'KR mode summary', value: _krModeSummary(settings)),
+        _InfoRow(
+          label: 'Next US run',
+          value: _nextRun(status.us),
+          scope: 'ALPACA / US',
+        ),
+        _InfoRow(
+          label: 'Next KR run',
+          value: _nextRun(status.kr),
+          scope: 'KIS / KR',
+        ),
+        _InfoRow(
+          label: 'KR mode summary',
+          value: _krModeSummary(settings),
+          scope: 'KIS / KR',
+        ),
       ]),
     );
   }
@@ -188,7 +415,6 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
   final _maxOrderNotionalPct = TextEditingController();
   final _maxPositionPct = TextEditingController();
   final _dailyMaxLossPct = TextEditingController();
-  final _noNewEntryAfter = TextEditingController();
   String _lastSignature = '';
   bool _editing = false;
 
@@ -212,7 +438,6 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
     _maxOrderNotionalPct.dispose();
     _maxPositionPct.dispose();
     _dailyMaxLossPct.dispose();
-    _noNewEntryAfter.dispose();
     super.dispose();
   }
 
@@ -228,41 +453,42 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
         const SizedBox(height: 12),
         _NumberField(
           label: 'Max trades per day',
+          scope: 'GLOBAL',
           controller: _maxTrades,
           onChanged: _markEditing,
         ),
         _NumberField(
           label: 'Max live orders per day',
+          scope: 'KIS / KR',
           controller: _maxLiveOrders,
           onChanged: _markEditing,
         ),
         _NumberField(
           label: 'Max positions',
+          scope: 'GLOBAL',
           controller: _maxPositions,
           onChanged: _markEditing,
         ),
         _NumberField(
           label: 'Max order notional %',
+          scope: 'KIS / KR',
           controller: _maxOrderNotionalPct,
           decimal: true,
           onChanged: _markEditing,
         ),
         _NumberField(
           label: 'Max position %',
+          scope: 'KIS / KR',
           controller: _maxPositionPct,
           decimal: true,
           onChanged: _markEditing,
         ),
         _NumberField(
           label: 'Daily max loss %',
+          scope: 'GLOBAL',
           controller: _dailyMaxLossPct,
           decimal: true,
           onChanged: _markEditing,
-        ),
-        TextField(
-          controller: _noNewEntryAfter,
-          onChanged: (_) => _markEditing(),
-          decoration: const InputDecoration(labelText: 'No new entry after'),
         ),
         const SizedBox(height: 12),
         Align(
@@ -290,7 +516,6 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
       settings.maxOrderNotionalPct,
       settings.maxPositionPct,
       settings.dailyMaxLossPct,
-      settings.noNewEntryAfter,
     ].join('|');
     if (!force && (_editing || signature == _lastSignature)) return;
     _lastSignature = signature;
@@ -301,7 +526,6 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
         _formatPercentInput(settings.maxOrderNotionalPct);
     _maxPositionPct.text = _formatPercentInput(settings.maxPositionPct);
     _dailyMaxLossPct.text = _formatPercentInput(settings.dailyMaxLossPct);
-    _noNewEntryAfter.text = settings.noNewEntryAfter;
   }
 
   Future<void> _save() async {
@@ -312,7 +536,6 @@ class _RiskLimitsCardState extends State<_RiskLimitsCard> {
       'max_order_notional_pct': _percentValue(_maxOrderNotionalPct.text),
       'max_position_pct': _percentValue(_maxPositionPct.text),
       'daily_max_loss_pct': _percentValue(_dailyMaxLossPct.text),
-      'no_new_entry_after': _noNewEntryAfter.text.trim(),
     }..removeWhere((_, value) => value == null || value == '');
     final result = await widget.controller.updateKisAutomationSettings(
       payload,
@@ -371,9 +594,10 @@ class _ExitRulesCardState extends State<_ExitRulesCard> {
           icon: Icons.exit_to_app_outlined,
           title: 'Exit Rules',
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Stop-loss enabled'),
+        _ScopedSwitchTile(
+          scope: 'KIS / KR',
+          title: 'Stop-loss enabled',
+          subtitle: 'KIS/KR sell automation gate.',
           value: _stopLossEnabled,
           onChanged: loading
               ? null
@@ -384,13 +608,15 @@ class _ExitRulesCardState extends State<_ExitRulesCard> {
         ),
         _NumberField(
           label: 'Stop-loss %',
+          scope: 'KIS / KR',
           controller: _stopLossPct,
           decimal: true,
           onChanged: _markEditing,
         ),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          title: const Text('Take-profit enabled'),
+        _ScopedSwitchTile(
+          scope: 'KIS / KR',
+          title: 'Take-profit enabled',
+          subtitle: 'KIS/KR sell automation gate.',
           value: _takeProfitEnabled,
           onChanged: loading
               ? null
@@ -401,12 +627,14 @@ class _ExitRulesCardState extends State<_ExitRulesCard> {
         ),
         _NumberField(
           label: 'Take-profit %',
+          scope: 'KIS / KR',
           controller: _takeProfitPct,
           decimal: true,
           onChanged: _markEditing,
         ),
         if (_takeProfitEnabled &&
-            (risk.liveSellArmed || widget.controller.settings.kisSchedulerLiveEnabled))
+            (risk.liveSellArmed ||
+                widget.controller.settings.kisSchedulerLiveEnabled))
           const Padding(
             padding: EdgeInsets.only(top: 8),
             child: Text(
@@ -483,8 +711,8 @@ class _AdvancedFlagsCard extends StatelessWidget {
     final flags = <_AdvancedFlag>[
       _AdvancedFlag('dry_run', settings.dryRun),
       _AdvancedFlag('kill_switch', settings.killSwitch, dangerous: true),
-      _AdvancedFlag('kis_scheduler_live_enabled',
-          settings.kisSchedulerLiveEnabled,
+      _AdvancedFlag(
+          'kis_scheduler_live_enabled', settings.kisSchedulerLiveEnabled,
           dangerous: true),
       _AdvancedFlag('kis_scheduler_allow_real_orders',
           settings.kisSchedulerAllowRealOrders,
@@ -492,23 +720,22 @@ class _AdvancedFlagsCard extends StatelessWidget {
       _AdvancedFlag('kis_scheduler_configured_allow_real_orders',
           settings.kisSchedulerConfiguredAllowRealOrders,
           dangerous: true),
-      _AdvancedFlag('kis_scheduler_sell_enabled',
-          settings.kisSchedulerSellEnabled),
-      _AdvancedFlag('kis_scheduler_buy_enabled',
-          settings.kisSchedulerBuyEnabled,
+      _AdvancedFlag(
+          'kis_scheduler_sell_enabled', settings.kisSchedulerSellEnabled),
+      _AdvancedFlag(
+          'kis_scheduler_buy_enabled', settings.kisSchedulerBuyEnabled,
           dangerous: true),
       _AdvancedFlag('kis_scheduler_allow_limited_auto_sell',
           settings.kisSchedulerAllowLimitedAutoSell),
       _AdvancedFlag('kis_scheduler_allow_limited_auto_buy',
           settings.kisSchedulerAllowLimitedAutoBuy,
           dangerous: true),
-      _AdvancedFlag('kis_live_auto_sell_enabled',
-          settings.kisLiveAutoSellEnabled),
-      _AdvancedFlag('kis_live_auto_buy_enabled',
-          settings.kisLiveAutoBuyEnabled,
+      _AdvancedFlag(
+          'kis_live_auto_sell_enabled', settings.kisLiveAutoSellEnabled),
+      _AdvancedFlag('kis_live_auto_buy_enabled', settings.kisLiveAutoBuyEnabled,
           dangerous: true),
-      _AdvancedFlag('kis_limited_auto_buy_enabled',
-          settings.kisLimitedAutoBuyEnabled,
+      _AdvancedFlag(
+          'kis_limited_auto_buy_enabled', settings.kisLimitedAutoBuyEnabled,
           dangerous: true),
     ];
     return SectionCard(
@@ -519,15 +746,34 @@ class _AdvancedFlagsCard extends StatelessWidget {
         title: const Text('Advanced Flags / Diagnostics'),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
+          _InfoRow(
+            label: 'kr_no_new_entry_after',
+            value: '${settings.krNoNewEntryAfter} KST',
+            scope: 'KIS / KR',
+          ),
+          _InfoRow(
+            label: 'no_new_entry_after',
+            value: '${settings.noNewEntryAfter} (deprecated alias)',
+            scope: 'KIS / KR',
+          ),
           for (final flag in flags) _FlagLine(flag: flag),
           if (risk.riskyFlags.isNotEmpty)
-            _InfoRow(label: 'risky_flags', value: risk.riskyFlags.join(', ')),
+            _InfoRow(
+              label: 'risky_flags',
+              value: risk.riskyFlags.join(', '),
+              scope: 'KIS / KR',
+            ),
           if (risk.blockingFlags.isNotEmpty)
             _InfoRow(
               label: 'blocking_flags',
               value: risk.blockingFlags.join(', '),
+              scope: 'KIS / KR',
             ),
-          _InfoRow(label: 'warning_level', value: risk.warningLevel),
+          _InfoRow(
+            label: 'warning_level',
+            value: risk.warningLevel,
+            scope: 'KIS / KR',
+          ),
         ],
       ),
     );
@@ -632,32 +878,113 @@ class _CardHeader extends StatelessWidget {
 class _NumberField extends StatelessWidget {
   const _NumberField({
     required this.label,
+    required this.scope,
     required this.controller,
     required this.onChanged,
     this.decimal = false,
   });
 
   final String label;
+  final String scope;
   final TextEditingController controller;
   final VoidCallback onChanged;
   final bool decimal;
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: TextInputType.numberWithOptions(decimal: decimal),
-      onChanged: (_) => onChanged(),
-      decoration: InputDecoration(labelText: label),
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _ScopeChip(label: scope),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.numberWithOptions(decimal: decimal),
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(labelText: label),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ScopedTextField extends StatelessWidget {
+  const _ScopedTextField({
+    required this.scope,
+    required this.label,
+    required this.controller,
+    required this.onChanged,
+    this.helperText,
+    this.suffixText,
+  });
+
+  final String scope;
+  final String label;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+  final String? helperText;
+  final String? suffixText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _ScopeChip(label: scope),
+        TextField(
+          controller: controller,
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(
+            labelText: label,
+            helperText: helperText,
+            suffixText: suffixText,
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _ScopedSwitchTile extends StatelessWidget {
+  const _ScopedSwitchTile({
+    required this.scope,
+    required this.title,
+    required this.value,
+    required this.onChanged,
+    this.subtitle,
+  });
+
+  final String scope;
+  final String title;
+  final String? subtitle;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _ScopeChip(label: scope),
+          Text(title),
+        ],
+      ),
+      subtitle: subtitle == null ? null : Text(subtitle!),
+      value: value,
+      onChanged: onChanged,
     );
   }
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+  const _InfoRow({required this.label, required this.value, this.scope});
 
   final String label;
   final String value;
+  final String? scope;
 
   @override
   Widget build(BuildContext context) {
@@ -668,6 +995,10 @@ class _InfoRow extends StatelessWidget {
           width: 170,
           child: Text(label, style: const TextStyle(color: Colors.white54)),
         ),
+        if (scope != null) ...[
+          _ScopeChip(label: scope!),
+          const SizedBox(width: 8),
+        ],
         Expanded(
           child: Text(
             value.isEmpty ? 'n/a' : value,
@@ -676,6 +1007,23 @@ class _InfoRow extends StatelessWidget {
         ),
       ]),
     );
+  }
+}
+
+class _ScopeChip extends StatelessWidget {
+  const _ScopeChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final normalized = label.toUpperCase();
+    final color = normalized.contains('KIS')
+        ? Colors.orangeAccent
+        : normalized.contains('ALPACA')
+            ? Colors.lightBlueAccent
+            : Colors.greenAccent;
+    return _TextChip(label: normalized, color: color);
   }
 }
 
@@ -745,6 +1093,29 @@ class _SettingsChangeSummary extends StatelessWidget {
   }
 }
 
+class _PresetScopeDetails extends StatelessWidget {
+  const _PresetScopeDetails({required this.mode});
+
+  final String mode;
+
+  @override
+  Widget build(BuildContext context) {
+    final scope = _presetScope(mode);
+    final affects = _presetAffects(mode);
+    final warning = _presetWarningLevel(mode);
+    final color = warning == 'dangerous_mixed'
+        ? Colors.redAccent
+        : warning == 'armed_sell_only'
+            ? Colors.orangeAccent
+            : Colors.greenAccent;
+    return Wrap(spacing: 8, runSpacing: 8, children: [
+      _TextChip(label: 'Scope: $scope', color: color),
+      _TextChip(label: 'Affects: $affects', color: color),
+      _TextChip(label: 'Warning: $warning', color: color),
+    ]);
+  }
+}
+
 class _FlagLine extends StatelessWidget {
   const _FlagLine({required this.flag});
 
@@ -757,6 +1128,8 @@ class _FlagLine extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Row(children: [
+        _ScopeChip(label: _scopeForKey(flag.key)),
+        const SizedBox(width: 8),
         Expanded(child: Text(flag.key)),
         _TextChip(label: active ? 'ON' : 'OFF', color: color),
       ]),
@@ -856,6 +1229,50 @@ String _modeLabel(String mode) {
       return 'Full Live Test Mode';
   }
   return 'Custom Mode';
+}
+
+String _presetScope(String mode) {
+  switch (mode) {
+    case 'kis_sell_only_automation':
+    case 'full_live_test_mode':
+      return 'KIS / KR';
+    default:
+      return 'Global';
+  }
+}
+
+String _presetAffects(String mode) {
+  switch (mode) {
+    case 'kis_sell_only_automation':
+      return 'KIS scheduler sell only';
+    case 'full_live_test_mode':
+      return 'KIS scheduler live buy + sell';
+    case 'manual_live_trading':
+      return 'Manual trading; scheduler live orders off';
+    default:
+      return 'Alpaca + KIS';
+  }
+}
+
+String _presetWarningLevel(String mode) {
+  switch (mode) {
+    case 'kis_sell_only_automation':
+      return 'armed_sell_only';
+    case 'full_live_test_mode':
+      return 'dangerous_mixed';
+    default:
+      return 'safe';
+  }
+}
+
+String _scopeForKey(String key) {
+  if (key.startsWith('kis_') || key.startsWith('kr_')) {
+    return 'KIS / KR';
+  }
+  if (key.startsWith('us_') || key.startsWith('alpaca_')) {
+    return 'ALPACA / US';
+  }
+  return 'GLOBAL';
 }
 
 String _krModeSummary(dynamic settings) {

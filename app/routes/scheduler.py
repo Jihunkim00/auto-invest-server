@@ -57,6 +57,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     )
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
+    runtime_settings = runtime_service.get_settings_read_only(db)
     kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
     current_operation_mode = runtime_service.current_operation_mode_read_only(db)
     daily_live_order_remaining = kr_risk_summary.get("daily_live_order_remaining")
@@ -76,6 +77,16 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     warning_message = _warning_message(current_operation_mode, kr_risk_summary)
 
     kr_live_scheduler_enabled_effective = real_order_scheduler_enabled
+    us_no_new_entry_after = str(
+        us.get("no_new_entry_after")
+        or runtime_settings.get("us_no_new_entry_after")
+        or "15:45"
+    )
+    kr_no_new_entry_after = str(
+        runtime_settings.get("kr_no_new_entry_after")
+        or runtime_settings.get("kis_limited_auto_buy_no_new_entry_after")
+        or "14:50"
+    )
 
     kr_dry_run_scheduler_enabled_effective = bool(
         runtime_state["scheduler_enabled"]
@@ -146,6 +157,36 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "current_operation_mode": current_operation_mode,
         "user_friendly_summary": user_friendly_summary,
         "risk_summary": kr_risk_summary,
+        "global": {
+            "scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
+            "dry_run": bool(runtime_state["dry_run"]),
+            "kill_switch": bool(runtime_state["kill_switch"]),
+        },
+        "alpaca": {
+            "market": "US",
+            "timezone": us.get("timezone", "America/New_York"),
+            "scheduler_enabled": bool(
+                runtime_state["scheduler_enabled"]
+                and us.get("enabled_for_scheduler", False)
+            ),
+            "next_run": us_next_slot["time_local"],
+            "next_slot_name": us_next_slot["name"],
+            "no_new_entry_after": us_no_new_entry_after,
+            "live_order_possible": bool(
+                not runtime_state["dry_run"] and not runtime_state["kill_switch"]
+            ),
+        },
+        "kis": {
+            "market": "KR",
+            "timezone": kr.get("timezone", "Asia/Seoul"),
+            "scheduler_enabled": kr_enabled_for_scheduler,
+            "next_run": kr_next_slot["time_local"],
+            "next_slot_name": kr_next_slot["name"],
+            "kr_no_new_entry_after": kr_no_new_entry_after,
+            "live_buy_possible": live_buy_possible,
+            "live_sell_possible": live_sell_possible,
+            "warning_level": kr_risk_summary.get("warning_level", "safe"),
+        },
         "next_run": {
             "US": us_next_slot,
             "KR": kr_next_slot,
@@ -160,6 +201,9 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "enabled_for_scheduler": bool(us.get("enabled_for_scheduler", False)),
             "timezone": us.get("timezone", "America/New_York"),
             "slots": us.get("entry_slots", []),
+            "market": "US",
+            "broker": "alpaca",
+            "no_new_entry_after": us_no_new_entry_after,
             "next_slot_name": us_next_slot["name"],
             "next_slot_time_local": us_next_slot["time_local"],
             "last_scheduler_run_at": us_last_run["created_at"],
@@ -175,6 +219,10 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "enabled_for_scheduler_block_reasons": kr_enabled_for_scheduler_block_reasons,
             "timezone": kr.get("timezone", "Asia/Seoul"),
             "slots": kr.get("entry_slots", []),
+            "market": "KR",
+            "broker": "kis",
+            "kr_no_new_entry_after": kr_no_new_entry_after,
+            "no_new_entry_after": kr_no_new_entry_after,
             "next_slot_name": kr_next_slot["name"],
             "next_slot_time_local": kr_next_slot["time_local"],
             "last_scheduler_run_at": kr_last_run["created_at"],

@@ -16,8 +16,11 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
+    expect(find.text('Global Safety'), findsOneWidget);
     expect(find.text('Operation Mode'), findsOneWidget);
     expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
+    expect(find.text('Scope: Global'), findsOneWidget);
+    expect(find.text('Affects: Alpaca + KIS'), findsOneWidget);
 
     await tester.tap(find.byType(DropdownButtonFormField<String>));
     await tester.pumpAndSettle();
@@ -27,6 +30,22 @@ void main() {
     expect(find.text('Manual Live Trading'), findsWidgets);
     expect(find.text('KIS Sell-only Automation'), findsWidgets);
     expect(find.text('Full Live Test Mode'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Settings shows broker scoped trading cards', (tester) async {
+    _useTallSettingsViewport(tester);
+    final controller = _controller();
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.text('Global Safety'), findsOneWidget);
+    expect(find.text('Alpaca / US Trading'), findsOneWidget);
+    expect(find.text('KIS / KR Trading'), findsOneWidget);
+    expect(find.text('GLOBAL'), findsWidgets);
+    expect(find.text('ALPACA / US'), findsWidgets);
+    expect(find.text('KIS / KR'), findsWidgets);
 
     controller.dispose();
   });
@@ -50,7 +69,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('selecting KIS Sell-only Automation shows sell-only armed summary',
+  testWidgets(
+      'selecting KIS Sell-only Automation shows sell-only armed summary',
       (tester) async {
     final api = _SettingsFakeApiClient();
     final controller = _controller(api);
@@ -61,7 +81,8 @@ void main() {
 
     expect(api.lastPreset, 'kis_sell_only_automation');
     expect(
-      find.text('KIS sell-only live automation is armed. Auto-buy is disabled.'),
+      find.text(
+          'KIS sell-only live automation is armed. Auto-buy is disabled.'),
       findsOneWidget,
     );
     expect(find.text('LIVE SELL ARMED ON'), findsOneWidget);
@@ -154,6 +175,30 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('KR no new entry after saves broker scoped key', (tester) async {
+    _useTallSettingsViewport(tester);
+    final api = _SettingsFakeApiClient();
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.widgetWithText(TextField, 'KR no new entry after'),
+        findsOneWidget);
+    expect(find.text('KST'), findsOneWidget);
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'KR no new entry after'),
+      '14:40',
+    );
+    await tester.tap(find.text('Save KR Cutoff'));
+    await tester.pumpAndSettle();
+
+    expect(api.lastSettingsUpdate?['kr_no_new_entry_after'], '14:40');
+    expect(controller.settings.krNoNewEntryAfter, '14:40');
+
+    controller.dispose();
+  });
+
   testWidgets('Schedule Control card displays next KR and US run',
       (tester) async {
     _useTallSettingsViewport(tester);
@@ -163,10 +208,23 @@ void main() {
 
     expect(find.text('Schedule Control'), findsOneWidget);
     expect(find.text('Next US run'), findsOneWidget);
-    expect(find.textContaining('open_phase 2026-06-11T09:30'),
-        findsOneWidget);
+    expect(find.textContaining('open_phase 2026-06-11T09:30'), findsWidgets);
     expect(find.text('Next KR run'), findsOneWidget);
-    expect(find.textContaining('midday 2026-06-12T11:30'), findsOneWidget);
+    expect(find.textContaining('midday 2026-06-12T11:30'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('US no new entry after displays ET derived read-only label',
+      (tester) async {
+    _useTallSettingsViewport(tester);
+    final controller = _controller();
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.text('US no new entry after'), findsOneWidget);
+    expect(find.textContaining('15:45 ET'), findsOneWidget);
+    expect(find.textContaining('derived / read-only'), findsOneWidget);
 
     controller.dispose();
   });
@@ -195,6 +253,25 @@ void main() {
         findsOneWidget);
     expect(find.text('FULL LIVE TEST MODE ON'), findsOneWidget);
     expect(find.text('LIVE BUY ARMED ON'), findsOneWidget);
+    expect(find.text('Scope: KIS / KR'), findsOneWidget);
+    expect(find.text('Warning: dangerous_mixed'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('old no_new_entry_after is displayed as KR cutoff',
+      (tester) async {
+    _useTallSettingsViewport(tester);
+    final api = _SettingsFakeApiClient(
+      initialSettings: _opsSettings(noNewEntryAfter: '14:35'),
+    );
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(find.widgetWithText(TextField, 'KR no new entry after'),
+        findsOneWidget);
+    expect(find.text('14:35'), findsOneWidget);
 
     controller.dispose();
   });
@@ -375,6 +452,7 @@ OpsSettings _opsSettings({
     maxPositionPct: maxPositionPct,
     dailyMaxLossPct: dailyMaxLossPct,
     noNewEntryAfter: noNewEntryAfter,
+    krNoNewEntryAfter: noNewEntryAfter,
     kisSchedulerEnabled: kisSchedulerEnabled,
     kisSchedulerDryRun: kisSchedulerDryRun,
     kisSchedulerLiveEnabled: kisSchedulerLiveEnabled,
@@ -392,6 +470,7 @@ OpsSettings _opsSettings({
     kisLimitedAutoTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoSellTakeProfitEnabled: kisLimitedAutoTakeProfitEnabled,
     kisLimitedAutoBuyEnabled: kisLimitedAutoBuyEnabled,
+    kisLimitedAutoBuyNoNewEntryAfter: noNewEntryAfter,
   );
 }
 
@@ -460,25 +539,28 @@ OpsSettings _settingsWithPayload(
     'take_profit_enabled',
     fallbackKey: 'kis_limited_auto_take_profit_enabled',
   );
+  final krNoNewEntryAfter = _valueString(values, 'kr_no_new_entry_after') ??
+      _valueString(values, 'no_new_entry_after') ??
+      _valueString(values, 'kis_limited_auto_buy_no_new_entry_after');
   return settings.copyWith(
     schedulerEnabled:
         _valueBool(values, 'scheduler_enabled') ?? settings.schedulerEnabled,
     dryRun: _valueBool(values, 'dry_run') ?? settings.dryRun,
     maxDailyTrades:
         _valueInt(values, 'max_trades_per_day') ?? settings.maxDailyTrades,
-    maxLiveOrdersPerDay:
-        _valueInt(values, 'max_live_orders_per_day') ??
-            settings.maxLiveOrdersPerDay,
+    maxLiveOrdersPerDay: _valueInt(values, 'max_live_orders_per_day') ??
+        settings.maxLiveOrdersPerDay,
     maxPositions: _valueInt(values, 'max_positions') ?? settings.maxPositions,
-    maxOrderNotionalPct:
-        _valueDouble(values, 'max_order_notional_pct') ??
-            settings.maxOrderNotionalPct,
+    maxOrderNotionalPct: _valueDouble(values, 'max_order_notional_pct') ??
+        settings.maxOrderNotionalPct,
     maxPositionPct:
         _valueDouble(values, 'max_position_pct') ?? settings.maxPositionPct,
     dailyMaxLossPct:
         _valueDouble(values, 'daily_max_loss_pct') ?? settings.dailyMaxLossPct,
-    noNewEntryAfter:
-        _valueString(values, 'no_new_entry_after') ?? settings.noNewEntryAfter,
+    noNewEntryAfter: krNoNewEntryAfter ?? settings.noNewEntryAfter,
+    krNoNewEntryAfter: krNoNewEntryAfter ?? settings.krNoNewEntryAfter,
+    kisLimitedAutoBuyNoNewEntryAfter:
+        krNoNewEntryAfter ?? settings.kisLimitedAutoBuyNoNewEntryAfter,
     kisSchedulerEnabled: _valueBool(values, 'kr_scheduler_enabled') ??
         _valueBool(values, 'kis_scheduler_enabled') ??
         settings.kisSchedulerEnabled,
