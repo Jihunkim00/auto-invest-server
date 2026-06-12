@@ -105,6 +105,9 @@ class DashboardController extends ChangeNotifier {
     minScoreGap: 3,
   );
   SchedulerStatus schedulerStatus = SchedulerStatus.safeDefault();
+  bool schedulerStatusLoading = false;
+  bool schedulerStatusLoaded = false;
+  String? schedulerStatusError;
   AutomationRuntimeMonitor? automationRuntimeMonitor;
   bool automationRuntimeMonitorLoading = false;
   String? automationRuntimeMonitorError;
@@ -406,7 +409,7 @@ class DashboardController extends ChangeNotifier {
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
-      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await refreshSchedulerStatus(silent: true);
       await refreshKisSchedulerStatus(silent: true);
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
@@ -440,6 +443,37 @@ class DashboardController extends ChangeNotifier {
     } finally {
       loading = false;
       notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshSchedulerStatus({bool silent = false}) async {
+    if (schedulerStatusLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Scheduler status refresh already in progress.',
+      );
+    }
+
+    schedulerStatusLoading = true;
+    if (!silent) notifyListeners();
+
+    try {
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      schedulerStatusLoaded = true;
+      schedulerStatusError = null;
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
+      _rebuildPortfolioManagementItems();
+      return const ActionResult(
+        success: true,
+        message: 'Operational readiness refreshed.',
+      );
+    } catch (e) {
+      schedulerStatusError =
+          'Operational readiness unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      return ActionResult(success: false, message: schedulerStatusError!);
+    } finally {
+      schedulerStatusLoading = false;
+      if (!silent) notifyListeners();
     }
   }
 
@@ -490,8 +524,12 @@ class DashboardController extends ChangeNotifier {
     try {
       nextSchedulerStatus = await apiClient.fetchSchedulerStatus();
       schedulerStatus = nextSchedulerStatus;
+      schedulerStatusLoaded = true;
+      schedulerStatusError = null;
     } catch (e) {
       warnings.add('scheduler status unavailable');
+      schedulerStatusError =
+          'Operational readiness unavailable: ${ApiErrorFormatter.format(e.toString())}';
     }
 
     try {
@@ -745,7 +783,7 @@ class DashboardController extends ChangeNotifier {
     try {
       v ? await apiClient.schedulerOn() : await apiClient.schedulerOff();
       settings = await apiClient.getOpsSettings();
-      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await refreshSchedulerStatus(silent: true);
       return ActionResult(
           success: true,
           message: 'Scheduler ${v ? 'enabled' : 'disabled'} successfully.');
@@ -816,6 +854,7 @@ class DashboardController extends ChangeNotifier {
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
+      await refreshSchedulerStatus(silent: true);
       return ActionResult(
           success: true,
           message: 'Kill switch ${v ? 'enabled' : 'disabled'} successfully.');
@@ -841,6 +880,7 @@ class DashboardController extends ChangeNotifier {
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
+      await refreshSchedulerStatus(silent: true);
       _recordSettingsChangeEvent('Dry Run', {'dry_run': v});
       _rebuildAutomationRuntimeMonitorFromCurrentState();
       return ActionResult(
@@ -882,7 +922,7 @@ class DashboardController extends ChangeNotifier {
       await apiClient.updateOpsSettings(values);
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
-      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await refreshSchedulerStatus(silent: true);
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
       _recordSettingsChangeEvent(label, values);
       _rebuildAutomationRuntimeMonitorFromCurrentState();
@@ -899,6 +939,7 @@ class DashboardController extends ChangeNotifier {
       try {
         settings = await apiClient.getOpsSettings();
         kisSafetyStatus = kisSafetyStatusFromSettings();
+        await refreshSchedulerStatus(silent: true);
       } catch (_) {
         // Keep the rollback state when the backend refresh is unavailable.
       }
@@ -933,7 +974,7 @@ class DashboardController extends ChangeNotifier {
       }
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
-      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      await refreshSchedulerStatus(silent: true);
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
       _recordSettingsChangeEvent(_operationModeLabel(preset), {
         'operation_mode': preset,
@@ -953,7 +994,7 @@ class DashboardController extends ChangeNotifier {
       try {
         settings = await apiClient.getOpsSettings();
         kisSafetyStatus = kisSafetyStatusFromSettings();
-        schedulerStatus = await apiClient.fetchSchedulerStatus();
+        await refreshSchedulerStatus(silent: true);
       } catch (_) {
         // Keep the rollback state when backend refresh is unavailable.
       }

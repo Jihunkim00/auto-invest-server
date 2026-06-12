@@ -52,6 +52,7 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
               controller: _controller,
               onOpenManualOrder: () => _selectTab(3),
               onReviewPosition: () => _selectTab(2),
+              onOpenSettings: () => _selectTab(5),
             ),
             WatchlistScreen(
               controller: _controller,

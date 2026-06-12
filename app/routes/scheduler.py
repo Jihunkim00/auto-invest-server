@@ -75,6 +75,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         kr_risk_summary,
     )
     warning_message = _warning_message(current_operation_mode, kr_risk_summary)
+    warning_level = str(kr_risk_summary.get("warning_level") or "safe")
 
     kr_live_scheduler_enabled_effective = real_order_scheduler_enabled
     us_no_new_entry_after = str(
@@ -155,12 +156,18 @@ def get_scheduler_status(db: Session = Depends(get_db)):
 
     return {
         "current_operation_mode": current_operation_mode,
+        "display_mode_label": _display_mode_label(current_operation_mode),
+        "display_warning_level": warning_level,
         "user_friendly_summary": user_friendly_summary,
         "risk_summary": kr_risk_summary,
         "global": {
             "scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
             "dry_run": bool(runtime_state["dry_run"]),
             "kill_switch": bool(runtime_state["kill_switch"]),
+            "safe_mode_active": bool(
+                kr_risk_summary.get("safe_mode_active")
+                or current_operation_mode == "safe_mode"
+            ),
         },
         "alpaca": {
             "market": "US",
@@ -172,6 +179,8 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "next_run": us_next_slot["time_local"],
             "next_slot_name": us_next_slot["name"],
             "no_new_entry_after": us_no_new_entry_after,
+            "display_next_run": _display_next_run(us_next_slot, "ET"),
+            "display_no_new_entry_after": f"{us_no_new_entry_after} ET",
             "live_order_possible": bool(
                 not runtime_state["dry_run"] and not runtime_state["kill_switch"]
             ),
@@ -183,9 +192,13 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "next_run": kr_next_slot["time_local"],
             "next_slot_name": kr_next_slot["name"],
             "kr_no_new_entry_after": kr_no_new_entry_after,
+            "display_next_run": _display_next_run(kr_next_slot, "KST"),
+            "display_no_new_entry_after": f"{kr_no_new_entry_after} KST",
+            "live_buy_armed": bool(kr_risk_summary.get("live_buy_armed")),
+            "live_sell_armed": bool(kr_risk_summary.get("live_sell_armed")),
             "live_buy_possible": live_buy_possible,
             "live_sell_possible": live_sell_possible,
-            "warning_level": kr_risk_summary.get("warning_level", "safe"),
+            "warning_level": warning_level,
         },
         "next_run": {
             "US": us_next_slot,
@@ -204,8 +217,10 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "market": "US",
             "broker": "alpaca",
             "no_new_entry_after": us_no_new_entry_after,
+            "display_no_new_entry_after": f"{us_no_new_entry_after} ET",
             "next_slot_name": us_next_slot["name"],
             "next_slot_time_local": us_next_slot["time_local"],
+            "display_next_run": _display_next_run(us_next_slot, "ET"),
             "last_scheduler_run_at": us_last_run["created_at"],
             "last_scheduler_run_result": us_last_run["result"],
             "last_scheduler_run_reason": us_last_run["reason"],
@@ -223,8 +238,10 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "broker": "kis",
             "kr_no_new_entry_after": kr_no_new_entry_after,
             "no_new_entry_after": kr_no_new_entry_after,
+            "display_no_new_entry_after": f"{kr_no_new_entry_after} KST",
             "next_slot_name": kr_next_slot["name"],
             "next_slot_time_local": kr_next_slot["time_local"],
+            "display_next_run": _display_next_run(kr_next_slot, "KST"),
             "last_scheduler_run_at": kr_last_run["created_at"],
             "last_scheduler_run_result": kr_last_run["result"],
             "last_scheduler_run_reason": kr_last_run["reason"],
@@ -262,6 +279,8 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "live_order_possible": bool(live_buy_possible or live_sell_possible),
             "live_buy_possible": live_buy_possible,
             "live_sell_possible": live_sell_possible,
+            "live_buy_armed": bool(kr_risk_summary.get("live_buy_armed")),
+            "live_sell_armed": bool(kr_risk_summary.get("live_sell_armed")),
             "daily_live_order_remaining": daily_live_order_remaining,
             "warning_message": warning_message,
         },
@@ -298,6 +317,26 @@ def _warning_message(mode: str, risk_summary: dict[str, Any]) -> str:
     if mode == "manual_live_trading":
         return "Manual KIS live order submit still requires explicit confirmation and backend validation."
     return "No scheduler live buy or sell automation is armed."
+
+
+def _display_mode_label(mode: str) -> str:
+    labels = {
+        "safe_mode": "Safe Mode",
+        "dry_run_simulation": "Dry-run Simulation",
+        "manual_live_trading": "Manual Live Trading",
+        "kis_sell_only_automation": "KIS Sell-only Automation",
+        "full_live_test_mode": "Full Live Test Mode",
+    }
+    return labels.get(mode, mode)
+
+
+def _display_next_run(slot: dict[str, str | None], timezone_label: str) -> str | None:
+    time_local = slot.get("time_local")
+    if not time_local:
+        return None
+    name = slot.get("name")
+    prefix = f"{name} " if name else ""
+    return f"{prefix}{time_local} {timezone_label}"
 
 
 def _next_slot(slots: Any, timezone: str) -> dict[str, str | None]:
