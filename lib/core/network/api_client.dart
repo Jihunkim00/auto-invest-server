@@ -1109,12 +1109,8 @@ class ApiClient {
   }
 
   Future<SchedulerStatus> fetchSchedulerStatus() async {
-    try {
-      final payload = await _getJsonNoCache('/scheduler/status');
-      return SchedulerStatus.fromJson(payload);
-    } catch (_) {
-      return SchedulerStatus.safeDefault();
-    }
+    final payload = await _getJsonNoCache('/scheduler/status');
+    return SchedulerStatus.fromJson(payload);
   }
 
   Future<void> schedulerOn() => _post('/ops/scheduler/on');
