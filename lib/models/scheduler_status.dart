@@ -3,7 +3,10 @@ class SchedulerStatus {
     required this.runtimeSchedulerEnabled,
     required this.us,
     required this.kr,
+    this.global = const SchedulerGlobalStatus.safe(),
     this.currentOperationMode = 'safe_mode',
+    this.displayModeLabel = '',
+    this.displayWarningLevel = '',
     this.userFriendlySummary = '',
     this.riskSummary = const SchedulerRiskSummary.safe(),
     this.liveOrderPossible = false,
@@ -14,37 +17,51 @@ class SchedulerStatus {
   });
 
   factory SchedulerStatus.fromJson(Map<String, dynamic> json) {
-    final global = Map<String, dynamic>.from((json['global'] as Map?) ?? {});
+    final globalJson =
+        Map<String, dynamic>.from((json['global'] as Map?) ?? {});
+    final us = MarketSchedulerStatus.fromJson(
+      _mergedBrokerJson(json, modernKey: 'alpaca', legacyKey: 'US'),
+    );
     final kr = MarketSchedulerStatus.fromJson(
-      Map<String, dynamic>.from(
-        (json['kis'] as Map?) ?? (json['KR'] as Map?) ?? {},
-      ),
+      _mergedBrokerJson(json, modernKey: 'kis', legacyKey: 'KR'),
       isKr: true,
     );
     final riskSummary = SchedulerRiskSummary.fromJson(
       Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
     );
+    final effectiveRiskSummary =
+        riskSummary.warningLevel == 'safe' && json['risk_summary'] == null
+            ? kr.riskSummary
+            : riskSummary;
+    final runtimeSchedulerEnabled =
+        _readBool(json['runtime_scheduler_enabled']) ??
+            _readBool(globalJson['scheduler_enabled']) ??
+            false;
+    final currentOperationMode =
+        _readString(json['current_operation_mode'], 'safe_mode');
     return SchedulerStatus(
-      runtimeSchedulerEnabled: json['runtime_scheduler_enabled'] == true ||
-          global['scheduler_enabled'] == true,
-      us: MarketSchedulerStatus.fromJson(
-        Map<String, dynamic>.from(
-          (json['alpaca'] as Map?) ?? (json['US'] as Map?) ?? {},
-        ),
+      runtimeSchedulerEnabled: runtimeSchedulerEnabled,
+      global: SchedulerGlobalStatus.fromJson(
+        globalJson,
+        fallbackSchedulerEnabled: runtimeSchedulerEnabled,
+        fallbackDryRun: effectiveRiskSummary.dryRun,
+        fallbackKillSwitch: effectiveRiskSummary.killSwitch,
+        fallbackSafeModeActive: effectiveRiskSummary.safeModeActive ||
+            currentOperationMode == 'safe_mode',
       ),
+      us: us,
       kr: kr,
-      currentOperationMode:
-          _readString(json['current_operation_mode'], 'safe_mode'),
+      currentOperationMode: currentOperationMode,
+      displayModeLabel: _readString(json['display_mode_label'], ''),
+      displayWarningLevel: _readString(json['display_warning_level'], ''),
       userFriendlySummary: _readString(json['user_friendly_summary'], ''),
-      riskSummary:
-          riskSummary.warningLevel == 'safe' && json['risk_summary'] == null
-              ? kr.riskSummary
-              : riskSummary,
-      liveOrderPossible: json['live_order_possible'] == true,
-      liveBuyPossible: json['live_buy_possible'] == true,
-      liveSellPossible: json['live_sell_possible'] == true,
+      riskSummary: effectiveRiskSummary,
+      liveOrderPossible: _readBool(json['live_order_possible']) ?? false,
+      liveBuyPossible: _readBool(json['live_buy_possible']) ?? false,
+      liveSellPossible: _readBool(json['live_sell_possible']) ?? false,
       dailyLiveOrderRemaining:
-          _readNullableInt(json['daily_live_order_remaining']),
+          _readNullableInt(json['daily_live_order_remaining']) ??
+              effectiveRiskSummary.dailyLiveOrderRemaining,
       warningMessage: _readString(json['warning_message'], ''),
     );
   }
@@ -52,19 +69,28 @@ class SchedulerStatus {
   factory SchedulerStatus.safeDefault() {
     return const SchedulerStatus(
       runtimeSchedulerEnabled: false,
+      global: SchedulerGlobalStatus.safe(),
       us: MarketSchedulerStatus(
         enabledForScheduler: true,
         timezone: 'America/New_York',
         slots: [],
+        market: 'US',
+        broker: 'alpaca',
+        noNewEntryAfter: '15:45',
       ),
       kr: MarketSchedulerStatus(
         enabledForScheduler: false,
         timezone: 'Asia/Seoul',
         slots: [],
+        market: 'KR',
+        broker: 'kis',
         previewOnly: true,
         realOrdersAllowed: false,
+        noNewEntryAfter: '14:50',
       ),
       currentOperationMode: 'safe_mode',
+      displayModeLabel: 'Safe Mode',
+      displayWarningLevel: 'safe',
       userFriendlySummary:
           'Safe mode is active. Scheduler live buy and sell automation are disabled.',
       warningMessage: 'No scheduler live buy or sell automation is armed.',
@@ -72,9 +98,12 @@ class SchedulerStatus {
   }
 
   final bool runtimeSchedulerEnabled;
+  final SchedulerGlobalStatus global;
   final MarketSchedulerStatus us;
   final MarketSchedulerStatus kr;
   final String currentOperationMode;
+  final String displayModeLabel;
+  final String displayWarningLevel;
   final String userFriendlySummary;
   final SchedulerRiskSummary riskSummary;
   final bool liveOrderPossible;
@@ -82,6 +111,53 @@ class SchedulerStatus {
   final bool liveSellPossible;
   final int? dailyLiveOrderRemaining;
   final String warningMessage;
+
+  String get modeLabel {
+    if (displayModeLabel.trim().isNotEmpty) return displayModeLabel;
+    return operationModeLabel(currentOperationMode);
+  }
+
+  String get warningLevel {
+    if (displayWarningLevel.trim().isNotEmpty) return displayWarningLevel;
+    return riskSummary.warningLevel;
+  }
+}
+
+class SchedulerGlobalStatus {
+  const SchedulerGlobalStatus({
+    required this.schedulerEnabled,
+    required this.dryRun,
+    required this.killSwitch,
+    required this.safeModeActive,
+  });
+
+  const SchedulerGlobalStatus.safe()
+      : schedulerEnabled = false,
+        dryRun = true,
+        killSwitch = false,
+        safeModeActive = true;
+
+  factory SchedulerGlobalStatus.fromJson(
+    Map<String, dynamic> json, {
+    required bool fallbackSchedulerEnabled,
+    required bool fallbackDryRun,
+    required bool fallbackKillSwitch,
+    required bool fallbackSafeModeActive,
+  }) {
+    return SchedulerGlobalStatus(
+      schedulerEnabled:
+          _readBool(json['scheduler_enabled']) ?? fallbackSchedulerEnabled,
+      dryRun: _readBool(json['dry_run']) ?? fallbackDryRun,
+      killSwitch: _readBool(json['kill_switch']) ?? fallbackKillSwitch,
+      safeModeActive:
+          _readBool(json['safe_mode_active']) ?? fallbackSafeModeActive,
+    );
+  }
+
+  final bool schedulerEnabled;
+  final bool dryRun;
+  final bool killSwitch;
+  final bool safeModeActive;
 }
 
 class MarketSchedulerStatus {
@@ -89,6 +165,8 @@ class MarketSchedulerStatus {
     required this.enabledForScheduler,
     required this.timezone,
     required this.slots,
+    this.market = '',
+    this.broker = '',
     this.previewOnly = false,
     this.realOrdersAllowed = false,
     this.realOrderSchedulerEnabled = false,
@@ -106,6 +184,10 @@ class MarketSchedulerStatus {
     this.lastSchedulerRunMode,
     this.lastSchedulerRunTriggerSource,
     this.noNewEntryAfter,
+    this.displayNextRun,
+    this.displayNoNewEntryAfter,
+    this.liveBuyArmed = false,
+    this.liveSellArmed = false,
     this.riskSummary = const SchedulerRiskSummary.safe(),
   });
 
@@ -113,25 +195,36 @@ class MarketSchedulerStatus {
     Map<String, dynamic> json, {
     bool isKr = false,
   }) {
+    final riskSummary = SchedulerRiskSummary.fromJson(
+      Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
+    );
+    final nextSlotTimeLocal =
+        _readNullableString(json['next_slot_time_local'] ?? json['next_run']);
+    final noNewEntryAfter = _readNullableString(
+        json['no_new_entry_after'] ?? json['kr_no_new_entry_after']);
     return MarketSchedulerStatus(
-      enabledForScheduler: json['enabled_for_scheduler'] == true ||
-          json['scheduler_enabled'] == true,
+      enabledForScheduler: _readBool(json['scheduler_enabled']) ??
+          _readBool(json['enabled_for_scheduler']) ??
+          false,
+      market: _readString(json['market'], isKr ? 'KR' : 'US'),
+      broker: _readString(json['broker'], isKr ? 'kis' : 'alpaca'),
       timezone: _readString(json['timezone'], ''),
       slots: _readSlots(json['slots']),
-      previewOnly: json['preview_only'] == true,
-      realOrdersAllowed: json['real_orders_allowed'] == true,
-      realOrderSchedulerEnabled: json['real_order_scheduler_enabled'] == true,
-      liveSchedulerReady: json['live_scheduler_ready'] == true,
-      krSchedulerAnyEnabled: json['kr_scheduler_any_enabled'] == true,
+      previewOnly: _readBool(json['preview_only']) ?? false,
+      realOrdersAllowed: _readBool(json['real_orders_allowed']) ?? false,
+      realOrderSchedulerEnabled:
+          _readBool(json['real_order_scheduler_enabled']) ?? false,
+      liveSchedulerReady: _readBool(json['live_scheduler_ready']) ?? false,
+      krSchedulerAnyEnabled:
+          _readBool(json['kr_scheduler_any_enabled']) ?? false,
       krLiveSchedulerEnabledEffective:
-          json['kr_live_scheduler_enabled_effective'] == true,
+          _readBool(json['kr_live_scheduler_enabled_effective']) ?? false,
       krDryRunSchedulerEnabledEffective:
-          json['kr_dry_run_scheduler_enabled_effective'] == true,
+          _readBool(json['kr_dry_run_scheduler_enabled_effective']) ?? false,
       enabledForSchedulerBlockReasons:
           _readStringList(json['enabled_for_scheduler_block_reasons']),
       nextSlotName: _readNullableString(json['next_slot_name']),
-      nextSlotTimeLocal:
-          _readNullableString(json['next_slot_time_local'] ?? json['next_run']),
+      nextSlotTimeLocal: nextSlotTimeLocal,
       lastSchedulerRunAt: _readNullableString(json['last_scheduler_run_at']),
       lastSchedulerRunResult:
           _readNullableString(json['last_scheduler_run_result']),
@@ -143,15 +236,26 @@ class MarketSchedulerStatus {
       lastSchedulerRunTriggerSource: isKr
           ? _readNullableString(json['last_scheduler_run_trigger_source'])
           : null,
-      noNewEntryAfter: _readNullableString(
-          json['no_new_entry_after'] ?? json['kr_no_new_entry_after']),
-      riskSummary: SchedulerRiskSummary.fromJson(
-        Map<String, dynamic>.from((json['risk_summary'] as Map?) ?? {}),
-      ),
+      noNewEntryAfter: noNewEntryAfter,
+      displayNextRun: _readNullableString(json['display_next_run']) ??
+          _displayNextRun(
+            _readNullableString(json['next_slot_name']),
+            nextSlotTimeLocal,
+          ),
+      displayNoNewEntryAfter:
+          _readNullableString(json['display_no_new_entry_after']) ??
+              noNewEntryAfter,
+      liveBuyArmed:
+          _readBool(json['live_buy_armed']) ?? riskSummary.liveBuyArmed,
+      liveSellArmed:
+          _readBool(json['live_sell_armed']) ?? riskSummary.liveSellArmed,
+      riskSummary: riskSummary,
     );
   }
 
   final bool enabledForScheduler;
+  final String market;
+  final String broker;
   final String timezone;
   final List<String> slots;
   final bool previewOnly;
@@ -171,6 +275,10 @@ class MarketSchedulerStatus {
   final String? lastSchedulerRunMode;
   final String? lastSchedulerRunTriggerSource;
   final String? noNewEntryAfter;
+  final String? displayNextRun;
+  final String? displayNoNewEntryAfter;
+  final bool liveBuyArmed;
+  final bool liveSellArmed;
   final SchedulerRiskSummary riskSummary;
 }
 
@@ -245,10 +353,50 @@ class SchedulerRiskSummary {
   final bool buyGateEnabled;
 }
 
+String operationModeLabel(String mode) {
+  switch (mode) {
+    case 'safe_mode':
+      return 'Safe Mode';
+    case 'dry_run_simulation':
+      return 'Dry-run Simulation';
+    case 'manual_live_trading':
+      return 'Manual Live Trading';
+    case 'kis_sell_only_automation':
+      return 'KIS Sell-only Automation';
+    case 'full_live_test_mode':
+      return 'Full Live Test Mode';
+  }
+  return mode.trim().isEmpty ? 'Unknown Mode' : mode;
+}
+
+Map<String, dynamic> _mergedBrokerJson(
+  Map<String, dynamic> json, {
+  required String modernKey,
+  required String legacyKey,
+}) {
+  final legacy = Map<String, dynamic>.from((json[legacyKey] as Map?) ?? {});
+  final modern = Map<String, dynamic>.from((json[modernKey] as Map?) ?? {});
+  return {...legacy, ...modern};
+}
+
 String _readString(Object? value, String fallback) {
   final text = value?.toString();
   if (text == null || text.isEmpty) return fallback;
   return text;
+}
+
+bool? _readBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  if (value is num) return value != 0;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes' || text == 'on') {
+    return true;
+  }
+  if (text == 'false' || text == '0' || text == 'no' || text == 'off') {
+    return false;
+  }
+  return null;
 }
 
 List<String> _readSlots(Object? value) {
@@ -296,4 +444,10 @@ int? _readNullableInt(Object? value) {
 double _readDouble(Object? value, double fallback) {
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+String? _displayNextRun(String? slotName, String? slotTime) {
+  if (slotTime == null || slotTime.trim().isEmpty) return null;
+  if (slotName == null || slotName.trim().isEmpty) return slotTime;
+  return '$slotName $slotTime';
 }

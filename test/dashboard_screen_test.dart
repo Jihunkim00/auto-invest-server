@@ -297,6 +297,190 @@ const _krManagedPosition = ManagedPosition(
 );
 
 void main() {
+  testWidgets('Operational Readiness card renders current mode',
+      (tester) async {
+    final controller = _operationalController(
+      status: _operationalStatus(mode: 'dry_run_simulation'),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.byKey(const Key('operational-readiness-card')), findsOneWidget);
+    expect(find.text('Operational Readiness'), findsOneWidget);
+    expect(
+        find.text('Dry-run Simulation (dry_run_simulation)'), findsOneWidget);
+    expect(find.text('Warning'), findsOneWidget);
+    expect(find.text('safe'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness Safe Mode renders SAFE without live badges',
+      (tester) async {
+    final controller = _operationalController(
+      status: _operationalStatus(mode: 'safe_mode'),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.text('SAFE'), findsOneWidget);
+    expect(find.text('LIVE BUY ARMED'), findsNothing);
+    expect(find.text('LIVE SELL ARMED'), findsNothing);
+    expect(find.text('Live buy armed'), findsOneWidget);
+    expect(find.text('Live sell armed'), findsOneWidget);
+    expect(find.text('NO'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness KIS Sell-only mode renders sell-only and buy off',
+      (tester) async {
+    final controller = _operationalController(
+      status: _operationalStatus(mode: 'kis_sell_only_automation'),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.text('SELL ONLY ARMED'), findsWidgets);
+    expect(find.text('LIVE SELL ARMED'), findsOneWidget);
+    expect(find.text('LIVE BUY ARMED'), findsNothing);
+    expect(find.text('Live buy armed'), findsOneWidget);
+    expect(find.text('NO'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness Full Live Test mode renders danger and both live badges',
+      (tester) async {
+    final controller = _operationalController(
+      status: _operationalStatus(mode: 'full_live_test_mode'),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.text('DANGEROUS FULL LIVE'), findsWidgets);
+    expect(find.text('LIVE BUY ARMED'), findsOneWidget);
+    expect(find.text('LIVE SELL ARMED'), findsOneWidget);
+    expect(find.byKey(const ValueKey('operational-switch-safe-mode')),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness renders global safety and market schedules',
+      (tester) async {
+    final controller = _operationalController(
+      status: _operationalStatus(
+        mode: 'kis_sell_only_automation',
+        dailyRemaining: 2,
+        killSwitch: true,
+        usNoNewEntryAfter: '15:45',
+        krNoNewEntryAfter: '14:40',
+      ),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.text('Global Safety'), findsOneWidget);
+    expect(find.text('Scheduler'), findsWidgets);
+    expect(find.text('Dry-run'), findsOneWidget);
+    expect(find.text('Kill switch'), findsOneWidget);
+    expect(find.text('Alpaca / US'), findsOneWidget);
+    expect(find.text('open_phase 2026-06-11T09:30 ET'), findsOneWidget);
+    expect(find.text('15:45 ET'), findsOneWidget);
+    expect(find.text('KIS / KR'), findsOneWidget);
+    expect(find.text('midday 2026-06-12T11:30 KST'), findsOneWidget);
+    expect(find.text('14:40 KST'), findsOneWidget);
+    expect(find.text('Daily remaining'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness backend failure shows unavailable and Retry',
+      (tester) async {
+    final api = _OperationalReadinessApiClient(
+      status: _operationalStatus(mode: 'safe_mode'),
+    );
+    final controller = _operationalController(
+      api: api,
+      status: _operationalStatus(mode: 'safe_mode'),
+    )
+      ..schedulerStatusLoaded = false
+      ..schedulerStatusError = 'Operational readiness unavailable: offline';
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    expect(find.text('Operational readiness unavailable.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('operational-readiness-retry')),
+        findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('operational-readiness-retry')));
+    await tester.pumpAndSettle();
+
+    expect(api.fetchSchedulerStatusCalls, 1);
+    expect(controller.schedulerStatusError, isNull);
+
+    controller.dispose();
+  });
+
+  testWidgets('Operational Readiness Open Settings button navigates',
+      (tester) async {
+    var openedSettings = false;
+    final controller = _operationalController(
+      status: _operationalStatus(mode: 'safe_mode'),
+    );
+
+    await _pumpOperationalReadiness(
+      tester,
+      controller,
+      onOpenSettings: () => openedSettings = true,
+    );
+
+    final openSettings =
+        find.byKey(const ValueKey('operational-open-settings'));
+    await _showDashboardFinder(tester, openSettings);
+    await tester.tap(openSettings);
+    await tester.pumpAndSettle();
+
+    expect(openedSettings, isTrue);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'Operational Readiness Switch to Safe Mode calls preset and refreshes status',
+      (tester) async {
+    final api = _OperationalReadinessApiClient(
+      status: _operationalStatus(mode: 'full_live_test_mode'),
+    );
+    final controller = _operationalController(
+      api: api,
+      status: _operationalStatus(mode: 'full_live_test_mode'),
+    );
+
+    await _pumpOperationalReadiness(tester, controller);
+
+    final switchButton =
+        find.byKey(const ValueKey('operational-switch-safe-mode'));
+    await _showDashboardFinder(tester, switchButton);
+    await tester.tap(switchButton);
+    await tester.pumpAndSettle();
+
+    expect(api.applyPresetCalls, 1);
+    expect(api.lastPreset, 'safe_mode');
+    expect(api.fetchSchedulerStatusCalls, 1);
+    expect(controller.schedulerStatus.currentOperationMode, 'safe_mode');
+    expect(controller.schedulerStatus.warningLevel, 'safe');
+
+    controller.dispose();
+  });
+
   testWidgets('Automation Runtime Monitor renders global safety',
       (tester) async {
     final controller = DashboardController(FakeKisApiClient(), autoload: false)
@@ -307,6 +491,11 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
 
     expect(find.text('Automation Runtime Monitor'), findsOneWidget);
     expect(find.text('Global Safety'), findsOneWidget);
@@ -327,6 +516,11 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
 
     expect(find.text('Alpaca Paper Scheduler'), findsOneWidget);
     expect(find.textContaining('weak_final_score_gap'), findsWidgets);
@@ -350,6 +544,11 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
 
     expect(
       find.text(
@@ -375,6 +574,11 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
 
     expect(
       find.text(
@@ -404,6 +608,11 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
+
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
 
     expect(find.text('Safe Mode / Live automation off.'), findsOneWidget);
     expect(find.text('safe'), findsWidgets);
@@ -438,6 +647,11 @@ void main() {
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
 
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
+
     expect(find.text('Global Scheduler ON'), findsOneWidget);
     expect(
       find.textContaining('KIS Scheduler Effective: OFF'),
@@ -465,6 +679,10 @@ void main() {
       home: Scaffold(body: DashboardScreen(controller: controller)),
     ));
 
+    await _showDashboardSection(
+      tester,
+      const Key('automation_runtime_monitor_card'),
+    );
     await tester.tap(find.byKey(const ValueKey('automation-runtime-refresh')));
     await tester.pumpAndSettle();
 
@@ -1041,6 +1259,233 @@ Future<void> _showDashboardFinder(WidgetTester tester, Finder finder) async {
   expect(finder, findsOneWidget);
   await tester.ensureVisible(finder);
   await tester.pumpAndSettle();
+}
+
+DashboardController _operationalController({
+  _OperationalReadinessApiClient? api,
+  required SchedulerStatus status,
+}) {
+  final fake = api ?? _OperationalReadinessApiClient(status: status);
+  return DashboardController(fake, autoload: false)
+    ..settings = fake.currentSettings
+    ..schedulerStatus = status
+    ..schedulerStatusLoaded = true
+    ..selectedProvider = SelectedProvider.kis;
+}
+
+Future<void> _pumpOperationalReadiness(
+  WidgetTester tester,
+  DashboardController controller, {
+  VoidCallback? onOpenSettings,
+}) async {
+  await tester.pumpWidget(MaterialApp(
+    theme: ThemeData.dark(),
+    home: Scaffold(
+      body: DashboardScreen(
+        controller: controller,
+        onOpenSettings: onOpenSettings,
+      ),
+    ),
+  ));
+  await tester.pumpAndSettle();
+}
+
+class _OperationalReadinessApiClient extends ApiClient {
+  _OperationalReadinessApiClient({required SchedulerStatus status})
+      : currentStatus = status,
+        currentSettings = _operationalSettingsForMode(
+          status.currentOperationMode,
+        );
+
+  SchedulerStatus currentStatus;
+  OpsSettings currentSettings;
+  int fetchSchedulerStatusCalls = 0;
+  int applyPresetCalls = 0;
+  String? lastPreset;
+
+  @override
+  Future<OpsSettings> getOpsSettings() async => currentSettings;
+
+  @override
+  Future<SchedulerStatus> fetchSchedulerStatus() async {
+    fetchSchedulerStatusCalls += 1;
+    return currentStatus;
+  }
+
+  @override
+  Future<Map<String, dynamic>> applyOpsSettingsPreset({
+    required String preset,
+    bool confirmDangerous = false,
+  }) async {
+    applyPresetCalls += 1;
+    lastPreset = preset;
+    currentSettings = _operationalSettingsForMode(preset);
+    currentStatus = _operationalStatus(mode: preset);
+    return {
+      'preset': preset,
+      'applied': true,
+      'requires_confirmation': false,
+    };
+  }
+
+  @override
+  Future<KisSchedulerGuardedSellResult>
+      fetchKisSchedulerGuardedSellStatus() async {
+    return KisSchedulerGuardedSellResult.fromJson({
+      'result': 'blocked',
+      'reason': 'test',
+    });
+  }
+
+  @override
+  Future<KisSchedulerGuardedBuyResult>
+      fetchKisSchedulerGuardedBuyStatus() async {
+    return KisSchedulerGuardedBuyResult.fromJson({
+      'result': 'blocked',
+      'reason': 'test',
+    });
+  }
+}
+
+OpsSettings _operationalSettingsForMode(String mode) {
+  final sellOnly = mode == 'kis_sell_only_automation';
+  final fullLive = mode == 'full_live_test_mode';
+  final dryRunSimulation = mode == 'dry_run_simulation';
+  return OpsSettings(
+    schedulerEnabled: sellOnly || fullLive || dryRunSimulation,
+    botEnabled: false,
+    dryRun: !(sellOnly || fullLive),
+    killSwitch: false,
+    brokerMode: 'Paper',
+    defaultGateLevel: 2,
+    maxDailyTrades: 5,
+    maxDailyEntries: 2,
+    minEntryScore: 65,
+    minScoreGap: 3,
+    currentOperationMode: mode,
+    maxLiveOrdersPerDay: 2,
+    kisSchedulerEnabled: sellOnly || fullLive || dryRunSimulation,
+    kisSchedulerDryRun: dryRunSimulation || mode == 'safe_mode',
+    kisSchedulerLiveEnabled: sellOnly || fullLive,
+    kisSchedulerAllowRealOrders: sellOnly || fullLive,
+    kisSchedulerConfiguredAllowRealOrders: sellOnly || fullLive,
+    kisSchedulerSellEnabled: sellOnly || fullLive,
+    kisSchedulerBuyEnabled: fullLive,
+    kisSchedulerAllowLimitedAutoSell: sellOnly || fullLive,
+    kisSchedulerAllowLimitedAutoBuy: fullLive,
+    kisLiveAutoSellEnabled: sellOnly || fullLive,
+    kisLiveAutoBuyEnabled: fullLive,
+    kisLimitedAutoStopLossEnabled: sellOnly || fullLive,
+    kisLimitedAutoSellStopLossEnabled: sellOnly || fullLive,
+    kisLimitedAutoTakeProfitEnabled: sellOnly || fullLive,
+    kisLimitedAutoSellTakeProfitEnabled: sellOnly || fullLive,
+    kisLimitedAutoBuyEnabled: fullLive,
+    krNoNewEntryAfter: '14:40',
+    noNewEntryAfter: '14:40',
+    kisLimitedAutoBuyNoNewEntryAfter: '14:40',
+  );
+}
+
+SchedulerStatus _operationalStatus({
+  required String mode,
+  int? dailyRemaining,
+  bool killSwitch = false,
+  String usNoNewEntryAfter = '15:45',
+  String krNoNewEntryAfter = '14:40',
+}) {
+  final sellOnly = mode == 'kis_sell_only_automation';
+  final fullLive = mode == 'full_live_test_mode';
+  final dryRunSimulation = mode == 'dry_run_simulation';
+  final risk = SchedulerRiskSummary(
+    liveSellArmed: sellOnly || fullLive,
+    liveBuyArmed: fullLive,
+    sellOnlyMode: sellOnly,
+    dailyLiveOrderLimit: 2,
+    dailyLiveOrderRemaining:
+        sellOnly || fullLive ? (dailyRemaining ?? 1) : null,
+    maxNotionalPct: 0.03,
+    dryRun: !(sellOnly || fullLive),
+    killSwitch: killSwitch,
+    safeModeActive: mode == 'safe_mode',
+    riskyFlags: fullLive ? const ['kis_scheduler_buy_enabled'] : const [],
+    blockingFlags: const [],
+    warningLevel: fullLive
+        ? 'dangerous_mixed'
+        : sellOnly
+            ? 'armed_sell_only'
+            : 'safe',
+    sellGateEnabled: sellOnly || fullLive,
+    buyGateEnabled: fullLive,
+  );
+  final schedulerEnabled = sellOnly || fullLive || dryRunSimulation;
+  return SchedulerStatus(
+    runtimeSchedulerEnabled: schedulerEnabled,
+    global: SchedulerGlobalStatus(
+      schedulerEnabled: schedulerEnabled,
+      dryRun: !(sellOnly || fullLive),
+      killSwitch: killSwitch,
+      safeModeActive: mode == 'safe_mode',
+    ),
+    currentOperationMode: mode,
+    displayModeLabel: operationModeLabel(mode),
+    displayWarningLevel: risk.warningLevel,
+    userFriendlySummary: _operationalSummary(mode),
+    riskSummary: risk,
+    liveOrderPossible: sellOnly || fullLive,
+    liveBuyPossible: fullLive,
+    liveSellPossible: sellOnly || fullLive,
+    dailyLiveOrderRemaining: risk.dailyLiveOrderRemaining,
+    warningMessage: _operationalWarning(mode, risk.dailyLiveOrderRemaining),
+    us: MarketSchedulerStatus(
+      enabledForScheduler: schedulerEnabled,
+      market: 'US',
+      broker: 'alpaca',
+      timezone: 'America/New_York',
+      slots: const ['open_phase 09:30'],
+      nextSlotName: 'open_phase',
+      nextSlotTimeLocal: '2026-06-11T09:30',
+      noNewEntryAfter: usNoNewEntryAfter,
+    ),
+    kr: MarketSchedulerStatus(
+      enabledForScheduler: schedulerEnabled,
+      market: 'KR',
+      broker: 'kis',
+      timezone: 'Asia/Seoul',
+      slots: const ['midday 11:30'],
+      nextSlotName: 'midday',
+      nextSlotTimeLocal: '2026-06-12T11:30',
+      noNewEntryAfter: krNoNewEntryAfter,
+      realOrderSchedulerEnabled: sellOnly || fullLive,
+      liveSchedulerReady: sellOnly || fullLive,
+      liveBuyArmed: fullLive,
+      liveSellArmed: sellOnly || fullLive,
+      riskSummary: risk,
+    ),
+  );
+}
+
+String _operationalSummary(String mode) {
+  switch (mode) {
+    case 'dry_run_simulation':
+      return 'Dry-run simulation is enabled. Scheduler checks can run without real orders.';
+    case 'kis_sell_only_automation':
+      return 'KIS sell-only live automation is armed. Auto-buy is disabled.';
+    case 'full_live_test_mode':
+      return 'Full live test mode is armed. Live buy and live sell automation are enabled.';
+    default:
+      return 'Safe mode is active. Scheduler live buy and sell automation are disabled.';
+  }
+}
+
+String _operationalWarning(String mode, int? dailyRemaining) {
+  switch (mode) {
+    case 'kis_sell_only_automation':
+      return 'LIVE SELL ARMED. Auto-buy is disabled. Daily live orders remaining: ${dailyRemaining ?? 1}.';
+    case 'full_live_test_mode':
+      return 'LIVE BUY ARMED and LIVE SELL ARMED may be possible. Full live test mode is dangerous.';
+    default:
+      return 'No scheduler live buy or sell automation is armed.';
+  }
 }
 
 const _usSummary = PortfolioSummary(

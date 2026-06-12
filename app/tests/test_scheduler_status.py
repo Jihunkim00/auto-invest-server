@@ -44,6 +44,8 @@ def test_scheduler_status_returns_operation_mode_and_summary(client):
     assert response.status_code == 200
     body = response.json()
     assert body["current_operation_mode"] == "safe_mode"
+    assert body["display_mode_label"] == "Safe Mode"
+    assert body["display_warning_level"] == "safe"
     assert body["user_friendly_summary"]
     assert body["risk_summary"]["warning_level"] == "safe"
     assert body["live_order_possible"] is False
@@ -55,12 +57,17 @@ def test_scheduler_status_returns_operation_mode_and_summary(client):
     assert body["global"]["scheduler_enabled"] is False
     assert body["global"]["dry_run"] is True
     assert body["global"]["kill_switch"] is False
+    assert body["global"]["safe_mode_active"] is True
     assert body["alpaca"]["market"] == "US"
     assert body["alpaca"]["timezone"] == "America/New_York"
     assert body["alpaca"]["no_new_entry_after"] == "15:45"
+    assert body["alpaca"]["display_no_new_entry_after"] == "15:45 ET"
     assert body["kis"]["market"] == "KR"
     assert body["kis"]["timezone"] == "Asia/Seoul"
     assert body["kis"]["kr_no_new_entry_after"] == "14:50"
+    assert body["kis"]["display_no_new_entry_after"] == "14:50 KST"
+    assert body["kis"]["live_buy_armed"] is False
+    assert body["kis"]["live_sell_armed"] is False
     assert body["kis"]["warning_level"] == "safe"
 
 
@@ -91,6 +98,8 @@ def test_scheduler_status_returns_sell_only_mode_summary(monkeypatch, client):
     assert "LIVE SELL ARMED" in body["warning_message"]
     assert body["KR"]["current_operation_mode"] == "kis_sell_only_automation"
     assert body["kis"]["scheduler_enabled"] is True
+    assert body["kis"]["live_sell_armed"] is True
+    assert body["kis"]["live_buy_armed"] is False
     assert body["kis"]["live_sell_possible"] is True
     assert body["kis"]["live_buy_possible"] is False
     assert body["kis"]["warning_level"] == "armed_sell_only"
