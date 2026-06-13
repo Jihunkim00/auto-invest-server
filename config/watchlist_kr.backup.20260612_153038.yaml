@@ -8,17 +8,17 @@ symbols:
 - symbol: '000660'
   name: SK하이닉스
   market: KOSPI
-- symbol: '402340'
-  name: SK스퀘어
-  market: KOSPI
 - symbol: 005935
   name: 삼성전자우
   market: KOSPI
-- symbol: 009150
-  name: 삼성전기
+- symbol: '402340'
+  name: SK스퀘어
   market: KOSPI
 - symbol: 005380
   name: 현대차
+  market: KOSPI
+- symbol: 009150
+  name: 삼성전기
   market: KOSPI
 - symbol: '373220'
   name: LG에너지솔루션
@@ -32,6 +32,12 @@ symbols:
 - symbol: '329180'
   name: HD현대중공업
   market: KOSPI
+- symbol: '012330'
+  name: 현대모비스
+  market: KOSPI
+- symbol: '105560'
+  name: KB금융
+  market: KOSPI
 - symbol: '000270'
   name: 기아
   market: KOSPI
@@ -41,17 +47,14 @@ symbols:
 - symbol: '034020'
   name: 두산에너빌리티
   market: KOSPI
-- symbol: '105560'
-  name: KB금융
-  market: KOSPI
 - symbol: '012450'
   name: 한화에어로스페이스
   market: KOSPI
-- symbol: '012330'
-  name: 현대모비스
-  market: KOSPI
 - symbol: '055550'
   name: 신한지주
+  market: KOSPI
+- symbol: '066570'
+  name: LG전자
   market: KOSPI
 - symbol: '006400'
   name: 삼성SDI
@@ -59,26 +62,20 @@ symbols:
 - symbol: '034730'
   name: SK
   market: KOSPI
-- symbol: '267260'
-  name: HD현대일렉트릭
-  market: KOSPI
 - symbol: '035420'
   name: NAVER
   market: KOSPI
 - symbol: 068270
   name: 셀트리온
   market: KOSPI
-- symbol: '066570'
-  name: LG전자
-  market: KOSPI
-- symbol: '042660'
-  name: 한화오션
-  market: KOSPI
-- symbol: '042700'
-  name: 한미반도체
+- symbol: '267260'
+  name: HD현대일렉트릭
   market: KOSPI
 - symbol: '010120'
   name: LS ELECTRIC
+  market: KOSPI
+- symbol: '042660'
+  name: 한화오션
   market: KOSPI
 - symbol: 086790
   name: 하나금융지주
@@ -86,11 +83,14 @@ symbols:
 - symbol: '298040'
   name: 효성중공업
   market: KOSPI
-- symbol: 005490
-  name: POSCO홀딩스
-  market: KOSPI
 - symbol: 006800
   name: 미래에셋증권
+  market: KOSPI
+- symbol: 000810
+  name: 삼성화재
+  market: KOSPI
+- symbol: 005490
+  name: POSCO홀딩스
   market: KOSPI
 - symbol: '196170'
   name: 알테오젠
@@ -107,23 +107,20 @@ symbols:
 - symbol: 036930
   name: 주성엔지니어링
   market: KOSDAQ
-- symbol: '240810'
-  name: 원익IPS
-  market: KOSDAQ
 - symbol: 058470
   name: 리노공업
-  market: KOSDAQ
-- symbol: 039030
-  name: 이오테크닉스
-  market: KOSDAQ
-- symbol: 028300
-  name: HLB
   market: KOSDAQ
 - symbol: '000250'
   name: 삼천당제약
   market: KOSDAQ
-- symbol: '403870'
-  name: HPSP
+- symbol: 028300
+  name: HLB
+  market: KOSDAQ
+- symbol: '240810'
+  name: 원익IPS
+  market: KOSDAQ
+- symbol: 039030
+  name: 이오테크닉스
   market: KOSDAQ
 - symbol: 087010
   name: 펩트론
@@ -131,24 +128,27 @@ symbols:
 - symbol: '298380'
   name: 에이비엘바이오
   market: KOSDAQ
-- symbol: '319660'
-  name: 피에스케이
-  market: KOSDAQ
-- symbol: 095340
-  name: ISC
-  market: KOSDAQ
-- symbol: '222800'
-  name: 심텍
-  market: KOSDAQ
-- symbol: '108490'
-  name: 로보티즈
-  market: KOSDAQ
 - symbol: '440110'
   name: 파두
   market: KOSDAQ
 - symbol: '141080'
   name: 리가켐바이오
   market: KOSDAQ
+- symbol: '108490'
+  name: 로보티즈
+  market: KOSDAQ
+- symbol: 095340
+  name: ISC
+  market: KOSDAQ
+- symbol: '403870'
+  name: HPSP
+  market: KOSDAQ
 - symbol: '178320'
   name: 서진시스템
+  market: KOSDAQ
+- symbol: '214370'
+  name: 케어젠
+  market: KOSDAQ
+- symbol: '347850'
+  name: 디앤디파마텍
   market: KOSDAQ
