@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.brokers.alpaca_client import AlpacaClient
+from app.services.us_symbol_metadata import enrich_us_symbol_metadata
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -12,8 +13,8 @@ def list_positions():
 
         result = []
         for p in positions:
-            result.append({
-                "symbol": p.symbol,
+            result.append(enrich_us_symbol_metadata({
+                "symbol": str(p.symbol or "").upper(),
                 "side": p.side,
                 "qty": str(p.qty),
                 "avg_entry_price": str(p.avg_entry_price),
@@ -21,7 +22,7 @@ def list_positions():
                 "unrealized_pl": str(p.unrealized_pl),
                 "unrealized_plpc": str(p.unrealized_plpc),
                 "current_price": str(p.current_price),
-            })
+            }))
 
         return {
             "count": len(result),
@@ -44,8 +45,8 @@ def get_position(symbol: str):
                 "message": "No open position"
             }
 
-        return {
-            "symbol": position.symbol,
+        return enrich_us_symbol_metadata({
+            "symbol": str(position.symbol or "").upper(),
             "exists": True,
             "side": position.side,
             "qty": str(position.qty),
@@ -54,6 +55,6 @@ def get_position(symbol: str):
             "unrealized_pl": str(position.unrealized_pl),
             "unrealized_plpc": str(position.unrealized_plpc),
             "current_price": str(position.current_price),
-        }
+        })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch position: {str(e)}")

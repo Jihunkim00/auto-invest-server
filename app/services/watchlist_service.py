@@ -10,6 +10,11 @@ from app.services.indicator_service import IndicatorService
 from app.services.market_data_service import MarketDataService
 from app.services.market_profile_service import MarketProfileService
 from app.services.quant_signal_service import QuantSignalService
+from app.services.us_symbol_metadata import (
+    build_us_symbol_metadata,
+    enrich_us_candidate_metadata,
+    enrich_us_symbol_metadata,
+)
 
 WATCHLIST_DEFAULT_SYMBOLS = [
     "NVDA",
@@ -116,7 +121,7 @@ class WatchlistService:
 
         valid_symbols = []
         for symbol in symbols:
-            raw_symbol = symbol.get("symbol") if isinstance(symbol, dict) else symbol
+            raw_symbol = _watchlist_symbol(symbol)
             if not raw_symbol:
                 continue
             if self.market:
@@ -132,6 +137,7 @@ class WatchlistService:
 
     def _load_symbol_metadata(self) -> dict[str, dict[str, object]]:
         settings = get_settings()
+        us_metadata = build_us_symbol_metadata() if _is_us_market(self.market) else {}
         source_path = (
             self.market_profile_service.get_watchlist_path(self.market)
             if self.market
@@ -160,9 +166,9 @@ class WatchlistService:
 
         metadata: dict[str, dict[str, object]] = {}
         for item in symbols:
-            if not isinstance(item, dict) or not item.get("symbol"):
+            raw_symbol = _watchlist_symbol(item)
+            if not raw_symbol:
                 continue
-            raw_symbol = str(item["symbol"])
             try:
                 symbol = (
                     self.market_profile_service.normalize_symbol(raw_symbol, self.market)
@@ -171,25 +177,38 @@ class WatchlistService:
                 )
             except Exception:
                 continue
-            name = _first_text(
-                item.get("name"),
-                item.get("company_name"),
-                item.get("display_name"),
-                item.get("symbol_name"),
-                item.get("korean_name"),
-                item.get("asset_name"),
-            )
+            if _is_us_market(self.market):
+                raw_item = dict(item) if isinstance(item, dict) else {"symbol": symbol}
+                raw_item["symbol"] = symbol
+                metadata[symbol] = enrich_us_symbol_metadata(
+                    raw_item,
+                    metadata_by_symbol=us_metadata,
+                )
+                continue
+            if isinstance(item, dict):
+                name = _watchlist_company_name(item, symbol)
+                market = item.get("market") or self.market or "US"
+                broker = item.get("broker") or item.get("provider") or _broker_for_market(str(market))
+                market_label = item.get("market_label")
+            else:
+                name = _watchlist_company_name({}, symbol)
+                market = self.market or "US"
+                broker = _broker_for_market(str(market))
+                market_label = None
             row: dict[str, object] = {
                 "symbol": symbol,
-                "market": item.get("market") or self.market or "US",
+                "name": name,
+                "company_name": name,
+                "market": market,
+                "broker": broker,
             }
-            if name:
-                row["name"] = name
-                row["company_name"] = name
+            if market_label:
+                row["market_label"] = market_label
             metadata[symbol] = row
         return metadata
 
     def _score_symbol(self, symbol: str, gate_level: int = DEFAULT_GATE_LEVEL) -> tuple[dict[str, object], dict[str, object]]:
+        normalized_symbol = symbol.upper()
         bars = self.market_data_service.get_recent_bars(symbol.upper())
         indicators = self.indicator_service.calculate(bars)
         quant = self.quant_signal_service.score(indicators, gate_level=gate_level)
@@ -211,12 +230,25 @@ class WatchlistService:
             gating_notes=list(quant.get("quant_notes") or []),
         )
 
-        metadata = self.symbol_metadata.get(symbol.upper(), {})
+        metadata = self.symbol_metadata.get(normalized_symbol, {})
+        if _is_us_market(self.market):
+            identity = enrich_us_candidate_metadata(
+                {"symbol": normalized_symbol, **metadata},
+                self.symbol_metadata,
+            )
+        else:
+            company_name = _watchlist_company_name(metadata, normalized_symbol)
+            market = metadata.get("market") or self.market or "US"
+            identity = {
+                "symbol": normalized_symbol,
+                "name": company_name,
+                "company_name": company_name,
+                "market": market,
+                "broker": metadata.get("broker") or _broker_for_market(str(market)),
+                "market_label": metadata.get("market_label"),
+            }
         symbol_result = {
-            "symbol": symbol.upper(),
-            "name": metadata.get("name"),
-            "company_name": metadata.get("company_name"),
-            "market": metadata.get("market") or self.market or "US",
+            **identity,
             "entry_score": round(entry_score, 2),
             "should_trade": bool(readiness["entry_ready"]),
             "quant_score": quant["quant_buy_score"],
@@ -276,3 +308,28 @@ def _first_text(*values: object) -> str | None:
         if text and text.lower() != "null":
             return text
     return None
+
+
+def _watchlist_symbol(item: object) -> str | None:
+    if isinstance(item, dict):
+        return _first_text(item.get("symbol"), item.get("ticker"))
+    return _first_text(item)
+
+
+def _watchlist_company_name(raw: dict[str, object], symbol: str) -> str:
+    return _first_text(
+        raw.get("company_name"),
+        raw.get("companyName"),
+        raw.get("name"),
+        raw.get("company"),
+        symbol,
+        "Unknown Company",
+    ) or "Unknown Company"
+
+
+def _broker_for_market(market: str) -> str:
+    return "kis" if market.strip().upper() in {"KR", "KOSPI", "KOSDAQ", "KONEX"} else "alpaca"
+
+
+def _is_us_market(market: str | None) -> bool:
+    return str(market or "US").strip().upper() == "US"

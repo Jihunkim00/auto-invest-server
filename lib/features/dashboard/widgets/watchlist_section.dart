@@ -8507,9 +8507,13 @@ class _SymbolChip extends StatelessWidget {
     final marketLabel = item.marketLabel.isNotEmpty
         ? item.marketLabel
         : _marketCodeLabel(item.market);
-    final label = isKr && item.name.isNotEmpty
-        ? '${item.symbol} - ${item.name} - $marketLabel'
-        : item.symbol;
+    final companyName = _firstText([item.companyName, item.name]);
+    final hasCompanyName = companyName.isNotEmpty && companyName != item.symbol;
+    final label = isKr && hasCompanyName
+        ? '${item.symbol} - $companyName - $marketLabel'
+        : hasCompanyName
+            ? '${item.symbol} - $companyName'
+            : item.symbol;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(

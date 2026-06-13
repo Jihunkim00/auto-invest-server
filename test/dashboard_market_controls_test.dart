@@ -672,7 +672,7 @@ void main() {
     await tester.tap(find.text('Run Watchlist Analysis'));
     await tester.pumpAndSettle();
 
-    expect(find.text('AAPL · Unknown company'), findsWidgets);
+    expect(find.text('AAPL · AAPL'), findsWidgets);
 
     controller.dispose();
   });

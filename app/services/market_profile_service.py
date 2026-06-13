@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from app.config import get_settings
+from app.services.us_symbol_metadata import enrich_us_symbol_metadata
 
 MARKET_LABELS = {
     "KOSPI": "코스피",
@@ -206,23 +207,39 @@ class MarketProfileService:
         profile: MarketProfile,
     ) -> dict[str, Any] | None:
         if isinstance(raw, dict):
-            raw_symbol = raw.get("symbol")
+            raw_symbol = _first_text(raw.get("symbol"), raw.get("ticker"))
             if not raw_symbol:
                 return None
-            symbol = self.normalize_symbol(str(raw_symbol), profile.market)
+            symbol = self.normalize_symbol(raw_symbol, profile.market)
             item = dict(raw)
             item["symbol"] = symbol
-            item.setdefault("market", profile.market)
-            item.setdefault("market_label", _market_label(item.get("market")))
+            if profile.market == "US":
+                item = enrich_us_symbol_metadata(item)
+            else:
+                company_name = _watchlist_company_name(raw, symbol)
+                item["company_name"] = company_name
+                item["name"] = company_name
+            item["market"] = profile.market
+            item["broker"] = profile.broker_provider
+            item["market_label"] = _market_label(profile.market)
             return item
 
         if raw:
             symbol = self.normalize_symbol(str(raw), profile.market)
-            return {
+            item = {
                 "symbol": symbol,
                 "market": profile.market,
+                "broker": profile.broker_provider,
                 "market_label": _market_label(profile.market),
             }
+            if profile.market == "US":
+                item.update(enrich_us_symbol_metadata({"symbol": symbol}))
+                item["market_label"] = _market_label(profile.market)
+                return item
+            company_name = _watchlist_company_name({}, symbol)
+            item["company_name"] = company_name
+            item["name"] = company_name
+            return item
         return None
 
     @staticmethod
@@ -233,3 +250,22 @@ class MarketProfileService:
 def _market_label(market: Any) -> str:
     normalized = str(market or "").strip().upper()
     return MARKET_LABELS.get(normalized, normalized)
+
+
+def _watchlist_company_name(raw: dict[str, Any], symbol: str) -> str:
+    return _first_text(
+        raw.get("company_name"),
+        raw.get("companyName"),
+        raw.get("name"),
+        raw.get("company"),
+        symbol,
+        "Unknown Company",
+    ) or "Unknown Company"
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and text.lower() != "null":
+            return text
+    return None

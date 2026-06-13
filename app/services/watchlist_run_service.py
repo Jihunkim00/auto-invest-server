@@ -11,6 +11,7 @@ from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_research_service import WatchlistResearchService
 from app.services.watchlist_service import WatchlistService
+from app.services.us_symbol_metadata import enrich_us_candidate_metadata
 
 _RISK_LEVEL_ORDER = {"low": 0, "normal": 1, "medium": 2, "high": 3}
 PROVIDER = "alpaca"
@@ -45,6 +46,37 @@ def _dedupe(values: list[str]) -> list[str]:
         if value not in result:
             result.append(value)
     return result
+
+
+def _candidate_identity_payload(
+    candidate: dict[str, object],
+    metadata_by_symbol: dict[str, dict[str, object]] | None = None,
+) -> dict[str, object]:
+    enriched = enrich_us_candidate_metadata(candidate, metadata_by_symbol)
+    payload: dict[str, object] = {
+        "symbol": enriched.get("symbol"),
+        "company_name": enriched.get("company_name"),
+        "name": enriched.get("name"),
+        "market": enriched.get("market", MARKET),
+        "broker": enriched.get("broker", PROVIDER),
+    }
+    for source_key, target_key in (
+        ("provider", "provider"),
+        ("market_label", "market_label"),
+    ):
+        value = enriched.get(source_key)
+        if value is not None:
+            payload[target_key] = value
+    return payload
+
+
+def _with_candidate_identity(
+    candidate: dict[str, object],
+    metadata_by_symbol: dict[str, dict[str, object]] | None = None,
+) -> dict[str, object]:
+    row = dict(candidate)
+    row.update(_candidate_identity_payload(row, metadata_by_symbol))
+    return row
 
 
 def _event_risk_unavailable(symbol: str, market: str = "US") -> dict[str, object]:
@@ -154,10 +186,20 @@ class WatchlistRunService:
         open_position_count = len(open_positions)
 
         watchlist = WatchlistService()
+        metadata_by_symbol = watchlist.symbol_metadata
         research_service = WatchlistResearchService()
         event_risk_service = EventRiskService()
         analysis = watchlist.analyze(gate_level=gate_level)
-        watchlist_rows = analysis.get("watchlist") or []
+        watchlist_rows = [
+            _with_candidate_identity(row, metadata_by_symbol)
+            for row in (analysis.get("watchlist") or [])
+            if isinstance(row, dict)
+        ]
+        analysis = {
+            **analysis,
+            "watchlist": watchlist_rows,
+            "analyzed_symbol_count": len(watchlist_rows),
+        }
         top_candidate_count = settings.watchlist_top_candidates_for_research
         quant_weight = settings.watchlist_quant_weight
         research_weight = settings.watchlist_research_weight
@@ -178,7 +220,7 @@ class WatchlistRunService:
         )[:top_candidate_count]
         top_quant_candidates = [
             {
-                "symbol": candidate["symbol"],
+                **_candidate_identity_payload(candidate, metadata_by_symbol),
                 "quant_score": candidate["quant_score"],
                 "quant_reason": candidate.get("quant_reason"),
                 "entry_ready": bool(candidate.get("entry_ready")),
@@ -205,6 +247,9 @@ class WatchlistRunService:
                 **scored_candidate,
                 **research,
             }
+            researched_candidate.update(
+                _candidate_identity_payload(researched_candidate, metadata_by_symbol)
+            )
             researched_candidate["final_entry_score"] = round(
                 researched_candidate["quant_score"] * quant_weight
                 + researched_candidate["market_research_score"] * research_weight,
@@ -328,12 +373,18 @@ class WatchlistRunService:
         best_score = _safe_float(final_best_candidate.get("final_entry_score", 0)) if final_best_candidate else 0.0
 
         tied_final_candidates = [
-            {"symbol": candidate.get("symbol"), "final_entry_score": _safe_float(candidate.get("final_entry_score", 0))}
+            {
+                **_candidate_identity_payload(candidate, metadata_by_symbol),
+                "final_entry_score": _safe_float(candidate.get("final_entry_score", 0)),
+            }
             for candidate in final_candidates
             if _safe_float(candidate.get("final_entry_score", 0)) == best_score
         ]
         near_tied_candidates = [
-            {"symbol": candidate.get("symbol"), "final_entry_score": _safe_float(candidate.get("final_entry_score", 0))}
+            {
+                **_candidate_identity_payload(candidate, metadata_by_symbol),
+                "final_entry_score": _safe_float(candidate.get("final_entry_score", 0)),
+            }
             for candidate in final_candidates
             if abs(best_score - _safe_float(candidate.get("final_entry_score", 0))) <= 1.0
         ]

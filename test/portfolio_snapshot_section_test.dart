@@ -330,7 +330,9 @@ void main() {
     controller.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(find.text('091810 · Unknown company'), findsOneWidget);
+    expect(find.text('091810'), findsOneWidget);
+    expect(find.textContaining('091810 · 091810'), findsNothing);
+    expect(find.textContaining('Unknown Company'), findsNothing);
 
     controller.dispose();
   });
@@ -341,8 +343,22 @@ void main() {
         await _pumpSnapshot(tester, usSummary: _usPositionSummary);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
+    expect(find.text('AAPL - Apple Inc.'), findsOneWidget);
     expect(find.text(r'+$12.34'), findsWidgets);
     expect(find.text('+12.34%'), findsNWidgets(2));
+
+    controller.dispose();
+  });
+
+  testWidgets('US position title falls back to symbol without duplication',
+      (tester) async {
+    final controller =
+        await _pumpSnapshot(tester, usSummary: _usSymbolFallbackSummary);
+
+    expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
+    expect(find.text('AAPL'), findsOneWidget);
+    expect(find.textContaining('AAPL - AAPL'), findsNothing);
+    expect(find.textContaining('Unknown Company'), findsNothing);
 
     controller.dispose();
   });
@@ -531,7 +547,37 @@ const _usPositionSummary = PortfolioSummary(
   positions: [
     PositionSummary(
       symbol: 'AAPL',
-      name: 'Apple',
+      name: 'Apple Inc.',
+      broker: 'alpaca',
+      market: 'US',
+      side: 'long',
+      qty: 1,
+      avgEntryPrice: 100,
+      costBasis: 100,
+      currentPrice: 112.34,
+      marketValue: 112.34,
+      unrealizedPl: 12.34,
+      unrealizedPlpc: 0.1234,
+    ),
+  ],
+  pendingOrders: [],
+);
+
+const _usSymbolFallbackSummary = PortfolioSummary(
+  currency: 'USD',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 100,
+  totalMarketValue: 112.34,
+  totalUnrealizedPl: 12.34,
+  totalUnrealizedPlpc: 0.1234,
+  cash: 123.45,
+  positions: [
+    PositionSummary(
+      symbol: 'AAPL',
+      name: 'AAPL',
+      broker: 'alpaca',
+      market: 'US',
       side: 'long',
       qty: 1,
       avgEntryPrice: 100,

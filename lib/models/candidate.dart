@@ -178,8 +178,9 @@ class Candidate {
         _readStringList(json['risk_flags']) + gptContext.riskFlags);
     final gatingNotes = _dedupeStringList(
         _readStringList(json['gating_notes']) + gptContext.gatingNotes);
+    final symbol = json['symbol']?.toString() ?? '';
     return Candidate(
-      symbol: json['symbol']?.toString() ?? '',
+      symbol: symbol,
       score: score,
       note: _readNullableString(json['note']) ??
           _readNullableString(json[noteKey]) ??
@@ -187,16 +188,18 @@ class Candidate {
       entryReady: _readNullableBool(json['entry_ready']) ?? false,
       actionHint: _readNullableString(json['action_hint']) ?? 'watch',
       blockReason: _readNullableString(json['block_reason']),
-      name: _firstString([
-        json['name'],
+      name: _companyName([
         json['company_name'],
+        json['companyName'],
+        json['name'],
+        json['company'],
         json['display_name'],
         json['symbol_name'],
         json['korean_name'],
         json['asset_name'],
         _readMap(json['asset'])['name'],
         _readMap(json['profile'])['name'],
-      ]),
+      ], symbol),
       provider: _readNullableString(json['provider']) ?? '',
       market: _readNullableString(json['market']) ?? '',
       marketLabel: _readNullableString(json['market_label']) ??
@@ -288,12 +291,20 @@ Map<String, dynamic> _readMap(Object? value) {
   return const {};
 }
 
-String _firstString(List<Object?> values) {
+
+
+String _companyName(List<Object?> values, String symbol) {
   for (final value in values) {
     final text = _readNullableString(value);
-    if (text != null) return text;
+    if (text == null) continue;
+    if (symbol.isNotEmpty && text.toUpperCase() == symbol.toUpperCase()) {
+      continue;
+    }
+    final lower = text.toLowerCase();
+    if (lower == 'unknown company' || lower == 'unknown') continue;
+    return text;
   }
-  return '';
+  return symbol.isNotEmpty ? symbol : 'Unknown Company';
 }
 
 String? _readNullableString(Object? value) {

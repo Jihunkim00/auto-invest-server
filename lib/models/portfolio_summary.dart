@@ -110,6 +110,8 @@ class PositionSummary {
   const PositionSummary({
     required this.symbol,
     this.name = '',
+    this.broker = '',
+    this.market = '',
     required this.side,
     required this.qty,
     required this.avgEntryPrice,
@@ -121,9 +123,12 @@ class PositionSummary {
   });
 
   factory PositionSummary.fromJson(Map<String, dynamic> json) {
+    final symbol = _readString(json['symbol'], '');
     return PositionSummary(
-      symbol: _readString(json['symbol'], ''),
-      name: _readString(json['name'], ''),
+      symbol: symbol,
+      name: _companyName(json, symbol),
+      broker: _readString(json['broker'] ?? json['provider'], ''),
+      market: _readString(json['market'], ''),
       side: _readString(json['side'], 'long'),
       qty: _readDouble(json['qty']),
       avgEntryPrice: _readDouble(json['avg_entry_price']),
@@ -137,6 +142,8 @@ class PositionSummary {
 
   final String symbol;
   final String name;
+  final String broker;
+  final String market;
   final String side;
   final double qty;
   final double avgEntryPrice;
@@ -216,14 +223,14 @@ double? _readNullableDouble(Object? value) {
 }
 
 String _readString(Object? value, String fallback) {
-  final text = value?.toString();
-  if (text == null || text.isEmpty) return fallback;
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return fallback;
   return text;
 }
 
 String? _readNullableString(Object? value) {
-  final text = value?.toString();
-  if (text == null || text.isEmpty) return null;
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
   return text;
 }
 
@@ -233,4 +240,29 @@ bool _readBool(Object? value, bool fallback) {
   if (text == 'true') return true;
   if (text == 'false') return false;
   return fallback;
+}
+
+String _companyName(Map<String, dynamic> json, String symbol) {
+  final value = _firstDistinctString([
+    json['company_name'],
+    json['companyName'],
+    json['name'],
+    json['company'],
+    json['asset_name'],
+  ], symbol);
+  return value ?? (symbol.isNotEmpty ? symbol : 'Unknown Company');
+}
+
+String? _firstDistinctString(List<Object?> values, String symbol) {
+  for (final value in values) {
+    final text = _readNullableString(value);
+    if (text == null) continue;
+    if (symbol.isNotEmpty && text.toUpperCase() == symbol.toUpperCase()) {
+      continue;
+    }
+    final lower = text.toLowerCase();
+    if (lower == 'unknown company' || lower == 'unknown') continue;
+    return text;
+  }
+  return null;
 }

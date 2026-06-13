@@ -75,6 +75,10 @@ def test_portfolio_summary_one_holding_calculates_totals(monkeypatch):
     position = body["positions"][0]
     assert body["positions_count"] == 1
     assert position["symbol"] == "AAPL"
+    assert position["company_name"] == "Apple Inc."
+    assert position["name"] == "Apple Inc."
+    assert position["broker"] == "alpaca"
+    assert position["market"] == "US"
     assert position["qty"] == 2
     assert position["avg_entry_price"] == 180
     assert position["cost_basis"] == 360
@@ -86,6 +90,34 @@ def test_portfolio_summary_one_holding_calculates_totals(monkeypatch):
     assert body["total_market_value"] == 372.4
     assert body["total_unrealized_pl"] == 12.4
     assert body["total_unrealized_plpc"] == pytest.approx(12.4 / 360)
+
+
+def test_portfolio_summary_symbol_only_position_falls_back_to_symbol(monkeypatch):
+    broker = FakeBroker(
+        positions=[
+            SimpleNamespace(
+                symbol="ZZZZ",
+                side="long",
+                qty="1",
+                avg_entry_price="10",
+                current_price="11",
+                market_value="11",
+                unrealized_pl="1",
+                unrealized_plpc="0.1",
+            )
+        ]
+    )
+    client = _client_with_broker(monkeypatch, broker)
+
+    response = client.get("/portfolio/summary")
+
+    assert response.status_code == 200
+    position = response.json()["positions"][0]
+    assert position["symbol"] == "ZZZZ"
+    assert position["company_name"] == "ZZZZ"
+    assert position["name"] == "ZZZZ"
+    assert position["broker"] == "alpaca"
+    assert position["market"] == "US"
 
 
 def test_portfolio_summary_pending_buy_order_uses_notional_estimate(monkeypatch):

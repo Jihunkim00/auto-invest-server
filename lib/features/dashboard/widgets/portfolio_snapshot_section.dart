@@ -307,6 +307,17 @@ class _PositionTile extends StatelessWidget {
     final reason = managedPosition?.humanReason ??
         _positionStatusReason(position, isKr: isKr);
     final company = _companyLabel(position, managedPosition);
+    final title = _positionTitle(
+      symbol: position.symbol,
+      company: company,
+      market: managementItem.market.isNotEmpty
+          ? managementItem.market
+          : position.market,
+      broker: managementItem.provider.isNotEmpty
+          ? managementItem.provider
+          : position.broker,
+      isKr: isKr,
+    );
     final canPrepareManualSell = isKr &&
         managementMode &&
         managementItem.manualSellAvailable &&
@@ -328,7 +339,7 @@ class _PositionTile extends StatelessWidget {
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
           title: Row(children: [
             Expanded(
-              child: Text('${position.symbol} · $company',
+              child: Text(title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -1070,8 +1081,37 @@ class _CountPill extends StatelessWidget {
 
 String _companyLabel(PositionSummary position, ManagedPosition? managed) {
   final value = managed?.companyName ?? position.name;
-  if (value.trim().isEmpty) return 'Unknown company';
-  return value.trim();
+  final text = value.trim();
+  if (text.isEmpty || text.toLowerCase() == 'unknown company') {
+    return position.symbol.trim().isEmpty
+        ? 'Unknown Company'
+        : position.symbol.trim();
+  }
+  return text;
+}
+
+String _positionTitle({
+  required String symbol,
+  required String company,
+  required String market,
+  required String broker,
+  required bool isKr,
+}) {
+  final cleanSymbol = symbol.trim();
+  final cleanCompany = company.trim();
+  final hasDistinctCompany = cleanCompany.isNotEmpty &&
+      cleanCompany.toUpperCase() != cleanSymbol.toUpperCase() &&
+      cleanCompany.toLowerCase() != 'unknown company';
+  if (!hasDistinctCompany) {
+    return cleanSymbol.isNotEmpty ? cleanSymbol : 'Unknown Company';
+  }
+
+  final normalizedMarket = market.trim().toUpperCase();
+  final normalizedBroker = broker.trim().toLowerCase();
+  final isUsAlpaca =
+      !isKr && (normalizedMarket == 'US' || normalizedBroker == 'alpaca');
+  final separator = isUsAlpaca ? ' - ' : ' · ';
+  return '$cleanSymbol$separator$cleanCompany';
 }
 
 Color _valueColor(double value) {

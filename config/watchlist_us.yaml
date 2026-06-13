@@ -2,53 +2,103 @@ market: US
 currency: USD
 timezone: America/New_York
 symbols:
-  - NVDA
-  - AAPL
-  - MSFT
-  - AMZN
-  - GOOGL
-  - GOOG
-  - AVGO
-  - META
-  - TSLA
-  - WMT
-  - MU
-  - AMD
-  - ASML
-  - COST
-  - INTC
-  - NFLX
-  - CSCO
-  - LRCX
-  - PLTR
-  - AMAT
-  - TXN
-  - KLAC
-  - ARM
-  - LIN
-  - PEP
-  - TMUS
-  - ADI
-  - AMGN
-  - ISRG
-  - GILD
-  - SHOP
-  - QCOM
-  - APP
-  - SNDK
-  - BKNG
-  - PANW
-  - MRVL
-  - PDD
-  - WDC
-  - HON
-  - STX
-  - SBUX
-  - CRWD
-  - VRTX
-  - CEG
-  - INTU
-  - CMCSA
-  - MAR
-  - ADBE
-  - SNPS
+  - symbol: NVDA
+    company_name: NVIDIA Corporation
+  - symbol: AAPL
+    company_name: Apple Inc.
+  - symbol: MSFT
+    company_name: Microsoft Corporation
+  - symbol: AMZN
+    company_name: Amazon.com, Inc.
+  - symbol: GOOGL
+    company_name: Alphabet Inc.
+  - symbol: GOOG
+    company_name: Alphabet Inc.
+  - symbol: AVGO
+    company_name: Broadcom Inc.
+  - symbol: META
+    company_name: Meta Platforms, Inc.
+  - symbol: TSLA
+    company_name: Tesla, Inc.
+  - symbol: WMT
+    company_name: Walmart Inc.
+  - symbol: MU
+    company_name: Micron Technology, Inc.
+  - symbol: AMD
+    company_name: Advanced Micro Devices, Inc.
+  - symbol: ASML
+    company_name: ASML Holding N.V.
+  - symbol: COST
+    company_name: Costco Wholesale Corporation
+  - symbol: INTC
+    company_name: Intel Corporation
+  - symbol: NFLX
+    company_name: Netflix, Inc.
+  - symbol: CSCO
+    company_name: Cisco Systems, Inc.
+  - symbol: LRCX
+    company_name: Lam Research Corporation
+  - symbol: PLTR
+    company_name: Palantir Technologies Inc.
+  - symbol: AMAT
+    company_name: Applied Materials, Inc.
+  - symbol: TXN
+    company_name: Texas Instruments Incorporated
+  - symbol: KLAC
+    company_name: KLA Corporation
+  - symbol: ARM
+    company_name: Arm Holdings plc
+  - symbol: LIN
+    company_name: Linde plc
+  - symbol: PEP
+    company_name: PepsiCo, Inc.
+  - symbol: TMUS
+    company_name: T-Mobile US, Inc.
+  - symbol: ADI
+    company_name: Analog Devices, Inc.
+  - symbol: AMGN
+    company_name: Amgen Inc.
+  - symbol: ISRG
+    company_name: Intuitive Surgical, Inc.
+  - symbol: GILD
+    company_name: Gilead Sciences, Inc.
+  - symbol: SHOP
+    company_name: Shopify Inc.
+  - symbol: QCOM
+    company_name: Qualcomm Incorporated
+  - symbol: APP
+    company_name: AppLovin Corporation
+  - symbol: SNDK
+    company_name: SanDisk Corporation
+  - symbol: BKNG
+    company_name: Booking Holdings Inc.
+  - symbol: PANW
+    company_name: Palo Alto Networks, Inc.
+  - symbol: MRVL
+    company_name: Marvell Technology, Inc.
+  - symbol: PDD
+    company_name: PDD Holdings Inc.
+  - symbol: WDC
+    company_name: Western Digital Corporation
+  - symbol: HON
+    company_name: Honeywell International Inc.
+  - symbol: STX
+    company_name: Seagate Technology Holdings plc
+  - symbol: SBUX
+    company_name: Starbucks Corporation
+  - symbol: CRWD
+    company_name: CrowdStrike Holdings, Inc.
+  - symbol: VRTX
+    company_name: Vertex Pharmaceuticals Incorporated
+  - symbol: CEG
+    company_name: Constellation Energy Corporation
+  - symbol: INTU
+    company_name: Intuit Inc.
+  - symbol: CMCSA
+    company_name: Comcast Corporation
+  - symbol: MAR
+    company_name: Marriott International, Inc.
+  - symbol: ADBE
+    company_name: Adobe Inc.
+  - symbol: SNPS
+    company_name: Synopsys, Inc.

@@ -3,6 +3,7 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
+from app.config import get_settings
 from app.main import app
 from app.services.market_profile_service import (
     MarketProfileError,
@@ -31,6 +32,119 @@ def test_us_profile_points_to_alpaca_usd_and_us_configs():
     assert profile.reference_sites_file == "config/reference_sites_us.yaml"
     assert profile.symbol_format == "ticker"
     assert profile.enabled_for_trading is True
+
+
+def test_us_watchlist_endpoint_includes_company_name_and_name():
+    client = TestClient(app)
+
+    response = client.get("/market-profiles/US/watchlist")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["market"] == "US"
+    nvda = next(item for item in body["symbols"] if item["symbol"] == "NVDA")
+    assert nvda["company_name"]
+    assert nvda["company_name"] != "Unknown Company"
+    assert nvda["name"] == nvda["company_name"]
+    assert nvda["market"] == "US"
+    assert nvda["broker"] == "alpaca"
+    assert nvda["market_label"] == "미국"
+
+
+def test_us_watchlist_yaml_aliases_normalize_to_company_name(monkeypatch, tmp_path):
+    path = tmp_path / "watchlist_us_aliases.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "symbols:",
+                "  - symbol: NVDA",
+                "    company_name: NVIDIA Corporation",
+                "  - symbol: AAPL",
+                "    name: Apple Inc.",
+                "  - symbol: MSFT",
+                "    company: Microsoft Corporation",
+                "  - symbol: GOOGL",
+                "    companyName: Alphabet Inc.",
+                "  - ticker: AMD",
+                "    company_name: Advanced Micro Devices, Inc.",
+                "  - TSLA",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(get_settings(), "watchlist_us_path", str(path))
+
+    payload = MarketProfileService().load_watchlist("US")
+
+    by_symbol = {item["symbol"]: item for item in payload["symbols"]}
+    assert by_symbol["NVDA"]["company_name"] == "NVIDIA Corporation"
+    assert by_symbol["NVDA"]["name"] == "NVIDIA Corporation"
+    assert by_symbol["AAPL"]["company_name"] == "Apple Inc."
+    assert by_symbol["MSFT"]["company_name"] == "Microsoft Corporation"
+    assert by_symbol["GOOGL"]["company_name"] == "Alphabet Inc."
+    assert by_symbol["AMD"]["company_name"] == "Advanced Micro Devices, Inc."
+    assert by_symbol["TSLA"]["company_name"] == "Tesla, Inc."
+    assert by_symbol["TSLA"]["name"] == "Tesla, Inc."
+    assert all(item["market"] == "US" for item in by_symbol.values())
+    assert all(item["broker"] == "alpaca" for item in by_symbol.values())
+
+
+def test_watchlist_service_metadata_aliases_use_symbol_fallback(monkeypatch, tmp_path):
+    path = tmp_path / "watchlist_us_metadata.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "symbols:",
+                "  - symbol: NVDA",
+                "    company: NVIDIA Corporation",
+                "  - ticker: AAPL",
+                "    name: Apple Inc.",
+                "  - MSFT",
+                "  - ZZZZ",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(get_settings(), "watchlist_us_path", str(path))
+
+    service = WatchlistService(market="US")
+
+    assert service.symbols == ["NVDA", "AAPL", "MSFT", "ZZZZ"]
+    assert service.symbol_metadata["NVDA"]["company_name"] == "NVIDIA Corporation"
+    assert service.symbol_metadata["AAPL"]["company_name"] == "Apple Inc."
+    assert service.symbol_metadata["MSFT"]["company_name"] == "Microsoft Corporation"
+    assert service.symbol_metadata["ZZZZ"]["company_name"] == "ZZZZ"
+
+
+def test_us_watchlist_symbol_only_yaml_uses_static_company_metadata(monkeypatch, tmp_path):
+    path = tmp_path / "watchlist_us_symbols.yaml"
+    path.write_text(
+        "\n".join(
+            [
+                "symbols:",
+                "  - NVDA",
+                "  - HON",
+                "  - MU",
+                "  - STX",
+                "  - LRCX",
+                "  - APP",
+                "  - ZZZZ",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(get_settings(), "watchlist_us_path", str(path))
+
+    payload = MarketProfileService().load_watchlist("US")
+
+    by_symbol = {item["symbol"]: item for item in payload["symbols"]}
+    assert by_symbol["NVDA"]["company_name"] == "NVIDIA Corporation"
+    assert by_symbol["HON"]["company_name"] == "Honeywell International Inc."
+    assert by_symbol["MU"]["company_name"] == "Micron Technology, Inc."
+    assert by_symbol["STX"]["company_name"] == "Seagate Technology Holdings plc"
+    assert by_symbol["LRCX"]["company_name"] == "Lam Research Corporation"
+    assert by_symbol["APP"]["company_name"] == "AppLovin Corporation"
+    assert by_symbol["ZZZZ"]["company_name"] == "ZZZZ"
 
 
 def test_kr_profile_points_to_kis_krw_and_kr_configs():
@@ -81,7 +195,8 @@ def test_watchlist_candidate_payload_includes_configured_company_name(monkeypatc
         "AAPL": {
             "name": "Apple Inc.",
             "company_name": "Apple Inc.",
-            "market": "NASDAQ",
+            "market": "US",
+            "broker": "alpaca",
         }
     }
     monkeypatch.setattr(
@@ -118,7 +233,8 @@ def test_watchlist_candidate_payload_includes_configured_company_name(monkeypatc
 
     assert payload["name"] == "Apple Inc."
     assert payload["company_name"] == "Apple Inc."
-    assert payload["market"] == "NASDAQ"
+    assert payload["market"] == "US"
+    assert payload["broker"] == "alpaca"
 
 
 def test_kr_symbol_validation_accepts_005930():

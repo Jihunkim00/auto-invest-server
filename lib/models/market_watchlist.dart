@@ -46,14 +46,27 @@ class WatchlistSymbol {
     required this.symbol,
     required this.name,
     required this.market,
+    this.companyName = '',
     this.marketLabel = '',
   });
 
   factory WatchlistSymbol.fromJson(Map<String, dynamic> json) {
+    final symbol = _readString(json['symbol'] ?? json['ticker'], '');
+    final companyName = _firstString([
+      json['company_name'],
+      json['companyName'],
+      json['name'],
+      json['company'],
+      json['display_name'],
+      json['asset_name'],
+      symbol,
+      'Unknown Company',
+    ], symbol: symbol);
     return WatchlistSymbol(
-      symbol: _readString(json['symbol'], ''),
-      name: _readString(json['name'], ''),
+      symbol: symbol,
+      name: companyName,
       market: _readString(json['market'], ''),
+      companyName: companyName,
       marketLabel: _readString(json['market_label'], ''),
     );
   }
@@ -61,6 +74,7 @@ class WatchlistSymbol {
   final String symbol;
   final String name;
   final String market;
+  final String companyName;
   final String marketLabel;
 }
 
@@ -70,7 +84,23 @@ int _readInt(Object? value, int fallback) {
 }
 
 String _readString(Object? value, String fallback) {
-  final text = value?.toString();
-  if (text == null || text.isEmpty) return fallback;
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return fallback;
   return text;
+}
+
+String _firstString(List<Object?> values, {String symbol = ''}) {
+  String fallback = '';
+  for (final value in values) {
+    final text = _readString(value, '');
+    if (text.toLowerCase() == 'unknown company' && symbol.isNotEmpty) {
+      continue;
+    }
+    if (symbol.isNotEmpty && text.toUpperCase() == symbol.toUpperCase()) {
+      fallback = text;
+      continue;
+    }
+    if (text.isNotEmpty) return text;
+  }
+  return fallback;
 }

@@ -797,8 +797,9 @@ class PortfolioPositionManagementItem {
       companyName: _firstText([
             managed?.companyName,
             position.name,
+            position.symbol,
           ]) ??
-          'Unknown company',
+          'Unknown Company',
       quantity: managed?.quantity ?? position.qty,
       averagePrice: managed?.averagePrice ?? position.avgEntryPrice,
       costBasis: managed?.costBasis ?? position.costBasis,

@@ -38,8 +38,7 @@ void main() {
     expect(candidate.indicatorPayload['vwap'], 70500);
   });
 
-  test('Candidate without company name remains safe to render with empty name',
-      () {
+  test('Candidate without company name falls back to symbol', () {
     final candidate = Candidate.fromJson({
       'symbol': 'AAPL',
       'final_entry_score': 66,
@@ -47,8 +46,19 @@ void main() {
     }, scoreKey: 'final_entry_score', noteKey: 'reason');
 
     expect(candidate.symbol, 'AAPL');
-    expect(candidate.name, '');
+    expect(candidate.name, 'AAPL');
     expect(candidate.finalEntryScore, 66);
     expect(candidate.blockReason, 'score_threshold_not_met');
+  });
+
+  test('Candidate ignores symbol and Unknown Company company-name values', () {
+    final candidate = Candidate.fromJson({
+      'symbol': 'AAPL',
+      'company_name': 'AAPL',
+      'name': 'Unknown Company',
+      'asset_name': 'Apple Inc.',
+    });
+
+    expect(candidate.name, 'Apple Inc.');
   });
 }

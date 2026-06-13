@@ -173,5 +173,9 @@ def test_latest_watchlist_run_serializes_hold_without_error_and_keeps_candidates
     assert item["run"]["order_id"] is None
     assert item["trigger_block_reason"] == "weak_final_score_gap"
     assert item["top_quant_candidates"][0]["symbol"] == "HON"
+    assert item["top_quant_candidates"][0]["company_name"] == "Honeywell International Inc."
     assert item["researched_candidates"][0]["symbol"] == "HON"
+    assert item["researched_candidates"][0]["company_name"] == "Honeywell International Inc."
     assert item["final_ranked_candidates"][0]["symbol"] == "HON"
+    assert item["final_ranked_candidates"][0]["company_name"] == "Honeywell International Inc."
+    assert item["final_best_candidate"]["company_name"] == "Honeywell International Inc."

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
 from app.brokers.alpaca_client import AlpacaClient
+from app.services.us_symbol_metadata import enrich_us_symbol_metadata
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -53,6 +54,7 @@ def _as_datetime_text(value) -> str | None:
 
 
 def _position_summary(position) -> dict:
+    symbol = (_as_text(getattr(position, "symbol", None)) or "").upper()
     qty = _as_float(getattr(position, "qty", None)) or 0.0
     avg_entry_price = _as_float(getattr(position, "avg_entry_price", None)) or 0.0
     cost_basis = qty * avg_entry_price
@@ -60,8 +62,8 @@ def _position_summary(position) -> dict:
     unrealized_pl = _as_float(getattr(position, "unrealized_pl", None)) or 0.0
     unrealized_plpc = _as_float(getattr(position, "unrealized_plpc", None)) or 0.0
 
-    return {
-        "symbol": _as_text(getattr(position, "symbol", None)) or "",
+    return enrich_us_symbol_metadata({
+        "symbol": symbol,
         "side": _as_text(getattr(position, "side", None)) or "long",
         "qty": qty,
         "avg_entry_price": avg_entry_price,
@@ -70,7 +72,7 @@ def _position_summary(position) -> dict:
         "market_value": market_value,
         "unrealized_pl": unrealized_pl,
         "unrealized_plpc": unrealized_plpc,
-    }
+    })
 
 
 def _pending_order_summary(order) -> dict | None:

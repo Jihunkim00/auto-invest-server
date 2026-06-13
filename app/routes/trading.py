@@ -8,6 +8,7 @@ from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import get_db
 from app.db.models import TradeRunLog
 from app.services.trading_orchestrator_service import TradingOrchestratorService
+from app.services.us_symbol_metadata import enrich_us_watchlist_payload
 from app.services.watchlist_run_service import WatchlistRunService
 
 router = APIRouter(prefix="/trading", tags=["trading"])
@@ -94,7 +95,7 @@ def _serialize_latest_watchlist_payload(row: TradeRunLog) -> dict[str, Any] | No
         "order_id": row.order_id,
         "created_at": row.created_at,
     }
-    return item
+    return enrich_us_watchlist_payload(item)
 
 
 @router.get("/watchlist/latest")
