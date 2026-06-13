@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
+import '../../core/utils/kr_symbol.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -1134,8 +1135,9 @@ class DashboardController extends ChangeNotifier {
   }
 
   void useKrCandidateInOrderTicket(Candidate candidate) {
+    final normalizedSymbol = normalizeKrSymbol(candidate.symbol);
     selectedOrderMarket = PortfolioMarket.kr;
-    orderTicketSymbol = candidate.symbol.trim();
+    orderTicketSymbol = normalizedSymbol;
     orderTicketSide = 'buy';
     if (orderTicketQty <= 0 || parsedOrderTicketQty == null) {
       orderTicketQty = 1;
@@ -1149,7 +1151,10 @@ class DashboardController extends ChangeNotifier {
     orderTicketSourceMetadata = {
       'source': 'watchlist_candidate',
       'source_type': 'manual_buy_ticket_prefill',
-      'symbol': candidate.symbol.trim(),
+      'symbol': normalizedSymbol,
+      'company_name': candidate.name,
+      'market': 'KR',
+      'broker': 'kis',
       'score': candidate.score,
       'entry_ready': candidate.entryReady,
       'action_hint': candidate.actionHint,
@@ -1171,7 +1176,7 @@ class DashboardController extends ChangeNotifier {
     Candidate candidate, {
     int? candidateRank,
   }) {
-    final normalizedSymbol = candidate.symbol.trim().toUpperCase();
+    final normalizedSymbol = normalizeKrSymbol(candidate.symbol);
     if (normalizedSymbol.isEmpty) {
       return const ActionResult(
         success: false,
@@ -1191,6 +1196,12 @@ class DashboardController extends ChangeNotifier {
       'source': 'watchlist_candidate',
       'source_type': 'click_to_trade_prefill',
       'symbol': normalizedSymbol,
+      'company_name': candidate.name,
+      'market': 'KR',
+      'broker': 'kis',
+      'side': 'buy',
+      'qty': null,
+      'confirm_live': false,
       if (candidateRank != null) 'candidate_rank': candidateRank,
       'candidate_score': candidate.finalBuyScore ??
           candidate.finalEntryScore ??
@@ -1225,7 +1236,7 @@ class DashboardController extends ChangeNotifier {
     String symbol, {
     int? gateLevel,
   }) {
-    final normalizedSymbol = symbol.trim().toUpperCase();
+    final normalizedSymbol = normalizeKrSymbol(symbol);
     if (normalizedSymbol.isEmpty) {
       return const ActionResult(
         success: false,
@@ -1267,7 +1278,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   ActionResult prepareKisManualSellFromPosition(PositionSummary position) {
-    final symbol = position.symbol.trim();
+    final symbol = normalizeKrSymbol(position.symbol);
     final qty = position.qty.floor();
     if (symbol.isEmpty || qty < 1) {
       return const ActionResult(
@@ -1341,7 +1352,7 @@ class DashboardController extends ChangeNotifier {
   Future<ActionResult> prepareKisManualSellFromManagedPosition(
     ManagedPosition position,
   ) async {
-    final symbol = position.symbol.trim();
+    final symbol = normalizeKrSymbol(position.symbol);
     if (symbol.isEmpty) {
       return const ActionResult(
         success: false,
@@ -1365,7 +1376,8 @@ class DashboardController extends ChangeNotifier {
 
       selectedProvider = SelectedProvider.kis;
       selectedOrderMarket = PortfolioMarket.kr;
-      orderTicketSymbol = preparation.symbol;
+      final preparedSymbol = normalizeKrSymbol(preparation.symbol);
+      orderTicketSymbol = preparedSymbol;
       orderTicketSide = 'sell';
       orderTicketQty = qty;
       orderTicketQtyInput = qty.toString();
@@ -1377,7 +1389,7 @@ class DashboardController extends ChangeNotifier {
       orderTicketSourceMetadata = {
         'source': 'kis_portfolio_manual_sell',
         'source_type': 'operator_confirmed_position_exit',
-        'symbol': preparation.symbol,
+        'symbol': preparedSymbol,
         'company_name': preparation.companyName,
         'quantity': qty,
         'suggested_quantity': qty,
@@ -1410,7 +1422,7 @@ class DashboardController extends ChangeNotifier {
     KisLiveExitCandidate candidate, {
     KisLiveExitPreflightResult? preflight,
   }) {
-    final symbol = candidate.symbol.trim();
+    final symbol = normalizeKrSymbol(candidate.symbol);
     final qty = candidate.suggestedQuantityInt;
     if (symbol.isEmpty || qty == null) {
       return const ActionResult(
@@ -1444,7 +1456,7 @@ class DashboardController extends ChangeNotifier {
     KisExitShadowCandidate candidate, {
     KisExitShadowDecision? decision,
   }) {
-    final symbol = candidate.symbol.trim();
+    final symbol = normalizeKrSymbol(candidate.symbol);
     final qty = candidate.suggestedQuantityInt;
     if (symbol.isEmpty || qty == null) {
       return const ActionResult(
@@ -2708,7 +2720,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    final normalizedSymbol = symbol.trim().toUpperCase();
+    final normalizedSymbol = normalizeKrSymbol(symbol);
     kisSingleSymbolTradingLoading = true;
     kisSingleSymbolTradingError = null;
     latestKisSingleSymbolTradingResult = null;

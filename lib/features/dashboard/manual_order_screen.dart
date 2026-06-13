@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/utils/kr_symbol.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/kis_single_symbol_trading_result.dart';
 import 'dashboard_controller.dart';
@@ -100,7 +101,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     _syncFromController(controller);
-    final symbol = _symbolController.text.trim().toUpperCase();
+    final symbol = normalizeKrSymbol(_symbolController.text);
     final qty = int.tryParse(_qtyController.text.trim());
     final canAnalyze =
         symbol.isNotEmpty && !controller.kisSingleSymbolTradingLoading;
@@ -145,34 +146,43 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           const SizedBox(height: 12),
           _KisSourceContextPanel(sourceContext: sourceContext),
         ],
-        if (controller.krWatchlist.symbols.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: controller.krWatchlist.symbols
-                    .any((item) => item.symbol == symbol)
-                ? symbol
-                : null,
-            decoration: const InputDecoration(
-              labelText: 'Common KR symbol',
-              border: OutlineInputBorder(),
-            ),
-            items: [
-              for (final item in controller.krWatchlist.symbols.take(30))
-                DropdownMenuItem<String>(
-                  value: item.symbol,
-                  child: Text('${item.symbol} ${item.name}'.trim()),
+        Builder(builder: (context) {
+          final options = _krSymbolOptions(controller);
+          if (options.isEmpty) return const SizedBox.shrink();
+          final hasSelected = options.any((option) => option.symbol == symbol);
+          final dropdownValue = hasSelected ? symbol : null;
+          return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'kis_common_kr_symbol_dropdown-$dropdownValue-${options.map((option) => option.symbol).join(',')}',
+                  ),
+                  initialValue: dropdownValue,
+                  decoration: const InputDecoration(
+                    labelText: 'Common KR symbol',
+                    border: OutlineInputBorder(),
+                  ),
+                  hint: symbol.isEmpty ? null : Text(symbol),
+                  items: [
+                    for (final option in options)
+                      DropdownMenuItem<String>(
+                        value: option.symbol,
+                        child: Text(_krSymbolOptionLabel(option)),
+                      ),
+                  ],
+                  onChanged: controller.kisSingleSymbolTradingLoading
+                      ? null
+                      : (value) {
+                          if (value == null) return;
+                          _symbolController.text = value;
+                          controller.setKisGuardedRunSymbol(value);
+                          setState(() {});
+                        },
                 ),
-            ],
-            onChanged: controller.kisSingleSymbolTradingLoading
-                ? null
-                : (value) {
-                    if (value == null) return;
-                    _symbolController.text = value;
-                    controller.setKisGuardedRunSymbol(value);
-                    setState(() {});
-                  },
-          ),
-        ],
+              ]);
+        }),
         const SizedBox(height: 12),
         TextField(
           controller: _symbolController,
@@ -306,9 +316,9 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
   }
 
   void _syncFromController(DashboardController controller) {
-    final desiredSymbol = controller.kisGuardedRunSymbol.trim().toUpperCase();
+    final desiredSymbol = normalizeKrSymbol(controller.kisGuardedRunSymbol);
     if (desiredSymbol.isNotEmpty &&
-        _symbolController.text.trim().toUpperCase() != desiredSymbol) {
+        normalizeKrSymbol(_symbolController.text) != desiredSymbol) {
       _symbolController.text = desiredSymbol;
     }
     final desiredQty = controller.orderTicketQtyInput.trim();
@@ -349,6 +359,55 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     );
     return confirmed == true;
   }
+}
+
+class _KrSymbolOption {
+  const _KrSymbolOption({required this.symbol, required this.name});
+
+  final String symbol;
+  final String name;
+}
+
+List<_KrSymbolOption> _krSymbolOptions(DashboardController controller) {
+  final bySymbol = <String, _KrSymbolOption>{};
+
+  for (final item in controller.krWatchlist.symbols) {
+    final symbol = normalizeKrSymbol(item.symbol);
+    if (symbol.isEmpty) continue;
+    bySymbol.putIfAbsent(
+      symbol,
+      () => _KrSymbolOption(
+        symbol: symbol,
+        name: _cleanKrCompanyName(item.name, symbol),
+      ),
+    );
+    if (bySymbol.length >= 30) break;
+  }
+
+  final selectedSymbol = normalizeKrSymbol(controller.kisGuardedRunSymbol);
+  if (selectedSymbol.isNotEmpty && !bySymbol.containsKey(selectedSymbol)) {
+    final source = controller.kisTradingSourceContext ?? const {};
+    bySymbol[selectedSymbol] = _KrSymbolOption(
+      symbol: selectedSymbol,
+      name: _cleanKrCompanyName(source['company_name'], selectedSymbol),
+    );
+  }
+
+  return bySymbol.values.toList();
+}
+
+String _krSymbolOptionLabel(_KrSymbolOption option) {
+  if (option.name.isEmpty) return option.symbol;
+  return '${option.symbol} · ${option.name}';
+}
+
+String _cleanKrCompanyName(Object? value, String symbol) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return '';
+  final lower = text.toLowerCase();
+  if (lower == 'unknown company' || lower == 'unknown') return '';
+  if (normalizeKrSymbol(text) == symbol) return '';
+  return text;
 }
 
 class _KisSafetyLabelWrap extends StatelessWidget {

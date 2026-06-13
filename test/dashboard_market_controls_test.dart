@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/order_ticket_section.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/watchlist_section.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
@@ -452,6 +453,156 @@ void main() {
     expect(controller.kisTradingSourceContext?['candidate_rank'], 1);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'KIS watchlist Analyze in Trading opens Trading with a deduped selected symbol',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        symbol: '108490',
+        name: 'Robostar',
+        blockReason: 'kr_trading_disabled',
+        entryScore: 64,
+      ),
+    );
+    var openedTrading = false;
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = const MarketWatchlist(
+        market: 'KR',
+        currency: 'KRW',
+        timezone: 'Asia/Seoul',
+        watchlistFile: 'config/watchlist_kr.yaml',
+        count: 2,
+        symbols: [
+          WatchlistSymbol(symbol: '108490', name: 'Robostar', market: 'KOSDAQ'),
+          WatchlistSymbol(
+              symbol: '108490', name: 'Duplicate Robostar', market: 'KOSDAQ'),
+        ],
+      );
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(
+        controller: controller,
+        onOpenManualOrder: () => openedTrading = true,
+      ),
+    ));
+
+    await tester.tap(find.text('Run Watchlist Analysis'));
+    await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.text('Analyze in Trading').first,
+      find.byType(ListView),
+      const Offset(0, -200),
+    );
+    await tester.tap(find.text('Analyze in Trading').first);
+    await tester.pumpAndSettle();
+
+    expect(openedTrading, isTrue);
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.kisGuardedRunSymbol, '108490');
+    expect(controller.kisGuardedRunConfirmation, isFalse);
+    expect(controller.kisTradingSourceContext?['company_name'], 'Robostar');
+    expect(controller.kisTradingSourceContext?['market'], 'KR');
+    expect(controller.kisTradingSourceContext?['broker'], 'kis');
+    expect(controller.kisTradingSourceContext?['side'], 'buy');
+    expect(controller.kisTradingSourceContext?['confirm_live'], isFalse);
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+
+    await tester.pumpWidget(_wrapFullScreen(
+      controller,
+      () => TradingScreen(controller: controller),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final dropdown = _krSymbolDropdown(tester);
+    expect(dropdown.initialValue, '108490');
+    expect(_dropdownValueCount(tester, '108490'), 1);
+    expect(find.text('108490 · Robostar'), findsOneWidget);
+    expect(find.text('Unknown Company'), findsNothing);
+    expect(find.text('108490 · 108490'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Trading injects a missing selected dropdown option once',
+      (tester) async {
+    final controller = DashboardController(_FakeApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..kisGuardedRunSymbol = '108490'
+      ..kisTradingSourceContext = {
+        'source': 'watchlist_candidate',
+        'company_name': 'Robostar',
+        'market': 'KR',
+        'broker': 'kis',
+        'confirm_live': false,
+      }
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrapFullScreen(
+      controller,
+      () => TradingScreen(controller: controller),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final dropdown = _krSymbolDropdown(tester);
+    expect(dropdown.initialValue, '108490');
+    expect(_dropdownValueCount(tester, '108490'), 1);
+    expect(find.text('108490 · Robostar'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS Trading keeps short numeric symbols padded as strings',
+      (tester) async {
+    final controller = DashboardController(_FakeApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..krWatchlist = const MarketWatchlist(
+        market: 'KR',
+        currency: 'KRW',
+        timezone: 'Asia/Seoul',
+        watchlistFile: 'config/watchlist_kr.yaml',
+        count: 1,
+        symbols: [
+          WatchlistSymbol(
+              symbol: '5930', name: 'Samsung Electronics', market: 'KOSPI'),
+        ],
+      );
+    final result = controller.prepareKisTradingFromWatchlistCandidate(
+      const Candidate(
+        symbol: '5930',
+        score: 64,
+        note: '',
+        entryReady: false,
+        actionHint: 'watch',
+        blockReason: 'kr_trading_disabled',
+        name: 'Samsung Electronics',
+      ),
+    );
+
+    expect(result.success, isTrue);
+    expect(controller.kisGuardedRunSymbol, '005930');
+
+    await tester.pumpWidget(_wrapFullScreen(
+      controller,
+      () => TradingScreen(controller: controller),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final dropdown = _krSymbolDropdown(tester);
+    expect(dropdown.initialValue, '005930');
+    expect(_dropdownValueCount(tester, '005930'), 1);
+    expect(_dropdownValueCount(tester, '5930'), 0);
+    expect(find.text('005930 · Samsung Electronics'), findsOneWidget);
 
     controller.dispose();
   });
@@ -1353,6 +1504,36 @@ Widget _wrap(DashboardController controller, Widget Function() buildChild) {
       ),
     ),
   );
+}
+
+Widget _wrapFullScreen(
+  DashboardController controller,
+  Widget Function() buildChild,
+) {
+  return MaterialApp(
+    theme: ThemeData.dark(),
+    home: Scaffold(
+      body: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) => buildChild(),
+      ),
+    ),
+  );
+}
+
+DropdownButtonFormField<String> _krSymbolDropdown(WidgetTester tester) {
+  return tester.widget<DropdownButtonFormField<String>>(
+    find.byType(DropdownButtonFormField<String>).first,
+  );
+}
+
+int _dropdownValueCount(WidgetTester tester, String value) {
+  return find
+      .byWidgetPredicate(
+        (widget) => widget is DropdownMenuItem<String> && widget.value == value,
+      )
+      .evaluate()
+      .length;
 }
 
 Finder _qtyField() {
