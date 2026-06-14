@@ -281,7 +281,7 @@ class DashboardController extends ChangeNotifier {
         (!currentOrderRequiresEntryWindow || kisSafetyStatus.entryAllowedNow);
   }
 
-  bool get canSubmitLiveKisOrder {
+  bool get orderValidationMatchesCurrent {
     final validation = orderValidationResult;
     if (validation == null) return false;
 
@@ -289,13 +289,22 @@ class DashboardController extends ChangeNotifier {
     final currentQty = parsedOrderTicketQty;
     final qtyMatches = currentQty != null && validation.qty == currentQty;
     final sideMatches = validation.side == orderTicketSide;
+    return symbolMatches && qtyMatches && sideMatches;
+  }
+
+  bool get orderValidationExpired =>
+      orderValidationResult?.isValidationExpired == true;
+
+  bool get canSubmitLiveKisOrder {
+    final validation = orderValidationResult;
+    if (validation == null) return false;
 
     return !kisManualSubmitLoading &&
+        !orderValidationExpired &&
+        validation.effectiveSubmitAllowed &&
         validation.validatedForSubmission &&
         isOrderTicketInputValid &&
-        symbolMatches &&
-        qtyMatches &&
-        sideMatches &&
+        orderValidationMatchesCurrent &&
         kisLiveConfirmation &&
         !kisSafetyStatus.runtimeDryRun &&
         !kisSafetyStatus.killSwitch &&
@@ -1638,6 +1647,33 @@ class DashboardController extends ChangeNotifier {
       orderValidationError = ApiErrorFormatter.format(e.toString());
       return ActionResult(
           success: false, message: _primaryMessage(orderValidationError!));
+    } finally {
+      orderValidationLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<OrderValidationResult?> validateKisLiveOrderDraft({
+    required String symbol,
+    required String side,
+    required int qty,
+    Map<String, dynamic>? sourceMetadata,
+  }) async {
+    if (orderValidationLoading) return null;
+    orderValidationLoading = true;
+    orderValidationError = null;
+    notifyListeners();
+    try {
+      await refreshKisSafetyStatus(silent: true);
+      return await apiClient.validateKisOrder(
+        symbol: symbol,
+        side: side,
+        qty: qty,
+        sourceMetadata: sourceMetadata,
+      );
+    } catch (e) {
+      orderValidationError = ApiErrorFormatter.format(e.toString());
+      return null;
     } finally {
       orderValidationLoading = false;
       notifyListeners();
@@ -3244,6 +3280,19 @@ class DashboardController extends ChangeNotifier {
       return 'Current order input changed after validation. Validate again.';
     }
 
+    if (validation.isValidationExpired) {
+      return 'Validation expired, validate again.';
+    }
+    if (!validation.effectiveSubmitAllowed) {
+      if (validation.message?.isNotEmpty == true) return validation.message!;
+      if (validation.gatingNotes.isNotEmpty) {
+        return 'Live submit blocked: ${validation.gatingNotes.first}';
+      }
+      if (validation.blockReasons.isNotEmpty) {
+        return 'Live submit blocked: ${validation.blockReasons.first}';
+      }
+      return 'Live submit blocked by validation summary.';
+    }
     if (!kisLiveConfirmation) return 'Confirm live KIS order first.';
     if (kisSafetyStatus.runtimeDryRun) {
       return 'Live submit blocked: dry-run is ON';

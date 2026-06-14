@@ -37,10 +37,10 @@ def concise_order_block(reason_codes: list[str], *, detail_source: dict[str, Any
             "primary_block_reason": "kis_real_order_disabled",
             "message": "KIS real-order submission is disabled.",
         }
-    if has("recent_dry_run_validation_missing"):
+    if has("validation_stale", "recent_dry_run_validation_missing"):
         return {
-            "primary_block_reason": "recent_dry_run_validation_missing",
-            "message": "A successful validation within the last 5 minutes is required.",
+            "primary_block_reason": "validation_stale",
+            "message": "Validation expired. Validate again before submitting.",
         }
     if has("confirm_live_required", "confirmation_required", "manual_confirmation_missing_or_invalid"):
         return {"primary_block_reason": "confirmation_required", "message": "Live confirmation is required."}

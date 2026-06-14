@@ -217,14 +217,14 @@ void main() {
     await tester.tap(find.text('Submit Manual Sell'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Confirm Submit'), findsWidgets);
-    expect(find.text('KIS'), findsOneWidget);
+    expect(find.text('Confirm KIS Live SELL'), findsOneWidget);
+    expect(find.text('KIS / KR'), findsOneWidget);
     expect(find.text('SELL'), findsWidgets);
     expect(find.textContaining('Samsung Electronics'), findsWidgets);
     expect(find.text('2'), findsWidgets);
     expect(find.text('Operator-selected position exit'), findsOneWidget);
     expect(find.text('OFF'), findsWidgets);
-    expect(find.text('true'), findsWidgets);
+    expect(find.text('ENABLED'), findsWidgets);
 
     controller.dispose();
   });
@@ -338,6 +338,31 @@ Map<String, dynamic> _validationResponse() {
       'payload_preview': {'PDNO': '005930'},
     },
     'source_metadata': _sourceMetadata(),
+    'broker': 'kis',
+    'company_name': 'Samsung Electronics',
+    'estimated_price': 72000,
+    'estimated_notional': 144000,
+    'runtime_dry_run': false,
+    'kill_switch': false,
+    'kis_enabled': true,
+    'kis_real_order_enabled': true,
+    'market_open': true,
+    'entry_allowed_now': true,
+    'no_new_entry_after': '15:00',
+    'current_operation_mode': 'manual_live_trading',
+    'max_order_notional_pct': 0.03,
+    'daily_live_order_remaining': 3,
+    'validated_at': DateTime.now().toUtc().toIso8601String(),
+    'validation_expires_at': DateTime.now()
+        .toUtc()
+        .add(const Duration(minutes: 5))
+        .toIso8601String(),
+    'warning_level': 'safe',
+    'risk_flags': [],
+    'gating_notes': [],
+    'submit_allowed': true,
+    'confirm_live_required': true,
+    'manual_only': true,
   };
 }
 

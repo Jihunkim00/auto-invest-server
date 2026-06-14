@@ -121,6 +121,70 @@ def test_validate_buy_market_order_success_with_sufficient_cash(client):
     assert body["order_preview"]["payload_preview"]["ORD_DVSN"] == "01"
 
 
+def test_validation_response_includes_live_confirmation_safety_summary(
+    monkeypatch,
+    client,
+):
+    monkeypatch.setattr(
+        "app.routes.kis.get_settings",
+        lambda: _settings(kis_enabled=True, kis_real_order_enabled=True),
+    )
+    monkeypatch.setattr(
+        "app.routes.kis.RuntimeSettingService.get_settings",
+        lambda self, db: {
+            "dry_run": False,
+            "kill_switch": False,
+            "max_trades_per_day": 3,
+            "max_order_notional_pct": 0.03,
+            "current_operation_mode": "manual_live_trading",
+        },
+    )
+    monkeypatch.setattr(
+        "app.routes.kis.RuntimeSettingService.get_kis_risk_summary_read_only",
+        lambda self, db: {
+            "warning_level": "safe",
+            "risky_flags": ["manual_live_trading"],
+            "blocking_flags": [],
+            "max_notional_pct": 0.03,
+        },
+    )
+
+    response = client.post(
+        "/kis/orders/validate",
+        json=_buy_payload(
+            source_metadata={"company_name": "Samsung Electronics"}
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["symbol"] == "005930"
+    assert body["company_name"] == "Samsung Electronics"
+    assert body["side"] == "buy"
+    assert body["qty"] == 1
+    assert body["estimated_price"] == 72000.0
+    assert body["estimated_notional"] == 72000.0
+    assert body["available_cash"] == 1000000.0
+    assert body["runtime_dry_run"] is False
+    assert body["kill_switch"] is False
+    assert body["kis_enabled"] is True
+    assert body["kis_real_order_enabled"] is True
+    assert body["market_open"] is True
+    assert body["entry_allowed_now"] is True
+    assert body["no_new_entry_after"] == "15:00"
+    assert body["current_operation_mode"] == "manual_live_trading"
+    assert body["daily_live_order_remaining"] == 3
+    assert body["max_order_notional_pct"] == 0.03
+    assert body["validated_at"]
+    assert body["validation_expires_at"]
+    assert body["warning_level"] == "safe"
+    assert body["risk_flags"] == ["manual_live_trading"]
+    assert body["gating_notes"] == []
+    assert body["submit_allowed"] is True
+    assert body["confirm_live_required"] is True
+    assert body["manual_only"] is True
+
+
 def test_validate_buy_blocked_with_insufficient_cash(monkeypatch, client):
     monkeypatch.setattr(
         "app.brokers.kis_client.KisClient.get_account_balance",

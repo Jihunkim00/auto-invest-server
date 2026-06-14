@@ -245,7 +245,7 @@ class KisManualOrderService:
         check(
             "recent_dry_run_validation_passed",
             latest_validation is not None,
-            "recent_dry_run_validation_missing",
+            "validation_stale",
             {"max_age_seconds": int(KIS_VALIDATION_MAX_AGE.total_seconds())},
         )
 

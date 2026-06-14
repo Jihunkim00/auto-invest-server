@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -193,7 +193,15 @@ def _payload(**overrides):
     return payload
 
 
-def _seed_validation(db_session, *, symbol="005930", side="buy", qty=1, amount=72000):
+def _seed_validation(
+    db_session,
+    *,
+    symbol="005930",
+    side="buy",
+    qty=1,
+    amount=72000,
+    created_at=None,
+):
     row = KisOrderValidationLog(
         market="KR",
         symbol=symbol,
@@ -205,7 +213,7 @@ def _seed_validation(db_session, *, symbol="005930", side="buy", qty=1, amount=7
         estimated_amount=amount,
         request_payload="{}",
         response_payload="{}",
-        created_at=datetime.now(UTC).replace(tzinfo=None),
+        created_at=created_at or datetime.now(UTC).replace(tzinfo=None),
     )
     db_session.add(row)
     db_session.commit()
@@ -321,11 +329,21 @@ def test_submit_manual_rejects_when_no_recent_dry_run_validation(client):
     response = client.post("/kis/orders/submit-manual", json=_payload())
 
     body = _assert_rejected(response, "recent_dry_run_validation_passed")
-    assert body["primary_block_reason"] == "recent_dry_run_validation_missing"
-    assert (
-        body["message"]
-        == "A successful validation within the last 5 minutes is required."
+    assert body["primary_block_reason"] == "validation_stale"
+    assert body["message"] == "Validation expired. Validate again before submitting."
+
+
+def test_submit_manual_rejects_when_validation_is_stale(client, db_session):
+    _seed_validation(
+        db_session,
+        created_at=(datetime.now(UTC) - timedelta(minutes=6)).replace(tzinfo=None),
     )
+
+    response = client.post("/kis/orders/submit-manual", json=_payload())
+
+    body = _assert_rejected(response, "recent_dry_run_validation_passed")
+    assert "validation_stale" in body["block_reasons"]
+    assert body["primary_block_reason"] == "validation_stale"
 
 
 def test_submit_manual_rejects_when_qty_exceeds_cap(monkeypatch, client, db_session):

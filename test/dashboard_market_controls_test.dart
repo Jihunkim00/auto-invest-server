@@ -75,6 +75,161 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('KIS BUY live submit opens final confirmation before submit',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Submit Live KIS Order'));
+    await tester.tap(find.text('Submit Live KIS Order'));
+    await tester.pumpAndSettle();
+
+    expect(api.validationCalls, 1);
+    expect(api.submitCalls, 0);
+    expect(find.text('Confirm KIS Live BUY'), findsOneWidget);
+    expect(find.text('LIVE ORDER'), findsOneWidget);
+    expect(find.text('MANUAL ONLY'), findsWidgets);
+    expect(find.text('BUY ORDER'), findsOneWidget);
+    expect(find.text('005930 - Samsung Electronics'), findsOneWidget);
+    expect(find.text('KRW 72,000'), findsWidgets);
+    expect(find.text('OFF'), findsWidgets);
+    expect(find.text('3'), findsWidgets);
+    expect(
+      find.text(
+        'This is a live KIS BUY order. It may use real cash in your broker account.',
+      ),
+      findsOneWidget,
+    );
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS manual live confirmation submits exactly once',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus
+      ..kisLiveConfirmation = true;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Submit Live KIS Order'));
+    await tester.tap(find.text('Submit Live KIS Order'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm KIS Live BUY'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isTrue);
+    await tester.tap(find.text('Submit Live Order'));
+    await tester.pumpAndSettle();
+
+    expect(api.validationCalls, 1);
+    expect(api.submitCalls, 1);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS blocked validation dialog disables submit', (tester) async {
+    final api = _FakeApiClient(
+      validationResult: _orderValidation(
+        validated: false,
+        submitAllowed: false,
+        blockReasons: const ['insufficient_cash'],
+        gatingNotes: const ['insufficient_cash'],
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus
+      ..kisLiveConfirmation = true;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Submit Live KIS Order'));
+    await tester.tap(find.text('Submit Live KIS Order'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm KIS Live BUY'), findsOneWidget);
+    expect(find.text('BLOCKED'), findsOneWidget);
+    expect(find.textContaining('insufficient_cash'), findsWidgets);
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS stale validation dialog shows re-validate state',
+      (tester) async {
+    final api = _FakeApiClient(
+      validationResult: _orderValidation(
+        validationExpiresAt: DateTime.now()
+            .toUtc()
+            .subtract(const Duration(minutes: 1))
+            .toIso8601String(),
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus
+      ..kisLiveConfirmation = true;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Submit Live KIS Order'));
+    await tester.tap(find.text('Submit Live KIS Order'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Validation expired, validate again'), findsWidgets);
+    expect(find.text('Re-validate'), findsOneWidget);
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('KIS SELL confirmation uses sell-specific warning',
+      (tester) async {
+    final api = _FakeApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..kisSafetyStatus = api.safetyStatus
+      ..kisLiveConfirmation = true;
+    controller.setOrderTicketSide('sell');
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => OrderTicketSection(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Submit Manual Sell'));
+    await tester.tap(find.text('Submit Manual Sell'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm KIS Live SELL'), findsOneWidget);
+    expect(find.text('SELL ORDER'), findsOneWidget);
+    expect(
+      find.text(
+        'This is a live KIS SELL order. It may close or reduce a real broker position.',
+      ),
+      findsOneWidget,
+    );
+    expect(api.submitCalls, 0);
+
+    controller.dispose();
+  });
+
   testWidgets('KIS manual qty can be cleared without restoring default',
       (tester) async {
     final api = _FakeApiClient();
@@ -1572,6 +1727,7 @@ class _FakeApiClient extends ApiClient {
     this.throwCancel = false,
     this.dryRunAutoDelay = Duration.zero,
     this.runWatchlistDelay = Duration.zero,
+    this.validationResult,
     this.safetyStatus = const KisManualOrderSafetyStatus(
       runtimeDryRun: false,
       killSwitch: false,
@@ -1596,6 +1752,7 @@ class _FakeApiClient extends ApiClient {
   final bool throwCancel;
   final Duration dryRunAutoDelay;
   final Duration runWatchlistDelay;
+  final OrderValidationResult? validationResult;
   final KisManualOrderSafetyStatus safetyStatus;
   int validationCalls = 0;
   int submitCalls = 0;
@@ -1726,41 +1883,8 @@ class _FakeApiClient extends ApiClient {
   }) async {
     validationCalls += 1;
     lastValidationQty = qty;
-    return OrderValidationResult(
-      provider: 'kis',
-      market: 'KR',
-      environment: 'prod',
-      dryRun: true,
-      validatedForSubmission: true,
-      canSubmitLater: true,
-      symbol: symbol,
-      side: side,
-      qty: qty,
-      orderType: 'market',
-      currentPrice: 72000,
-      estimatedAmount: 72000,
-      availableCash: 1000000,
-      heldQty: null,
-      warnings: const [],
-      blockReasons: const [],
-      marketSession: const MarketSessionStatus(
-        market: 'KR',
-        timezone: 'Asia/Seoul',
-        isMarketOpen: true,
-        isEntryAllowedNow: true,
-        isNearClose: false,
-      ),
-      orderPreview: const OrderPreview(
-        accountNoMasked: '12****78',
-        productCode: '01',
-        symbol: '005930',
-        side: 'buy',
-        qty: 1,
-        orderType: 'market',
-        kisTrIdPreview: 'TTTC0802U',
-        payloadPreview: {'CANO': '12****78', 'PDNO': '005930'},
-      ),
-    );
+    return validationResult ??
+        _orderValidation(symbol: symbol, side: side, qty: qty);
   }
 
   @override
@@ -2253,6 +2377,77 @@ Map<String, dynamic> _noCandidateWatchlistPayload() {
     'final_best_candidate': null,
     'final_ranked_candidates': [],
   };
+}
+
+OrderValidationResult _orderValidation({
+  String symbol = '005930',
+  String side = 'buy',
+  int qty = 1,
+  bool validated = true,
+  bool submitAllowed = true,
+  String? validationExpiresAt,
+  List<String> blockReasons = const [],
+  List<String> warnings = const [],
+  List<String> riskFlags = const [],
+  List<String> gatingNotes = const [],
+}) {
+  return OrderValidationResult(
+    provider: 'kis',
+    market: 'KR',
+    environment: 'prod',
+    dryRun: true,
+    validatedForSubmission: validated,
+    canSubmitLater: validated,
+    symbol: symbol,
+    side: side,
+    qty: qty,
+    orderType: 'market',
+    currentPrice: 72000,
+    estimatedAmount: 72000,
+    availableCash: 1000000,
+    heldQty: side == 'sell' ? 3 : null,
+    warnings: warnings,
+    blockReasons: blockReasons,
+    marketSession: const MarketSessionStatus(
+      market: 'KR',
+      timezone: 'Asia/Seoul',
+      isMarketOpen: true,
+      isEntryAllowedNow: true,
+      isNearClose: false,
+      noNewEntryAfter: '15:00',
+    ),
+    orderPreview: OrderPreview(
+      accountNoMasked: '12****78',
+      productCode: '01',
+      symbol: symbol,
+      side: side,
+      qty: qty,
+      orderType: 'market',
+      kisTrIdPreview: side == 'sell' ? 'TTTC0801U' : 'TTTC0802U',
+      payloadPreview: {'CANO': '12****78', 'PDNO': symbol},
+    ),
+    companyName: 'Samsung Electronics',
+    estimatedPrice: 72000,
+    estimatedNotional: 72000,
+    runtimeDryRun: false,
+    killSwitch: false,
+    kisEnabled: true,
+    kisRealOrderEnabled: true,
+    marketOpen: true,
+    entryAllowedNow: true,
+    noNewEntryAfter: '15:00',
+    currentOperationMode: 'manual_live_trading',
+    maxOrderNotionalPct: 0.03,
+    dailyLiveOrderRemaining: 3,
+    validatedAt: DateTime.now().toUtc().toIso8601String(),
+    validationExpiresAt: validationExpiresAt,
+    warningLevel: submitAllowed ? 'safe' : 'blocked',
+    riskFlags: riskFlags,
+    gatingNotes: gatingNotes,
+    submitAllowed: submitAllowed,
+    confirmLiveRequired: true,
+    manualOnly: true,
+  );
 }
 
 KisManualOrderResult _kisOrder({
