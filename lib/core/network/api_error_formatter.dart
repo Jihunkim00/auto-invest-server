@@ -89,6 +89,9 @@ class ApiErrorFormatter {
         case 'recent_dry_run_validation_missing':
           messages.add('Dry-run validation is missing.');
           break;
+        case 'validation_stale':
+          messages.add('Validation expired. Validate again.');
+          break;
         case 'kill_switch_enabled':
           messages.add('Kill switch is enabled.');
           break;
@@ -96,13 +99,18 @@ class ApiErrorFormatter {
           messages.add('KIS trading is disabled.');
           break;
         case 'kis_real_order_disabled':
+        case 'kis_real_orders_disabled':
           messages.add('KIS real-order submission is disabled.');
           break;
         case 'confirmation_required':
           messages.add('Live confirmation is required.');
           break;
         case 'dry_run_must_be_false':
+        case 'dry_run_enabled':
           messages.add('Live submit requires dry_run=false.');
+          break;
+        case 'daily_live_order_limit_reached':
+          messages.add('Daily live order limit reached.');
           break;
         default:
           messages.add(reason); // Keep unknown reasons as-is

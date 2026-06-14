@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query
 from fastapi.responses import JSONResponse
@@ -18,6 +21,7 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_manual_order_service import (
+    KIS_VALIDATION_MAX_AGE,
     KisManualOrderService,
     KisManualOrderSubmitRequest,
 )
@@ -288,8 +292,15 @@ def validate_kis_order(
     service = KisOrderValidationService(client)
     try:
         result = service.validate(payload)
-        record_kis_order_validation(db, request=payload, result=result)
-        return result.to_dict()
+        row = record_kis_order_validation(db, request=payload, result=result)
+        response_payload = result.to_dict()
+        _enrich_validation_response(
+            response_payload,
+            db=db,
+            client=client,
+            validation_created_at=row.created_at,
+        )
+        return response_payload
     except KisOrderValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except MarketProfileError as exc:
@@ -882,6 +893,180 @@ def run_kis_buy_shadow_once(
     client = _client(db)
     service = KisBuyShadowDecisionService(client)
     return service.run_once(db, gate_level=gate_level)
+
+
+def _enrich_validation_response(
+    payload: dict[str, Any],
+    *,
+    db: Session,
+    client: KisClient,
+    validation_created_at: datetime | None,
+) -> None:
+    runtime_service = RuntimeSettingService()
+    try:
+        runtime = runtime_service.get_settings(db)
+        risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
+    except Exception:
+        runtime = {}
+        risk_summary = {}
+
+    settings = client.settings
+    market_session = payload.get("market_session")
+    if not isinstance(market_session, dict):
+        market_session = {}
+
+    runtime_dry_run = bool(runtime.get("dry_run", True))
+    kill_switch = bool(runtime.get("kill_switch", False))
+    kis_enabled = bool(getattr(settings, "kis_enabled", False))
+    kis_real_order_enabled = bool(
+        getattr(settings, "kis_real_order_enabled", False)
+    )
+    market_open = market_session.get("is_market_open") is True
+    entry_allowed_now = market_session.get("is_entry_allowed_now") is True
+    side = str(payload.get("side") or "").strip().lower()
+    daily_live_order_remaining = _manual_daily_live_order_remaining(
+        db,
+        client=client,
+        runtime=runtime,
+    )
+
+    gating_notes = _dedupe_strings(
+        [
+            *_string_list(payload.get("gating_notes")),
+            *_string_list(payload.get("block_reasons")),
+            *_string_list(risk_summary.get("blocking_flags")),
+        ]
+    )
+    if runtime_dry_run:
+        gating_notes.append("dry_run_enabled")
+    if kill_switch:
+        gating_notes.append("kill_switch_enabled")
+    if not kis_enabled:
+        gating_notes.append("kis_disabled")
+    if not kis_real_order_enabled:
+        gating_notes.append("kis_real_orders_disabled")
+    if not market_open:
+        gating_notes.append("market_closed")
+    if side == "buy" and not entry_allowed_now:
+        gating_notes.append("after_no_new_entry_time")
+    if daily_live_order_remaining == 0:
+        gating_notes.append("daily_live_order_limit_reached")
+    gating_notes = _dedupe_strings(gating_notes)
+
+    risk_flags = _dedupe_strings(
+        [
+            *_string_list(payload.get("risk_flags")),
+            *_string_list(payload.get("warnings")),
+            *_string_list(risk_summary.get("risky_flags")),
+        ]
+    )
+
+    validated_at = _iso_utc(validation_created_at)
+    validation_expires_at = _iso_utc(
+        validation_created_at + KIS_VALIDATION_MAX_AGE
+        if validation_created_at is not None
+        else None
+    )
+
+    submit_allowed = bool(payload.get("validated_for_submission") is True)
+    submit_allowed = bool(
+        submit_allowed
+        and not runtime_dry_run
+        and not kill_switch
+        and kis_enabled
+        and kis_real_order_enabled
+        and market_open
+        and (side != "buy" or entry_allowed_now)
+        and (daily_live_order_remaining is None or daily_live_order_remaining > 0)
+    )
+
+    warning_level = str(risk_summary.get("warning_level") or "safe")
+    if not submit_allowed:
+        warning_level = "blocked"
+    operation_mode = runtime.get("current_operation_mode")
+    if not operation_mode and runtime:
+        try:
+            operation_mode = runtime_service.current_operation_mode(runtime)
+        except Exception:
+            operation_mode = "unknown"
+
+    payload.update(
+        {
+            "broker": "kis",
+            "company_name": payload.get("company_name"),
+            "estimated_price": payload.get("current_price"),
+            "estimated_notional": payload.get("estimated_amount"),
+            "runtime_dry_run": runtime_dry_run,
+            "kill_switch": kill_switch,
+            "kis_enabled": kis_enabled,
+            "kis_real_order_enabled": kis_real_order_enabled,
+            "market_open": market_open,
+            "entry_allowed_now": entry_allowed_now,
+            "no_new_entry_after": market_session.get("no_new_entry_after"),
+            "current_operation_mode": operation_mode or "unknown",
+            "max_order_notional_pct": float(
+                runtime.get(
+                    "max_order_notional_pct",
+                    risk_summary.get("max_notional_pct", 0.03),
+                )
+                or 0
+            ),
+            "daily_live_order_remaining": daily_live_order_remaining,
+            "validated_at": validated_at,
+            "validation_expires_at": validation_expires_at,
+            "warning_level": warning_level,
+            "risk_flags": risk_flags,
+            "gating_notes": gating_notes,
+            "submit_allowed": submit_allowed,
+            "confirm_live_required": True,
+            "manual_only": True,
+        }
+    )
+
+
+def _manual_daily_live_order_remaining(
+    db: Session,
+    *,
+    client: KisClient,
+    runtime: dict[str, Any],
+) -> int | None:
+    if not runtime:
+        return None
+    try:
+        max_trades = max(0, int(runtime.get("max_trades_per_day", 0) or 0))
+        daily_count = KisManualOrderService(client)._daily_kis_trade_count(
+            db,
+            now_utc=datetime.now(UTC),
+        )
+    except Exception:
+        return None
+    return max(0, max_trades - daily_count)
+
+
+def _iso_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    else:
+        value = value.astimezone(UTC)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
 
 
 def _client(db: Session) -> KisClient:

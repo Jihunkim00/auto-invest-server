@@ -266,8 +266,12 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
             key: const Key('kis_trading_analyze_submit_button'),
             onPressed: canSubmit
                 ? () async {
-                    final confirmed =
-                        await _confirmKisLiveRun(context, symbol, qty);
+                    final confirmed = await _confirmKisLiveRun(
+                      context,
+                      controller,
+                      symbol,
+                      qty,
+                    );
                     if (!confirmed || !context.mounted) return;
                     final actionResult =
                         await controller.runKisAnalyzeAndBuySelectedSymbol(
@@ -328,36 +332,55 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
   }
 
   Future<bool> _confirmKisLiveRun(
-      BuildContext context, String symbol, int qty) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Analyze & Submit KIS Order'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Analyze this KIS symbol and submit only if every guarded safety gate passes.',
-            ),
-            const SizedBox(height: 12),
-            _DialogRow(label: 'Symbol', value: symbol),
-            _DialogRow(label: 'Quantity', value: qty.toString()),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Confirm Analyze & Submit'),
-          ),
-        ],
-      ),
+    BuildContext context,
+    DashboardController controller,
+    String symbol,
+    int qty,
+  ) async {
+    var validation = await controller.validateKisLiveOrderDraft(
+      symbol: symbol,
+      side: 'buy',
+      qty: qty,
+      sourceMetadata: controller.kisTradingSourceContext,
     );
-    return confirmed == true;
+    if (!context.mounted) return false;
+    if (validation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(controller.orderValidationError ??
+            'KIS validation failed. No order submitted.'),
+        backgroundColor: Colors.redAccent,
+      ));
+      return false;
+    }
+
+    while (context.mounted) {
+      final source = controller.kisTradingSourceContext ?? const {};
+      final action = await showKisLiveOrderConfirmationDialog(
+        context,
+        controller: controller,
+        validation: validation,
+        symbol: symbol,
+        side: 'buy',
+        qty: qty,
+        confirmLive: controller.kisGuardedRunConfirmation,
+        companyName: _cleanKrCompanyName(source['company_name'], symbol),
+        reason: _contextValue(source, 'candidate_reason', fallback: ''),
+      );
+      if (!context.mounted || action == KisLiveOrderConfirmationAction.cancel) {
+        return false;
+      }
+      if (action == KisLiveOrderConfirmationAction.submit) {
+        return true;
+      }
+      validation = await controller.validateKisLiveOrderDraft(
+        symbol: symbol,
+        side: 'buy',
+        qty: qty,
+        sourceMetadata: controller.kisTradingSourceContext,
+      );
+      if (!context.mounted || validation == null) return false;
+    }
+    return false;
   }
 }
 
@@ -837,28 +860,6 @@ class _ReasonBanner extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.18)),
       ),
       child: Text(text, style: TextStyle(color: color)),
-    );
-  }
-}
-
-class _DialogRow extends StatelessWidget {
-  const _DialogRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(children: [
-        SizedBox(
-            width: 76,
-            child: Text(label, style: const TextStyle(color: Colors.white70))),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(fontWeight: FontWeight.w700))),
-      ]),
     );
   }
 }

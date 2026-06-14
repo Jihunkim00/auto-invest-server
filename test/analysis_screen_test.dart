@@ -206,7 +206,7 @@ void main() {
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
 
-    await tester.tap(find.text('Confirm Analyze & Submit'));
+    await tester.tap(find.text('Submit Live Order'));
     await tester.pumpAndSettle();
 
     expect(api.kisSingleSymbolCalls, 1);
@@ -255,7 +255,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Analyze & Submit'));
+    await tester.tap(find.text('Submit Live Order'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Dry-run'), findsWidgets);
@@ -305,7 +305,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Analyze & Submit'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm Analyze & Submit'));
+    await tester.tap(find.text('Submit Live Order'));
     await tester.pumpAndSettle();
 
     expect(api.lastKisSingleSymbol, '005380');
@@ -828,7 +828,7 @@ Future<void> _submitKisAnalyzeBuy(
   await tester.pumpAndSettle();
   await tester.tap(find.text('Analyze & Submit'));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Confirm Analyze & Submit'));
+  await tester.tap(find.text('Submit Live Order'));
   await tester.pumpAndSettle();
 }
 
@@ -870,6 +870,19 @@ class _AnalysisFakeApi extends ApiClient {
   bool? lastKisSingleConfirmLive;
   String? lastKisSingleRequestedAction;
   Map<String, dynamic>? lastKisSingleSourceContext;
+
+  @override
+  Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {
+    return const KisManualOrderSafetyStatus(
+      runtimeDryRun: false,
+      killSwitch: false,
+      kisEnabled: true,
+      kisRealOrderEnabled: true,
+      marketOpen: true,
+      entryAllowedNow: true,
+      noNewEntryAfter: '15:00',
+    );
+  }
 
   @override
   Future<ManualTradingRunResult> runTradingOnce({
@@ -1232,5 +1245,24 @@ OrderValidationResult _validationResult() {
       kisTrIdPreview: 'TTTC0802U',
       payloadPreview: {'CANO': '12****78', 'PDNO': '005930'},
     ),
+    companyName: 'Samsung Electronics',
+    estimatedPrice: 72000,
+    estimatedNotional: 72000,
+    runtimeDryRun: false,
+    killSwitch: false,
+    kisEnabled: true,
+    kisRealOrderEnabled: true,
+    marketOpen: true,
+    entryAllowedNow: true,
+    noNewEntryAfter: '15:00',
+    currentOperationMode: 'manual_live_trading',
+    maxOrderNotionalPct: 0.03,
+    dailyLiveOrderRemaining: 3,
+    warningLevel: 'safe',
+    riskFlags: [],
+    gatingNotes: [],
+    submitAllowed: true,
+    confirmLiveRequired: true,
+    manualOnly: true,
   );
 }

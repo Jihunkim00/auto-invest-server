@@ -276,22 +276,11 @@ class _KrOrderTicket extends StatelessWidget {
       const SizedBox(height: 8),
       Wrap(spacing: 8, runSpacing: 8, children: [
         FilledButton.icon(
-          onPressed: !controller.canSubmitLiveKisOrder
+          onPressed: controller.kisManualSubmitLoading ||
+                  controller.orderValidationLoading ||
+                  !controller.isOrderTicketInputValid
               ? null
-              : () async {
-                  final confirmed = await _confirmSubmitKisOrder(
-                    context,
-                    controller: controller,
-                  );
-                  if (!confirmed || !context.mounted) return;
-                  final result = await controller.submitKisManualOrder();
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(result.message),
-                    backgroundColor:
-                        result.success ? Colors.green : Colors.redAccent,
-                  ));
-                },
+              : () => _handleManualSubmitPressed(context, controller),
           icon: controller.kisManualSubmitLoading
               ? const SizedBox(
                   width: 18,
@@ -1291,6 +1280,37 @@ String _groupedNumber(int value) {
   return buffer.toString();
 }
 
+String _krwDisplay(double value) {
+  final sign = value < 0 ? '-' : '';
+  return '${sign}KRW ${_groupedNumber(value.abs().round())}';
+}
+
+String _formatPct(double value) {
+  return '${(value * 100).toStringAsFixed(2)}%';
+}
+
+String _displaySymbolCompany(String symbol, String? companyName) {
+  final normalizedSymbol = symbol.trim();
+  final name = companyName?.trim() ?? '';
+  if (name.isEmpty) return normalizedSymbol;
+  final lower = name.toLowerCase();
+  if (lower == 'unknown' || lower == 'unknown company') {
+    return normalizedSymbol;
+  }
+  if (name == normalizedSymbol) return normalizedSymbol;
+  return '$normalizedSymbol - $name';
+}
+
+List<String> _dedupe(List<String> values) {
+  final result = <String>[];
+  for (final value in values) {
+    final text = value.trim();
+    if (text.isEmpty || result.contains(text)) continue;
+    result.add(text);
+  }
+  return result;
+}
+
 String _quantity(double value) {
   if (value == value.roundToDouble()) return value.toStringAsFixed(0);
   return value
@@ -1398,66 +1418,335 @@ Future<bool> _confirmCancelKisOrder(BuildContext context) async {
   return confirmed == true;
 }
 
-Future<bool> _confirmSubmitKisOrder(
+Future<void> _handleManualSubmitPressed(
+  BuildContext context,
+  DashboardController controller,
+) async {
+  if (controller.orderValidationResult == null ||
+      !controller.orderValidationMatchesCurrent) {
+    final validationResult = await controller.validateKisOrder();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(validationResult.message),
+      backgroundColor:
+          validationResult.success ? Colors.green : Colors.redAccent,
+    ));
+    if (controller.orderValidationResult == null) return;
+  }
+
+  while (context.mounted) {
+    final action = await showKisLiveOrderConfirmationDialog(
+      context,
+      controller: controller,
+      validation: controller.orderValidationResult,
+      symbol: controller.orderTicketSymbol,
+      side: controller.orderTicketSide,
+      qty: controller.parsedOrderTicketQty ?? 0,
+      confirmLive: controller.kisLiveConfirmation,
+      companyName: _orderCompanyName(controller),
+      reason: _orderReason(controller),
+    );
+    if (!context.mounted || action == KisLiveOrderConfirmationAction.cancel) {
+      return;
+    }
+    if (action == KisLiveOrderConfirmationAction.revalidate) {
+      final validationResult = await controller.validateKisOrder();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(validationResult.message),
+        backgroundColor:
+            validationResult.success ? Colors.green : Colors.redAccent,
+      ));
+      if (controller.orderValidationResult == null) return;
+      continue;
+    }
+
+    final result = await controller.submitKisManualOrder();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(result.message),
+      backgroundColor: result.success ? Colors.green : Colors.redAccent,
+    ));
+    return;
+  }
+}
+
+enum KisLiveOrderConfirmationAction { cancel, submit, revalidate }
+
+Future<KisLiveOrderConfirmationAction> showKisLiveOrderConfirmationDialog(
   BuildContext context, {
   required DashboardController controller,
+  required OrderValidationResult? validation,
+  required String symbol,
+  required String side,
+  required int qty,
+  required bool confirmLive,
+  String? companyName,
+  String? reason,
+  bool allowRevalidate = true,
 }) async {
-  final symbol = controller.orderTicketSymbol;
-  final side = controller.orderTicketSide;
-  final qty = controller.parsedOrderTicketQty ?? 0;
-  final validation = controller.orderValidationResult;
-  final estimated = validation?.estimatedAmount;
-  final reason = _orderReason(controller);
-  final company = _orderCompanyName(controller);
-  final confirmed = await showDialog<bool>(
+  final normalizedSide = side.trim().toLowerCase() == 'sell' ? 'SELL' : 'BUY';
+  final submitEnabled = _liveOrderSubmitEnabled(
+    validation: validation,
+    status: controller.kisSafetyStatus,
+    side: normalizedSide.toLowerCase(),
+    confirmLive: confirmLive,
+  );
+  final action = await showDialog<KisLiveOrderConfirmationAction>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Confirm Submit'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'This is a real KIS live order.\n'
-            'Broker account funds may be used.',
-          ),
-          const SizedBox(height: 14),
-          const _ConfirmRow(label: 'Provider', value: 'KIS'),
-          _ConfirmRow(label: 'Side', value: side.toUpperCase()),
-          _ConfirmRow(
-              label: 'Symbol',
-              value: company.isEmpty ? symbol : '$symbol · $company'),
-          _ConfirmRow(label: 'Quantity', value: qty.toString()),
-          _ConfirmRow(
-              label: 'Estimated notional',
-              value: estimated == null ? 'n/a' : _krw(estimated)),
-          _ConfirmRow(label: 'Reason', value: reason),
-          _ConfirmRow(
-              label: 'dry_run',
-              value: controller.kisSafetyStatus.runtimeDryRun ? 'ON' : 'OFF'),
-          _ConfirmRow(
-              label: 'kill_switch',
-              value: controller.kisSafetyStatus.killSwitch ? 'ON' : 'OFF'),
-          _ConfirmRow(
-              label: 'kis_real_order_enabled',
-              value: controller.kisSafetyStatus.kisRealOrderEnabled
-                  ? 'true'
-                  : 'false'),
-        ],
+      title: Text('Confirm KIS Live $normalizedSide'),
+      content: _KisLiveOrderConfirmationContent(
+        controller: controller,
+        validation: validation,
+        symbol: symbol,
+        side: normalizedSide,
+        qty: qty,
+        confirmLive: confirmLive,
+        submitEnabled: submitEnabled,
+        companyName: companyName,
+        reason: reason,
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () =>
+              Navigator.of(context).pop(KisLiveOrderConfirmationAction.cancel),
           child: const Text('Cancel'),
         ),
+        if (allowRevalidate && validation?.isValidationExpired == true)
+          OutlinedButton(
+            onPressed: () => Navigator.of(context)
+                .pop(KisLiveOrderConfirmationAction.revalidate),
+            child: const Text('Re-validate'),
+          ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Confirm Submit'),
+          key: const Key('kis_live_order_dialog_submit_button'),
+          onPressed: submitEnabled
+              ? () => Navigator.of(context)
+                  .pop(KisLiveOrderConfirmationAction.submit)
+              : null,
+          child: const Text('Submit Live Order'),
         ),
       ],
     ),
   );
-  return confirmed == true;
+  return action ?? KisLiveOrderConfirmationAction.cancel;
+}
+
+bool _liveOrderSubmitEnabled({
+  required OrderValidationResult? validation,
+  required dynamic status,
+  required String side,
+  required bool confirmLive,
+}) {
+  if (validation == null || validation.isValidationExpired) return false;
+  final requiresEntryWindow = side.trim().toLowerCase() != 'sell';
+  return confirmLive &&
+      validation.validatedForSubmission &&
+      validation.effectiveSubmitAllowed &&
+      status.runtimeDryRun != true &&
+      status.killSwitch != true &&
+      status.kisEnabled == true &&
+      status.kisRealOrderEnabled == true &&
+      status.marketOpen == true &&
+      (!requiresEntryWindow || status.entryAllowedNow == true);
+}
+
+class _KisLiveOrderConfirmationContent extends StatelessWidget {
+  const _KisLiveOrderConfirmationContent({
+    required this.controller,
+    required this.validation,
+    required this.symbol,
+    required this.side,
+    required this.qty,
+    required this.confirmLive,
+    required this.submitEnabled,
+    this.companyName,
+    this.reason,
+  });
+
+  final DashboardController controller;
+  final OrderValidationResult? validation;
+  final String symbol;
+  final String side;
+  final int qty;
+  final bool confirmLive;
+  final bool submitEnabled;
+  final String? companyName;
+  final String? reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = controller.kisSafetyStatus;
+    final isSell = side == 'SELL';
+    final estimatedPrice =
+        validation?.estimatedPrice ?? validation?.currentPrice;
+    final estimatedNotional =
+        validation?.estimatedNotional ?? validation?.estimatedAmount;
+    final availableCash = validation?.availableCash;
+    final runtimeDryRun = validation?.runtimeDryRun ?? status.runtimeDryRun;
+    final killSwitch = validation?.killSwitch ?? status.killSwitch;
+    final kisRealOrderEnabled =
+        validation?.kisRealOrderEnabled ?? status.kisRealOrderEnabled;
+    final dailyRemaining = validation?.dailyLiveOrderRemaining;
+    final maxNotionalPct = validation?.maxOrderNotionalPct ??
+        controller.settings.maxOrderNotionalPct;
+    final operationMode = validation?.currentOperationMode ??
+        controller.settings.currentOperationMode;
+    final riskFlags = _dedupe([
+      ...?validation?.riskFlags,
+      ...?validation?.warnings,
+    ]);
+    final gatingNotes = _dedupe([
+      ...?validation?.gatingNotes,
+      ...?validation?.blockReasons,
+      if (!confirmLive) 'confirm_live_required',
+      if (validation?.isValidationExpired == true) 'validation_stale',
+      if (!submitEnabled &&
+          identical(controller.orderValidationResult, validation) &&
+          controller.kisSubmitBlockedMessage().isNotEmpty)
+        controller.kisSubmitBlockedMessage(),
+    ]);
+    final blocked = validation == null ||
+        validation?.isValidationExpired == true ||
+        validation?.effectiveSubmitAllowed == false ||
+        runtimeDryRun ||
+        killSwitch ||
+        !kisRealOrderEnabled;
+
+    return SizedBox(
+      width: 540,
+      child: SingleChildScrollView(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            const _SoftBadge(text: 'LIVE ORDER', color: Colors.redAccent),
+            const _SoftBadge(
+                text: 'MANUAL ONLY', color: Colors.lightBlueAccent),
+            if (submitEnabled)
+              const _SoftBadge(
+                  text: 'BROKER SUBMIT POSSIBLE', color: Colors.redAccent),
+            _SoftBadge(
+              text: isSell ? 'SELL ORDER' : 'BUY ORDER',
+              color: isSell ? Colors.orangeAccent : Colors.redAccent,
+            ),
+            if (runtimeDryRun)
+              const _SoftBadge(text: 'DRY RUN', color: Colors.amberAccent),
+            if (blocked)
+              const _SoftBadge(text: 'BLOCKED', color: Colors.redAccent),
+          ]),
+          const SizedBox(height: 12),
+          _StateLine(
+            text: isSell
+                ? 'This is a live KIS SELL order. It may close or reduce a real broker position.'
+                : 'This is a live KIS BUY order. It may use real cash in your broker account.',
+            color: Colors.redAccent,
+          ),
+          const SizedBox(height: 12),
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            const _DataPair(label: 'Broker', value: 'KIS / KR'),
+            _DataPair(
+              label: 'Symbol',
+              value: _displaySymbolCompany(
+                symbol,
+                companyName?.trim().isNotEmpty == true
+                    ? companyName
+                    : validation?.companyName,
+              ),
+            ),
+            _DataPair(label: 'Side', value: side),
+            _DataPair(label: 'Quantity', value: qty.toString()),
+            _DataPair(
+              label: 'Estimated price',
+              value:
+                  estimatedPrice == null ? 'n/a' : _krwDisplay(estimatedPrice),
+            ),
+            _DataPair(
+              label: 'Estimated notional',
+              value: estimatedNotional == null
+                  ? 'n/a'
+                  : _krwDisplay(estimatedNotional),
+            ),
+            _DataPair(
+              label: 'Available cash',
+              value: availableCash == null ? 'n/a' : _krwDisplay(availableCash),
+            ),
+            _DataPair(label: 'Operation mode', value: operationMode),
+            _DataPair(label: 'Dry-run', value: runtimeDryRun ? 'ON' : 'OFF'),
+            _DataPair(label: 'Kill switch', value: killSwitch ? 'ON' : 'OFF'),
+            _DataPair(
+              label: 'KIS real orders',
+              value: kisRealOrderEnabled ? 'ENABLED' : 'DISABLED',
+            ),
+            _DataPair(
+              label: 'Daily remaining',
+              value: dailyRemaining?.toString() ?? 'n/a',
+            ),
+            _DataPair(
+              label: 'Max notional',
+              value: _formatPct(maxNotionalPct),
+            ),
+            _DataPair(
+              label: 'Validation',
+              value:
+                  validation?.validationFreshnessLabel ?? 'Validation not run',
+            ),
+            _DataPair(
+              label: 'Warning level',
+              value: validation?.warningLevel ?? 'n/a',
+            ),
+            const _DataPair(label: 'Manual-only', value: 'YES'),
+            if (reason?.trim().isNotEmpty == true)
+              _DataPair(label: 'Reason', value: reason!.trim()),
+          ]),
+          const SizedBox(height: 12),
+          _DialogSection(
+            title: 'Risk flags',
+            values: riskFlags,
+            fallback: 'none',
+          ),
+          const SizedBox(height: 8),
+          _DialogSection(
+            title: 'Gating notes',
+            values: gatingNotes,
+            fallback: 'none',
+          ),
+          if (!confirmLive) ...[
+            const SizedBox(height: 8),
+            const _StateLine(
+              text: 'confirm_live is not checked.',
+              color: Colors.amberAccent,
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _DialogSection extends StatelessWidget {
+  const _DialogSection({
+    required this.title,
+    required this.values,
+    required this.fallback,
+  });
+
+  final String title;
+  final List<String> values;
+  final String fallback;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = values.isEmpty ? fallback : values.join('\n');
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title.toUpperCase(),
+          style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 10,
+              fontWeight: FontWeight.w800)),
+      const SizedBox(height: 4),
+      _StateLine(text: text),
+    ]);
+  }
 }
 
 String _preparedEstimatedNotional(
@@ -1544,26 +1833,4 @@ double? _doubleValue(Object? value) {
   final text = value.toString().trim().replaceAll(',', '');
   if (text.isEmpty || text == 'null') return null;
   return double.tryParse(text);
-}
-
-class _ConfirmRow extends StatelessWidget {
-  const _ConfirmRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(children: [
-        SizedBox(
-            width: 86,
-            child: Text(label, style: const TextStyle(color: Colors.white70))),
-        Expanded(
-            child: Text(value,
-                style: const TextStyle(fontWeight: FontWeight.w700))),
-      ]),
-    );
-  }
 }

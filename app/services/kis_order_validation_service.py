@@ -79,6 +79,7 @@ class KisOrderValidationResult:
     validated_for_submission: bool
     can_submit_later: bool
     symbol: str
+    company_name: str | None
     side: str
     qty: int
     order_type: str
@@ -135,6 +136,8 @@ class KisOrderValidationService:
         block_reasons: list[str] = []
         available_cash: float | None = None
         held_qty: float | None = None
+        source_metadata = normalize_kis_order_source_metadata(request.source_metadata)
+        company_name = _company_name_from_sources(source_metadata, symbol)
 
         market_session = self.session_service.get_session_status(request.market, now=now)
         if not market_session["is_market_open"]:
@@ -152,6 +155,12 @@ class KisOrderValidationService:
 
         try:
             price_info = self.client.get_domestic_stock_price(symbol)
+            company_name = _company_name_from_sources(
+                source_metadata,
+                price_info,
+                {"symbol": symbol, "company_name": company_name},
+                symbol,
+            )
             current_price = _optional_float(price_info.get("current_price"))
             if current_price is None or current_price <= 0:
                 current_price = None
@@ -192,6 +201,12 @@ class KisOrderValidationService:
                     held_qty = 0.0
                     block_reasons.append("no_position_for_symbol")
                 else:
+                    company_name = _company_name_from_sources(
+                        source_metadata,
+                        match,
+                        {"symbol": symbol, "company_name": company_name},
+                        symbol,
+                    )
                     held_qty = to_float(match.get("qty"))
                     if held_qty < request.qty:
                         block_reasons.append("insufficient_holdings")
@@ -206,7 +221,6 @@ class KisOrderValidationService:
         warnings = _dedupe(warnings)
         validated = len(block_reasons) == 0
         public_session = _public_market_session(market_session)
-        source_metadata = normalize_kis_order_source_metadata(request.source_metadata)
         concise = (
             {}
             if validated
@@ -221,6 +235,7 @@ class KisOrderValidationService:
             validated_for_submission=validated,
             can_submit_later=validated,
             symbol=symbol,
+            company_name=company_name,
             side=request.side,
             qty=request.qty,
             order_type=request.order_type,
@@ -272,6 +287,22 @@ def _optional_float(value) -> float | None:
     if isinstance(value, str) and value.strip() == "":
         return None
     return to_float(value)
+
+
+def _company_name_from_sources(*sources: Any) -> str | None:
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in ("company_name", "companyName", "name", "company", "asset_name"):
+            value = source.get(key)
+            text = str(value or "").strip()
+            if not text:
+                continue
+            normalized = text.lower()
+            if normalized in {"unknown", "unknown company", "null"}:
+                continue
+            return text
+    return None
 
 
 def _find_position(positions: list[dict], symbol: str) -> dict | None:
