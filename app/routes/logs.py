@@ -9,6 +9,8 @@ from app.services.gpt_risk_context import gpt_context_from_market_analysis
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
+    live_order_audit_from_payloads,
+    live_order_audit_summary_fields,
 )
 
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -67,6 +69,9 @@ def get_order_logs(
         source_fields = kis_order_source_fields(
             kis_order_source_metadata_from_payloads(request_payload, response_payload)
         )
+        audit_fields = live_order_audit_summary_fields(
+            live_order_audit_from_payloads(request_payload, response_payload)
+        )
         items.append(
             {
             "id": row.id,
@@ -82,6 +87,7 @@ def get_order_logs(
             "submitted_at": row.submitted_at,
             "filled_at": row.filled_at,
             "created_at": row.created_at,
+            **audit_fields,
             **source_fields,
         }
         )

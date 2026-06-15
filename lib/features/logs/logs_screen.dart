@@ -1243,6 +1243,10 @@ class _OrderHistoryCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (order.hasLiveOrderAudit) ...[
+              const SizedBox(height: 10),
+              _LiveOrderAuditSection(order: order),
+            ],
             const SizedBox(height: 4),
             ExpansionTile(
               tilePadding: EdgeInsets.zero,
@@ -1335,6 +1339,151 @@ class _OrderHistoryCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _LiveOrderAuditSection extends StatelessWidget {
+  const _LiveOrderAuditSection({required this.order});
+
+  final OrderLogItem order;
+
+  @override
+  Widget build(BuildContext context) {
+    final audit = order.liveOrderAudit;
+    final symbol = audit.symbol ?? order.symbol;
+    final symbolLabel =
+        audit.companyName == null ? symbol : '$symbol (${audit.companyName})';
+    final estimatedNotional = audit.estimatedNotional ?? order.notional;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 18),
+        const Text(
+          'Live Order Audit',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        _BadgeWrap(labels: audit.badgeLabels),
+        const SizedBox(height: 6),
+        _DetailRow(
+          label: 'Source context',
+          value: _fallback(audit.sourceContext ?? '', 'unknown_manual'),
+        ),
+        _DetailRow(label: 'Label', value: 'KIS manual live'),
+        _DetailRow(label: 'Symbol', value: symbolLabel),
+        _DetailRow(
+          label: 'Side / qty',
+          value:
+              '${(audit.side ?? order.side).toUpperCase()} / ${_numberLabel(audit.qty ?? order.qty)}',
+        ),
+        _DetailRow(
+          label: 'Est. notional',
+          value: _moneyLabel(
+            estimatedNotional,
+            provider: order.provider,
+            market: order.market,
+            currency: order.currency,
+          ),
+        ),
+        _DetailRow(
+          label: 'Validation age',
+          value: _auditValidationAgeLabel(audit.validationAgeSeconds),
+        ),
+        _DetailRow(label: 'Validation', value: audit.validationStatus),
+        _DetailRow(
+          label: 'Operation mode',
+          value: _fallback(audit.currentOperationMode ?? '', '-'),
+        ),
+        _DetailRow(
+          label: 'Runtime gates',
+          value:
+              'dry_run=${_auditBoolLabel(audit.dryRun)} / kill_switch=${_auditBoolLabel(audit.killSwitch)} / kis_real_order_enabled=${_auditBoolLabel(audit.kisRealOrderEnabled)}',
+        ),
+        _DetailRow(
+          label: 'Market gates',
+          value:
+              'market_open=${_auditBoolLabel(audit.marketOpen)} / entry_allowed_now=${_auditBoolLabel(audit.entryAllowedNow)}',
+        ),
+        _DetailRow(
+          label: 'Daily remaining',
+          value: _numberLabel(audit.dailyLiveOrderRemaining),
+        ),
+        _DetailRow(
+          label: 'Warning level',
+          value: _fallback(audit.warningLevel ?? '', '-'),
+        ),
+        _DetailRow(
+          label: 'Confirmed',
+          value: _auditBoolLabel(audit.userConfirmedLiveOrder),
+        ),
+        _DetailRow(
+          label: 'Broker submit',
+          value: _auditBoolLabel(audit.brokerSubmitCalled),
+        ),
+        _DetailRow(
+          label: 'Real order',
+          value: _auditBoolLabel(audit.realOrderSubmitted),
+        ),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Audit Details'),
+          children: [
+            _DetailRow(
+              label: 'Order source',
+              value: _fallback(audit.orderSource ?? '', '-'),
+            ),
+            _DetailRow(
+              label: 'Action source',
+              value: _fallback(audit.operatorActionSource ?? '', '-'),
+            ),
+            _DetailRow(
+              label: 'Price',
+              value: _moneyLabel(
+                audit.estimatedPrice,
+                provider: order.provider,
+                market: order.market,
+                currency: order.currency,
+              ),
+            ),
+            _DetailRow(
+              label: 'Cash',
+              value: _moneyLabel(
+                audit.availableCash,
+                provider: order.provider,
+                market: order.market,
+                currency: order.currency,
+              ),
+            ),
+            _DetailRow(
+              label: 'KIS enabled',
+              value: _auditBoolLabel(audit.kisEnabled),
+            ),
+            _DetailRow(
+              label: 'Dialog shown',
+              value: _auditBoolLabel(audit.confirmationDialogShown),
+            ),
+            _DetailRow(
+              label: 'Manual submit',
+              value: _auditBoolLabel(audit.manualSubmitCalled),
+            ),
+            if (audit.riskFlags.isNotEmpty)
+              _DetailRow(
+                label: 'Risk flags',
+                value: audit.riskFlags.join(', '),
+              ),
+            if (audit.gatingNotes.isNotEmpty)
+              _DetailRow(
+                label: 'Gates',
+                value: _compactText(audit.gatingNotes),
+              ),
+            if (audit.rawPreview.isNotEmpty)
+              _DetailRow(label: 'Raw audit', value: audit.rawPreview),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -1935,6 +2084,23 @@ List<Widget> _safetyFlagRows({
 String _boolLabel(bool value) => value ? 'true' : 'false';
 
 String _yesNo(bool value) => value ? 'Yes' : 'No';
+
+String _auditBoolLabel(bool? value) => value == null ? '-' : _yesNo(value);
+
+String _auditValidationAgeLabel(int? seconds) {
+  if (seconds == null) return '-';
+  if (seconds < 60) return '${seconds}s';
+  final minutes = seconds ~/ 60;
+  final remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    return remainingSeconds == 0
+        ? '${minutes}m'
+        : '${minutes}m ${remainingSeconds}s';
+  }
+  final hours = minutes ~/ 60;
+  final remainingMinutes = minutes % 60;
+  return remainingMinutes == 0 ? '${hours}h' : '${hours}h ${remainingMinutes}m';
+}
 
 String _compactText(List<String> values) {
   final text = values.join(' | ');

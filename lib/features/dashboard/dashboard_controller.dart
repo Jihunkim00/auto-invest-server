@@ -1160,6 +1160,7 @@ class DashboardController extends ChangeNotifier {
     orderTicketSourceMetadata = {
       'source': 'watchlist_candidate',
       'source_type': 'manual_buy_ticket_prefill',
+      'source_context': 'watchlist_analyze_in_trading',
       'symbol': normalizedSymbol,
       'company_name': candidate.name,
       'market': 'KR',
@@ -1204,6 +1205,7 @@ class DashboardController extends ChangeNotifier {
     kisTradingSourceContext = {
       'source': 'watchlist_candidate',
       'source_type': 'click_to_trade_prefill',
+      'source_context': 'watchlist_analyze_in_trading',
       'symbol': normalizedSymbol,
       'company_name': candidate.name,
       'market': 'KR',
@@ -1268,6 +1270,7 @@ class DashboardController extends ChangeNotifier {
     orderTicketSourceMetadata = {
       'source': 'single_symbol_trading',
       'source_type': 'manual_buy_ticket_prefill',
+      'source_context': 'direct_manual_ticket',
       'symbol': normalizedSymbol,
       if (gateLevel != null) 'gate_level': gateLevel,
       'manual_confirm_required': true,
@@ -1310,6 +1313,7 @@ class DashboardController extends ChangeNotifier {
     orderTicketSourceMetadata = {
       'source': 'kis_portfolio_manual_sell',
       'source_type': 'operator_confirmed_position_exit',
+      'source_context': 'audit_sell_manual_ticket',
       'symbol': symbol,
       if (position.name.isNotEmpty) 'company_name': position.name,
       'suggested_quantity': qty,
@@ -1398,6 +1402,7 @@ class DashboardController extends ChangeNotifier {
       orderTicketSourceMetadata = {
         'source': 'kis_portfolio_manual_sell',
         'source_type': 'operator_confirmed_position_exit',
+        'source_context': 'audit_sell_manual_ticket',
         'symbol': preparedSymbol,
         'company_name': preparation.companyName,
         'quantity': qty,
@@ -3736,6 +3741,7 @@ Map<String, dynamic> _exitPreflightSourceMetadata(
   return {
     'source': 'kis_live_exit_preflight',
     'source_type': 'manual_confirm_exit',
+    'source_context': 'exit_preflight_manual_sell',
     if (checkedAt != null) 'preflight_checked_at': checkedAt,
     if (preflight?.runKey != null) 'preflight_run_key': preflight!.runKey,
     if (preflight?.runId != null) 'preflight_id': preflight!.runId,
@@ -3770,6 +3776,7 @@ Map<String, dynamic> _exitShadowSourceMetadata(
   return {
     'source': 'kis_exit_shadow_decision',
     'source_type': 'dry_run_sell_simulation',
+    'source_context': 'shadow_exit_manual_sell',
     if (checkedAt != null) 'shadow_decision_checked_at': checkedAt,
     if (decision?.runKey != null) 'shadow_decision_run_key': decision!.runKey,
     'exit_trigger': candidate.trigger,

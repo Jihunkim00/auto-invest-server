@@ -126,6 +126,185 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Logs screen shows KIS live order audit details', (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: const [],
+        signals: const [],
+        orders: [
+          OrderLogItem.fromJson({
+            'id': 41,
+            'order_id': 41,
+            'provider': 'kis',
+            'broker': 'kis',
+            'market': 'KR',
+            'mode': 'manual_live_order',
+            'trigger_source': 'manual',
+            'symbol': '005930',
+            'side': 'buy',
+            'action': 'buy',
+            'result': 'SUBMITTED',
+            'reason': 'Live KIS order submitted.',
+            'qty': 1,
+            'notional': 72000,
+            'internal_status': 'SUBMITTED',
+            'broker_order_status': 'submitted',
+            'kis_odno': '0001234567',
+            'created_at': '2026-05-08T00:03:00',
+            'updated_at': '2026-05-08T00:04:00',
+            'real_order_submitted': true,
+            'broker_submit_called': true,
+            'manual_submit_called': true,
+            'audit_metadata': {
+              'source_context': 'direct_manual_ticket',
+              'order_source': 'manual_live_order',
+              'operator_action_source': 'manual_ticket_submit',
+              'symbol': '005930',
+              'company_name': 'Samsung Electronics',
+              'side': 'buy',
+              'qty': 1,
+              'estimated_price': 72000,
+              'estimated_notional': 72000,
+              'available_cash': 100000,
+              'current_operation_mode': 'kis_sell_only',
+              'dry_run': false,
+              'kill_switch': false,
+              'kis_enabled': true,
+              'kis_real_order_enabled': true,
+              'market_open': true,
+              'entry_allowed_now': true,
+              'daily_live_order_remaining': 2,
+              'warning_level': 'dangerous_mixed',
+              'validation_age_seconds': 42,
+              'validation_stale': false,
+              'confirmation_dialog_shown': true,
+              'user_confirmed_live_order': true,
+              'broker_submit_called': true,
+              'real_order_submitted': true,
+              'manual_submit_called': true,
+              'risk_flags': ['manual_live_order'],
+              'gating_notes': ['validated_recently'],
+            },
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+    await tester.tap(find.text('Orders').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Live Order Audit'), findsOneWidget);
+    expect(find.text('direct_manual_ticket'), findsOneWidget);
+    expect(find.text('OPERATOR CONFIRMED'), findsWidgets);
+    expect(find.text('dangerous_mixed'), findsOneWidget);
+    expect(find.text('42s'), findsOneWidget);
+    expect(find.text('\u20A972,000'), findsOneWidget);
+    expect(find.text('Samsung Electronics'), findsNothing);
+    expect(find.text('005930 (Samsung Electronics)'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('Logs screen badges blocked audit with no broker submit',
+      (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: const [],
+        signals: const [],
+        orders: [
+          OrderLogItem.fromJson({
+            'id': 42,
+            'order_id': 42,
+            'provider': 'kis',
+            'broker': 'kis',
+            'market': 'KR',
+            'mode': 'manual_live_order',
+            'trigger_source': 'manual',
+            'symbol': '005930',
+            'side': 'buy',
+            'action': 'buy',
+            'result': 'REJECTED_BY_SAFETY_GATE',
+            'reason': 'Validation expired.',
+            'qty': 1,
+            'notional': 72000,
+            'internal_status': 'REJECTED_BY_SAFETY_GATE',
+            'created_at': '2026-05-08T00:03:00',
+            'updated_at': '2026-05-08T00:04:00',
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'audit_metadata': {
+              'source_context': 'watchlist_analyze_in_trading',
+              'symbol': '005930',
+              'side': 'buy',
+              'qty': 1,
+              'estimated_notional': 72000,
+              'dry_run': false,
+              'kill_switch': false,
+              'kis_enabled': true,
+              'kis_real_order_enabled': true,
+              'market_open': true,
+              'entry_allowed_now': true,
+              'daily_live_order_remaining': 0,
+              'warning_level': 'normal',
+              'validation_age_seconds': 125,
+              'validation_stale': true,
+              'confirmation_dialog_shown': true,
+              'user_confirmed_live_order': true,
+              'broker_submit_called': false,
+              'real_order_submitted': false,
+              'manual_submit_called': true,
+              'gating_notes': ['validation_stale'],
+            },
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+    await tester.tap(find.text('Orders').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Live Order Audit'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsWidgets);
+    expect(find.text('VALIDATION STALE'), findsWidgets);
+    expect(find.text('BLOCKED'), findsWidgets);
+    expect(find.text('Broker submit'), findsOneWidget);
+    expect(find.text('No'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Logs screen hides live audit section when audit is absent',
+      (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        runs: const [],
+        signals: const [],
+        orders: [
+          _manualLiveOrder(
+            orderId: 43,
+            createdAt: '2026-05-08T00:03:00',
+          ),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+    await tester.tap(find.text('Orders').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('KIS MANUAL LIVE'), findsOneWidget);
+    expect(find.text('Live Order Audit'), findsNothing);
+    expect(find.text('OPERATOR CONFIRMED'), findsNothing);
+
+    controller.dispose();
+  });
+
   testWidgets('Logs screen shows exit preflight manual sell audit fields',
       (tester) async {
     final controller = DashboardController(

@@ -16,6 +16,8 @@ from app.services.gpt_risk_context import (
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
+    live_order_audit_from_payloads,
+    live_order_audit_summary_fields,
 )
 
 router = APIRouter(tags=["history"])
@@ -365,6 +367,12 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         response_payload,
         last_sync_payload,
     )
+    audit_metadata = live_order_audit_from_payloads(
+        request_payload,
+        response_payload,
+        last_sync_payload,
+    )
+    audit_fields = live_order_audit_summary_fields(audit_metadata)
     source_fields = kis_order_source_fields(source_metadata)
     source = str(
         _first_present(
@@ -481,6 +489,7 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
         "real_order_submitted": real_order_submitted,
         "broker_submit_called": broker_submit_called,
         "manual_submit_called": manual_submit_called,
+        **audit_fields,
         **{
             key: value
             for key, value in source_fields.items()

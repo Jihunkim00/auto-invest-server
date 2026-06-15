@@ -18,8 +18,11 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.kis_order_messages import concise_order_block
 from app.services.kis_order_audit import (
     kis_order_source_fields,
+    kis_manual_live_source_context,
+    live_order_audit_summary_fields,
     kis_order_source_metadata_from_payloads,
     merge_kis_order_source_metadata,
+    sanitize_live_order_audit_payload,
 )
 from app.services.market_profile_service import MarketProfileError, MarketProfileService
 from app.services.market_session_service import MarketSessionError, MarketSessionService
@@ -60,6 +63,7 @@ class KisManualOrderSubmitRequest(BaseModel):
     confirm_live: bool = Field(default=False)
     confirmation: str | None = Field(default=None, max_length=300)
     reason: str | None = Field(default=None, max_length=500)
+    source_context: str | None = Field(default=None, max_length=80)
     source_metadata: dict[str, Any] | None = Field(default=None)
 
 
@@ -222,6 +226,7 @@ class KisManualOrderService:
             )
 
         latest_validation = None
+        validation_for_audit = None
         if (
             checks["market_is_kr"]["passed"]
             and checks["symbol_is_kr_6_digit"]["passed"]
@@ -229,18 +234,35 @@ class KisManualOrderService:
             and checks["qty_is_positive_integer"]["passed"]
             and checks["order_type_is_market"]["passed"]
         ):
-            latest_validation = self._latest_recent_validation(
+            validation_for_audit = self._latest_validation(
                 db,
                 market=normalized_market,
                 symbol=normalized_symbol,
                 side=normalized_side,
                 qty=request.qty,
                 order_type=normalized_order_type,
-                now_utc=now_utc,
             )
+            if _validation_is_recent(validation_for_audit, now_utc=now_utc):
+                latest_validation = validation_for_audit
         source_metadata = merge_kis_order_source_metadata(
-            _source_metadata_from_validation(latest_validation),
+            _source_metadata_from_validation(validation_for_audit),
             request.source_metadata,
+        )
+        source_context = kis_manual_live_source_context(
+            source_metadata=source_metadata,
+            explicit=request.source_context
+            or (
+                request.source_metadata.get("source_context")
+                if isinstance(request.source_metadata, dict)
+                else None
+            ),
+        )
+        source_metadata = merge_kis_order_source_metadata(
+            source_metadata,
+            {
+                "source_context": source_context,
+                "operator_action_source": source_context,
+            },
         )
         check(
             "recent_dry_run_validation_passed",
@@ -319,6 +341,27 @@ class KisManualOrderService:
             name for name, item in checks.items() if item.get("passed") is not True
         ]
         if failed_checks:
+            audit_metadata = self._build_audit_metadata(
+                db,
+                request=request,
+                now_utc=now_utc,
+                normalized_market=normalized_market or request.market,
+                normalized_symbol=normalized_symbol,
+                normalized_side=normalized_side,
+                validation_for_audit=validation_for_audit,
+                latest_validation=latest_validation,
+                source_metadata=source_metadata,
+                runtime=runtime,
+                market_session=market_session,
+                failed_checks=failed_checks,
+                daily_count=daily_count,
+                max_daily_trades=max_daily_trades,
+                estimated_amount=estimated_amount,
+                confirmation_matches=confirmation_matches,
+                real_order_submitted=False,
+                broker_submit_called=False,
+                manual_submit_called=True,
+            )
             logger.warning(
                 "KIS manual submit blocked by safety checks: market=%s symbol=%s side=%s qty=%s failed_checks=%s safety_checks=%s",
                 request.market,
@@ -343,6 +386,7 @@ class KisManualOrderService:
                 broker_status=None,
                 source_metadata=source_metadata,
             )
+            response = self._with_audit_fields(response, audit_metadata)
             order = self._create_order_log(
                 db,
                 request=request,
@@ -353,6 +397,7 @@ class KisManualOrderService:
                 internal_status=InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
                 response_payload=response,
                 source_metadata=source_metadata,
+                audit_metadata=audit_metadata,
             )
             response["order_log_id"] = order.id
             response["order_id"] = order.id
@@ -372,6 +417,27 @@ class KisManualOrderService:
             internal_status=InternalOrderStatus.REQUESTED.value,
             response_payload=None,
             source_metadata=source_metadata,
+            audit_metadata=self._build_audit_metadata(
+                db,
+                request=request,
+                now_utc=now_utc,
+                normalized_market=normalized_market,
+                normalized_symbol=normalized_symbol,
+                normalized_side=normalized_side,
+                validation_for_audit=validation_for_audit,
+                latest_validation=latest_validation,
+                source_metadata=source_metadata,
+                runtime=runtime,
+                market_session=market_session,
+                failed_checks=[],
+                daily_count=daily_count,
+                max_daily_trades=max_daily_trades,
+                estimated_amount=estimated_amount,
+                confirmation_matches=confirmation_matches,
+                real_order_submitted=False,
+                broker_submit_called=False,
+                manual_submit_called=True,
+            ),
         )
 
         try:
@@ -386,6 +452,27 @@ class KisManualOrderService:
                     qty=request.qty,
                 )
         except Exception as exc:
+            audit_metadata = self._build_audit_metadata(
+                db,
+                request=request,
+                now_utc=now_utc,
+                normalized_market=normalized_market,
+                normalized_symbol=normalized_symbol,
+                normalized_side=normalized_side,
+                validation_for_audit=validation_for_audit,
+                latest_validation=latest_validation,
+                source_metadata=source_metadata,
+                runtime=runtime,
+                market_session=market_session,
+                failed_checks=[],
+                daily_count=daily_count,
+                max_daily_trades=max_daily_trades,
+                estimated_amount=estimated_amount,
+                confirmation_matches=confirmation_matches,
+                real_order_submitted=False,
+                broker_submit_called=True,
+                manual_submit_called=True,
+            )
             response = self._base_response(
                 request=request,
                 normalized_market=normalized_market,
@@ -400,6 +487,7 @@ class KisManualOrderService:
                 broker_status="failed",
                 source_metadata=source_metadata,
             )
+            response = self._with_audit_fields(response, audit_metadata)
             response["error"] = _safe_error(exc)
             response["order_log_id"] = order.id
             response["order_id"] = order.id
@@ -429,6 +517,28 @@ class KisManualOrderService:
             broker_status=broker_status,
             source_metadata=source_metadata,
         )
+        audit_metadata = self._build_audit_metadata(
+            db,
+            request=request,
+            now_utc=now_utc,
+            normalized_market=normalized_market,
+            normalized_symbol=normalized_symbol,
+            normalized_side=normalized_side,
+            validation_for_audit=validation_for_audit,
+            latest_validation=latest_validation,
+            source_metadata=source_metadata,
+            runtime=runtime,
+            market_session=market_session,
+            failed_checks=[],
+            daily_count=daily_count,
+            max_daily_trades=max_daily_trades,
+            estimated_amount=estimated_amount,
+            confirmation_matches=confirmation_matches,
+            real_order_submitted=True,
+            broker_submit_called=True,
+            manual_submit_called=True,
+        )
+        response = self._with_audit_fields(response, audit_metadata)
         response["order_log_id"] = order.id
         response["order_id"] = order.id
         response["kis_odno"] = broker_order_id
@@ -485,6 +595,28 @@ class KisManualOrderService:
             .first()
         )
 
+    def _latest_validation(
+        self,
+        db: Session,
+        *,
+        market: str,
+        symbol: str,
+        side: str,
+        qty: int,
+        order_type: str,
+    ) -> KisOrderValidationLog | None:
+        return (
+            db.query(KisOrderValidationLog)
+            .filter(KisOrderValidationLog.market == market)
+            .filter(KisOrderValidationLog.symbol == symbol)
+            .filter(KisOrderValidationLog.side == side)
+            .filter(KisOrderValidationLog.qty == qty)
+            .filter(KisOrderValidationLog.order_type == order_type)
+            .filter(KisOrderValidationLog.validated_for_submission.is_(True))
+            .order_by(KisOrderValidationLog.created_at.desc(), KisOrderValidationLog.id.desc())
+            .first()
+        )
+
     def _daily_kis_trade_count(self, db: Session, *, now_utc: datetime) -> int:
         local_now = now_utc.astimezone(KR_TZ)
         start_local = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -512,6 +644,7 @@ class KisManualOrderService:
         internal_status: str,
         response_payload: dict[str, Any] | None,
         source_metadata: dict[str, Any] | None,
+        audit_metadata: dict[str, Any] | None,
     ) -> OrderLog:
         order_payload_preview = None
         if re.fullmatch(r"\d{6}", symbol or "") and side in {"buy", "sell"}:
@@ -527,6 +660,7 @@ class KisManualOrderService:
                 order_payload_preview = None
 
         source_fields = kis_order_source_fields(source_metadata)
+        audit_payload = sanitize_live_order_audit_payload(audit_metadata)
         row = OrderLog(
             broker="kis",
             market=str(request.market or "KR").strip().upper() or "KR",
@@ -555,6 +689,7 @@ class KisManualOrderService:
                     "reason": request.reason,
                     "confirmation_provided": bool(request.confirmation),
                     "order_payload_preview": order_payload_preview,
+                    "audit_metadata": audit_payload or None,
                     **source_fields,
                 },
                 ensure_ascii=False,
@@ -570,6 +705,171 @@ class KisManualOrderService:
         db.commit()
         db.refresh(row)
         return row
+
+    def _build_audit_metadata(
+        self,
+        db: Session,
+        *,
+        request: KisManualOrderSubmitRequest,
+        now_utc: datetime,
+        normalized_market: str,
+        normalized_symbol: str,
+        normalized_side: str,
+        validation_for_audit: KisOrderValidationLog | None,
+        latest_validation: KisOrderValidationLog | None,
+        source_metadata: dict[str, Any] | None,
+        runtime: dict[str, Any],
+        market_session: dict[str, Any],
+        failed_checks: list[str],
+        daily_count: int,
+        max_daily_trades: int,
+        estimated_amount: float | None,
+        confirmation_matches: bool,
+        real_order_submitted: bool,
+        broker_submit_called: bool,
+        manual_submit_called: bool,
+    ) -> dict[str, Any]:
+        validation_payload = _validation_payload(validation_for_audit)
+        risk_summary = {}
+        try:
+            risk_summary = self.runtime_settings.get_kis_risk_summary_read_only(db)
+        except Exception:
+            risk_summary = {}
+
+        operation_mode = runtime.get("current_operation_mode")
+        if not operation_mode and runtime:
+            try:
+                operation_mode = self.runtime_settings.current_operation_mode(runtime)
+            except Exception:
+                operation_mode = "unknown"
+
+        source_context = kis_manual_live_source_context(
+            source_metadata=source_metadata,
+            explicit=request.source_context
+            or (
+                request.source_metadata.get("source_context")
+                if isinstance(request.source_metadata, dict)
+                else None
+            ),
+        )
+        validation_age = _validation_age_seconds(
+            validation_for_audit,
+            now_utc=now_utc,
+        )
+        validation_stale = latest_validation is None
+        validated_at = _iso_utc(
+            validation_for_audit.created_at if validation_for_audit else None
+        )
+        validation_expires_at = _iso_utc(
+            validation_for_audit.created_at + KIS_VALIDATION_MAX_AGE
+            if validation_for_audit is not None
+            else None
+        )
+        warning_level = str(risk_summary.get("warning_level") or "safe")
+        if failed_checks:
+            warning_level = "blocked"
+
+        risk_flags = _dedupe_strings(
+            [
+                *_string_list(validation_payload.get("risk_flags")),
+                *_string_list(validation_payload.get("warnings")),
+                *_string_list(risk_summary.get("risky_flags")),
+            ]
+        )
+        gating_notes = _dedupe_strings(
+            [
+                *_string_list(validation_payload.get("gating_notes")),
+                *_string_list(validation_payload.get("block_reasons")),
+                *_string_list(risk_summary.get("blocking_flags")),
+                *failed_checks,
+            ]
+        )
+
+        order_source = _first_text(
+            source_metadata.get("source") if isinstance(source_metadata, dict) else None,
+            "manual_ticket",
+        )
+        daily_remaining = max(0, max_daily_trades - daily_count)
+        payload = {
+            "audit_version": "pr50_manual_kis_live_order_v1",
+            "broker": "kis",
+            "market": normalized_market or "KR",
+            "source_endpoint": "/kis/orders/manual-submit",
+            "source_context": source_context,
+            "order_source": order_source,
+            "operator_action_source": _first_text(
+                source_metadata.get("operator_action_source")
+                if isinstance(source_metadata, dict)
+                else None,
+                source_context,
+            ),
+            "symbol": normalized_symbol or request.symbol,
+            "company_name": _first_text(
+                validation_payload.get("company_name"),
+                source_metadata.get("company_name")
+                if isinstance(source_metadata, dict)
+                else None,
+            ),
+            "side": normalized_side or request.side,
+            "qty": request.qty,
+            "estimated_price": _float_or_none(
+                validation_payload.get("estimated_price")
+                or validation_payload.get("current_price")
+            ),
+            "estimated_notional": _float_or_none(
+                validation_payload.get("estimated_notional")
+                or validation_payload.get("estimated_amount")
+                or estimated_amount
+            ),
+            "available_cash": _float_or_none(validation_payload.get("available_cash")),
+            "current_operation_mode": operation_mode or "unknown",
+            "dry_run": bool(runtime.get("dry_run", True)),
+            "kill_switch": bool(runtime.get("kill_switch", False)),
+            "kis_enabled": bool(getattr(self.client.settings, "kis_enabled", False)),
+            "kis_real_order_enabled": bool(
+                getattr(self.client.settings, "kis_real_order_enabled", False)
+            ),
+            "market_open": market_session.get("is_market_open") is True,
+            "entry_allowed_now": market_session.get("is_entry_allowed_now") is True,
+            "no_new_entry_after": market_session.get("no_new_entry_after"),
+            "daily_live_order_remaining": daily_remaining,
+            "max_order_notional_pct": _float_or_none(
+                runtime.get(
+                    "max_order_notional_pct",
+                    risk_summary.get("max_notional_pct", 0.03),
+                )
+            ),
+            "validation_id": validation_for_audit.id if validation_for_audit else None,
+            "validated_at": validated_at,
+            "validation_expires_at": validation_expires_at,
+            "validation_age_seconds": validation_age,
+            "validation_stale": validation_stale,
+            "submit_allowed": not failed_checks,
+            "confirm_live": request.confirm_live,
+            "warning_level": warning_level,
+            "risk_flags": risk_flags,
+            "gating_notes": gating_notes,
+            "confirmation_dialog_shown": True,
+            "user_confirmed_live_order": bool(
+                request.confirm_live is True and confirmation_matches
+            ),
+            "real_order_submitted": real_order_submitted,
+            "broker_submit_called": broker_submit_called,
+            "manual_submit_called": manual_submit_called,
+        }
+        return sanitize_live_order_audit_payload(payload)
+
+    @staticmethod
+    def _with_audit_fields(
+        response: dict[str, Any],
+        audit_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        audit = sanitize_live_order_audit_payload(audit_metadata)
+        return {
+            **response,
+            "audit_metadata": audit,
+            **live_order_audit_summary_fields(audit),
+        }
 
     @staticmethod
     def _base_response(
@@ -656,6 +956,84 @@ def _naive_utc(value: datetime) -> datetime:
     if value.tzinfo is not None:
         value = value.astimezone(UTC)
     return value.replace(tzinfo=None)
+
+
+def _iso_utc(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    else:
+        value = value.astimezone(UTC)
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _validation_is_recent(
+    validation: KisOrderValidationLog | None,
+    *,
+    now_utc: datetime,
+) -> bool:
+    if validation is None or validation.created_at is None:
+        return False
+    return now_utc - _utc_now(validation.created_at) <= KIS_VALIDATION_MAX_AGE
+
+
+def _validation_age_seconds(
+    validation: KisOrderValidationLog | None,
+    *,
+    now_utc: datetime,
+) -> int | None:
+    if validation is None or validation.created_at is None:
+        return None
+    return max(0, int((now_utc - _utc_now(validation.created_at)).total_seconds()))
+
+
+def _validation_payload(validation: KisOrderValidationLog | None) -> dict[str, Any]:
+    if validation is None:
+        return {}
+    for raw in (validation.response_payload, validation.request_payload):
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        text = str(value or "").strip()
+        if text and text.lower() not in {"none", "null", "unknown"}:
+            return text[:200]
+    return None
 
 
 def _safe_error(exc: Exception) -> str:

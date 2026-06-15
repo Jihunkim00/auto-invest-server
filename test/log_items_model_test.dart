@@ -215,6 +215,100 @@ void main() {
     expect(item.currency, 'KRW');
   });
 
+  test('OrderLogItem parses KIS manual live audit metadata', () {
+    final item = OrderLogItem.fromJson({
+      'id': 32,
+      'order_id': 32,
+      'provider': 'kis',
+      'broker': 'kis',
+      'market': 'KR',
+      'mode': 'manual_live_order',
+      'symbol': '005930',
+      'side': 'buy',
+      'qty': 1,
+      'notional': 72000,
+      'internal_status': 'SUBMITTED',
+      'broker_order_status': 'submitted',
+      'created_at': '2026-05-08T00:02:00',
+      'updated_at': '2026-05-08T00:03:00',
+      'real_order_submitted': true,
+      'broker_submit_called': true,
+      'manual_submit_called': true,
+      'audit_metadata': {
+        'source_context': 'direct_manual_ticket',
+        'order_source': 'manual_live_order',
+        'operator_action_source': 'manual_ticket_submit',
+        'symbol': '005930',
+        'company_name': 'Samsung Electronics',
+        'side': 'buy',
+        'qty': 1,
+        'estimated_notional': 72000,
+        'available_cash': 100000,
+        'current_operation_mode': 'kis_sell_only',
+        'dry_run': false,
+        'kill_switch': false,
+        'kis_enabled': true,
+        'kis_real_order_enabled': true,
+        'market_open': true,
+        'entry_allowed_now': true,
+        'daily_live_order_remaining': 2,
+        'warning_level': 'dangerous_mixed',
+        'validation_age_seconds': 42,
+        'validation_stale': false,
+        'confirmation_dialog_shown': true,
+        'user_confirmed_live_order': true,
+        'broker_submit_called': true,
+        'real_order_submitted': true,
+        'manual_submit_called': true,
+        'risk_flags': ['manual_live_order'],
+        'gating_notes': ['validated_recently'],
+      },
+    });
+
+    expect(item.hasLiveOrderAudit, isTrue);
+    expect(item.liveOrderAudit.sourceContext, 'direct_manual_ticket');
+    expect(item.liveOrderAudit.companyName, 'Samsung Electronics');
+    expect(item.liveOrderAudit.validationStatus, 'Validation fresh');
+    expect(item.liveOrderAudit.rawPreview, contains('source_context='));
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS MANUAL LIVE',
+        'OPERATOR CONFIRMED',
+        'VALIDATION FRESH',
+        'BROKER SUBMIT CALLED',
+        'WARNING: DANGEROUS MODE',
+      ]),
+    );
+  });
+
+  test('OrderLogItem hides audit badges when audit metadata is missing', () {
+    final item = OrderLogItem.fromJson({
+      'id': 33,
+      'order_id': 33,
+      'provider': 'kis',
+      'broker': 'kis',
+      'market': 'KR',
+      'mode': 'manual_live_order',
+      'symbol': '005930',
+      'side': 'buy',
+      'qty': 1,
+      'internal_status': 'SUBMITTED',
+      'broker_order_status': 'submitted',
+      'created_at': '2026-05-08T00:02:00',
+      'updated_at': '2026-05-08T00:03:00',
+      'real_order_submitted': true,
+      'broker_submit_called': true,
+      'manual_submit_called': true,
+    });
+
+    expect(item.hasLiveOrderAudit, isFalse);
+    expect(item.liveOrderAudit.hasAudit, isFalse);
+    expect(item.safetyBadges, isNot(contains('OPERATOR CONFIRMED')));
+    expect(item.safetyBadges, isNot(contains('VALIDATION FRESH')));
+    expect(item.safetyBadges, isNot(contains('BROKER SUBMIT CALLED')));
+  });
+
   test('OrderLogItem labels portfolio manual sell as position exit', () {
     final item = OrderLogItem.fromJson({
       'id': 31,
