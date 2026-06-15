@@ -1492,7 +1492,13 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
   final isExitPreflight = source == 'kis_live_exit_preflight';
   final isExitShadow = source == 'kis_exit_shadow_decision';
   final isPortfolioManualSell = source == 'kis_portfolio_manual_sell';
-  if (!isExitPreflight && !isExitShadow && !isPortfolioManualSell) {
+  final isWatchlistPrefill = source == 'watchlist_candidate';
+  final isDirectManualTicket = source == 'single_symbol_trading';
+  if (!isExitPreflight &&
+      !isExitShadow &&
+      !isPortfolioManualSell &&
+      !isWatchlistPrefill &&
+      !isDirectManualTicket) {
     return const <String, dynamic>{};
   }
 
@@ -1500,6 +1506,10 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
   const stringKeys = {
     'source',
     'source_type',
+    'source_context',
+    'operator_action_source',
+    'market',
+    'broker',
     'preflight_id',
     'preflight_run_key',
     'preflight_checked_at',
@@ -1511,8 +1521,17 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'symbol',
     'company_name',
     'exit_reason',
+    'action_hint',
+    'block_reason',
+    'candidate_reason',
+    'candidate_action_hint',
+    'candidate_block_reason',
   };
   const numberKeys = {
+    'gate_level',
+    'score',
+    'candidate_rank',
+    'candidate_score',
     'unrealized_pl',
     'unrealized_pl_pct',
     'cost_basis',
@@ -1537,6 +1556,9 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'shadow_real_order_submitted',
     'shadow_broker_submit_called',
     'shadow_manual_submit_called',
+    'entry_ready',
+    'candidate_entry_ready',
+    'watchlist_click_submits_order',
   };
   const listKeys = {'risk_flags', 'gating_notes'};
 
@@ -1571,12 +1593,31 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
       ? 'kis_portfolio_manual_sell'
       : isExitShadow
           ? 'kis_exit_shadow_decision'
-          : 'kis_live_exit_preflight';
+          : isExitPreflight
+              ? 'kis_live_exit_preflight'
+              : isWatchlistPrefill
+                  ? 'watchlist_candidate'
+                  : 'single_symbol_trading';
   result['source_type'] = isPortfolioManualSell
       ? 'operator_confirmed_position_exit'
       : isExitShadow
           ? 'dry_run_sell_simulation'
-          : 'manual_confirm_exit';
+          : isExitPreflight
+              ? 'manual_confirm_exit'
+              : isWatchlistPrefill
+                  ? (_auditString(sourceMetadata['source_type']) ??
+                      'manual_buy_ticket_prefill')
+                  : 'manual_buy_ticket_prefill';
+  result['source_context'] = isPortfolioManualSell
+      ? 'audit_sell_manual_ticket'
+      : isExitShadow
+          ? 'shadow_exit_manual_sell'
+          : isExitPreflight
+              ? 'exit_preflight_manual_sell'
+              : isWatchlistPrefill
+                  ? 'watchlist_analyze_in_trading'
+                  : 'direct_manual_ticket';
+  result['operator_action_source'] = result['source_context'];
   result['manual_confirm_required'] = true;
   result['auto_buy_enabled'] = false;
   result['auto_sell_enabled'] = false;

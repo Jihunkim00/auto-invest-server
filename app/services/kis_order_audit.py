@@ -21,6 +21,8 @@ PORTFOLIO_MANUAL_SELL_SOURCE_TYPE = "operator_confirmed_position_exit"
 _STRING_KEYS = {
     "source",
     "source_type",
+    "source_context",
+    "operator_action_source",
     "mode",
     "preflight_id",
     "preflight_run_key",
@@ -105,6 +107,63 @@ _DICT_KEYS = {
     "daily_limit",
     "validation_summary",
 }
+
+MANUAL_LIVE_SOURCE_CONTEXTS = {
+    "direct_manual_ticket",
+    "watchlist_analyze_in_trading",
+    "exit_preflight_manual_sell",
+    "shadow_exit_manual_sell",
+    "audit_sell_manual_ticket",
+    "unknown_manual",
+}
+
+_AUDIT_STRING_KEYS = {
+    "audit_version",
+    "broker",
+    "market",
+    "source_endpoint",
+    "source_context",
+    "order_source",
+    "operator_action_source",
+    "symbol",
+    "company_name",
+    "side",
+    "current_operation_mode",
+    "no_new_entry_after",
+    "validation_id",
+    "validated_at",
+    "validation_expires_at",
+    "warning_level",
+}
+_AUDIT_FLOAT_KEYS = {
+    "qty",
+    "estimated_price",
+    "estimated_notional",
+    "available_cash",
+    "validation_age_seconds",
+    "daily_live_order_remaining",
+    "max_order_notional_pct",
+}
+_AUDIT_BOOL_KEYS = {
+    "dry_run",
+    "kill_switch",
+    "kis_enabled",
+    "kis_real_order_enabled",
+    "market_open",
+    "entry_allowed_now",
+    "validation_stale",
+    "submit_allowed",
+    "confirm_live",
+    "confirmation_dialog_shown",
+    "user_confirmed_live_order",
+    "real_order_submitted",
+    "broker_submit_called",
+    "manual_submit_called",
+}
+_AUDIT_LIST_KEYS = {"risk_flags", "gating_notes"}
+_AUDIT_ALLOWED_KEYS = (
+    _AUDIT_STRING_KEYS | _AUDIT_FLOAT_KEYS | _AUDIT_BOOL_KEYS | _AUDIT_LIST_KEYS
+)
 
 
 def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
@@ -220,6 +279,8 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
     fields = {
         "source": data.get("source"),
         "source_type": data.get("source_type"),
+        "source_context": data.get("source_context"),
+        "operator_action_source": data.get("operator_action_source"),
         "exit_trigger": data.get("exit_trigger"),
         "exit_trigger_source": data.get("trigger_source"),
         "manual_confirm_required": data.get("manual_confirm_required"),
@@ -296,6 +357,8 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
         source_fields = {
             "source": payload.get("source"),
             "source_type": payload.get("source_type"),
+            "source_context": payload.get("source_context"),
+            "operator_action_source": payload.get("operator_action_source"),
             "exit_trigger": payload.get("exit_trigger"),
             "trigger_source": payload.get("exit_trigger_source")
             or payload.get("trigger_source"),
@@ -388,6 +451,115 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
         }
         values.append(source_fields)
     return merge_kis_order_source_metadata(*values)
+
+
+def kis_manual_live_source_context(
+    *,
+    source_metadata: dict[str, Any] | None = None,
+    explicit: Any = None,
+) -> str:
+    explicit_text = _string_value(explicit)
+    if explicit_text in MANUAL_LIVE_SOURCE_CONTEXTS:
+        return explicit_text
+
+    metadata = normalize_kis_order_source_metadata(source_metadata)
+    metadata_context = _string_value(metadata.get("source_context"))
+    if metadata_context in MANUAL_LIVE_SOURCE_CONTEXTS:
+        return metadata_context
+
+    source = str(metadata.get("source") or "").strip()
+    source_type = str(metadata.get("source_type") or "").strip()
+    if source == "kis_live_exit_preflight":
+        return "exit_preflight_manual_sell"
+    if source == "kis_exit_shadow_decision":
+        return "shadow_exit_manual_sell"
+    if source == "kis_portfolio_manual_sell":
+        return "audit_sell_manual_ticket"
+    if source == "single_symbol_trading":
+        return "direct_manual_ticket"
+    if source == "watchlist_candidate" or source_type in {
+        "click_to_trade_prefill",
+        "manual_buy_ticket_prefill",
+    }:
+        return "watchlist_analyze_in_trading"
+    if not source:
+        return "direct_manual_ticket"
+    return "unknown_manual"
+
+
+def sanitize_live_order_audit_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    result: dict[str, Any] = {}
+    for key in _AUDIT_STRING_KEYS:
+        text = _string_value(value.get(key))
+        if text is not None:
+            result[key] = text
+    for key in _AUDIT_FLOAT_KEYS:
+        number = _float_value(value.get(key))
+        if number is not None:
+            if key in {
+                "qty",
+                "validation_age_seconds",
+                "daily_live_order_remaining",
+            }:
+                result[key] = int(number)
+            else:
+                result[key] = number
+    for key in _AUDIT_BOOL_KEYS:
+        parsed = _bool_value(value.get(key))
+        if parsed is not None:
+            result[key] = parsed
+    for key in _AUDIT_LIST_KEYS:
+        items = _string_list(value.get(key))
+        if items:
+            result[key] = items
+
+    source_context = kis_manual_live_source_context(
+        source_metadata={
+            "source": result.get("order_source"),
+            "source_context": result.get("source_context"),
+        },
+        explicit=result.get("source_context"),
+    )
+    if source_context:
+        result["source_context"] = source_context
+
+    return sanitize_kis_payload(
+        {key: value for key, value in result.items() if key in _AUDIT_ALLOWED_KEYS}
+    )
+
+
+def live_order_audit_from_payloads(*payloads: Any) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        audit = payload.get("audit_metadata")
+        if not isinstance(audit, dict):
+            audit = payload.get("live_order_audit")
+        if isinstance(audit, dict):
+            merged.update(sanitize_live_order_audit_payload(audit))
+    return sanitize_live_order_audit_payload(merged)
+
+
+def live_order_audit_summary_fields(audit_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    audit = sanitize_live_order_audit_payload(audit_metadata)
+    if not audit:
+        return {}
+    return {
+        "audit_source_context": audit.get("source_context"),
+        "audit_warning_level": audit.get("warning_level"),
+        "audit_validation_age_seconds": audit.get("validation_age_seconds"),
+        "audit_confirmation_dialog_shown": audit.get("confirmation_dialog_shown"),
+        "audit_user_confirmed_live_order": audit.get("user_confirmed_live_order"),
+        "audit_estimated_notional": audit.get("estimated_notional"),
+        "audit_daily_live_order_remaining": audit.get("daily_live_order_remaining"),
+        "audit_risk_flags": audit.get("risk_flags") or [],
+        "audit_gating_notes": audit.get("gating_notes") or [],
+        "audit_metadata": audit,
+    }
 
 
 def _string_value(value: Any) -> str | None:

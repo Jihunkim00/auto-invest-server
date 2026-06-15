@@ -367,6 +367,156 @@ class TradingLogItem {
   }
 }
 
+class LiveOrderAudit {
+  const LiveOrderAudit({
+    this.sourceContext,
+    this.orderSource,
+    this.operatorActionSource,
+    this.symbol,
+    this.companyName,
+    this.side,
+    this.qty,
+    this.estimatedPrice,
+    this.estimatedNotional,
+    this.availableCash,
+    this.currentOperationMode,
+    this.dryRun,
+    this.killSwitch,
+    this.kisEnabled,
+    this.kisRealOrderEnabled,
+    this.marketOpen,
+    this.entryAllowedNow,
+    this.dailyLiveOrderRemaining,
+    this.warningLevel,
+    this.validationAgeSeconds,
+    this.validationStale,
+    this.confirmationDialogShown,
+    this.userConfirmedLiveOrder,
+    this.brokerSubmitCalled,
+    this.realOrderSubmitted,
+    this.manualSubmitCalled,
+    this.riskFlags = const [],
+    this.gatingNotes = const [],
+    this.raw = const {},
+  });
+
+  static const empty = LiveOrderAudit();
+
+  final String? sourceContext;
+  final String? orderSource;
+  final String? operatorActionSource;
+  final String? symbol;
+  final String? companyName;
+  final String? side;
+  final double? qty;
+  final double? estimatedPrice;
+  final double? estimatedNotional;
+  final double? availableCash;
+  final String? currentOperationMode;
+  final bool? dryRun;
+  final bool? killSwitch;
+  final bool? kisEnabled;
+  final bool? kisRealOrderEnabled;
+  final bool? marketOpen;
+  final bool? entryAllowedNow;
+  final int? dailyLiveOrderRemaining;
+  final String? warningLevel;
+  final int? validationAgeSeconds;
+  final bool? validationStale;
+  final bool? confirmationDialogShown;
+  final bool? userConfirmedLiveOrder;
+  final bool? brokerSubmitCalled;
+  final bool? realOrderSubmitted;
+  final bool? manualSubmitCalled;
+  final List<String> riskFlags;
+  final List<String> gatingNotes;
+  final Map<String, dynamic> raw;
+
+  bool get hasAudit =>
+      raw.isNotEmpty ||
+      sourceContext != null ||
+      warningLevel != null ||
+      validationAgeSeconds != null ||
+      userConfirmedLiveOrder != null;
+
+  String get validationStatus =>
+      validationStale == true ? 'Validation stale' : 'Validation fresh';
+
+  List<String> get badgeLabels {
+    if (!hasAudit) return const [];
+    final labels = <String>['KIS MANUAL LIVE'];
+    if (userConfirmedLiveOrder == true) {
+      _addUnique(labels, 'OPERATOR CONFIRMED');
+    }
+    _addUnique(labels,
+        validationStale == true ? 'VALIDATION STALE' : 'VALIDATION FRESH');
+    _addUnique(
+        labels,
+        brokerSubmitCalled == true
+            ? 'BROKER SUBMIT CALLED'
+            : 'NO BROKER SUBMIT');
+    if (dryRun == true) _addUnique(labels, 'DRY RUN');
+    if (realOrderSubmitted != true || validationStale == true) {
+      _addUnique(labels, 'BLOCKED');
+    }
+    if (warningLevel == 'dangerous_mixed') {
+      _addUnique(labels, 'WARNING: DANGEROUS MODE');
+    }
+    return labels;
+  }
+
+  String get rawPreview {
+    if (raw.isEmpty) return '';
+    return raw.entries
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(' | ');
+  }
+
+  factory LiveOrderAudit.fromJson(Map<String, dynamic> json) {
+    final audit = _optionalMap(json['audit_metadata']) ?? const {};
+    Object? read(String auditKey, [String? summaryKey]) =>
+        audit[auditKey] ?? (summaryKey == null ? null : json[summaryKey]);
+    return LiveOrderAudit(
+      sourceContext:
+          _nullableString(read('source_context', 'audit_source_context')),
+      orderSource: _nullableString(read('order_source')),
+      operatorActionSource: _nullableString(read('operator_action_source')),
+      symbol: _nullableString(read('symbol')),
+      companyName: _nullableString(read('company_name')),
+      side: _nullableString(read('side')),
+      qty: _doubleValue(read('qty')),
+      estimatedPrice: _doubleValue(read('estimated_price')),
+      estimatedNotional:
+          _doubleValue(read('estimated_notional', 'audit_estimated_notional')),
+      availableCash: _doubleValue(read('available_cash')),
+      currentOperationMode: _nullableString(read('current_operation_mode')),
+      dryRun: _boolValue(read('dry_run')),
+      killSwitch: _boolValue(read('kill_switch')),
+      kisEnabled: _boolValue(read('kis_enabled')),
+      kisRealOrderEnabled: _boolValue(read('kis_real_order_enabled')),
+      marketOpen: _boolValue(read('market_open')),
+      entryAllowedNow: _boolValue(read('entry_allowed_now')),
+      dailyLiveOrderRemaining: _nullableInt(read(
+          'daily_live_order_remaining', 'audit_daily_live_order_remaining')),
+      warningLevel:
+          _nullableString(read('warning_level', 'audit_warning_level')),
+      validationAgeSeconds: _nullableInt(
+          read('validation_age_seconds', 'audit_validation_age_seconds')),
+      validationStale: _boolValue(read('validation_stale')),
+      confirmationDialogShown: _boolValue(
+          read('confirmation_dialog_shown', 'audit_confirmation_dialog_shown')),
+      userConfirmedLiveOrder: _boolValue(
+          read('user_confirmed_live_order', 'audit_user_confirmed_live_order')),
+      brokerSubmitCalled: _boolValue(read('broker_submit_called')),
+      realOrderSubmitted: _boolValue(read('real_order_submitted')),
+      manualSubmitCalled: _boolValue(read('manual_submit_called')),
+      riskFlags: _stringList(read('risk_flags', 'audit_risk_flags')),
+      gatingNotes: _stringList(read('gating_notes', 'audit_gating_notes')),
+      raw: Map<String, dynamic>.from(audit),
+    );
+  }
+}
+
 class OrderLogItem {
   const OrderLogItem({
     required this.id,
@@ -414,6 +564,7 @@ class OrderLogItem {
     this.schedulerRealOrderEnabled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.liveOrderAudit = LiveOrderAudit.empty,
     this.gptContext = GptRiskContext.empty,
   });
 
@@ -462,6 +613,7 @@ class OrderLogItem {
   final bool? schedulerRealOrderEnabled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final LiveOrderAudit liveOrderAudit;
   final GptRiskContext gptContext;
 
   String get statusLabel => brokerOrderStatus ?? brokerStatus ?? internalStatus;
@@ -508,6 +660,7 @@ class OrderLogItem {
       !isKisLimitedAutoSell &&
       !isKisLimitedAutoBuy &&
       !isKisSchedulerLive;
+  bool get hasLiveOrderAudit => isKisManualLive && liveOrderAudit.hasAudit;
   String get sourceLabel {
     if (isPortfolioManualSell) return 'KIS MANUAL SELL';
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
@@ -634,6 +787,11 @@ class OrderLogItem {
     if (manualSubmitCalled == true) {
       _addUnique(labels, 'MANUAL SUBMIT');
     }
+    if (hasLiveOrderAudit) {
+      for (final label in liveOrderAudit.badgeLabels) {
+        _addUnique(labels, label);
+      }
+    }
     return labels;
   }
 
@@ -703,6 +861,7 @@ class OrderLogItem {
           _boolValue(json['scheduler_real_order_enabled']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
+      liveOrderAudit: LiveOrderAudit.fromJson(json),
       gptContext: GptRiskContext.fromJson(json['gpt_context']),
     );
   }

@@ -20,6 +20,8 @@ from app.services.kis_order_mapper import (
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
+    live_order_audit_from_payloads,
+    live_order_audit_summary_fields,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload, sanitize_kis_text
 
@@ -329,6 +331,14 @@ def summarize_kis_orders(
 def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) -> dict[str, Any]:
     request_payload = _parse_json_object(order.request_payload)
     response_payload = _parse_json_object(order.response_payload)
+    last_sync_payload = _parse_json_object(order.last_sync_payload)
+    audit_fields = live_order_audit_summary_fields(
+        live_order_audit_from_payloads(
+            request_payload,
+            response_payload,
+            last_sync_payload,
+        )
+    )
     mode = str(response_payload.get("mode") or request_payload.get("mode") or "manual_live")
     requested_qty = order.requested_qty
     if requested_qty is None:
@@ -374,6 +384,7 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "is_syncable": is_syncable,
         "clear_status": _clear_status_label(internal_status),
         "display_status": _display_status(internal_status),
+        **audit_fields,
     }
     payload.update(kis_order_source_fields(_order_source_metadata(order)))
     if include_sync_payload and order.last_sync_payload:

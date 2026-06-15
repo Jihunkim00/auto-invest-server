@@ -10,6 +10,7 @@ from app.services.order_service import (
     update_order_from_broker_response,
     sync_order_status,
 )
+from app.services.kis_order_sync_service import serialize_kis_order
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
@@ -163,6 +164,15 @@ def test_sell(payload: TestSellRequest, db: Session = Depends(get_db)):
 @router.get("/{order_id}")
 def get_order(order_id: str, db: Session = Depends(get_db)):
     try:
+        try:
+            local_id = int(order_id)
+        except (TypeError, ValueError):
+            local_id = None
+        if local_id is not None:
+            local_order = db.get(OrderLog, local_id)
+            if local_order is not None and str(local_order.broker or "").lower() == "kis":
+                return serialize_kis_order(local_order)
+
         broker = AlpacaClient()
         broker_order = broker.get_order(order_id)
 
