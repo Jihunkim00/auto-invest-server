@@ -50,7 +50,7 @@ GPT advisory is not a primary hard-block mechanism. Broad macro, geopolitical, e
 class KisGptPreview:
     gpt_used: bool
     action_hint: str
-    gpt_reason: str
+    gpt_reason: str | None
     warnings: list[str]
     action: str = "hold"
     risk_flags: list[str] | None = None
@@ -59,6 +59,8 @@ class KisGptPreview:
     ai_buy_score: float | None = None
     ai_sell_score: float | None = None
     confidence: float | None = None
+    gpt_analysis_status: str = "not_run"
+    gpt_analysis_reason: str | None = None
 
 
 class KisWatchlistPreviewService:
@@ -587,42 +589,90 @@ class KisWatchlistPreviewService:
         gpt = KisGptPreview(
             gpt_used=False,
             action_hint="watch",
-            gpt_reason=(
-                "\u0047\u0050\u0054 \ucc38\uace0 \ud574\uc11d "
-                "\uc804\uc6a9\uc785\ub2c8\ub2e4. \uc2e4\ud589 \uac00\ub2a5\ud55c "
-                "\ub9e4\ub9e4 \uacb0\uc815\uc774 \uc544\ub2d9\ub2c8\ub2e4."
-            ),
+            gpt_reason=None,
             warnings=[],
+            gpt_analysis_status="not_run",
+            gpt_analysis_reason="Only top KIS watchlist candidates receive GPT analysis.",
+        )
+        gpt_analysis_status = "not_run"
+        gpt_analysis_reason: str | None = (
+            "Only top KIS watchlist candidates receive GPT analysis."
         )
         if include_gpt:
-            gpt = self.gpt_advisor.analyze(
-                symbol=symbol,
-                name=name,
-                current_price=current_price,
-                indicator_status=indicator_status,
-                indicator_payload=indicator_payload if can_score else dict(EMPTY_INDICATORS),
-                market_session=market_session,
-                reference_sources=reference_sources,
-                event_context=event_risk if event_risk.get("has_near_event") else None,
-            )
-            gpt = self._ensure_korean_gpt_preview(
-                gpt,
-                indicator_status=indicator_status,
-                indicator_payload=indicator_payload,
-                market_session=market_session,
-            )
-            warnings.extend(gpt.warnings)
-            if "gpt_unavailable" in gpt.warnings:
-                risk_flags.append("gpt_unavailable")
-            if gpt.risk_flags:
-                risk_flags.extend(gpt.risk_flags)
-            if gpt.gating_notes:
-                gating_notes.extend(gpt.gating_notes)
+            try:
+                gpt = self.gpt_advisor.analyze(
+                    symbol=symbol,
+                    name=name,
+                    current_price=current_price,
+                    indicator_status=indicator_status,
+                    indicator_payload=indicator_payload if can_score else dict(EMPTY_INDICATORS),
+                    market_session=market_session,
+                    reference_sources=reference_sources,
+                    event_context=event_risk if event_risk.get("has_near_event") else None,
+                )
+                gpt = self._ensure_korean_gpt_preview(
+                    gpt,
+                    indicator_status=indicator_status,
+                    indicator_payload=indicator_payload,
+                    market_session=market_session,
+                )
+                warnings.extend(gpt.warnings)
+                if "gpt_unavailable" in gpt.warnings:
+                    risk_flags.append("gpt_unavailable")
+                if gpt.risk_flags:
+                    risk_flags.extend(gpt.risk_flags)
+                if gpt.gating_notes:
+                    gating_notes.extend(gpt.gating_notes)
+                if gpt.gpt_used:
+                    gpt_analysis_status = "completed"
+                    gpt_analysis_reason = None
+                else:
+                    gpt_analysis_status = "failed"
+                    gpt_analysis_reason = (
+                        gpt.gpt_analysis_reason
+                        or _first_text(gpt.gating_notes)
+                        or _first_text(gpt.warnings)
+                        or "GPT analysis unavailable."
+                    )
+            except Exception as exc:
+                gpt = KisGptPreview(
+                    gpt_used=False,
+                    action_hint="watch",
+                    gpt_reason=None,
+                    warnings=["gpt_unavailable"],
+                    action="hold",
+                    risk_flags=["gpt_unavailable"],
+                    gating_notes=["GPT analysis unavailable; quant preview preserved."],
+                    gpt_analysis_status="failed",
+                    gpt_analysis_reason=_safe_error(exc),
+                )
+                warnings.extend(gpt.warnings)
+                risk_flags.extend(gpt.risk_flags or [])
+                gating_notes.extend(gpt.gating_notes or [])
+                gpt_analysis_status = "failed"
+                gpt_analysis_reason = gpt.gpt_analysis_reason
 
-        ai_buy_score = gpt.ai_buy_score if can_score else None
-        ai_sell_score = gpt.ai_sell_score if can_score else None
+        gpt_completed = gpt_analysis_status == "completed" and gpt.gpt_used
+        ai_buy_score = gpt.ai_buy_score if can_score and gpt_completed else None
+        ai_sell_score = gpt.ai_sell_score if can_score and gpt_completed else None
         final_buy_score = self._blend_score(quant_buy_score, ai_buy_score)
         final_sell_score = self._blend_score(quant_sell_score, ai_sell_score)
+        confidence = gpt.confidence if can_score and gpt_completed else None
+        gpt_reason = gpt.gpt_reason if gpt_completed else None
+        gpt_context = (
+            {
+                "reason": gpt_reason,
+                "gpt_buy_score": ai_buy_score,
+                "gpt_sell_score": ai_sell_score,
+                "confidence": confidence,
+                "action_hint": gpt.action_hint,
+                "risk_flags": list(gpt.risk_flags or []),
+                "gating_notes": list(gpt.gating_notes or []),
+                "hard_block_reason": gpt.hard_block_reason,
+            }
+            if gpt_completed
+            else {}
+        )
 
         if indicator_status == "price_only":
             reason = "Only current price is available; technical indicator score was not calculated."
@@ -654,11 +704,13 @@ class KisWatchlistPreviewService:
             "ai_sell_score": ai_sell_score,
             "final_buy_score": final_buy_score,
             "final_sell_score": final_sell_score,
-            "confidence": gpt.confidence if can_score else None,
+            "confidence": confidence,
             "quant_reason": quant_reason,
             "quant_notes": quant_notes,
+            "ai_reason": gpt_reason,
             "action": "hold",
             "action_hint": "watch",
+            "gpt_action_hint": gpt.action_hint if gpt_completed else None,
             "entry_ready": False,
             "final_entry_ready": False,
             "trade_allowed": False,
@@ -675,7 +727,10 @@ class KisWatchlistPreviewService:
             "gating_notes": _dedupe(gating_notes),
             "block_reason": block_reason,
             "reason": reason,
-            "gpt_reason": gpt.gpt_reason,
+            "gpt_reason": gpt_reason,
+            "gpt_context": gpt_context,
+            "gpt_analysis_status": gpt_analysis_status,
+            "gpt_analysis_reason": gpt_analysis_reason,
             "event_risk": event_risk,
             "warnings": _dedupe(warnings),
             "block_reasons": _dedupe(block_reasons),
@@ -751,11 +806,16 @@ class KisWatchlistPreviewService:
             (index, item)
             for index, item in enumerate(items)
             if item.get("quant_buy_score") is not None
+            and str(item.get("indicator_status") or "").lower() == "ok"
         ]
 
         def sort_key(pair: tuple[int, dict[str, Any]]):
             index, item = pair
             return (
+                -_safe_float(
+                    item.get("final_entry_score") or item.get("final_buy_score"),
+                    _safe_float(item.get("quant_buy_score"), 0.0),
+                ),
                 -_safe_float(item.get("quant_buy_score"), 0.0),
                 _safe_float(item.get("quant_sell_score"), 100.0),
                 index,
@@ -828,6 +888,8 @@ class KisWatchlistPreviewService:
         indicator_payload: dict[str, Any],
         market_session: dict[str, Any],
     ) -> KisGptPreview:
+        if not gpt.gpt_used:
+            return gpt
         if _contains_hangul(gpt.gpt_reason):
             return gpt
         return KisGptPreview(
@@ -846,6 +908,8 @@ class KisWatchlistPreviewService:
             ai_buy_score=gpt.ai_buy_score,
             ai_sell_score=gpt.ai_sell_score,
             confidence=gpt.confidence,
+            gpt_analysis_status=gpt.gpt_analysis_status,
+            gpt_analysis_reason=gpt.gpt_analysis_reason,
         )
 
 
@@ -977,6 +1041,17 @@ def _candidate_symbols(value: Any) -> list[str]:
     return symbols
 
 
+def _first_text(values: Any) -> str | None:
+    if isinstance(values, (list, tuple, set)):
+        for value in values:
+            text = str(value or "").strip()
+            if text:
+                return text
+        return None
+    text = str(values or "").strip()
+    return text or None
+
+
 class KisPreviewGptAdvisor:
     def __init__(
         self,
@@ -1011,15 +1086,13 @@ class KisPreviewGptAdvisor:
             return KisGptPreview(
                 gpt_used=False,
                 action_hint="watch",
-                gpt_reason=_korean_advisory_fallback(
-                    indicator_status=indicator_status,
-                    indicator_payload=indicator_payload,
-                    market_session=market_session,
-                ),
+                gpt_reason=None,
                 warnings=["gpt_unavailable"],
                 action="hold",
                 risk_flags=["gpt_unavailable"],
                 gating_notes=[f"GPT advisory unavailable; {fallback_scope} kept hold/watch."],
+                gpt_analysis_status="failed",
+                gpt_analysis_reason="OpenAI client unavailable.",
             )
 
         try:
@@ -1048,15 +1121,13 @@ class KisPreviewGptAdvisor:
             return KisGptPreview(
                 gpt_used=False,
                 action_hint="watch",
-                gpt_reason=_korean_advisory_fallback(
-                    indicator_status=indicator_status,
-                    indicator_payload=indicator_payload,
-                    market_session=market_session,
-                ),
+                gpt_reason=None,
                 warnings=["gpt_unavailable"],
                 action="hold",
                 risk_flags=["gpt_unavailable"],
                 gating_notes=[f"GPT advisory unavailable; {fallback_scope} kept hold/watch."],
+                gpt_analysis_status="failed",
+                gpt_analysis_reason=_safe_error(exc),
             )
 
     def _call_openai(
@@ -1222,6 +1293,7 @@ class KisPreviewGptAdvisor:
             ai_buy_score=ai_buy_score,
             ai_sell_score=ai_sell_score,
             confidence=confidence,
+            gpt_analysis_status="completed",
         )
 
 

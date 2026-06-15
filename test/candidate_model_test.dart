@@ -61,4 +61,23 @@ void main() {
 
     expect(candidate.name, 'Apple Inc.');
   });
+
+  test('Candidate parses KIS GPT enrichment status fields', () {
+    final candidate = Candidate.fromJson({
+      'symbol': '005930',
+      'gpt_used': true,
+      'gpt_analysis_status': 'completed',
+      'gpt_analysis_reason': null,
+      'gpt_action_hint': 'candidate',
+      'ai_reason': 'KR quant and GPT context are aligned.',
+      'gpt_reason': 'KR quant and GPT context are aligned.',
+    });
+
+    expect(candidate.gptUsed, isTrue);
+    expect(candidate.gptAnalysisStatus, 'completed');
+    expect(candidate.gptAnalysisReason, isEmpty);
+    expect(candidate.gptActionHint, 'candidate');
+    expect(candidate.aiReason, 'KR quant and GPT context are aligned.');
+    expect(candidate.hasRiskContext, isTrue);
+  });
 }

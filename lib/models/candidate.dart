@@ -55,8 +55,12 @@ class Candidate {
     this.gptContext = GptRiskContext.empty,
     this.reason = '',
     this.gptReason = '',
+    this.aiReason = '',
     this.marketResearchReason = '',
     this.gptUsed,
+    this.gptAnalysisStatus = '',
+    this.gptAnalysisReason = '',
+    this.gptActionHint = '',
     this.previewOnly,
     this.tradingEnabled,
     this.realOrderSubmitted,
@@ -117,8 +121,12 @@ class Candidate {
   final GptRiskContext gptContext;
   final String reason;
   final String gptReason;
+  final String aiReason;
   final String marketResearchReason;
   final bool? gptUsed;
+  final String gptAnalysisStatus;
+  final String gptAnalysisReason;
+  final String gptActionHint;
   final bool? previewOnly;
   final bool? tradingEnabled;
   final bool? realOrderSubmitted;
@@ -158,6 +166,8 @@ class Candidate {
       !allowSellOrExit ||
       softEntryAllowed != null ||
       gptUsed != null ||
+      gptAnalysisStatus.isNotEmpty ||
+      gptAnalysisReason.isNotEmpty ||
       previewOnly != null ||
       tradingEnabled != null ||
       realOrderSubmitted != null ||
@@ -273,9 +283,13 @@ class Candidate {
       gptContext: gptContext,
       reason: _readNullableString(json['reason']) ?? '',
       gptReason: _readNullableString(json['gpt_reason']) ?? '',
+      aiReason: _readNullableString(json['ai_reason']) ?? '',
       marketResearchReason:
           _readNullableString(json['market_research_reason']) ?? '',
       gptUsed: _readNullableBool(json['gpt_used']),
+      gptAnalysisStatus: _readNullableString(json['gpt_analysis_status']) ?? '',
+      gptAnalysisReason: _readNullableString(json['gpt_analysis_reason']) ?? '',
+      gptActionHint: _readNullableString(json['gpt_action_hint']) ?? '',
       previewOnly: _readNullableBool(json['preview_only']),
       tradingEnabled: _readNullableBool(json['trading_enabled']),
       realOrderSubmitted: _readNullableBool(json['real_order_submitted']),
@@ -290,8 +304,6 @@ Map<String, dynamic> _readMap(Object? value) {
   if (value is Map) return Map<String, dynamic>.from(value);
   return const {};
 }
-
-
 
 String _companyName(List<Object?> values, String symbol) {
   for (final value in values) {
