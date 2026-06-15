@@ -207,6 +207,11 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert item["final_buy_score"] is None
     assert item["final_sell_score"] is None
     assert item["confidence"] is None
+    assert item["gpt_analysis_status"] == "not_run"
+    assert (
+        item["gpt_analysis_reason"]
+        == "Only top KIS watchlist candidates receive GPT analysis."
+    )
     assert item["action"] == "hold"
     assert item["action_hint"] == "watch"
     assert item["entry_ready"] is False
@@ -216,7 +221,7 @@ def test_kis_watchlist_preview_returns_items(client, db_session):
     assert "preview_only" in item["risk_flags"]
     assert "KR preview uses the shared signal/risk vocabulary but trading is disabled." in item["gating_notes"]
     assert item["block_reason"] == "insufficient_indicator_data"
-    assert _has_hangul(item["gpt_reason"])
+    assert item["gpt_reason"] is None
     assert "preview_only" in item["block_reasons"]
     assert "kr_trading_disabled" in item["block_reasons"]
     assert "preview_only" in item["warnings"]
@@ -472,6 +477,12 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert item["final_buy_score"] is not None
     assert item["final_sell_score"] is not None
     assert item["confidence"] == 0.72
+    assert item["gpt_used"] is True
+    assert item["gpt_analysis_status"] == "completed"
+    assert item["gpt_analysis_reason"] is None
+    assert item["gpt_action_hint"] == "candidate"
+    assert item["ai_reason"] == "KR 정량 참고용입니다."
+    assert item["gpt_context"]["reason"] == "KR 정량 참고용입니다."
     assert "fx_pressure" in item["risk_flags"]
     assert "gpt_advisory_context_visible" in item["gating_notes"]
     assert item["gpt_reason"] == "KR 정량 참고용입니다."
@@ -496,6 +507,21 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert body["gpt_target_symbols"] == [
         item["symbol"] for item in body["top_quant_candidates"][:5]
     ]
+    non_top = next(
+        item
+        for item in body["items"]
+        if item["symbol"] not in set(body["gpt_target_symbols"])
+    )
+    assert non_top["gpt_used"] is False
+    assert non_top["gpt_analysis_status"] == "not_run"
+    assert (
+        non_top["gpt_analysis_reason"]
+        == "Only top KIS watchlist candidates receive GPT analysis."
+    )
+    assert non_top["ai_buy_score"] is None
+    assert non_top["ai_sell_score"] is None
+    assert non_top["confidence"] is None
+    assert non_top["gpt_reason"] is None
     assert captured_symbols == body["gpt_target_symbols"]
     assert len(bar_symbols) == 55
     assert len(captured_payloads) == 5
@@ -542,6 +568,9 @@ def test_kis_preview_gpt_unavailable_keeps_quant_scores(monkeypatch, client):
             gpt_reason="GPT preview unavailable; quant-only fallback.",
             warnings=["gpt_unavailable"],
             risk_flags=["gpt_unavailable"],
+            gating_notes=[
+                "GPT advisory unavailable; quant-only KIS OHLCV preview kept hold/watch."
+            ],
         )
 
     monkeypatch.setattr(
@@ -559,6 +588,13 @@ def test_kis_preview_gpt_unavailable_keeps_quant_scores(monkeypatch, client):
     assert item["quant_buy_score"] is not None
     assert item["ai_buy_score"] is None
     assert item["final_buy_score"] == item["quant_buy_score"]
+    assert item["gpt_used"] is False
+    assert item["gpt_analysis_status"] == "failed"
+    assert (
+        item["gpt_analysis_reason"]
+        == "GPT advisory unavailable; quant-only KIS OHLCV preview kept hold/watch."
+    )
+    assert item["gpt_reason"] is None
     assert "gpt_unavailable" in item["warnings"]
     assert "gpt_unavailable" in item["risk_flags"]
     assert item["entry_ready"] is False
@@ -594,9 +630,60 @@ def test_kis_preview_gpt_failure_falls_back_to_quant(monkeypatch, client):
     assert body["gpt_analyzed_symbol_count"] == 0
     assert body["items"][0]["quant_buy_score"] is not None
     assert body["items"][0]["final_buy_score"] == body["items"][0]["quant_buy_score"]
+    assert body["items"][0]["gpt_analysis_status"] == "failed"
+    assert body["items"][0]["gpt_reason"] is None
     assert "gpt_unavailable" in body["items"][0]["warnings"]
     assert "gpt_unavailable" in body["items"][0]["risk_flags"]
     assert body["items"][0]["entry_ready"] is False
+
+
+def test_kis_preview_gpt_exception_does_not_fail_whole_preview(monkeypatch, client):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+    calls = []
+
+    def flaky_gpt(self, **kwargs):
+        calls.append(kwargs["symbol"])
+        if len(calls) == 1:
+            raise RuntimeError("gpt timeout")
+        return KisGptPreview(
+            gpt_used=True,
+            action_hint="watch",
+            gpt_reason="KR 정량 참고용입니다.",
+            warnings=[],
+            ai_buy_score=61.0,
+            ai_sell_score=22.0,
+            confidence=0.66,
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        flaky_gpt,
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preview_only"] is True
+    assert body["trading_enabled"] is False
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["manual_submit_called"] is False
+    assert body["gpt_target_count"] == 5
+    assert body["gpt_analyzed_symbol_count"] == 4
+    failed = _find_item(body, body["gpt_target_symbols"][0])
+    completed = _find_item(body, body["gpt_target_symbols"][1])
+    assert failed["gpt_used"] is False
+    assert failed["gpt_analysis_status"] == "failed"
+    assert "RuntimeError" in failed["gpt_analysis_reason"]
+    assert failed["quant_buy_score"] is not None
+    assert failed["final_buy_score"] == failed["quant_buy_score"]
+    assert failed["gpt_reason"] is None
+    assert completed["gpt_used"] is True
+    assert completed["gpt_analysis_status"] == "completed"
 
 
 def test_kis_preview_kr_trading_remains_disabled(client):

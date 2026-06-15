@@ -961,6 +961,10 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
                   value: presentation.compactScore(candidate.buySellSpread)),
             ],
           ),
+          if (isKr) ...[
+            const SizedBox(height: 10),
+            _KisWatchlistGptAnalysisPanel(candidate: candidate),
+          ],
           const SizedBox(height: 10),
           _ReadableDetailGroup(
             title: 'Technical Snapshot',
@@ -1028,6 +1032,101 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _KisWatchlistGptAnalysisPanel extends StatelessWidget {
+  const _KisWatchlistGptAnalysisPanel({required this.candidate});
+
+  final Candidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = candidate.gptAnalysisStatus.trim().toLowerCase();
+    final completed = status == 'completed' ||
+        (candidate.gptUsed == true &&
+            presentation
+                .displayText(_gptAdvisoryReason(candidate), fallback: '')
+                .isNotEmpty);
+    final failed = status == 'failed';
+    final notRun = !completed && !failed;
+
+    if (notRun) {
+      return const Text(
+        'GPT not run for this candidate',
+        style: TextStyle(color: Colors.white60, fontWeight: FontWeight.w600),
+      );
+    }
+
+    final reason = presentation.displayText(
+      _firstText([
+        candidate.aiReason,
+        candidate.gptReason,
+        candidate.gptContext.reason,
+      ]),
+      fallback: failed ? 'GPT analysis unavailable' : 'No GPT reason returned',
+    );
+    final actionHint = presentation.displayText(
+      _firstText([candidate.gptActionHint, candidate.actionHint]),
+      fallback: 'watch',
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.psychology_alt_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('GPT / AI Analysis',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          _SoftBadge(
+            text: failed ? 'FAILED' : 'COMPLETED',
+            color: failed ? Colors.redAccent : Colors.greenAccent,
+          ),
+        ]),
+        const SizedBox(height: 10),
+        if (failed) ...[
+          const _StateLine(text: 'GPT analysis unavailable'),
+          if (candidate.gptAnalysisReason.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _StateLine(text: candidate.gptAnalysisReason),
+          ],
+        ] else ...[
+          Wrap(spacing: 14, runSpacing: 8, children: [
+            _ResultPair(label: 'Status', value: 'completed'),
+            _ResultPair(
+                label: 'AI buy score',
+                value: presentation.compactScore(candidate.aiBuyScore)),
+            _ResultPair(
+                label: 'AI sell score',
+                value: presentation.compactScore(candidate.aiSellScore)),
+            _ResultPair(
+                label: 'Confidence',
+                value: presentation.compactScore(candidate.confidence)),
+            _ResultPair(label: 'Action hint', value: actionHint),
+          ]),
+          const SizedBox(height: 8),
+          _StateLine(text: 'Reason: $reason'),
+          if (candidate.riskFlags.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _StateLine(text: 'Risk flags: ${_joinList(candidate.riskFlags)}'),
+          ],
+          if (candidate.gatingNotes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _StateLine(
+                text: 'Gating notes: ${_joinList(candidate.gatingNotes)}'),
+          ],
+        ],
+      ]),
     );
   }
 }
@@ -2361,10 +2460,13 @@ class _TopCandidateCard extends StatelessWidget {
           _ResultPair(label: 'Next Action', value: nextAction),
         ]),
         const SizedBox(height: 8),
-        _StateLine(
-          text:
-              'GPT Advisory: ${presentation.displayText(_gptAdvisoryReason(candidate), fallback: 'GPT advisory unavailable')}',
-        ),
+        if (isKr)
+          _KisWatchlistGptAnalysisPanel(candidate: candidate)
+        else
+          _StateLine(
+            text:
+                'GPT Advisory: ${presentation.displayText(_gptAdvisoryReason(candidate), fallback: 'GPT advisory unavailable')}',
+          ),
         const SizedBox(height: 8),
         _StateLine(text: 'Block reason: $blockReason'),
         if (riskNotes.isNotEmpty) ...[

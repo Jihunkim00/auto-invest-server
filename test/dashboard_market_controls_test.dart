@@ -503,9 +503,15 @@ void main() {
     expect(candidate.aiBuyScore, 70);
     expect(candidate.finalBuyScore, 64);
     expect(candidate.confidence, 0.72);
+    expect(candidate.gptAnalysisStatus, 'completed');
     expect(find.text('Prepare Buy Ticket'), findsOneWidget);
     expect(find.text('Not ready'), findsWidgets);
     expect(find.text('0.72'), findsWidgets);
+    expect(find.text('GPT / AI Analysis'), findsOneWidget);
+    expect(find.text('COMPLETED'), findsOneWidget);
+    expect(find.text('AI BUY SCORE'), findsOneWidget);
+    expect(find.textContaining('KR \uC815\uB7C9 \uCC38\uACE0\uC6A9'),
+        findsWidgets);
     expect(find.text('KIS GPT Advisory Context'), findsNothing);
     expect(find.text('AI_BUY_SCORE'), findsNothing);
     expect(find.textContaining('GPT approved'), findsNothing);
@@ -521,6 +527,89 @@ void main() {
           'momentum',
           'recent_return',
         ]));
+
+    controller.dispose();
+  });
+
+  testWidgets('KR scan shows GPT not-run status for non-top candidates',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        symbol: '005930',
+        name: 'Samsung Electronics',
+        blockReason: 'kr_trading_disabled',
+        entryScore: 58,
+        quantBuyScore: 58,
+        quantSellScore: 18,
+        aiBuyScore: null,
+        aiSellScore: null,
+        gptUsed: false,
+        gptAnalysisStatus: 'not_run',
+        gptAnalysisReason:
+            'Only top KIS watchlist candidates receive GPT analysis.',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Run Watchlist Analysis'));
+    await tester.pumpAndSettle();
+
+    final candidate = controller.runResult.finalRankedCandidates.single;
+    expect(candidate.gptUsed, isFalse);
+    expect(candidate.gptAnalysisStatus, 'not_run');
+    expect(candidate.aiBuyScore, isNull);
+    expect(find.text('GPT not run for this candidate'), findsOneWidget);
+    expect(find.text('GPT / AI Analysis'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('KR scan shows GPT failure status without losing quant preview',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        symbol: '005930',
+        name: 'Samsung Electronics',
+        blockReason: 'kr_trading_disabled',
+        entryScore: 58,
+        quantBuyScore: 58,
+        quantSellScore: 18,
+        aiBuyScore: null,
+        aiSellScore: null,
+        gptUsed: false,
+        gptAnalysisStatus: 'failed',
+        gptAnalysisReason: 'RuntimeError: gpt timeout',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Run Watchlist Analysis'));
+    await tester.pumpAndSettle();
+
+    final candidate = controller.runResult.finalRankedCandidates.single;
+    expect(candidate.gptUsed, isFalse);
+    expect(candidate.gptAnalysisStatus, 'failed');
+    expect(candidate.finalBuyScore, 58);
+    expect(find.text('GPT / AI Analysis'), findsOneWidget);
+    expect(find.text('FAILED'), findsOneWidget);
+    expect(find.text('GPT analysis unavailable'), findsOneWidget);
+    expect(find.text('RuntimeError: gpt timeout'), findsOneWidget);
 
     controller.dispose();
   });
@@ -1995,7 +2084,9 @@ class _FakeApiClient extends ApiClient {
           blockReason: 'insufficient_indicator_data',
           reason:
               'Only current price is available; technical indicator score was not calculated.',
-          gptReason: 'KR preview \uCC38\uACE0\uC6A9',
+          gptAnalysisStatus: 'not_run',
+          gptAnalysisReason:
+              'Only top KIS watchlist candidates receive GPT analysis.',
           eventRiskLevel: 'low',
           riskFlags: ['kr_trading_disabled', 'preview_only'],
           gatingNotes: [
@@ -2073,6 +2164,10 @@ class _FakeApiClient extends ApiClient {
           blockReason: 'kr_trading_disabled',
           reason: 'KIS OHLCV quant indicators calculated for preview.',
           gptReason: 'KR \uC815\uB7C9 \uCC38\uACE0\uC6A9',
+          aiReason: 'KR \uC815\uB7C9 \uCC38\uACE0\uC6A9',
+          gptUsed: true,
+          gptAnalysisStatus: 'completed',
+          gptActionHint: 'watch',
           eventRiskLevel: 'low',
           riskFlags: ['kr_trading_disabled', 'preview_only', 'fx_pressure'],
           gatingNotes: [
@@ -2168,6 +2263,12 @@ Map<String, dynamic> _realisticCandidatePayload({
   double? sellScore,
   int? entryPenalty,
   bool hardBlockNewBuy = false,
+  bool? gptUsed,
+  String? gptAnalysisStatus,
+  String? gptAnalysisReason,
+  String? gptReason,
+  String? aiReason,
+  String? gptActionHint,
 }) {
   return {
     'symbol': symbol,
@@ -2218,10 +2319,16 @@ Map<String, dynamic> _realisticCandidatePayload({
     'no_order_reason': 'risk gate blocked order creation',
     'entry_penalty': entryPenalty,
     'hard_block_new_buy': hardBlockNewBuy,
+    if (gptUsed != null) 'gpt_used': gptUsed,
+    if (gptAnalysisStatus != null) 'gpt_analysis_status': gptAnalysisStatus,
+    if (gptAnalysisReason != null) 'gpt_analysis_reason': gptAnalysisReason,
+    if (gptReason != null) 'gpt_reason': gptReason,
+    if (aiReason != null) 'ai_reason': aiReason,
+    if (gptActionHint != null) 'gpt_action_hint': gptActionHint,
     'gpt_context': {
       'hard_block_new_buy': hardBlockNewBuy,
       'entry_penalty': entryPenalty,
-      'reason': 'GPT hard block is active for this entry.',
+      'reason': gptReason ?? 'GPT hard block is active for this entry.',
       'gpt_buy_score': null,
       'gpt_sell_score': null,
     },
@@ -2243,6 +2350,12 @@ Map<String, dynamic> _realisticWatchlistPayload({
   double? sellScore,
   int? entryPenalty,
   bool hardBlockNewBuy = false,
+  bool? gptUsed,
+  String? gptAnalysisStatus,
+  String? gptAnalysisReason,
+  String? gptReason,
+  String? aiReason,
+  String? gptActionHint,
 }) {
   final candidate = _realisticCandidatePayload(
     symbol: symbol,
@@ -2259,6 +2372,12 @@ Map<String, dynamic> _realisticWatchlistPayload({
     sellScore: sellScore,
     entryPenalty: entryPenalty,
     hardBlockNewBuy: hardBlockNewBuy,
+    gptUsed: gptUsed,
+    gptAnalysisStatus: gptAnalysisStatus,
+    gptAnalysisReason: gptAnalysisReason,
+    gptReason: gptReason,
+    aiReason: aiReason,
+    gptActionHint: gptActionHint,
   );
 
   return {
