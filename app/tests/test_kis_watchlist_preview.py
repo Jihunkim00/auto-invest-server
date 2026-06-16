@@ -686,6 +686,177 @@ def test_kis_preview_gpt_exception_does_not_fail_whole_preview(monkeypatch, clie
     assert completed["gpt_analysis_status"] == "completed"
 
 
+def test_kis_watchlist_preview_returns_operator_summary(client, db_session):
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    summary = body["operator_summary"]
+    assert summary["mode"] == "kis_watchlist_gpt_operator_summary"
+    assert summary["preview_only"] is True
+    assert summary["trading_enabled"] is False
+    assert summary["real_order_submitted"] is False
+    assert summary["broker_submit_called"] is False
+    assert summary["manual_submit_called"] is False
+    assert summary["completed_gpt_count"] >= 0
+    assert "top_gpt_candidates" in summary
+    assert summary["next_manual_action_hint"] == "review_top_gpt_candidates_in_trading_tab"
+
+    run = db_session.query(TradeRunLog).one()
+    payload = json.loads(run.response_payload)
+    assert payload["operator_summary"]["preview_only"] is True
+    assert payload["operator_summary"]["real_order_submitted"] is False
+
+
+def test_kis_watchlist_operator_summary_counts_completed_not_run_failed(
+    monkeypatch, client
+):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+    calls = []
+
+    def mixed_gpt(self, **kwargs):
+        calls.append(kwargs["symbol"])
+        if len(calls) == 2:
+            return KisGptPreview(
+                gpt_used=False,
+                action_hint="watch",
+                gpt_reason=None,
+                warnings=["gpt_unavailable"],
+                risk_flags=["gpt_unavailable"],
+                gating_notes=["GPT advisory unavailable."],
+            )
+        return KisGptPreview(
+            gpt_used=True,
+            action_hint="candidate",
+            gpt_reason="KR ?뺣웾 李멸퀬?⑹엯?덈떎.",
+            warnings=[],
+            ai_buy_score=66.0,
+            ai_sell_score=18.0,
+            confidence=0.72,
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        mixed_gpt,
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    summary = response.json()["operator_summary"]
+    assert summary["completed_gpt_count"] == 4
+    assert summary["failed_count"] == 1
+    assert summary["not_run_count"] == 45
+    assert len(summary["top_gpt_candidates"]) == 5
+    assert {item["gpt_analysis_status"] for item in summary["top_gpt_candidates"]} == {
+        "completed",
+        "failed",
+    }
+
+
+def test_kis_watchlist_operator_summary_best_candidate_matches_final_best(
+    monkeypatch, client
+):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["final_best_candidate"] is not None
+    assert body["operator_summary"]["best_candidate"]["symbol"] == body[
+        "final_best_candidate"
+    ]["symbol"]
+    assert body["operator_summary"]["best_candidate"]["rank"] == 1
+
+
+def test_kis_watchlist_candidate_contains_why_hold_why_not_buy_manual_hint(
+    monkeypatch, client
+):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    candidate = response.json()["final_best_candidate"]
+    assert "operator_summary" in candidate
+    assert "why_hold" in candidate
+    assert "why_not_buy" in candidate
+    assert "next_manual_action_hint" in candidate
+    assert candidate["why_hold"] == (
+        "KIS watchlist preview is advisory-only and KR trading is disabled."
+    )
+    assert "preview_only" in candidate["why_not_buy"]
+    assert "kr_trading_disabled" in candidate["why_not_buy"]
+
+
+def test_kis_watchlist_operator_summary_preserves_preview_only_safety_flags(client):
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    summary = response.json()["operator_summary"]
+    assert summary["preview_only"] is True
+    assert summary["trading_enabled"] is False
+    assert summary["real_order_submitted"] is False
+    assert summary["broker_submit_called"] is False
+    assert summary["manual_submit_called"] is False
+
+
+def test_kis_watchlist_gpt_failure_keeps_quant_and_marks_failed_in_summary(
+    monkeypatch, client
+):
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+    calls = []
+
+    def fail_first_gpt(self, **kwargs):
+        calls.append(kwargs["symbol"])
+        if len(calls) == 1:
+            raise RuntimeError("gpt timeout")
+        return KisGptPreview(
+            gpt_used=True,
+            action_hint="watch",
+            gpt_reason="KR ?뺣웾 李멸퀬?⑹엯?덈떎.",
+            warnings=[],
+            ai_buy_score=61.0,
+            ai_sell_score=22.0,
+            confidence=0.66,
+        )
+
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        fail_first_gpt,
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    failed = _find_item(body, body["gpt_target_symbols"][0])
+    assert failed["gpt_analysis_status"] == "failed"
+    assert failed["quant_buy_score"] is not None
+    assert failed["final_buy_score"] == failed["quant_buy_score"]
+    summary = body["operator_summary"]
+    assert summary["failed_count"] == 1
+    failed_summary = next(
+        item
+        for item in summary["top_gpt_candidates"]
+        if item["symbol"] == failed["symbol"]
+    )
+    assert failed_summary["gpt_analysis_status"] == "failed"
+
+
 def test_kis_preview_kr_trading_remains_disabled(client):
     response = client.post("/kis/watchlist/preview")
 

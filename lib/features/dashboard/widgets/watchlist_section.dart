@@ -30,6 +30,7 @@ import '../../../models/managed_position.dart';
 import '../../../models/ops_production_readiness.dart';
 import '../../../models/ops_settings.dart';
 import '../../../models/watchlist_run_result.dart';
+import '../../../models/watchlist_operator_summary.dart';
 import '../../dashboard/dashboard_controller.dart';
 import 'result_presentation_helpers.dart' as presentation;
 
@@ -557,6 +558,12 @@ class _WatchlistRunResultSummary extends StatelessWidget {
               ? null
               : () => onAnalyzeInTrading!(candidate!, 1),
         ),
+        if (isKr && runResult.operatorSummary != null) ...[
+          const SizedBox(height: 10),
+          _KisWatchlistOperatorSummaryCard(
+            summary: runResult.operatorSummary!,
+          ),
+        ],
         if (previewCandidates.isNotEmpty) ...[
           const SizedBox(height: 10),
           _WatchlistCandidatePreview(
@@ -610,6 +617,177 @@ class _WatchlistCandidatePreview extends StatelessWidget {
           ),
         ),
     ]);
+  }
+}
+
+class _KisWatchlistOperatorSummaryCard extends StatelessWidget {
+  const _KisWatchlistOperatorSummaryCard({required this.summary});
+
+  final WatchlistOperatorSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final best = summary.bestCandidate;
+    final bestLabel = best == null
+        ? 'None'
+        : best.name.isEmpty
+            ? best.symbol
+            : '${best.symbol} / ${best.name}';
+    final topCandidates = summary.topGptCandidates.take(5).toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: _panelDecoration(),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.psychology_alt_outlined, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('KIS Watchlist GPT Summary',
+                style: Theme.of(context).textTheme.titleSmall),
+          ),
+          const _SoftBadge(text: 'OPERATOR REVIEW', color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 8),
+        const Wrap(spacing: 8, runSpacing: 8, children: [
+          _SoftBadge(text: 'PREVIEW ONLY', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'GPT TOP 5', color: Colors.cyanAccent),
+          _SoftBadge(text: 'NO ORDER SUBMIT', color: Colors.orangeAccent),
+          _SoftBadge(text: 'OPERATOR REVIEW', color: Colors.greenAccent),
+        ]),
+        const SizedBox(height: 10),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'Completed GPT',
+              value: summary.completedGptCount.toString()),
+          _ResultPair(label: 'Not run', value: summary.notRunCount.toString()),
+          _ResultPair(label: 'Failed', value: summary.failedCount.toString()),
+          _ResultPair(label: 'Best candidate', value: bestLabel),
+          _ResultPair(
+              label: 'Safety',
+              value:
+                  'preview=${summary.previewOnly} / broker=${summary.brokerSubmitCalled} / manual=${summary.manualSubmitCalled}'),
+        ]),
+        const SizedBox(height: 8),
+        _StateLine(
+          text: presentation.displayText(
+            summary.conservativeDecisionSummary,
+            fallback: 'Review top GPT candidates before any manual action.',
+          ),
+        ),
+        const SizedBox(height: 6),
+        _StateLine(
+          text: 'Next manual action: ${presentation.displayText(
+            summary.nextManualActionHint,
+            fallback: 'review_top_gpt_candidates_in_trading_tab',
+          )}',
+        ),
+        if (summary.topRiskFlags.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          _StateLine(
+              text: 'Top risk flags: ${_joinList(summary.topRiskFlags)}'),
+        ],
+        if (summary.topGatingNotes.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          _StateLine(
+              text: 'Top gating notes: ${_joinList(summary.topGatingNotes)}'),
+        ],
+        if (topCandidates.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          const Text('GPT Top 5',
+              style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          for (final entry in topCandidates.asMap().entries)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _KisWatchlistOperatorCandidateRow(
+                rank: entry.key + 1,
+                candidate: entry.value,
+              ),
+            ),
+        ],
+      ]),
+    );
+  }
+}
+
+class _KisWatchlistOperatorCandidateRow extends StatelessWidget {
+  const _KisWatchlistOperatorCandidateRow({
+    required this.rank,
+    required this.candidate,
+  });
+
+  final int rank;
+  final Candidate candidate;
+
+  @override
+  Widget build(BuildContext context) {
+    final company = _candidateCompanyLabel(candidate);
+    final status = candidate.gptAnalysisStatus.isEmpty
+        ? 'not_run'
+        : candidate.gptAnalysisStatus;
+    final reason = presentation.displayText(
+      _firstText([
+        candidate.reason,
+        candidate.operatorSummary,
+        candidate.gptReason,
+        candidate.aiReason,
+      ]),
+      fallback: 'No summary reason returned.',
+    );
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _CountPill(text: '#$rank'),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text('${candidate.symbol} / $company',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+          _SoftBadge(
+            text: status.toUpperCase(),
+            color: status == 'failed'
+                ? Colors.redAccent
+                : status == 'completed'
+                    ? Colors.greenAccent
+                    : Colors.amberAccent,
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(spacing: 14, runSpacing: 8, children: [
+          _ResultPair(
+              label: 'Quant buy',
+              value: presentation.compactScore(candidate.quantBuyScore)),
+          _ResultPair(
+              label: 'Quant sell',
+              value: presentation.compactScore(candidate.quantSellScore)),
+          _ResultPair(
+              label: 'GPT buy',
+              value: presentation.compactScore(candidate.aiBuyScore)),
+          _ResultPair(
+              label: 'GPT sell',
+              value: presentation.compactScore(candidate.aiSellScore)),
+          _ResultPair(
+              label: 'Confidence',
+              value: presentation.compactScore(candidate.confidence)),
+          _ResultPair(label: 'Action hint', value: candidate.actionHint),
+        ]),
+        if (candidate.riskFlags.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          _StateLine(text: 'Risk flags: ${_joinList(candidate.riskFlags)}'),
+        ],
+        const SizedBox(height: 6),
+        _StateLine(text: 'Short reason: $reason'),
+      ]),
+    );
   }
 }
 
@@ -1023,11 +1201,17 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
             title: 'Advisory / Risk',
             lines: [
               'GPT/AI reason: ${presentation.displayText(_gptAdvisoryReason(candidate), fallback: 'GPT advisory unavailable')}',
+              if (candidate.whyHold.isNotEmpty)
+                'Why Hold: ${candidate.whyHold}',
+              if (candidate.whyNotBuy.isNotEmpty)
+                'Why Not Buy: ${_joinList(candidate.whyNotBuy)}',
               'Why not tradable: $reason',
               if (blockNotes.isNotEmpty) 'Blockers: ${blockNotes.join(' / ')}',
               if (riskNotes.isNotEmpty) 'Risk flags: ${riskNotes.join(' / ')}',
               if (gatingNotes.isNotEmpty)
                 'Gating notes: ${gatingNotes.join(' / ')}',
+              if (candidate.nextManualActionHint.isNotEmpty)
+                'Next Manual Action: ${candidate.nextManualActionHint}',
             ],
           ),
         ],

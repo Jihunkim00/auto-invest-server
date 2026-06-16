@@ -1,4 +1,5 @@
 import 'candidate.dart';
+import 'watchlist_operator_summary.dart';
 
 class WatchlistRunResult {
   const WatchlistRunResult({
@@ -29,6 +30,7 @@ class WatchlistRunResult {
     required this.result,
     required this.reason,
     required this.triggerSource,
+    this.operatorSummary,
   });
 
   final int configuredSymbolCount;
@@ -58,6 +60,7 @@ class WatchlistRunResult {
   final String result;
   final String reason;
   final String triggerSource;
+  final WatchlistOperatorSummary? operatorSummary;
 
   factory WatchlistRunResult.fromJson(Map<String, dynamic> json) {
     final run = parseMap(json['run']);
@@ -182,6 +185,9 @@ class WatchlistRunResult {
       triggerSource: parseNullableString(run?['trigger_source']) ??
           parseNullableString(json['trigger_source']) ??
           'manual',
+      operatorSummary: WatchlistOperatorSummary.fromJson(
+        json['operator_summary'] ?? json['operatorSummary'],
+      ),
     );
   }
 }

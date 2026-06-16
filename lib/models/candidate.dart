@@ -61,6 +61,10 @@ class Candidate {
     this.gptAnalysisStatus = '',
     this.gptAnalysisReason = '',
     this.gptActionHint = '',
+    this.operatorSummary = '',
+    this.whyHold = '',
+    this.whyNotBuy = const [],
+    this.nextManualActionHint = '',
     this.previewOnly,
     this.tradingEnabled,
     this.realOrderSubmitted,
@@ -127,6 +131,10 @@ class Candidate {
   final String gptAnalysisStatus;
   final String gptAnalysisReason;
   final String gptActionHint;
+  final String operatorSummary;
+  final String whyHold;
+  final List<String> whyNotBuy;
+  final String nextManualActionHint;
   final bool? previewOnly;
   final bool? tradingEnabled;
   final bool? realOrderSubmitted;
@@ -168,6 +176,10 @@ class Candidate {
       gptUsed != null ||
       gptAnalysisStatus.isNotEmpty ||
       gptAnalysisReason.isNotEmpty ||
+      operatorSummary.isNotEmpty ||
+      whyHold.isNotEmpty ||
+      whyNotBuy.isNotEmpty ||
+      nextManualActionHint.isNotEmpty ||
       previewOnly != null ||
       tradingEnabled != null ||
       realOrderSubmitted != null ||
@@ -290,6 +302,11 @@ class Candidate {
       gptAnalysisStatus: _readNullableString(json['gpt_analysis_status']) ?? '',
       gptAnalysisReason: _readNullableString(json['gpt_analysis_reason']) ?? '',
       gptActionHint: _readNullableString(json['gpt_action_hint']) ?? '',
+      operatorSummary: _readOperatorSummaryText(json['operator_summary']),
+      whyHold: _readNullableString(json['why_hold']) ?? '',
+      whyNotBuy: _dedupeStringList(_readStringList(json['why_not_buy'])),
+      nextManualActionHint:
+          _readNullableString(json['next_manual_action_hint']) ?? '',
       previewOnly: _readNullableBool(json['preview_only']),
       tradingEnabled: _readNullableBool(json['trading_enabled']),
       realOrderSubmitted: _readNullableBool(json['real_order_submitted']),
@@ -358,8 +375,9 @@ bool? _readNullableBool(Object? value) {
 }
 
 List<String> _readStringList(Object? value) {
-  if (value is! List) return const [];
-  return value.map((item) => item.toString()).toList();
+  if (value is List) return value.map((item) => item.toString()).toList();
+  final text = _readNullableString(value);
+  return text == null ? const [] : <String>[text];
 }
 
 List<String> _dedupeStringList(List<String> values) {
@@ -371,4 +389,14 @@ List<String> _dedupeStringList(List<String> values) {
     }
   }
   return result;
+}
+
+String _readOperatorSummaryText(Object? value) {
+  final direct = _readNullableString(value);
+  if (direct != null && value is! Map) return direct;
+  final map = _readMap(value);
+  return _readNullableString(map['summary']) ??
+      _readNullableString(map['short_reason']) ??
+      _readNullableString(map['conservative_decision_summary']) ??
+      '';
 }

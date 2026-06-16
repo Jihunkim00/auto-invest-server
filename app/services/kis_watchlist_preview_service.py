@@ -28,6 +28,11 @@ KR_PREVIEW_TOP_GPT_CANDIDATES = 5
 KR_DISABLED_REASONS = ["preview_only", "kr_trading_disabled"]
 EMPTY_INDICATORS = dict(EMPTY_TECHNICAL_INDICATORS)
 SCOREABLE_INDICATOR_STATUSES = {"ok", "partial"}
+KIS_WATCHLIST_OPERATOR_REVIEW_HINT = "review_top_gpt_candidates_in_trading_tab"
+KIS_WATCHLIST_NEXT_MANUAL_ACTION_HINT = (
+    "Open Trading, run KIS Analyze & Buy, validate manually, then confirm live "
+    "only if all safety gates pass."
+)
 
 KR_PREVIEW_GPT_MARKET_CONTEXT = """
 KR/KIS market risk checklist for advisory-only preview:
@@ -296,6 +301,12 @@ class KisWatchlistPreviewService:
             ["KIS scheduler portfolio concept is preview-only; no real order submitted."]
             + _string_list(entry_candidate_item.get("gating_notes") if entry_candidate_item else None)
         )
+        operator_summary = self._build_operator_summary(
+            items=items,
+            final_ranked_candidates=final_ranked_candidates,
+            final_best_candidate=final_best_candidate,
+            gpt_target_symbols=gpt_target_symbols,
+        )
 
         trade_result = {
             "action": "hold",
@@ -373,6 +384,7 @@ class KisWatchlistPreviewService:
             "real_order_submitted": False,
             "broker_submit_called": False,
             "manual_submit_called": False,
+            "operator_summary": operator_summary,
             "result": "preview_only",
             "reason": "kr_trading_disabled",
             "trade_result": trade_result,
@@ -479,6 +491,115 @@ class KisWatchlistPreviewService:
             + ["KIS portfolio management is preview-only; no real order submitted."]
         )
         return payload
+
+    def _build_operator_summary(
+        self,
+        *,
+        items: list[dict[str, Any]],
+        final_ranked_candidates: list[dict[str, Any]],
+        final_best_candidate: dict[str, Any] | None,
+        gpt_target_symbols: list[str],
+    ) -> dict[str, Any]:
+        rank_by_symbol = {
+            str(item.get("symbol") or ""): index + 1
+            for index, item in enumerate(final_ranked_candidates)
+            if item.get("symbol")
+        }
+        item_by_symbol = {
+            str(item.get("symbol") or ""): item
+            for item in items
+            if item.get("symbol")
+        }
+        top_source_items = [
+            item_by_symbol[symbol]
+            for symbol in gpt_target_symbols
+            if symbol in item_by_symbol
+        ]
+        top_gpt_candidates = [
+            self._operator_candidate_summary(
+                item,
+                rank=rank_by_symbol.get(str(item.get("symbol") or ""), index + 1),
+            )
+            for index, item in enumerate(top_source_items)
+        ]
+        completed_count = _gpt_status_count(items, "completed")
+        failed_count = _gpt_status_count(items, "failed")
+        not_run_count = _gpt_status_count(items, "not_run")
+        top_risk_flags = _dedupe(
+            [
+                value
+                for item in top_source_items
+                for value in _string_list(item.get("risk_flags"))
+            ]
+        )[:8]
+        top_gating_notes = _dedupe(
+            [
+                value
+                for item in top_source_items
+                for value in _string_list(item.get("gating_notes"))
+            ]
+        )[:8]
+        best_candidate = (
+            self._operator_candidate_summary(
+                final_best_candidate,
+                rank=rank_by_symbol.get(
+                    str(final_best_candidate.get("symbol") or ""),
+                    1,
+                ),
+            )
+            if final_best_candidate is not None
+            else None
+        )
+
+        return {
+            "mode": "kis_watchlist_gpt_operator_summary",
+            "preview_only": True,
+            "trading_enabled": False,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
+            "completed_gpt_count": completed_count,
+            "not_run_count": not_run_count,
+            "failed_count": failed_count,
+            "top_gpt_candidates": top_gpt_candidates,
+            "best_candidate": best_candidate,
+            "top_risk_flags": top_risk_flags,
+            "top_gating_notes": top_gating_notes,
+            "conservative_decision_summary": _operator_decision_summary(
+                completed_count=completed_count,
+                failed_count=failed_count,
+                final_best_candidate=final_best_candidate,
+            ),
+            "next_manual_action_hint": KIS_WATCHLIST_OPERATOR_REVIEW_HINT,
+        }
+
+    @staticmethod
+    def _operator_candidate_summary(
+        item: dict[str, Any],
+        *,
+        rank: int,
+    ) -> dict[str, Any]:
+        return {
+            "rank": rank,
+            "symbol": item.get("symbol"),
+            "name": item.get("name"),
+            "gpt_analysis_status": item.get("gpt_analysis_status") or "not_run",
+            "gpt_used": bool(item.get("gpt_used")),
+            "quant_buy_score": item.get("quant_buy_score"),
+            "quant_sell_score": item.get("quant_sell_score"),
+            "ai_buy_score": item.get("ai_buy_score"),
+            "ai_sell_score": item.get("ai_sell_score"),
+            "final_buy_score": item.get("final_buy_score"),
+            "final_sell_score": item.get("final_sell_score"),
+            "confidence": item.get("confidence"),
+            "action_hint": item.get("action_hint") or "watch",
+            "main_risk_flags": _string_list(item.get("risk_flags"))[:4],
+            "short_reason": _candidate_short_reason(item),
+            "why_hold": item.get("why_hold"),
+            "why_not_buy": _string_list(item.get("why_not_buy")),
+            "next_manual_action_hint": item.get("next_manual_action_hint")
+            or KIS_WATCHLIST_NEXT_MANUAL_ACTION_HINT,
+        }
 
     def _preview_symbol(
         self,
@@ -684,6 +805,23 @@ class KisWatchlistPreviewService:
             reason = quant_reason or "KIS OHLCV quant indicators calculated for preview."
             note = "KIS OHLCV indicators available; quant score calculated for preview only."
 
+        why_not_buy = _candidate_why_not_buy(
+            block_reason=block_reason,
+            can_score=can_score,
+            final_buy_score=final_buy_score,
+            gpt_analysis_status=gpt_analysis_status,
+            risk_flags=risk_flags,
+            gating_notes=gating_notes,
+        )
+        why_hold = "KIS watchlist preview is advisory-only and KR trading is disabled."
+        short_reason = _first_text([gpt_reason, quant_reason, reason, block_reason])
+        operator_summary = _candidate_operator_summary_text(
+            symbol=symbol,
+            gpt_analysis_status=gpt_analysis_status,
+            final_buy_score=final_buy_score,
+            block_reason=block_reason,
+        )
+
         return {
             "symbol": symbol,
             "name": name or None,
@@ -695,6 +833,11 @@ class KisWatchlistPreviewService:
             "final_entry_score": final_buy_score,
             "quant_score": quant_buy_score,
             "note": note,
+            "operator_summary": operator_summary,
+            "why_hold": why_hold,
+            "why_not_buy": why_not_buy,
+            "next_manual_action_hint": KIS_WATCHLIST_NEXT_MANUAL_ACTION_HINT,
+            "short_reason": short_reason,
             "indicator_status": indicator_status,
             "indicator_payload": indicator_payload,
             "indicator_bar_count": bar_count,
@@ -1000,6 +1143,7 @@ def _preview_log_payload(
             "researched_candidates_count": payload.get("researched_candidates_count"),
             "final_best_candidate": final_best,
             "final_ranked_symbols": _candidate_symbols(ranked),
+            "operator_summary": payload.get("operator_summary"),
             "risk_flags": _string_list(payload.get("risk_flags")),
             "gating_notes": _string_list(payload.get("gating_notes")),
         }
@@ -1039,6 +1183,112 @@ def _candidate_symbols(value: Any) -> list[str]:
         if symbol:
             symbols.append(symbol)
     return symbols
+
+
+def _gpt_status_count(items: list[dict[str, Any]], status: str) -> int:
+    expected = status.strip().lower()
+    return sum(
+        1
+        for item in items
+        if str(item.get("gpt_analysis_status") or "").strip().lower() == expected
+    )
+
+
+def _operator_decision_summary(
+    *,
+    completed_count: int,
+    failed_count: int,
+    final_best_candidate: dict[str, Any] | None,
+) -> str:
+    if final_best_candidate is None:
+        return (
+            "No scoreable KIS watchlist candidate is ready for action; keep hold "
+            "and review the next preview scan."
+        )
+    best_symbol = str(final_best_candidate.get("symbol") or "best candidate")
+    if failed_count > 0:
+        return (
+            f"{best_symbol} is the current preview leader, but {failed_count} GPT "
+            "analysis result(s) failed; keep hold until manual validation and all "
+            "safety gates pass."
+        )
+    if completed_count > 0:
+        return (
+            f"{best_symbol} is the current preview leader after GPT enrichment; "
+            "this is advisory-only and remains hold until operator review."
+        )
+    return (
+        f"{best_symbol} is ranked by quant preview only; GPT did not complete, "
+        "so keep hold until a reviewed analysis is available."
+    )
+
+
+def _candidate_why_not_buy(
+    *,
+    block_reason: str | None,
+    can_score: bool,
+    final_buy_score: float | None,
+    gpt_analysis_status: str | None,
+    risk_flags: list[str],
+    gating_notes: list[str],
+) -> list[str]:
+    reasons = ["preview_only", "kr_trading_disabled"]
+    if not can_score:
+        reasons.append("insufficient_data")
+    if block_reason and block_reason not in {"preview_only", "kr_trading_disabled"}:
+        reasons.append(str(block_reason))
+    min_entry_score = _safe_float(
+        getattr(get_settings(), "watchlist_min_entry_score", 0),
+        0.0,
+    )
+    if (
+        final_buy_score is not None
+        and min_entry_score > 0
+        and float(final_buy_score) < min_entry_score
+    ):
+        reasons.append("score_below_threshold")
+    normalized_gpt_status = str(gpt_analysis_status or "").strip().lower()
+    if normalized_gpt_status == "failed":
+        reasons.append("gpt_failed_or_unavailable")
+    elif normalized_gpt_status == "not_run":
+        reasons.append("gpt_not_run")
+    actionable_risk_flags = [
+        value
+        for value in risk_flags
+        if value not in {"preview_only", "kr_trading_disabled"}
+    ]
+    if actionable_risk_flags:
+        reasons.append("risk_flags_present")
+    if gating_notes:
+        reasons.append("gating_notes_require_review")
+    return _dedupe(reasons)
+
+
+def _candidate_operator_summary_text(
+    *,
+    symbol: str,
+    gpt_analysis_status: str,
+    final_buy_score: float | None,
+    block_reason: str | None,
+) -> str:
+    score = "n/a" if final_buy_score is None else f"{float(final_buy_score):.2f}"
+    return (
+        f"{symbol} remains hold in KIS preview. GPT status={gpt_analysis_status}; "
+        f"final_buy_score={score}; blocker={block_reason or 'kr_trading_disabled'}."
+    )
+
+
+def _candidate_short_reason(item: dict[str, Any]) -> str:
+    return _first_text(
+        [
+            item.get("short_reason"),
+            item.get("gpt_reason"),
+            item.get("ai_reason"),
+            item.get("quant_reason"),
+            item.get("reason"),
+            item.get("block_reason"),
+        ]
+    ) or "KIS preview remains advisory-only."
 
 
 def _first_text(values: Any) -> str | None:
