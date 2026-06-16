@@ -294,7 +294,28 @@ def test_market_analysis_watchlist_reads_all_configured_symbols(monkeypatch):
     assert payload["best_candidate"] is not None
     assert "best_score" in payload
     assert "should_trade" in payload
+    
+    
+def test_market_analysis_watchlist_exposes_price_fields(monkeypatch):
+    monkeypatch.setattr(
+        MarketDataService,
+        "get_recent_bars",
+        lambda self, symbol, limit=120, timeframe="1Min": make_dummy_bars(),
+    )
 
+    client = TestClient(app)
+    response = client.post("/market-analysis/watchlist?gate_level=2")
+    assert response.status_code == 200
+
+    payload = response.json()
+    row = payload["watchlist"][0]
+
+    assert row["has_indicators"] is True
+    assert row["current_price"] is not None
+    assert row["price"] == row["current_price"]
+    assert row["indicator_status"] == "ok"
+    assert row["indicator_bar_count"] == len(make_dummy_bars())
+    assert row["indicator_payload"]["price"] == row["current_price"]
 
 def test_market_analysis_watchlist_does_not_mark_weak_holds_as_buy_candidates(monkeypatch):
     monkeypatch.setattr(

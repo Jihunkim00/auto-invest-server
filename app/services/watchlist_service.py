@@ -247,8 +247,14 @@ class WatchlistService:
                 "broker": metadata.get("broker") or _broker_for_market(str(market)),
                 "market_label": metadata.get("market_label"),
             }
+        current_price = indicators.get("price") if indicators else None
         symbol_result = {
             **identity,
+            "current_price": current_price,
+            "price": current_price,
+            "indicator_payload": indicators,
+            "indicator_status": "ok" if indicators else "insufficient_data",
+            "indicator_bar_count": len(bars),
             "entry_score": round(entry_score, 2),
             "should_trade": bool(readiness["entry_ready"]),
             "quant_score": quant["quant_buy_score"],
