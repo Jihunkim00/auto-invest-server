@@ -166,8 +166,23 @@ class PortfolioSnapshotSection extends StatelessWidget {
               const SizedBox(height: 4),
               const _StateNote(
                 text:
-                    'Held positions with trigger state and manual-prep actions.',
+                    'Held positions with trigger state. Manual sell actions prefill a ticket only.',
               ),
+              if (isKr) ...[
+                const SizedBox(height: 8),
+                const Wrap(spacing: 8, runSpacing: 8, children: [
+                  _SoftBadge(
+                      text: 'HELD POSITIONS', color: Colors.lightBlueAccent),
+                  _SoftBadge(
+                      text: 'EXIT PREFLIGHT FIRST',
+                      color: Colors.lightBlueAccent),
+                  _SoftBadge(
+                      text: 'TICKET PREFILL ONLY',
+                      color: Colors.greenAccent),
+                  _SoftBadge(
+                      text: 'CONFIRM_LIVE MANUAL', color: Colors.redAccent),
+                ]),
+              ],
               const SizedBox(height: 8),
               const _SubsectionTitle('Current Holdings'),
               if (isKr && controller.kisManagedPositionsLoading) ...[
@@ -417,7 +432,7 @@ class _PositionTile extends StatelessWidget {
                   icon: const Icon(Icons.rate_review_outlined, size: 18),
                   label: const Text('Review'),
                 ),
-                if (canPrepareManualSell)
+                if (canPrepareManualSell && managedPosition != null)
                   OutlinedButton.icon(
                     key: ValueKey('prepare-manual-sell-${position.symbol}'),
                     onPressed: () async {
@@ -433,9 +448,12 @@ class _PositionTile extends StatelessWidget {
                       ));
                     },
                     icon: const Icon(Icons.request_quote_outlined, size: 18),
-                    label: const Text('Prepare Manual Sell'),
+                    label: const Text('Prepare Manual Sell Ticket'),
                   )
-                else if (isKr && managementMode && managedPosition == null)
+                else if (isKr &&
+                    managementMode &&
+                    managementItem.manualSellAvailable &&
+                    managedPosition == null)
                   OutlinedButton.icon(
                     onPressed: () {
                       final result =
@@ -448,9 +466,14 @@ class _PositionTile extends StatelessWidget {
                       ));
                     },
                     icon: const Icon(Icons.request_quote_outlined, size: 18),
-                    label: const Text('Prepare Manual Sell'),
+                    label: const Text('Prepare Manual Sell Ticket'),
                   ),
               ]),
+              const SizedBox(height: 8),
+              const _StateNote(
+                text:
+                    'Ticket prefill does not validate, check confirm_live, or submit.',
+              ),
             ],
           ],
         ),

@@ -3646,6 +3646,10 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           const _SoftBadge(
+              text: 'READINESS REVIEW', color: Colors.greenAccent),
+          const _SoftBadge(
+              text: 'NO ENABLE ACTION', color: Colors.amberAccent),
+          const _SoftBadge(
               text: 'STOP-LOSS EXECUTION', color: Colors.lightBlueAccent),
           const _SoftBadge(
               text: 'TAKE-PROFIT GUARDED EXECUTION',
@@ -3664,6 +3668,11 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
                 : Colors.orangeAccent,
           ),
         ]),
+        const SizedBox(height: 12),
+        const _StateLine(
+          text:
+              'Review status and preflight results here. Limited auto sell settings are not enabled from this card.',
+        ),
         const SizedBox(height: 12),
         Wrap(spacing: 14, runSpacing: 8, children: [
           _ResultPair(

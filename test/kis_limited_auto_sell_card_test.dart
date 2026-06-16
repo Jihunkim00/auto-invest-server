@@ -78,6 +78,20 @@ void main() {
     expect(
       find.descendant(
         of: limitedAutoSellCard,
+        matching: find.text('READINESS REVIEW'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
+        matching: find.text('NO ENABLE ACTION'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: limitedAutoSellCard,
         matching: find.text('STOP-LOSS EXECUTION'),
       ),
       findsOneWidget,
@@ -144,6 +158,7 @@ void main() {
     expect(find.text('Auto Buy'), findsNothing);
     expect(find.text('Enable Scheduler Real Orders'), findsNothing);
     expect(find.text('Enable Take Profit Auto Sell'), findsNothing);
+    expect(find.textContaining('settings are not enabled'), findsOneWidget);
 
     await tester.ensureVisible(runButton);
     await tester.tap(runButton);

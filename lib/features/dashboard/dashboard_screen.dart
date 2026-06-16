@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/automation_runtime_monitor.dart';
+import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
@@ -64,6 +66,11 @@ class DashboardScreen extends StatelessWidget {
                   onOpenSettings: onOpenSettings,
                 ),
                 const SizedBox(height: 12),
+                _PreLiveOperationsCard(
+                  controller: controller,
+                  onOpenManualOrder: onOpenManualOrder,
+                ),
+                const SizedBox(height: 12),
                 _SafetySummary(controller: controller),
                 const SizedBox(height: 12),
                 AutomationRuntimeMonitorCard(controller: controller),
@@ -94,6 +101,290 @@ class DashboardScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _PreLiveOperationsCard extends StatelessWidget {
+  const _PreLiveOperationsCard({
+    required this.controller,
+    required this.onOpenManualOrder,
+  });
+
+  final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = controller.krPortfolioSummary;
+    final managementItems =
+        controller.portfolioManagementItemsForMarket(PortfolioMarket.kr);
+    final exitReviewCount = managementItems
+        .where((item) =>
+            item.manualSellAvailable &&
+            item.triggerStatus != TriggerStatus.hold &&
+            item.triggerStatus != TriggerStatus.noData)
+        .length;
+    final preflight = controller.kisLiveExitPreflightResult;
+    final preparedSellTicket = controller.hasPreparedKisManualSellTicket;
+    final validation = controller.orderValidationResult;
+    final validationCurrent =
+        validation != null && controller.orderValidationMatchesCurrent;
+    final validationReady = validationCurrent &&
+        validation.validatedForSubmission &&
+        !controller.orderValidationExpired;
+    final schedulerRealOrdersOn =
+        controller.schedulerStatus.kr.realOrderSchedulerEnabled ||
+            controller.schedulerStatus.kr.realOrdersAllowed ||
+            controller.settings.kisSchedulerAllowRealOrders;
+    final liveAutoBuyOn = controller.settings.kisLiveAutoBuyEnabled ||
+        controller.schedulerStatus.kr.liveBuyArmed ||
+        controller.schedulerStatus.liveBuyPossible;
+
+    return SectionCard(
+      key: const Key('pre_live_operations_card'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.assignment_turned_in_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                'Pre-Live Operations',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _preLiveSummary(
+                  summary: summary,
+                  exitReviewCount: exitReviewCount,
+                  preflightCandidateCount: preflight?.candidateCount,
+                  preparedSellTicket: preparedSellTicket,
+                ),
+                style: const TextStyle(color: Colors.white70, height: 1.25),
+              ),
+            ]),
+          ),
+          _ReadinessBadge(
+            text: preparedSellTicket ? 'TICKET READY' : 'REVIEW MODE',
+            color:
+                preparedSellTicket ? Colors.greenAccent : Colors.lightBlueAccent,
+          ),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          const _ReadinessBadge(
+            text: 'PREFLIGHT FIRST',
+            color: Colors.lightBlueAccent,
+          ),
+          const _ReadinessBadge(
+            text: 'TICKET PREFILL ONLY',
+            color: Colors.greenAccent,
+          ),
+          const _ReadinessBadge(
+            text: 'VALIDATION REQUIRED',
+            color: Colors.lightBlueAccent,
+          ),
+          const _ReadinessBadge(
+            text: 'CONFIRM_LIVE MANUAL',
+            color: Colors.redAccent,
+          ),
+          _ReadinessBadge(
+            text: liveAutoBuyOn ? 'LIVE AUTO BUY ON' : 'LIVE AUTO BUY OFF',
+            color: liveAutoBuyOn ? Colors.redAccent : Colors.greenAccent,
+          ),
+          _ReadinessBadge(
+            text: schedulerRealOrdersOn
+                ? 'SCHEDULER REAL ORDERS ON'
+                : 'SCHEDULER REAL ORDERS OFF',
+            color:
+                schedulerRealOrdersOn ? Colors.redAccent : Colors.greenAccent,
+          ),
+        ]),
+        const SizedBox(height: 14),
+        LayoutBuilder(builder: (context, constraints) {
+          final steps = [
+            _PreLiveStep(
+              label: 'Holdings',
+              value: _preLiveHoldingsLabel(summary),
+              color: summary.positionsUnavailable
+                  ? Colors.amberAccent
+                  : summary.positions.isEmpty
+                      ? Colors.white70
+                      : Colors.greenAccent,
+            ),
+            _PreLiveStep(
+              label: 'Exit preflight',
+              value: preflight == null
+                  ? 'not run'
+                  : '${preflight.action} / ${preflight.candidateCount}',
+              color: preflight == null
+                  ? Colors.white70
+                  : preflight.candidateCount > 0
+                      ? Colors.greenAccent
+                      : Colors.lightBlueAccent,
+            ),
+            _PreLiveStep(
+              label: 'Manual ticket',
+              value: preparedSellTicket ? 'prefilled' : 'not prepared',
+              color: preparedSellTicket ? Colors.greenAccent : Colors.white70,
+            ),
+            _PreLiveStep(
+              label: 'Validation',
+              value: _preLiveValidationLabel(
+                validation: validation,
+                validationReady: validationReady,
+                validationCurrent: validationCurrent,
+              ),
+              color: _preLiveValidationColor(
+                validation: validation,
+                validationReady: validationReady,
+                validationCurrent: validationCurrent,
+              ),
+            ),
+            _PreLiveStep(
+              label: 'confirm_live',
+              value: controller.kisLiveConfirmation ? 'checked' : 'manual',
+              color: controller.kisLiveConfirmation
+                  ? Colors.redAccent
+                  : Colors.white70,
+            ),
+            _PreLiveStep(
+              label: 'Submit',
+              value: controller.canSubmitLiveKisOrder ? 'available' : 'blocked',
+              color: controller.canSubmitLiveKisOrder
+                  ? Colors.redAccent
+                  : Colors.white70,
+            ),
+          ];
+          if (constraints.maxWidth >= 760) {
+            return Row(children: [
+              for (var i = 0; i < steps.length; i++) ...[
+                if (i > 0) const SizedBox(width: 8),
+                Expanded(child: steps[i]),
+              ],
+            ]);
+          }
+          return Wrap(spacing: 8, runSpacing: 8, children: steps);
+        }),
+        const SizedBox(height: 12),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          OutlinedButton.icon(
+            key: const ValueKey('pre-live-refresh-positions'),
+            onPressed: controller.portfolioManagementLoading
+                ? null
+                : () => _refreshPositions(context),
+            icon: controller.portfolioManagementLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh, size: 16),
+            label: const Text('Refresh Positions'),
+          ),
+          FilledButton.icon(
+            key: const ValueKey('pre-live-run-exit-preflight'),
+            onPressed: controller.kisLiveExitPreflightLoading
+                ? null
+                : () => _runExitPreflight(context),
+            icon: controller.kisLiveExitPreflightLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.fact_check_outlined, size: 16),
+            label: Text(controller.kisLiveExitPreflightLoading
+                ? 'Running Exit Preflight...'
+                : 'Run Exit Preflight'),
+          ),
+          if (preparedSellTicket && onOpenManualOrder != null)
+            OutlinedButton.icon(
+              key: const ValueKey('pre-live-open-manual-ticket'),
+              onPressed: onOpenManualOrder,
+              icon: const Icon(Icons.open_in_new, size: 16),
+              label: const Text('Open Manual Ticket'),
+            ),
+        ]),
+        if (controller.kisLiveExitPreflightError != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            controller.kisLiveExitPreflightError!,
+            style: const TextStyle(color: Colors.redAccent),
+          ),
+        ],
+        if (controller.portfolioManagementError != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            controller.portfolioManagementError!,
+            style: const TextStyle(color: Colors.orangeAccent),
+          ),
+        ],
+      ]),
+    );
+  }
+
+  Future<void> _refreshPositions(BuildContext context) async {
+    final result = await controller.refreshPortfolioManagement();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(result.message)));
+  }
+
+  Future<void> _runExitPreflight(BuildContext context) async {
+    final result = await controller.runKisLiveExitPreflight();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(result.message)));
+  }
+}
+
+class _PreLiveStep extends StatelessWidget {
+  const _PreLiveStep({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 112,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          label.toUpperCase(),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white54,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -839,4 +1130,55 @@ String _withZone(String value, String zoneLabel) {
   final zone = zoneLabel.toUpperCase();
   if (upper.endsWith(' $zone') || upper.contains(' $zone ')) return trimmed;
   return '$trimmed $zoneLabel';
+}
+
+String _preLiveSummary({
+  required PortfolioSummary summary,
+  required int exitReviewCount,
+  required int? preflightCandidateCount,
+  required bool preparedSellTicket,
+}) {
+  if (preparedSellTicket) {
+    return 'Manual sell ticket is prefilled. Continue in Trading: validate, check confirm_live manually, then submit if runtime gates allow.';
+  }
+  if (preflightCandidateCount != null && preflightCandidateCount > 0) {
+    return 'Exit preflight found $preflightCandidateCount candidate(s). Prepare a manual sell ticket from the reviewed candidate.';
+  }
+  if (exitReviewCount > 0) {
+    return '$exitReviewCount held position(s) need operator exit review before any manual ticket.';
+  }
+  if (summary.positionsUnavailable) {
+    return 'KIS holdings are unavailable. Refresh positions before pre-live review.';
+  }
+  if (summary.positions.isEmpty) {
+    return 'No held KIS positions loaded. Manual exit flow starts after holdings are visible.';
+  }
+  return 'KIS holdings are loaded. Run exit preflight before preparing any manual sell ticket.';
+}
+
+String _preLiveHoldingsLabel(PortfolioSummary summary) {
+  if (summary.positionsUnavailable) return 'unavailable';
+  return '${summary.positions.length} held';
+}
+
+String _preLiveValidationLabel({
+  required Object? validation,
+  required bool validationReady,
+  required bool validationCurrent,
+}) {
+  if (validation == null) return 'not run';
+  if (validationReady) return 'passed';
+  if (!validationCurrent) return 'stale';
+  return 'blocked';
+}
+
+Color _preLiveValidationColor({
+  required Object? validation,
+  required bool validationReady,
+  required bool validationCurrent,
+}) {
+  if (validation == null) return Colors.white70;
+  if (validationReady) return Colors.greenAccent;
+  if (!validationCurrent) return Colors.amberAccent;
+  return Colors.redAccent;
 }
