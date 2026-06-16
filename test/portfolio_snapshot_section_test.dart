@@ -174,7 +174,12 @@ void main() {
     expect(find.text('Technical Snapshot'), findsOneWidget);
     expect(find.text('SELL SCORE'), findsOneWidget);
     expect(find.text('Stop loss'), findsOneWidget);
-    expect(find.text('Prepare Manual Sell'), findsOneWidget);
+    expect(find.text('Prepare Manual Sell Ticket'), findsOneWidget);
+    expect(find.text('TICKET PREFILL ONLY'), findsWidgets);
+    expect(
+      find.text('Ticket prefill does not validate, check confirm_live, or submit.'),
+      findsOneWidget,
+    );
     expect(find.text('Developer Raw Payload'), findsOneWidget);
     expect(find.textContaining('raw_marker'), findsNothing);
 
@@ -313,7 +318,7 @@ void main() {
     await _expandPositionCard(tester, '005930');
 
     expect(find.text('HOLD'), findsWidgets);
-    expect(find.text('Prepare Manual Sell'), findsNothing);
+    expect(find.text('Prepare Manual Sell Ticket'), findsNothing);
 
     controller.dispose();
   });

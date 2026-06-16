@@ -6,6 +6,8 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/manual_order_screen.dart';
 import 'package:auto_invest_dashboard/models/automation_runtime_monitor.dart';
+import 'package:auto_invest_dashboard/models/kis_live_exit_preflight.dart';
+import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_dry_run_orchestration.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
@@ -13,6 +15,7 @@ import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
@@ -25,6 +28,9 @@ class FakeKisApiClient extends ApiClient {
   int guardedSellRunCalls = 0;
   int guardedBuyRunCalls = 0;
   int alpacaWatchlistCalls = 0;
+  int liveExitPreflightCalls = 0;
+  int validationCalls = 0;
+  int submitCalls = 0;
   String? lastWatchlistProvider;
 
   @override
@@ -256,6 +262,37 @@ class FakeKisApiClient extends ApiClient {
       sourceMetadata: {'source': 'portfolio_position'},
       rawPayload: {'symbol': '005930'},
     );
+  }
+
+  @override
+  Future<KisLiveExitPreflightResult> runKisLiveExitPreflight() async {
+    liveExitPreflightCalls += 1;
+    return KisLiveExitPreflightResult.fromJson(_liveExitPreflightJson());
+  }
+
+  @override
+  Future<OrderValidationResult> validateKisOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+    Map<String, dynamic>? sourceMetadata,
+  }) async {
+    validationCalls += 1;
+    throw const ApiRequestException('validation should not run');
+  }
+
+  @override
+  Future<KisManualOrderResult> submitKisManualOrder({
+    required String symbol,
+    required String side,
+    required int qty,
+    String orderType = 'market',
+    required bool confirmLive,
+    Map<String, dynamic>? sourceMetadata,
+  }) async {
+    submitCalls += 1;
+    throw const ApiRequestException('submit should not run');
   }
 }
 
@@ -1103,6 +1140,76 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Pre-Live Operations runs exit preflight without submit side effects',
+      (tester) async {
+    final api = FakeKisApiClient();
+    final controller = DashboardController(api, autoload: false)
+      ..usPortfolioSummary = _usSummary
+      ..krPortfolioSummary = _krSummary
+      ..kisManagedPositions = const [_krManagedPosition]
+      ..selectedProvider = SelectedProvider.kis
+      ..selectedPortfolioMarket = PortfolioMarket.kr
+      ..settings = const OpsSettings(
+        schedulerEnabled: false,
+        botEnabled: false,
+        dryRun: true,
+        killSwitch: false,
+        brokerMode: 'Paper',
+        defaultGateLevel: 2,
+        maxDailyTrades: 5,
+        maxDailyEntries: 2,
+        minEntryScore: 65,
+        minScoreGap: 3,
+      )
+      ..schedulerStatus = SchedulerStatus.safeDefault();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) => DashboardScreen(
+            controller: controller,
+            onOpenManualOrder: () {},
+          ),
+        ),
+      ),
+    ));
+
+    await _showDashboardSection(tester, const Key('pre_live_operations_card'));
+
+    final card = find.byKey(const Key('pre_live_operations_card'));
+    expect(find.descendant(of: card, matching: find.text('Pre-Live Operations')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('PREFLIGHT FIRST')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('TICKET PREFILL ONLY')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('CONFIRM_LIVE MANUAL')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('LIVE AUTO BUY OFF')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: card, matching: find.text('SCHEDULER REAL ORDERS OFF')),
+        findsOneWidget);
+
+    final preflightButton =
+        find.byKey(const ValueKey('pre-live-run-exit-preflight'));
+    await _showDashboardFinder(tester, preflightButton);
+    await tester.tap(preflightButton);
+    await tester.pumpAndSettle();
+
+    expect(api.liveExitPreflightCalls, 1);
+    expect(api.validationCalls, 0);
+    expect(api.submitCalls, 0);
+    expect(controller.kisLiveExitPreflightResult?.candidateCount, 1);
+    expect(controller.orderValidationResult, isNull);
+    expect(controller.kisLiveConfirmation, isFalse);
+
+    controller.dispose();
+  });
+
   testWidgets('Home dashboard includes Portfolio Snapshot and holdings',
       (tester) async {
     final controller = DashboardController(FakeKisApiClient(), autoload: false)
@@ -1526,6 +1633,56 @@ const _krSummary = PortfolioSummary(
   ],
   pendingOrders: [],
 );
+
+Map<String, dynamic> _liveExitPreflightJson() {
+  return {
+    'status': 'ok',
+    'provider': 'kis',
+    'market': 'KR',
+    'mode': 'kis_live_exit_preflight',
+    'execution_mode': 'manual_confirm_only',
+    'action': 'sell',
+    'symbol': '005930',
+    'qty': 1,
+    'candidate_count': 1,
+    'candidates': [
+      {
+        'symbol': '005930',
+        'side': 'sell',
+        'quantity_available': 1,
+        'suggested_quantity': 1,
+        'current_price': 600000,
+        'estimated_notional': 600000,
+        'cost_basis': 500000,
+        'current_value': 600000,
+        'unrealized_pl': 100000,
+        'unrealized_pl_pct': 0.2,
+        'trigger': 'take_profit',
+        'trigger_source': 'portfolio_snapshot',
+        'severity': 'review',
+        'action_hint': 'manual_confirm_sell',
+        'reason': 'take_profit_triggered',
+        'submit_ready': false,
+        'manual_confirm_required': true,
+        'real_order_submit_allowed': false,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+      }
+    ],
+    'reason': 'take_profit_triggered',
+    'would_submit_if_enabled': false,
+    'live_order_submitted': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'manual_confirm_required': true,
+    'real_order_submit_allowed': false,
+    'auto_buy_enabled': false,
+    'auto_sell_enabled': false,
+    'blocked_by': ['preflight_only_no_broker_submit'],
+  };
+}
 
 AutomationRuntimeMonitor _runtimeMonitor({
   List<AutomationEvent> localEvents = const [],
