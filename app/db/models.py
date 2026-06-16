@@ -286,3 +286,27 @@ class TradeRunLog(Base):
     request_payload = Column(Text, nullable=True)
     response_payload = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AgentCommandLog(Base):
+    __tablename__ = "agent_command_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String(120), nullable=True, index=True)
+    user_message = Column(Text, nullable=False)
+    parser_status = Column(String(40), nullable=False, index=True)
+    command_type = Column(String(80), nullable=False, index=True)
+    domain = Column(String(40), nullable=False, index=True)
+    market = Column(String(10), nullable=True, index=True)
+    provider = Column(String(20), nullable=True, index=True)
+    symbol = Column(String(20), nullable=True, index=True)
+    side = Column(String(10), nullable=True)
+    risk_level = Column(String(40), nullable=False, index=True)
+    requires_auth = Column(Boolean, nullable=False, default=False)
+    needs_clarification = Column(Boolean, nullable=False, default=False)
+    parsed_command_json = Column(Text, nullable=False)
+    safety_json = Column(Text, nullable=False)
+    model_name = Column(String(120), nullable=True)
+    schema_version = Column(String(80), nullable=False, default="autoinvest_command_v1")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)

@@ -295,6 +295,46 @@ def _create_trade_run_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol ON trade_run_logs (symbol)"))
 
 
+def _create_agent_command_logs_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_command_logs (
+                    id INTEGER PRIMARY KEY,
+                    conversation_id VARCHAR(120),
+                    user_message TEXT NOT NULL,
+                    parser_status VARCHAR(40) NOT NULL,
+                    command_type VARCHAR(80) NOT NULL,
+                    domain VARCHAR(40) NOT NULL,
+                    market VARCHAR(10),
+                    provider VARCHAR(20),
+                    symbol VARCHAR(20),
+                    side VARCHAR(10),
+                    risk_level VARCHAR(40) NOT NULL,
+                    requires_auth BOOLEAN NOT NULL DEFAULT 0,
+                    needs_clarification BOOLEAN NOT NULL DEFAULT 0,
+                    parsed_command_json TEXT NOT NULL,
+                    safety_json TEXT NOT NULL,
+                    model_name VARCHAR(120),
+                    schema_version VARCHAR(80) NOT NULL DEFAULT 'autoinvest_command_v1',
+                    error_message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_conversation_id ON agent_command_logs (conversation_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_parser_status ON agent_command_logs (parser_status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_command_type ON agent_command_logs (command_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_domain ON agent_command_logs (domain)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_market ON agent_command_logs (market)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_provider ON agent_command_logs (provider)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_symbol ON agent_command_logs (symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_risk_level ON agent_command_logs (risk_level)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_created_at ON agent_command_logs (created_at)"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
@@ -303,6 +343,7 @@ def init_db():
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
+    _create_agent_command_logs_table_if_missing()
 
     # Lightweight SQLite-friendly migrations
     signal_columns = {
