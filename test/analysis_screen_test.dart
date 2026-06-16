@@ -79,7 +79,9 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
+    expect(find.text('Analyze Selected Symbol'), findsWidgets);
+    expect(find.text('Validate Manual Order'), findsWidgets);
+    expect(find.text('Submit Live Order'), findsWidgets);
     expect(find.text('KIS Manual Buy/Sell Ticket'), findsOneWidget);
     expect(find.text('Buy'), findsOneWidget);
     expect(find.text('Sell'), findsOneWidget);
@@ -94,12 +96,15 @@ void main() {
     expect(find.text('KIS Scheduler Guarded Sell'), findsNothing);
     expect(
       find.text(
-        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+        'I understand Submit Live Order requires confirm_live and final confirmation.',
       ),
       findsOneWidget,
     );
-    expect(find.text('Analyze & Submit'), findsOneWidget);
-    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
+    expect(
+      find.textContaining('Analysis does not submit an order.'),
+      findsOneWidget,
+    );
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
     expect(api.singleRunCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
@@ -125,24 +130,24 @@ void main() {
     expect(
       find.widgetWithText(
         CheckboxListTile,
-        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+        'I understand Submit Live Order requires confirm_live and final confirmation.',
       ),
       findsOneWidget,
     );
-    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
     expect(
       find.text(
-        'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+        'I understand Submit Live Order requires confirm_live and final confirmation.',
       ),
       findsOneWidget,
     );
-    await tester.tap(find.text('Analyze & Submit'));
+    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
 
     expect(api.kisBuyShadowCalls, 0);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
-    expect(find.text('Analyze & Submit'), findsOneWidget);
+    expect(find.text('Submit Live Order'), findsWidgets);
 
     controller.dispose();
   });
@@ -172,6 +177,31 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('KIS Validate Manual Order does not submit or analyze',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 2200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _AnalysisFakeApi();
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis;
+
+    await tester.pumpWidget(_wrapTrading(controller));
+
+    await tester.tap(find.byKey(const Key('kis_trading_validate_button')));
+    await tester.pumpAndSettle();
+
+    expect(api.validationCalls, 1);
+    expect(api.kisSingleSymbolCalls, 0);
+    expect(api.submitCalls, 0);
+    expect(find.text('Manual order validated. No order submitted.'),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
   testWidgets('Single Symbol Analyze & Buy uses one checkbox and final dialog',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2200);
@@ -194,21 +224,21 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
 
-    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isFalse);
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isFalse);
     await tester.tap(find.text(
-      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      'I understand Submit Live Order requires confirm_live and final confirmation.',
     ));
     await tester.pumpAndSettle();
 
-    expect(_filledButtonEnabled(tester, 'Analyze & Submit'), isTrue);
-    await tester.tap(find.text('Analyze & Submit'));
+    expect(_filledButtonEnabled(tester, 'Submit Live Order'), isTrue);
+    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Analyze & Submit'), findsWidgets);
+    expect(find.text('Submit Live Order'), findsWidgets);
     expect(api.kisLimitedAutoBuyCalls, 0);
     expect(api.kisSingleSymbolCalls, 0);
 
-    await tester.tap(find.text('Submit Live Order'));
+    await _tapFinalSubmitLiveOrderDialog(tester);
     await tester.pumpAndSettle();
 
     expect(api.kisSingleSymbolCalls, 1);
@@ -252,12 +282,12 @@ void main() {
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.tap(find.text(
-      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      'I understand Submit Live Order requires confirm_live and final confirmation.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze & Submit'));
+    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Submit Live Order'));
+    await _tapFinalSubmitLiveOrderDialog(tester);
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Dry-run'), findsWidgets);
@@ -302,12 +332,12 @@ void main() {
     await tester.enterText(
         find.widgetWithText(TextField, 'KR Symbol'), '005380');
     await tester.tap(find.text(
-      'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+      'I understand Submit Live Order requires confirm_live and final confirmation.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Analyze & Submit'));
+    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Submit Live Order'));
+    await _tapFinalSubmitLiveOrderDialog(tester);
     await tester.pumpAndSettle();
 
     expect(api.lastKisSingleSymbol, '005380');
@@ -825,13 +855,17 @@ Future<void> _submitKisAnalyzeBuy(
   await tester.enterText(find.widgetWithText(TextField, 'KR Symbol'), symbol);
   await tester.tap(find.widgetWithText(
     CheckboxListTile,
-    'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+    'I understand Submit Live Order requires confirm_live and final confirmation.',
   ));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Analyze & Submit'));
+  await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('Submit Live Order'));
+  await _tapFinalSubmitLiveOrderDialog(tester);
   await tester.pumpAndSettle();
+}
+
+Future<void> _tapFinalSubmitLiveOrderDialog(WidgetTester tester) async {
+  await tester.tap(find.widgetWithText(FilledButton, 'Submit Live Order').last);
 }
 
 void _expectKisNormalizedSections() {

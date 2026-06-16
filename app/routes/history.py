@@ -35,6 +35,29 @@ def _parse_json_object(raw_value: str | None) -> dict[str, Any]:
     return {}
 
 
+def _json_object_or_none(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+    return None
+
+
+def _payload_operator_summary(*payloads: Any) -> dict[str, Any] | None:
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        summary = _json_object_or_none(payload.get("operator_summary"))
+        if summary is not None:
+            return summary
+    return None
+
+
 def _first_present(*values: Any) -> Any:
     for value in values:
         if value is not None:
@@ -345,6 +368,7 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         ),
         "risk_flags": _payload_list(response_payload, trade_result, request_payload, "risk_flags"),
         "gating_notes": _payload_list(response_payload, trade_result, request_payload, "gating_notes"),
+        "operator_summary": _payload_operator_summary(response_payload, request_payload),
         "gpt_context": _payload_gpt_context(
             response_payload,
             trade_result,

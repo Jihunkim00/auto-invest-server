@@ -6,7 +6,9 @@ import '../../core/widgets/status_badge.dart';
 import '../../models/gpt_risk_context.dart';
 import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/kis_scheduler_simulation.dart';
+import '../../models/candidate.dart';
 import '../../models/log_items.dart';
+import '../../models/watchlist_operator_summary.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
@@ -1092,6 +1094,18 @@ class _RunHistoryCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (run.operatorSummary != null) ...[
+              const SizedBox(height: 10),
+              _KisWatchlistOperatorSummarySection(
+                summary: run.operatorSummary!,
+              ),
+            ] else if (run.isKisPreview) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'No operator summary stored for this run.',
+                style: TextStyle(color: Colors.white60),
+              ),
+            ],
             if (isKisAnalyzeBuy) ...[
               const SizedBox(height: 8),
               Text(
@@ -1205,6 +1219,159 @@ class _RunHistoryCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _KisWatchlistOperatorSummarySection extends StatelessWidget {
+  const _KisWatchlistOperatorSummarySection({required this.summary});
+
+  final WatchlistOperatorSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final bestCandidate = summary.bestCandidate;
+    final whyHold = _operatorWhyHold(summary);
+    final whyNotBuy = _operatorWhyNotBuy(summary);
+    final actionHint = _operatorActionHint(summary.nextManualActionHint);
+    final badges = <String>[
+      'KIS WATCHLIST PREVIEW',
+      'OPERATOR REVIEW',
+      if (summary.previewOnly) 'PREVIEW ONLY',
+      'NO ORDER SUBMIT',
+      'GPT TOP 5',
+      if (summary.failedCount > 0) 'GPT PARTIAL',
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.lightBlueAccent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.lightBlueAccent.withValues(alpha: 0.20),
+        ),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text(
+          'KIS Watchlist Operator Summary',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
+        _BadgeWrap(labels: badges),
+        const SizedBox(height: 10),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _OperatorMetric(
+            label: 'Completed GPT',
+            value: summary.completedGptCount.toString(),
+          ),
+          _OperatorMetric(
+            label: 'Failed GPT',
+            value: summary.failedCount.toString(),
+            alert: summary.failedCount > 0,
+          ),
+          _OperatorMetric(
+            label: 'Not Run',
+            value: summary.notRunCount.toString(),
+          ),
+          _OperatorMetric(
+            label: 'Best Candidate',
+            value: _operatorCandidateLabel(bestCandidate),
+            wide: true,
+          ),
+        ]),
+        const SizedBox(height: 10),
+        _OperatorTextBlock(
+          title: 'Conservative Decision',
+          text: _textOrFallback(summary.conservativeDecisionSummary),
+        ),
+        _OperatorTextBlock(title: 'Why Hold', text: whyHold),
+        _OperatorTextBlock(title: 'Why Not Buy', text: whyNotBuy),
+        _OperatorTextBlock(title: 'Next Manual Action', text: actionHint),
+        if (summary.topRiskFlags.isNotEmpty)
+          _OperatorTextBlock(
+            title: 'Top Risk Flags',
+            text: summary.topRiskFlags.join(', '),
+          ),
+        if (summary.topGatingNotes.isNotEmpty)
+          _OperatorTextBlock(
+            title: 'Top Gating Notes',
+            text: _compactText(summary.topGatingNotes),
+          ),
+      ]),
+    );
+  }
+}
+
+class _OperatorMetric extends StatelessWidget {
+  const _OperatorMetric({
+    required this.label,
+    required this.value,
+    this.alert = false,
+    this.wide = false,
+  });
+
+  final String label;
+  final String value;
+  final bool alert;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = alert ? Colors.amberAccent : Colors.white70;
+    return Container(
+      constraints: BoxConstraints(minWidth: wide ? 220 : 104, maxWidth: 260),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: color.withValues(alpha: 0.82),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          maxLines: wide ? 2 : 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: color, fontWeight: FontWeight.w800),
+        ),
+      ]),
+    );
+  }
+}
+
+class _OperatorTextBlock extends StatelessWidget {
+  const _OperatorTextBlock({required this.title, required this.text});
+
+  final String title;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = _textOrFallback(text);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(display, style: const TextStyle(color: Colors.white)),
+      ]),
     );
   }
 }
@@ -1975,6 +2142,48 @@ String _formatGate(int gateLevel) {
 
 String _fallback(String value, String fallback) {
   return value.isEmpty ? fallback : value;
+}
+
+String _textOrFallback(String value, {String fallback = '-'}) {
+  final text = value.trim();
+  if (text.isEmpty || text == 'null') return fallback;
+  return text;
+}
+
+String _operatorCandidateLabel(Candidate? candidate) {
+  if (candidate == null) return 'None';
+  final name = candidate.name.trim();
+  final score =
+      candidate.finalBuyScore ?? candidate.finalEntryScore ?? candidate.score;
+  final base = name.isEmpty ? candidate.symbol : '${candidate.symbol} $name';
+  final scoreLabel = _numberLabel(score);
+  return scoreLabel == '-' ? base : '$base | Score $scoreLabel';
+}
+
+String _operatorWhyHold(WatchlistOperatorSummary summary) {
+  final best = summary.bestCandidate;
+  if (best != null && best.whyHold.trim().isNotEmpty) return best.whyHold;
+  return 'KIS watchlist preview is advisory-only. No order submitted.';
+}
+
+String _operatorWhyNotBuy(WatchlistOperatorSummary summary) {
+  final best = summary.bestCandidate;
+  if (best != null && best.whyNotBuy.isNotEmpty) {
+    return best.whyNotBuy.join(', ');
+  }
+  if (summary.topRiskFlags.isNotEmpty) return summary.topRiskFlags.join(', ');
+  return 'No executable buy approval was stored for this preview.';
+}
+
+String _operatorActionHint(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized == 'review_top_gpt_candidates_in_trading_tab') {
+    return 'Review top GPT candidates in Trading, validate manually, then confirm live only if all safety gates pass.';
+  }
+  if (normalized.isEmpty || normalized == 'null') {
+    return 'Review the candidate manually before any live order flow.';
+  }
+  return value;
 }
 
 String _primaryLine(String value) {

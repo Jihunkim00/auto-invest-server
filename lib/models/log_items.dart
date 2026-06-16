@@ -1,4 +1,5 @@
 import 'gpt_risk_context.dart';
+import 'watchlist_operator_summary.dart';
 
 class TradingLogItem {
   const TradingLogItem({
@@ -47,6 +48,7 @@ class TradingLogItem {
     this.schedulerRealOrderEnabled,
     this.riskFlags = const [],
     this.gatingNotes = const [],
+    this.operatorSummary,
     this.gptContext = GptRiskContext.empty,
   });
 
@@ -95,6 +97,7 @@ class TradingLogItem {
   final bool? schedulerRealOrderEnabled;
   final List<String> riskFlags;
   final List<String> gatingNotes;
+  final WatchlistOperatorSummary? operatorSummary;
   final GptRiskContext gptContext;
 
   bool get hasOrder => relatedOrderId != null;
@@ -288,6 +291,12 @@ class TradingLogItem {
       _addUnique(labels, 'NO MANUAL SUBMIT');
       _addUnique(labels, 'LIVE AUTO BUY DISABLED');
     }
+    if (operatorSummary != null) {
+      _addUnique(labels, 'KIS WATCHLIST PREVIEW');
+      _addUnique(labels, 'OPERATOR REVIEW');
+      _addUnique(labels, 'NO ORDER SUBMIT');
+      _addUnique(labels, 'GPT TOP 5');
+    }
     if (manualConfirmRequired == true) {
       _addUnique(labels, 'MANUAL CONFIRMATION REQUIRED');
     }
@@ -362,6 +371,8 @@ class TradingLogItem {
           _boolValue(json['scheduler_real_order_enabled']),
       riskFlags: _stringList(json['risk_flags']),
       gatingNotes: _stringList(json['gating_notes']),
+      operatorSummary: WatchlistOperatorSummary.fromJson(
+          json['operator_summary'] ?? json['operatorSummary']),
       gptContext: GptRiskContext.fromJson(json['gpt_context']),
     );
   }

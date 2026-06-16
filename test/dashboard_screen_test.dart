@@ -1220,7 +1220,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('KIS Analyze & Order'), findsOneWidget);
+    expect(find.text('KIS Analyze / Validate / Submit'), findsOneWidget);
     await tester.dragUntilVisible(
       find.text('KIS Manual Buy/Sell Ticket'),
       find.byType(ListView),
