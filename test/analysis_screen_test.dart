@@ -31,9 +31,11 @@ void main() {
 
     await tester.pumpWidget(_wrap(controller));
 
-    expect(find.text('Decision Summary'), findsOneWidget);
-    expect(find.text('No single-symbol decision yet. Run one from Trading.'),
-        findsOneWidget);
+    expect(find.text('No KIS watchlist summary yet.'), findsOneWidget);
+    expect(
+      find.text('Run KIS Watchlist Preview from Dashboard first.'),
+      findsOneWidget,
+    );
     expect(find.text('Run Single Symbol'), findsNothing);
     expect(find.text('KIS Guarded Trading Run Once'), findsNothing);
     expect(find.text('Submit Live KIS Order'), findsNothing);
@@ -213,7 +215,7 @@ void main() {
     expect(api.lastKisSingleSymbol, '005930');
     expect(api.lastKisSingleQuantity, 1);
     expect(api.lastKisSingleConfirmLive, isTrue);
-    expect(find.text('Decision Summary'), findsWidgets);
+    expect(find.text('Analysis Status'), findsWidgets);
 
     controller.dispose();
   });
@@ -834,7 +836,6 @@ Future<void> _submitKisAnalyzeBuy(
 
 void _expectKisNormalizedSections() {
   expect(find.text('Analysis Status'), findsOneWidget);
-  expect(find.text('Decision Summary'), findsOneWidget);
   expect(find.text('Score vs Threshold'), findsOneWidget);
   expect(find.text('Main Reason'), findsOneWidget);
   expect(find.text('Technical Snapshot'), findsOneWidget);
