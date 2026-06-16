@@ -186,6 +186,115 @@ def test_recent_runs_preserves_kis_dry_run_safety_fields(client, db_session):
     assert item["gating_notes"] == ["Dry-run only."]
 
 
+def test_recent_runs_exposes_kis_watchlist_operator_summary(client, db_session):
+    operator_summary = {
+        "mode": "kis_watchlist_gpt_operator_summary",
+        "preview_only": True,
+        "trading_enabled": False,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "completed_gpt_count": 5,
+        "failed_count": 0,
+        "not_run_count": 45,
+        "best_candidate": {
+            "rank": 1,
+            "symbol": "005930",
+            "name": "Samsung Electronics",
+            "final_buy_score": 64,
+        },
+        "conservative_decision_summary": (
+            "005930 is the current preview leader; this is advisory-only."
+        ),
+        "top_risk_flags": ["preview_only", "kr_trading_disabled"],
+        "top_gating_notes": ["No order submitted."],
+        "next_manual_action_hint": "review_top_gpt_candidates_in_trading_tab",
+    }
+    db_session.add(
+        TradeRunLog(
+            run_key="kis-preview-summary",
+            trigger_source="manual_kis_preview",
+            symbol="005930",
+            mode="kis_watchlist_preview",
+            gate_level=2,
+            stage="done",
+            result="preview_only",
+            reason="kr_trading_disabled",
+            order_id=None,
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "mode": "kis_watchlist_preview",
+                    "dry_run": True,
+                    "preview_only": True,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "action": "hold",
+                    "operator_summary": operator_summary,
+                    "risk_flags": ["preview_only", "kr_trading_disabled"],
+                    "gating_notes": ["No order submitted."],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/runs/recent")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["provider"] == "kis"
+    assert item["mode"] == "kis_watchlist_preview"
+    assert item["preview_only"] is True
+    assert item["real_order_submitted"] is False
+    assert item["broker_submit_called"] is False
+    assert item["manual_submit_called"] is False
+    assert item["operator_summary"] == operator_summary
+    assert item["operator_summary"]["best_candidate"]["symbol"] == "005930"
+
+
+def test_recent_runs_handles_missing_or_malformed_operator_summary(
+    client, db_session
+):
+    db_session.add_all(
+        [
+            TradeRunLog(
+                run_key="old-kis-preview",
+                trigger_source="manual_kis_preview",
+                symbol="WATCHLIST",
+                mode="kis_watchlist_preview",
+                result="preview_only",
+                response_payload=json.dumps(
+                    {
+                        "provider": "kis",
+                        "market": "KR",
+                        "preview_only": True,
+                    }
+                ),
+            ),
+            TradeRunLog(
+                run_key="malformed-kis-preview",
+                trigger_source="manual_kis_preview",
+                symbol="WATCHLIST",
+                mode="kis_watchlist_preview",
+                result="preview_only",
+                response_payload="{not-valid-json",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.get("/runs/recent")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 2
+    assert [item["operator_summary"] for item in items] == [None, None]
+
+
 def test_recent_runs_serializes_kis_single_symbol_scores(client, db_session):
     db_session.add(
         TradeRunLog(

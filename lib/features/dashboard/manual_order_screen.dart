@@ -38,7 +38,7 @@ class TradingScreen extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 isKis
-                    ? 'Selected broker: KIS live. Analyze the selected KR symbol or use manual BUY/SELL ticket.'
+                    ? 'Selected broker: KIS live. Analyze selected KR symbols, validate manual orders, then submit only after confirm_live and final confirmation.'
                     : 'Selected broker: Alpaca paper. Analyze and paper-buy one US symbol.',
                 style: const TextStyle(color: Colors.white70),
               ),
@@ -105,10 +105,16 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
     final qty = int.tryParse(_qtyController.text.trim());
     final canAnalyze =
         symbol.isNotEmpty && !controller.kisSingleSymbolTradingLoading;
+    final canValidate = symbol.isNotEmpty &&
+        qty != null &&
+        qty > 0 &&
+        !controller.orderValidationLoading &&
+        !controller.kisSingleSymbolTradingLoading;
     final canSubmit = symbol.isNotEmpty &&
         qty != null &&
         qty > 0 &&
         controller.kisGuardedRunConfirmation &&
+        !controller.orderValidationLoading &&
         !controller.kisSingleSymbolTradingLoading;
     final result = controller.latestKisSingleSymbolTradingResult;
     final sourceContext = controller.kisTradingSourceContext;
@@ -120,7 +126,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           const Icon(Icons.verified_user_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('KIS Analyze & Order',
+            child: Text('KIS Analyze / Validate / Submit',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           _SoftBadge(
@@ -137,11 +143,18 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         const SizedBox(height: 8),
         const Wrap(spacing: 8, runSpacing: 8, children: [
           _SoftBadge(
-              text: 'Single Symbol Analyze & Buy',
-              color: Colors.lightBlueAccent),
+              text: 'Analyze Selected Symbol', color: Colors.lightBlueAccent),
+          _SoftBadge(text: 'Validate Manual Order', color: Colors.white70),
+          _SoftBadge(text: 'Submit Live Order', color: Colors.white70),
           _SoftBadge(text: 'REQUESTED SYMBOL ONLY', color: Colors.white70),
           _SoftBadge(text: 'NO WATCHLIST FALLBACK', color: Colors.white70),
         ]),
+        const SizedBox(height: 10),
+        const _ReasonBanner(
+          text:
+              'Analysis does not submit an order. Validation does not submit an order. Live submit requires confirm_live and final confirmation. KIS live auto-buy remains disabled.',
+          color: Colors.amberAccent,
+        ),
         if (sourceContext != null) ...[
           const SizedBox(height: 12),
           _KisSourceContextPanel(sourceContext: sourceContext),
@@ -228,7 +241,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
               : (value) =>
                   controller.setKisGuardedRunConfirmation(value == true),
           title: const Text(
-            'I understand this analyzes only the selected KIS symbol and may submit only after guarded safety gates pass.',
+            'I understand Submit Live Order requires confirm_live and final confirmation.',
           ),
         ),
         Wrap(spacing: 8, runSpacing: 8, children: [
@@ -260,7 +273,45 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                 : const Icon(Icons.search),
             label: Text(controller.kisSingleSymbolTradingLoading
                 ? 'Analyzing symbol...'
-                : 'Analyze'),
+                : 'Analyze Selected Symbol'),
+          ),
+          OutlinedButton.icon(
+            key: const Key('kis_trading_validate_button'),
+            onPressed: canValidate
+                ? () async {
+                    final validation =
+                        await controller.validateKisLiveOrderDraft(
+                      symbol: symbol,
+                      side: 'buy',
+                      qty: qty,
+                      sourceMetadata: controller.kisTradingSourceContext,
+                    );
+                    if (!context.mounted) return;
+                    final success =
+                        validation?.validatedForSubmission == true;
+                    final message = validation == null
+                        ? controller.orderValidationError ??
+                            'KIS validation failed. No order submitted.'
+                        : success
+                            ? 'Manual order validated. No order submitted.'
+                            : validation.message ??
+                                'Manual order validation blocked. No order submitted.';
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(message),
+                      backgroundColor:
+                          success ? Colors.green : Colors.redAccent,
+                    ));
+                  }
+                : null,
+            icon: controller.orderValidationLoading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.fact_check_outlined),
+            label: Text(controller.orderValidationLoading
+                ? 'Validating...'
+                : 'Validate Manual Order'),
           ),
           FilledButton.icon(
             key: const Key('kis_trading_analyze_submit_button'),
@@ -290,7 +341,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                   }
                 : null,
             icon: const Icon(Icons.verified_outlined),
-            label: const Text('Analyze & Submit'),
+            label: const Text('Submit Live Order'),
           ),
         ]),
         if (!canSubmit) ...[
@@ -298,7 +349,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           _ReasonBanner(
             text: controller.kisGuardedRunConfirmation
                 ? 'Enter a KR symbol and quantity.'
-                : 'Confirm that a real KIS order may be submitted.',
+                : 'Check confirm_live manually before final live submit.',
           ),
         ],
         if (controller.kisSingleSymbolTradingError != null) ...[

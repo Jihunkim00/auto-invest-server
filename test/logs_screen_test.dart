@@ -72,6 +72,107 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Logs screen renders KIS watchlist operator summary read-only',
+      (tester) async {
+    final controller = DashboardController(
+      _FakeLogsApiClient(
+        orders: const [],
+        signals: const [],
+        runs: [
+          TradingLogItem.fromJson({
+            'id': 18,
+            'run_key': 'kis-preview-summary',
+            'provider': 'kis',
+            'market': 'KR',
+            'symbol': 'WATCHLIST',
+            'trigger_source': 'manual_kis_preview',
+            'mode': 'kis_watchlist_preview',
+            'action': 'hold',
+            'result': 'preview_only',
+            'reason': 'kr_trading_disabled',
+            'gate_level': 2,
+            'created_at': '2026-05-08T00:01:00',
+            'dry_run': true,
+            'preview_only': true,
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'operator_summary': {
+              'mode': 'kis_watchlist_gpt_operator_summary',
+              'preview_only': true,
+              'trading_enabled': false,
+              'real_order_submitted': false,
+              'broker_submit_called': false,
+              'manual_submit_called': false,
+              'completed_gpt_count': 5,
+              'failed_count': 1,
+              'not_run_count': 44,
+              'top_gpt_candidates': [
+                {
+                  'rank': 1,
+                  'symbol': '005930',
+                  'name': 'Samsung Electronics',
+                  'final_buy_score': 64,
+                  'main_risk_flags': ['preview_only'],
+                  'why_hold':
+                      'KIS watchlist preview is advisory-only and KR trading is disabled.',
+                  'why_not_buy': ['preview_only', 'kr_trading_disabled'],
+                  'next_manual_action_hint':
+                      'Open Trading, run KIS Analyze & Buy, validate manually, then confirm live only if all safety gates pass.',
+                },
+              ],
+              'best_candidate': {
+                'rank': 1,
+                'symbol': '005930',
+                'name': 'Samsung Electronics',
+                'final_buy_score': 64,
+                'main_risk_flags': ['preview_only'],
+                'why_hold':
+                    'KIS watchlist preview is advisory-only and KR trading is disabled.',
+                'why_not_buy': ['preview_only', 'kr_trading_disabled'],
+                'next_manual_action_hint':
+                    'Open Trading, run KIS Analyze & Buy, validate manually, then confirm live only if all safety gates pass.',
+              },
+              'top_risk_flags': ['preview_only', 'kr_trading_disabled'],
+              'top_gating_notes': ['No real KIS order submitted.'],
+              'conservative_decision_summary':
+                  '005930 is the current preview leader; this is advisory-only.',
+              'next_manual_action_hint':
+                  'review_top_gpt_candidates_in_trading_tab',
+            },
+          }),
+        ],
+      ),
+      autoload: false,
+    );
+
+    await _pumpLogs(tester, controller);
+
+    expect(find.text('KIS Watchlist Operator Summary'), findsOneWidget);
+    expect(find.text('KIS WATCHLIST PREVIEW'), findsWidgets);
+    expect(find.text('OPERATOR REVIEW'), findsWidgets);
+    expect(find.text('PREVIEW ONLY'), findsWidgets);
+    expect(find.text('NO ORDER SUBMIT'), findsWidgets);
+    expect(find.text('GPT TOP 5'), findsWidgets);
+    expect(find.text('GPT PARTIAL'), findsOneWidget);
+    expect(find.text('Completed GPT'), findsOneWidget);
+    expect(find.text('Failed GPT'), findsOneWidget);
+    expect(find.text('Not Run'), findsOneWidget);
+    expect(find.text('005930 Samsung Electronics | Score 64'), findsOneWidget);
+    expect(find.text('Conservative Decision'), findsOneWidget);
+    expect(find.text('Why Hold'), findsOneWidget);
+    expect(find.text('Why Not Buy'), findsOneWidget);
+    expect(find.text('Next Manual Action'), findsOneWidget);
+    expect(
+      find.textContaining(
+          'validate manually, then confirm live only if all safety gates pass'),
+      findsWidgets,
+    );
+    expect(find.text('Submit Live Order'), findsNothing);
+
+    controller.dispose();
+  });
+
   testWidgets('Logs screen renders Single Symbol Analyze & Buy runs readably',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2600);

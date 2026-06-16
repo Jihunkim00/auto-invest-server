@@ -51,7 +51,7 @@ void main() {
 
     await tester.tap(find.text('Trading'));
     await tester.pumpAndSettle();
-    expect(find.text('Single Symbol Analyze & Buy'), findsOneWidget);
+    expect(find.text('KIS Analyze / Validate / Submit'), findsOneWidget);
     expect(find.text('KIS Guarded Trading'), findsNothing);
     expect(find.text('KIS / KR'), findsWidgets);
 

@@ -60,6 +60,97 @@ void main() {
     expect(item.realOrderSubmitted, isFalse);
   });
 
+  test('TradingLogItem parses KIS watchlist operator summary safely', () {
+    final item = TradingLogItem.fromJson({
+      'id': 15,
+      'run_key': 'kis-preview-summary',
+      'provider': 'kis',
+      'market': 'KR',
+      'symbol': 'WATCHLIST',
+      'trigger_source': 'manual_kis_preview',
+      'mode': 'kis_watchlist_preview',
+      'action': 'hold',
+      'result': 'preview_only',
+      'reason': 'kr_trading_disabled',
+      'gate_level': 2,
+      'created_at': '2026-05-08T00:01:00',
+      'dry_run': true,
+      'preview_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+      'operator_summary': {
+        'mode': 'kis_watchlist_gpt_operator_summary',
+        'preview_only': true,
+        'trading_enabled': false,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        'completed_gpt_count': 5,
+        'failed_count': 1,
+        'not_run_count': 44,
+        'top_gpt_candidates': [
+          {
+            'rank': 1,
+            'symbol': '005930',
+            'name': 'Samsung Electronics',
+            'final_buy_score': 64,
+            'main_risk_flags': ['preview_only'],
+          },
+        ],
+        'best_candidate': {
+          'rank': 1,
+          'symbol': '005930',
+          'name': 'Samsung Electronics',
+          'final_buy_score': 64,
+          'main_risk_flags': ['preview_only'],
+        },
+        'top_risk_flags': ['preview_only', 'kr_trading_disabled'],
+        'top_gating_notes': ['No order submitted.'],
+        'conservative_decision_summary':
+            '005930 is the current preview leader; this is advisory-only.',
+        'next_manual_action_hint': 'review_top_gpt_candidates_in_trading_tab',
+      },
+    });
+
+    expect(item.operatorSummary, isNotNull);
+    expect(item.operatorSummary!.completedGptCount, 5);
+    expect(item.operatorSummary!.failedCount, 1);
+    expect(item.operatorSummary!.notRunCount, 44);
+    expect(item.operatorSummary!.bestCandidate?.symbol, '005930');
+    expect(
+      item.safetyBadges,
+      containsAll([
+        'KIS WATCHLIST PREVIEW',
+        'OPERATOR REVIEW',
+        'NO ORDER SUBMIT',
+        'GPT TOP 5',
+      ]),
+    );
+  });
+
+  test('TradingLogItem keeps old KIS preview records without summary', () {
+    final item = TradingLogItem.fromJson({
+      'id': 16,
+      'run_key': 'old-kis-preview',
+      'provider': 'kis',
+      'market': 'KR',
+      'symbol': 'WATCHLIST',
+      'trigger_source': 'manual_kis_preview',
+      'mode': 'kis_watchlist_preview',
+      'action': 'hold',
+      'result': 'preview_only',
+      'reason': 'kr_trading_disabled',
+      'gate_level': 2,
+      'created_at': '2026-05-08T00:01:00',
+      'preview_only': true,
+    });
+
+    expect(item.operatorSummary, isNull);
+    expect(item.sourceLabel, 'KIS PREVIEW');
+    expect(item.safetyBadges, contains('PREVIEW ONLY'));
+  });
+
   test('TradingLogItem labels KIS single-symbol Analyze & Buy distinctly', () {
     final item = TradingLogItem.fromJson({
       'id': 14,
