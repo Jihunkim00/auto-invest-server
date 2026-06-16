@@ -607,9 +607,57 @@ void main() {
     expect(candidate.gptAnalysisStatus, 'failed');
     expect(candidate.finalBuyScore, 58);
     expect(find.text('GPT / AI Analysis'), findsOneWidget);
-    expect(find.text('FAILED'), findsOneWidget);
+    expect(find.text('FAILED'), findsWidgets);
     expect(find.text('GPT analysis unavailable'), findsOneWidget);
     expect(find.text('RuntimeError: gpt timeout'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('KR scan renders KIS watchlist GPT operator summary',
+      (tester) async {
+    final api = _FakeApiClient(
+      watchlistPayload: _realisticWatchlistPayload(
+        symbol: '005930',
+        name: 'Samsung Electronics',
+        blockReason: 'kr_trading_disabled',
+        entryScore: 64,
+        quantBuyScore: 62,
+        quantSellScore: 18,
+        aiBuyScore: 70,
+        aiSellScore: 20,
+        gptUsed: true,
+        gptAnalysisStatus: 'completed',
+        gptReason: 'KR preview advisory reason',
+      ),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..usWatchlist = _usWatchlist
+      ..krWatchlist = _krWatchlist;
+
+    await tester.pumpWidget(_wrap(
+      controller,
+      () => WatchlistSection(controller: controller),
+    ));
+
+    await tester.tap(find.text('Run Watchlist Analysis'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('KIS Watchlist GPT Summary'), findsOneWidget);
+    expect(find.text('GPT TOP 5'), findsOneWidget);
+    expect(find.text('NO ORDER SUBMIT'), findsWidgets);
+    expect(find.text('OPERATOR REVIEW'), findsWidgets);
+    expect(find.text('COMPLETED GPT'), findsOneWidget);
+    expect(find.text('NOT RUN'), findsOneWidget);
+    expect(find.text('FAILED'), findsWidgets);
+    expect(find.text('BEST CANDIDATE'), findsOneWidget);
+    expect(find.text('GPT Top 5'), findsOneWidget);
+    expect(find.textContaining('005930 / Samsung Electronics'), findsWidgets);
+    expect(
+      find.textContaining('review_top_gpt_candidates_in_trading_tab'),
+      findsOneWidget,
+    );
 
     controller.dispose();
   });
@@ -1175,6 +1223,18 @@ void main() {
     expect(candidate.previewOnly, isTrue);
     expect(candidate.tradingEnabled, isFalse);
     expect(candidate.realOrderSubmitted, isFalse);
+    expect(candidate.operatorSummary, contains('005930 remains hold'));
+    expect(candidate.whyHold,
+        'KIS watchlist preview is advisory-only and KR trading is disabled.');
+    expect(candidate.whyNotBuy, contains('preview_only'));
+    expect(candidate.nextManualActionHint, contains('Open Trading'));
+    expect(result.operatorSummary, isNotNull);
+    expect(result.operatorSummary!.completedGptCount, 1);
+    expect(result.operatorSummary!.notRunCount, 45);
+    expect(result.operatorSummary!.failedCount, 0);
+    expect(result.operatorSummary!.topGptCandidates.single.symbol, '005930');
+    expect(result.operatorSummary!.bestCandidate?.symbol, '005930');
+    expect(result.operatorSummary!.previewOnly, isTrue);
   });
 
   testWidgets('Watchlist Refresh reloads watchlist and latest run summary',
@@ -2270,13 +2330,14 @@ Map<String, dynamic> _realisticCandidatePayload({
   String? aiReason,
   String? gptActionHint,
 }) {
+  final isKr = RegExp(r'^\d{6}$').hasMatch(symbol);
   return {
     'symbol': symbol,
     if (name != null) 'company_name': name,
-    'provider': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'kis' : 'alpaca',
-    'market': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'KOSPI' : 'US',
-    'currency': RegExp(r'^\d{6}$').hasMatch(symbol) ? 'KRW' : 'USD',
-    'current_price': RegExp(r'^\d{6}$').hasMatch(symbol) ? 72000 : 189.45,
+    'provider': isKr ? 'kis' : 'alpaca',
+    'market': isKr ? 'KOSPI' : 'US',
+    'currency': isKr ? 'KRW' : 'USD',
+    'current_price': isKr ? 72000 : 189.45,
     'action': 'hold',
     'action_hint': 'watch',
     'entry_ready': false,
@@ -2288,6 +2349,17 @@ Map<String, dynamic> _realisticCandidatePayload({
     'final_entry_score': entryScore,
     'final_score': entryScore,
     'quant_score': quantScore,
+    'operator_summary':
+        '$symbol remains hold in KIS preview. GPT status=${gptAnalysisStatus ?? 'completed'}; final_buy_score=${entryScore.toStringAsFixed(2)}; blocker=$blockReason.',
+    'why_hold':
+        'KIS watchlist preview is advisory-only and KR trading is disabled.',
+    'why_not_buy': [
+      'preview_only',
+      'kr_trading_disabled',
+      blockReason,
+    ],
+    'next_manual_action_hint':
+        'Open Trading, run KIS Analyze & Buy, validate manually, then confirm live only if all safety gates pass.',
     'final_buy_score': entryScore,
     'final_sell_score': 18,
     'effective_min_entry_score': 65,
@@ -2302,11 +2374,11 @@ Map<String, dynamic> _realisticCandidatePayload({
     'indicator_status': 'ok',
     'indicator_bar_count': 100,
     'indicator_payload': {
-      'ema20': RegExp(r'^\d{6}$').hasMatch(symbol) ? 70000 : 181.2,
-      'ema50': RegExp(r'^\d{6}$').hasMatch(symbol) ? 68000 : 176.8,
-      'vwap': RegExp(r'^\d{6}$').hasMatch(symbol) ? 70500 : 184.1,
+      'ema20': isKr ? 70000 : 181.2,
+      'ema50': isKr ? 68000 : 176.8,
+      'vwap': isKr ? 70500 : 184.1,
       'rsi': 58.5,
-      'atr': RegExp(r'^\d{6}$').hasMatch(symbol) ? 1200 : 3.2,
+      'atr': isKr ? 1200 : 3.2,
       'volume_ratio': 1.24,
       'recent_return': 0.041,
       'momentum': 0.018,
@@ -2319,6 +2391,14 @@ Map<String, dynamic> _realisticCandidatePayload({
     'no_order_reason': 'risk gate blocked order creation',
     'entry_penalty': entryPenalty,
     'hard_block_new_buy': hardBlockNewBuy,
+    if (isKr) 'preview_only': true,
+    if (isKr) 'trading_enabled': false,
+    if (isKr) 'real_order_submitted': false,
+    if (isKr) 'risk_flags': ['kr_trading_disabled', 'preview_only'],
+    if (isKr)
+      'gating_notes': [
+        'KR preview uses the shared signal/risk vocabulary but trading is disabled.'
+      ],
     if (gptUsed != null) 'gpt_used': gptUsed,
     if (gptAnalysisStatus != null) 'gpt_analysis_status': gptAnalysisStatus,
     if (gptAnalysisReason != null) 'gpt_analysis_reason': gptAnalysisReason,
@@ -2394,6 +2474,62 @@ Map<String, dynamic> _realisticWatchlistPayload({
     'order_id': null,
     'final_best_candidate': candidate,
     'final_ranked_candidates': [candidate],
+    'operator_summary': _operatorSummaryPayload(candidate),
+  };
+}
+
+Map<String, dynamic> _operatorSummaryPayload(Map<String, dynamic> candidate) {
+  return {
+    'mode': 'kis_watchlist_gpt_operator_summary',
+    'preview_only': true,
+    'trading_enabled': false,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'completed_gpt_count': 1,
+    'not_run_count': 45,
+    'failed_count': 0,
+    'top_gpt_candidates': [
+      {
+        'rank': 1,
+        'symbol': candidate['symbol'],
+        'name': candidate['company_name'] ?? candidate['name'],
+        'gpt_analysis_status': candidate['gpt_analysis_status'] ?? 'completed',
+        'gpt_used': candidate['gpt_used'] ?? true,
+        'quant_buy_score': candidate['quant_buy_score'],
+        'quant_sell_score': candidate['quant_sell_score'],
+        'ai_buy_score': candidate['ai_buy_score'],
+        'ai_sell_score': candidate['ai_sell_score'],
+        'final_buy_score': candidate['final_buy_score'],
+        'final_sell_score': candidate['final_sell_score'],
+        'confidence': candidate['confidence'],
+        'action_hint': candidate['action_hint'],
+        'main_risk_flags': candidate['risk_flags'] ?? ['preview_only'],
+        'short_reason': candidate['reason'],
+      },
+    ],
+    'best_candidate': {
+      'rank': 1,
+      'symbol': candidate['symbol'],
+      'name': candidate['company_name'] ?? candidate['name'],
+      'gpt_analysis_status': candidate['gpt_analysis_status'] ?? 'completed',
+      'gpt_used': candidate['gpt_used'] ?? true,
+      'quant_buy_score': candidate['quant_buy_score'],
+      'quant_sell_score': candidate['quant_sell_score'],
+      'ai_buy_score': candidate['ai_buy_score'],
+      'ai_sell_score': candidate['ai_sell_score'],
+      'final_buy_score': candidate['final_buy_score'],
+      'final_sell_score': candidate['final_sell_score'],
+      'confidence': candidate['confidence'],
+      'action_hint': candidate['action_hint'],
+      'main_risk_flags': candidate['risk_flags'] ?? ['preview_only'],
+      'short_reason': candidate['reason'],
+    },
+    'top_risk_flags': candidate['risk_flags'] ?? ['preview_only'],
+    'top_gating_notes': candidate['gating_notes'] ?? ['kr_trading_disabled'],
+    'conservative_decision_summary':
+        '${candidate['symbol']} is the current preview leader after GPT enrichment; this is advisory-only.',
+    'next_manual_action_hint': 'review_top_gpt_candidates_in_trading_tab',
   };
 }
 
@@ -2456,6 +2592,14 @@ Map<String, dynamic> _kisPreviewPayload() {
     'confidence': 0.69,
     'gpt_reason': 'KR preview advisory reason',
     'gpt_used': true,
+    'gpt_analysis_status': 'completed',
+    'operator_summary':
+        '005930 remains hold in KIS preview. GPT status=completed; final_buy_score=52.00; blocker=kr_trading_disabled.',
+    'why_hold':
+        'KIS watchlist preview is advisory-only and KR trading is disabled.',
+    'why_not_buy': ['preview_only', 'kr_trading_disabled'],
+    'next_manual_action_hint':
+        'Open Trading, run KIS Analyze & Buy, validate manually, then confirm live only if all safety gates pass.',
     'block_reason': 'kr_trading_disabled',
     'block_reasons': ['kr_trading_disabled'],
     'risk_flags': ['preview_only'],
@@ -2476,6 +2620,7 @@ Map<String, dynamic> _kisPreviewPayload() {
     'reason': 'kr_trading_disabled',
     'final_best_candidate': candidate,
     'final_ranked_candidates': [candidate],
+    'operator_summary': _operatorSummaryPayload(candidate),
   };
 }
 

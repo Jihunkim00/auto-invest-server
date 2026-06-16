@@ -80,4 +80,22 @@ void main() {
     expect(candidate.aiReason, 'KR quant and GPT context are aligned.');
     expect(candidate.hasRiskContext, isTrue);
   });
+
+  test('Candidate parses KIS operator-facing summary fields', () {
+    final candidate = Candidate.fromJson({
+      'symbol': '005930',
+      'operator_summary': '005930 remains hold in KIS preview.',
+      'why_hold':
+          'KIS watchlist preview is advisory-only and KR trading is disabled.',
+      'why_not_buy': ['preview_only', 'kr_trading_disabled'],
+      'next_manual_action_hint':
+          'Open Trading, run KIS Analyze & Buy, validate manually.',
+    });
+
+    expect(candidate.operatorSummary, contains('remains hold'));
+    expect(candidate.whyHold, contains('advisory-only'));
+    expect(candidate.whyNotBuy, contains('preview_only'));
+    expect(candidate.nextManualActionHint, contains('Open Trading'));
+    expect(candidate.hasRiskContext, isTrue);
+  });
 }
