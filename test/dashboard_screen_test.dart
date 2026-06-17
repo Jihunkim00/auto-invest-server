@@ -1140,7 +1140,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('Pre-Live Operations runs exit preflight without submit side effects',
+  testWidgets(
+      'Pre-Live Operations runs exit preflight without submit side effects',
       (tester) async {
     final api = FakeKisApiClient();
     final controller = DashboardController(api, autoload: false)
@@ -1179,13 +1180,16 @@ void main() {
     await _showDashboardSection(tester, const Key('pre_live_operations_card'));
 
     final card = find.byKey(const Key('pre_live_operations_card'));
-    expect(find.descendant(of: card, matching: find.text('Pre-Live Operations')),
+    expect(
+        find.descendant(of: card, matching: find.text('Pre-Live Operations')),
         findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('PREFLIGHT FIRST')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('TICKET PREFILL ONLY')),
+    expect(
+        find.descendant(of: card, matching: find.text('TICKET PREFILL ONLY')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('CONFIRM_LIVE MANUAL')),
+    expect(
+        find.descendant(of: card, matching: find.text('CONFIRM_LIVE MANUAL')),
         findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('LIVE AUTO BUY OFF')),
         findsOneWidget);

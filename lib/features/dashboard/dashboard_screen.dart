@@ -168,8 +168,9 @@ class _PreLiveOperationsCard extends StatelessWidget {
           ),
           _ReadinessBadge(
             text: preparedSellTicket ? 'TICKET READY' : 'REVIEW MODE',
-            color:
-                preparedSellTicket ? Colors.greenAccent : Colors.lightBlueAccent,
+            color: preparedSellTicket
+                ? Colors.greenAccent
+                : Colors.lightBlueAccent,
           ),
         ]),
         const SizedBox(height: 12),

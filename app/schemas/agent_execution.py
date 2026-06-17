@@ -8,9 +8,11 @@ from pydantic import BaseModel, Field
 class AgentExecutionSafetyFlags(BaseModel):
     safe_execution_only: bool = True
     execution_blocked_for_live_actions: bool = True
+    prefill_only: bool = False
     real_order_submitted: bool = False
     broker_submit_called: bool = False
     manual_submit_called: bool = False
+    confirm_live_auto_checked: bool = False
     setting_changed: bool = False
     scheduler_changed: bool = False
     validation_called: bool = False

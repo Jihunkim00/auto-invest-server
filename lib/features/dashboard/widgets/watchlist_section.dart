@@ -3645,10 +3645,8 @@ class _KisLimitedAutoSellCard extends StatelessWidget {
         ]),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          const _SoftBadge(
-              text: 'READINESS REVIEW', color: Colors.greenAccent),
-          const _SoftBadge(
-              text: 'NO ENABLE ACTION', color: Colors.amberAccent),
+          const _SoftBadge(text: 'READINESS REVIEW', color: Colors.greenAccent),
+          const _SoftBadge(text: 'NO ENABLE ACTION', color: Colors.amberAccent),
           const _SoftBadge(
               text: 'STOP-LOSS EXECUTION', color: Colors.lightBlueAccent),
           const _SoftBadge(

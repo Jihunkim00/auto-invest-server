@@ -177,7 +177,8 @@ void main() {
     expect(find.text('Prepare Manual Sell Ticket'), findsOneWidget);
     expect(find.text('TICKET PREFILL ONLY'), findsWidgets);
     expect(
-      find.text('Ticket prefill does not validate, check confirm_live, or submit.'),
+      find.text(
+          'Ticket prefill does not validate, check confirm_live, or submit.'),
       findsOneWidget,
     );
     expect(find.text('Developer Raw Payload'), findsOneWidget);
