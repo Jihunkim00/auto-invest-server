@@ -5,7 +5,9 @@ from app.config import get_settings
 from app.db.init_db import init_db
 from app.routes.account import router as account_router
 from app.routes.agent import router as agent_router
+from app.routes.agent_execution import router as agent_execution_router
 from app.routes.agent_plans import router as agent_plans_router
+from app.routes.agent_schedules import router as agent_schedules_router
 from app.routes.brokers import router as brokers_router
 from app.routes.health import router as health_router
 from app.routes.history import router as history_router
@@ -60,6 +62,8 @@ def on_shutdown():
 app.include_router(health_router)
 app.include_router(agent_router)
 app.include_router(agent_plans_router)
+app.include_router(agent_execution_router)
+app.include_router(agent_schedules_router)
 app.include_router(brokers_router)
 app.include_router(kis_router)
 app.include_router(account_router)
