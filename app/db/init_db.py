@@ -335,6 +335,161 @@ def _create_agent_command_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_created_at ON agent_command_logs (created_at)"))
 
 
+def _create_agent_plan_tables_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_plans (
+                    id INTEGER PRIMARY KEY,
+                    plan_key VARCHAR(80) NOT NULL UNIQUE,
+                    conversation_id VARCHAR(120),
+                    command_log_id INTEGER,
+                    schema_version VARCHAR(80) NOT NULL DEFAULT 'agent_plan_v1',
+                    command_type VARCHAR(80) NOT NULL,
+                    domain VARCHAR(40) NOT NULL,
+                    intent VARCHAR(120) NOT NULL DEFAULT 'unknown',
+                    market VARCHAR(10),
+                    provider VARCHAR(20),
+                    symbol VARCHAR(20),
+                    side VARCHAR(10),
+                    risk_level VARCHAR(40) NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    plan_title TEXT NOT NULL,
+                    plan_summary TEXT NOT NULL,
+                    user_visible_summary TEXT NOT NULL,
+                    command_json TEXT NOT NULL,
+                    execution_policy_json TEXT NOT NULL,
+                    safety_json TEXT NOT NULL,
+                    scope_json TEXT NOT NULL,
+                    scope_hash VARCHAR(64) NOT NULL,
+                    requires_auth BOOLEAN NOT NULL DEFAULT 0,
+                    requires_risk_approval BOOLEAN NOT NULL DEFAULT 0,
+                    requires_confirm_live BOOLEAN NOT NULL DEFAULT 0,
+                    requires_recent_validation BOOLEAN NOT NULL DEFAULT 0,
+                    allow_live_order BOOLEAN NOT NULL DEFAULT 0,
+                    allow_setting_change BOOLEAN NOT NULL DEFAULT 0,
+                    allow_scheduler_change BOOLEAN NOT NULL DEFAULT 0,
+                    approved_auth_request_id INTEGER,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    expires_at DATETIME,
+                    cancelled_at DATETIME,
+                    cancellation_reason TEXT
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_plans_plan_key ON agent_plans (plan_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_conversation_id ON agent_plans (conversation_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_command_log_id ON agent_plans (command_log_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_command_type ON agent_plans (command_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_domain ON agent_plans (domain)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_market ON agent_plans (market)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_provider ON agent_plans (provider)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_symbol ON agent_plans (symbol)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_risk_level ON agent_plans (risk_level)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_status ON agent_plans (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_scope_hash ON agent_plans (scope_hash)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_plans_approved_auth_request_id "
+                "ON agent_plans (approved_auth_request_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_created_at ON agent_plans (created_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plans_expires_at ON agent_plans (expires_at)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS auth_approval_requests (
+                    id INTEGER PRIMARY KEY,
+                    approval_key VARCHAR(80) NOT NULL UNIQUE,
+                    plan_id INTEGER NOT NULL,
+                    command_log_id INTEGER,
+                    conversation_id VARCHAR(120),
+                    status VARCHAR(40) NOT NULL,
+                    auth_type VARCHAR(60) NOT NULL,
+                    risk_level VARCHAR(40) NOT NULL,
+                    scope_hash VARCHAR(64) NOT NULL,
+                    scope_json TEXT NOT NULL,
+                    requested_action_summary TEXT NOT NULL,
+                    user_visible_warning TEXT NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    approved_at DATETIME,
+                    rejected_at DATETIME,
+                    cancelled_at DATETIME,
+                    used_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    metadata_json TEXT
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_auth_approval_requests_approval_key "
+                "ON auth_approval_requests (approval_key)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_plan_id ON auth_approval_requests (plan_id)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_command_log_id "
+                "ON auth_approval_requests (command_log_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_conversation_id "
+                "ON auth_approval_requests (conversation_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_status ON auth_approval_requests (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_auth_type ON auth_approval_requests (auth_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_risk_level ON auth_approval_requests (risk_level)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_scope_hash ON auth_approval_requests (scope_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_expires_at ON auth_approval_requests (expires_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_requests_created_at ON auth_approval_requests (created_at)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS auth_approval_tokens (
+                    id INTEGER PRIMARY KEY,
+                    approval_request_id INTEGER NOT NULL,
+                    token_hash VARCHAR(64) NOT NULL UNIQUE,
+                    token_type VARCHAR(40) NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    scope_hash VARCHAR(64) NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    used_at DATETIME,
+                    revoked_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_approval_request_id "
+                "ON auth_approval_tokens (approval_request_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_auth_approval_tokens_token_hash "
+                "ON auth_approval_tokens (token_hash)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_token_type ON auth_approval_tokens (token_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_status ON auth_approval_tokens (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_scope_hash ON auth_approval_tokens (scope_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_expires_at ON auth_approval_tokens (expires_at)"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
@@ -344,6 +499,7 @@ def init_db():
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
+    _create_agent_plan_tables_if_missing()
 
     # Lightweight SQLite-friendly migrations
     signal_columns = {

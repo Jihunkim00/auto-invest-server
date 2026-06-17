@@ -310,3 +310,83 @@ class AgentCommandLog(Base):
     schema_version = Column(String(80), nullable=False, default="autoinvest_command_v1")
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class AgentPlan(Base):
+    __tablename__ = "agent_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_key = Column(String(80), nullable=False, unique=True, index=True)
+    conversation_id = Column(String(120), nullable=True, index=True)
+    command_log_id = Column(Integer, nullable=True, index=True)
+    schema_version = Column(String(80), nullable=False, default="agent_plan_v1")
+    command_type = Column(String(80), nullable=False, index=True)
+    domain = Column(String(40), nullable=False, index=True)
+    intent = Column(String(120), nullable=False, default="unknown")
+    market = Column(String(10), nullable=True, index=True)
+    provider = Column(String(20), nullable=True, index=True)
+    symbol = Column(String(20), nullable=True, index=True)
+    side = Column(String(10), nullable=True)
+    risk_level = Column(String(40), nullable=False, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    plan_title = Column(Text, nullable=False)
+    plan_summary = Column(Text, nullable=False)
+    user_visible_summary = Column(Text, nullable=False)
+    command_json = Column(Text, nullable=False)
+    execution_policy_json = Column(Text, nullable=False)
+    safety_json = Column(Text, nullable=False)
+    scope_json = Column(Text, nullable=False)
+    scope_hash = Column(String(64), nullable=False, index=True)
+    requires_auth = Column(Boolean, nullable=False, default=False)
+    requires_risk_approval = Column(Boolean, nullable=False, default=False)
+    requires_confirm_live = Column(Boolean, nullable=False, default=False)
+    requires_recent_validation = Column(Boolean, nullable=False, default=False)
+    allow_live_order = Column(Boolean, nullable=False, default=False)
+    allow_setting_change = Column(Boolean, nullable=False, default=False)
+    allow_scheduler_change = Column(Boolean, nullable=False, default=False)
+    approved_auth_request_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
+
+
+class AuthApprovalRequest(Base):
+    __tablename__ = "auth_approval_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    approval_key = Column(String(80), nullable=False, unique=True, index=True)
+    plan_id = Column(Integer, nullable=False, index=True)
+    command_log_id = Column(Integer, nullable=True, index=True)
+    conversation_id = Column(String(120), nullable=True, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    auth_type = Column(String(60), nullable=False, index=True)
+    risk_level = Column(String(40), nullable=False, index=True)
+    scope_hash = Column(String(64), nullable=False, index=True)
+    scope_json = Column(Text, nullable=False)
+    requested_action_summary = Column(Text, nullable=False)
+    user_visible_warning = Column(Text, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    metadata_json = Column(Text, nullable=True)
+
+
+class AuthApprovalToken(Base):
+    __tablename__ = "auth_approval_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    approval_request_id = Column(Integer, nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    token_type = Column(String(40), nullable=False, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    scope_hash = Column(String(64), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
