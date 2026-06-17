@@ -390,3 +390,55 @@ class AuthApprovalToken(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     used_at = Column(DateTime(timezone=True), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AgentPlanRun(Base):
+    __tablename__ = "agent_plan_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, nullable=False, index=True)
+    plan_key = Column(String(80), nullable=False, index=True)
+    command_log_id = Column(Integer, nullable=True, index=True)
+    conversation_id = Column(String(120), nullable=True, index=True)
+    command_type = Column(String(80), nullable=False, index=True)
+    domain = Column(String(40), nullable=False, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    result_type = Column(String(60), nullable=False, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    request_json = Column(Text, nullable=False)
+    response_json = Column(Text, nullable=False)
+    safety_json = Column(Text, nullable=False)
+    scope_hash = Column(String(64), nullable=False, index=True)
+    execution_mode = Column(String(60), nullable=False, index=True)
+    trigger_source = Column(String(60), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class AgentScheduleJob(Base):
+    __tablename__ = "agent_schedule_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    schedule_key = Column(String(80), nullable=False, unique=True, index=True)
+    plan_id = Column(Integer, nullable=False, index=True)
+    command_log_id = Column(Integer, nullable=True, index=True)
+    conversation_id = Column(String(120), nullable=True, index=True)
+    command_type = Column(String(80), nullable=False, index=True)
+    domain = Column(String(40), nullable=False, index=True)
+    status = Column(String(40), nullable=False, index=True)
+    schedule_type = Column(String(40), nullable=False, index=True)
+    run_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    timezone = Column(String(80), nullable=False, default="UTC")
+    recurrence_rule = Column(Text, nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    max_runs = Column(Integer, nullable=True)
+    run_count = Column(Integer, nullable=False, default=0)
+    scope_hash = Column(String(64), nullable=False, index=True)
+    schedule_json = Column(Text, nullable=False)
+    safety_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)

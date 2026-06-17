@@ -490,6 +490,99 @@ def _create_agent_plan_tables_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_expires_at ON auth_approval_tokens (expires_at)"))
 
 
+def _create_agent_execution_tables_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_plan_runs (
+                    id INTEGER PRIMARY KEY,
+                    plan_id INTEGER NOT NULL,
+                    plan_key VARCHAR(80) NOT NULL,
+                    command_log_id INTEGER,
+                    conversation_id VARCHAR(120),
+                    command_type VARCHAR(80) NOT NULL,
+                    domain VARCHAR(40) NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    result_type VARCHAR(60) NOT NULL,
+                    started_at DATETIME NOT NULL,
+                    completed_at DATETIME,
+                    failed_at DATETIME,
+                    error_message TEXT,
+                    request_json TEXT NOT NULL,
+                    response_json TEXT NOT NULL,
+                    safety_json TEXT NOT NULL,
+                    scope_hash VARCHAR(64) NOT NULL,
+                    execution_mode VARCHAR(60) NOT NULL,
+                    trigger_source VARCHAR(60) NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_plan_id ON agent_plan_runs (plan_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_plan_key ON agent_plan_runs (plan_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_command_log_id ON agent_plan_runs (command_log_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_conversation_id ON agent_plan_runs (conversation_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_command_type ON agent_plan_runs (command_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_domain ON agent_plan_runs (domain)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_status ON agent_plan_runs (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_result_type ON agent_plan_runs (result_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_started_at ON agent_plan_runs (started_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_scope_hash ON agent_plan_runs (scope_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_execution_mode ON agent_plan_runs (execution_mode)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_trigger_source ON agent_plan_runs (trigger_source)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_created_at ON agent_plan_runs (created_at)"))
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_schedule_jobs (
+                    id INTEGER PRIMARY KEY,
+                    schedule_key VARCHAR(80) NOT NULL UNIQUE,
+                    plan_id INTEGER NOT NULL,
+                    command_log_id INTEGER,
+                    conversation_id VARCHAR(120),
+                    command_type VARCHAR(80) NOT NULL,
+                    domain VARCHAR(40) NOT NULL,
+                    status VARCHAR(40) NOT NULL,
+                    schedule_type VARCHAR(40) NOT NULL,
+                    run_at DATETIME,
+                    timezone VARCHAR(80) NOT NULL DEFAULT 'UTC',
+                    recurrence_rule TEXT,
+                    next_run_at DATETIME,
+                    last_run_at DATETIME,
+                    max_runs INTEGER,
+                    run_count INTEGER NOT NULL DEFAULT 0,
+                    scope_hash VARCHAR(64) NOT NULL,
+                    schedule_json TEXT NOT NULL,
+                    safety_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    cancelled_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_schedule_jobs_schedule_key "
+                "ON agent_schedule_jobs (schedule_key)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_plan_id ON agent_schedule_jobs (plan_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_command_log_id ON agent_schedule_jobs (command_log_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_conversation_id ON agent_schedule_jobs (conversation_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_command_type ON agent_schedule_jobs (command_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_domain ON agent_schedule_jobs (domain)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_status ON agent_schedule_jobs (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_schedule_type ON agent_schedule_jobs (schedule_type)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_run_at ON agent_schedule_jobs (run_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_next_run_at ON agent_schedule_jobs (next_run_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_scope_hash ON agent_schedule_jobs (scope_hash)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_created_at ON agent_schedule_jobs (created_at)"))
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _create_reference_site_cache_table_if_missing()
@@ -500,6 +593,7 @@ def init_db():
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_plan_tables_if_missing()
+    _create_agent_execution_tables_if_missing()
 
     # Lightweight SQLite-friendly migrations
     signal_columns = {
