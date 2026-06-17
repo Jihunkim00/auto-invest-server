@@ -177,8 +177,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
                       text: 'EXIT PREFLIGHT FIRST',
                       color: Colors.lightBlueAccent),
                   _SoftBadge(
-                      text: 'TICKET PREFILL ONLY',
-                      color: Colors.greenAccent),
+                      text: 'TICKET PREFILL ONLY', color: Colors.greenAccent),
                   _SoftBadge(
                       text: 'CONFIRM_LIVE MANUAL', color: Colors.redAccent),
                 ]),

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/candidate.dart';
+import '../../models/agent_live_prefill.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
@@ -339,6 +340,21 @@ class ApiClient {
       const {},
     );
     return ManualSellPreparation.fromJson(payload);
+  }
+
+  Future<AgentLivePrefill> prepareAgentManualTicket(
+    int planId, {
+    String? operatorNote,
+    bool requireAuthApproval = true,
+  }) async {
+    final payload = await _postJsonBody(
+      '/agent/plans/$planId/prepare-manual-ticket',
+      {
+        'operator_note': operatorNote,
+        'require_auth_approval': requireAuthApproval,
+      },
+    );
+    return AgentLivePrefill.fromJson(payload);
   }
 
   Future<MarketWatchlist> fetchMarketWatchlist(String market) async {

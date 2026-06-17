@@ -287,8 +287,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
                       sourceMetadata: controller.kisTradingSourceContext,
                     );
                     if (!context.mounted) return;
-                    final success =
-                        validation?.validatedForSubmission == true;
+                    final success = validation?.validatedForSubmission == true;
                     final message = validation == null
                         ? controller.orderValidationError ??
                             'KIS validation failed. No order submitted.'

@@ -141,7 +141,8 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
+    await tester
+        .tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
 
     expect(api.kisBuyShadowCalls, 0);
@@ -231,7 +232,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_filledButtonEnabled(tester, 'Submit Live Order'), isTrue);
-    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
+    await tester
+        .tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
 
     expect(find.text('Submit Live Order'), findsWidgets);
@@ -285,7 +287,8 @@ void main() {
       'I understand Submit Live Order requires confirm_live and final confirmation.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
+    await tester
+        .tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
     await _tapFinalSubmitLiveOrderDialog(tester);
     await tester.pumpAndSettle();
@@ -335,7 +338,8 @@ void main() {
       'I understand Submit Live Order requires confirm_live and final confirmation.',
     ));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
+    await tester
+        .tap(find.byKey(const Key('kis_trading_analyze_submit_button')));
     await tester.pumpAndSettle();
     await _tapFinalSubmitLiveOrderDialog(tester);
     await tester.pumpAndSettle();
