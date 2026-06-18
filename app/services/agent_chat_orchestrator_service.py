@@ -1,0 +1,545 @@
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from sqlalchemy.orm import Session
+
+from app.brokers.alpaca_client import AlpacaClient
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
+from app.db.models import OrderLog, SignalLog, TradeRunLog
+from app.schemas.agent_chat import AgentChatConversationCreateRequest
+from app.schemas.agent_chat_orchestrator import (
+    AgentChatAnswer,
+    AgentChatIntent,
+    AgentChatIntentCategory,
+    AgentChatSafetyFlags,
+    AgentChatSendRequest,
+    AgentChatSendResponse,
+)
+from app.schemas.agent_command import CommandDomain, CommandType, OrderSide, SCHEMA_VERSION
+from app.schemas.agent_execution import AgentPlanRunRequest
+from app.services.agent_chat_answer_service import AgentChatAnswerService
+from app.services.agent_chat_intent_router_service import AgentChatIntentRouterService
+from app.services.agent_chat_service import AgentChatConversationNotFound, AgentChatService
+from app.services.agent_execution_gateway import AgentExecutionGateway
+from app.services.agent_plan_service import AgentPlanService
+
+
+class AgentChatOrchestratorService:
+    def __init__(
+        self,
+        *,
+        chat_service: AgentChatService | None = None,
+        intent_router: AgentChatIntentRouterService | None = None,
+        answer_service: AgentChatAnswerService | None = None,
+        plan_service: AgentPlanService | None = None,
+        execution_gateway: AgentExecutionGateway | None = None,
+        kis_client_factory: Callable[[Session], KisClient] | None = None,
+        alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
+    ) -> None:
+        self.chat_service = chat_service or AgentChatService()
+        self.intent_router = intent_router or AgentChatIntentRouterService()
+        self.answer_service = answer_service or AgentChatAnswerService()
+        self.plan_service = plan_service or AgentPlanService()
+        self.execution_gateway = execution_gateway or AgentExecutionGateway()
+        self.kis_client_factory = kis_client_factory or self._default_kis_client
+        self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
+
+    def send(self, db: Session, *, request: AgentChatSendRequest) -> dict[str, Any]:
+        context = request.context_dict()
+        conversation_key = self._resolve_conversation_key(db, request=request)
+        user_message = self.chat_service.append_message(
+            db,
+            conversation_key=conversation_key,
+            request={
+                "role": "user",
+                "text": request.message,
+                "message_type": "plain_text",
+                "metadata": {
+                    "source": str(context.get("source") or "api"),
+                    "conversation_title": request.message,
+                },
+            },
+        )["message"]
+
+        intent = self.intent_router.route(message=request.message, context=context)
+        action = self._handle_intent(db, intent=intent, conversation_key=conversation_key)
+        answer = self.answer_service.compose(
+            intent=intent,
+            data=action["data"],
+            plan=action.get("plan"),
+            run=action.get("run"),
+            available_actions=action["available_actions"],
+        )
+        safety = action["safety"]
+        assistant_message = self.chat_service.append_message(
+            db,
+            conversation_key=conversation_key,
+            request={
+                "role": "assistant",
+                "text": answer.text,
+                "message_type": answer.answer_type,
+                "status": self._message_status(answer),
+                "command_log_id": action.get("command_log_id"),
+                "plan_id": (action.get("plan") or {}).get("id"),
+                "plan_run_id": (action.get("run") or {}).get("plan_run_id"),
+                "model_name": intent.model_name,
+                "parser_status": intent.parser_status,
+                "safety": safety.model_dump(mode="json"),
+                "metadata": self._assistant_metadata(
+                    intent=intent,
+                    answer=answer,
+                    action=action,
+                    safety=safety,
+                ),
+            },
+        )["message"]
+
+        response = AgentChatSendResponse(
+            conversation_key=conversation_key,
+            user_message_id=user_message.get("id"),
+            assistant_message_id=assistant_message.get("id"),
+            intent=intent,
+            answer=answer,
+            data=action["data"],
+            command=action.get("command"),
+            plan=action.get("plan"),
+            run=action.get("run"),
+            available_actions=action["available_actions"],
+            safety=safety,
+        )
+        return response.model_dump(mode="json")
+
+    def _resolve_conversation_key(
+        self,
+        db: Session,
+        *,
+        request: AgentChatSendRequest,
+    ) -> str:
+        key = str(request.conversation_key or "").strip()
+        if key:
+            self.chat_service.get_conversation(db, conversation_key=key)
+            return key
+        if not request.auto_create_conversation:
+            raise AgentChatConversationNotFound("missing_conversation_key")
+        created = self.chat_service.create_conversation(
+            db,
+            request=AgentChatConversationCreateRequest(
+                title=request.message[:80],
+                source="flutter_dashboard",
+                metadata={"source": "flutter_dashboard"},
+            ),
+        )
+        return created["conversation"]["conversation_key"]
+
+    def _handle_intent(
+        self,
+        db: Session,
+        *,
+        intent: AgentChatIntent,
+        conversation_key: str,
+    ) -> dict[str, Any]:
+        safety = self._base_safety(intent)
+        category = intent.category
+        if category == AgentChatIntentCategory.READ_ONLY_PRICE_QUERY:
+            return self._action(data=self._lookup_price(db, intent), safety=safety)
+        if category == AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY:
+            return self._action(data=self._lookup_positions(db, intent), safety=safety)
+        if category == AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY:
+            return self._action(data=self._lookup_balance(db, intent), safety=safety)
+        if category == AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY:
+            return self._action(data=self._recent_orders(db), safety=safety)
+        if category == AgentChatIntentCategory.READ_ONLY_RUNS_QUERY:
+            return self._action(data=self._recent_runs(db), safety=safety)
+        if category == AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY:
+            return self._action(data=self._recent_signals(db), safety=safety)
+        if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
+            return self._analysis_action(db, intent=intent, conversation_key=conversation_key)
+        if category == AgentChatIntentCategory.MANUAL_TICKET_REQUEST:
+            return self._manual_ticket_action(db, intent=intent, conversation_key=conversation_key)
+        if category == AgentChatIntentCategory.LIVE_ORDER_REQUEST:
+            return self._live_order_action(db, intent=intent, conversation_key=conversation_key)
+        if category in {
+            AgentChatIntentCategory.DANGEROUS_SETTING_REQUEST,
+            AgentChatIntentCategory.SCHEDULER_REQUEST,
+            AgentChatIntentCategory.UNSUPPORTED,
+            AgentChatIntentCategory.NEEDS_CLARIFICATION,
+            AgentChatIntentCategory.GENERAL_CHAT,
+            AgentChatIntentCategory.CAPABILITY_QUESTION,
+        }:
+            return self._action(data={}, safety=safety)
+        return self._action(data={}, safety=safety)
+
+    def _lookup_price(self, db: Session, intent: AgentChatIntent) -> dict[str, Any]:
+        symbol = str(intent.symbol or "").strip().upper()
+        if not symbol:
+            return {"error": "종목을 확인할 수 없습니다."}
+        market = str(intent.market or "").upper()
+        provider = str(intent.provider or "").lower()
+        if market == "KR" or provider == "kis":
+            try:
+                payload = self.kis_client_factory(db).get_domestic_stock_price(symbol)
+                return {
+                    "price": {
+                        "symbol": payload.get("symbol") or symbol,
+                        "name": payload.get("name") or intent.symbol_name or symbol,
+                        "price": payload.get("current_price"),
+                        "current_price": payload.get("current_price"),
+                        "currency": "KRW",
+                        "provider": "kis",
+                        "timestamp": payload.get("timestamp"),
+                    }
+                }
+            except Exception as exc:
+                return {"price": {"symbol": symbol, "name": intent.symbol_name}, "error": self._safe_error(exc)}
+        if market == "US" or provider == "alpaca":
+            try:
+                payload = self.alpaca_client_factory().get_latest_price(symbol)
+                if not payload:
+                    return {"price": {"symbol": symbol}, "error": "현재 US 단건 가격 조회 응답이 없습니다."}
+                return {
+                    "price": {
+                        "symbol": payload.get("symbol") or symbol,
+                        "name": intent.symbol_name or symbol,
+                        "price": payload.get("price"),
+                        "current_price": payload.get("price"),
+                        "currency": "USD",
+                        "provider": "alpaca",
+                        "timestamp": payload.get("timestamp"),
+                    }
+                }
+            except Exception as exc:
+                return {"price": {"symbol": symbol, "name": intent.symbol_name}, "error": self._safe_error(exc)}
+        return {"price": {"symbol": symbol, "name": intent.symbol_name}, "error": "지원하지 않는 가격 조회 provider입니다."}
+
+    def _lookup_positions(self, db: Session, intent: AgentChatIntent) -> dict[str, Any]:
+        market = str(intent.market or "").upper()
+        provider = str(intent.provider or "").lower()
+        if market == "KR" or provider == "kis":
+            try:
+                positions = self.kis_client_factory(db).list_positions()
+                return {"provider": "kis", "market": "KR", "count": len(positions), "positions": positions}
+            except Exception as exc:
+                return {"provider": "kis", "market": "KR", "count": 0, "positions": [], "error": self._safe_error(exc)}
+        try:
+            rows = self.alpaca_client_factory().list_positions()
+            positions = [
+                {
+                    "symbol": str(getattr(row, "symbol", "") or "").upper(),
+                    "qty": getattr(row, "qty", None),
+                    "market_value": getattr(row, "market_value", None),
+                    "unrealized_pl": getattr(row, "unrealized_pl", None),
+                    "current_price": getattr(row, "current_price", None),
+                }
+                for row in rows
+            ]
+            return {"provider": "alpaca", "market": "US", "count": len(positions), "positions": positions}
+        except Exception as exc:
+            return {"provider": "alpaca", "market": "US", "count": 0, "positions": [], "error": self._safe_error(exc)}
+
+    def _lookup_balance(self, db: Session, intent: AgentChatIntent) -> dict[str, Any]:
+        market = str(intent.market or "").upper()
+        provider = str(intent.provider or "").lower()
+        if market == "KR" or provider == "kis":
+            try:
+                return {"balance": self.kis_client_factory(db).get_account_balance()}
+            except Exception as exc:
+                return {"balance": {}, "error": self._safe_error(exc)}
+        try:
+            account = self.alpaca_client_factory().get_account()
+            return {
+                "balance": {
+                    "provider": "alpaca",
+                    "market": "US",
+                    "currency": "USD",
+                    "cash": getattr(account, "cash", None),
+                    "total_asset_value": getattr(account, "portfolio_value", None),
+                }
+            }
+        except Exception as exc:
+            return {"balance": {}, "error": self._safe_error(exc)}
+
+    def _recent_orders(self, db: Session, *, limit: int = 10) -> dict[str, Any]:
+        rows = db.query(OrderLog).order_by(OrderLog.created_at.desc(), OrderLog.id.desc()).limit(limit).all()
+        return {"count": len(rows), "orders": [self._order_summary(row) for row in rows]}
+
+    def _recent_runs(self, db: Session, *, limit: int = 10) -> dict[str, Any]:
+        rows = db.query(TradeRunLog).order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc()).limit(limit).all()
+        return {"count": len(rows), "runs": [self._run_summary(row) for row in rows]}
+
+    def _recent_signals(self, db: Session, *, limit: int = 10) -> dict[str, Any]:
+        rows = db.query(SignalLog).order_by(SignalLog.created_at.desc(), SignalLog.id.desc()).limit(limit).all()
+        return {"count": len(rows), "signals": [self._signal_summary(row) for row in rows]}
+
+    def _analysis_action(
+        self,
+        db: Session,
+        *,
+        intent: AgentChatIntent,
+        conversation_key: str,
+    ) -> dict[str, Any]:
+        safety = self._base_safety(intent)
+        safety.read_only = False
+        if not intent.symbol:
+            return self._action(data={"error": "분석할 종목을 확인할 수 없습니다."}, safety=safety)
+        command = self._analysis_command(intent)
+        try:
+            created = self.plan_service.create_from_command(
+                db,
+                command=command,
+                conversation_id=conversation_key,
+                plan_title=f"Safe analysis for {intent.symbol}",
+            )
+            plan = created["plan"]
+            run = self.execution_gateway.run_plan(
+                db,
+                plan_id=plan["id"],
+                request=AgentPlanRunRequest(
+                    dry_run=True,
+                    operator_note="Agent chat safe analysis request.",
+                    trigger_source="agent_chat_orchestrator",
+                ),
+            )
+            return self._action(
+                data={"analysis": run.get("result", {})},
+                command=command,
+                plan=plan,
+                run=run,
+                safety=safety,
+            )
+        except Exception as exc:
+            return self._action(data={"error": self._safe_error(exc)}, command=command, safety=safety)
+
+    def _manual_ticket_action(
+        self,
+        db: Session,
+        *,
+        intent: AgentChatIntent,
+        conversation_key: str,
+    ) -> dict[str, Any]:
+        safety = self._base_safety(intent)
+        safety.read_only = False
+        if not intent.symbol:
+            return self._action(data={"error": "티켓을 준비할 종목을 확인할 수 없습니다."}, safety=safety)
+        command = self._manual_ticket_command(intent)
+        try:
+            created = self.plan_service.create_from_command(
+                db,
+                command=command,
+                conversation_id=conversation_key,
+                plan_title=f"Prepare manual ticket for {intent.symbol}",
+            )
+            return self._action(
+                data={"prefill_ready": created["plan"].get("status") == "ready_for_review"},
+                command=command,
+                plan=created["plan"],
+                available_actions=["prepare_manual_ticket", "open_trading_ticket"],
+                safety=safety,
+            )
+        except Exception as exc:
+            return self._action(data={"error": self._safe_error(exc)}, command=command, safety=safety)
+
+    def _live_order_action(
+        self,
+        db: Session,
+        *,
+        intent: AgentChatIntent,
+        conversation_key: str,
+    ) -> dict[str, Any]:
+        safety = self._base_safety(intent)
+        safety.read_only = False
+        if not intent.symbol:
+            return self._action(data={"direct_order_blocked": True}, safety=safety)
+        command = self._manual_ticket_command(intent)
+        try:
+            created = self.plan_service.create_from_command(
+                db,
+                command=command,
+                conversation_id=conversation_key,
+                plan_title=f"Blocked live request; manual ticket only for {intent.symbol}",
+            )
+            return self._action(
+                data={"direct_order_blocked": True},
+                command=command,
+                plan=created["plan"],
+                available_actions=["prepare_manual_ticket", "open_trading_ticket"],
+                safety=safety,
+            )
+        except Exception as exc:
+            return self._action(
+                data={"direct_order_blocked": True, "error": self._safe_error(exc)},
+                command=command,
+                safety=safety,
+            )
+
+    def _analysis_command(self, intent: AgentChatIntent) -> dict[str, Any]:
+        market = intent.market or ("KR" if str(intent.symbol or "").isdigit() else "US")
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "command_type": CommandType.RUN_SINGLE_SYMBOL_ANALYSIS.value,
+            "domain": CommandDomain.ANALYSIS.value,
+            "intent": "single_symbol_analysis",
+            "market": market,
+            "provider": intent.provider or ("kis" if market == "KR" else "alpaca"),
+            "symbol": intent.symbol,
+            "side": OrderSide.NONE.value,
+            "user_visible_summary": f"{intent.symbol} 분석 plan입니다. 주문은 실행하지 않습니다.",
+            "parser_confidence": intent.confidence,
+        }
+
+    def _manual_ticket_command(self, intent: AgentChatIntent) -> dict[str, Any]:
+        side = intent.side if intent.side in {"buy", "sell"} else "buy"
+        market = intent.market or ("KR" if str(intent.symbol or "").isdigit() else "US")
+        provider = intent.provider or ("kis" if market == "KR" else "alpaca")
+        currency = intent.currency or ("KRW" if market == "KR" else "USD")
+        command_type = (
+            CommandType.PREPARE_MANUAL_SELL_TICKET.value
+            if side == "sell"
+            else CommandType.PREPARE_MANUAL_BUY_TICKET.value
+        )
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "command_type": command_type,
+            "domain": CommandDomain.ORDER.value,
+            "intent": f"prepare_manual_{side}_ticket",
+            "market": market,
+            "provider": provider,
+            "symbol": intent.symbol,
+            "side": side,
+            "quantity": intent.quantity,
+            "budget": {
+                "amount": intent.notional,
+                "currency": currency,
+                "mode": "max_notional",
+            }
+            if intent.notional is not None
+            else None,
+            "user_visible_summary": (
+                f"{intent.symbol} 수동 {side} 티켓을 준비합니다. "
+                "채팅에서는 주문, validation, confirm_live를 실행하지 않습니다."
+            ),
+            "parser_confidence": intent.confidence,
+        }
+
+    def _action(
+        self,
+        *,
+        data: dict[str, Any],
+        safety: AgentChatSafetyFlags,
+        command: dict[str, Any] | None = None,
+        plan: dict[str, Any] | None = None,
+        run: dict[str, Any] | None = None,
+        available_actions: list[str] | None = None,
+        command_log_id: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "data": data,
+            "command": command,
+            "plan": plan,
+            "run": run,
+            "available_actions": available_actions or [],
+            "safety": safety,
+            "command_log_id": command_log_id,
+        }
+
+    def _base_safety(self, intent: AgentChatIntent) -> AgentChatSafetyFlags:
+        read_only_categories = {
+            AgentChatIntentCategory.GENERAL_CHAT,
+            AgentChatIntentCategory.CAPABILITY_QUESTION,
+            AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
+            AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
+            AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_RUNS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
+            AgentChatIntentCategory.UNSUPPORTED,
+            AgentChatIntentCategory.NEEDS_CLARIFICATION,
+        }
+        return AgentChatSafetyFlags(read_only=intent.category in read_only_categories)
+
+    def _assistant_metadata(
+        self,
+        *,
+        intent: AgentChatIntent,
+        answer: AgentChatAnswer,
+        action: dict[str, Any],
+        safety: AgentChatSafetyFlags,
+    ) -> dict[str, Any]:
+        plan = action.get("plan") or {}
+        run = action.get("run") or {}
+        return {
+            "intent_category": intent.category.value,
+            "answer_type": answer.answer_type,
+            "market": intent.market,
+            "provider": intent.provider,
+            "symbol": intent.symbol,
+            "side": intent.side,
+            "parser_status": intent.parser_status,
+            "model_name": intent.model_name,
+            "fallback_used": intent.fallback_used,
+            "plan_id": plan.get("id"),
+            "plan_run_id": run.get("plan_run_id"),
+            "available_actions": action.get("available_actions") or [],
+            "safety": safety.model_dump(mode="json"),
+        }
+
+    def _message_status(self, answer: AgentChatAnswer) -> str:
+        if answer.answer_type == "error":
+            return "failed"
+        if answer.answer_type in {"blocked", "auth_required", "unsupported"}:
+            return "blocked"
+        return "completed"
+
+    def _order_summary(self, row: OrderLog) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "broker": row.broker,
+            "market": row.market,
+            "symbol": row.symbol,
+            "side": row.side,
+            "order_type": row.order_type,
+            "qty": row.qty,
+            "notional": row.notional,
+            "internal_status": row.internal_status,
+            "broker_status": row.broker_status,
+            "created_at": row.created_at,
+        }
+
+    def _run_summary(self, row: TradeRunLog) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "run_key": row.run_key,
+            "trigger_source": row.trigger_source,
+            "symbol": row.symbol,
+            "mode": row.mode,
+            "stage": row.stage,
+            "result": row.result,
+            "reason": row.reason,
+            "created_at": row.created_at,
+        }
+
+    def _signal_summary(self, row: SignalLog) -> dict[str, Any]:
+        return {
+            "id": row.id,
+            "symbol": row.symbol,
+            "action": row.action,
+            "buy_score": row.buy_score,
+            "sell_score": row.sell_score,
+            "confidence": row.confidence,
+            "reason": row.reason,
+            "signal_status": row.signal_status,
+            "trigger_source": row.trigger_source,
+            "created_at": row.created_at,
+        }
+
+    def _default_kis_client(self, db: Session) -> KisClient:
+        settings = get_settings()
+        return KisClient(settings, KisAuthManager(settings, db))
+
+    def _safe_error(self, exc: Exception) -> str:
+        text = str(exc).strip() or exc.__class__.__name__
+        if len(text) > 240:
+            return f"{exc.__class__.__name__}: {text[:240]}..."
+        return text

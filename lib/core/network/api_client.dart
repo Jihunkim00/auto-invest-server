@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_message.dart';
+import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
@@ -360,6 +361,21 @@ class ApiClient {
       'context': context ?? const <String, dynamic>{},
     });
     return AgentCommandParseResult.fromJson(payload);
+  }
+
+  Future<AgentChatSendResponse> sendAgentChatMessage({
+    required String message,
+    String? conversationKey,
+    Map<String, dynamic>? context,
+    bool autoCreateConversation = true,
+  }) async {
+    final payload = await _postJsonBody('/agent/chat/send', {
+      'conversation_key': conversationKey,
+      'message': message,
+      'context': context ?? const <String, dynamic>{},
+      'auto_create_conversation': autoCreateConversation,
+    });
+    return AgentChatSendResponse.fromJson(payload);
   }
 
   Future<AgentChatConversation> createAgentChatConversation({

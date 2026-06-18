@@ -242,11 +242,27 @@ class _MiniMessageLine extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Text(
-            message.text,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: color, fontSize: 13, height: 1.25),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message.text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontSize: 13, height: 1.25),
+              ),
+              if (!isUser && message.safetyBadges.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final badge in message.safetyBadges.take(4))
+                      _AgentBadge(text: badge),
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ]),

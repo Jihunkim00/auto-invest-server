@@ -8,6 +8,8 @@ from app.schemas.agent_chat import (
     AgentChatConversationCreateRequest,
     AgentChatMessageAppendRequest,
 )
+from app.schemas.agent_chat_orchestrator import AgentChatSendRequest
+from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
 from app.services.agent_chat_service import (
     AgentChatConversationNotFound,
     AgentChatService,
@@ -15,6 +17,22 @@ from app.services.agent_chat_service import (
 
 
 router = APIRouter(prefix="/agent/chat", tags=["agent-chat"])
+
+
+def get_agent_chat_orchestrator_service() -> AgentChatOrchestratorService:
+    return AgentChatOrchestratorService()
+
+
+@router.post("/send")
+def send_agent_chat_message(
+    payload: AgentChatSendRequest,
+    db: Session = Depends(get_db),
+    service: AgentChatOrchestratorService = Depends(get_agent_chat_orchestrator_service),
+):
+    try:
+        return service.send(db, request=payload)
+    except AgentChatConversationNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_conversation_not_found")
 
 
 @router.post("/conversations")
