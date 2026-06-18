@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
+import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_live_prefill.dart';
@@ -273,6 +274,11 @@ class DashboardController extends ChangeNotifier {
   AgentPlanRunResult? latestAgentRun;
   AgentLivePrefill? latestAgentPrefill;
   String? agentErrorMessage;
+  String? activeAgentConversationKey;
+  List<AgentChatConversation> agentConversations = const [];
+  bool isLoadingAgentHistory = false;
+  bool isSavingAgentMessage = false;
+  String? agentHistoryError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1199,6 +1205,10 @@ class DashboardController extends ChangeNotifier {
   }
 
   void clearAgentChat() {
+    clearCurrentAgentChatLocal();
+  }
+
+  void clearCurrentAgentChatLocal() {
     agentMessages = [
       AgentChatMessage(
         id: _newAgentMessageId('safety'),
@@ -1222,6 +1232,183 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<ActionResult> initializeAgentConversation() async {
+    if (activeAgentConversationKey != null || isLoadingAgentHistory) {
+      return const ActionResult(success: true, message: 'Agent chat is ready.');
+    }
+    return restoreLatestAgentConversation();
+  }
+
+  Future<ActionResult> restoreLatestAgentConversation() async {
+    isLoadingAgentHistory = true;
+    agentHistoryError = null;
+    notifyListeners();
+    try {
+      agentConversations = await apiClient.fetchAgentChatConversations(
+        status: 'active',
+        limit: 20,
+      );
+      if (agentConversations.isEmpty) {
+        final conversation = await apiClient.createAgentChatConversation(
+          source: 'flutter_dashboard',
+          metadata: const {'source': 'flutter_dashboard'},
+        );
+        activeAgentConversationKey = conversation.conversationKey;
+        agentConversations = [conversation];
+        return const ActionResult(
+          success: true,
+          message: 'New agent conversation created.',
+        );
+      }
+      final latest = agentConversations.first;
+      await loadAgentConversationHistory(latest.conversationKey, silent: true);
+      return const ActionResult(
+        success: true,
+        message: 'Agent conversation restored.',
+      );
+    } catch (e) {
+      agentHistoryError =
+          'Chat history unavailable; continuing local-only. ${ApiErrorFormatter.format(e.toString())}';
+      activeAgentConversationKey ??= agentConversationId;
+      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+    } finally {
+      isLoadingAgentHistory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> loadAgentConversationHistory(
+    String conversationKey, {
+    bool silent = false,
+  }) async {
+    if (!silent) {
+      isLoadingAgentHistory = true;
+      agentHistoryError = null;
+      notifyListeners();
+    }
+    try {
+      activeAgentConversationKey = conversationKey;
+      final messages = await apiClient.fetchAgentChatMessages(
+        conversationKey,
+        limit: 100,
+      );
+      agentMessages = messages.isEmpty ? _defaultAgentSafetyMessages() : messages;
+      return const ActionResult(
+        success: true,
+        message: 'Agent chat history loaded.',
+      );
+    } catch (e) {
+      agentHistoryError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+    } finally {
+      if (!silent) {
+        isLoadingAgentHistory = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<ActionResult> startNewAgentConversation() async {
+    isLoadingAgentHistory = true;
+    agentHistoryError = null;
+    notifyListeners();
+    try {
+      final conversation = await apiClient.createAgentChatConversation(
+        source: 'flutter_dashboard',
+        metadata: const {'source': 'flutter_dashboard'},
+      );
+      activeAgentConversationKey = conversation.conversationKey;
+      agentConversations = [conversation, ...agentConversations]
+          .where((item) => item.status == 'active')
+          .toList();
+      latestAgentCommand = null;
+      latestAgentPlan = null;
+      latestAgentRun = null;
+      latestAgentPrefill = null;
+      agentMessages = _defaultAgentSafetyMessages();
+      return const ActionResult(success: true, message: 'New agent chat started.');
+    } catch (e) {
+      agentHistoryError = ApiErrorFormatter.format(e.toString());
+      clearCurrentAgentChatLocal();
+      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+    } finally {
+      isLoadingAgentHistory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> archiveAgentConversation() async {
+    final key = activeAgentConversationKey;
+    if (key == null || key.isEmpty) {
+      clearCurrentAgentChatLocal();
+      return const ActionResult(success: true, message: 'Local chat cleared.');
+    }
+    isLoadingAgentHistory = true;
+    agentHistoryError = null;
+    notifyListeners();
+    try {
+      await apiClient.archiveAgentChatConversation(key);
+      activeAgentConversationKey = null;
+      agentConversations = agentConversations
+          .where((item) => item.conversationKey != key)
+          .toList();
+      latestAgentCommand = null;
+      latestAgentPlan = null;
+      latestAgentRun = null;
+      latestAgentPrefill = null;
+      agentMessages = _defaultAgentSafetyMessages();
+      return const ActionResult(
+        success: true,
+        message: 'Agent conversation archived.',
+      );
+    } catch (e) {
+      agentHistoryError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+    } finally {
+      isLoadingAgentHistory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> saveAgentUserMessage(String text) async {
+    await _persistAgentMessage(
+      role: 'user',
+      text: text,
+      messageType: 'plain_text',
+    );
+  }
+
+  Future<void> saveAgentAssistantMessage({
+    required String text,
+    required String messageType,
+    String status = 'completed',
+    int? commandLogId,
+    int? planId,
+    int? planRunId,
+    int? authApprovalRequestId,
+    int? prefillSourcePlanId,
+    String? modelName,
+    String? parserStatus,
+    Map<String, dynamic>? safety,
+    Map<String, dynamic>? metadata,
+  }) async {
+    await _persistAgentMessage(
+      role: 'assistant',
+      text: text,
+      messageType: messageType,
+      status: status,
+      commandLogId: commandLogId,
+      planId: planId,
+      planRunId: planRunId,
+      authApprovalRequestId: authApprovalRequestId,
+      prefillSourcePlanId: prefillSourcePlanId,
+      modelName: modelName,
+      parserStatus: parserStatus,
+      safety: safety,
+      metadata: metadata,
+    );
+  }
+
   Future<ActionResult> sendAgentMessage(String text) async {
     final cleanText = text.trim();
     if (cleanText.isEmpty) {
@@ -1230,6 +1417,8 @@ class DashboardController extends ChangeNotifier {
         message: 'Enter a message for Agent Assistant.',
       );
     }
+
+    await initializeAgentConversation();
 
     final now = DateTime.now();
     final assistantId = _newAgentMessageId('assistant');
@@ -1261,9 +1450,10 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
 
     try {
+      await saveAgentUserMessage(cleanText);
       final parsed = await apiClient.parseAgentCommand(
         message: cleanText,
-        conversationId: agentConversationId,
+        conversationId: _agentConversationKeyForRequests(),
         context: _agentContext(),
       );
       latestAgentCommand = parsed;
@@ -1272,6 +1462,15 @@ class DashboardController extends ChangeNotifier {
         _replaceAgentMessage(
           assistantId,
           _agentMessageForParsedCommand(assistantId, parsed),
+        );
+        await saveAgentAssistantMessage(
+          text: parsed.command.userVisibleSummary,
+          messageType: 'command_parse',
+          commandLogId: parsed.commandLogId,
+          modelName: parsed.modelName,
+          parserStatus: parsed.parserStatus,
+          safety: parsed.safety,
+          metadata: _agentCommandMetadata(parsed),
         );
         return const ActionResult(
           success: true,
@@ -1314,6 +1513,16 @@ class DashboardController extends ChangeNotifier {
           },
         ),
       );
+      await saveAgentAssistantMessage(
+        text: _agentPlanAssistantText(planResponse.plan),
+        messageType: 'plan_review',
+        commandLogId: parsed.commandLogId,
+        planId: planResponse.plan.id,
+        modelName: parsed.modelName,
+        parserStatus: parsed.parserStatus,
+        safety: planResponse.safety,
+        metadata: _agentPlanMetadata(parsed, planResponse.plan),
+      );
       return const ActionResult(
         success: true,
         message: 'Agent plan created for review. No order submitted.',
@@ -1330,6 +1539,12 @@ class DashboardController extends ChangeNotifier {
           status: AgentChatStatus.failed,
           safetyBadges: const ['NO AUTO SUBMIT'],
         ),
+      );
+      await saveAgentAssistantMessage(
+        text: _primaryMessage(agentErrorMessage!),
+        messageType: 'error',
+        status: 'failed',
+        metadata: const {'message_type': 'error'},
       );
       return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
     } finally {
@@ -1375,6 +1590,21 @@ class DashboardController extends ChangeNotifier {
         runId: run.planRunId,
         badges: const ['SAFE EXECUTION ONLY', 'NO AUTO SUBMIT'],
       );
+      await saveAgentAssistantMessage(
+        text: run.isBlocked
+            ? 'Safe action was blocked by the backend policy.'
+            : 'Safe action completed. No live order was submitted.',
+        messageType: 'safe_run_result',
+        status: run.isBlocked ? 'blocked' : 'completed',
+        planId: id,
+        planRunId: run.planRunId,
+        safety: run.safety,
+        metadata: {
+          'plan_id': id,
+          'plan_run_id': run.planRunId,
+          'command_type': run.commandType,
+        },
+      );
       return ActionResult(
         success: !run.isBlocked,
         message: run.isBlocked
@@ -1387,6 +1617,12 @@ class DashboardController extends ChangeNotifier {
         _primaryMessage(agentErrorMessage!),
         status: AgentChatStatus.failed,
         badges: const ['NO AUTO SUBMIT'],
+      );
+      await saveAgentAssistantMessage(
+        text: _primaryMessage(agentErrorMessage!),
+        messageType: 'error',
+        status: 'failed',
+        planId: id,
       );
       return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
     } finally {
@@ -1434,6 +1670,22 @@ class DashboardController extends ChangeNotifier {
             'NO AUTO SUBMIT',
           ],
         );
+        await saveAgentAssistantMessage(
+          text:
+              'Manual ticket prefill is ready in Trading. Validate and submit manually.',
+          messageType: 'manual_prefill_result',
+          planId: id,
+          planRunId: prefill.planRunId,
+          prefillSourcePlanId: prefill.planId,
+          safety: prefill.safety,
+          metadata: {
+            'plan_id': id,
+            'plan_run_id': prefill.planRunId,
+            'prefill_source_plan_id': prefill.planId,
+            'command_type': prefill.commandType,
+            'prefill_status': prefill.status,
+          },
+        );
         return const ActionResult(
           success: true,
           message: 'Agent prepared a manual ticket. Validate and submit manually.',
@@ -1452,6 +1704,22 @@ class DashboardController extends ChangeNotifier {
         runId: prefill.planRunId,
         badges: const ['NO AUTO SUBMIT'],
       );
+      await saveAgentAssistantMessage(
+        text: prefill.requiresAuth
+            ? 'Auth is required. Approval flow is not connected to live execution yet.'
+            : 'Manual ticket prefill was blocked by backend policy.',
+        messageType: prefill.requiresAuth ? 'auth_required' : 'blocked',
+        status: prefill.requiresAuth ? 'blocked' : 'blocked',
+        planId: id,
+        planRunId: prefill.planRunId,
+        safety: prefill.safety,
+        metadata: {
+          'plan_id': id,
+          'plan_run_id': prefill.planRunId,
+          'command_type': prefill.commandType,
+          'prefill_status': prefill.status,
+        },
+      );
       return ActionResult(
         success: false,
         message: prefill.requiresAuth
@@ -1464,6 +1732,12 @@ class DashboardController extends ChangeNotifier {
         _primaryMessage(agentErrorMessage!),
         status: AgentChatStatus.failed,
         badges: const ['NO AUTO SUBMIT'],
+      );
+      await saveAgentAssistantMessage(
+        text: _primaryMessage(agentErrorMessage!),
+        messageType: 'error',
+        status: 'failed',
+        planId: id,
       );
       return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
     } finally {
@@ -3818,6 +4092,94 @@ class DashboardController extends ChangeNotifier {
       'default_provider': selectedProviderCode,
       'timezone': 'Asia/Seoul',
       'source': 'flutter_dashboard_agent_chat',
+      'conversation_key': _agentConversationKeyForRequests(),
+    };
+  }
+
+  String _agentConversationKeyForRequests() {
+    final key = activeAgentConversationKey?.trim();
+    if (key != null && key.isNotEmpty) return key;
+    return agentConversationId;
+  }
+
+  Future<void> _persistAgentMessage({
+    required String role,
+    required String text,
+    required String messageType,
+    String status = 'completed',
+    int? commandLogId,
+    int? planId,
+    int? planRunId,
+    int? authApprovalRequestId,
+    int? prefillSourcePlanId,
+    String? modelName,
+    String? parserStatus,
+    Map<String, dynamic>? safety,
+    Map<String, dynamic>? metadata,
+  }) async {
+    final key = activeAgentConversationKey;
+    if (key == null || key.isEmpty || key == agentConversationId) return;
+    isSavingAgentMessage = true;
+    notifyListeners();
+    try {
+      await apiClient.appendAgentChatMessage(
+        conversationKey: key,
+        role: role,
+        text: text,
+        messageType: messageType,
+        status: status,
+        commandLogId: commandLogId,
+        planId: planId,
+        planRunId: planRunId,
+        authApprovalRequestId: authApprovalRequestId,
+        prefillSourcePlanId: prefillSourcePlanId,
+        modelName: modelName,
+        parserStatus: parserStatus,
+        safety: safety,
+        metadata: metadata,
+      );
+      agentHistoryError = null;
+    } catch (e) {
+      agentHistoryError =
+          'Saved locally only; history sync failed. ${ApiErrorFormatter.format(e.toString())}';
+    } finally {
+      isSavingAgentMessage = false;
+      notifyListeners();
+    }
+  }
+
+  Map<String, dynamic> _agentCommandMetadata(AgentCommandParseResult parsed) {
+    return {
+      if (parsed.commandLogId != null) 'command_log_id': parsed.commandLogId,
+      'command_type': parsed.command.commandType,
+      'domain': parsed.command.domain,
+      'market': parsed.command.market,
+      'provider': parsed.command.provider,
+      if (parsed.command.symbol != null) 'symbol': parsed.command.symbol,
+      'side': parsed.command.side,
+      'risk_level': parsed.command.riskLevel,
+      'parser_status': parsed.parserStatus,
+      if (parsed.modelName != null) 'model_name': parsed.modelName,
+      'fallback_used': parsed.fallbackUsed,
+    };
+  }
+
+  Map<String, dynamic> _agentPlanMetadata(
+    AgentCommandParseResult parsed,
+    AgentPlan plan,
+  ) {
+    return {
+      ..._agentCommandMetadata(parsed),
+      'plan_id': plan.id,
+      'scope_hash': plan.scopeHash,
+      'command_type': plan.commandType,
+      'domain': plan.domain,
+      'market': plan.market,
+      'provider': plan.provider,
+      if (plan.symbol != null) 'symbol': plan.symbol,
+      'side': plan.side,
+      'risk_level': plan.riskLevel,
+      'status': plan.status,
     };
   }
 
@@ -3886,6 +4248,24 @@ class DashboardController extends ChangeNotifier {
 
 String _newAgentMessageId(String prefix) {
   return '$prefix-${DateTime.now().microsecondsSinceEpoch}';
+}
+
+List<AgentChatMessage> _defaultAgentSafetyMessages() {
+  return [
+    AgentChatMessage(
+      id: _newAgentMessageId('safety'),
+      role: AgentChatRole.safety,
+      text:
+          'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+      createdAt: DateTime.now(),
+      status: AgentChatStatus.sent,
+      safetyBadges: const [
+        'SERVER-SIDE API',
+        'SAFE MODE',
+        'NO AUTO SUBMIT',
+      ],
+    ),
+  ];
 }
 
 AgentChatStatus _agentStatusForPlan(AgentPlan plan) {

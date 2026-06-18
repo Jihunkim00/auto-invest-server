@@ -25,6 +25,14 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
   final TextEditingController _input = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.controller.initializeAgentConversation();
+    });
+  }
+
+  @override
   void dispose() {
     _input.dispose();
     super.dispose();
@@ -53,6 +61,18 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
                 style: TextStyle(color: Colors.white70, height: 1.25),
               ),
             ]),
+          ),
+          IconButton(
+            key: const ValueKey('agent-chat-new-chat'),
+            tooltip: 'New Chat',
+            onPressed: () => _startNewChat(context),
+            icon: const Icon(Icons.add_comment_outlined, size: 18),
+          ),
+          IconButton(
+            key: const ValueKey('agent-chat-refresh-history'),
+            tooltip: 'Refresh History',
+            onPressed: () => _refreshHistory(context),
+            icon: const Icon(Icons.history, size: 18),
           ),
           IconButton(
             key: const ValueKey('agent-chat-collapse'),
@@ -85,6 +105,20 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
           _AgentBadge(text: 'SAFE MODE'),
           _AgentBadge(text: 'NO AUTO SUBMIT'),
         ]),
+        if (controller.isLoadingAgentHistory) ...[
+          const SizedBox(height: 10),
+          const Text(
+            'Loading previous chat...',
+            style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
+          ),
+        ],
+        if (controller.agentHistoryError != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            controller.agentHistoryError!,
+            style: const TextStyle(color: Colors.orangeAccent, fontSize: 12),
+          ),
+        ],
         if (!collapsed) ...[
           const SizedBox(height: 12),
           _RecentAgentMessages(
@@ -119,6 +153,25 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
     _input.clear();
     final result = await widget.controller.sendAgentMessage(text);
     if (!mounted || result.success) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
+
+  Future<void> _startNewChat(BuildContext context) async {
+    final result = await widget.controller.startNewAgentConversation();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
+
+  Future<void> _refreshHistory(BuildContext context) async {
+    final key = widget.controller.activeAgentConversationKey;
+    final result = key == null
+        ? await widget.controller.restoreLatestAgentConversation()
+        : await widget.controller.loadAgentConversationHistory(key);
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),
     );
