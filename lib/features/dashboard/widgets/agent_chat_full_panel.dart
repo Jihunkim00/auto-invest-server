@@ -23,6 +23,14 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
   final ScrollController _scroll = ScrollController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.controller.initializeAgentConversation();
+    });
+  }
+
+  @override
   void dispose() {
     _input.dispose();
     _scroll.dispose();
@@ -53,6 +61,26 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   const _SafetyNotice(),
+                  if (controller.isLoadingAgentHistory) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Loading previous chat...',
+                      style: TextStyle(
+                        color: Colors.lightBlueAccent,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  if (controller.agentHistoryError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      controller.agentHistoryError!,
+                      style: const TextStyle(
+                        color: Colors.orangeAccent,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   for (final message in controller.agentMessages)
                     _MessageBubble(message: message),
@@ -143,17 +171,19 @@ class _FullToolbar extends StatelessWidget {
       child: Row(children: [
         const Icon(Icons.auto_awesome_outlined, size: 20),
         const SizedBox(width: 8),
-        const Expanded(
+        Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
+              const Text(
                 'Agent Assistant',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 2),
               Text(
-                'Natural language command review',
+                controller.activeAgentConversationKey == null
+                    ? 'Natural language command review'
+                    : 'Conversation ${controller.activeAgentConversationKey}',
                 style: TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
@@ -172,6 +202,35 @@ class _FullToolbar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
+        IconButton(
+          key: const ValueKey('agent-chat-full-new-chat'),
+          tooltip: 'New Chat',
+          onPressed: () {
+            controller.startNewAgentConversation();
+          },
+          icon: const Icon(Icons.add_comment_outlined, size: 18),
+        ),
+        IconButton(
+          key: const ValueKey('agent-chat-full-refresh-history'),
+          tooltip: 'Refresh History',
+          onPressed: () {
+            final key = controller.activeAgentConversationKey;
+            if (key == null) {
+              controller.restoreLatestAgentConversation();
+            } else {
+              controller.loadAgentConversationHistory(key);
+            }
+          },
+          icon: const Icon(Icons.history, size: 18),
+        ),
+        IconButton(
+          key: const ValueKey('agent-chat-full-archive'),
+          tooltip: 'Archive',
+          onPressed: () {
+            controller.archiveAgentConversation();
+          },
+          icon: const Icon(Icons.archive_outlined, size: 18),
+        ),
         IconButton(
           key: const ValueKey('agent-chat-minimize'),
           tooltip: 'Minimize',

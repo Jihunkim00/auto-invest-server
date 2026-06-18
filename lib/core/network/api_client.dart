@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../../models/agent_chat_conversation.dart';
+import '../../models/agent_chat_message.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_plan.dart';
 import '../../models/agent_run.dart';
@@ -356,6 +358,121 @@ class ApiClient {
       'context': context ?? const <String, dynamic>{},
     });
     return AgentCommandParseResult.fromJson(payload);
+  }
+
+  Future<AgentChatConversation> createAgentChatConversation({
+    String? title,
+    String source = 'flutter_dashboard',
+    Map<String, dynamic>? metadata,
+  }) async {
+    final payload = await _postJsonBody('/agent/chat/conversations', {
+      'title': title,
+      'source': source,
+      'metadata': metadata ?? const <String, dynamic>{},
+    });
+    return AgentChatConversation.fromJson(
+      Map<String, dynamic>.from(payload['conversation'] as Map),
+    );
+  }
+
+  Future<List<AgentChatConversation>> fetchAgentChatConversations({
+    String status = 'active',
+    int limit = 20,
+  }) async {
+    final payload = await _getJsonNoCache(
+      '/agent/chat/conversations?status=$status&limit=$limit',
+    );
+    return AgentChatConversationList.fromJson(payload).conversations;
+  }
+
+  Future<AgentChatConversation> fetchAgentChatConversation(
+    String conversationKey,
+  ) async {
+    final payload = await _getJsonNoCache(
+      '/agent/chat/conversations/$conversationKey',
+    );
+    return AgentChatConversation.fromJson(
+      Map<String, dynamic>.from(payload['conversation'] as Map),
+    );
+  }
+
+  Future<List<AgentChatMessage>> fetchAgentChatMessages(
+    String conversationKey, {
+    int limit = 100,
+    int? beforeId,
+  }) async {
+    final path = beforeId == null
+        ? '/agent/chat/conversations/$conversationKey/messages?limit=$limit'
+        : '/agent/chat/conversations/$conversationKey/messages?limit=$limit&before_id=$beforeId';
+    final payload = await _getJsonNoCache(path);
+    final items = payload['messages'] as List<dynamic>? ?? const [];
+    return items
+        .whereType<Map>()
+        .map((item) => AgentChatMessage.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<AgentChatMessage> appendAgentChatMessage({
+    required String conversationKey,
+    required String role,
+    required String text,
+    String messageType = 'plain_text',
+    String status = 'completed',
+    int? commandLogId,
+    int? planId,
+    int? planRunId,
+    int? authApprovalRequestId,
+    int? prefillSourcePlanId,
+    String? modelName,
+    String? parserStatus,
+    Map<String, dynamic>? safety,
+    Map<String, dynamic>? metadata,
+  }) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/conversations/$conversationKey/messages',
+      {
+        'role': role,
+        'text': text,
+        'message_type': messageType,
+        'status': status,
+        'command_log_id': commandLogId,
+        'plan_id': planId,
+        'plan_run_id': planRunId,
+        'auth_approval_request_id': authApprovalRequestId,
+        'prefill_source_plan_id': prefillSourcePlanId,
+        'model_name': modelName,
+        'parser_status': parserStatus,
+        'safety': safety ?? const <String, dynamic>{},
+        'metadata': metadata ?? const <String, dynamic>{},
+      },
+    );
+    return AgentChatMessage.fromJson(
+      Map<String, dynamic>.from(payload['message'] as Map),
+    );
+  }
+
+  Future<AgentChatConversation> archiveAgentChatConversation(
+    String conversationKey,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/conversations/$conversationKey/archive',
+      const {},
+    );
+    return AgentChatConversation.fromJson(
+      Map<String, dynamic>.from(payload['conversation'] as Map),
+    );
+  }
+
+  Future<AgentChatConversation> clearAgentChatConversation(
+    String conversationKey,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/conversations/$conversationKey/clear',
+      const {},
+    );
+    return AgentChatConversation.fromJson(
+      Map<String, dynamic>.from(payload['conversation'] as Map),
+    );
   }
 
   Future<AgentPlanCreateResult> createAgentPlanFromCommand(

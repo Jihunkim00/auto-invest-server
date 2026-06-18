@@ -312,6 +312,44 @@ class AgentCommandLog(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class AgentChatConversation(Base):
+    __tablename__ = "agent_chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_key = Column(String(80), nullable=False, unique=True, index=True)
+    title = Column(String(160), nullable=True)
+    status = Column(String(20), nullable=False, default="active", index=True)
+    source = Column(String(40), nullable=False, default="unknown", index=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False, index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    last_message_at = Column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class AgentChatMessage(Base):
+    __tablename__ = "agent_chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, nullable=False, index=True)
+    conversation_key = Column(String(80), nullable=False, index=True)
+    role = Column(String(20), nullable=False, index=True)
+    message_type = Column(String(40), nullable=False, default="plain_text", index=True)
+    status = Column(String(20), nullable=False, default="completed", index=True)
+    text = Column(Text, nullable=False)
+    command_log_id = Column(Integer, nullable=True, index=True)
+    plan_id = Column(Integer, nullable=True, index=True)
+    plan_run_id = Column(Integer, nullable=True, index=True)
+    auth_approval_request_id = Column(Integer, nullable=True, index=True)
+    prefill_source_plan_id = Column(Integer, nullable=True, index=True)
+    model_name = Column(String(120), nullable=True)
+    parser_status = Column(String(40), nullable=True, index=True)
+    safety_json = Column(Text, nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=True)
+
+
 class AgentPlan(Base):
     __tablename__ = "agent_plans"
 

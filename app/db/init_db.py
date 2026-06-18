@@ -335,6 +335,142 @@ def _create_agent_command_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_command_logs_created_at ON agent_command_logs (created_at)"))
 
 
+def _create_agent_chat_tables_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_chat_conversations (
+                    id INTEGER PRIMARY KEY,
+                    conversation_key VARCHAR(80) NOT NULL UNIQUE,
+                    title VARCHAR(160),
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    source VARCHAR(40) NOT NULL DEFAULT 'unknown',
+                    metadata_json TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    archived_at DATETIME,
+                    last_message_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_chat_conversations_conversation_key "
+                "ON agent_chat_conversations (conversation_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_conversations_status "
+                "ON agent_chat_conversations (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_conversations_source "
+                "ON agent_chat_conversations (source)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_conversations_updated_at "
+                "ON agent_chat_conversations (updated_at)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_conversations_last_message_at "
+                "ON agent_chat_conversations (last_message_at)"
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_chat_messages (
+                    id INTEGER PRIMARY KEY,
+                    conversation_id INTEGER NOT NULL,
+                    conversation_key VARCHAR(80) NOT NULL,
+                    role VARCHAR(20) NOT NULL,
+                    message_type VARCHAR(40) NOT NULL DEFAULT 'plain_text',
+                    status VARCHAR(20) NOT NULL DEFAULT 'completed',
+                    text TEXT NOT NULL,
+                    command_log_id INTEGER,
+                    plan_id INTEGER,
+                    plan_run_id INTEGER,
+                    auth_approval_request_id INTEGER,
+                    prefill_source_plan_id INTEGER,
+                    model_name VARCHAR(120),
+                    parser_status VARCHAR(40),
+                    safety_json TEXT,
+                    metadata_json TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_conversation_id "
+                "ON agent_chat_messages (conversation_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_conversation_key "
+                "ON agent_chat_messages (conversation_key)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_role ON agent_chat_messages (role)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_message_type "
+                "ON agent_chat_messages (message_type)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_status ON agent_chat_messages (status)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_command_log_id "
+                "ON agent_chat_messages (command_log_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_plan_id ON agent_chat_messages (plan_id)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_plan_run_id "
+                "ON agent_chat_messages (plan_run_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_auth_approval_request_id "
+                "ON agent_chat_messages (auth_approval_request_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_prefill_source_plan_id "
+                "ON agent_chat_messages (prefill_source_plan_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_parser_status "
+                "ON agent_chat_messages (parser_status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_chat_messages_created_at "
+                "ON agent_chat_messages (created_at)"
+            )
+        )
+
+
 def _create_agent_plan_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -592,6 +728,7 @@ def init_db():
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
+    _create_agent_chat_tables_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
 

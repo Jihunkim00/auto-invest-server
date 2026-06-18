@@ -33,9 +33,13 @@ class AgentChatMessage {
     required this.text,
     required this.createdAt,
     required this.status,
+    this.conversationKey,
+    this.messageType = 'plain_text',
     this.commandLogId,
     this.planId,
     this.runId,
+    this.modelName,
+    this.parserStatus,
     this.prefillAvailable = false,
     this.safetyBadges = const [],
     this.metadata = const {},
@@ -46,9 +50,13 @@ class AgentChatMessage {
   final String text;
   final DateTime createdAt;
   final AgentChatStatus status;
+  final String? conversationKey;
+  final String messageType;
   final int? commandLogId;
   final int? planId;
   final int? runId;
+  final String? modelName;
+  final String? parserStatus;
   final bool prefillAvailable;
   final List<String> safetyBadges;
   final Map<String, dynamic> metadata;
@@ -61,11 +69,18 @@ class AgentChatMessage {
       createdAt: DateTime.tryParse(_readString(json['created_at'], '')) ??
           DateTime.fromMillisecondsSinceEpoch(0),
       status: agentChatStatusFromString(_readString(json['status'], 'sent')),
+      conversationKey: _readNullableString(json['conversation_key']),
+      messageType: _readString(json['message_type'], 'plain_text'),
       commandLogId: _readNullableInt(json['command_log_id']),
       planId: _readNullableInt(json['plan_id']),
-      runId: _readNullableInt(json['run_id']),
+      runId: _readNullableInt(json['plan_run_id']) ??
+          _readNullableInt(json['run_id']),
+      modelName: _readNullableString(json['model_name']),
+      parserStatus: _readNullableString(json['parser_status']),
       prefillAvailable: json['prefill_available'] == true,
-      safetyBadges: _readStringList(json['safety_badges']),
+      safetyBadges: _readStringList(json['safety_badges']).isNotEmpty
+          ? _readStringList(json['safety_badges'])
+          : _badgesFromPersistedMessage(json),
       metadata: _readMap(json['metadata']),
     );
   }
@@ -77,9 +92,14 @@ class AgentChatMessage {
       'text': text,
       'created_at': createdAt.toIso8601String(),
       'status': status.wireName,
+      'conversation_key': conversationKey,
+      'message_type': messageType,
       'command_log_id': commandLogId,
       'plan_id': planId,
+      'plan_run_id': runId,
       'run_id': runId,
+      'model_name': modelName,
+      'parser_status': parserStatus,
       'prefill_available': prefillAvailable,
       'safety_badges': safetyBadges,
       'metadata': metadata,
@@ -90,9 +110,13 @@ class AgentChatMessage {
     AgentChatRole? role,
     String? text,
     AgentChatStatus? status,
+    String? conversationKey,
+    String? messageType,
     int? commandLogId,
     int? planId,
     int? runId,
+    String? modelName,
+    String? parserStatus,
     bool? prefillAvailable,
     List<String>? safetyBadges,
     Map<String, dynamic>? metadata,
@@ -103,9 +127,13 @@ class AgentChatMessage {
       text: text ?? this.text,
       createdAt: createdAt,
       status: status ?? this.status,
+      conversationKey: conversationKey ?? this.conversationKey,
+      messageType: messageType ?? this.messageType,
       commandLogId: commandLogId ?? this.commandLogId,
       planId: planId ?? this.planId,
       runId: runId ?? this.runId,
+      modelName: modelName ?? this.modelName,
+      parserStatus: parserStatus ?? this.parserStatus,
       prefillAvailable: prefillAvailable ?? this.prefillAvailable,
       safetyBadges: safetyBadges ?? this.safetyBadges,
       metadata: metadata ?? this.metadata,
@@ -157,6 +185,8 @@ AgentChatStatus agentChatStatusFromString(String value) {
   switch (value.trim().toLowerCase()) {
     case 'pending':
       return AgentChatStatus.pending;
+    case 'completed':
+      return AgentChatStatus.sent;
     case 'parsing':
       return AgentChatStatus.parsing;
     case 'plan_created':
@@ -196,10 +226,35 @@ int? _readNullableInt(Object? value) {
   return int.tryParse(value.toString());
 }
 
+String? _readNullableString(Object? value) {
+  final text = value?.toString().trim();
+  if (text == null || text.isEmpty || text == 'null') return null;
+  return text;
+}
+
 List<String> _readStringList(Object? value) {
   if (value is! List) return const [];
   return [
     for (final item in value)
       if (item?.toString().trim().isNotEmpty == true) item.toString().trim(),
   ];
+}
+
+List<String> _badgesFromPersistedMessage(Map<String, dynamic> json) {
+  final badges = <String>[];
+  final parserStatus = _readNullableString(json['parser_status']);
+  final messageType = _readString(json['message_type'], '');
+  if (parserStatus != null) {
+    badges.add(parserStatus.contains('fallback') ? 'FALLBACK PARSER' : 'GPT-BACKED');
+  }
+  if (messageType == 'manual_prefill_result') {
+    badges.addAll([
+      'PREFILL ONLY',
+      'MANUAL VALIDATION REQUIRED',
+      'NO AUTO SUBMIT',
+    ]);
+  } else if (messageType == 'safe_run_result') {
+    badges.addAll(['SAFE EXECUTION ONLY', 'NO AUTO SUBMIT']);
+  }
+  return badges;
 }
