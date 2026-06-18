@@ -87,6 +87,34 @@ def test_parse_agent_command_endpoint_handles_ambiguous_buy(client):
     assert body["safety"]["real_order_submitted"] is False
 
 
+def test_parse_agent_command_endpoint_preserves_korean_utf8_message(client):
+    message = "삼성전자 주식 지금 가격 얼마야?"
+    response = client.post(
+        "/agent/commands/parse",
+        json={
+            "conversation_id": "conv-utf8",
+            "message": message,
+            "context": {
+                "default_market": "KR",
+                "default_provider": "kis",
+                "timezone": "Asia/Seoul",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "parsed"
+    assert body["command"]["raw_message"] == message
+    assert "????" not in body["command"]["raw_message"]
+
+    recent = client.get("/agent/commands/recent", params={"conversation_id": "conv-utf8"})
+    assert recent.status_code == 200
+    item = recent.json()["commands"][0]
+    assert item["user_message"] == message
+    assert "????" not in item["user_message"]
+
+
 def test_agent_command_detail_404(client):
     response = client.get("/agent/commands/999999")
 

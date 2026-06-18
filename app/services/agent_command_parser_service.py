@@ -59,7 +59,7 @@ class AgentCommandParserService:
             "agent_chat_reasoning_effort",
             getattr(self.settings, "openai_reasoning_effort", "low"),
         )
-        self.openai_temperature = getattr(self.settings, "agent_chat_temperature", 0.0)
+        self.openai_temperature = getattr(self.settings, "agent_chat_temperature", None)
         self.openai_timeout_seconds = getattr(
             self.settings,
             "agent_chat_timeout_seconds",
@@ -158,17 +158,44 @@ class AgentCommandParserService:
                 "scheduler_changed": False,
             },
         }
-        response = self.client.responses.create(
-            model=self.openai_model,
-            reasoning={"effort": self.openai_reasoning_effort},
-            temperature=self.openai_temperature,
-            instructions=AGENT_COMMAND_SYSTEM_PROMPT,
-            input=json.dumps(prompt_payload, ensure_ascii=False),
-        )
+        request_payload = {
+            "model": self.openai_model,
+            "reasoning": {"effort": self.openai_reasoning_effort},
+            "instructions": AGENT_COMMAND_SYSTEM_PROMPT,
+            "input": json.dumps(prompt_payload, ensure_ascii=False),
+        }
+        if (
+            self.openai_temperature is not None
+            and self._model_supports_temperature(self.openai_model)
+        ):
+            request_payload["temperature"] = self.openai_temperature
+
+        try:
+            response = self.client.responses.create(**request_payload)
+        except Exception as exc:
+            if (
+                "temperature" in request_payload
+                and self._is_unsupported_temperature_error(exc)
+            ):
+                retry_payload = dict(request_payload)
+                retry_payload.pop("temperature", None)
+                response = self.client.responses.create(**retry_payload)
+            else:
+                raise
         raw_text = (response.output_text or "").strip()
         if not raw_text:
             raise ValueError("OpenAI returned empty output_text")
         return self._parse_json_text(raw_text)
+
+    def _model_supports_temperature(self, model_name: str | None) -> bool:
+        normalized = str(model_name or "").strip().lower()
+        if normalized.startswith("gpt-5"):
+            return False
+        return True
+
+    def _is_unsupported_temperature_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return "unsupported parameter" in message and "temperature" in message
 
     def _parse_json_text(self, raw_text: str) -> dict[str, Any]:
         text = raw_text.strip()
