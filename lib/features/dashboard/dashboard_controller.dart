@@ -3,6 +3,11 @@ import 'package:flutter/foundation.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
+import '../../models/agent_chat_message.dart';
+import '../../models/agent_command.dart';
+import '../../models/agent_live_prefill.dart';
+import '../../models/agent_plan.dart';
+import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/candidate.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -243,6 +248,33 @@ class DashboardController extends ChangeNotifier {
   KisOrderHistoryFilter kisOrderFilter = KisOrderHistoryFilter.all;
   KisOrderHistorySort kisOrderSort = KisOrderHistorySort.newestFirst;
   KisManualOrderResult? selectedKisOrder;
+  AgentChatPanelMode agentChatMode = AgentChatPanelMode.mini;
+  List<AgentChatMessage> agentMessages = [
+    AgentChatMessage(
+      id: 'agent-safety-intro',
+      role: AgentChatRole.safety,
+      text:
+          'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      status: AgentChatStatus.sent,
+      safetyBadges: const [
+        'SERVER-SIDE API',
+        'SAFE MODE',
+        'NO AUTO SUBMIT',
+      ],
+    ),
+  ];
+  bool isAgentParsing = false;
+  bool isAgentPlanCreating = false;
+  bool isAgentRunning = false;
+  bool isAgentPreparingTicket = false;
+  AgentCommandParseResult? latestAgentCommand;
+  AgentPlan? latestAgentPlan;
+  AgentPlanRunResult? latestAgentRun;
+  AgentLivePrefill? latestAgentPrefill;
+  String? agentErrorMessage;
+  final String agentConversationId =
+      'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
   bool get hasValidKisValidation =>
       orderValidationResult?.validatedForSubmission == true;
@@ -1141,6 +1173,381 @@ class DashboardController extends ChangeNotifier {
   void setKisGuardedRunConfirmation(bool value) {
     kisGuardedRunConfirmation = value;
     notifyListeners();
+  }
+
+  void setAgentChatMode(AgentChatPanelMode mode) {
+    if (agentChatMode == mode) return;
+    agentChatMode = mode;
+    notifyListeners();
+  }
+
+  void cycleAgentChatMode() {
+    switch (agentChatMode) {
+      case AgentChatPanelMode.collapsed:
+        setAgentChatMode(AgentChatPanelMode.mini);
+        return;
+      case AgentChatPanelMode.mini:
+        setAgentChatMode(AgentChatPanelMode.expanded);
+        return;
+      case AgentChatPanelMode.expanded:
+        setAgentChatMode(AgentChatPanelMode.fullscreen);
+        return;
+      case AgentChatPanelMode.fullscreen:
+        setAgentChatMode(AgentChatPanelMode.mini);
+        return;
+    }
+  }
+
+  void clearAgentChat() {
+    agentMessages = [
+      AgentChatMessage(
+        id: _newAgentMessageId('safety'),
+        role: AgentChatRole.safety,
+        text:
+            'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+        createdAt: DateTime.now(),
+        status: AgentChatStatus.sent,
+        safetyBadges: const [
+          'SERVER-SIDE API',
+          'SAFE MODE',
+          'NO AUTO SUBMIT',
+        ],
+      ),
+    ];
+    latestAgentCommand = null;
+    latestAgentPlan = null;
+    latestAgentRun = null;
+    latestAgentPrefill = null;
+    agentErrorMessage = null;
+    notifyListeners();
+  }
+
+  Future<ActionResult> sendAgentMessage(String text) async {
+    final cleanText = text.trim();
+    if (cleanText.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'Enter a message for Agent Assistant.',
+      );
+    }
+
+    final now = DateTime.now();
+    final assistantId = _newAgentMessageId('assistant');
+    agentMessages = [
+      ...agentMessages,
+      AgentChatMessage(
+        id: _newAgentMessageId('user'),
+        role: AgentChatRole.user,
+        text: cleanText,
+        createdAt: now,
+        status: AgentChatStatus.sent,
+      ),
+      AgentChatMessage(
+        id: assistantId,
+        role: AgentChatRole.assistant,
+        text: 'Parsing with the FastAPI agent endpoint...',
+        createdAt: now,
+        status: AgentChatStatus.parsing,
+        safetyBadges: const [
+          'SERVER-SIDE API',
+          'SAFE MODE',
+          'NO AUTO SUBMIT',
+        ],
+      ),
+    ];
+    isAgentParsing = true;
+    isAgentPlanCreating = false;
+    agentErrorMessage = null;
+    notifyListeners();
+
+    try {
+      final parsed = await apiClient.parseAgentCommand(
+        message: cleanText,
+        conversationId: agentConversationId,
+        context: _agentContext(),
+      );
+      latestAgentCommand = parsed;
+
+      if (parsed.commandLogId == null) {
+        _replaceAgentMessage(
+          assistantId,
+          _agentMessageForParsedCommand(assistantId, parsed),
+        );
+        return const ActionResult(
+          success: true,
+          message: 'Agent command parsed. No plan was created.',
+        );
+      }
+
+      _replaceAgentMessage(
+        assistantId,
+        _agentMessageForParsedCommand(
+          assistantId,
+          parsed,
+          textOverride: 'Command parsed. Creating a plan review...',
+        ),
+      );
+      isAgentParsing = false;
+      isAgentPlanCreating = true;
+      notifyListeners();
+
+      final planResponse = await apiClient.createAgentPlanFromCommand(
+        parsed.commandLogId!,
+      );
+      latestAgentPlan = planResponse.plan;
+      final status = _agentStatusForPlan(planResponse.plan);
+      _replaceAgentMessage(
+        assistantId,
+        AgentChatMessage(
+          id: assistantId,
+          role: AgentChatRole.assistant,
+          text: _agentPlanAssistantText(planResponse.plan),
+          createdAt: now,
+          status: status,
+          commandLogId: parsed.commandLogId,
+          planId: planResponse.plan.id,
+          prefillAvailable: planResponse.plan.canPrepareManualTicket,
+          safetyBadges: _agentSafetyBadges(parsed, planResponse.plan),
+          metadata: {
+            'parser_status': parsed.parserStatus,
+            if (parsed.modelName != null) 'model_name': parsed.modelName,
+          },
+        ),
+      );
+      return const ActionResult(
+        success: true,
+        message: 'Agent plan created for review. No order submitted.',
+      );
+    } catch (e) {
+      agentErrorMessage = ApiErrorFormatter.format(e.toString());
+      _replaceAgentMessage(
+        assistantId,
+        AgentChatMessage(
+          id: assistantId,
+          role: AgentChatRole.error,
+          text: _primaryMessage(agentErrorMessage!),
+          createdAt: now,
+          status: AgentChatStatus.failed,
+          safetyBadges: const ['NO AUTO SUBMIT'],
+        ),
+      );
+      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
+    } finally {
+      isAgentParsing = false;
+      isAgentPlanCreating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAgentSafePlan([int? planId]) async {
+    final plan = latestAgentPlan;
+    final id = planId ?? plan?.id;
+    if (id == null || id <= 0 || plan == null) {
+      return const ActionResult(
+        success: false,
+        message: 'No agent plan is ready to run.',
+      );
+    }
+    if (!plan.canRunSafeAction) {
+      return const ActionResult(
+        success: false,
+        message: 'This plan is not eligible for safe chat execution.',
+      );
+    }
+
+    isAgentRunning = true;
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final run = await apiClient.runAgentPlan(
+        id,
+        operatorNote: 'Triggered by Flutter Agent Chat plan review.',
+      );
+      latestAgentRun = run;
+      _appendAgentAssistantMessage(
+        run.isBlocked
+            ? 'Safe action was blocked by the backend policy.'
+            : 'Safe action completed. No live order was submitted.',
+        status: run.isBlocked
+            ? AgentChatStatus.blocked
+            : AgentChatStatus.safeRunCompleted,
+        planId: id,
+        runId: run.planRunId,
+        badges: const ['SAFE EXECUTION ONLY', 'NO AUTO SUBMIT'],
+      );
+      return ActionResult(
+        success: !run.isBlocked,
+        message: run.isBlocked
+            ? 'Agent safe action blocked. No order submitted.'
+            : 'Agent safe action completed. No order submitted.',
+      );
+    } catch (e) {
+      agentErrorMessage = ApiErrorFormatter.format(e.toString());
+      _appendAgentAssistantMessage(
+        _primaryMessage(agentErrorMessage!),
+        status: AgentChatStatus.failed,
+        badges: const ['NO AUTO SUBMIT'],
+      );
+      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
+    } finally {
+      isAgentRunning = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> prepareAgentManualTicket([int? planId]) async {
+    final plan = latestAgentPlan;
+    final id = planId ?? plan?.id;
+    if (id == null || id <= 0 || plan == null) {
+      return const ActionResult(
+        success: false,
+        message: 'No agent plan is ready for manual ticket prefill.',
+      );
+    }
+    if (!plan.canPrepareManualTicket) {
+      return const ActionResult(
+        success: false,
+        message: 'This plan cannot prepare a manual ticket from chat.',
+      );
+    }
+
+    isAgentPreparingTicket = true;
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final prefill = await apiClient.prepareAgentManualTicket(
+        id,
+        operatorNote: 'Prepared from Flutter Agent Chat.',
+      );
+      latestAgentPrefill = prefill;
+      if (prefill.isReady && prefill.prefill != null) {
+        applyAgentPrefillToManualTicket(prefill);
+        _appendAgentAssistantMessage(
+          'Manual ticket prefill is ready in Trading. Validate and submit manually.',
+          status: AgentChatStatus.prefillReady,
+          planId: id,
+          runId: prefill.planRunId,
+          badges: const [
+            'PREFILL ONLY',
+            'MANUAL VALIDATION REQUIRED',
+            'CONFIRM_LIVE MANUAL',
+            'NO AUTO SUBMIT',
+          ],
+        );
+        return const ActionResult(
+          success: true,
+          message: 'Agent prepared a manual ticket. Validate and submit manually.',
+        );
+      }
+
+      final status = prefill.requiresAuth
+          ? AgentChatStatus.authRequired
+          : AgentChatStatus.blocked;
+      _appendAgentAssistantMessage(
+        prefill.requiresAuth
+            ? 'Auth is required. Approval flow is not connected to live execution yet.'
+            : 'Manual ticket prefill was blocked by backend policy.',
+        status: status,
+        planId: id,
+        runId: prefill.planRunId,
+        badges: const ['NO AUTO SUBMIT'],
+      );
+      return ActionResult(
+        success: false,
+        message: prefill.requiresAuth
+            ? 'Auth required. No ticket was prepared.'
+            : 'Manual ticket prefill blocked. No order submitted.',
+      );
+    } catch (e) {
+      agentErrorMessage = ApiErrorFormatter.format(e.toString());
+      _appendAgentAssistantMessage(
+        _primaryMessage(agentErrorMessage!),
+        status: AgentChatStatus.failed,
+        badges: const ['NO AUTO SUBMIT'],
+      );
+      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
+    } finally {
+      isAgentPreparingTicket = false;
+      notifyListeners();
+    }
+  }
+
+  ActionResult applyAgentPrefillToManualTicket(AgentLivePrefill response) {
+    final prefill = response.prefill;
+    if (!response.isReady || prefill == null) {
+      return const ActionResult(
+        success: false,
+        message: 'Agent prefill is not ready.',
+      );
+    }
+
+    final market = prefill.market.trim().toUpperCase();
+    final provider = prefill.provider.trim().toLowerCase();
+    final symbol = market == 'KR'
+        ? normalizeKrSymbol(prefill.symbol)
+        : prefill.symbol.trim().toUpperCase();
+    if (symbol.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'Agent prefill is missing a symbol.',
+      );
+    }
+
+    selectedProvider =
+        provider == 'kis' ? SelectedProvider.kis : SelectedProvider.alpaca;
+    selectedPortfolioMarket =
+        market == 'KR' ? PortfolioMarket.kr : PortfolioMarket.us;
+    selectedWatchlistMarket = selectedPortfolioMarket;
+    selectedOrderMarket = selectedPortfolioMarket;
+    orderTicketSymbol = symbol;
+    orderTicketSide = prefill.side.trim().toLowerCase() == 'sell'
+        ? 'sell'
+        : 'buy';
+    final wholeQty = prefill.qty ?? _wholeAgentPrefillQuantity(prefill.quantity);
+    if (wholeQty != null && wholeQty > 0) {
+      orderTicketQty = wholeQty;
+      orderTicketQtyInput = wholeQty.toString();
+    } else if (parsedOrderTicketQty == null || orderTicketQty < 1) {
+      orderTicketQty = 1;
+      orderTicketQtyInput = '1';
+    }
+    orderValidationResult = null;
+    orderValidationError = null;
+    kisLiveConfirmation = false;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+    orderTicketSourceMetadata = {
+      ...prefill.sourceMetadata,
+      'source': 'agent_plan',
+      'source_type': 'agent_manual_ticket_prefill',
+      'source_context': 'agent_manual_prefill',
+      'operator_action_source': 'agent_manual_prefill',
+      'agent_plan_id': response.planId,
+      'command_type': response.commandType,
+      'market': market,
+      'broker': provider,
+      'symbol': symbol,
+      'side': orderTicketSide,
+      if (wholeQty != null) 'quantity': wholeQty,
+      if (prefill.notional != null) 'notional': prefill.notional,
+      if (prefill.currency != null) 'currency': prefill.currency,
+      'manual_confirm_required': true,
+      'requires_user_review': true,
+      'requires_user_validation': true,
+      'requires_confirm_live': true,
+      'auto_buy_enabled': false,
+      'auto_sell_enabled': false,
+      'scheduler_real_order_enabled': false,
+      'real_order_submit_allowed': false,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    };
+    notifyListeners();
+    return const ActionResult(
+      success: true,
+      message: 'Agent prepared a manual ticket. Validate and submit manually.',
+    );
   }
 
   void useKrCandidateInOrderTicket(Candidate candidate) {
@@ -3405,6 +3812,68 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Map<String, dynamic> _agentContext() {
+    return {
+      'default_market': selectedMarketCode,
+      'default_provider': selectedProviderCode,
+      'timezone': 'Asia/Seoul',
+      'source': 'flutter_dashboard_agent_chat',
+    };
+  }
+
+  AgentChatMessage _agentMessageForParsedCommand(
+    String id,
+    AgentCommandParseResult parsed, {
+    String? textOverride,
+  }) {
+    return AgentChatMessage(
+      id: id,
+      role: AgentChatRole.assistant,
+      text: textOverride ?? parsed.command.userVisibleSummary,
+      createdAt: DateTime.now(),
+      status: parsed.command.needsClarification
+          ? AgentChatStatus.blocked
+          : AgentChatStatus.sent,
+      commandLogId: parsed.commandLogId,
+      safetyBadges: _agentSafetyBadges(parsed, null),
+      metadata: {
+        'parser_status': parsed.parserStatus,
+        if (parsed.modelName != null) 'model_name': parsed.modelName,
+      },
+    );
+  }
+
+  void _replaceAgentMessage(String id, AgentChatMessage replacement) {
+    agentMessages = [
+      for (final message in agentMessages)
+        if (message.id == id) replacement else message,
+    ];
+  }
+
+  void _appendAgentAssistantMessage(
+    String text, {
+    required AgentChatStatus status,
+    int? planId,
+    int? runId,
+    List<String> badges = const [],
+  }) {
+    agentMessages = [
+      ...agentMessages,
+      AgentChatMessage(
+        id: _newAgentMessageId('assistant'),
+        role: status == AgentChatStatus.failed
+            ? AgentChatRole.error
+            : AgentChatRole.assistant,
+        text: text,
+        createdAt: DateTime.now(),
+        status: status,
+        planId: planId,
+        runId: runId,
+        safetyBadges: badges,
+      ),
+    ];
+  }
+
   void _clearOrderTicketSourceMetadata() {
     orderTicketSourceMetadata = null;
     orderValidationResult = null;
@@ -3413,6 +3882,67 @@ class DashboardController extends ChangeNotifier {
     kisManualOrderError = null;
     kisManualOrderErrorRaw = null;
   }
+}
+
+String _newAgentMessageId(String prefix) {
+  return '$prefix-${DateTime.now().microsecondsSinceEpoch}';
+}
+
+AgentChatStatus _agentStatusForPlan(AgentPlan plan) {
+  if (plan.isAuthRequired) return AgentChatStatus.authRequired;
+  if (plan.isBlocked) return AgentChatStatus.blocked;
+  return AgentChatStatus.readyForReview;
+}
+
+String _agentPlanAssistantText(AgentPlan plan) {
+  if (plan.isAuthRequired) {
+    return 'Plan requires auth. No action was executed.';
+  }
+  if (plan.isBlocked) {
+    return 'Plan is blocked by backend policy. No action was executed.';
+  }
+  if (plan.canPrepareManualTicket) {
+    return 'Manual ticket prefill plan created. No order submitted.';
+  }
+  if (plan.canRunSafeAction) {
+    return 'Safe action plan created for review. No order submitted.';
+  }
+  return 'Plan created for review. No order submitted.';
+}
+
+List<String> _agentSafetyBadges(
+  AgentCommandParseResult parsed,
+  AgentPlan? plan,
+) {
+  final badges = <String>[
+    parsed.fallbackUsed ? 'FALLBACK PARSER' : 'GPT-BACKED',
+    'SERVER-SIDE API',
+    'NO AUTO SUBMIT',
+  ];
+  if (plan == null) return badges;
+  if (plan.canPrepareManualTicket) {
+    badges.addAll([
+      'PREFILL ONLY',
+      'MANUAL VALIDATION REQUIRED',
+      'CONFIRM_LIVE MANUAL',
+    ]);
+  } else if (plan.canRunSafeAction) {
+    badges.add('SAFE EXECUTION ONLY');
+  }
+  if (plan.isAuthRequired) badges.add('AUTH REQUIRED');
+  if (plan.isBlocked) badges.add('BLOCKED');
+  if (plan.riskLevel == 'read_only') badges.add('READ ONLY');
+  if (plan.riskLevel == 'analysis_only') badges.add('ANALYSIS ONLY');
+  return badges;
+}
+
+int? _wholeAgentPrefillQuantity(double? value) {
+  if (value == null || value < 1 || value.isNaN || value.isInfinite) {
+    return null;
+  }
+  final rounded = value.roundToDouble();
+  if (rounded != value) return null;
+  return rounded.toInt();
 }
 
 OpsSettings _opsSettingsWithPayload(

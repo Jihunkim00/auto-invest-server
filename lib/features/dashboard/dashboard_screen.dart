@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/utils/timestamp_formatter.dart';
 import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
+import '../../models/agent_chat_message.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
@@ -10,6 +11,8 @@ import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
 import 'widgets/automation_event_timeline_card.dart';
 import 'widgets/automation_runtime_monitor_card.dart';
+import 'widgets/agent_chat_full_panel.dart';
+import 'widgets/agent_chat_panel.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/operation_rehearsal_panel.dart';
 import 'widgets/portfolio_snapshot_section.dart';
@@ -34,70 +37,88 @@ class DashboardScreen extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         return SafeArea(
-          child: RefreshIndicator(
-            onRefresh: controller.load,
-            child: ListView(
-              key: const Key('dashboard_home_scroll_view'),
-              padding: const EdgeInsets.all(16),
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                onRefresh: controller.load,
+                child: ListView(
+                  key: const Key('dashboard_home_scroll_view'),
+                  padding: const EdgeInsets.all(16),
                   children: [
-                    const Expanded(
-                      child: Text(
-                        'Home',
-                        style: TextStyle(
-                            fontSize: 28, fontWeight: FontWeight.w700),
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Home',
+                            style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        GlobalBrokerSelector(controller: controller),
+                      ],
                     ),
-                    GlobalBrokerSelector(controller: controller),
+                    const SizedBox(height: 6),
+                    Text(
+                      controller.selectedProvider == SelectedProvider.kis
+                          ? 'KIS account, manual live safety, and recent KR activity.'
+                          : 'Alpaca paper portfolio, watchlist status, and recent US activity.',
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 14),
+                    AgentChatPanel(
+                      controller: controller,
+                      onOpenManualOrder: onOpenManualOrder,
+                    ),
+                    const SizedBox(height: 12),
+                    _OperationalReadinessCard(
+                      controller: controller,
+                      onOpenSettings: onOpenSettings,
+                    ),
+                    const SizedBox(height: 12),
+                    _PreLiveOperationsCard(
+                      controller: controller,
+                      onOpenManualOrder: onOpenManualOrder,
+                    ),
+                    const SizedBox(height: 12),
+                    _SafetySummary(controller: controller),
+                    const SizedBox(height: 12),
+                    AutomationRuntimeMonitorCard(controller: controller),
+                    const SizedBox(height: 12),
+                    OperationRehearsalPanel(controller: controller),
+                    const SizedBox(height: 12),
+                    AutomationEventTimelineCard(controller: controller),
+                    const SizedBox(height: 12),
+                    PortfolioSnapshotSection(
+                      controller: controller,
+                      managementMode: true,
+                      onOpenManualOrder: onOpenManualOrder,
+                      onReviewPosition: onReviewPosition,
+                    ),
+                    const SizedBox(height: 12),
+                    _NextActionCard(controller: controller),
+                    const SizedBox(height: 12),
+                    _RecentActivityCard(controller: controller),
+                    if (controller.error != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        controller.error!,
+                        style: const TextStyle(color: Colors.orangeAccent),
+                      ),
+                    ],
                   ],
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  controller.selectedProvider == SelectedProvider.kis
-                      ? 'KIS account, manual live safety, and recent KR activity.'
-                      : 'Alpaca paper portfolio, watchlist status, and recent US activity.',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 14),
-                _OperationalReadinessCard(
-                  controller: controller,
-                  onOpenSettings: onOpenSettings,
-                ),
-                const SizedBox(height: 12),
-                _PreLiveOperationsCard(
-                  controller: controller,
-                  onOpenManualOrder: onOpenManualOrder,
-                ),
-                const SizedBox(height: 12),
-                _SafetySummary(controller: controller),
-                const SizedBox(height: 12),
-                AutomationRuntimeMonitorCard(controller: controller),
-                const SizedBox(height: 12),
-                OperationRehearsalPanel(controller: controller),
-                const SizedBox(height: 12),
-                AutomationEventTimelineCard(controller: controller),
-                const SizedBox(height: 12),
-                PortfolioSnapshotSection(
-                  controller: controller,
-                  managementMode: true,
-                  onOpenManualOrder: onOpenManualOrder,
-                  onReviewPosition: onReviewPosition,
-                ),
-                const SizedBox(height: 12),
-                _NextActionCard(controller: controller),
-                const SizedBox(height: 12),
-                _RecentActivityCard(controller: controller),
-                if (controller.error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    controller.error!,
-                    style: const TextStyle(color: Colors.orangeAccent),
+              ),
+              if (controller.agentChatMode == AgentChatPanelMode.fullscreen)
+                Positioned.fill(
+                  child: AgentChatFullPanel(
+                    controller: controller,
+                    onOpenManualOrder: onOpenManualOrder,
                   ),
-                ],
-              ],
-            ),
+                ),
+            ],
           ),
         );
       },

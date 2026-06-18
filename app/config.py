@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-mini"
     openai_reasoning_effort: str = "medium"
+    agent_chat_model: str = "gpt-5.4-mini"
+    agent_chat_reasoning_effort: str = "low"
+    agent_chat_temperature: float = 0.0
+    agent_chat_timeout_seconds: float = 20.0
+    agent_chat_fallback_enabled: bool = True
 
     reference_sites_config_path: str = "config/reference_sites.yaml"
     event_sources_config_path: str = "config/event_sources.yaml"
