@@ -4,6 +4,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_conversation.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_message.dart';
+import 'package:auto_invest_dashboard/models/agent_chat_send_response.dart';
 import 'package:auto_invest_dashboard/models/agent_command.dart';
 import 'package:auto_invest_dashboard/models/agent_plan.dart';
 
@@ -38,7 +39,7 @@ void main() {
     controller.dispose();
   });
 
-  test('sendAgentMessage restores before parse and persists user and plan review',
+  test('sendAgentMessage restores before chat send and lets backend persist',
       () async {
     final api = _AgentChatHistoryFakeApi(
       conversations: [_conversation('agent_conv_latest')],
@@ -51,26 +52,31 @@ void main() {
     final result = await controller.sendAgentMessage('show my positions');
 
     expect(result.success, isTrue);
-    expect(api.parseConversationId, 'agent_conv_latest');
-    expect(api.parseContext?['conversation_key'], 'agent_conv_latest');
-    expect(api.appendedMessages, hasLength(2));
-    expect(api.appendedMessages.first.role, AgentChatRole.user);
-    expect(api.appendedMessages.first.text, 'show my positions');
-    expect(api.appendedMessages.last.messageType, 'plan_review');
-    expect(api.appendedMessages.last.commandLogId, 77);
-    expect(api.appendedMessages.last.planId, 88);
-    expect(controller.latestAgentPlan?.id, 88);
+    expect(api.chatSendCalls, 1);
+    expect(api.chatConversationKey, 'agent_conv_latest');
+    expect(api.chatContext?['conversation_key'], 'agent_conv_latest');
+    expect(api.parseCalls, 0);
+    expect(api.createPlanCalls, 0);
+    expect(api.appendedMessages, isEmpty);
+    expect(controller.latestAgentPlan, isNull);
     expect(
       controller.agentMessages.map((message) => message.text),
       contains('Previous summary.'),
+    );
+    expect(
+      controller.agentMessages.map((message) => message.text),
+      contains('Read-only positions summary.'),
     );
 
     controller.dispose();
   });
 
-  test('append failure keeps local chat and does not block plan creation',
+  test('chat send failure falls back and append failure keeps local plan',
       () async {
-    final api = _AgentChatHistoryFakeApi(throwAppend: true);
+    final api = _AgentChatHistoryFakeApi(
+      throwAppend: true,
+      throwChatSend: true,
+    );
     final controller = DashboardController(api, autoload: false);
 
     final result = await controller.sendAgentMessage('show my positions');
@@ -121,22 +127,27 @@ class _AgentChatHistoryFakeApi extends ApiClient {
     List<AgentChatConversation>? conversations,
     List<AgentChatMessage>? messages,
     this.throwAppend = false,
+    this.throwChatSend = false,
   })  : conversations = List<AgentChatConversation>.of(conversations ?? const []),
         messages = List<AgentChatMessage>.of(messages ?? const []);
 
   final List<AgentChatConversation> conversations;
   final List<AgentChatMessage> messages;
   final bool throwAppend;
+  final bool throwChatSend;
   final List<AgentChatMessage> appendedMessages = [];
   final List<String> archivedKeys = [];
 
   int fetchConversationsCalls = 0;
   int createConversationCalls = 0;
   int fetchMessagesCalls = 0;
+  int chatSendCalls = 0;
   int appendCalls = 0;
   int parseCalls = 0;
   int createPlanCalls = 0;
   int archiveCalls = 0;
+  String? chatConversationKey;
+  Map<String, dynamic>? chatContext;
   String? parseConversationId;
   Map<String, dynamic>? parseContext;
 
@@ -183,6 +194,57 @@ class _AgentChatHistoryFakeApi extends ApiClient {
             message.conversationKey == conversationKey)
         .take(limit)
         .toList();
+  }
+
+  @override
+  Future<AgentChatSendResponse> sendAgentChatMessage({
+    required String message,
+    String? conversationKey,
+    Map<String, dynamic>? context,
+    bool autoCreateConversation = true,
+  }) async {
+    chatSendCalls += 1;
+    chatConversationKey = conversationKey;
+    chatContext = context;
+    if (throwChatSend) {
+      throw const ApiRequestException('chat send failed');
+    }
+    return AgentChatSendResponse.fromJson({
+      'conversation_key': conversationKey ?? 'agent_conv_created_1',
+      'user_message_id': 10,
+      'assistant_message_id': 11,
+      'intent': {
+        'category': 'read_only_positions_query',
+        'supported': true,
+        'confidence': 0.9,
+        'market': 'KR',
+        'provider': 'kis',
+        'side': 'none',
+        'requires_plan': false,
+        'requires_auth': false,
+        'requires_manual_confirmation': false,
+        'fallback_used': true,
+        'parser_status': 'fallback',
+      },
+      'answer': {
+        'role': 'assistant',
+        'text': 'Read-only positions summary.',
+        'answer_type': 'read_only_result',
+      },
+      'data': {'positions': [], 'count': 0},
+      'available_actions': [],
+      'safety': {
+        'read_only': true,
+        'safe_execution_only': true,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        'validation_called': false,
+        'setting_changed': false,
+        'scheduler_changed': false,
+        'confirm_live_auto_checked': false,
+      },
+    });
   }
 
   @override

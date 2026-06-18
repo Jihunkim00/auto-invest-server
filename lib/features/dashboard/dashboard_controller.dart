@@ -5,6 +5,7 @@ import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_message.dart';
+import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_live_prefill.dart';
 import '../../models/agent_operations.dart';
@@ -1665,7 +1666,44 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      await saveAgentUserMessage(cleanText);
+      final chatResponse = await apiClient.sendAgentChatMessage(
+        message: cleanText,
+        conversationKey: activeAgentConversationKey,
+        context: _agentContext(),
+        autoCreateConversation: true,
+      );
+      _applyAgentChatSendResponse(chatResponse);
+      _replaceAgentMessage(
+        assistantId,
+        _agentMessageForChatSendResponse(assistantId, chatResponse, now),
+      );
+      isAgentParsing = false;
+      isAgentPlanCreating = false;
+      notifyListeners();
+      return ActionResult(
+        success: chatResponse.answer.answerType != 'error',
+        message: chatResponse.answer.answerType == 'error'
+            ? 'Agent chat returned an error. No order submitted.'
+            : 'Agent chat answered. No order submitted.',
+      );
+    } catch (chatSendError) {
+      agentHistoryError =
+          'Chat send endpoint unavailable; using legacy parse flow. ${ApiErrorFormatter.format(chatSendError.toString())}';
+      _replaceAgentMessage(
+        assistantId,
+        AgentChatMessage(
+          id: assistantId,
+          role: AgentChatRole.assistant,
+          text: 'Chat endpoint unavailable. Falling back to command review...',
+          createdAt: now,
+          status: AgentChatStatus.parsing,
+          safetyBadges: const ['FALLBACK PARSER', 'NO AUTO SUBMIT'],
+        ),
+      );
+      notifyListeners();
+
+      try {
+        await saveAgentUserMessage(cleanText);
       final parsed = await apiClient.parseAgentCommand(
         message: cleanText,
         conversationId: _agentConversationKeyForRequests(),
@@ -1767,6 +1805,7 @@ class DashboardController extends ChangeNotifier {
       isAgentPlanCreating = false;
       notifyListeners();
     }
+  }
   }
 
   Future<ActionResult> runAgentSafePlan([int? planId]) async {
@@ -4395,6 +4434,121 @@ class DashboardController extends ChangeNotifier {
       'side': plan.side,
       'risk_level': plan.riskLevel,
       'status': plan.status,
+    };
+  }
+
+  void _applyAgentChatSendResponse(AgentChatSendResponse response) {
+    activeAgentConversationKey = response.conversationKey;
+    latestAgentCommand = null;
+    latestAgentPlan = response.plan;
+    latestAgentRun = response.run;
+    if (response.answer.answerType != 'error') {
+      agentErrorMessage = null;
+    }
+    agentHistoryError = null;
+  }
+
+  AgentChatMessage _agentMessageForChatSendResponse(
+    String id,
+    AgentChatSendResponse response,
+    DateTime createdAt,
+  ) {
+    return AgentChatMessage(
+      id: id,
+      role: response.answer.answerType == 'error'
+          ? AgentChatRole.error
+          : AgentChatRole.assistant,
+      text: response.answer.text,
+      createdAt: createdAt,
+      status: _agentStatusForChatSendResponse(response),
+      conversationKey: response.conversationKey,
+      messageType: response.answer.answerType,
+      planId: response.plan?.id,
+      runId: response.run?.planRunId,
+      modelName: response.intent.modelName,
+      parserStatus: response.intent.parserStatus,
+      prefillAvailable:
+          response.availableActions.contains('prepare_manual_ticket'),
+      safetyBadges: _agentSafetyBadgesForChatSendResponse(response),
+      metadata: _agentMetadataForChatSendResponse(response),
+    );
+  }
+
+  AgentChatStatus _agentStatusForChatSendResponse(
+    AgentChatSendResponse response,
+  ) {
+    switch (response.answer.answerType) {
+      case 'error':
+        return AgentChatStatus.failed;
+      case 'auth_required':
+        return AgentChatStatus.authRequired;
+      case 'blocked':
+      case 'unsupported':
+        return AgentChatStatus.blocked;
+      case 'manual_ticket_prepared':
+        return response.plan == null
+            ? AgentChatStatus.sent
+            : AgentChatStatus.readyForReview;
+      case 'analysis_summary':
+        if (response.run != null) return AgentChatStatus.safeRunCompleted;
+        return response.plan == null
+            ? AgentChatStatus.sent
+            : AgentChatStatus.readyForReview;
+      default:
+        return AgentChatStatus.sent;
+    }
+  }
+
+  List<String> _agentSafetyBadgesForChatSendResponse(
+    AgentChatSendResponse response,
+  ) {
+    final badges = <String>[
+      response.intent.fallbackUsed ? 'FALLBACK ROUTER' : 'GPT-BACKED',
+      'SERVER-SIDE API',
+      'NO AUTO SUBMIT',
+    ];
+    final provider = response.intent.provider?.toUpperCase();
+    if (provider != null && provider.isNotEmpty && provider != 'UNKNOWN') {
+      badges.add(provider);
+    }
+    if (response.safety.readOnly || response.intent.isReadOnly) {
+      badges.add('READ ONLY');
+    }
+    if (response.safety.safeExecutionOnly) {
+      badges.add('SAFE EXECUTION ONLY');
+    }
+    if (response.availableActions.contains('prepare_manual_ticket')) {
+      badges.addAll([
+        'PREFILL ONLY',
+        'MANUAL VALIDATION REQUIRED',
+        'CONFIRM_LIVE MANUAL',
+      ]);
+    }
+    if (response.intent.requiresAuth ||
+        response.answer.answerType == 'auth_required') {
+      badges.add('AUTH REQUIRED');
+    }
+    if (response.answer.answerType == 'blocked') badges.add('BLOCKED');
+    return badges.toSet().toList();
+  }
+
+  Map<String, dynamic> _agentMetadataForChatSendResponse(
+    AgentChatSendResponse response,
+  ) {
+    return {
+      'intent_category': response.intent.category,
+      'answer_type': response.answer.answerType,
+      'market': response.intent.market,
+      'provider': response.intent.provider,
+      if (response.intent.symbol != null) 'symbol': response.intent.symbol,
+      'side': response.intent.side,
+      if (response.plan != null) 'plan_id': response.plan!.id,
+      if (response.run != null) 'plan_run_id': response.run!.planRunId,
+      'parser_status': response.intent.parserStatus,
+      if (response.intent.modelName != null) 'model_name': response.intent.modelName,
+      'fallback_used': response.intent.fallbackUsed,
+      'available_actions': response.availableActions,
+      'safety': response.safety.raw,
     };
   }
 

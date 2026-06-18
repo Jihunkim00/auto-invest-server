@@ -28,8 +28,13 @@ class AgentChatService:
         "plan_review",
         "safe_run_result",
         "manual_prefill_result",
+        "general_answer",
+        "read_only_result",
+        "analysis_summary",
+        "manual_ticket_prepared",
         "auth_required",
         "blocked",
+        "unsupported",
         "error",
     }
     allowed_statuses = {"pending", "completed", "failed", "blocked"}
@@ -58,8 +63,17 @@ class AgentChatService:
         "status",
         "message_type",
         "source",
+        "intent_category",
+        "answer_type",
+        "available_actions",
+        "read_only",
+        "supported",
+        "requires_plan",
+        "requires_auth",
+        "requires_manual_confirmation",
     }
     allowed_safety_keys = {
+        "read_only",
         "execution_blocked_in_pr56",
         "execution_blocked_in_pr57",
         "safe_execution_only",

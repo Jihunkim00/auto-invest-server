@@ -2,7 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/models/agent_chat_conversation.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_message.dart';
+import 'package:auto_invest_dashboard/models/agent_chat_send_response.dart';
 import 'package:auto_invest_dashboard/models/agent_command.dart';
 import 'package:auto_invest_dashboard/models/agent_live_prefill.dart';
 import 'package:auto_invest_dashboard/models/agent_plan.dart';
@@ -11,7 +13,7 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 
 void main() {
-  test('sendAgentMessage parses command and creates plan without execution',
+  test('sendAgentMessage uses chat send endpoint without legacy parse',
       () async {
     final api = _AgentChatFakeApiClient();
     final controller = DashboardController(api, autoload: false);
@@ -19,21 +21,26 @@ void main() {
     final result = await controller.sendAgentMessage('show my positions');
 
     expect(result.success, isTrue);
-    expect(api.parseCalls, 1);
-    expect(api.createPlanCalls, 1);
+    expect(api.chatSendCalls, 1);
+    expect(api.chatConversationKey, 'agent_conv_created_1');
+    expect(api.chatContext?['conversation_key'], 'agent_conv_created_1');
+    expect(api.parseCalls, 0);
+    expect(api.createPlanCalls, 0);
     expect(api.runPlanCalls, 0);
     expect(api.prepareTicketCalls, 0);
     expect(api.validationCalls, 0);
     expect(api.submitCalls, 0);
-    expect(controller.latestAgentCommand?.commandLogId, 77);
-    expect(controller.latestAgentPlan?.id, 88);
+    expect(controller.latestAgentCommand, isNull);
+    expect(controller.latestAgentPlan, isNull);
     expect(
       controller.agentMessages.any((message) =>
           message.role == AgentChatRole.user &&
           message.text == 'show my positions'),
       isTrue,
     );
-    expect(controller.agentMessages.last.status, AgentChatStatus.readyForReview);
+    expect(controller.agentMessages.last.text, 'Read-only positions summary.');
+    expect(controller.agentMessages.last.status, AgentChatStatus.sent);
+    expect(controller.agentMessages.last.safetyBadges, contains('READ ONLY'));
 
     controller.dispose();
   });
@@ -75,12 +82,93 @@ class _AgentChatFakeApiClient extends ApiClient {
   _AgentChatFakeApiClient({AgentPlan? plan}) : plan = plan ?? _safePlan();
 
   final AgentPlan plan;
+  int chatSendCalls = 0;
   int parseCalls = 0;
   int createPlanCalls = 0;
   int runPlanCalls = 0;
   int prepareTicketCalls = 0;
   int validationCalls = 0;
   int submitCalls = 0;
+  String? chatConversationKey;
+  Map<String, dynamic>? chatContext;
+
+  @override
+  Future<List<AgentChatConversation>> fetchAgentChatConversations({
+    String status = 'active',
+    int limit = 20,
+  }) async {
+    return const [];
+  }
+
+  @override
+  Future<AgentChatConversation> createAgentChatConversation({
+    String? title,
+    String source = 'flutter_dashboard',
+    Map<String, dynamic>? metadata,
+  }) async {
+    return AgentChatConversation(
+      id: 1,
+      conversationKey: 'agent_conv_created_1',
+      title: title,
+      status: 'active',
+      source: source,
+      metadata: metadata ?? const {},
+      createdAt: DateTime.utc(2026, 6, 18),
+      updatedAt: DateTime.utc(2026, 6, 18),
+      lastMessageAt: DateTime.utc(2026, 6, 18),
+    );
+  }
+
+  @override
+  Future<AgentChatSendResponse> sendAgentChatMessage({
+    required String message,
+    String? conversationKey,
+    Map<String, dynamic>? context,
+    bool autoCreateConversation = true,
+  }) async {
+    chatSendCalls += 1;
+    chatConversationKey = conversationKey;
+    chatContext = context;
+    return AgentChatSendResponse.fromJson({
+      'conversation_key': conversationKey ?? 'agent_conv_created_1',
+      'user_message_id': 10,
+      'assistant_message_id': 11,
+      'intent': {
+        'category': 'read_only_positions_query',
+        'supported': true,
+        'confidence': 0.9,
+        'market': 'KR',
+        'provider': 'kis',
+        'side': 'none',
+        'requires_plan': false,
+        'requires_auth': false,
+        'requires_manual_confirmation': false,
+        'fallback_used': true,
+        'parser_status': 'fallback',
+      },
+      'answer': {
+        'role': 'assistant',
+        'text': 'Read-only positions summary.',
+        'answer_type': 'read_only_result',
+      },
+      'data': {
+        'positions': [],
+        'count': 0,
+      },
+      'available_actions': [],
+      'safety': {
+        'read_only': true,
+        'safe_execution_only': true,
+        'real_order_submitted': false,
+        'broker_submit_called': false,
+        'manual_submit_called': false,
+        'validation_called': false,
+        'setting_changed': false,
+        'scheduler_changed': false,
+        'confirm_live_auto_checked': false,
+      },
+    });
+  }
 
   @override
   Future<AgentCommandParseResult> parseAgentCommand({
