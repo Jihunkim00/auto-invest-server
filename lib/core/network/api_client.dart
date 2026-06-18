@@ -6,7 +6,9 @@ import '../config/app_config.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_command.dart';
+import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
+import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/candidate.dart';
 import '../../models/agent_live_prefill.dart';
@@ -473,6 +475,56 @@ class ApiClient {
     return AgentChatConversation.fromJson(
       Map<String, dynamic>.from(payload['conversation'] as Map),
     );
+  }
+
+  Future<AgentOperationsSnapshot> fetchAgentOperationsSummary() async {
+    final payload = await _getJsonNoCache('/agent/operations/summary');
+    return AgentOperationsSnapshot.fromJson(payload);
+  }
+
+  Future<AgentReviewQueue> fetchAgentReviewQueue({
+    String status = 'open',
+    String queueType = 'all',
+    String? conversationKey,
+    int limit = 50,
+  }) async {
+    final params = <String>[
+      'status=$status',
+      'queue_type=$queueType',
+      'limit=$limit',
+      if (conversationKey != null && conversationKey.trim().isNotEmpty)
+        'conversation_key=${Uri.encodeQueryComponent(conversationKey.trim())}',
+    ];
+    final payload = await _getJsonNoCache(
+      '/agent/operations/review-queue?${params.join('&')}',
+    );
+    return AgentReviewQueue.fromJson(payload);
+  }
+
+  Future<AgentReviewQueueStateResult> markAgentReviewQueueItemReviewed(
+    String queueKey, {
+    String? reviewerNote,
+  }) async {
+    final payload = await _postJsonBody(
+      '/agent/operations/review-queue/$queueKey/reviewed',
+      {
+        if (reviewerNote != null) 'reviewer_note': reviewerNote,
+      },
+    );
+    return AgentReviewQueueStateResult.fromJson(payload);
+  }
+
+  Future<AgentReviewQueueStateResult> dismissAgentReviewQueueItem(
+    String queueKey, {
+    String? reviewerNote,
+  }) async {
+    final payload = await _postJsonBody(
+      '/agent/operations/review-queue/$queueKey/dismiss',
+      {
+        if (reviewerNote != null) 'reviewer_note': reviewerNote,
+      },
+    );
+    return AgentReviewQueueStateResult.fromJson(payload);
   }
 
   Future<AgentPlanCreateResult> createAgentPlanFromCommand(

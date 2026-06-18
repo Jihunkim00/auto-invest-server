@@ -7,7 +7,9 @@ import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_live_prefill.dart';
+import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
+import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/candidate.dart';
@@ -279,6 +281,12 @@ class DashboardController extends ChangeNotifier {
   bool isLoadingAgentHistory = false;
   bool isSavingAgentMessage = false;
   String? agentHistoryError;
+  AgentOperationsSnapshot? agentOperationsSnapshot;
+  AgentReviewQueue agentReviewQueue = AgentReviewQueue.empty;
+  String selectedAgentQueueFilter = 'all';
+  bool isLoadingAgentOperations = false;
+  bool isLoadingAgentReviewQueue = false;
+  String? agentOperationsError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1366,6 +1374,213 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
     } finally {
       isLoadingAgentHistory = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAgentOperationsSummary() async {
+    isLoadingAgentOperations = true;
+    agentOperationsError = null;
+    notifyListeners();
+    try {
+      agentOperationsSnapshot = await apiClient.fetchAgentOperationsSummary();
+      return const ActionResult(
+        success: true,
+        message: 'Agent operations summary refreshed.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    } finally {
+      isLoadingAgentOperations = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAgentReviewQueue({String? filter}) async {
+    if (filter != null && filter.trim().isNotEmpty) {
+      selectedAgentQueueFilter = filter.trim();
+    }
+    isLoadingAgentReviewQueue = true;
+    agentOperationsError = null;
+    notifyListeners();
+    try {
+      agentReviewQueue = await apiClient.fetchAgentReviewQueue(
+        queueType: selectedAgentQueueFilter,
+        status: 'open',
+      );
+      return const ActionResult(
+        success: true,
+        message: 'Agent review queue refreshed.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    } finally {
+      isLoadingAgentReviewQueue = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> markAgentQueueItemReviewed(String queueKey) async {
+    if (queueKey.trim().isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'No review queue item selected.',
+      );
+    }
+    try {
+      await apiClient.markAgentReviewQueueItemReviewed(
+        queueKey,
+        reviewerNote: 'Reviewed from Flutter Agent Operations Dashboard.',
+      );
+      await refreshAgentReviewQueue();
+      await refreshAgentOperationsSummary();
+      return const ActionResult(
+        success: true,
+        message: 'Agent queue item marked reviewed.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      notifyListeners();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    }
+  }
+
+  Future<ActionResult> dismissAgentQueueItem(String queueKey) async {
+    if (queueKey.trim().isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'No review queue item selected.',
+      );
+    }
+    try {
+      await apiClient.dismissAgentReviewQueueItem(
+        queueKey,
+        reviewerNote: 'Dismissed from Flutter Agent Operations Dashboard.',
+      );
+      await refreshAgentReviewQueue();
+      await refreshAgentOperationsSummary();
+      return const ActionResult(
+        success: true,
+        message: 'Agent queue item dismissed.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      notifyListeners();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    }
+  }
+
+  Future<ActionResult> openAgentConversationFromQueue(
+    String? conversationKey,
+  ) async {
+    final key = conversationKey?.trim();
+    if (key == null || key.isEmpty) {
+      return const ActionResult(
+        success: false,
+        message: 'This review item is not linked to a chat conversation.',
+      );
+    }
+    final result = await loadAgentConversationHistory(key);
+    if (result.success) {
+      setAgentChatMode(AgentChatPanelMode.expanded);
+      return const ActionResult(
+        success: true,
+        message: 'Agent chat opened for this review item.',
+      );
+    }
+    return result;
+  }
+
+  Future<ActionResult> runSafeActionFromQueue(int? planId) async {
+    if (planId == null || planId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'No agent plan is linked to this queue item.',
+      );
+    }
+    isAgentRunning = true;
+    agentOperationsError = null;
+    notifyListeners();
+    try {
+      final run = await apiClient.runAgentPlan(
+        planId,
+        operatorNote: 'Triggered from Flutter Agent Operations review queue.',
+      );
+      latestAgentRun = run;
+      await refreshAgentOperationsSummary();
+      await refreshAgentReviewQueue();
+      return ActionResult(
+        success: !run.isBlocked,
+        message: run.isBlocked
+            ? 'Agent safe action blocked. No order submitted.'
+            : 'Agent safe action completed. No order submitted.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    } finally {
+      isAgentRunning = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> prepareTicketFromQueue(int? planId) async {
+    if (planId == null || planId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'No agent plan is linked to this queue item.',
+      );
+    }
+    isAgentPreparingTicket = true;
+    agentOperationsError = null;
+    notifyListeners();
+    try {
+      final prefill = await apiClient.prepareAgentManualTicket(
+        planId,
+        operatorNote: 'Prepared from Flutter Agent Operations review queue.',
+      );
+      latestAgentPrefill = prefill;
+      final applied = applyAgentPrefillToManualTicket(prefill);
+      await refreshAgentOperationsSummary();
+      await refreshAgentReviewQueue();
+      if (!applied.success) {
+        return ActionResult(
+          success: false,
+          message: prefill.requiresAuth
+              ? 'Auth required. No ticket was prepared.'
+              : 'Manual ticket prefill blocked. No order submitted.',
+        );
+      }
+      return const ActionResult(
+        success: true,
+        message:
+            'Manual ticket prepared from Agent review queue. Validate and submit manually.',
+      );
+    } catch (e) {
+      agentOperationsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentOperationsError!),
+      );
+    } finally {
+      isAgentPreparingTicket = false;
       notifyListeners();
     }
   }
