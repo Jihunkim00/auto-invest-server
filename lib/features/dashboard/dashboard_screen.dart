@@ -9,10 +9,12 @@ import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
+import 'widgets/agent_operations_summary_card.dart';
 import 'widgets/automation_event_timeline_card.dart';
 import 'widgets/automation_runtime_monitor_card.dart';
 import 'widgets/agent_chat_full_panel.dart';
 import 'widgets/agent_chat_panel.dart';
+import 'widgets/agent_review_queue_panel.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/operation_rehearsal_panel.dart';
 import 'widgets/portfolio_snapshot_section.dart';
@@ -77,6 +79,10 @@ class DashboardScreen extends StatelessWidget {
                       controller: controller,
                       onOpenSettings: onOpenSettings,
                     ),
+                    const SizedBox(height: 12),
+                    AgentOperationsSummaryCard(controller: controller),
+                    const SizedBox(height: 12),
+                    AgentReviewQueuePanel(controller: controller),
                     const SizedBox(height: 12),
                     _PreLiveOperationsCard(
                       controller: controller,

@@ -455,6 +455,21 @@ class AgentPlanRun(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class AgentReviewQueueState(Base):
+    __tablename__ = "agent_review_queue_state"
+
+    id = Column(Integer, primary_key=True, index=True)
+    queue_key = Column(String(120), nullable=False, unique=True, index=True)
+    item_type = Column(String(60), nullable=False, index=True)
+    source_id = Column(Integer, nullable=True, index=True)
+    status = Column(String(20), nullable=False, default="open", index=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewer_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class AgentScheduleJob(Base):
     __tablename__ = "agent_schedule_jobs"
 

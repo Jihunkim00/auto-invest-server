@@ -668,6 +668,58 @@ def _create_agent_execution_tables_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_scope_hash ON agent_plan_runs (scope_hash)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_execution_mode ON agent_plan_runs (execution_mode)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_trigger_source ON agent_plan_runs (trigger_source)"))
+
+
+def _create_agent_review_queue_state_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_review_queue_state (
+                    id INTEGER PRIMARY KEY,
+                    queue_key VARCHAR(120) NOT NULL UNIQUE,
+                    item_type VARCHAR(60) NOT NULL,
+                    source_id INTEGER,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    reviewed_at DATETIME,
+                    dismissed_at DATETIME,
+                    reviewer_note TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_agent_review_queue_state_queue_key "
+                "ON agent_review_queue_state (queue_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_review_queue_state_item_type "
+                "ON agent_review_queue_state (item_type)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_review_queue_state_source_id "
+                "ON agent_review_queue_state (source_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_review_queue_state_status "
+                "ON agent_review_queue_state (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_agent_review_queue_state_created_at "
+                "ON agent_review_queue_state (created_at)"
+            )
+        )
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_plan_runs_created_at ON agent_plan_runs (created_at)"))
 
         conn.execute(
@@ -731,6 +783,7 @@ def init_db():
     _create_agent_chat_tables_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
+    _create_agent_review_queue_state_table_if_missing()
 
     # Lightweight SQLite-friendly migrations
     signal_columns = {
