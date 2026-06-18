@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import '../../models/agent_command.dart';
+import '../../models/agent_plan.dart';
+import '../../models/agent_run.dart';
 import '../../models/candidate.dart';
 import '../../models/agent_live_prefill.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -340,6 +343,46 @@ class ApiClient {
       const {},
     );
     return ManualSellPreparation.fromJson(payload);
+  }
+
+  Future<AgentCommandParseResult> parseAgentCommand({
+    required String message,
+    String? conversationId,
+    Map<String, dynamic>? context,
+  }) async {
+    final payload = await _postJsonBody('/agent/commands/parse', {
+      if (conversationId != null) 'conversation_id': conversationId,
+      'message': message,
+      'context': context ?? const <String, dynamic>{},
+    });
+    return AgentCommandParseResult.fromJson(payload);
+  }
+
+  Future<AgentPlanCreateResult> createAgentPlanFromCommand(
+    int commandLogId, {
+    String? planTitle,
+    int expiresInMinutes = 60,
+  }) async {
+    final payload = await _postJsonBody(
+      '/agent/plans/from-command/$commandLogId',
+      {
+        if (planTitle != null) 'plan_title': planTitle,
+        'expires_in_minutes': expiresInMinutes,
+      },
+    );
+    return AgentPlanCreateResult.fromJson(payload);
+  }
+
+  Future<AgentPlanRunResult> runAgentPlan(
+    int planId, {
+    String? operatorNote,
+  }) async {
+    final payload = await _postJsonBody('/agent/plans/$planId/run', {
+      'dry_run': true,
+      'trigger_source': 'flutter_agent_chat',
+      if (operatorNote != null) 'operator_note': operatorNote,
+    });
+    return AgentPlanRunResult.fromJson(payload);
   }
 
   Future<AgentLivePrefill> prepareAgentManualTicket(
@@ -1510,11 +1553,13 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
   final isPortfolioManualSell = source == 'kis_portfolio_manual_sell';
   final isWatchlistPrefill = source == 'watchlist_candidate';
   final isDirectManualTicket = source == 'single_symbol_trading';
+  final isAgentPlanPrefill = source == 'agent_plan';
   if (!isExitPreflight &&
       !isExitShadow &&
       !isPortfolioManualSell &&
       !isWatchlistPrefill &&
-      !isDirectManualTicket) {
+      !isDirectManualTicket &&
+      !isAgentPlanPrefill) {
     return const <String, dynamic>{};
   }
 
@@ -1542,6 +1587,13 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'candidate_reason',
     'candidate_action_hint',
     'candidate_block_reason',
+    'agent_plan_key',
+    'command_type',
+    'domain',
+    'plan_status',
+    'scope_hash',
+    'auth_type',
+    'auth_status',
   };
   const numberKeys = {
     'gate_level',
@@ -1556,6 +1608,10 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'suggested_quantity',
     'quantity',
     'estimated_amount',
+    'agent_plan_id',
+    'command_log_id',
+    'auth_approval_request_id',
+    'notional',
   };
   const boolKeys = {
     'manual_confirm_required',
@@ -1575,6 +1631,10 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
     'entry_ready',
     'candidate_entry_ready',
     'watchlist_click_submits_order',
+    'requires_auth',
+    'requires_user_review',
+    'requires_user_validation',
+    'requires_confirm_live',
   };
   const listKeys = {'risk_flags', 'gating_notes'};
 
@@ -1613,7 +1673,9 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
               ? 'kis_live_exit_preflight'
               : isWatchlistPrefill
                   ? 'watchlist_candidate'
-                  : 'single_symbol_trading';
+                  : isAgentPlanPrefill
+                      ? 'agent_plan'
+                      : 'single_symbol_trading';
   result['source_type'] = isPortfolioManualSell
       ? 'operator_confirmed_position_exit'
       : isExitShadow
@@ -1623,7 +1685,9 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
               : isWatchlistPrefill
                   ? (_auditString(sourceMetadata['source_type']) ??
                       'manual_buy_ticket_prefill')
-                  : 'manual_buy_ticket_prefill';
+                  : isAgentPlanPrefill
+                      ? 'agent_manual_ticket_prefill'
+                      : 'manual_buy_ticket_prefill';
   result['source_context'] = isPortfolioManualSell
       ? 'audit_sell_manual_ticket'
       : isExitShadow
@@ -1632,7 +1696,9 @@ Map<String, dynamic> _safeKisAuditSourceMetadata(
               ? 'exit_preflight_manual_sell'
               : isWatchlistPrefill
                   ? 'watchlist_analyze_in_trading'
-                  : 'direct_manual_ticket';
+                  : isAgentPlanPrefill
+                      ? 'agent_manual_prefill'
+                      : 'direct_manual_ticket';
   result['operator_action_source'] = result['source_context'];
   result['manual_confirm_required'] = true;
   result['auto_buy_enabled'] = false;

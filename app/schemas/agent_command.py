@@ -247,4 +247,5 @@ class AgentCommandParseResponse(BaseModel):
     command: AutoInvestCommand
     safety: SafetyFlagsPayload
     command_log_id: int | None = None
+    model_name: str | None = None
     error_message: str | None = None

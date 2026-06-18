@@ -49,14 +49,33 @@ class AgentCommandParserService:
         settings: Any | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self.openai_model = self.settings.openai_model
-        self.openai_reasoning_effort = self.settings.openai_reasoning_effort
+        self.openai_model = getattr(
+            self.settings,
+            "agent_chat_model",
+            getattr(self.settings, "openai_model", "gpt-5.4-mini"),
+        )
+        self.openai_reasoning_effort = getattr(
+            self.settings,
+            "agent_chat_reasoning_effort",
+            getattr(self.settings, "openai_reasoning_effort", "low"),
+        )
+        self.openai_temperature = getattr(self.settings, "agent_chat_temperature", 0.0)
+        self.openai_timeout_seconds = getattr(
+            self.settings,
+            "agent_chat_timeout_seconds",
+            20.0,
+        )
+        self.fallback_enabled = getattr(self.settings, "agent_chat_fallback_enabled", True)
         self.validator = validator or AgentCommandValidator()
         if openai_client is not None:
             self.client = openai_client
         else:
             api_key = getattr(self.settings, "openai_api_key", None)
-            self.client = OpenAI(api_key=api_key) if api_key else None
+            self.client = (
+                OpenAI(api_key=api_key, timeout=self.openai_timeout_seconds)
+                if api_key
+                else None
+            )
 
     def parse(
         self,
@@ -107,6 +126,7 @@ class AgentCommandParserService:
             command=command,
             safety=command.safety,
             command_log_id=row.id,
+            model_name=model_name,
             error_message=error_message,
         )
         return response.model_dump(mode="json")
@@ -141,6 +161,7 @@ class AgentCommandParserService:
         response = self.client.responses.create(
             model=self.openai_model,
             reasoning={"effort": self.openai_reasoning_effort},
+            temperature=self.openai_temperature,
             instructions=AGENT_COMMAND_SYSTEM_PROMPT,
             input=json.dumps(prompt_payload, ensure_ascii=False),
         )
