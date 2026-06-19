@@ -5,6 +5,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.agent_chat_tool import (
+    AgentChatResultCard,
+    AgentChatToolCall,
+    AgentChatToolResult,
+)
+
 
 class AgentChatIntentCategory(str, Enum):
     GENERAL_CHAT = "general_chat"
@@ -15,6 +21,7 @@ class AgentChatIntentCategory(str, Enum):
     READ_ONLY_ORDERS_QUERY = "read_only_orders_query"
     READ_ONLY_RUNS_QUERY = "read_only_runs_query"
     READ_ONLY_SIGNALS_QUERY = "read_only_signals_query"
+    READ_ONLY_SETTINGS_QUERY = "read_only_settings_query"
     ANALYSIS_REQUEST = "analysis_request"
     WATCHLIST_PREVIEW_REQUEST = "watchlist_preview_request"
     EXIT_REVIEW_REQUEST = "exit_review_request"
@@ -67,6 +74,7 @@ class AgentChatIntent(BaseModel):
     fallback_used: bool = False
     parser_status: str = "fallback"
     model_name: str | None = None
+    selected_tools: list[AgentChatToolCall] = Field(default_factory=list)
 
 
 class AgentChatAnswer(BaseModel):
@@ -87,6 +95,7 @@ class AgentChatSafetyFlags(BaseModel):
     confirm_live_auto_checked: bool = False
     broker_api_called: bool = False
     agent_schedule_created: bool = False
+    mutation: bool = False
 
 
 class AgentChatSendResponse(BaseModel):
@@ -101,3 +110,10 @@ class AgentChatSendResponse(BaseModel):
     run: dict[str, Any] | None = None
     available_actions: list[str] = Field(default_factory=list)
     safety: AgentChatSafetyFlags = Field(default_factory=AgentChatSafetyFlags)
+    context_snapshot: dict[str, Any] = Field(default_factory=dict)
+    selected_tools: list[AgentChatToolCall] = Field(default_factory=list)
+    tool_results: list[AgentChatToolResult] = Field(default_factory=list)
+    result_cards: list[AgentChatResultCard] = Field(default_factory=list)
+    follow_up_suggestions: list[str] = Field(default_factory=list)
+    answer_type: str | None = None
+    fallback_used: bool = False

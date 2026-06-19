@@ -1,5 +1,6 @@
 import 'agent_plan.dart';
 import 'agent_run.dart';
+import 'agent_chat_tool_result.dart';
 
 class AgentChatSendResponse {
   const AgentChatSendResponse({
@@ -9,11 +10,18 @@ class AgentChatSendResponse {
     required this.data,
     required this.availableActions,
     required this.safety,
+    required this.contextSnapshot,
+    required this.selectedTools,
+    required this.toolResults,
+    required this.resultCards,
+    required this.followUpSuggestions,
+    required this.fallbackUsed,
     this.userMessageId,
     this.assistantMessageId,
     this.command,
     this.plan,
     this.run,
+    this.answerType,
   });
 
   final String conversationKey;
@@ -27,6 +35,13 @@ class AgentChatSendResponse {
   final AgentPlanRunResult? run;
   final List<String> availableActions;
   final AgentChatSafety safety;
+  final Map<String, dynamic> contextSnapshot;
+  final List<AgentChatToolCall> selectedTools;
+  final List<AgentChatToolResult> toolResults;
+  final List<AgentChatResultCard> resultCards;
+  final List<String> followUpSuggestions;
+  final String? answerType;
+  final bool fallbackUsed;
 
   factory AgentChatSendResponse.fromJson(Map<String, dynamic> json) {
     final planJson = json['plan'];
@@ -44,6 +59,13 @@ class AgentChatSendResponse {
       run: runJson is Map ? AgentPlanRunResult.fromJson(Map<String, dynamic>.from(runJson)) : null,
       availableActions: _readStringList(json['available_actions']),
       safety: AgentChatSafety.fromJson(_readMap(json['safety'])),
+      contextSnapshot: _readMap(json['context_snapshot']),
+      selectedTools: _readToolCallList(json['selected_tools']),
+      toolResults: _readToolResultList(json['tool_results']),
+      resultCards: _readResultCardList(json['result_cards']),
+      followUpSuggestions: _readStringList(json['follow_up_suggestions']),
+      answerType: _readNullableString(json['answer_type']),
+      fallbackUsed: json['fallback_used'] == true,
     );
   }
 }
@@ -59,6 +81,7 @@ class AgentChatIntent {
     required this.requiresManualConfirmation,
     required this.fallbackUsed,
     required this.parserStatus,
+    required this.selectedTools,
     this.market,
     this.provider,
     this.symbol,
@@ -89,6 +112,7 @@ class AgentChatIntent {
   final bool fallbackUsed;
   final String parserStatus;
   final String? modelName;
+  final List<AgentChatToolCall> selectedTools;
   final Map<String, dynamic> raw;
 
   bool get isReadOnly => category.startsWith('read_only_');
@@ -113,6 +137,7 @@ class AgentChatIntent {
       fallbackUsed: json['fallback_used'] == true,
       parserStatus: _readString(json['parser_status'], ''),
       modelName: _readNullableString(json['model_name']),
+      selectedTools: _readToolCallList(json['selected_tools']),
       raw: Map<String, dynamic>.from(json),
     );
   }
@@ -149,6 +174,7 @@ class AgentChatSafety {
     required this.settingChanged,
     required this.schedulerChanged,
     required this.confirmLiveAutoChecked,
+    required this.mutation,
     this.raw = const {},
   });
 
@@ -161,6 +187,7 @@ class AgentChatSafety {
   final bool settingChanged;
   final bool schedulerChanged;
   final bool confirmLiveAutoChecked;
+  final bool mutation;
   final Map<String, dynamic> raw;
 
   factory AgentChatSafety.fromJson(Map<String, dynamic> json) {
@@ -174,9 +201,37 @@ class AgentChatSafety {
       settingChanged: json['setting_changed'] == true,
       schedulerChanged: json['scheduler_changed'] == true,
       confirmLiveAutoChecked: json['confirm_live_auto_checked'] == true,
+      mutation: json['mutation'] == true,
       raw: Map<String, dynamic>.from(json),
     );
   }
+}
+
+List<AgentChatToolCall> _readToolCallList(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map)
+        AgentChatToolCall.fromJson(Map<String, dynamic>.from(item)),
+  ];
+}
+
+List<AgentChatToolResult> _readToolResultList(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map)
+        AgentChatToolResult.fromJson(Map<String, dynamic>.from(item)),
+  ];
+}
+
+List<AgentChatResultCard> _readResultCardList(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map)
+        AgentChatResultCard.fromJson(Map<String, dynamic>.from(item)),
+  ];
 }
 
 Map<String, dynamic> _readMap(Object? value) {

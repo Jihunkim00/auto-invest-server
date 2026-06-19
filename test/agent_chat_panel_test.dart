@@ -22,9 +22,9 @@ void main() {
 
     expect(find.text('Agent Assistant'), findsOneWidget);
     expect(find.text('GPT-BACKED'), findsOneWidget);
-    expect(find.text('SERVER-SIDE API'), findsOneWidget);
-    expect(find.text('SAFE MODE'), findsOneWidget);
-    expect(find.text('NO AUTO SUBMIT'), findsOneWidget);
+    expect(find.text('SERVER-SIDE API'), findsWidgets);
+    expect(find.text('SAFE MODE'), findsWidgets);
+    expect(find.text('NO AUTO SUBMIT'), findsWidgets);
     expect(find.byKey(const ValueKey('agent-chat-mini-input')), findsOneWidget);
     expect(find.byKey(const ValueKey('agent-chat-new-chat')), findsOneWidget);
     expect(
@@ -86,6 +86,20 @@ void main() {
           text: 'Plan is ready for review.',
           createdAt: DateTime(2026, 6, 18),
           status: AgentChatStatus.readyForReview,
+          metadata: const {
+            'result_cards': [
+              {
+                'card_type': 'settings',
+                'title': 'Safety Status',
+                'badges': ['READ ONLY', 'NO CHANGE'],
+                'rows': [
+                  {'label': 'dry_run', 'value': 'ON'},
+                ],
+                'data': {'dry_run': true},
+              }
+            ],
+            'follow_up_suggestions': ['Show positions'],
+          },
         ),
       ];
 
@@ -96,8 +110,10 @@ void main() {
     ));
 
     expect(find.byKey(const Key('agent-chat-full-panel')), findsOneWidget);
-    expect(find.text('Show positions'), findsOneWidget);
+    expect(find.text('Show positions'), findsWidgets);
     expect(find.text('Plan is ready for review.'), findsOneWidget);
+    expect(find.text('Safety Status'), findsOneWidget);
+    expect(find.text('Show positions'), findsWidgets);
     expect(find.byKey(const ValueKey('agent-chat-full-input')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('agent-chat-full-new-chat')),

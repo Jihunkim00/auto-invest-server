@@ -71,6 +71,11 @@ class AgentChatService:
         "requires_plan",
         "requires_auth",
         "requires_manual_confirmation",
+        "context_snapshot",
+        "selected_tools",
+        "tool_results",
+        "result_cards",
+        "follow_up_suggestions",
     }
     allowed_safety_keys = {
         "read_only",
@@ -89,6 +94,7 @@ class AgentChatService:
         "validation_called",
         "broker_api_called",
         "agent_schedule_created",
+        "mutation",
     }
     sensitive_key_pattern = re.compile(
         r"(?i)\b("

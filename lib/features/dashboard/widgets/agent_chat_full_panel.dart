@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
 import 'agent_plan_review_card.dart';
+import 'agent_chat_tool_result_card.dart';
 
 class AgentChatFullPanel extends StatefulWidget {
   const AgentChatFullPanel({
@@ -83,7 +84,10 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                   ],
                   const SizedBox(height: 12),
                   for (final message in controller.agentMessages)
-                    _MessageBubble(message: message),
+                    _MessageBubble(
+                      message: message,
+                      onSuggestionSelected: _sendSuggestion,
+                    ),
                   if (controller.isAgentParsing ||
                       controller.isAgentPlanCreating) ...[
                     const SizedBox(height: 8),
@@ -139,6 +143,11 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
         curve: Curves.easeOut,
       );
     }
+  }
+
+  Future<void> _sendSuggestion(String text) async {
+    _input.text = text;
+    await _send();
   }
 
   Future<void> _runSafeAction(BuildContext context) async {
@@ -278,9 +287,13 @@ class _SafetyNotice extends StatelessWidget {
 }
 
 class _MessageBubble extends StatelessWidget {
-  const _MessageBubble({required this.message});
+  const _MessageBubble({
+    required this.message,
+    required this.onSuggestionSelected,
+  });
 
   final AgentChatMessage message;
+  final ValueChanged<String> onSuggestionSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -320,6 +333,16 @@ class _MessageBubble extends StatelessWidget {
               for (final badge in message.safetyBadges)
                 _ToolbarBadge(text: badge),
             ]),
+          ],
+          if (!isUser &&
+              (message.resultCards.isNotEmpty ||
+                  message.followUpSuggestions.isNotEmpty)) ...[
+            const SizedBox(height: 10),
+            AgentChatToolResultCardList(
+              cards: message.resultCards,
+              followUpSuggestions: message.followUpSuggestions,
+              onSuggestionSelected: onSuggestionSelected,
+            ),
           ],
         ]),
       ),

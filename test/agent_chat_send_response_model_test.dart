@@ -22,6 +22,13 @@ void main() {
         'requires_manual_confirmation': false,
         'fallback_used': true,
         'parser_status': 'fallback',
+        'selected_tools': [
+          {
+            'tool_name': 'kis_price_lookup',
+            'arguments': {'symbol': '005930'},
+            'reason': 'price',
+          }
+        ],
       },
       'answer': {
         'role': 'assistant',
@@ -36,6 +43,58 @@ void main() {
         },
       },
       'available_actions': ['prepare_manual_ticket'],
+      'context_snapshot': {
+        'last_symbol': '005930',
+        'last_market': 'KR',
+        'last_provider': 'kis',
+      },
+      'selected_tools': [
+        {
+          'tool_name': 'kis_price_lookup',
+          'arguments': {'symbol': '005930'},
+          'reason': 'price',
+        }
+      ],
+      'tool_results': [
+        {
+          'tool_name': 'kis_price_lookup',
+          'status': 'success',
+          'result_type': 'price',
+          'data': {
+            'price': {
+              'symbol': '005930',
+              'price': 72000,
+              'currency': 'KRW',
+            },
+          },
+          'summary': 'ok',
+          'safety': {
+            'read_only': true,
+            'mutation': false,
+            'real_order_submitted': false,
+            'broker_submit_called': false,
+            'manual_submit_called': false,
+            'validation_called': false,
+            'setting_changed': false,
+            'scheduler_changed': false,
+            'confirm_live_auto_checked': false,
+          },
+        }
+      ],
+      'result_cards': [
+        {
+          'card_type': 'price',
+          'title': 'Samsung Electronics current price',
+          'subtitle': '005930 · KIS',
+          'primary_value': '₩72,000',
+          'badges': ['READ ONLY', 'NO ORDER'],
+          'rows': [],
+          'data': {'symbol': '005930'},
+        }
+      ],
+      'follow_up_suggestions': ['Analyze this'],
+      'answer_type': 'read_only_result',
+      'fallback_used': true,
       'safety': {
         'read_only': true,
         'safe_execution_only': true,
@@ -46,6 +105,7 @@ void main() {
         'setting_changed': false,
         'scheduler_changed': false,
         'confirm_live_auto_checked': false,
+        'mutation': false,
       },
     });
 
@@ -55,8 +115,17 @@ void main() {
     expect(response.intent.isReadOnly, isTrue);
     expect(response.answer.answerType, 'read_only_result');
     expect(response.data['price']['price'], 72000);
+    expect(response.contextSnapshot['last_symbol'], '005930');
+    expect(response.selectedTools.first.toolName, 'kis_price_lookup');
+    expect(response.intent.selectedTools.first.toolName, 'kis_price_lookup');
+    expect(response.toolResults.first.resultType, 'price');
+    expect(response.resultCards.first.cardType, 'price');
+    expect(response.followUpSuggestions, contains('Analyze this'));
+    expect(response.answerType, 'read_only_result');
+    expect(response.fallbackUsed, isTrue);
     expect(response.availableActions, contains('prepare_manual_ticket'));
     expect(response.safety.readOnly, isTrue);
+    expect(response.safety.mutation, isFalse);
     expect(response.safety.realOrderSubmitted, isFalse);
     expect(response.safety.validationCalled, isFalse);
   });
