@@ -95,12 +95,20 @@ void main() {
           'card_type': 'analysis',
           'title': 'Safe Analysis',
           'primary_value': 'HOLD',
-          'badges': ['ANALYSIS ONLY', 'NO ORDER'],
+          'badges': ['SAFE ANALYSIS', 'NO ORDER', 'NO VALIDATION'],
           'rows': [],
           'data': {'symbol': 'AAPL'},
         }
       ],
-      'follow_up_suggestions': ['이 종목을 간단히 분석해줄까요?'],
+      'follow_up_suggestions': ['이 종목 분석해줘'],
+      'diagnostics': {
+        'encoding_safe': true,
+        'answer_contains_mojibake_marker': false,
+        'router': 'fallback',
+        'fallback_used': true,
+        'tool_count': 1,
+        'result_card_count': 1,
+      },
       'answer_type': 'manual_ticket_prepared',
       'fallback_used': true,
     };
@@ -119,6 +127,7 @@ void main() {
     expect(response.toolResults.single.isBlocked, isTrue);
     expect(response.resultCards.single.cardType, 'analysis');
     expect(response.followUpSuggestions.single, contains('분석'));
+    expect(response.diagnostics['encoding_safe'], isTrue);
     expect(response.safety.realOrderSubmitted, isFalse);
     expect(response.safety.brokerSubmitCalled, isFalse);
     expect(response.safety.manualSubmitCalled, isFalse);
@@ -127,8 +136,11 @@ void main() {
     expect(response.safety.raw['broker_api_called'], isFalse);
 
     final encoded = jsonEncode(raw);
-    expect(encoded, isNot(contains('ì')));
-    expect(encoded, isNot(contains('ë')));
-    expect(encoded, isNot(contains('ê')));
+    for (final marker in _mojibakeMarkers) {
+      expect(encoded, isNot(contains(marker)));
+    }
   });
 }
+
+final _mojibakeMarkers =
+    List<String>.unmodifiable([0x00EC, 0x00EB, 0x00EA].map(String.fromCharCode));

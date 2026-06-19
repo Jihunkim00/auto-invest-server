@@ -91,8 +91,8 @@ void main() {
                 'result_cards': [
                   {
                     'card_type': 'settings',
-                    'title': 'Safety Status',
-                    'badges': ['READ ONLY', 'NO CHANGE'],
+                    'title': 'System Status',
+                    'badges': ['READ ONLY', 'NO SETTINGS CHANGE'],
                     'rows': [
                       {'label': 'dry_run', 'value': 'ON'},
                     ],
@@ -113,7 +113,7 @@ void main() {
     expect(find.byKey(const Key('agent-chat-full-panel')), findsOneWidget);
     expect(find.text('Show positions'), findsWidgets);
     expect(find.text('Plan is ready for review.'), findsOneWidget);
-    expect(find.text('Safety Status'), findsOneWidget);
+    expect(find.text('System Status'), findsOneWidget);
     expect(find.text('Show positions'), findsWidgets);
     expect(find.byKey(const ValueKey('agent-chat-full-input')), findsOneWidget);
     expect(

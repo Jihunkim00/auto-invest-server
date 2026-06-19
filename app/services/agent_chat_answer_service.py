@@ -26,9 +26,9 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.CAPABILITY_QUESTION:
             return AgentChatAnswer(
                 text=(
-                    "저는 Auto Invest의 읽기 전용 조회, 최근 주문/실행 로그 요약, "
-                    "보유종목/잔고 확인, 안전한 분석 계획 생성, 수동 주문 티켓 준비를 도와줄 수 있습니다. "
-                    "채팅에서는 주문을 실행하지 않고 validation도 자동 호출하지 않습니다."
+                    "Auto Invest Agent Chat은 주식 현재가, 보유종목, 잔고, 최근 주문/실행 로그, "
+                    "안전 분석, 수동 주문 티켓 준비를 도와줄 수 있습니다. "
+                    "채팅에서는 주문·validation·confirm_live를 실행하지 않습니다."
                 ),
                 answer_type="general_answer",
             )
@@ -36,8 +36,8 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.GENERAL_CHAT:
             return AgentChatAnswer(
                 text=(
-                    "Auto Invest 범위 안에서 질문해 주세요. 예: 현재가 조회, 보유종목 조회, "
-                    "최근 주문 기록, 안전한 종목 분석, 수동 주문 티켓 준비를 처리할 수 있습니다. "
+                    "Auto Invest 범위 안에서 질문해 주세요. 현재가 조회, 보유종목 조회, "
+                    "최근 주문 기록, 안전 분석, 수동 주문 티켓 준비를 처리할 수 있습니다. "
                     "주문은 실행하지 않습니다."
                 ),
                 answer_type="general_answer",
@@ -76,9 +76,9 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.DANGEROUS_SETTING_REQUEST:
             return AgentChatAnswer(
                 text=(
-                    "이 요청은 위험 설정 변경으로 분류했습니다. 채팅에서는 dry_run, kill_switch, "
-                    "auto buy 같은 런타임 설정을 직접 변경하지 않습니다. 별도 인증/승인 흐름에서만 "
-                    "검토해야 합니다. 주문은 실행하지 않았고 validation도 호출하지 않았습니다."
+                    "요청은 위험 설정 변경으로 분류했습니다. 채팅에서는 dry_run, kill_switch, "
+                    "auto buy 같은 운영 설정을 변경하지 않습니다. "
+                    "주문·validation·confirm_live도 실행하지 않습니다."
                 ),
                 answer_type="auth_required",
             )
@@ -86,9 +86,8 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.SCHEDULER_REQUEST:
             return AgentChatAnswer(
                 text=(
-                    "스케줄러 관련 요청은 채팅에서 바로 live 스케줄이나 실주문을 만들지 않습니다. "
-                    "읽기 전용 상태 확인이나 안전한 plan review 흐름으로만 연결할 수 있습니다. "
-                    "설정은 변경하지 않았습니다."
+                    "스케줄러 관련 요청은 채팅에서 live 스케줄이나 실주문을 만들지 않습니다. "
+                    "상태 조회나 안전한 plan review 흐름으로만 연결할 수 있으며 설정은 변경하지 않습니다."
                 ),
                 answer_type="blocked",
             )
@@ -96,7 +95,7 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.NEEDS_CLARIFICATION:
             return AgentChatAnswer(
                 text=(
-                    "요청을 안전하게 처리하려면 종목, 시장, 매수/매도 방향, 금액 또는 수량을 더 구체적으로 알려주세요. "
+                    "안전하게 처리하려면 종목, 시장, 매수/매도 방향, 금액 또는 수량을 더 구체적으로 알려주세요. "
                     "주문은 실행하지 않았습니다."
                 ),
                 answer_type="unsupported",
@@ -104,9 +103,8 @@ class AgentChatAnswerService:
 
         return AgentChatAnswer(
             text=(
-                "현재 이 요청은 Auto Invest 채팅에서 지원하지 않는 범위입니다. "
-                "지원 범위는 주식 가격/보유종목/잔고/주문 기록 조회, 안전한 분석, 수동 주문 티켓 준비입니다. "
-                "주문은 실행하지 않았습니다."
+                "현재 Auto Invest는 미국 주식 Alpaca paper와 한국 주식 KIS 중심으로 동작합니다. "
+                "코인·선물·옵션·자동입출금은 지원하지 않습니다."
             ),
             answer_type="unsupported",
         )
@@ -121,7 +119,7 @@ class AgentChatAnswerService:
             return AgentChatAnswer(
                 text=(
                     f"{name}({symbol}) 현재가 조회에 실패했습니다. 사유: {error}. "
-                    "주문은 실행하지 않았고 validation도 호출하지 않았습니다."
+                    "주문·validation·confirm_live는 실행하지 않았습니다."
                 ),
                 answer_type="error",
             )
@@ -130,8 +128,8 @@ class AgentChatAnswerService:
         formatted = self._money(value, currency)
         return AgentChatAnswer(
             text=(
-                f"{name}는 {symbol}로 조회됩니다. 현재가는 {formatted}입니다. "
-                f"이 조회는 {provider} read-only 경로 기준이며 주문은 실행하지 않았습니다."
+                f"{name}({symbol})는 {provider} 기준 현재가가 {formatted}입니다. "
+                "이 작업은 read-only 가격 조회만 수행했으며, 주문·validation·confirm_live는 실행하지 않았습니다."
             ),
             answer_type="read_only_result",
         )
@@ -139,14 +137,21 @@ class AgentChatAnswerService:
     def _positions_answer(self, data: dict[str, Any]) -> AgentChatAnswer:
         if data.get("error"):
             return AgentChatAnswer(
-                text=f"보유종목 조회에 실패했습니다. 사유: {data['error']}. 주문은 실행하지 않았습니다.",
+                text=(
+                    f"보유종목 조회에 실패했습니다. 사유: {data['error']}. "
+                    "주문·validation·confirm_live는 실행하지 않았습니다."
+                ),
                 answer_type="error",
             )
         positions = data.get("positions") if isinstance(data.get("positions"), list) else []
         count = int(data.get("count", len(positions)) or 0)
+        provider = str(data.get("provider") or "KIS").upper()
         if count == 0:
             return AgentChatAnswer(
-                text="현재 조회된 보유종목이 없습니다. 이 조회는 read-only이며 주문은 실행하지 않았습니다.",
+                text=(
+                    f"현재 {provider} 보유종목은 없습니다. 조회만 수행했으며 "
+                    "매도나 주문 검증은 실행하지 않았습니다."
+                ),
                 answer_type="read_only_result",
             )
         samples = []
@@ -156,30 +161,37 @@ class AgentChatAnswerService:
             label = item.get("name") or item.get("symbol") or "종목"
             qty = item.get("qty") or item.get("quantity")
             samples.append(f"{label} {qty}주" if qty is not None else str(label))
-        suffix = f" 주요 보유: {', '.join(samples)}." if samples else ""
+        detail = f" {', '.join(samples)}를 보유 중입니다." if samples else ""
         return AgentChatAnswer(
-            text=f"현재 조회된 보유종목은 {count}개입니다.{suffix} 주문은 실행하지 않았습니다.",
+            text=(
+                f"현재 {provider} 보유종목은 {count}개입니다.{detail} "
+                "조회만 수행했으며 매도나 주문 검증은 실행하지 않았습니다."
+            ),
             answer_type="read_only_result",
         )
 
     def _balance_answer(self, data: dict[str, Any]) -> AgentChatAnswer:
         if data.get("error"):
             return AgentChatAnswer(
-                text=f"잔고 조회에 실패했습니다. 사유: {data['error']}. 주문은 실행하지 않았습니다.",
+                text=(
+                    f"잔고 조회에 실패했습니다. 사유: {data['error']}. "
+                    "주문·validation·confirm_live는 실행하지 않았습니다."
+                ),
                 answer_type="error",
             )
         balance = data.get("balance") if isinstance(data.get("balance"), dict) else data
-        cash = balance.get("cash")
-        total = balance.get("total_asset_value")
         currency = balance.get("currency") or "KRW"
         parts = []
-        if cash is not None:
-            parts.append(f"현금 {self._money(cash, currency)}")
-        if total is not None:
-            parts.append(f"총자산 {self._money(total, currency)}")
-        summary = ", ".join(parts) if parts else "잔고 요약을 가져왔습니다"
+        if balance.get("cash") is not None:
+            parts.append(f"예수금 {self._money(balance.get('cash'), currency)}")
+        if balance.get("total_asset_value") is not None:
+            parts.append(f"총자산 {self._money(balance.get('total_asset_value'), currency)}")
+        summary = ", ".join(parts) if parts else "잔고 정보를 조회했습니다"
         return AgentChatAnswer(
-            text=f"{summary}. 이 조회는 read-only이며 주문은 실행하지 않았습니다.",
+            text=(
+                f"{summary}. read-only 조회만 수행했으며 "
+                "주문·validation·confirm_live는 실행하지 않았습니다."
+            ),
             answer_type="read_only_result",
         )
 
@@ -188,7 +200,7 @@ class AgentChatAnswerService:
         count = int(data.get("count", len(orders)) or 0)
         if count == 0:
             return AgentChatAnswer(
-                text="최근 주문 기록이 없습니다. 이 조회는 read-only이며 주문은 실행하지 않았습니다.",
+                text="최근 주문 기록은 없습니다. 조회만 수행했고 새 주문은 실행하지 않았습니다.",
                 answer_type="read_only_result",
             )
         first = orders[0] if isinstance(orders[0], dict) else {}
@@ -199,7 +211,7 @@ class AgentChatAnswerService:
                 f"{first.get('side', '')} / {first.get('internal_status') or first.get('status') or '상태 미상'}입니다."
             )
         return AgentChatAnswer(
-            text=f"최근 주문 기록 {count}건을 찾았습니다.{detail} 주문은 실행하지 않았습니다.",
+            text=f"최근 주문 기록 {count}건을 조회했습니다.{detail} 새 주문은 실행하지 않았습니다.",
             answer_type="read_only_result",
         )
 
@@ -208,7 +220,7 @@ class AgentChatAnswerService:
         count = int(data.get("count", len(runs)) or 0)
         if count == 0:
             return AgentChatAnswer(
-                text="최근 실행 로그가 없습니다. 이 조회는 read-only이며 주문은 실행하지 않았습니다.",
+                text="최근 실행 로그는 없습니다. 조회만 수행했고 주문은 실행하지 않았습니다.",
                 answer_type="read_only_result",
             )
         first = runs[0] if isinstance(runs[0], dict) else {}
@@ -216,7 +228,7 @@ class AgentChatAnswerService:
         if first:
             detail = f" 최신 실행은 {first.get('symbol', '종목')} / {first.get('result', '상태 미상')}입니다."
         return AgentChatAnswer(
-            text=f"최근 실행 로그 {count}건을 찾았습니다.{detail} 주문은 실행하지 않았습니다.",
+            text=f"최근 실행 로그 {count}건을 조회했습니다.{detail} 주문은 실행하지 않았습니다.",
             answer_type="read_only_result",
         )
 
@@ -224,7 +236,7 @@ class AgentChatAnswerService:
         signals = data.get("signals") if isinstance(data.get("signals"), list) else []
         count = int(data.get("count", len(signals)) or 0)
         return AgentChatAnswer(
-            text=f"최근 시그널 {count}건을 조회했습니다. 이 조회는 read-only이며 주문은 실행하지 않았습니다.",
+            text=f"최근 신호 {count}건을 조회했습니다. 조회만 수행했고 주문은 실행하지 않았습니다.",
             answer_type="read_only_result",
         )
 
@@ -232,10 +244,11 @@ class AgentChatAnswerService:
         settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
         dry_run = self._on_off(settings.get("dry_run"))
         kill_switch = self._on_off(settings.get("kill_switch"))
+        scheduler = self._on_off(settings.get("scheduler_enabled"))
         return AgentChatAnswer(
             text=(
-                f"현재 dry-run은 {dry_run}, kill switch는 {kill_switch}입니다. "
-                "설정은 조회만 했고 변경하지 않았습니다."
+                f"현재 dry-run은 {dry_run}, kill switch는 {kill_switch}, scheduler는 {scheduler}입니다. "
+                "이 상태 정보는 조회만 수행했으며 설정을 변경하지 않았습니다."
             ),
             answer_type="read_only_result",
         )
@@ -260,7 +273,7 @@ class AgentChatAnswerService:
             reason = latest.get("risk_note") or latest.get("reason") or "최근 분석 기록을 확인했습니다"
             return AgentChatAnswer(
                 text=(
-                    f"{symbol} 분석 요청으로 이해했습니다. 안전한 분석 조회만 실행했고 주문은 제출하지 않았습니다. "
+                    f"{symbol} 분석 요청으로 이해했습니다. 안전 분석만 수행했고 주문은 제출하지 않았습니다. "
                     f"요약: {reason}"
                 ),
                 answer_type="analysis_summary",
@@ -268,14 +281,13 @@ class AgentChatAnswerService:
         if plan:
             return AgentChatAnswer(
                 text=(
-                    f"{symbol} 분석 요청으로 이해했습니다. 안전한 분석 plan을 만들었고 주문은 제출하지 않았습니다. "
-                    "validation은 호출하지 않았고 confirm_live는 자동 체크하지 않았습니다."
+                    f"{symbol} 안전 분석 plan을 만들었습니다. 주문·validation·confirm_live는 실행하지 않았습니다."
                 ),
                 answer_type="analysis_summary",
             )
         return AgentChatAnswer(
             text=(
-                f"{symbol} 분석 요청으로 이해했지만 현재 사용할 수 있는 분석 경로가 충분하지 않습니다. "
+                f"{symbol} 분석 요청으로 이해했지만 현재 사용할 수 있는 분석 결과가 충분하지 않습니다. "
                 "주문은 실행하지 않았습니다."
             ),
             answer_type="analysis_summary",
@@ -297,7 +309,7 @@ class AgentChatAnswerService:
             )
         return AgentChatAnswer(
             text=(
-                "수동 주문 티켓을 준비하려면 종목과 매수/매도 방향, 금액 또는 수량이 필요합니다. "
+                "수동 주문 티켓을 준비하려면 종목, 매수/매도 방향, 금액 또는 수량이 필요합니다. "
                 "주문은 실행하지 않았습니다."
             ),
             answer_type="unsupported",
@@ -309,12 +321,15 @@ class AgentChatAnswerService:
         plan: dict[str, Any] | None,
         available_actions: list[str],
     ) -> AgentChatAnswer:
-        extra = " 대신 수동 주문 티켓 검토 계획만 준비했습니다." if plan else " 대신 수동 주문 티켓 흐름으로만 준비할 수 있습니다."
+        extra = (
+            " 수동 주문 티켓 검토 계획까지만 준비했습니다."
+            if plan
+            else " 원하시면 수동 주문 티켓까지만 준비할 수 있습니다."
+        )
         return AgentChatAnswer(
             text=(
                 f"채팅에서는 실주문을 직접 제출할 수 없습니다.{extra} "
-                "주문은 실행하지 않았고 validation은 호출하지 않았습니다. "
-                "confirm_live는 자동 체크하지 않았습니다."
+                "Trading 화면에서 Validate와 confirm_live를 직접 진행해야 합니다."
             ),
             answer_type="blocked",
         )

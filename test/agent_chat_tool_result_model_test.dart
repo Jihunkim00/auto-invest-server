@@ -35,8 +35,8 @@ void main() {
   test('AgentChatResultCard parses rows and badges', () {
     final card = AgentChatResultCard.fromJson({
       'card_type': 'settings',
-      'title': 'Safety Status',
-      'badges': ['READ ONLY', 'NO CHANGE'],
+      'title': 'System Status',
+      'badges': ['READ ONLY', 'NO SETTINGS CHANGE'],
       'rows': [
         {'label': 'dry_run', 'value': 'ON'},
       ],
@@ -44,7 +44,8 @@ void main() {
     });
 
     expect(card.cardType, 'settings');
-    expect(card.badges, contains('NO CHANGE'));
+    expect(card.title, 'System Status');
+    expect(card.badges, contains('NO SETTINGS CHANGE'));
     expect(card.rows.first['label'], 'dry_run');
     expect(card.data['dry_run'], isTrue);
   });

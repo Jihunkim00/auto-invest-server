@@ -15,6 +15,7 @@ class AgentChatSendResponse {
     required this.toolResults,
     required this.resultCards,
     required this.followUpSuggestions,
+    required this.diagnostics,
     required this.fallbackUsed,
     this.userMessageId,
     this.assistantMessageId,
@@ -40,6 +41,7 @@ class AgentChatSendResponse {
   final List<AgentChatToolResult> toolResults;
   final List<AgentChatResultCard> resultCards;
   final List<String> followUpSuggestions;
+  final Map<String, dynamic> diagnostics;
   final String? answerType;
   final bool fallbackUsed;
 
@@ -69,6 +71,7 @@ class AgentChatSendResponse {
       toolResults: _readToolResultList(json['tool_results']),
       resultCards: _readResultCardList(json['result_cards']),
       followUpSuggestions: _readStringList(json['follow_up_suggestions']),
+      diagnostics: _readMap(json['diagnostics']),
       answerType: _readNullableString(json['answer_type']),
       fallbackUsed: json['fallback_used'] == true,
     );

@@ -94,6 +94,14 @@ void main() {
         }
       ],
       'follow_up_suggestions': ['Analyze this'],
+      'diagnostics': {
+        'encoding_safe': true,
+        'answer_contains_mojibake_marker': false,
+        'router': 'fallback',
+        'fallback_used': true,
+        'tool_count': 1,
+        'result_card_count': 1,
+      },
       'answer_type': 'read_only_result',
       'fallback_used': true,
       'safety': {
@@ -122,6 +130,7 @@ void main() {
     expect(response.toolResults.first.resultType, 'price');
     expect(response.resultCards.first.cardType, 'price');
     expect(response.followUpSuggestions, contains('Analyze this'));
+    expect(response.diagnostics['encoding_safe'], isTrue);
     expect(response.answerType, 'read_only_result');
     expect(response.fallbackUsed, isTrue);
     expect(response.availableActions, contains('prepare_manual_ticket'));

@@ -1196,7 +1196,7 @@ Map<String, dynamic> _kisCompletedAnalysisPayload({
     'final_buy_score': finalBuyScore,
     'final_sell_score': finalSellScore,
     'confidence': 0.77,
-    'gpt_reason': 'ì ë ì§í mojibake fallback should not render',
+    'gpt_reason': _mojibakeFallbackReason(),
     'risk_flags': riskFlags,
     'gating_notes': const ['KIS OHLCV indicators were used for quant scoring.'],
     'block_reason': noOrderReason,
@@ -1247,6 +1247,24 @@ Map<String, dynamic> _kisCompletedAnalysisPayload({
       'is_near_close': nearClose,
     },
   };
+}
+
+String _mojibakeFallbackReason() {
+  return String.fromCharCodes([
+    0x00EC,
+    0x00A0,
+    0x0095,
+    0x00EB,
+    0x009F,
+    0x0089,
+    0x0020,
+    0x00EC,
+    0x00A7,
+    0x0080,
+    0x00ED,
+    0x0091,
+    0x009C,
+  ]);
 }
 
 OrderValidationResult _validationResult() {
