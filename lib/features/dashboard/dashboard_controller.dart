@@ -1279,7 +1279,8 @@ class DashboardController extends ChangeNotifier {
       agentHistoryError =
           'Chat history unavailable; continuing local-only. ${ApiErrorFormatter.format(e.toString())}';
       activeAgentConversationKey ??= agentConversationId;
-      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentHistoryError!));
     } finally {
       isLoadingAgentHistory = false;
       notifyListeners();
@@ -1301,14 +1302,16 @@ class DashboardController extends ChangeNotifier {
         conversationKey,
         limit: 100,
       );
-      agentMessages = messages.isEmpty ? _defaultAgentSafetyMessages() : messages;
+      agentMessages =
+          messages.isEmpty ? _defaultAgentSafetyMessages() : messages;
       return const ActionResult(
         success: true,
         message: 'Agent chat history loaded.',
       );
     } catch (e) {
       agentHistoryError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentHistoryError!));
     } finally {
       if (!silent) {
         isLoadingAgentHistory = false;
@@ -1335,11 +1338,13 @@ class DashboardController extends ChangeNotifier {
       latestAgentRun = null;
       latestAgentPrefill = null;
       agentMessages = _defaultAgentSafetyMessages();
-      return const ActionResult(success: true, message: 'New agent chat started.');
+      return const ActionResult(
+          success: true, message: 'New agent chat started.');
     } catch (e) {
       agentHistoryError = ApiErrorFormatter.format(e.toString());
       clearCurrentAgentChatLocal();
-      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentHistoryError!));
     } finally {
       isLoadingAgentHistory = false;
       notifyListeners();
@@ -1372,7 +1377,8 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       agentHistoryError = ApiErrorFormatter.format(e.toString());
-      return ActionResult(success: false, message: _primaryMessage(agentHistoryError!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentHistoryError!));
     } finally {
       isLoadingAgentHistory = false;
       notifyListeners();
@@ -1704,108 +1710,109 @@ class DashboardController extends ChangeNotifier {
 
       try {
         await saveAgentUserMessage(cleanText);
-      final parsed = await apiClient.parseAgentCommand(
-        message: cleanText,
-        conversationId: _agentConversationKeyForRequests(),
-        context: _agentContext(),
-      );
-      latestAgentCommand = parsed;
+        final parsed = await apiClient.parseAgentCommand(
+          message: cleanText,
+          conversationId: _agentConversationKeyForRequests(),
+          context: _agentContext(),
+        );
+        latestAgentCommand = parsed;
 
-      if (parsed.commandLogId == null) {
+        if (parsed.commandLogId == null) {
+          _replaceAgentMessage(
+            assistantId,
+            _agentMessageForParsedCommand(assistantId, parsed),
+          );
+          await saveAgentAssistantMessage(
+            text: parsed.command.userVisibleSummary,
+            messageType: 'command_parse',
+            commandLogId: parsed.commandLogId,
+            modelName: parsed.modelName,
+            parserStatus: parsed.parserStatus,
+            safety: parsed.safety,
+            metadata: _agentCommandMetadata(parsed),
+          );
+          return const ActionResult(
+            success: true,
+            message: 'Agent command parsed. No plan was created.',
+          );
+        }
+
         _replaceAgentMessage(
           assistantId,
-          _agentMessageForParsedCommand(assistantId, parsed),
+          _agentMessageForParsedCommand(
+            assistantId,
+            parsed,
+            textOverride: 'Command parsed. Creating a plan review...',
+          ),
+        );
+        isAgentParsing = false;
+        isAgentPlanCreating = true;
+        notifyListeners();
+
+        final planResponse = await apiClient.createAgentPlanFromCommand(
+          parsed.commandLogId!,
+        );
+        latestAgentPlan = planResponse.plan;
+        final status = _agentStatusForPlan(planResponse.plan);
+        _replaceAgentMessage(
+          assistantId,
+          AgentChatMessage(
+            id: assistantId,
+            role: AgentChatRole.assistant,
+            text: _agentPlanAssistantText(planResponse.plan),
+            createdAt: now,
+            status: status,
+            commandLogId: parsed.commandLogId,
+            planId: planResponse.plan.id,
+            prefillAvailable: planResponse.plan.canPrepareManualTicket,
+            safetyBadges: _agentSafetyBadges(parsed, planResponse.plan),
+            metadata: {
+              'parser_status': parsed.parserStatus,
+              if (parsed.modelName != null) 'model_name': parsed.modelName,
+            },
+          ),
         );
         await saveAgentAssistantMessage(
-          text: parsed.command.userVisibleSummary,
-          messageType: 'command_parse',
+          text: _agentPlanAssistantText(planResponse.plan),
+          messageType: 'plan_review',
           commandLogId: parsed.commandLogId,
+          planId: planResponse.plan.id,
           modelName: parsed.modelName,
           parserStatus: parsed.parserStatus,
-          safety: parsed.safety,
-          metadata: _agentCommandMetadata(parsed),
+          safety: planResponse.safety,
+          metadata: _agentPlanMetadata(parsed, planResponse.plan),
         );
         return const ActionResult(
           success: true,
-          message: 'Agent command parsed. No plan was created.',
+          message: 'Agent plan created for review. No order submitted.',
         );
-      }
-
-      _replaceAgentMessage(
-        assistantId,
-        _agentMessageForParsedCommand(
+      } catch (e) {
+        agentErrorMessage = ApiErrorFormatter.format(e.toString());
+        _replaceAgentMessage(
           assistantId,
-          parsed,
-          textOverride: 'Command parsed. Creating a plan review...',
-        ),
-      );
-      isAgentParsing = false;
-      isAgentPlanCreating = true;
-      notifyListeners();
-
-      final planResponse = await apiClient.createAgentPlanFromCommand(
-        parsed.commandLogId!,
-      );
-      latestAgentPlan = planResponse.plan;
-      final status = _agentStatusForPlan(planResponse.plan);
-      _replaceAgentMessage(
-        assistantId,
-        AgentChatMessage(
-          id: assistantId,
-          role: AgentChatRole.assistant,
-          text: _agentPlanAssistantText(planResponse.plan),
-          createdAt: now,
-          status: status,
-          commandLogId: parsed.commandLogId,
-          planId: planResponse.plan.id,
-          prefillAvailable: planResponse.plan.canPrepareManualTicket,
-          safetyBadges: _agentSafetyBadges(parsed, planResponse.plan),
-          metadata: {
-            'parser_status': parsed.parserStatus,
-            if (parsed.modelName != null) 'model_name': parsed.modelName,
-          },
-        ),
-      );
-      await saveAgentAssistantMessage(
-        text: _agentPlanAssistantText(planResponse.plan),
-        messageType: 'plan_review',
-        commandLogId: parsed.commandLogId,
-        planId: planResponse.plan.id,
-        modelName: parsed.modelName,
-        parserStatus: parsed.parserStatus,
-        safety: planResponse.safety,
-        metadata: _agentPlanMetadata(parsed, planResponse.plan),
-      );
-      return const ActionResult(
-        success: true,
-        message: 'Agent plan created for review. No order submitted.',
-      );
-    } catch (e) {
-      agentErrorMessage = ApiErrorFormatter.format(e.toString());
-      _replaceAgentMessage(
-        assistantId,
-        AgentChatMessage(
-          id: assistantId,
-          role: AgentChatRole.error,
+          AgentChatMessage(
+            id: assistantId,
+            role: AgentChatRole.error,
+            text: _primaryMessage(agentErrorMessage!),
+            createdAt: now,
+            status: AgentChatStatus.failed,
+            safetyBadges: const ['NO AUTO SUBMIT'],
+          ),
+        );
+        await saveAgentAssistantMessage(
           text: _primaryMessage(agentErrorMessage!),
-          createdAt: now,
-          status: AgentChatStatus.failed,
-          safetyBadges: const ['NO AUTO SUBMIT'],
-        ),
-      );
-      await saveAgentAssistantMessage(
-        text: _primaryMessage(agentErrorMessage!),
-        messageType: 'error',
-        status: 'failed',
-        metadata: const {'message_type': 'error'},
-      );
-      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
-    } finally {
-      isAgentParsing = false;
-      isAgentPlanCreating = false;
-      notifyListeners();
+          messageType: 'error',
+          status: 'failed',
+          metadata: const {'message_type': 'error'},
+        );
+        return ActionResult(
+            success: false, message: _primaryMessage(agentErrorMessage!));
+      } finally {
+        isAgentParsing = false;
+        isAgentPlanCreating = false;
+        notifyListeners();
+      }
     }
-  }
   }
 
   Future<ActionResult> runAgentSafePlan([int? planId]) async {
@@ -1878,7 +1885,8 @@ class DashboardController extends ChangeNotifier {
         status: 'failed',
         planId: id,
       );
-      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentErrorMessage!));
     } finally {
       isAgentRunning = false;
       notifyListeners();
@@ -1942,7 +1950,8 @@ class DashboardController extends ChangeNotifier {
         );
         return const ActionResult(
           success: true,
-          message: 'Agent prepared a manual ticket. Validate and submit manually.',
+          message:
+              'Agent prepared a manual ticket. Validate and submit manually.',
         );
       }
 
@@ -1993,7 +2002,8 @@ class DashboardController extends ChangeNotifier {
         status: 'failed',
         planId: id,
       );
-      return ActionResult(success: false, message: _primaryMessage(agentErrorMessage!));
+      return ActionResult(
+          success: false, message: _primaryMessage(agentErrorMessage!));
     } finally {
       isAgentPreparingTicket = false;
       notifyListeners();
@@ -2028,10 +2038,10 @@ class DashboardController extends ChangeNotifier {
     selectedWatchlistMarket = selectedPortfolioMarket;
     selectedOrderMarket = selectedPortfolioMarket;
     orderTicketSymbol = symbol;
-    orderTicketSide = prefill.side.trim().toLowerCase() == 'sell'
-        ? 'sell'
-        : 'buy';
-    final wholeQty = prefill.qty ?? _wholeAgentPrefillQuantity(prefill.quantity);
+    orderTicketSide =
+        prefill.side.trim().toLowerCase() == 'sell' ? 'sell' : 'buy';
+    final wholeQty =
+        prefill.qty ?? _wholeAgentPrefillQuantity(prefill.quantity);
     if (wholeQty != null && wholeQty > 0) {
       orderTicketQty = wholeQty;
       orderTicketQtyInput = wholeQty.toString();
@@ -4545,7 +4555,8 @@ class DashboardController extends ChangeNotifier {
       if (response.plan != null) 'plan_id': response.plan!.id,
       if (response.run != null) 'plan_run_id': response.run!.planRunId,
       'parser_status': response.intent.parserStatus,
-      if (response.intent.modelName != null) 'model_name': response.intent.modelName,
+      if (response.intent.modelName != null)
+        'model_name': response.intent.modelName,
       'fallback_used': response.intent.fallbackUsed,
       'available_actions': response.availableActions,
       'safety': response.safety.raw,

@@ -395,7 +395,8 @@ class _FullInputRow extends StatelessWidget {
             fillColor: Colors.black.withValues(alpha: 0.28),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide:
+                  BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
           ),
         ),

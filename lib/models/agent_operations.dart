@@ -81,7 +81,8 @@ class AgentOperationsSummary {
       activeConversationCount: _readInt(json['active_conversation_count']),
       archivedConversationCount: _readInt(json['archived_conversation_count']),
       todayMessagesCount: _readInt(json['today_messages_count']),
-      latestConversationKey: _readNullableString(json['latest_conversation_key']),
+      latestConversationKey:
+          _readNullableString(json['latest_conversation_key']),
       latestPlanId: _readNullableInt(json['latest_plan_id']),
       latestRunId: _readNullableInt(json['latest_run_id']),
       latestPlanAt: _readDate(json['latest_plan_at']),

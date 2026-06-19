@@ -71,7 +71,8 @@ void main() {
     expect(controller.orderValidationResult, isNull);
     expect(controller.kisManualOrderError, isNull);
     expect(controller.orderTicketSourceMetadata?['source'], 'agent_plan');
-    expect(controller.orderTicketSourceMetadata?['manual_submit_called'], isFalse);
+    expect(
+        controller.orderTicketSourceMetadata?['manual_submit_called'], isFalse);
     expect(controller.latestAgentPrefill?.isReady, isTrue);
 
     controller.dispose();

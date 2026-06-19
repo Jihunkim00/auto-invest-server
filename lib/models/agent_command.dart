@@ -116,15 +116,14 @@ class AutoInvestCommand {
       symbol: _readNullableString(json['symbol']),
       side: _readString(json['side'], 'none'),
       quantity: _readNullableDouble(json['quantity']),
-      budget:
-          budget is Map ? Map<String, dynamic>.from(budget) : null,
-      schedule:
-          schedule is Map ? Map<String, dynamic>.from(schedule) : null,
+      budget: budget is Map ? Map<String, dynamic>.from(budget) : null,
+      schedule: schedule is Map ? Map<String, dynamic>.from(schedule) : null,
       riskLevel: _readString(json['risk_level'], 'unknown'),
       requiresAuth: json['requires_auth'] == true,
       requiresRiskApproval: json['requires_risk_approval'] == true,
       needsClarification: json['needs_clarification'] == true,
-      clarificationQuestion: _readNullableString(json['clarification_question']),
+      clarificationQuestion:
+          _readNullableString(json['clarification_question']),
       userVisibleSummary: _readString(
         json['user_visible_summary'],
         'Command parsed for review. No action was executed.',

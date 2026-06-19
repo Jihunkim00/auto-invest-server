@@ -9,7 +9,8 @@ import 'package:auto_invest_dashboard/models/agent_command.dart';
 import 'package:auto_invest_dashboard/models/agent_plan.dart';
 
 void main() {
-  test('restoreLatestAgentConversation loads persisted active thread', () async {
+  test('restoreLatestAgentConversation loads persisted active thread',
+      () async {
     final api = _AgentChatHistoryFakeApi(
       conversations: [_conversation('agent_conv_latest')],
       messages: [
@@ -30,10 +31,12 @@ void main() {
     expect(controller.activeAgentConversationKey, 'agent_conv_latest');
     expect(api.fetchConversationsCalls, 1);
     expect(api.fetchMessagesCalls, 1);
-    expect(controller.agentMessages.map((message) => message.text), containsAll([
-      'Show Samsung positions',
-      'Persisted plan review.',
-    ]));
+    expect(
+        controller.agentMessages.map((message) => message.text),
+        containsAll([
+          'Show Samsung positions',
+          'Persisted plan review.',
+        ]));
     expect(controller.agentHistoryError, isNull);
 
     controller.dispose();
@@ -89,7 +92,8 @@ void main() {
     expect(controller.activeAgentConversationKey, 'agent_conv_created_1');
     expect(controller.agentHistoryError, contains('Saved locally only'));
     expect(
-      controller.agentMessages.any((message) => message.text == 'show my positions'),
+      controller.agentMessages
+          .any((message) => message.text == 'show my positions'),
       isTrue,
     );
     expect(controller.latestAgentPlan?.id, 88);
@@ -128,7 +132,8 @@ class _AgentChatHistoryFakeApi extends ApiClient {
     List<AgentChatMessage>? messages,
     this.throwAppend = false,
     this.throwChatSend = false,
-  })  : conversations = List<AgentChatConversation>.of(conversations ?? const []),
+  })  : conversations =
+            List<AgentChatConversation>.of(conversations ?? const []),
         messages = List<AgentChatMessage>.of(messages ?? const []);
 
   final List<AgentChatConversation> conversations;

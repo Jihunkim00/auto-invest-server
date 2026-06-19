@@ -79,7 +79,9 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
             key: const ValueKey('agent-chat-collapse'),
             tooltip: collapsed ? 'Expand Agent Chat' : 'Collapse Agent Chat',
             onPressed: () => controller.setAgentChatMode(
-              collapsed ? AgentChatPanelMode.mini : AgentChatPanelMode.collapsed,
+              collapsed
+                  ? AgentChatPanelMode.mini
+                  : AgentChatPanelMode.collapsed,
             ),
             icon: Icon(collapsed
                 ? Icons.keyboard_arrow_up
@@ -331,7 +333,8 @@ class _AgentInputRow extends StatelessWidget {
             fillColor: Colors.black.withValues(alpha: 0.20),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide:
+                  BorderSide(color: Colors.white.withValues(alpha: 0.1)),
             ),
           ),
         ),

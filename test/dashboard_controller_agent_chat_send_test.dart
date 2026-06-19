@@ -27,7 +27,8 @@ void main() {
     expect(controller.latestAgentPlan, isNull);
     expect(controller.agentMessages.last.text, contains('현재가'));
     expect(controller.agentMessages.last.safetyBadges, contains('READ ONLY'));
-    expect(controller.agentMessages.last.safetyBadges, contains('NO AUTO SUBMIT'));
+    expect(
+        controller.agentMessages.last.safetyBadges, contains('NO AUTO SUBMIT'));
 
     controller.dispose();
   });
@@ -50,7 +51,8 @@ void main() {
     controller.dispose();
   });
 
-  test('manual ticket response shows prefill state without validation or submit',
+  test(
+      'manual ticket response shows prefill state without validation or submit',
       () async {
     final api = _ChatSendFakeApi(response: _manualTicketResponse());
     final controller = DashboardController(api, autoload: false)
@@ -63,7 +65,8 @@ void main() {
     expect(api.submitCalls, 0);
     expect(controller.latestAgentPlan?.canPrepareManualTicket, isTrue);
     expect(controller.agentMessages.last.prefillAvailable, isTrue);
-    expect(controller.agentMessages.last.safetyBadges, contains('PREFILL ONLY'));
+    expect(
+        controller.agentMessages.last.safetyBadges, contains('PREFILL ONLY'));
     expect(controller.kisLiveConfirmation, isTrue);
 
     controller.dispose();
@@ -347,7 +350,9 @@ AgentPlan _manualPlan() {
     'plan_title': 'Prepare manual ticket',
     'plan_summary': 'Prepare ticket only.',
     'user_visible_summary': 'Manual ticket only.',
-    'command': {'budget': {'amount': 30000, 'currency': 'KRW'}},
+    'command': {
+      'budget': {'amount': 30000, 'currency': 'KRW'}
+    },
     'execution_policy': {'allow_live_order': false},
     'safety': {'real_order_submitted': false},
     'requires_auth': false,

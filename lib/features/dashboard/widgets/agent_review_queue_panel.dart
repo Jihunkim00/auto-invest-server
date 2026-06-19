@@ -40,85 +40,86 @@ class _AgentReviewQueuePanelState extends State<AgentReviewQueuePanel> {
     return SectionCard(
       padding: const EdgeInsets.all(14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        const Icon(Icons.rule_folder_outlined, size: 20),
-        const SizedBox(width: 8),
-        const Expanded(
-          child: Text(
-            'Agent Review Queue',
-            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
-          ),
-        ),
-        IconButton(
-          key: const ValueKey('agent-review-queue-refresh'),
-          tooltip: 'Refresh Agent Review Queue',
-          onPressed: busy ? null : controller.refreshAgentReviewQueue,
-          icon: const Icon(Icons.refresh, size: 18),
-        ),
-      ]),
-      const SizedBox(height: 8),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final entry in _agentQueueFilters.entries)
-            ChoiceChip(
-              key: ValueKey('agent-review-filter-${entry.key}'),
-              label: Text(entry.value),
-              selected: controller.selectedAgentQueueFilter == entry.key,
-              onSelected: busy
-                  ? null
-                  : (_) => controller.refreshAgentReviewQueue(filter: entry.key),
+        Row(children: [
+          const Icon(Icons.rule_folder_outlined, size: 20),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Agent Review Queue',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
             ),
+          ),
+          IconButton(
+            key: const ValueKey('agent-review-queue-refresh'),
+            tooltip: 'Refresh Agent Review Queue',
+            onPressed: busy ? null : controller.refreshAgentReviewQueue,
+            icon: const Icon(Icons.refresh, size: 18),
+          ),
+        ]),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final entry in _agentQueueFilters.entries)
+              ChoiceChip(
+                key: ValueKey('agent-review-filter-${entry.key}'),
+                label: Text(entry.value),
+                selected: controller.selectedAgentQueueFilter == entry.key,
+                onSelected: busy
+                    ? null
+                    : (_) =>
+                        controller.refreshAgentReviewQueue(filter: entry.key),
+              ),
+          ],
+        ),
+        if (controller.isLoadingAgentReviewQueue) ...[
+          const SizedBox(height: 10),
+          const Text(
+            'Refreshing review queue...',
+            style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
+          ),
         ],
-      ),
-      if (controller.isLoadingAgentReviewQueue) ...[
-        const SizedBox(height: 10),
-        const Text(
-          'Refreshing review queue...',
-          style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
-        ),
-      ],
-      const SizedBox(height: 12),
-      if (controller.agentReviewQueue.items.isEmpty)
-        const Text(
-          'No open Agent review queue items.',
-          style: TextStyle(color: Colors.white70),
-        )
-      else
-        for (final item in controller.agentReviewQueue.items)
-          AgentReviewQueueItemCard(
-            item: item,
-            busy: busy,
-            onOpenChat: item.canOpenChat
-                ? () => _runAction(
-                      context,
-                      controller.openAgentConversationFromQueue(
-                        item.conversationKey,
-                      ),
-                    )
-                : null,
-            onRunSafeAction: item.canRunSafeAction
-                ? () => _runAction(
-                      context,
-                      controller.runSafeActionFromQueue(item.planId),
-                    )
-                : null,
-            onPrepareTicket: item.canPrepareTicket
-                ? () => _runAction(
-                      context,
-                      controller.prepareTicketFromQueue(item.planId),
-                    )
-                : null,
-            onMarkReviewed: () => _runAction(
-              context,
-              controller.markAgentQueueItemReviewed(item.queueKey),
+        const SizedBox(height: 12),
+        if (controller.agentReviewQueue.items.isEmpty)
+          const Text(
+            'No open Agent review queue items.',
+            style: TextStyle(color: Colors.white70),
+          )
+        else
+          for (final item in controller.agentReviewQueue.items)
+            AgentReviewQueueItemCard(
+              item: item,
+              busy: busy,
+              onOpenChat: item.canOpenChat
+                  ? () => _runAction(
+                        context,
+                        controller.openAgentConversationFromQueue(
+                          item.conversationKey,
+                        ),
+                      )
+                  : null,
+              onRunSafeAction: item.canRunSafeAction
+                  ? () => _runAction(
+                        context,
+                        controller.runSafeActionFromQueue(item.planId),
+                      )
+                  : null,
+              onPrepareTicket: item.canPrepareTicket
+                  ? () => _runAction(
+                        context,
+                        controller.prepareTicketFromQueue(item.planId),
+                      )
+                  : null,
+              onMarkReviewed: () => _runAction(
+                context,
+                controller.markAgentQueueItemReviewed(item.queueKey),
+              ),
+              onDismiss: () => _runAction(
+                context,
+                controller.dismissAgentQueueItem(item.queueKey),
+              ),
             ),
-            onDismiss: () => _runAction(
-              context,
-              controller.dismissAgentQueueItem(item.queueKey),
-            ),
-          ),
       ]),
     );
   }

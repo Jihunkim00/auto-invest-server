@@ -33,7 +33,8 @@ void main() {
     final api = _AgentOperationsFakeApi();
     final controller = DashboardController(api, autoload: false);
 
-    final result = await controller.openAgentConversationFromQueue('conv_queue');
+    final result =
+        await controller.openAgentConversationFromQueue('conv_queue');
 
     expect(result.success, isTrue);
     expect(api.fetchChatMessagesCalls, 1);
@@ -80,12 +81,14 @@ void main() {
     expect(controller.kisLiveConfirmation, isFalse);
     expect(controller.orderValidationResult, isNull);
     expect(controller.kisManualOrderError, isNull);
-    expect(controller.orderTicketSourceMetadata?['manual_submit_called'], isFalse);
+    expect(
+        controller.orderTicketSourceMetadata?['manual_submit_called'], isFalse);
 
     controller.dispose();
   });
 
-  test('reviewed and dismiss queue actions call API and refresh queue', () async {
+  test('reviewed and dismiss queue actions call API and refresh queue',
+      () async {
     final api = _AgentOperationsFakeApi();
     final controller = DashboardController(api, autoload: false);
 

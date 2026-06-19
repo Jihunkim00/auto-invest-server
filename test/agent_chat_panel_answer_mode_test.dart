@@ -32,7 +32,8 @@ void main() {
     expect(find.textContaining('현재가는'), findsOneWidget);
     expect(find.text('READ ONLY'), findsOneWidget);
     expect(find.text('NO AUTO SUBMIT'), findsWidgets);
-    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')), findsNothing);
+    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')),
+        findsNothing);
     expect(find.byKey(const ValueKey('agent-run-safe-action')), findsNothing);
 
     controller.dispose();
@@ -65,7 +66,8 @@ void main() {
     ));
 
     expect(find.text('Prepare Manual Ticket'), findsOneWidget);
-    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')), findsOneWidget);
+    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')),
+        findsOneWidget);
     expect(find.text('Submit Live Order'), findsNothing);
     expect(find.byKey(const ValueKey('agent-run-safe-action')), findsNothing);
 
@@ -95,7 +97,8 @@ void main() {
 
     expect(find.textContaining('실주문'), findsOneWidget);
     expect(find.text('Submit Live Order'), findsNothing);
-    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')), findsNothing);
+    expect(find.byKey(const ValueKey('agent-prepare-manual-ticket')),
+        findsNothing);
 
     controller.dispose();
   });
@@ -119,7 +122,9 @@ AgentPlan _manualPlan() {
     'plan_title': 'Prepare manual ticket',
     'plan_summary': 'Prepare ticket only.',
     'user_visible_summary': 'Manual ticket only.',
-    'command': {'budget': {'amount': 30000, 'currency': 'KRW'}},
+    'command': {
+      'budget': {'amount': 30000, 'currency': 'KRW'}
+    },
     'execution_policy': {'allow_live_order': false},
     'safety': {'real_order_submitted': false},
     'requires_auth': false,

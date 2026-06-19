@@ -104,7 +104,7 @@ class AgentChatIntentRouterService:
             "symbol_name": symbol_info.get("name") if symbol_info else None,
             "side": side,
             "notional": amount,
-            "currency": "KRW" if market == "KR" and amount is not None else None,
+            "currency": ("KRW" if market == "KR" else "USD") if amount is not None and market in {"KR", "US"} else None,
             "fallback_used": True,
             "parser_status": parser_status,
         }
@@ -157,6 +157,16 @@ class AgentChatIntentRouterService:
                 **base,
             )
 
+        if self._is_exit_review_request(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.EXIT_REVIEW_REQUEST,
+                confidence=0.84 if symbol_info else 0.62,
+                reason="User is asking for a safe exit review.",
+                supported=bool(symbol_info),
+                requires_plan=bool(symbol_info),
+                **base,
+            )
+
         if self._is_live_order_request(text):
             return self._intent(
                 AgentChatIntentCategory.LIVE_ORDER_REQUEST,
@@ -165,15 +175,6 @@ class AgentChatIntentRouterService:
                 supported=True,
                 requires_plan=bool(symbol_info),
                 requires_manual_confirmation=True,
-                **base,
-            )
-
-        if self._is_price_query(text, lowered):
-            return self._intent(
-                AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
-                confidence=0.9 if symbol_info else 0.62,
-                reason="User is asking for a current stock price.",
-                supported=bool(symbol_info),
                 **base,
             )
 
@@ -214,6 +215,23 @@ class AgentChatIntentRouterService:
                 AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
                 confidence=0.84,
                 reason="User is asking for recent signals.",
+                **base,
+            )
+
+        if self._is_price_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
+                confidence=0.9 if symbol_info else 0.62,
+                reason="User is asking for a current stock price.",
+                supported=bool(symbol_info),
+                **base,
+            )
+
+        if self._is_watchlist_preview_request(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.WATCHLIST_PREVIEW_REQUEST,
+                confidence=0.82,
+                reason="User is asking for a safe watchlist preview.",
                 **base,
             )
 
@@ -439,16 +457,18 @@ class AgentChatIntentRouterService:
         us_symbol = re.search(r"\b[A-Z]{1,5}\b", upper_text)
         if us_symbol:
             candidate = us_symbol.group(0)
-            if candidate not in {"KR", "US", "KIS", "GPT", "API", "ETF"}:
+            if candidate not in {"KR", "US", "KIS", "GPT", "API", "ETF", "RUN", "HOLD", "BUY", "SELL"}:
                 return {"symbol": candidate, "name": candidate, "market": "US", "provider": "alpaca"}
         return None
 
     def _symbol_info_from_context(self, context: dict[str, Any]) -> dict[str, str] | None:
         symbol = str(context.get("last_symbol") or "").strip().upper()
         if not symbol:
+            symbol = str(context.get("first_position_symbol") or "").strip().upper()
+        if not symbol:
             snapshot = context.get("context_snapshot")
             if isinstance(snapshot, dict):
-                symbol = str(snapshot.get("last_symbol") or "").strip().upper()
+                symbol = str(snapshot.get("last_symbol") or snapshot.get("first_position_symbol") or "").strip().upper()
         if not symbol:
             return None
         market = str(context.get("last_market") or "").strip().upper()
@@ -462,8 +482,10 @@ class AgentChatIntentRouterService:
         if not provider:
             provider = "kis" if market == "KR" else "alpaca"
         name = str(context.get("last_symbol_name") or "").strip()
+        if not name:
+            name = str(context.get("first_position_name") or "").strip()
         if isinstance(snapshot, dict):
-            name = name or str(snapshot.get("last_symbol_name") or "").strip()
+            name = name or str(snapshot.get("last_symbol_name") or snapshot.get("first_position_name") or "").strip()
         return {"symbol": symbol, "name": name or symbol, "market": market, "provider": provider}
 
     def _should_use_context_symbol(self, text: str, lowered: str) -> bool:
@@ -471,7 +493,10 @@ class AgentChatIntentRouterService:
             return False
         if self._is_price_query(text, lowered) or self._is_analysis_request(text, lowered):
             return True
-        return any(token in text for token in ["\uadf8\uac70", "\uc774\uac70", "\uadf8\ub7fc", "\ud574\ub2f9 \uc885\ubaa9"])
+        return any(
+            token in text
+            for token in ["그거", "이거", "그럼", "해당 종목", "방금 본", "본 종목", "첫 번째", "첫번째", "보유 중인"]
+        )
 
     def _tools_for_intent(self, intent: AgentChatIntent) -> list[AgentChatToolCall]:
         category = intent.category
@@ -549,6 +574,10 @@ class AgentChatIntentRouterService:
         return "UNKNOWN"
 
     def _resolve_provider(self, context: dict[str, Any], market: str) -> str:
+        if market == "KR":
+            return "kis"
+        if market == "US":
+            return "alpaca"
         snapshot = context.get("context_snapshot")
         raw = str(
             context.get("last_provider")
@@ -559,10 +588,6 @@ class AgentChatIntentRouterService:
         ).strip().lower()
         if raw in {"alpaca", "kis", "all"}:
             return raw
-        if market == "KR":
-            return "kis"
-        if market == "US":
-            return "alpaca"
         return "unknown"
 
     def _detect_side(self, text: str) -> str:
@@ -584,22 +609,31 @@ class AgentChatIntentRouterService:
         dollar = re.search(r"\$\s*(\d+(?:\.\d+)?)", compact)
         if dollar:
             return float(dollar.group(1))
+        dollar_word = re.search(r"(\d+(?:\.\d+)?)\s*달러", compact)
+        if dollar_word:
+            return float(dollar_word.group(1))
         return None
 
     def _is_price_query(self, text: str, lowered: str) -> bool:
         return any(token in text for token in ["가격", "현재가", "주가", "얼마"]) or "price" in lowered
 
     def _is_positions_query(self, text: str, lowered: str) -> bool:
-        return any(token in text for token in ["보유종목", "보유 종목", "포지션", "들고 있어"]) or "positions" in lowered
+        return any(token in text for token in ["보유종목", "보유 종목", "포지션", "들고 있어", "보유 중", "가지고 있어"]) or "positions" in lowered
 
     def _is_balance_query(self, text: str, lowered: str) -> bool:
-        return any(token in text for token in ["잔고", "현금", "계좌 상태", "예수금"]) or "balance" in lowered or "cash" in lowered
+        return any(token in text for token in ["잔고", "현금", "계좌 상태", "예수금", "평가손익", "손익"]) or "balance" in lowered or "cash" in lowered
 
     def _is_orders_query(self, text: str) -> bool:
         return "주문" in text and any(token in text for token in ["기록", "내역", "최근", "오늘", "보여", "조회"])
 
     def _is_runs_query(self, text: str, lowered: str) -> bool:
-        return any(token in text for token in ["실행 로그", "실행 기록", "런 기록"]) or "run log" in lowered or "runs" in lowered
+        return (
+            any(token in text for token in ["실행 로그", "실행 기록", "런 기록"])
+            or "run log" in lowered
+            or "runs" in lowered
+            or ("run" in lowered and any(token in text for token in ["결과", "기록", "로그", "마지막", "최근"]))
+            or ("최근" in text and any(token in text for token in ["매수 안", "hold", "HOLD", "이유"]))
+        )
 
     def _is_signals_query(self, text: str, lowered: str) -> bool:
         return "신호" in text or "시그널" in text or "signals" in lowered
@@ -612,7 +646,7 @@ class AgentChatIntentRouterService:
 
     def _is_live_order_request(self, text: str) -> bool:
         lowered = text.lower()
-        direct_tokens = ["사줘", "매수해", "바로 매수", "팔아", "매도해", "전량 매도"]
+        direct_tokens = ["사줘", "매수해", "바로 매수", "팔아", "매도해", "전량 매도", "주문 넣어", "주문해"]
         return any(token in text for token in direct_tokens) or "buy now" in lowered or "sell now" in lowered
 
     def _is_dangerous_setting_request(self, text: str) -> bool:
@@ -655,7 +689,6 @@ class AgentChatIntentRouterService:
             or "확인" in text
             or "어떻게" in text
             or "알려" in text
-            or "뭐야" in text
         )
         return mentions_setting and status_word
 
@@ -667,7 +700,22 @@ class AgentChatIntentRouterService:
 
     def _is_unsupported(self, text: str) -> bool:
         lowered = text.lower()
-        return any(token in text for token in ["비트코인", "선물", "100배", "롱", "숏"]) or "crypto" in lowered or "futures" in lowered
+        return (
+            any(token in text for token in ["비트코인", "선물", "100배", "롱", "숏", "옵션", "코인", "은행", "자동입금", "해외선물"])
+            or "crypto" in lowered
+            or "futures" in lowered
+            or "option" in lowered
+        )
+
+    def _is_watchlist_preview_request(self, text: str, lowered: str) -> bool:
+        return any(token in text for token in ["워치리스트", "후보 종목", "후보"]) or "watchlist" in lowered
+
+    def _is_exit_review_request(self, text: str, lowered: str) -> bool:
+        return (
+            any(token in text for token in ["팔아야", "매도해야", "정리해야", "나가야", "매도 검토", "청산 검토"])
+            or "exit review" in lowered
+            or "sell review" in lowered
+        )
 
     def _category(self, value: Any) -> AgentChatIntentCategory | None:
         raw = str(value or "").strip()

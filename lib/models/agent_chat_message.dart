@@ -262,7 +262,8 @@ List<String> _badgesFromPersistedMessage(Map<String, dynamic> json) {
   final parserStatus = _readNullableString(json['parser_status']);
   final messageType = _readString(json['message_type'], '');
   if (parserStatus != null) {
-    badges.add(parserStatus.contains('fallback') ? 'FALLBACK PARSER' : 'GPT-BACKED');
+    badges.add(
+        parserStatus.contains('fallback') ? 'FALLBACK PARSER' : 'GPT-BACKED');
   }
   if (messageType == 'manual_prefill_result') {
     badges.addAll([

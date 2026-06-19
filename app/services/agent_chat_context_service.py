@@ -76,6 +76,24 @@ class AgentChatContextService:
                 value = price.get("price", price.get("current_price"))
                 if value is not None:
                     snapshot["last_price"] = value
+            if result.result_type == "positions":
+                positions = result.data.get("positions") if isinstance(result.data.get("positions"), list) else []
+                first = positions[0] if positions and isinstance(positions[0], dict) else {}
+                snapshot["last_tool_name"] = result.tool_name
+                symbol = str(first.get("symbol") or "").strip().upper()
+                name = str(first.get("name") or "").strip()
+                if symbol:
+                    snapshot["first_position_symbol"] = symbol
+                    snapshot["last_symbol"] = symbol
+                if name:
+                    snapshot["first_position_name"] = name
+                    snapshot["last_symbol_name"] = name
+                market = str(result.data.get("market") or "").strip().upper()
+                provider = str(result.data.get("provider") or "").strip().lower()
+                if market:
+                    snapshot["last_market"] = market
+                if provider:
+                    snapshot["last_provider"] = provider
             if result.result_type == "analysis":
                 analysis = result.data.get("analysis")
                 if isinstance(analysis, dict) and analysis.get("action"):
@@ -113,6 +131,8 @@ class AgentChatContextService:
             "last_tool_name",
             "last_price",
             "last_analysis_action",
+            "first_position_symbol",
+            "first_position_name",
         ):
             raw = value.get(key)
             if raw is None or raw == "" or raw == "null":
