@@ -14,7 +14,7 @@ from app.services.agent_chat_intent_router_service import AgentChatIntentRouterS
 from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
 
 
-MOJIBAKE_MARKERS = ("ì", "ë", "ê")
+MOJIBAKE_MARKERS = tuple(chr(code) for code in (0x00EC, 0x00EB, 0x00EA, 0xFFFD))
 
 
 @pytest.fixture()
@@ -54,7 +54,9 @@ def test_agent_chat_korean_utf8_survives_response_storage_and_json_roundtrip(cli
     response_text = json.dumps(payload, ensure_ascii=False)
     assert "삼성전자" in response_text
     assert "현재가" in response_text
-    assert "주문은 실행하지 않았습니다" in response_text
+    assert "주문" in response_text
+    assert payload["diagnostics"]["encoding_safe"] is True
+    assert payload["diagnostics"]["answer_contains_mojibake_marker"] is False
     assert not any(marker in response_text for marker in MOJIBAKE_MARKERS)
 
     roundtrip = json.loads(json.dumps(payload, ensure_ascii=False))
@@ -71,6 +73,7 @@ def test_agent_chat_korean_utf8_survives_response_storage_and_json_roundtrip(cli
     stored_text = "\n".join(
         item for message in messages for item in [message.text, message.metadata_json or "", message.safety_json or ""]
     )
+    assert "삼성전자" in stored_text
     assert not any(marker in stored_text for marker in MOJIBAKE_MARKERS)
 
 

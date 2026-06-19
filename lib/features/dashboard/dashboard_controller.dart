@@ -4515,6 +4515,7 @@ class DashboardController extends ChangeNotifier {
     final badges = <String>[
       response.intent.fallbackUsed ? 'FALLBACK ROUTER' : 'GPT-BACKED',
       'SERVER-SIDE API',
+      'NO ORDER',
       'NO AUTO SUBMIT',
     ];
     final provider = response.intent.provider?.toUpperCase();
@@ -4525,11 +4526,14 @@ class DashboardController extends ChangeNotifier {
       badges.add('READ ONLY');
     }
     if (response.safety.safeExecutionOnly) {
-      badges.add('SAFE EXECUTION ONLY');
+      badges.add('SAFE ANALYSIS');
     }
+    if (!response.safety.validationCalled) badges.add('NO VALIDATION');
+    if (!response.safety.settingChanged) badges.add('NO SETTINGS CHANGE');
     if (response.availableActions.contains('prepare_manual_ticket')) {
       badges.addAll([
         'PREFILL ONLY',
+        'MANUAL REVIEW ONLY',
         'MANUAL VALIDATION REQUIRED',
         'CONFIRM_LIVE MANUAL',
       ]);
@@ -4595,6 +4599,7 @@ class DashboardController extends ChangeNotifier {
           },
       ],
       'follow_up_suggestions': response.followUpSuggestions,
+      'diagnostics': response.diagnostics,
     };
   }
 

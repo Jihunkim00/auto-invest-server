@@ -76,6 +76,7 @@ class AgentChatService:
         "tool_results",
         "result_cards",
         "follow_up_suggestions",
+        "diagnostics",
     }
     allowed_safety_keys = {
         "read_only",

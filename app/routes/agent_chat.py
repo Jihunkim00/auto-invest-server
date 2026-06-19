@@ -19,8 +19,34 @@ from app.services.agent_chat_service import (
 router = APIRouter(prefix="/agent/chat", tags=["agent-chat"])
 
 
+def _encoding_diagnostics_payload() -> dict:
+    sample_korean = "삼성전자 현재가 조회"
+    return {
+        "status": "ok",
+        "sample_korean": sample_korean,
+        "sample_answer": "삼성전자(005930)는 KIS 기준 현재가가 ₩354,000입니다.",
+        "sample_unicode_escape": sample_korean.encode("unicode_escape").decode("ascii"),
+        "encoding_note": (
+            "If this looks broken in PowerShell, set OutputEncoding to UTF-8 "
+            "or inspect JSON with unicode escape."
+        ),
+        "safety": {
+            "read_only": True,
+            "real_order_submitted": False,
+            "validation_called": False,
+            "setting_changed": False,
+            "scheduler_changed": False,
+        },
+    }
+
+
 def get_agent_chat_orchestrator_service() -> AgentChatOrchestratorService:
     return AgentChatOrchestratorService()
+
+
+@router.get("/diagnostics/encoding")
+def get_agent_chat_encoding_diagnostics():
+    return _encoding_diagnostics_payload()
 
 
 @router.post("/send")

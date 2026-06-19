@@ -19,7 +19,7 @@ void main() {
         AgentChatMessage(
           id: 'price-answer',
           role: AgentChatRole.assistant,
-          text: '삼성전자는 005930로 조회했습니다. 현재가는 KRW 72,000입니다.',
+          text: '삼성전자(005930)는 KIS 기준 현재가가 ₩72,000입니다.',
           createdAt: DateTime.utc(2026, 6, 19),
           status: AgentChatStatus.sent,
           safetyBadges: const ['READ ONLY', 'NO AUTO SUBMIT'],
@@ -28,14 +28,17 @@ void main() {
               {
                 'card_type': 'price',
                 'title': '삼성전자 현재가',
-                'subtitle': '005930 / KIS',
-                'primary_value': 'KRW 72,000',
-                'badges': ['READ ONLY', 'NO ORDER'],
-                'rows': [],
+                'subtitle': '005930 · KIS',
+                'primary_value': '₩72,000',
+                'badges': ['READ ONLY', 'KIS', 'NO ORDER', 'NO VALIDATION'],
+                'rows': [
+                  {'label': 'lookup', 'value': 'read-only lookup'},
+                  {'label': 'order', 'value': 'no order submitted'},
+                ],
                 'data': {'symbol': '005930'},
               }
             ],
-            'follow_up_suggestions': ['이 종목을 간단히 분석해줄까요?'],
+            'follow_up_suggestions': ['이 종목 분석해줘'],
           },
         ),
       ];
@@ -47,12 +50,16 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('이 종목을 간단히 분석해줄까요?'), findsOneWidget);
+    expect(find.text('이 종목 분석해줘'), findsOneWidget);
 
-    await tester.tap(find.text('이 종목을 간단히 분석해줄까요?'));
+    final suggestionChip =
+        find.byKey(const ValueKey('agent-chat-follow-up-이 종목 분석해줘'));
+    await tester.ensureVisible(suggestionChip);
+    await tester.pump();
+    await tester.tap(suggestionChip);
     await tester.pumpAndSettle();
 
-    expect(api.sentMessages, ['이 종목을 간단히 분석해줄까요?']);
+    expect(api.sentMessages, ['이 종목 분석해줘']);
     expect(api.sentConversationKeys, ['conv_followup_pr65']);
     expect(controller.agentMessages.last.text, contains('안전 분석만 수행했습니다'));
     expect(

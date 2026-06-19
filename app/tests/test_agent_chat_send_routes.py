@@ -12,6 +12,9 @@ from app.services.agent_chat_intent_router_service import AgentChatIntentRouterS
 from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
 
 
+MOJIBAKE_MARKERS = tuple(chr(code) for code in (0x00EC, 0x00EB, 0x00EA, 0xFFFD))
+
+
 @pytest.fixture()
 def client(db_session):
     def override_get_db():
@@ -66,13 +69,24 @@ def test_agent_chat_send_creates_conversation_and_assistant_answer(client):
     assert payload["intent"]["category"] == "read_only_price_query"
     assert payload["intent"]["symbol"] == "005930"
     assert payload["answer"]["answer_type"] == "read_only_result"
+    assert "삼성전자" in payload["answer"]["text"]
+    assert "주문" in payload["answer"]["text"]
     assert payload["safety"]["real_order_submitted"] is False
     assert payload["safety"]["validation_called"] is False
+    assert payload["diagnostics"]["encoding_safe"] is True
+    assert payload["diagnostics"]["answer_contains_mojibake_marker"] is False
+    assert payload["diagnostics"]["tool_count"] == 1
+    assert payload["diagnostics"]["result_card_count"] == 1
+    assert not any(marker in response.text for marker in MOJIBAKE_MARKERS)
 
     messages = client.get(f"/agent/chat/conversations/{payload['conversation_key']}/messages")
     assert messages.status_code == 200
-    assert messages.json()["count"] == 2
-    assert [item["role"] for item in messages.json()["messages"]] == ["user", "assistant"]
+    body = messages.json()
+    assert body["count"] == 2
+    assert [item["role"] for item in body["messages"]] == ["user", "assistant"]
+    assistant = body["messages"][1]
+    assert assistant["metadata"]["diagnostics"]["encoding_safe"] is True
+    assert assistant["metadata"]["diagnostics"]["result_card_count"] == 1
 
 
 def test_agent_chat_send_reuses_existing_conversation(client):
@@ -98,7 +112,7 @@ def test_agent_chat_send_invalid_conversation_returns_404(client):
         "/agent/chat/send",
         json={
             "conversation_key": "missing",
-            "message": "삼전 현재가",
+            "message": "삼성전자 현재가",
             "context": {"default_market": "KR", "default_provider": "kis"},
         },
     )

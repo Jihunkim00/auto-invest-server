@@ -113,6 +113,11 @@ class AgentChatOrchestratorService:
             previous=previous_context,
         )
         safety = action["safety"]
+        diagnostics = self._diagnostics(
+            intent=intent,
+            answer=answer,
+            action=action,
+        )
         assistant_message = self.chat_service.append_message(
             db,
             conversation_key=conversation_key,
@@ -132,6 +137,7 @@ class AgentChatOrchestratorService:
                     answer=answer,
                     action=action,
                     safety=safety,
+                    diagnostics=diagnostics,
                 ),
             },
         )["message"]
@@ -153,6 +159,7 @@ class AgentChatOrchestratorService:
             tool_results=action["tool_results"],
             result_cards=action["result_cards"],
             follow_up_suggestions=action["follow_up_suggestions"],
+            diagnostics=diagnostics,
             answer_type=answer.answer_type,
             fallback_used=intent.fallback_used,
         )
@@ -610,6 +617,7 @@ class AgentChatOrchestratorService:
         answer: AgentChatAnswer,
         action: dict[str, Any],
         safety: AgentChatSafetyFlags,
+        diagnostics: dict[str, Any],
     ) -> dict[str, Any]:
         plan = action.get("plan") or {}
         run = action.get("run") or {}
@@ -641,7 +649,32 @@ class AgentChatOrchestratorService:
                 for item in action.get("result_cards") or []
             ],
             "follow_up_suggestions": action.get("follow_up_suggestions") or [],
+            "diagnostics": diagnostics,
         }
+
+    def _diagnostics(
+        self,
+        *,
+        intent: AgentChatIntent,
+        answer: AgentChatAnswer,
+        action: dict[str, Any],
+    ) -> dict[str, Any]:
+        answer_text = answer.text or ""
+        contains_mojibake = self._contains_mojibake_marker(answer_text)
+        router = "gpt" if intent.parser_status == "gpt" else "fallback"
+        return {
+            "encoding_safe": not contains_mojibake,
+            "answer_contains_mojibake_marker": contains_mojibake,
+            "model_name": intent.model_name,
+            "router": router,
+            "fallback_used": intent.fallback_used,
+            "tool_count": len(action.get("tool_results") or []),
+            "result_card_count": len(action.get("result_cards") or []),
+        }
+
+    def _contains_mojibake_marker(self, text: str) -> bool:
+        markers = tuple(chr(code) for code in (0x00EC, 0x00EB, 0x00EA, 0xFFFD, 0xCC59, 0xCC58, 0xCC57))
+        return any(marker in text for marker in markers)
 
     def _message_status(self, answer: AgentChatAnswer) -> str:
         if answer.answer_type == "error":

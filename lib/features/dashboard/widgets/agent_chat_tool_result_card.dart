@@ -32,7 +32,11 @@ class AgentChatToolResultCardList extends StatelessWidget {
             for (final suggestion in followUpSuggestions)
               ActionChip(
                 key: ValueKey('agent-chat-follow-up-$suggestion'),
-                label: Text(suggestion),
+                label: Text(
+                  suggestion,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 onPressed: onSuggestionSelected == null
                     ? null
                     : () => onSuggestionSelected!(suggestion),
@@ -71,6 +75,7 @@ class AgentChatToolResultCard extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                     height: 1.2,
                   ),
+                  softWrap: true,
                 ),
                 if (card.subtitle != null) ...[
                   const SizedBox(height: 3),
@@ -81,6 +86,7 @@ class AgentChatToolResultCard extends StatelessWidget {
                       fontSize: 12,
                       height: 1.2,
                     ),
+                    softWrap: true,
                   ),
                 ],
               ],
@@ -88,12 +94,17 @@ class AgentChatToolResultCard extends StatelessWidget {
           ),
           if (card.primaryValue != null) ...[
             const SizedBox(width: 10),
-            Text(
-              card.primaryValue!,
-              style: const TextStyle(
-                color: Colors.lightBlueAccent,
-                fontWeight: FontWeight.w900,
-                fontSize: 16,
+            Flexible(
+              child: Text(
+                card.primaryValue!,
+                textAlign: TextAlign.right,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
+                style: const TextStyle(
+                  color: Colors.lightBlueAccent,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
               ),
             ),
           ],
@@ -107,13 +118,20 @@ class AgentChatToolResultCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     row['label']?.toString() ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white60, fontSize: 12),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  row['value']?.toString() ?? '-',
-                  style: const TextStyle(fontSize: 12),
+                Flexible(
+                  child: Text(
+                    row['value']?.toString() ?? '-',
+                    textAlign: TextAlign.right,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
                 ),
               ]),
             ),
@@ -140,22 +158,38 @@ class _ResultBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final color = _badgeColor(text);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.lightBlueAccent.withValues(alpha: 0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border:
-            Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.28)),
+        border: Border.all(color: color.withValues(alpha: 0.32)),
       ),
       child: Text(
         text,
-        style: const TextStyle(
-          color: Colors.lightBlueAccent,
+        style: TextStyle(
+          color: color,
           fontSize: 10,
           fontWeight: FontWeight.w900,
         ),
       ),
     );
   }
+}
+
+Color _badgeColor(String text) {
+  final normalized = text.toUpperCase();
+  if (normalized.contains('BLOCKED') || normalized.contains('AUTH')) {
+    return Colors.orangeAccent;
+  }
+  if (normalized.contains('NO ') ||
+      normalized.contains('READ ONLY') ||
+      normalized.contains('MANUAL REVIEW')) {
+    return Colors.lightBlueAccent;
+  }
+  if (normalized == 'KIS' || normalized == 'ALPACA') {
+    return Colors.greenAccent;
+  }
+  return Colors.white70;
 }

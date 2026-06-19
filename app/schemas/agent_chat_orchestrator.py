@@ -115,5 +115,6 @@ class AgentChatSendResponse(BaseModel):
     tool_results: list[AgentChatToolResult] = Field(default_factory=list)
     result_cards: list[AgentChatResultCard] = Field(default_factory=list)
     follow_up_suggestions: list[str] = Field(default_factory=list)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     answer_type: str | None = None
     fallback_used: bool = False

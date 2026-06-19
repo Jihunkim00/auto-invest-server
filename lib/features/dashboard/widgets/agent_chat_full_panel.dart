@@ -326,7 +326,11 @@ class _MessageBubble extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 5),
-          Text(message.text, style: const TextStyle(height: 1.3)),
+          Text(
+            message.text,
+            softWrap: true,
+            style: const TextStyle(height: 1.3),
+          ),
           if (message.safetyBadges.isNotEmpty) ...[
             const SizedBox(height: 8),
             Wrap(spacing: 6, runSpacing: 6, children: [
