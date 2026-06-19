@@ -21,8 +21,12 @@ from app.schemas.agent_chat_orchestrator import (
 from app.schemas.agent_command import CommandDomain, CommandType, OrderSide, SCHEMA_VERSION
 from app.schemas.agent_execution import AgentPlanRunRequest
 from app.services.agent_chat_answer_service import AgentChatAnswerService
+from app.services.agent_chat_context_service import AgentChatContextService
 from app.services.agent_chat_intent_router_service import AgentChatIntentRouterService
+from app.services.agent_chat_result_summarizer import AgentChatResultSummarizer
 from app.services.agent_chat_service import AgentChatConversationNotFound, AgentChatService
+from app.services.agent_chat_tool_executor import AgentChatToolExecutor
+from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.agent_execution_gateway import AgentExecutionGateway
 from app.services.agent_plan_service import AgentPlanService
 
@@ -34,6 +38,10 @@ class AgentChatOrchestratorService:
         chat_service: AgentChatService | None = None,
         intent_router: AgentChatIntentRouterService | None = None,
         answer_service: AgentChatAnswerService | None = None,
+        context_service: AgentChatContextService | None = None,
+        result_summarizer: AgentChatResultSummarizer | None = None,
+        tool_registry: AgentChatToolRegistry | None = None,
+        tool_executor: AgentChatToolExecutor | None = None,
         plan_service: AgentPlanService | None = None,
         execution_gateway: AgentExecutionGateway | None = None,
         kis_client_factory: Callable[[Session], KisClient] | None = None,
@@ -42,14 +50,28 @@ class AgentChatOrchestratorService:
         self.chat_service = chat_service or AgentChatService()
         self.intent_router = intent_router or AgentChatIntentRouterService()
         self.answer_service = answer_service or AgentChatAnswerService()
+        self.context_service = context_service or AgentChatContextService()
+        self.result_summarizer = result_summarizer or AgentChatResultSummarizer()
+        self.tool_registry = tool_registry or AgentChatToolRegistry()
         self.plan_service = plan_service or AgentPlanService()
         self.execution_gateway = execution_gateway or AgentExecutionGateway()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
+        self.tool_executor = tool_executor or AgentChatToolExecutor(
+            registry=self.tool_registry,
+            kis_client_factory=self.kis_client_factory,
+            alpaca_client_factory=self.alpaca_client_factory,
+        )
 
     def send(self, db: Session, *, request: AgentChatSendRequest) -> dict[str, Any]:
         context = request.context_dict()
         conversation_key = self._resolve_conversation_key(db, request=request)
+        previous_context = self.context_service.load_context(
+            db,
+            conversation_key=conversation_key,
+        )
+        if previous_context:
+            context = {**context, **previous_context, "context_snapshot": previous_context}
         user_message = self.chat_service.append_message(
             db,
             conversation_key=conversation_key,
@@ -65,13 +87,30 @@ class AgentChatOrchestratorService:
         )["message"]
 
         intent = self.intent_router.route(message=request.message, context=context)
-        action = self._handle_intent(db, intent=intent, conversation_key=conversation_key)
-        answer = self.answer_service.compose(
+        action = self._handle_intent(
+            db,
+            intent=intent,
+            conversation_key=conversation_key,
+        )
+        base_answer = self.answer_service.compose(
             intent=intent,
             data=action["data"],
             plan=action.get("plan"),
             run=action.get("run"),
             available_actions=action["available_actions"],
+        )
+        summary = self.result_summarizer.summarize(
+            intent=intent,
+            tool_results=action["tool_results"],
+            fallback_answer=base_answer,
+        )
+        answer = summary["answer"]
+        action["result_cards"] = summary["result_cards"]
+        action["follow_up_suggestions"] = summary["follow_up_suggestions"]
+        action["context_snapshot"] = self.context_service.build_snapshot(
+            intent=intent,
+            tool_results=action["tool_results"],
+            previous=previous_context,
         )
         safety = action["safety"]
         assistant_message = self.chat_service.append_message(
@@ -109,6 +148,13 @@ class AgentChatOrchestratorService:
             run=action.get("run"),
             available_actions=action["available_actions"],
             safety=safety,
+            context_snapshot=action["context_snapshot"],
+            selected_tools=action["selected_tools"],
+            tool_results=action["tool_results"],
+            result_cards=action["result_cards"],
+            follow_up_suggestions=action["follow_up_suggestions"],
+            answer_type=answer.answer_type,
+            fallback_used=intent.fallback_used,
         )
         return response.model_dump(mode="json")
 
@@ -142,25 +188,47 @@ class AgentChatOrchestratorService:
         conversation_key: str,
     ) -> dict[str, Any]:
         safety = self._base_safety(intent)
+        selected_tools = intent.selected_tools
+        tool_results = self.tool_executor.execute_many(
+            db,
+            calls=selected_tools,
+            intent=intent,
+        ) if selected_tools else []
+        self._merge_tool_safety(safety, tool_results)
         category = intent.category
-        if category == AgentChatIntentCategory.READ_ONLY_PRICE_QUERY:
-            return self._action(data=self._lookup_price(db, intent), safety=safety)
-        if category == AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY:
-            return self._action(data=self._lookup_positions(db, intent), safety=safety)
-        if category == AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY:
-            return self._action(data=self._lookup_balance(db, intent), safety=safety)
-        if category == AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY:
-            return self._action(data=self._recent_orders(db), safety=safety)
-        if category == AgentChatIntentCategory.READ_ONLY_RUNS_QUERY:
-            return self._action(data=self._recent_runs(db), safety=safety)
-        if category == AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY:
-            return self._action(data=self._recent_signals(db), safety=safety)
+        if category in {
+            AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
+            AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
+            AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_RUNS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY,
+        }:
+            return self._action(
+                data=self._data_from_tool_results(tool_results),
+                safety=safety,
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
         if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
-            return self._analysis_action(db, intent=intent, conversation_key=conversation_key)
+            return self._with_tool_audit(
+                self._analysis_action(db, intent=intent, conversation_key=conversation_key),
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
         if category == AgentChatIntentCategory.MANUAL_TICKET_REQUEST:
-            return self._manual_ticket_action(db, intent=intent, conversation_key=conversation_key)
+            return self._with_tool_audit(
+                self._manual_ticket_action(db, intent=intent, conversation_key=conversation_key),
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
         if category == AgentChatIntentCategory.LIVE_ORDER_REQUEST:
-            return self._live_order_action(db, intent=intent, conversation_key=conversation_key)
+            return self._with_tool_audit(
+                self._live_order_action(db, intent=intent, conversation_key=conversation_key),
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
         if category in {
             AgentChatIntentCategory.DANGEROUS_SETTING_REQUEST,
             AgentChatIntentCategory.SCHEDULER_REQUEST,
@@ -169,8 +237,18 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.GENERAL_CHAT,
             AgentChatIntentCategory.CAPABILITY_QUESTION,
         }:
-            return self._action(data={}, safety=safety)
-        return self._action(data={}, safety=safety)
+            return self._action(
+                data=self._data_from_tool_results(tool_results),
+                safety=safety,
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
+        return self._action(
+            data=self._data_from_tool_results(tool_results),
+            safety=safety,
+            selected_tools=selected_tools,
+            tool_results=tool_results,
+        )
 
     def _lookup_price(self, db: Session, intent: AgentChatIntent) -> dict[str, Any]:
         symbol = str(intent.symbol or "").strip().upper()
@@ -433,6 +511,11 @@ class AgentChatOrchestratorService:
         run: dict[str, Any] | None = None,
         available_actions: list[str] | None = None,
         command_log_id: int | None = None,
+        selected_tools: list[Any] | None = None,
+        tool_results: list[Any] | None = None,
+        result_cards: list[Any] | None = None,
+        follow_up_suggestions: list[str] | None = None,
+        context_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "data": data,
@@ -442,7 +525,57 @@ class AgentChatOrchestratorService:
             "available_actions": available_actions or [],
             "safety": safety,
             "command_log_id": command_log_id,
+            "selected_tools": selected_tools or [],
+            "tool_results": tool_results or [],
+            "result_cards": result_cards or [],
+            "follow_up_suggestions": follow_up_suggestions or [],
+            "context_snapshot": context_snapshot or {},
         }
+
+    def _with_tool_audit(
+        self,
+        action: dict[str, Any],
+        *,
+        selected_tools: list[Any],
+        tool_results: list[Any],
+    ) -> dict[str, Any]:
+        action["selected_tools"] = selected_tools
+        action["tool_results"] = tool_results
+        action.setdefault("result_cards", [])
+        action.setdefault("follow_up_suggestions", [])
+        action.setdefault("context_snapshot", {})
+        self._merge_tool_safety(action["safety"], tool_results)
+        return action
+
+    def _data_from_tool_results(self, tool_results: list[Any]) -> dict[str, Any]:
+        for result in tool_results:
+            if getattr(result, "status", None) == "success":
+                data = getattr(result, "data", None)
+                return dict(data) if isinstance(data, dict) else {}
+        for result in tool_results:
+            data = getattr(result, "data", None)
+            if isinstance(data, dict) and data:
+                return dict(data)
+        return {}
+
+    def _merge_tool_safety(
+        self,
+        safety: AgentChatSafetyFlags,
+        tool_results: list[Any],
+    ) -> None:
+        for result in tool_results:
+            tool_safety = getattr(result, "safety", None)
+            if tool_safety is None:
+                continue
+            safety.read_only = safety.read_only and bool(tool_safety.read_only)
+            safety.mutation = safety.mutation or bool(tool_safety.mutation)
+            safety.real_order_submitted = safety.real_order_submitted or bool(tool_safety.real_order_submitted)
+            safety.broker_submit_called = safety.broker_submit_called or bool(tool_safety.broker_submit_called)
+            safety.manual_submit_called = safety.manual_submit_called or bool(tool_safety.manual_submit_called)
+            safety.validation_called = safety.validation_called or bool(tool_safety.validation_called)
+            safety.setting_changed = safety.setting_changed or bool(tool_safety.setting_changed)
+            safety.scheduler_changed = safety.scheduler_changed or bool(tool_safety.scheduler_changed)
+            safety.confirm_live_auto_checked = safety.confirm_live_auto_checked or bool(tool_safety.confirm_live_auto_checked)
 
     def _base_safety(self, intent: AgentChatIntent) -> AgentChatSafetyFlags:
         read_only_categories = {
@@ -454,6 +587,7 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY,
             AgentChatIntentCategory.READ_ONLY_RUNS_QUERY,
             AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
+            AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY,
             AgentChatIntentCategory.UNSUPPORTED,
             AgentChatIntentCategory.NEEDS_CLARIFICATION,
         }
@@ -483,6 +617,20 @@ class AgentChatOrchestratorService:
             "plan_run_id": run.get("plan_run_id"),
             "available_actions": action.get("available_actions") or [],
             "safety": safety.model_dump(mode="json"),
+            "context_snapshot": action.get("context_snapshot") or {},
+            "selected_tools": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in action.get("selected_tools") or []
+            ],
+            "tool_results": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in action.get("tool_results") or []
+            ],
+            "result_cards": [
+                item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                for item in action.get("result_cards") or []
+            ],
+            "follow_up_suggestions": action.get("follow_up_suggestions") or [],
         }
 
     def _message_status(self, answer: AgentChatAnswer) -> str:

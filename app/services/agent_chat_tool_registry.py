@@ -1,0 +1,159 @@
+from __future__ import annotations
+
+from app.schemas.agent_chat_tool import AgentChatToolDefinition
+
+
+class AgentChatToolRegistry:
+    def __init__(self, tools: list[AgentChatToolDefinition] | None = None) -> None:
+        self._tools = {tool.tool_name: tool for tool in (tools or _DEFAULT_TOOLS)}
+
+    def list_tools(self, *, include_blocked: bool = True) -> list[AgentChatToolDefinition]:
+        tools = list(self._tools.values())
+        if include_blocked:
+            return tools
+        return [tool for tool in tools if tool.allowed_auto_execute and not tool.mutation]
+
+    def tool_names(self, *, include_blocked: bool = True) -> list[str]:
+        return [tool.tool_name for tool in self.list_tools(include_blocked=include_blocked)]
+
+    def get(self, tool_name: str) -> AgentChatToolDefinition | None:
+        return self._tools.get(str(tool_name or "").strip())
+
+    def require(self, tool_name: str) -> AgentChatToolDefinition:
+        tool = self.get(tool_name)
+        if tool is None:
+            raise KeyError(tool_name)
+        return tool
+
+    def can_auto_execute(self, tool_name: str) -> bool:
+        tool = self.get(tool_name)
+        if tool is None:
+            return False
+        return bool(tool.allowed_auto_execute and not tool.mutation and tool.mode in _AUTO_MODES)
+
+    def is_blocked(self, tool_name: str) -> bool:
+        tool = self.get(tool_name)
+        return tool is None or tool.mode == "blocked" or not self.can_auto_execute(tool_name)
+
+
+_DEFAULT_TOOLS = [
+    AgentChatToolDefinition(
+        tool_name="kis_price_lookup",
+        display_name="KIS Price Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only current price lookup for Korean stocks through KIS.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="alpaca_price_lookup",
+        display_name="Alpaca Price Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="alpaca",
+        market="US",
+        description="Read-only latest price lookup for US stocks through Alpaca.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="kis_positions_lookup",
+        display_name="KIS Positions Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only KIS positions lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="kis_balance_lookup",
+        display_name="KIS Balance Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only KIS account balance lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="recent_orders_lookup",
+        display_name="Recent Orders Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        description="Read-only local recent order log lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="recent_runs_lookup",
+        display_name="Recent Runs Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        description="Read-only local recent trading run lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="recent_signals_lookup",
+        display_name="Recent Signals Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        description="Read-only local recent signal lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="ops_settings_lookup",
+        display_name="Operations Settings Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        description="Read-only runtime safety settings lookup.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="watchlist_preview",
+        display_name="Watchlist Preview",
+        mode="analysis_only",
+        risk_level="medium",
+        allowed_auto_execute=True,
+        description="Analysis-only watchlist preview. It never submits broker orders.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="safe_symbol_analysis",
+        display_name="Safe Symbol Analysis",
+        mode="analysis_only",
+        risk_level="medium",
+        allowed_auto_execute=True,
+        description="Safe analysis-only single-symbol review. It never submits broker orders.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="manual_ticket_prefill",
+        display_name="Manual Ticket Prefill",
+        mode="prefill_only",
+        risk_level="high",
+        allowed_auto_execute=False,
+        requires_manual_confirm=True,
+        description="Manual order ticket prefill only. Validation and submit stay manual.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="live_order_request_blocker",
+        display_name="Live Order Request Blocker",
+        mode="blocked",
+        risk_level="critical",
+        allowed_auto_execute=False,
+        requires_auth=True,
+        requires_manual_confirm=True,
+        description="Blocks chat-originated live order requests.",
+    ),
+    AgentChatToolDefinition(
+        tool_name="settings_change_blocker",
+        display_name="Settings Change Blocker",
+        mode="blocked",
+        risk_level="high",
+        allowed_auto_execute=False,
+        requires_auth=True,
+        requires_manual_confirm=True,
+        description="Blocks chat-originated runtime setting mutations.",
+    ),
+]
+
+_AUTO_MODES = {"read_only", "analysis_only"}

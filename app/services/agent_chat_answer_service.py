@@ -61,6 +61,9 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY:
             return self._signals_answer(data)
 
+        if category == AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY:
+            return self._settings_answer(data)
+
         if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
             return self._analysis_answer(intent, plan=plan, run=run, data=data)
 
@@ -225,6 +228,18 @@ class AgentChatAnswerService:
             answer_type="read_only_result",
         )
 
+    def _settings_answer(self, data: dict[str, Any]) -> AgentChatAnswer:
+        settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+        dry_run = self._on_off(settings.get("dry_run"))
+        kill_switch = self._on_off(settings.get("kill_switch"))
+        return AgentChatAnswer(
+            text=(
+                f"현재 dry-run은 {dry_run}, kill switch는 {kill_switch}입니다. "
+                "설정은 조회만 했고 변경하지 않았습니다."
+            ),
+            answer_type="read_only_result",
+        )
+
     def _analysis_answer(
         self,
         intent: AgentChatIntent,
@@ -303,6 +318,13 @@ class AgentChatAnswerService:
             ),
             answer_type="blocked",
         )
+
+    def _on_off(self, value: Any) -> str:
+        if value is True:
+            return "ON"
+        if value is False:
+            return "OFF"
+        return "UNKNOWN"
 
     def _money(self, value: Any, currency: str | None) -> str:
         try:

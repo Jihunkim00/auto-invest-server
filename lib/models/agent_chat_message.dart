@@ -1,3 +1,5 @@
+import 'agent_chat_tool_result.dart';
+
 enum AgentChatRole {
   user,
   assistant,
@@ -60,6 +62,12 @@ class AgentChatMessage {
   final bool prefillAvailable;
   final List<String> safetyBadges;
   final Map<String, dynamic> metadata;
+
+  List<AgentChatResultCard> get resultCards =>
+      _readResultCards(metadata['result_cards']);
+
+  List<String> get followUpSuggestions =>
+      _readStringList(metadata['follow_up_suggestions']);
 
   factory AgentChatMessage.fromJson(Map<String, dynamic> json) {
     return AgentChatMessage(
@@ -237,6 +245,15 @@ List<String> _readStringList(Object? value) {
   return [
     for (final item in value)
       if (item?.toString().trim().isNotEmpty == true) item.toString().trim(),
+  ];
+}
+
+List<AgentChatResultCard> _readResultCards(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      if (item is Map)
+        AgentChatResultCard.fromJson(Map<String, dynamic>.from(item)),
   ];
 }
 

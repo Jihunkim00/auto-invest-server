@@ -4,6 +4,7 @@ import '../../../core/widgets/section_card.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
 import 'agent_plan_review_card.dart';
+import 'agent_chat_tool_result_card.dart';
 
 class AgentChatMiniPanel extends StatefulWidget {
   const AgentChatMiniPanel({
@@ -124,6 +125,7 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
           _RecentAgentMessages(
             messages: controller.agentMessages,
             maxItems: widget.expanded ? 5 : 3,
+            onSuggestionSelected: _sendSuggestion,
           ),
           if (controller.latestAgentPlan != null) ...[
             const SizedBox(height: 10),
@@ -156,6 +158,11 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),
     );
+  }
+
+  Future<void> _sendSuggestion(String text) async {
+    _input.text = text;
+    await _send();
   }
 
   Future<void> _startNewChat(BuildContext context) async {
@@ -196,16 +203,25 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
 }
 
 class _RecentAgentMessages extends StatelessWidget {
-  const _RecentAgentMessages({required this.messages, required this.maxItems});
+  const _RecentAgentMessages({
+    required this.messages,
+    required this.maxItems,
+    required this.onSuggestionSelected,
+  });
 
   final List<AgentChatMessage> messages;
   final int maxItems;
+  final ValueChanged<String> onSuggestionSelected;
 
   @override
   Widget build(BuildContext context) {
     final visible = messages.reversed.take(maxItems).toList().reversed;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      for (final message in visible) _MiniMessageLine(message: message),
+      for (final message in visible)
+        _MiniMessageLine(
+          message: message,
+          onSuggestionSelected: onSuggestionSelected,
+        ),
       if (messages.any((message) => message.status == AgentChatStatus.parsing))
         const Padding(
           padding: EdgeInsets.only(top: 4),
@@ -219,9 +235,13 @@ class _RecentAgentMessages extends StatelessWidget {
 }
 
 class _MiniMessageLine extends StatelessWidget {
-  const _MiniMessageLine({required this.message});
+  const _MiniMessageLine({
+    required this.message,
+    required this.onSuggestionSelected,
+  });
 
   final AgentChatMessage message;
+  final ValueChanged<String> onSuggestionSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -260,6 +280,16 @@ class _MiniMessageLine extends StatelessWidget {
                     for (final badge in message.safetyBadges.take(4))
                       _AgentBadge(text: badge),
                   ],
+                ),
+              ],
+              if (!isUser &&
+                  (message.resultCards.isNotEmpty ||
+                      message.followUpSuggestions.isNotEmpty)) ...[
+                const SizedBox(height: 8),
+                AgentChatToolResultCardList(
+                  cards: message.resultCards,
+                  followUpSuggestions: message.followUpSuggestions,
+                  onSuggestionSelected: onSuggestionSelected,
                 ),
               ],
             ],

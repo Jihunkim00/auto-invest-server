@@ -4549,6 +4549,41 @@ class DashboardController extends ChangeNotifier {
       'fallback_used': response.intent.fallbackUsed,
       'available_actions': response.availableActions,
       'safety': response.safety.raw,
+      'context_snapshot': response.contextSnapshot,
+      'selected_tools': [
+        for (final tool in response.selectedTools)
+          {
+            'tool_name': tool.toolName,
+            'arguments': tool.arguments,
+            if (tool.reason != null) 'reason': tool.reason,
+          },
+      ],
+      'tool_results': [
+        for (final result in response.toolResults)
+          {
+            'tool_name': result.toolName,
+            'status': result.status,
+            'result_type': result.resultType,
+            'data': result.data,
+            'summary': result.summary,
+            if (result.errorMessage != null)
+              'error_message': result.errorMessage,
+            'safety': result.safety.raw,
+          },
+      ],
+      'result_cards': [
+        for (final card in response.resultCards)
+          {
+            'card_type': card.cardType,
+            'title': card.title,
+            if (card.subtitle != null) 'subtitle': card.subtitle,
+            if (card.primaryValue != null) 'primary_value': card.primaryValue,
+            'badges': card.badges,
+            'rows': card.rows,
+            'data': card.data,
+          },
+      ],
+      'follow_up_suggestions': response.followUpSuggestions,
     };
   }
 
