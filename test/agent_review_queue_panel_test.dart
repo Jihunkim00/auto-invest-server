@@ -10,7 +10,8 @@ import 'package:auto_invest_dashboard/models/agent_review_queue.dart';
 void main() {
   testWidgets('review queue panel renders filters and blocked item',
       (tester) async {
-    final controller = DashboardController(_QueueFakeApi('blocked'), autoload: false);
+    final controller =
+        DashboardController(_QueueFakeApi('blocked'), autoload: false);
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(body: _wrap(controller)),
@@ -19,7 +20,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Agent Review Queue'), findsOneWidget);
-    expect(find.byKey(const ValueKey('agent-review-filter-all')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('agent-review-filter-all')), findsOneWidget);
     expect(
       find.byKey(const ValueKey('agent-review-filter-auth_required')),
       findsOneWidget,

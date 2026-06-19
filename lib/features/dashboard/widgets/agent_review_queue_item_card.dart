@@ -153,7 +153,8 @@ class _PriorityBadge extends StatelessWidget {
       ),
       child: Text(
         '$queueType · $priority',
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800),
+        style:
+            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800),
       ),
     );
   }

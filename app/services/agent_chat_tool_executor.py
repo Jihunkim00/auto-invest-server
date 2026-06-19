@@ -69,7 +69,7 @@ class AgentChatToolExecutor:
             if tool.tool_name == "ops_settings_lookup":
                 return self._ops_settings(db)
             if tool.tool_name == "watchlist_preview":
-                return self._analysis_stub(tool.tool_name, "watchlist")
+                return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
                 return self._safe_symbol_analysis(call, intent)
         except Exception as exc:

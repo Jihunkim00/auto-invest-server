@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_send_response.dart';
 
 void main() {
-  test('AgentChatSendResponse parses answer intent safety and optional plan', () {
+  test('AgentChatSendResponse parses answer intent safety and optional plan',
+      () {
     final response = AgentChatSendResponse.fromJson({
       'conversation_key': 'conv_1',
       'user_message_id': 10,

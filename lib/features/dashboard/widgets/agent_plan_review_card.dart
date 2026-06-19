@@ -65,7 +65,8 @@ class AgentPlanReviewCard extends StatelessWidget {
         Wrap(spacing: 8, runSpacing: 8, children: [
           _InfoPill(label: 'Type', value: plan.commandType),
           _InfoPill(label: 'Risk', value: plan.riskLevel),
-          if (plan.symbol != null) _InfoPill(label: 'Symbol', value: plan.symbol!),
+          if (plan.symbol != null)
+            _InfoPill(label: 'Symbol', value: plan.symbol!),
           if (plan.side != 'none') _InfoPill(label: 'Side', value: plan.side),
           if (plan.quantity != null)
             _InfoPill(label: 'Qty', value: plan.quantity.toString()),

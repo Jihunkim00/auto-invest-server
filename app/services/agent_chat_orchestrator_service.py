@@ -211,9 +211,19 @@ class AgentChatOrchestratorService:
                 selected_tools=selected_tools,
                 tool_results=tool_results,
             )
-        if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
+        if category in {
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
+            AgentChatIntentCategory.EXIT_REVIEW_REQUEST,
+        }:
             return self._with_tool_audit(
                 self._analysis_action(db, intent=intent, conversation_key=conversation_key),
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
+        if category == AgentChatIntentCategory.WATCHLIST_PREVIEW_REQUEST:
+            return self._action(
+                data=self._data_from_tool_results(tool_results),
+                safety=safety,
                 selected_tools=selected_tools,
                 tool_results=tool_results,
             )

@@ -93,14 +93,16 @@ class AgentReviewQueueItem {
   final DateTime? updatedAt;
   final Map<String, dynamic> metadata;
 
-  bool get canOpenChat => conversationKey != null && conversationKey!.isNotEmpty;
+  bool get canOpenChat =>
+      conversationKey != null && conversationKey!.isNotEmpty;
   bool get isAuthRequired => queueType == 'auth_required';
   bool get isBlocked => queueType == 'blocked';
 
   factory AgentReviewQueueItem.fromJson(Map<String, dynamic> json) {
     return AgentReviewQueueItem(
       queueId: _readString(json['queue_id'], ''),
-      queueKey: _readString(json['queue_key'], _readString(json['queue_id'], '')),
+      queueKey:
+          _readString(json['queue_key'], _readString(json['queue_id'], '')),
       itemType: _readString(json['item_type'], 'unknown'),
       queueType: _readString(json['queue_type'], 'all'),
       priority: _readString(json['priority'], 'low'),

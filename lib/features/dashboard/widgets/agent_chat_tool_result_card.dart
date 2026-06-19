@@ -124,8 +124,7 @@ class AgentChatToolResultCard extends StatelessWidget {
             spacing: 5,
             runSpacing: 5,
             children: [
-              for (final badge in card.badges)
-                _ResultBadge(text: badge),
+              for (final badge in card.badges) _ResultBadge(text: badge),
             ],
           ),
         ],
@@ -146,7 +145,8 @@ class _ResultBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.lightBlueAccent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.28)),
+        border:
+            Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.28)),
       ),
       child: Text(
         text,

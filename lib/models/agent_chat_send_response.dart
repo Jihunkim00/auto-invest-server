@@ -54,9 +54,14 @@ class AgentChatSendResponse {
       intent: AgentChatIntent.fromJson(_readMap(json['intent'])),
       answer: AgentChatAnswer.fromJson(_readMap(json['answer'])),
       data: _readMap(json['data']),
-      command: commandJson is Map ? Map<String, dynamic>.from(commandJson) : null,
-      plan: planJson is Map ? AgentPlan.fromJson(Map<String, dynamic>.from(planJson)) : null,
-      run: runJson is Map ? AgentPlanRunResult.fromJson(Map<String, dynamic>.from(runJson)) : null,
+      command:
+          commandJson is Map ? Map<String, dynamic>.from(commandJson) : null,
+      plan: planJson is Map
+          ? AgentPlan.fromJson(Map<String, dynamic>.from(planJson))
+          : null,
+      run: runJson is Map
+          ? AgentPlanRunResult.fromJson(Map<String, dynamic>.from(runJson))
+          : null,
       availableActions: _readStringList(json['available_actions']),
       safety: AgentChatSafety.fromJson(_readMap(json['safety'])),
       contextSnapshot: _readMap(json['context_snapshot']),

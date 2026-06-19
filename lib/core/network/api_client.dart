@@ -426,7 +426,8 @@ class ApiClient {
     final items = payload['messages'] as List<dynamic>? ?? const [];
     return items
         .whereType<Map>()
-        .map((item) => AgentChatMessage.fromJson(Map<String, dynamic>.from(item)))
+        .map((item) =>
+            AgentChatMessage.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 
