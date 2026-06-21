@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/widgets/section_card.dart';
+import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
+import 'agent_chat_live_order_confirmation_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
 
@@ -58,7 +60,7 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
               ),
               SizedBox(height: 3),
               Text(
-                'Ask for analysis, portfolio, or manual ticket prep.',
+                'Ask for analysis, portfolio, or confirmed KIS order prep.',
                 style: TextStyle(color: Colors.white70, height: 1.25),
               ),
             ]),
@@ -106,7 +108,7 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
           _AgentBadge(text: 'GPT-BACKED'),
           _AgentBadge(text: 'SERVER-SIDE API'),
           _AgentBadge(text: 'SAFE MODE'),
-          _AgentBadge(text: 'NO AUTO SUBMIT'),
+          _AgentBadge(text: 'CONFIRM REQUIRED'),
         ]),
         if (controller.isLoadingAgentHistory) ...[
           const SizedBox(height: 10),
@@ -128,6 +130,9 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
             messages: controller.agentMessages,
             maxItems: widget.expanded ? 5 : 3,
             onSuggestionSelected: _sendSuggestion,
+            onConfirmLiveOrder: _confirmLiveOrder,
+            onCancelLiveOrder: _cancelLiveOrder,
+            liveOrderBusy: controller.isAgentLiveOrderActionBusy,
           ),
           if (controller.latestAgentPlan != null) ...[
             const SizedBox(height: 10),
@@ -202,6 +207,22 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
     );
     if (result.success) widget.onOpenManualOrder?.call();
   }
+
+  Future<void> _confirmLiveOrder(AgentChatLiveOrderAction action) async {
+    final result = await widget.controller.confirmAgentChatLiveOrder(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
+
+  Future<void> _cancelLiveOrder(AgentChatLiveOrderAction action) async {
+    final result = await widget.controller.cancelAgentChatLiveOrder(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
 }
 
 class _RecentAgentMessages extends StatelessWidget {
@@ -209,11 +230,19 @@ class _RecentAgentMessages extends StatelessWidget {
     required this.messages,
     required this.maxItems,
     required this.onSuggestionSelected,
+    required this.onConfirmLiveOrder,
+    required this.onCancelLiveOrder,
+    required this.liveOrderBusy,
   });
 
   final List<AgentChatMessage> messages;
   final int maxItems;
   final ValueChanged<String> onSuggestionSelected;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onConfirmLiveOrder;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onCancelLiveOrder;
+  final bool Function(int actionId) liveOrderBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -223,6 +252,9 @@ class _RecentAgentMessages extends StatelessWidget {
         _MiniMessageLine(
           message: message,
           onSuggestionSelected: onSuggestionSelected,
+          onConfirmLiveOrder: onConfirmLiveOrder,
+          onCancelLiveOrder: onCancelLiveOrder,
+          liveOrderBusy: liveOrderBusy,
         ),
       if (messages.any((message) => message.status == AgentChatStatus.parsing))
         const Padding(
@@ -240,10 +272,18 @@ class _MiniMessageLine extends StatelessWidget {
   const _MiniMessageLine({
     required this.message,
     required this.onSuggestionSelected,
+    required this.onConfirmLiveOrder,
+    required this.onCancelLiveOrder,
+    required this.liveOrderBusy,
   });
 
   final AgentChatMessage message;
   final ValueChanged<String> onSuggestionSelected;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onConfirmLiveOrder;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onCancelLiveOrder;
+  final bool Function(int actionId) liveOrderBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -294,6 +334,14 @@ class _MiniMessageLine extends StatelessWidget {
                   onSuggestionSelected: onSuggestionSelected,
                 ),
               ],
+              if (!isUser && message.liveOrderAction != null)
+                AgentChatLiveOrderConfirmationCard(
+                  action: message.liveOrderAction!,
+                  busy: liveOrderBusy(message.liveOrderAction!.actionId),
+                  onConfirm: onConfirmLiveOrder,
+                  onCancel: onCancelLiveOrder,
+                  compact: true,
+                ),
             ],
           ),
         ),

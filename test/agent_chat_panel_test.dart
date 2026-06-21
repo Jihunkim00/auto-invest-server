@@ -24,7 +24,7 @@ void main() {
     expect(find.text('GPT-BACKED'), findsOneWidget);
     expect(find.text('SERVER-SIDE API'), findsWidgets);
     expect(find.text('SAFE MODE'), findsWidgets);
-    expect(find.text('NO AUTO SUBMIT'), findsWidgets);
+    expect(find.text('CONFIRM REQUIRED'), findsWidgets);
     expect(find.byKey(const ValueKey('agent-chat-mini-input')), findsOneWidget);
     expect(find.byKey(const ValueKey('agent-chat-new-chat')), findsOneWidget);
     expect(
@@ -129,7 +129,7 @@ void main() {
     expect(find.byKey(const ValueKey('agent-chat-minimize')), findsOneWidget);
     expect(
         find.byKey(const ValueKey('agent-chat-full-resize')), findsOneWidget);
-    expect(find.textContaining('Agent never submits live orders from chat'),
+    expect(find.textContaining('Live KIS orders from Agent Chat require'),
         findsOneWidget);
 
     controller.dispose();

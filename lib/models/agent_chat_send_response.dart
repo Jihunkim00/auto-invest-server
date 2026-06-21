@@ -1,5 +1,6 @@
 import 'agent_plan.dart';
 import 'agent_run.dart';
+import 'agent_chat_live_order_action.dart';
 import 'agent_chat_tool_result.dart';
 
 class AgentChatSendResponse {
@@ -22,6 +23,7 @@ class AgentChatSendResponse {
     this.command,
     this.plan,
     this.run,
+    this.liveOrderAction,
     this.answerType,
   });
 
@@ -34,6 +36,7 @@ class AgentChatSendResponse {
   final Map<String, dynamic>? command;
   final AgentPlan? plan;
   final AgentPlanRunResult? run;
+  final AgentChatLiveOrderAction? liveOrderAction;
   final List<String> availableActions;
   final AgentChatSafety safety;
   final Map<String, dynamic> contextSnapshot;
@@ -49,6 +52,7 @@ class AgentChatSendResponse {
     final planJson = json['plan'];
     final runJson = json['run'];
     final commandJson = json['command'];
+    final liveOrderActionJson = json['live_order_action'];
     return AgentChatSendResponse(
       conversationKey: _readString(json['conversation_key'], ''),
       userMessageId: _readNullableInt(json['user_message_id']),
@@ -63,6 +67,11 @@ class AgentChatSendResponse {
           : null,
       run: runJson is Map
           ? AgentPlanRunResult.fromJson(Map<String, dynamic>.from(runJson))
+          : null,
+      liveOrderAction: liveOrderActionJson is Map
+          ? AgentChatLiveOrderAction.fromJson(
+              Map<String, dynamic>.from(liveOrderActionJson),
+            )
           : null,
       availableActions: _readStringList(json['available_actions']),
       safety: AgentChatSafety.fromJson(_readMap(json['safety'])),

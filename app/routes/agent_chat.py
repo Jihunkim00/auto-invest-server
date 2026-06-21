@@ -8,7 +8,15 @@ from app.schemas.agent_chat import (
     AgentChatConversationCreateRequest,
     AgentChatMessageAppendRequest,
 )
+from app.schemas.agent_chat_live_order import (
+    AgentChatLiveOrderCancelRequest,
+    AgentChatLiveOrderConfirmRequest,
+)
 from app.schemas.agent_chat_orchestrator import AgentChatSendRequest
+from app.services.agent_chat_live_order_service import (
+    AgentChatLiveOrderNotFound,
+    AgentChatLiveOrderService,
+)
 from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
 from app.services.agent_chat_service import (
     AgentChatConversationNotFound,
@@ -44,6 +52,10 @@ def get_agent_chat_orchestrator_service() -> AgentChatOrchestratorService:
     return AgentChatOrchestratorService()
 
 
+def get_agent_chat_live_order_service() -> AgentChatLiveOrderService:
+    return AgentChatLiveOrderService()
+
+
 @router.get("/diagnostics/encoding")
 def get_agent_chat_encoding_diagnostics():
     return _encoding_diagnostics_payload()
@@ -59,6 +71,32 @@ def send_agent_chat_message(
         return service.send(db, request=payload)
     except AgentChatConversationNotFound:
         raise HTTPException(status_code=404, detail="agent_chat_conversation_not_found")
+
+
+@router.post("/live-orders/{action_id}/confirm")
+def confirm_agent_chat_live_order(
+    action_id: int,
+    payload: AgentChatLiveOrderConfirmRequest,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.confirm(db, action_id=action_id, request=payload)
+    except AgentChatLiveOrderNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
+
+
+@router.post("/live-orders/{action_id}/cancel")
+def cancel_agent_chat_live_order(
+    action_id: int,
+    payload: AgentChatLiveOrderCancelRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.cancel(db, action_id=action_id, request=payload)
+    except AgentChatLiveOrderNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
 
 
 @router.post("/conversations")

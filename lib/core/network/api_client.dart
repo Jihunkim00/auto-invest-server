@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
 import '../../models/agent_chat_conversation.dart';
+import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
@@ -376,6 +377,33 @@ class ApiClient {
       'auto_create_conversation': autoCreateConversation,
     });
     return AgentChatSendResponse.fromJson(payload);
+  }
+
+  Future<AgentChatLiveOrderResponse> confirmAgentChatLiveOrder(
+    AgentChatLiveOrderAction action,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/live-orders/${action.actionId}/confirm',
+      {
+        'confirmation': true,
+        if (action.confirmationToken != null)
+          'confirmation_token': action.confirmationToken,
+        if (action.confirmationPhrase != null)
+          'confirmation_phrase': action.confirmationPhrase,
+        'user_acknowledged_live_order': true,
+      },
+    );
+    return AgentChatLiveOrderResponse.fromJson(payload);
+  }
+
+  Future<AgentChatLiveOrderResponse> cancelAgentChatLiveOrder(
+    int actionId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/live-orders/$actionId/cancel',
+      const {},
+    );
+    return AgentChatLiveOrderResponse.fromJson(payload);
   }
 
   Future<AgentChatConversation> createAgentChatConversation({

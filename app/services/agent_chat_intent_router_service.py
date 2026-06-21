@@ -96,6 +96,7 @@ class AgentChatIntentRouterService:
         market = self._resolve_market(context, symbol_info)
         provider = self._resolve_provider(context, market)
         amount = self._parse_amount(text)
+        quantity = self._parse_quantity(text, symbol_info)
         side = self._detect_side(text)
         base = {
             "market": market,
@@ -103,6 +104,7 @@ class AgentChatIntentRouterService:
             "symbol": symbol_info.get("symbol") if symbol_info else None,
             "symbol_name": symbol_info.get("name") if symbol_info else None,
             "side": side,
+            "quantity": quantity,
             "notional": amount,
             "currency": ("KRW" if market == "KR" else "USD") if amount is not None and market in {"KR", "US"} else None,
             "fallback_used": True,
@@ -612,6 +614,24 @@ class AgentChatIntentRouterService:
         dollar_word = re.search(r"(\d+(?:\.\d+)?)\s*달러", compact)
         if dollar_word:
             return float(dollar_word.group(1))
+        return None
+
+    def _parse_quantity(
+        self,
+        text: str,
+        symbol_info: dict[str, str] | None,
+    ) -> float | None:
+        symbol = str((symbol_info or {}).get("symbol") or "").strip()
+        for match in re.finditer(r"\b(\d{1,5})\b", str(text or "")):
+            value = match.group(1)
+            if value == symbol:
+                continue
+            try:
+                number = int(value)
+            except Exception:
+                continue
+            if 1 <= number <= 10000:
+                return float(number)
         return None
 
     def _is_price_query(self, text: str, lowered: str) -> bool:

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
+import 'agent_chat_live_order_confirmation_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
 
@@ -87,6 +89,9 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                     _MessageBubble(
                       message: message,
                       onSuggestionSelected: _sendSuggestion,
+                      onConfirmLiveOrder: _confirmLiveOrder,
+                      onCancelLiveOrder: _cancelLiveOrder,
+                      liveOrderBusy: controller.isAgentLiveOrderActionBusy,
                     ),
                   if (controller.isAgentParsing ||
                       controller.isAgentPlanCreating) ...[
@@ -165,6 +170,30 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
       SnackBar(content: Text(result.message)),
     );
     if (result.success) widget.onOpenManualOrder?.call();
+  }
+
+  Future<void> _confirmLiveOrder(AgentChatLiveOrderAction action) async {
+    final result = await widget.controller.confirmAgentChatLiveOrder(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    if (_scroll.hasClients) {
+      await _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  Future<void> _cancelLiveOrder(AgentChatLiveOrderAction action) async {
+    final result = await widget.controller.cancelAgentChatLiveOrder(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
   }
 }
 
@@ -279,7 +308,7 @@ class _SafetyNotice extends StatelessWidget {
         ),
       ),
       child: const Text(
-        'Agent never submits live orders from chat. Manual validation and confirm_live are required in Trading. OpenAI API is called only from the FastAPI server.',
+        'Live KIS orders from Agent Chat require an explicit confirmation card. Backend validation and risk gates rerun before submit. OpenAI API is called only from the FastAPI server.',
         style: TextStyle(color: Colors.lightBlueAccent, height: 1.25),
       ),
     );
@@ -290,10 +319,18 @@ class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.onSuggestionSelected,
+    required this.onConfirmLiveOrder,
+    required this.onCancelLiveOrder,
+    required this.liveOrderBusy,
   });
 
   final AgentChatMessage message;
   final ValueChanged<String> onSuggestionSelected;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onConfirmLiveOrder;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onCancelLiveOrder;
+  final bool Function(int actionId) liveOrderBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +385,13 @@ class _MessageBubble extends StatelessWidget {
               onSuggestionSelected: onSuggestionSelected,
             ),
           ],
+          if (!isUser && message.liveOrderAction != null)
+            AgentChatLiveOrderConfirmationCard(
+              action: message.liveOrderAction!,
+              busy: liveOrderBusy(message.liveOrderAction!.actionId),
+              onConfirm: onConfirmLiveOrder,
+              onCancel: onCancelLiveOrder,
+            ),
         ]),
       ),
     );

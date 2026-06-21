@@ -10,6 +10,7 @@ from app.schemas.agent_chat_tool import (
     AgentChatToolCall,
     AgentChatToolResult,
 )
+from app.schemas.agent_chat_live_order import AgentChatLiveOrderActionPayload
 
 
 class AgentChatIntentCategory(str, Enum):
@@ -108,6 +109,7 @@ class AgentChatSendResponse(BaseModel):
     command: dict[str, Any] | None = None
     plan: dict[str, Any] | None = None
     run: dict[str, Any] | None = None
+    live_order_action: AgentChatLiveOrderActionPayload | None = None
     available_actions: list[str] = Field(default_factory=list)
     safety: AgentChatSafetyFlags = Field(default_factory=AgentChatSafetyFlags)
     context_snapshot: dict[str, Any] = Field(default_factory=dict)
