@@ -149,6 +149,18 @@ def _create_runtime_settings_table_if_missing():
                     kis_live_auto_requires_manual_confirm BOOLEAN NOT NULL DEFAULT 1,
                     kis_live_auto_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     kis_live_auto_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    agent_chat_live_order_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    agent_chat_live_order_kis_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    agent_chat_live_order_buy_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    agent_chat_live_order_sell_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    agent_chat_live_order_requires_confirm BOOLEAN NOT NULL DEFAULT 1,
+                    agent_chat_live_order_confirm_ttl_seconds INTEGER NOT NULL DEFAULT 120,
+                    agent_chat_live_order_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    agent_chat_live_order_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    agent_chat_live_order_max_notional_krw FLOAT NOT NULL DEFAULT 50000,
+                    agent_chat_live_order_allow_market_order BOOLEAN NOT NULL DEFAULT 1,
+                    agent_chat_live_order_allow_limit_order BOOLEAN NOT NULL DEFAULT 0,
+                    agent_chat_live_order_requires_recent_price BOOLEAN NOT NULL DEFAULT 1,
                     kis_limited_auto_sell_enabled BOOLEAN NOT NULL DEFAULT 0,
                     kis_limited_auto_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 0,
                     kis_limited_auto_take_profit_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -626,6 +638,66 @@ def _create_agent_plan_tables_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_auth_approval_tokens_expires_at ON auth_approval_tokens (expires_at)"))
 
 
+def _create_agent_chat_order_actions_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_chat_order_actions (
+                    id INTEGER PRIMARY KEY,
+                    conversation_key VARCHAR(80) NOT NULL,
+                    user_message_id INTEGER,
+                    assistant_message_id INTEGER,
+                    action_type VARCHAR(60) NOT NULL DEFAULT 'chat_confirmed_live_order',
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    symbol VARCHAR(20) NOT NULL,
+                    symbol_name VARCHAR(160),
+                    side VARCHAR(10) NOT NULL,
+                    order_type VARCHAR(20) NOT NULL DEFAULT 'market',
+                    quantity FLOAT,
+                    notional_amount FLOAT,
+                    currency VARCHAR(10) NOT NULL DEFAULT 'KRW',
+                    estimated_price FLOAT,
+                    estimated_notional FLOAT,
+                    status VARCHAR(40) NOT NULL DEFAULT 'pending_confirmation',
+                    scope_hash VARCHAR(64) NOT NULL,
+                    confirmation_phrase VARCHAR(200) NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    confirmed_at DATETIME,
+                    submitted_at DATETIME,
+                    related_order_id INTEGER,
+                    broker_order_id VARCHAR(100),
+                    validation_payload_json TEXT,
+                    risk_payload_json TEXT,
+                    request_payload_json TEXT,
+                    response_payload_json TEXT,
+                    safety_payload_json TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "conversation_key": "conversation_key",
+            "user_message_id": "user_message_id",
+            "assistant_message_id": "assistant_message_id",
+            "status": "status",
+            "symbol": "symbol",
+            "scope_hash": "scope_hash",
+            "expires_at": "expires_at",
+            "related_order_id": "related_order_id",
+            "broker_order_id": "broker_order_id",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_agent_chat_order_actions_{name} "
+                    f"ON agent_chat_order_actions ({column})"
+                )
+            )
+
+
 def _create_agent_execution_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -781,6 +853,7 @@ def init_db():
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
+    _create_agent_chat_order_actions_table_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
     _create_agent_review_queue_state_table_if_missing()
@@ -842,6 +915,18 @@ def init_db():
         "kis_live_auto_requires_manual_confirm": "BOOLEAN DEFAULT 1",
         "kis_live_auto_max_orders_per_day": "INTEGER DEFAULT 1",
         "kis_live_auto_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "agent_chat_live_order_enabled": "BOOLEAN DEFAULT 0",
+        "agent_chat_live_order_kis_enabled": "BOOLEAN DEFAULT 0",
+        "agent_chat_live_order_buy_enabled": "BOOLEAN DEFAULT 0",
+        "agent_chat_live_order_sell_enabled": "BOOLEAN DEFAULT 0",
+        "agent_chat_live_order_requires_confirm": "BOOLEAN DEFAULT 1",
+        "agent_chat_live_order_confirm_ttl_seconds": "INTEGER DEFAULT 120",
+        "agent_chat_live_order_max_orders_per_day": "INTEGER DEFAULT 1",
+        "agent_chat_live_order_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "agent_chat_live_order_max_notional_krw": "FLOAT DEFAULT 50000",
+        "agent_chat_live_order_allow_market_order": "BOOLEAN DEFAULT 1",
+        "agent_chat_live_order_allow_limit_order": "BOOLEAN DEFAULT 0",
+        "agent_chat_live_order_requires_recent_price": "BOOLEAN DEFAULT 1",
         "kis_limited_auto_sell_enabled": "BOOLEAN DEFAULT 0",
         "kis_limited_auto_stop_loss_enabled": "BOOLEAN DEFAULT 0",
         "kis_limited_auto_take_profit_enabled": "BOOLEAN DEFAULT 0",

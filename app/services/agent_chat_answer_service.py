@@ -71,7 +71,12 @@ class AgentChatAnswerService:
             return self._manual_ticket_answer(plan=plan, available_actions=available_actions)
 
         if category == AgentChatIntentCategory.LIVE_ORDER_REQUEST:
-            return self._live_order_block_answer(plan=plan, available_actions=available_actions)
+            return self._live_order_block_answer(
+                intent=intent,
+                data=data,
+                plan=plan,
+                available_actions=available_actions,
+            )
 
         if category == AgentChatIntentCategory.DANGEROUS_SETTING_REQUEST:
             return AgentChatAnswer(
@@ -318,9 +323,26 @@ class AgentChatAnswerService:
     def _live_order_block_answer(
         self,
         *,
+        intent: AgentChatIntent,
+        data: dict[str, Any],
         plan: dict[str, Any] | None,
         available_actions: list[str],
     ) -> AgentChatAnswer:
+        action = data.get("live_order_action") if isinstance(data, dict) else None
+        if isinstance(action, dict):
+            symbol = action.get("symbol") or intent.symbol or "symbol"
+            name = action.get("symbol_name") or intent.symbol_name or symbol
+            side = str(action.get("side") or intent.side or "buy").upper()
+            qty = action.get("quantity") or intent.quantity or 1
+            notional = self._money(action.get("estimated_notional"), "KRW")
+            return AgentChatAnswer(
+                text=(
+                    f"{name}({symbol}) {qty} share(s) {side} market order is ready for confirmation. "
+                    f"Estimated notional is {notional}. Press Confirm Live Order to submit only after "
+                    "backend validation and risk gates pass."
+                ),
+                answer_type="live_order_confirmation_required",
+            )
         extra = (
             " 수동 주문 티켓 검토 계획까지만 준비했습니다."
             if plan

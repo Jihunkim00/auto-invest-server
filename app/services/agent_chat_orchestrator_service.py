@@ -23,6 +23,7 @@ from app.schemas.agent_execution import AgentPlanRunRequest
 from app.services.agent_chat_answer_service import AgentChatAnswerService
 from app.services.agent_chat_context_service import AgentChatContextService
 from app.services.agent_chat_intent_router_service import AgentChatIntentRouterService
+from app.services.agent_chat_live_order_service import AgentChatLiveOrderService
 from app.services.agent_chat_result_summarizer import AgentChatResultSummarizer
 from app.services.agent_chat_service import AgentChatConversationNotFound, AgentChatService
 from app.services.agent_chat_tool_executor import AgentChatToolExecutor
@@ -44,6 +45,7 @@ class AgentChatOrchestratorService:
         tool_executor: AgentChatToolExecutor | None = None,
         plan_service: AgentPlanService | None = None,
         execution_gateway: AgentExecutionGateway | None = None,
+        live_order_service: AgentChatLiveOrderService | None = None,
         kis_client_factory: Callable[[Session], KisClient] | None = None,
         alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
     ) -> None:
@@ -57,6 +59,9 @@ class AgentChatOrchestratorService:
         self.execution_gateway = execution_gateway or AgentExecutionGateway()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
+        self.live_order_service = live_order_service or AgentChatLiveOrderService(
+            kis_client_factory=self.kis_client_factory,
+        )
         self.tool_executor = tool_executor or AgentChatToolExecutor(
             registry=self.tool_registry,
             kis_client_factory=self.kis_client_factory,
@@ -91,6 +96,7 @@ class AgentChatOrchestratorService:
             db,
             intent=intent,
             conversation_key=conversation_key,
+            user_message_id=user_message.get("id"),
         )
         base_answer = self.answer_service.compose(
             intent=intent,
@@ -105,7 +111,10 @@ class AgentChatOrchestratorService:
             fallback_answer=base_answer,
         )
         answer = summary["answer"]
-        action["result_cards"] = summary["result_cards"]
+        action["result_cards"] = [
+            *(action.get("result_cards") or []),
+            *summary["result_cards"],
+        ]
         action["follow_up_suggestions"] = summary["follow_up_suggestions"]
         action["context_snapshot"] = self.context_service.build_snapshot(
             intent=intent,
@@ -141,6 +150,13 @@ class AgentChatOrchestratorService:
                 ),
             },
         )["message"]
+        live_order_action = action.get("live_order_action")
+        if isinstance(live_order_action, dict) and live_order_action.get("action_id"):
+            self.live_order_service.update_assistant_message_id(
+                db,
+                action_id=int(live_order_action["action_id"]),
+                assistant_message_id=assistant_message.get("id"),
+            )
 
         response = AgentChatSendResponse(
             conversation_key=conversation_key,
@@ -152,6 +168,7 @@ class AgentChatOrchestratorService:
             command=action.get("command"),
             plan=action.get("plan"),
             run=action.get("run"),
+            live_order_action=live_order_action,
             available_actions=action["available_actions"],
             safety=safety,
             context_snapshot=action["context_snapshot"],
@@ -193,6 +210,7 @@ class AgentChatOrchestratorService:
         *,
         intent: AgentChatIntent,
         conversation_key: str,
+        user_message_id: int | None = None,
     ) -> dict[str, Any]:
         safety = self._base_safety(intent)
         selected_tools = intent.selected_tools
@@ -242,7 +260,12 @@ class AgentChatOrchestratorService:
             )
         if category == AgentChatIntentCategory.LIVE_ORDER_REQUEST:
             return self._with_tool_audit(
-                self._live_order_action(db, intent=intent, conversation_key=conversation_key),
+                self._live_order_action(
+                    db,
+                    intent=intent,
+                    conversation_key=conversation_key,
+                    user_message_id=user_message_id,
+                ),
                 selected_tools=selected_tools,
                 tool_results=tool_results,
             )
@@ -442,11 +465,32 @@ class AgentChatOrchestratorService:
         *,
         intent: AgentChatIntent,
         conversation_key: str,
+        user_message_id: int | None,
     ) -> dict[str, Any]:
         safety = self._base_safety(intent)
         safety.read_only = False
         if not intent.symbol:
             return self._action(data={"direct_order_blocked": True}, safety=safety)
+        prepared = self.live_order_service.prepare(
+            db,
+            intent=intent,
+            conversation_key=conversation_key,
+            user_message_id=user_message_id,
+        )
+        prepared_safety = prepared.get("safety")
+        if isinstance(prepared_safety, dict):
+            for key, value in prepared_safety.items():
+                if hasattr(safety, key):
+                    setattr(safety, key, value)
+        if prepared.get("created") is True:
+            action = dict(prepared.get("action") or {})
+            return self._action(
+                data=dict(prepared.get("data") or {}),
+                live_order_action=action,
+                available_actions=["confirm_live_order", "cancel_live_order"],
+                safety=safety,
+                result_cards=list(prepared.get("result_cards") or []),
+            )
         command = self._manual_ticket_command(intent)
         try:
             created = self.plan_service.create_from_command(
@@ -526,6 +570,7 @@ class AgentChatOrchestratorService:
         command: dict[str, Any] | None = None,
         plan: dict[str, Any] | None = None,
         run: dict[str, Any] | None = None,
+        live_order_action: dict[str, Any] | None = None,
         available_actions: list[str] | None = None,
         command_log_id: int | None = None,
         selected_tools: list[Any] | None = None,
@@ -539,6 +584,7 @@ class AgentChatOrchestratorService:
             "command": command,
             "plan": plan,
             "run": run,
+            "live_order_action": live_order_action,
             "available_actions": available_actions or [],
             "safety": safety,
             "command_log_id": command_log_id,
@@ -633,6 +679,7 @@ class AgentChatOrchestratorService:
             "fallback_used": intent.fallback_used,
             "plan_id": plan.get("id"),
             "plan_run_id": run.get("plan_run_id"),
+            "live_order_action": action.get("live_order_action"),
             "available_actions": action.get("available_actions") or [],
             "safety": safety.model_dump(mode="json"),
             "context_snapshot": action.get("context_snapshot") or {},

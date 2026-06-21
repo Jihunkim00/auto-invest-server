@@ -63,6 +63,18 @@ class RuntimeSettingService:
             "kis_live_auto_requires_manual_confirm": True,
             "kis_live_auto_max_orders_per_day": 1,
             "kis_live_auto_max_notional_pct": 0.03,
+            "agent_chat_live_order_enabled": False,
+            "agent_chat_live_order_kis_enabled": False,
+            "agent_chat_live_order_buy_enabled": False,
+            "agent_chat_live_order_sell_enabled": False,
+            "agent_chat_live_order_requires_confirm": True,
+            "agent_chat_live_order_confirm_ttl_seconds": 120,
+            "agent_chat_live_order_max_orders_per_day": 1,
+            "agent_chat_live_order_max_notional_pct": 0.03,
+            "agent_chat_live_order_max_notional_krw": 50000.0,
+            "agent_chat_live_order_allow_market_order": True,
+            "agent_chat_live_order_allow_limit_order": False,
+            "agent_chat_live_order_requires_recent_price": True,
             "kis_limited_auto_sell_enabled": False,
             "kis_limited_auto_stop_loss_enabled": False,
             "kis_limited_auto_take_profit_enabled": False,
@@ -156,6 +168,42 @@ class RuntimeSettingService:
             ),
             "kis_live_auto_max_notional_pct": float(
                 row.kis_live_auto_max_notional_pct
+            ),
+            "agent_chat_live_order_enabled": bool(
+                row.agent_chat_live_order_enabled
+            ),
+            "agent_chat_live_order_kis_enabled": bool(
+                row.agent_chat_live_order_kis_enabled
+            ),
+            "agent_chat_live_order_buy_enabled": bool(
+                row.agent_chat_live_order_buy_enabled
+            ),
+            "agent_chat_live_order_sell_enabled": bool(
+                row.agent_chat_live_order_sell_enabled
+            ),
+            "agent_chat_live_order_requires_confirm": bool(
+                row.agent_chat_live_order_requires_confirm
+            ),
+            "agent_chat_live_order_confirm_ttl_seconds": int(
+                row.agent_chat_live_order_confirm_ttl_seconds
+            ),
+            "agent_chat_live_order_max_orders_per_day": int(
+                row.agent_chat_live_order_max_orders_per_day
+            ),
+            "agent_chat_live_order_max_notional_pct": float(
+                row.agent_chat_live_order_max_notional_pct
+            ),
+            "agent_chat_live_order_max_notional_krw": float(
+                row.agent_chat_live_order_max_notional_krw
+            ),
+            "agent_chat_live_order_allow_market_order": bool(
+                row.agent_chat_live_order_allow_market_order
+            ),
+            "agent_chat_live_order_allow_limit_order": bool(
+                row.agent_chat_live_order_allow_limit_order
+            ),
+            "agent_chat_live_order_requires_recent_price": bool(
+                row.agent_chat_live_order_requires_recent_price
             ),
             "kis_limited_auto_sell_enabled": bool(
                 row.kis_limited_auto_sell_enabled
@@ -1018,6 +1066,90 @@ class RuntimeSettingService:
                 automation_scope="scheduler",
             ),
             _catalog_item(
+                "agent_chat_live_order_enabled",
+                "Agent chat live orders",
+                "Allows Agent Chat to create pending live-order confirmation actions only.",
+                "kis_kr_trading",
+                "bool",
+                settings["agent_chat_live_order_enabled"],
+                defaults["agent_chat_live_order_enabled"],
+                is_dangerous=bool(settings["agent_chat_live_order_enabled"]),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["Agent Chat confirmed live order flow"],
+                automation_scope="manual",
+            ),
+            _catalog_item(
+                "agent_chat_live_order_kis_enabled",
+                "Agent chat KIS submit",
+                "Allows confirmed Agent Chat actions to reuse the KIS manual submit path.",
+                "kis_kr_trading",
+                "bool",
+                settings["agent_chat_live_order_kis_enabled"],
+                defaults["agent_chat_live_order_kis_enabled"],
+                is_dangerous=bool(settings["agent_chat_live_order_kis_enabled"]),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["Agent Chat confirmed live order flow"],
+                automation_scope="manual",
+            ),
+            _catalog_item(
+                "agent_chat_live_order_buy_enabled",
+                "Agent chat buy",
+                "Allows confirmed Agent Chat buy actions; still requires backend gates.",
+                "kis_kr_trading",
+                "bool",
+                settings["agent_chat_live_order_buy_enabled"],
+                defaults["agent_chat_live_order_buy_enabled"],
+                is_dangerous=bool(settings["agent_chat_live_order_buy_enabled"]),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["Agent Chat confirmed live buy"],
+                automation_scope="manual",
+            ),
+            _catalog_item(
+                "agent_chat_live_order_sell_enabled",
+                "Agent chat sell",
+                "Allows confirmed Agent Chat sell actions; still requires backend gates.",
+                "kis_kr_trading",
+                "bool",
+                settings["agent_chat_live_order_sell_enabled"],
+                defaults["agent_chat_live_order_sell_enabled"],
+                is_dangerous=bool(settings["agent_chat_live_order_sell_enabled"]),
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["Agent Chat confirmed live sell"],
+                automation_scope="manual",
+            ),
+            _catalog_item(
+                "agent_chat_live_order_max_notional_krw",
+                "Agent chat max KRW",
+                "Absolute KRW cap for one confirmed Agent Chat live order.",
+                "risk_limits",
+                "float",
+                settings["agent_chat_live_order_max_notional_krw"],
+                defaults["agent_chat_live_order_max_notional_krw"],
+                minimum=0.0,
+                maximum=10000000.0,
+                unit="KRW",
+                is_dangerous=settings["agent_chat_live_order_max_notional_krw"]
+                > defaults["agent_chat_live_order_max_notional_krw"],
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["Agent Chat confirmed live order cap"],
+                automation_scope="manual",
+            ),
+            _catalog_item(
                 "near_close_block_minutes",
                 "US near-close block minutes",
                 "Alpaca/US new-entry guard window before the New York close.",
@@ -1421,6 +1553,18 @@ class RuntimeSettingService:
             "kis_live_auto_requires_manual_confirm",
             "kis_live_auto_max_orders_per_day",
             "kis_live_auto_max_notional_pct",
+            "agent_chat_live_order_enabled",
+            "agent_chat_live_order_kis_enabled",
+            "agent_chat_live_order_buy_enabled",
+            "agent_chat_live_order_sell_enabled",
+            "agent_chat_live_order_requires_confirm",
+            "agent_chat_live_order_confirm_ttl_seconds",
+            "agent_chat_live_order_max_orders_per_day",
+            "agent_chat_live_order_max_notional_pct",
+            "agent_chat_live_order_max_notional_krw",
+            "agent_chat_live_order_allow_market_order",
+            "agent_chat_live_order_allow_limit_order",
+            "agent_chat_live_order_requires_recent_price",
             "kis_limited_auto_sell_enabled",
             "kis_limited_auto_stop_loss_enabled",
             "kis_limited_auto_take_profit_enabled",
@@ -1718,6 +1862,10 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "kis_scheduler_allow_limited_auto_buy",
         "kis_live_auto_sell_enabled",
         "kis_live_auto_buy_enabled",
+        "agent_chat_live_order_enabled",
+        "agent_chat_live_order_kis_enabled",
+        "agent_chat_live_order_buy_enabled",
+        "agent_chat_live_order_sell_enabled",
         "kis_limited_auto_sell_enabled",
         "kis_limited_auto_buy_enabled",
         "kis_limited_auto_buy_requires_shadow_review",
@@ -1734,6 +1882,10 @@ def _dangerous_runtime_keys() -> set[str]:
         "kis_scheduler_buy_enabled",
         "kis_scheduler_allow_limited_auto_buy",
         "kis_live_auto_buy_enabled",
+        "agent_chat_live_order_enabled",
+        "agent_chat_live_order_kis_enabled",
+        "agent_chat_live_order_buy_enabled",
+        "agent_chat_live_order_sell_enabled",
         "kis_limited_auto_buy_enabled",
         "kis_limited_auto_sell_allow_take_profit_trigger",
     }

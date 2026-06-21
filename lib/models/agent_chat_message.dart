@@ -1,4 +1,5 @@
 import 'agent_chat_tool_result.dart';
+import 'agent_chat_live_order_action.dart';
 
 enum AgentChatRole {
   user,
@@ -68,6 +69,14 @@ class AgentChatMessage {
 
   List<String> get followUpSuggestions =>
       _readStringList(metadata['follow_up_suggestions']);
+
+  AgentChatLiveOrderAction? get liveOrderAction {
+    final value = metadata['live_order_action'];
+    if (value is Map) {
+      return AgentChatLiveOrderAction.fromJson(Map<String, dynamic>.from(value));
+    }
+    return null;
+  }
 
   factory AgentChatMessage.fromJson(Map<String, dynamic> json) {
     return AgentChatMessage(

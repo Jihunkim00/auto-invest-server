@@ -4,6 +4,7 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
 import '../../models/agent_chat_conversation.dart';
+import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
@@ -258,13 +259,13 @@ class DashboardController extends ChangeNotifier {
       id: 'agent-safety-intro',
       role: AgentChatRole.safety,
       text:
-          'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+          'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
       createdAt: DateTime.fromMillisecondsSinceEpoch(0),
       status: AgentChatStatus.sent,
       safetyBadges: const [
         'SERVER-SIDE API',
         'SAFE MODE',
-        'NO AUTO SUBMIT',
+        'CONFIRM REQUIRED',
       ],
     ),
   ];
@@ -272,6 +273,7 @@ class DashboardController extends ChangeNotifier {
   bool isAgentPlanCreating = false;
   bool isAgentRunning = false;
   bool isAgentPreparingTicket = false;
+  final Set<int> _agentLiveOrderActionBusy = <int>{};
   AgentCommandParseResult? latestAgentCommand;
   AgentPlan? latestAgentPlan;
   AgentPlanRunResult? latestAgentRun;
@@ -384,6 +386,9 @@ class DashboardController extends ChangeNotifier {
   String get selectedMarketCode => isKisSelected ? 'KR' : 'US';
 
   String get selectedBrokerLabel => isKisSelected ? 'KIS / KR' : 'Alpaca / US';
+
+  bool isAgentLiveOrderActionBusy(int actionId) =>
+      _agentLiveOrderActionBusy.contains(actionId);
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -1223,13 +1228,13 @@ class DashboardController extends ChangeNotifier {
         id: _newAgentMessageId('safety'),
         role: AgentChatRole.safety,
         text:
-            'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+            'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
         createdAt: DateTime.now(),
         status: AgentChatStatus.sent,
         safetyBadges: const [
           'SERVER-SIDE API',
           'SAFE MODE',
-          'NO AUTO SUBMIT',
+          'CONFIRM REQUIRED',
         ],
       ),
     ];
@@ -1812,6 +1817,128 @@ class DashboardController extends ChangeNotifier {
         isAgentPlanCreating = false;
         notifyListeners();
       }
+    }
+  }
+
+  Future<ActionResult> confirmAgentChatLiveOrder(
+    AgentChatLiveOrderAction action,
+  ) async {
+    if (action.actionId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is missing an action id.',
+      );
+    }
+    if (!action.isPending) {
+      return ActionResult(
+        success: false,
+        message: 'Live order action is ${action.status}.',
+      );
+    }
+    if (_agentLiveOrderActionBusy.contains(action.actionId)) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is already being processed.',
+      );
+    }
+
+    _agentLiveOrderActionBusy.add(action.actionId);
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final response = await apiClient.confirmAgentChatLiveOrder(action);
+      if (response.liveOrderAction != null) {
+        _replaceLiveOrderActionInMessages(response.liveOrderAction!);
+      }
+      _appendAgentLiveOrderResponseMessage(response);
+      final submitted = response.status == 'submitted' ||
+          response.answer.answerType == 'live_order_submitted';
+      return ActionResult(
+        success: submitted,
+        message: response.answer.text.isEmpty
+            ? submitted
+                ? 'Live order submitted.'
+                : 'Live order was not submitted.'
+            : response.answer.text,
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      agentErrorMessage = message;
+      _appendAgentAssistantMessage(
+        message,
+        status: AgentChatStatus.failed,
+        badges: const ['LIVE ORDER', 'CONFIRM FAILED', 'NO ORDER SUBMITTED'],
+        messageType: 'live_order_failed',
+        metadata: {
+          'answer_type': 'live_order_failed',
+          'live_order_action': action.raw,
+        },
+      );
+      return ActionResult(success: false, message: message);
+    } finally {
+      _agentLiveOrderActionBusy.remove(action.actionId);
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> cancelAgentChatLiveOrder(
+    AgentChatLiveOrderAction action,
+  ) async {
+    if (action.actionId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is missing an action id.',
+      );
+    }
+    if (!action.isPending) {
+      return ActionResult(
+        success: false,
+        message: 'Live order action is ${action.status}.',
+      );
+    }
+    if (_agentLiveOrderActionBusy.contains(action.actionId)) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is already being processed.',
+      );
+    }
+
+    _agentLiveOrderActionBusy.add(action.actionId);
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final response = await apiClient.cancelAgentChatLiveOrder(action.actionId);
+      if (response.liveOrderAction != null) {
+        _replaceLiveOrderActionInMessages(response.liveOrderAction!);
+      }
+      _appendAgentLiveOrderResponseMessage(response);
+      final cancelled = response.status == 'cancelled' ||
+          response.answer.answerType == 'live_order_cancelled';
+      return ActionResult(
+        success: cancelled,
+        message: response.answer.text.isEmpty
+            ? cancelled
+                ? 'Live order cancelled.'
+                : 'Live order was not cancelled.'
+            : response.answer.text,
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      agentErrorMessage = message;
+      _appendAgentAssistantMessage(
+        message,
+        status: AgentChatStatus.failed,
+        badges: const ['LIVE ORDER', 'CANCEL FAILED'],
+        messageType: 'live_order_failed',
+        metadata: {
+          'answer_type': 'live_order_failed',
+          'live_order_action': action.raw,
+        },
+      );
+      return ActionResult(success: false, message: message);
+    } finally {
+      _agentLiveOrderActionBusy.remove(action.actionId);
+      notifyListeners();
     }
   }
 
@@ -4499,6 +4626,14 @@ class DashboardController extends ChangeNotifier {
         return response.plan == null
             ? AgentChatStatus.sent
             : AgentChatStatus.readyForReview;
+      case 'live_order_confirmation_required':
+        return AgentChatStatus.readyForReview;
+      case 'live_order_blocked':
+      case 'live_order_expired':
+        return AgentChatStatus.blocked;
+      case 'live_order_submitted':
+      case 'live_order_cancelled':
+        return AgentChatStatus.sent;
       case 'analysis_summary':
         if (response.run != null) return AgentChatStatus.safeRunCompleted;
         return response.plan == null
@@ -4512,13 +4647,26 @@ class DashboardController extends ChangeNotifier {
   List<String> _agentSafetyBadgesForChatSendResponse(
     AgentChatSendResponse response,
   ) {
+    final isLiveOrderAction = response.liveOrderAction != null ||
+        response.answer.answerType == 'live_order_confirmation_required';
     final badges = <String>[
       response.intent.fallbackUsed ? 'FALLBACK ROUTER' : 'GPT-BACKED',
       'SERVER-SIDE API',
-      'NO ORDER',
-      'NO AUTO SUBMIT',
     ];
-    final provider = response.intent.provider?.toUpperCase();
+    if (isLiveOrderAction) {
+      badges.addAll([
+        'LIVE ORDER',
+        'CONFIRM REQUIRED',
+        'VALIDATION REQUIRED',
+        'RISK GATED',
+        'NO AUTO SUBMIT',
+      ]);
+    } else {
+      badges.addAll(['NO ORDER', 'NO AUTO SUBMIT']);
+    }
+    final provider =
+        response.liveOrderAction?.provider.toUpperCase() ??
+            response.intent.provider?.toUpperCase();
     if (provider != null && provider.isNotEmpty && provider != 'UNKNOWN') {
       badges.add(provider);
     }
@@ -4528,7 +4676,9 @@ class DashboardController extends ChangeNotifier {
     if (response.safety.safeExecutionOnly) {
       badges.add('SAFE ANALYSIS');
     }
-    if (!response.safety.validationCalled) badges.add('NO VALIDATION');
+    if (!isLiveOrderAction && !response.safety.validationCalled) {
+      badges.add('NO VALIDATION');
+    }
     if (!response.safety.settingChanged) badges.add('NO SETTINGS CHANGE');
     if (response.availableActions.contains('prepare_manual_ticket')) {
       badges.addAll([
@@ -4563,6 +4713,8 @@ class DashboardController extends ChangeNotifier {
         'model_name': response.intent.modelName,
       'fallback_used': response.intent.fallbackUsed,
       'available_actions': response.availableActions,
+      if (response.liveOrderAction != null)
+        'live_order_action': response.liveOrderAction!.raw,
       'safety': response.safety.raw,
       'context_snapshot': response.contextSnapshot,
       'selected_tools': [
@@ -4603,6 +4755,130 @@ class DashboardController extends ChangeNotifier {
     };
   }
 
+  void _appendAgentLiveOrderResponseMessage(
+    AgentChatLiveOrderResponse response,
+  ) {
+    final action = response.liveOrderAction;
+    agentMessages = [
+      ...agentMessages,
+      AgentChatMessage(
+        id: _newAgentMessageId('assistant'),
+        role: response.answer.answerType == 'error'
+            ? AgentChatRole.error
+            : AgentChatRole.assistant,
+        text: response.answer.text,
+        createdAt: DateTime.now(),
+        status: _agentStatusForLiveOrderResponse(response),
+        conversationKey: activeAgentConversationKey,
+        messageType: response.answer.answerType,
+        safetyBadges: _agentSafetyBadgesForLiveOrderResponse(response),
+        metadata: {
+          'answer_type': response.answer.answerType,
+          'live_order_result': {
+            'status': response.status,
+            if (response.order != null) 'order': response.order,
+            if (response.assistantMessageId != null)
+              'assistant_message_id': response.assistantMessageId,
+            'diagnostics': response.diagnostics,
+          },
+          if (action != null) 'live_order_action': action.raw,
+          'safety': response.safety,
+        },
+      ),
+    ];
+  }
+
+  AgentChatStatus _agentStatusForLiveOrderResponse(
+    AgentChatLiveOrderResponse response,
+  ) {
+    switch (response.answer.answerType) {
+      case 'live_order_blocked':
+      case 'live_order_expired':
+        return AgentChatStatus.blocked;
+      case 'error':
+        return AgentChatStatus.failed;
+      default:
+        return AgentChatStatus.sent;
+    }
+  }
+
+  List<String> _agentSafetyBadgesForLiveOrderResponse(
+    AgentChatLiveOrderResponse response,
+  ) {
+    final safety = response.safety;
+    final status = response.status.toUpperCase().replaceAll('_', ' ');
+    final badges = <String>[
+      'LIVE ORDER',
+      if (status.isNotEmpty) status,
+      'SERVER-SIDE API',
+    ];
+    if (safety['real_order_submitted'] == true) {
+      badges.add('REAL ORDER');
+    } else {
+      badges.add('NO ORDER SUBMITTED');
+    }
+    if (safety['validation_called'] == true) badges.add('VALIDATED');
+    if (safety['risk_approved'] == true) {
+      badges.add('RISK APPROVED');
+    } else {
+      badges.add('RISK GATED');
+    }
+    if (safety['manual_submit_called'] == true) badges.add('MANUAL SERVICE');
+    if (safety['broker_submit_called'] == true) badges.add('BROKER SUBMIT');
+    return badges.toSet().toList();
+  }
+
+  void _replaceLiveOrderActionInMessages(AgentChatLiveOrderAction action) {
+    final replacement = action.raw.isEmpty
+        ? _liveOrderActionMetadata(action)
+        : Map<String, dynamic>.from(action.raw);
+    agentMessages = [
+      for (final message in agentMessages)
+        if (message.liveOrderAction?.actionId == action.actionId)
+          message.copyWith(
+            metadata: {
+              ...message.metadata,
+              'live_order_action': replacement,
+            },
+          )
+        else
+          message,
+    ];
+  }
+
+  Map<String, dynamic> _liveOrderActionMetadata(
+    AgentChatLiveOrderAction action,
+  ) {
+    return {
+      'action_id': action.actionId,
+      'status': action.status,
+      'action_type': action.actionType,
+      'provider': action.provider,
+      'market': action.market,
+      'symbol': action.symbol,
+      if (action.symbolName != null) 'symbol_name': action.symbolName,
+      'side': action.side,
+      'order_type': action.orderType,
+      if (action.quantity != null) 'quantity': action.quantity,
+      if (action.notionalAmount != null)
+        'notional_amount': action.notionalAmount,
+      'currency': action.currency,
+      if (action.estimatedPrice != null)
+        'estimated_price': action.estimatedPrice,
+      if (action.estimatedNotional != null)
+        'estimated_notional': action.estimatedNotional,
+      if (action.expiresAt != null) 'expires_at': action.expiresAt,
+      if (action.confirmationPhrase != null)
+        'confirmation_phrase': action.confirmationPhrase,
+      if (action.confirmationToken != null)
+        'confirmation_token': action.confirmationToken,
+      if (action.relatedOrderId != null)
+        'related_order_id': action.relatedOrderId,
+      if (action.brokerOrderId != null) 'broker_order_id': action.brokerOrderId,
+      'safety': action.safety,
+    };
+  }
+
   AgentChatMessage _agentMessageForParsedCommand(
     String id,
     AgentCommandParseResult parsed, {
@@ -4638,6 +4914,8 @@ class DashboardController extends ChangeNotifier {
     int? planId,
     int? runId,
     List<String> badges = const [],
+    String messageType = 'plain_text',
+    Map<String, dynamic> metadata = const {},
   }) {
     agentMessages = [
       ...agentMessages,
@@ -4649,9 +4927,12 @@ class DashboardController extends ChangeNotifier {
         text: text,
         createdAt: DateTime.now(),
         status: status,
+        conversationKey: activeAgentConversationKey,
+        messageType: messageType,
         planId: planId,
         runId: runId,
         safetyBadges: badges,
+        metadata: metadata,
       ),
     ];
   }
@@ -4676,13 +4957,13 @@ List<AgentChatMessage> _defaultAgentSafetyMessages() {
       id: _newAgentMessageId('safety'),
       role: AgentChatRole.safety,
       text:
-          'Agent never submits live orders from chat. Manual validation and confirm_live stay in Trading.',
+          'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
       createdAt: DateTime.now(),
       status: AgentChatStatus.sent,
       safetyBadges: const [
         'SERVER-SIDE API',
         'SAFE MODE',
-        'NO AUTO SUBMIT',
+        'CONFIRM REQUIRED',
       ],
     ),
   ];
