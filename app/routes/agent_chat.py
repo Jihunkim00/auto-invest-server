@@ -73,6 +73,36 @@ def send_agent_chat_message(
         raise HTTPException(status_code=404, detail="agent_chat_conversation_not_found")
 
 
+@router.get("/live-orders/recent")
+def list_recent_agent_chat_live_orders(
+    limit: int = Query(default=20, ge=1, le=100),
+    status: str | None = Query(default=None, max_length=40),
+    symbol: str | None = Query(default=None, max_length=20),
+    conversation_key: str | None = Query(default=None, max_length=80),
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    return service.recent(
+        db,
+        limit=limit,
+        status=status,
+        symbol=symbol,
+        conversation_key=conversation_key,
+    )
+
+
+@router.get("/live-orders/{action_id}")
+def get_agent_chat_live_order(
+    action_id: int,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.get(db, action_id=action_id)
+    except AgentChatLiveOrderNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
+
+
 @router.post("/live-orders/{action_id}/confirm")
 def confirm_agent_chat_live_order(
     action_id: int,
@@ -82,6 +112,18 @@ def confirm_agent_chat_live_order(
 ):
     try:
         return service.confirm(db, action_id=action_id, request=payload)
+    except AgentChatLiveOrderNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
+
+
+@router.post("/live-orders/{action_id}/sync")
+def sync_agent_chat_live_order(
+    action_id: int,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.sync(db, action_id=action_id)
     except AgentChatLiveOrderNotFound:
         raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class AgentChatLiveOrderActionPayload(BaseModel):
     action_id: int
+    conversation_key: str | None = None
     status: str
     action_type: str = "chat_confirmed_live_order"
     provider: str = "kis"
@@ -26,7 +27,13 @@ class AgentChatLiveOrderActionPayload(BaseModel):
     confirmation_token: str | None = None
     related_order_id: int | None = None
     broker_order_id: str | None = None
+    broker_status: str | None = None
+    internal_status: str | None = None
+    last_sync_at: datetime | str | None = None
+    last_sync_payload: dict[str, Any] = Field(default_factory=dict)
+    audit: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
+    safety_controls: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentChatLiveOrderConfirmRequest(BaseModel):
@@ -54,3 +61,9 @@ class AgentChatLiveOrderResponse(BaseModel):
     safety: dict[str, Any] = Field(default_factory=dict)
     assistant_message_id: int | None = None
     diagnostics: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentChatLiveOrderListResponse(BaseModel):
+    status: str = "ok"
+    count: int
+    actions: list[AgentChatLiveOrderActionPayload] = Field(default_factory=list)

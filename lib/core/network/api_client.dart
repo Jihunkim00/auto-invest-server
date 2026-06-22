@@ -406,6 +406,47 @@ class ApiClient {
     return AgentChatLiveOrderResponse.fromJson(payload);
   }
 
+  Future<AgentChatLiveOrderAction> fetchAgentChatLiveOrder(int actionId) async {
+    final payload = await _getJsonNoCache('/agent/chat/live-orders/$actionId');
+    return AgentChatLiveOrderAction.fromJson(payload);
+  }
+
+  Future<List<AgentChatLiveOrderAction>> fetchRecentAgentChatLiveOrders({
+    int limit = 20,
+    String? status,
+    String? symbol,
+    String? conversationKey,
+  }) async {
+    final params = <String>[
+      'limit=$limit',
+      if (status != null && status.trim().isNotEmpty)
+        'status=${Uri.encodeQueryComponent(status.trim())}',
+      if (symbol != null && symbol.trim().isNotEmpty)
+        'symbol=${Uri.encodeQueryComponent(symbol.trim())}',
+      if (conversationKey != null && conversationKey.trim().isNotEmpty)
+        'conversation_key=${Uri.encodeQueryComponent(conversationKey.trim())}',
+    ];
+    final payload = await _getJsonNoCache(
+      '/agent/chat/live-orders/recent?${params.join('&')}',
+    );
+    final items = payload['actions'] as List<dynamic>? ?? const [];
+    return [
+      for (final item in items)
+        if (item is Map)
+          AgentChatLiveOrderAction.fromJson(Map<String, dynamic>.from(item)),
+    ];
+  }
+
+  Future<AgentChatLiveOrderResponse> syncAgentChatLiveOrder(
+    int actionId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/live-orders/$actionId/sync',
+      const {},
+    );
+    return AgentChatLiveOrderResponse.fromJson(payload);
+  }
+
   Future<AgentChatConversation> createAgentChatConversation({
     String? title,
     String source = 'flutter_dashboard',

@@ -34,14 +34,26 @@ from app.services.kis_order_validation_service import (
     KisOrderValidationService,
     record_kis_order_validation,
 )
+from app.services.kis_order_sync_service import (
+    KisOrderSyncError,
+    KisOrderSyncService,
+    serialize_kis_order,
+)
+from app.services.kis_payload_sanitizer import sanitize_kis_text
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
 KR_TZ = ZoneInfo("Asia/Seoul")
 ACTION_TYPE = "chat_confirmed_live_order"
 STATUS_PENDING = "pending_confirmation"
+STATUS_CONFIRMING = "confirming"
 STATUS_CONFIRMED = "confirmed"
+STATUS_SUBMITTING = "submitting"
 STATUS_SUBMITTED = "submitted"
+STATUS_SYNC_REQUIRED = "sync_required"
+STATUS_FILLED = "filled"
+STATUS_PARTIALLY_FILLED = "partially_filled"
+STATUS_REJECTED = "rejected"
 STATUS_BLOCKED = "blocked"
 STATUS_EXPIRED = "expired"
 STATUS_CANCELLED = "cancelled"
@@ -53,7 +65,26 @@ OPEN_ORDER_STATUSES = {
     InternalOrderStatus.PENDING.value,
     InternalOrderStatus.PARTIALLY_FILLED.value,
 }
-SUBMITTED_ACTION_STATUSES = {STATUS_SUBMITTED}
+SUBMITTED_ACTION_STATUSES = {
+    STATUS_SUBMITTED,
+    STATUS_SYNC_REQUIRED,
+    STATUS_FILLED,
+    STATUS_PARTIALLY_FILLED,
+}
+TERMINAL_ACTION_STATUSES = {
+    STATUS_SUBMITTED,
+    STATUS_SYNC_REQUIRED,
+    STATUS_FILLED,
+    STATUS_PARTIALLY_FILLED,
+    STATUS_REJECTED,
+    STATUS_BLOCKED,
+    STATUS_FAILED,
+    STATUS_EXPIRED,
+    STATUS_CANCELLED,
+    STATUS_CONFIRMED,
+    STATUS_CONFIRMING,
+    STATUS_SUBMITTING,
+}
 
 
 class AgentChatLiveOrderNotFound(Exception):
@@ -69,6 +100,7 @@ class AgentChatLiveOrderService:
         kis_client_factory: Callable[[Session], KisClient] | None = None,
         validation_service_factory: Callable[[KisClient], KisOrderValidationService] | None = None,
         manual_order_service_factory: Callable[[KisClient], KisManualOrderService] | None = None,
+        order_sync_service_factory: Callable[[KisClient], KisOrderSyncService] | None = None,
     ) -> None:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.chat_service = chat_service or AgentChatService()
@@ -78,6 +110,9 @@ class AgentChatLiveOrderService:
         )
         self.manual_order_service_factory = manual_order_service_factory or (
             lambda client: KisManualOrderService(client)
+        )
+        self.order_sync_service_factory = order_sync_service_factory or (
+            lambda client: KisOrderSyncService(client)
         )
 
     def prepare(
@@ -97,6 +132,12 @@ class AgentChatLiveOrderService:
         provider = str(intent.provider or "").strip().lower() or "kis"
         symbol = _normalize_symbol(intent.symbol)
         order_type = "market"
+        safety["safety_controls"] = self._safety_controls(
+            db,
+            settings=settings,
+            side=side,
+            now_utc=now_utc,
+        )
 
         if not self._prepare_flags_enabled(settings, provider=provider, side=side):
             return {
@@ -106,6 +147,7 @@ class AgentChatLiveOrderService:
                     "direct_order_blocked": True,
                     "live_order_feature_disabled": True,
                     "block_reason": "agent_chat_live_order_disabled",
+                    "safety_controls": safety["safety_controls"],
                 },
                 "safety": safety,
                 "result_cards": [],
@@ -223,6 +265,7 @@ class AgentChatLiveOrderService:
                 "direct_order_blocked": False,
                 "live_order_action": action,
                 "safety": safety,
+                "safety_controls": safety["safety_controls"],
             },
             "safety": safety,
             "result_cards": [result_card],
@@ -244,6 +287,129 @@ class AgentChatLiveOrderService:
         row.updated_at = _naive_utc(_utc_now())
         db.commit()
 
+    def get(
+        self,
+        db: Session,
+        *,
+        action_id: int,
+    ) -> dict[str, Any]:
+        row = self._get_action(db, action_id)
+        self._refresh_action_from_linked_order(db, row)
+        return self.serialize_action(row, db=db)
+
+    def recent(
+        self,
+        db: Session,
+        *,
+        limit: int = 20,
+        status: str | None = None,
+        symbol: str | None = None,
+        conversation_key: str | None = None,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit or 20), 100))
+        query = db.query(AgentChatOrderAction)
+        if status:
+            query = query.filter(AgentChatOrderAction.status == status.strip())
+        if symbol:
+            query = query.filter(AgentChatOrderAction.symbol == _normalize_symbol(symbol))
+        if conversation_key:
+            query = query.filter(AgentChatOrderAction.conversation_key == conversation_key.strip())
+        rows = (
+            query.order_by(AgentChatOrderAction.created_at.desc(), AgentChatOrderAction.id.desc())
+            .limit(safe_limit)
+            .all()
+        )
+        for row in rows:
+            self._refresh_action_from_linked_order(db, row)
+        return {
+            "status": "ok",
+            "count": len(rows),
+            "actions": [self.serialize_action(row, db=db) for row in rows],
+        }
+
+    def sync(
+        self,
+        db: Session,
+        *,
+        action_id: int,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        row = self._get_action(db, action_id)
+        now_utc = _utc_now(now)
+        safety = _sync_safety()
+        order = self._linked_order(db, row)
+        if order is None:
+            row.status = STATUS_SYNC_REQUIRED
+            row.last_sync_at = _naive_utc(now_utc)
+            row.last_sync_payload_json = _json(
+                {
+                    "sync_status": "missing_linked_order",
+                    "related_order_id": row.related_order_id,
+                    "broker_order_id": row.broker_order_id,
+                }
+            )
+            row.safety_payload_json = _json({**safety, "original_order_submitted": False})
+            row.last_state_change_at = _naive_utc(now_utc)
+            row.updated_at = _naive_utc(now_utc)
+            db.commit()
+            db.refresh(row)
+            response = self._response(
+                row,
+                status=STATUS_SYNC_REQUIRED,
+                answer_type="live_order_status_sync_failed",
+                text="Live order status sync needs manual review because no linked KIS order was found. No order was submitted.",
+                safety={**safety, "original_order_submitted": False},
+                order=None,
+                diagnostics={"sync_reason": "linked_order_missing"},
+                db=db,
+            )
+            self._append_result_message(db, row, response)
+            return response.model_dump(mode="json")
+
+        client = self.kis_client_factory(db)
+        try:
+            synced = self.order_sync_service_factory(client).sync_order(db, int(order.id))
+        except KisOrderSyncError as exc:
+            row.status = STATUS_SYNC_REQUIRED
+            row.last_sync_at = _naive_utc(now_utc)
+            row.last_sync_payload_json = _json({"sync_error": _safe_error(exc)})
+            row.safety_payload_json = _json({**safety, "original_order_submitted": True})
+            row.last_state_change_at = _naive_utc(now_utc)
+            row.updated_at = _naive_utc(now_utc)
+            db.commit()
+            db.refresh(row)
+            response = self._response(
+                row,
+                status=STATUS_SYNC_REQUIRED,
+                answer_type="live_order_status_sync_failed",
+                text="Live order status sync failed safely. No order was submitted.",
+                safety={**safety, "original_order_submitted": True},
+                order=self._order_payload(row, db=db),
+                diagnostics={"sync_error": _safe_error(exc)},
+                db=db,
+            )
+            self._append_result_message(db, row, response)
+            return response.model_dump(mode="json")
+
+        self._apply_order_status_to_action(row, synced, now_utc=now_utc)
+        row.last_sync_payload_json = _json(serialize_kis_order(synced, include_sync_payload=True))
+        row.safety_payload_json = _json({**safety, "original_order_submitted": True})
+        row.updated_at = _naive_utc(now_utc)
+        db.commit()
+        db.refresh(row)
+        response = self._response(
+            row,
+            status="synced",
+            answer_type="live_order_status_synced",
+            text=f"Live order status was synced. Current status is {row.status}.",
+            safety={**safety, "original_order_submitted": True},
+            order=self._order_payload(row, db=db),
+            diagnostics={"sync_submitted_new_order": False},
+            db=db,
+        )
+        self._append_result_message(db, row, response)
+        return response.model_dump(mode="json")
+
     def confirm(
         self,
         db: Session,
@@ -255,6 +421,32 @@ class AgentChatLiveOrderService:
         row = self._get_action(db, action_id)
         now_utc = _utc_now(now)
         safety = _base_safety(real_order_submitted=False)
+        settings = self.runtime_settings.get_settings(db)
+        safety["safety_controls"] = self._safety_controls(
+            db,
+            settings=settings,
+            side=row.side,
+            now_utc=now_utc,
+        )
+
+        if row.related_order_id is not None or row.broker_order_id:
+            self._refresh_action_from_linked_order(db, row)
+            if self._linked_order(db, row) is None:
+                row.status = STATUS_SYNC_REQUIRED
+                row.last_state_change_at = _naive_utc(now_utc)
+                row.updated_at = _naive_utc(now_utc)
+                db.commit()
+                db.refresh(row)
+            response = self._response(
+                row,
+                status=row.status,
+                answer_type=self._answer_type_for_status(row.status),
+                text="This live order action already has a linked order. No duplicate order was sent.",
+                safety={**safety, "idempotent_replay": True},
+                order=self._order_payload(row, db=db),
+                db=db,
+            )
+            return response.model_dump(mode="json")
 
         if row.status == STATUS_SUBMITTED:
             response = self._response(
@@ -263,7 +455,8 @@ class AgentChatLiveOrderService:
                 answer_type="live_order_submitted",
                 text="This live order action was already submitted. No duplicate order was sent.",
                 safety={**safety, "idempotent_replay": True},
-                order=self._order_payload(row),
+                order=self._order_payload(row, db=db),
+                db=db,
             )
             return response.model_dump(mode="json")
 
@@ -274,7 +467,8 @@ class AgentChatLiveOrderService:
                 answer_type=self._answer_type_for_status(row.status),
                 text=f"This live order action is {row.status}; no order was submitted.",
                 safety=safety,
-                order=self._order_payload(row) if row.related_order_id else None,
+                order=self._order_payload(row, db=db) if row.related_order_id else None,
+                db=db,
             )
             return response.model_dump(mode="json")
 
@@ -302,7 +496,13 @@ class AgentChatLiveOrderService:
                 now_utc=now_utc,
             )
 
-        settings = self.runtime_settings.get_settings(db)
+        row.status = STATUS_CONFIRMING
+        row.confirmed_at = _naive_utc(now_utc)
+        row.last_state_change_at = _naive_utc(now_utc)
+        row.updated_at = _naive_utc(now_utc)
+        db.commit()
+        db.refresh(row)
+
         settings_block = self._confirm_settings_block(row, settings)
         if settings_block is not None:
             return self._block(
@@ -315,12 +515,6 @@ class AgentChatLiveOrderService:
                 safety=safety,
                 now_utc=now_utc,
             )
-
-        row.status = STATUS_CONFIRMED
-        row.confirmed_at = _naive_utc(now_utc)
-        row.updated_at = _naive_utc(now_utc)
-        db.commit()
-        db.refresh(row)
 
         if self._daily_action_count(db, now_utc=now_utc) >= max(
             0, int(settings["agent_chat_live_order_max_orders_per_day"] or 0)
@@ -373,6 +567,13 @@ class AgentChatLiveOrderService:
                 result=validation_result,
             )
             safety["validation_called"] = True
+            safety["safety_controls"] = self._safety_controls(
+                db,
+                settings=settings,
+                side=row.side,
+                validation=validation_result.to_dict(),
+                now_utc=now_utc,
+            )
             row.validation_payload_json = _json(validation_result.to_dict())
             db.commit()
         except Exception as exc:
@@ -428,6 +629,12 @@ class AgentChatLiveOrderService:
             source_context="agent_chat_confirmed_live_order",
             source_metadata=self._source_metadata(row),
         )
+        row.status = STATUS_SUBMITTING
+        row.last_state_change_at = _naive_utc(now_utc)
+        row.updated_at = _naive_utc(now_utc)
+        row.safety_payload_json = _json({**safety, "validation_called": True, "risk_approved": True})
+        db.commit()
+        db.refresh(row)
         try:
             status_code, body = self.manual_order_service_factory(client).submit_manual(
                 db,
@@ -469,6 +676,7 @@ class AgentChatLiveOrderService:
         if real_submitted and status_code < 300:
             row.status = STATUS_SUBMITTED
             row.submitted_at = _naive_utc(now_utc)
+            row.last_state_change_at = _naive_utc(now_utc)
             db.commit()
             db.refresh(row)
             response = self._response(
@@ -481,11 +689,13 @@ class AgentChatLiveOrderService:
                 ),
                 safety=safety,
                 order=self._order_payload(row, body=body),
+                db=db,
             )
             self._append_result_message(db, row, response)
             return response.model_dump(mode="json")
 
         row.status = STATUS_BLOCKED if status_code < 500 else STATUS_FAILED
+        row.last_state_change_at = _naive_utc(now_utc)
         db.commit()
         db.refresh(row)
         response = self._response(
@@ -495,6 +705,7 @@ class AgentChatLiveOrderService:
             text="KIS manual submit safety gate blocked the order. No broker order was submitted.",
             safety=safety,
             order=self._order_payload(row, body=body) if row.related_order_id else None,
+            db=db,
         )
         self._append_result_message(db, row, response)
         return response.model_dump(mode="json")
@@ -510,6 +721,13 @@ class AgentChatLiveOrderService:
         row = self._get_action(db, action_id)
         now_utc = _utc_now(now)
         safety = _base_safety(real_order_submitted=False)
+        settings = self.runtime_settings.get_settings(db)
+        safety["safety_controls"] = self._safety_controls(
+            db,
+            settings=settings,
+            side=row.side,
+            now_utc=now_utc,
+        )
         if row.status != STATUS_PENDING:
             response = self._response(
                 row,
@@ -517,7 +735,8 @@ class AgentChatLiveOrderService:
                 answer_type=self._answer_type_for_status(row.status),
                 text=f"This live order action is {row.status}; no cancellation changed it.",
                 safety=safety,
-                order=self._order_payload(row) if row.related_order_id else None,
+                order=self._order_payload(row, db=db) if row.related_order_id else None,
+                db=db,
             )
             return response.model_dump(mode="json")
 
@@ -526,6 +745,7 @@ class AgentChatLiveOrderService:
             {"cancelled": True, "reason": (request.reason if request else None)}
         )
         row.safety_payload_json = _json(safety)
+        row.last_state_change_at = _naive_utc(now_utc)
         row.updated_at = _naive_utc(now_utc)
         db.commit()
         db.refresh(row)
@@ -536,13 +756,19 @@ class AgentChatLiveOrderService:
             text="Live order confirmation was cancelled. No validation or order submission ran.",
             safety=safety,
             order=None,
+            db=db,
         )
         self._append_result_message(db, row, response)
         return response.model_dump(mode="json")
 
-    def serialize_action(self, row: AgentChatOrderAction) -> dict[str, Any]:
+    def serialize_action(self, row: AgentChatOrderAction, *, db: Session | None = None) -> dict[str, Any]:
+        order = self._linked_order(db, row) if db is not None else None
+        safety = _parse_json_object(row.safety_payload_json)
+        raw_controls = safety.get("safety_controls")
+        safety_controls = raw_controls if isinstance(raw_controls, dict) else {}
         return AgentChatLiveOrderActionPayload(
             action_id=int(row.id),
+            conversation_key=row.conversation_key,
             status=str(row.status),
             action_type=str(row.action_type or ACTION_TYPE),
             provider=str(row.provider or "kis"),
@@ -557,11 +783,23 @@ class AgentChatLiveOrderService:
             estimated_price=row.estimated_price,
             estimated_notional=row.estimated_notional,
             expires_at=_iso_utc(row.expires_at),
-            confirmation_phrase=row.confirmation_phrase,
+            confirmation_phrase=None,
             confirmation_token=row.scope_hash,
             related_order_id=row.related_order_id,
             broker_order_id=row.broker_order_id,
-            safety=_parse_json_object(row.safety_payload_json),
+            broker_status=_text_or_none(
+                (order.broker_status if order is not None else None)
+                or (order.broker_order_status if order is not None else None)
+            ),
+            internal_status=_text_or_none(order.internal_status if order is not None else None),
+            last_sync_at=_iso_utc(
+                row.last_sync_at
+                or (order.last_synced_at if order is not None else None)
+            ),
+            last_sync_payload=_parse_json_object(row.last_sync_payload_json),
+            audit=self._audit_payload(row),
+            safety=safety,
+            safety_controls=safety_controls,
         ).model_dump(mode="json")
 
     def confirmation_card(self, action: dict[str, Any]) -> AgentChatResultCard:
@@ -613,6 +851,191 @@ class AgentChatLiveOrderService:
             ],
             data=response.model_dump(mode="json"),
         )
+
+    def _linked_order(self, db: Session | None, row: AgentChatOrderAction) -> OrderLog | None:
+        if db is None:
+            return None
+        if row.related_order_id is not None:
+            order = db.get(OrderLog, int(row.related_order_id))
+            if order is not None:
+                return order
+        broker_order_id = _text_or_none(row.broker_order_id)
+        if not broker_order_id:
+            return None
+        return (
+            db.query(OrderLog)
+            .filter(OrderLog.broker == "kis")
+            .filter(
+                (OrderLog.broker_order_id == broker_order_id)
+                | (OrderLog.kis_odno == broker_order_id)
+            )
+            .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
+            .first()
+        )
+
+    def _refresh_action_from_linked_order(
+        self,
+        db: Session,
+        row: AgentChatOrderAction,
+        *,
+        now_utc: datetime | None = None,
+    ) -> None:
+        order = self._linked_order(db, row)
+        if order is None:
+            return
+        changed = False
+        if row.related_order_id != order.id:
+            row.related_order_id = order.id
+            changed = True
+        broker_order_id = order.broker_order_id or order.kis_odno
+        if broker_order_id and row.broker_order_id != broker_order_id:
+            row.broker_order_id = broker_order_id
+            changed = True
+        next_status = self._action_status_from_internal_status(order.internal_status)
+        if next_status and row.status != next_status:
+            row.status = next_status
+            row.last_state_change_at = _naive_utc(now_utc or _utc_now())
+            changed = True
+        if order.last_synced_at and row.last_sync_at != order.last_synced_at:
+            row.last_sync_at = order.last_synced_at
+            changed = True
+        if changed:
+            row.updated_at = _naive_utc(now_utc or _utc_now())
+            db.commit()
+            db.refresh(row)
+
+    def _apply_order_status_to_action(
+        self,
+        row: AgentChatOrderAction,
+        order: OrderLog,
+        *,
+        now_utc: datetime,
+    ) -> None:
+        row.related_order_id = order.id
+        row.broker_order_id = order.broker_order_id or order.kis_odno or row.broker_order_id
+        row.status = self._action_status_from_internal_status(order.internal_status)
+        row.last_state_change_at = _naive_utc(now_utc)
+        row.last_sync_at = order.last_synced_at or _naive_utc(now_utc)
+
+    def _action_status_from_internal_status(self, internal_status: str | None) -> str:
+        status = str(internal_status or "").strip().upper()
+        if status == InternalOrderStatus.FILLED.value:
+            return STATUS_FILLED
+        if status == InternalOrderStatus.PARTIALLY_FILLED.value:
+            return STATUS_PARTIALLY_FILLED
+        if status in {
+            InternalOrderStatus.REJECTED.value,
+            InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+            InternalOrderStatus.FAILED.value,
+        }:
+            return STATUS_REJECTED
+        if status in {InternalOrderStatus.CANCELED.value, "CANCELLED"}:
+            return STATUS_CANCELLED
+        if status in {
+            InternalOrderStatus.SUBMITTED.value,
+            InternalOrderStatus.ACCEPTED.value,
+            InternalOrderStatus.PENDING.value,
+            InternalOrderStatus.REQUESTED.value,
+        }:
+            return STATUS_SUBMITTED
+        if status in {InternalOrderStatus.UNKNOWN_STALE.value, InternalOrderStatus.SYNC_FAILED.value}:
+            return STATUS_SYNC_REQUIRED
+        return STATUS_SUBMITTED if status else STATUS_SYNC_REQUIRED
+
+    def _audit_payload(self, row: AgentChatOrderAction) -> dict[str, Any]:
+        request_payload = _parse_json_object(row.request_payload_json)
+        validation_payload = _parse_json_object(row.validation_payload_json)
+        risk_payload = _parse_json_object(row.risk_payload_json)
+        response_payload = _parse_json_object(row.response_payload_json)
+        sync_payload = _parse_json_object(row.last_sync_payload_json)
+        return _sanitize_payload(
+            {
+                "requested_by": "agent_chat",
+                "conversation_key": row.conversation_key,
+                "user_message_id": row.user_message_id,
+                "assistant_message_id": row.assistant_message_id,
+                "intent_category": "live_order_request",
+                "selected_tool": "agent_chat_live_order_service",
+                "confirmation_method": "confirmation_card",
+                "confirmation_token_hash": _sha256_text(row.scope_hash),
+                "scope_hash": row.scope_hash,
+                "created_at": _iso_utc(row.created_at),
+                "confirmed_at": _iso_utc(row.confirmed_at),
+                "submitted_at": _iso_utc(row.submitted_at),
+                "last_state_change_at": _iso_utc(row.last_state_change_at or row.updated_at),
+                "last_sync_at": _iso_utc(row.last_sync_at),
+                "runtime_settings_snapshot": _parse_json_object(row.safety_payload_json).get("safety_controls") or {},
+                "validation_result_summary": _summary_payload(
+                    validation_payload,
+                    include_keys={
+                        "validated_for_submission",
+                        "estimated_amount",
+                        "available_cash",
+                        "block_reasons",
+                        "warnings",
+                    },
+                ),
+                "risk_gate_summary": _summary_payload(risk_payload),
+                "submit_result_summary": _summary_payload(
+                    response_payload,
+                    include_keys={
+                        "real_order_submitted",
+                        "broker_submit_called",
+                        "manual_submit_called",
+                        "order_id",
+                        "order_log_id",
+                        "internal_status",
+                    },
+                ),
+                "sync_result_summary": _summary_payload(
+                    sync_payload,
+                    include_keys={
+                        "internal_status",
+                        "broker_status",
+                        "broker_order_status",
+                        "sync_error",
+                        "display_status",
+                    },
+                ),
+                "request_summary": _summary_payload(
+                    request_payload,
+                    include_keys={"symbol", "side", "quantity", "currency", "order_type"},
+                ),
+            }
+        )
+
+    def _safety_controls(
+        self,
+        db: Session,
+        *,
+        settings: dict[str, Any],
+        side: str,
+        now_utc: datetime,
+        validation: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        global_settings = get_settings()
+        market_session = validation.get("market_session") if isinstance(validation, dict) else {}
+        if not isinstance(market_session, dict):
+            market_session = {}
+        max_orders = int(settings.get("agent_chat_live_order_max_orders_per_day") or 0)
+        remaining = max(0, max_orders - self._daily_action_count(db, now_utc=now_utc))
+        return {
+            "dry_run": bool(settings.get("dry_run")),
+            "kill_switch": bool(settings.get("kill_switch")),
+            "kis_enabled": bool(getattr(global_settings, "kis_enabled", False)),
+            "kis_real_order_enabled": bool(getattr(global_settings, "kis_real_order_enabled", False)),
+            "agent_chat_live_order_enabled": bool(settings.get("agent_chat_live_order_enabled")),
+            "agent_chat_live_order_kis_enabled": bool(settings.get("agent_chat_live_order_kis_enabled")),
+            "agent_chat_live_order_buy_enabled": bool(settings.get("agent_chat_live_order_buy_enabled")),
+            "agent_chat_live_order_sell_enabled": bool(settings.get("agent_chat_live_order_sell_enabled")),
+            "side_enabled": bool(settings.get(f"agent_chat_live_order_{side}_enabled", False)),
+            "market_open": market_session.get("is_market_open"),
+            "entry_allowed_now": market_session.get("is_entry_allowed_now"),
+            "no_new_entry_after": market_session.get("no_new_entry_after") or settings.get("kr_no_new_entry_after"),
+            "daily_limit_remaining": remaining,
+            "max_notional_limit": settings.get("agent_chat_live_order_max_notional_krw"),
+            "max_notional_pct": settings.get("agent_chat_live_order_max_notional_pct"),
+        }
 
     def _prepare_flags_enabled(self, settings: dict[str, Any], *, provider: str, side: str) -> bool:
         if provider != "kis":
@@ -736,6 +1159,7 @@ class AgentChatLiveOrderService:
         row.risk_payload_json = _json(risk_payload or {"block_reason": reason})
         row.response_payload_json = _json({"status": status, "block_reason": reason})
         row.safety_payload_json = _json(safety)
+        row.last_state_change_at = _naive_utc(now_utc)
         row.updated_at = _naive_utc(now_utc)
         db.commit()
         db.refresh(row)
@@ -747,6 +1171,7 @@ class AgentChatLiveOrderService:
             safety=safety,
             order=None,
             diagnostics={"block_reason": reason},
+            db=db,
         )
         self._append_result_message(db, row, response)
         return response.model_dump(mode="json")
@@ -761,12 +1186,13 @@ class AgentChatLiveOrderService:
         safety: dict[str, Any],
         order: dict[str, Any] | None,
         diagnostics: dict[str, Any] | None = None,
+        db: Session | None = None,
     ) -> AgentChatLiveOrderResponse:
         return AgentChatLiveOrderResponse(
             status=status,
             answer=AgentChatLiveOrderAnswer(text=text, answer_type=answer_type),
             live_order_action=AgentChatLiveOrderActionPayload.model_validate(
-                self.serialize_action(row)
+                self.serialize_action(row, db=db)
             ),
             order=order,
             safety=safety,
@@ -794,7 +1220,7 @@ class AgentChatLiveOrderService:
                 "safety": response.safety,
                 "metadata": {
                     "answer_type": response.answer.answer_type,
-                    "live_order_action": self.serialize_action(row),
+                    "live_order_action": self.serialize_action(row, db=db),
                     "live_order_result": response.model_dump(mode="json"),
                     "result_cards": [card.model_dump(mode="json")],
                     "available_actions": [],
@@ -805,40 +1231,58 @@ class AgentChatLiveOrderService:
         response.assistant_message_id = message.get("id")
 
     def _source_metadata(self, row: AgentChatOrderAction) -> dict[str, Any]:
-        return {
-            "source": "agent_chat_live_order",
-            "source_type": "chat_confirmed_live_order",
-            "source_context": "agent_chat_confirmed_live_order",
-            "operator_action_source": "agent_chat_confirmation_card",
-            "agent_chat_order_action_id": row.id,
-            "conversation_key": row.conversation_key,
-            "user_message_id": row.user_message_id,
-            "assistant_message_id": row.assistant_message_id,
-            "scope_hash": row.scope_hash,
-            "symbol": row.symbol,
-            "company_name": row.symbol_name,
-            "side": row.side,
-            "quantity": row.quantity,
-            "estimated_price": row.estimated_price,
-            "estimated_notional": row.estimated_notional,
-            "manual_confirm_required": True,
-            "real_order_submit_allowed": False,
-            "real_order_submitted": False,
-            "broker_submit_called": False,
-            "manual_submit_called": False,
-            "auto_buy_enabled": False,
-            "auto_sell_enabled": False,
-            "scheduler_real_order_enabled": False,
-        }
+        request_payload = _parse_json_object(row.request_payload_json)
+        safety_payload = _parse_json_object(row.safety_payload_json)
+        return _sanitize_payload(
+            {
+                "source": "agent_chat_live_order",
+                "source_type": "chat_confirmed_live_order",
+                "source_context": "agent_chat_confirmed_live_order",
+                "operator_action_source": "agent_chat_confirmation_card",
+                "requested_by": "agent_chat",
+                "agent_chat_order_action_id": row.id,
+                "conversation_key": row.conversation_key,
+                "user_message_id": row.user_message_id,
+                "assistant_message_id": row.assistant_message_id,
+                "intent_category": "live_order_request",
+                "selected_tool": "agent_chat_live_order_service",
+                "confirmation_method": "confirmation_card",
+                "confirmation_token_hash": _sha256_text(row.scope_hash),
+                "scope_hash": row.scope_hash,
+                "runtime_settings_snapshot": safety_payload.get("safety_controls") or {},
+                "symbol": row.symbol,
+                "company_name": row.symbol_name,
+                "side": row.side,
+                "quantity": row.quantity,
+                "estimated_price": row.estimated_price,
+                "estimated_notional": row.estimated_notional,
+                "manual_confirm_required": True,
+                "real_order_submit_allowed": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+                "auto_buy_enabled": False,
+                "auto_sell_enabled": False,
+                "scheduler_real_order_enabled": False,
+                "request_summary": {
+                    "currency": request_payload.get("currency"),
+                    "order_type": request_payload.get("order_type"),
+                },
+            }
+        )
 
     def _order_payload(
         self,
         row: AgentChatOrderAction,
         *,
         body: dict[str, Any] | None = None,
+        db: Session | None = None,
     ) -> dict[str, Any] | None:
-        if row.related_order_id is None and body is None:
+        order = self._linked_order(db, row) if db is not None else None
+        if row.related_order_id is None and body is None and order is None:
             return None
+        if order is not None:
+            return serialize_kis_order(order, include_sync_payload=False)
         return {
             "order_id": row.related_order_id or _int_or_none((body or {}).get("order_id")),
             "broker_order_id": row.broker_order_id or _text_or_none((body or {}).get("broker_order_id")),
@@ -884,10 +1328,16 @@ class AgentChatLiveOrderService:
     def _answer_type_for_status(self, status: str) -> str:
         return {
             STATUS_SUBMITTED: "live_order_submitted",
+            STATUS_SYNC_REQUIRED: "live_order_status_sync_required",
+            STATUS_FILLED: "live_order_filled",
+            STATUS_PARTIALLY_FILLED: "live_order_partially_filled",
+            STATUS_REJECTED: "live_order_rejected",
             STATUS_BLOCKED: "live_order_blocked",
             STATUS_CANCELLED: "live_order_cancelled",
             STATUS_EXPIRED: "live_order_expired",
             STATUS_FAILED: "live_order_blocked",
+            STATUS_CONFIRMING: "live_order_blocked",
+            STATUS_SUBMITTING: "live_order_blocked",
         }.get(status, "live_order_blocked")
 
     def _default_kis_client(self, db: Session) -> KisClient:
@@ -908,6 +1358,23 @@ def _base_safety(*, real_order_submitted: bool) -> dict[str, Any]:
         "confirm_live_auto_checked": False,
         "broker_api_called": False,
         "mutation": False,
+    }
+
+
+def _sync_safety() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "safe_execution_only": True,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "validation_called": False,
+        "setting_changed": False,
+        "scheduler_changed": False,
+        "confirm_live_auto_checked": False,
+        "broker_api_called": True,
+        "mutation": False,
+        "sync_submitted_new_order": False,
     }
 
 
@@ -945,6 +1412,13 @@ def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:
 def _scope_hash(payload: dict[str, Any]) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _sha256_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _json(payload: Any) -> str:
@@ -987,7 +1461,30 @@ def _sanitize_payload(value: Any) -> Any:
         return result
     if isinstance(value, list):
         return [_sanitize_payload(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_kis_text(value)
     return value
+
+
+def _summary_payload(
+    payload: dict[str, Any],
+    *,
+    include_keys: set[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        return {}
+    source = _sanitize_payload(payload)
+    if include_keys:
+        result = {
+            key: source.get(key)
+            for key in include_keys
+            if source.get(key) is not None
+        }
+    else:
+        result = source
+    if "error_message" in result and result["error_message"] is not None:
+        result["error_message"] = sanitize_kis_text(str(result["error_message"]))[:300]
+    return result
 
 
 def _normalize_symbol(value: Any) -> str | None:
@@ -1036,7 +1533,7 @@ def _text_or_none(value: Any) -> str | None:
 
 
 def _safe_error(exc: Exception) -> str:
-    text = str(exc).strip() or exc.__class__.__name__
+    text = sanitize_kis_text(str(exc).strip() or exc.__class__.__name__)
     if len(text) > 200:
         text = f"{text[:200]}..."
     return f"{exc.__class__.__name__}: {text}"

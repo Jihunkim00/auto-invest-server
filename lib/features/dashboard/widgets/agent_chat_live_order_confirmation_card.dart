@@ -50,6 +50,10 @@ class AgentChatLiveOrderConfirmationCard extends StatelessWidget {
         ]),
         SizedBox(height: compact ? 8 : 10),
         _LiveOrderRows(action: action, compact: compact),
+        if (action.safetyControls.isNotEmpty) ...[
+          SizedBox(height: compact ? 8 : 10),
+          _SafetyControls(action: action),
+        ],
         SizedBox(height: compact ? 8 : 10),
         Text(
           action.isPending
@@ -107,6 +111,60 @@ class AgentChatLiveOrderConfirmationCard extends StatelessWidget {
     if (approved == true) {
       await onConfirm(action);
     }
+  }
+}
+
+class _SafetyControls extends StatelessWidget {
+  const _SafetyControls({required this.action});
+
+  final AgentChatLiveOrderAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    final controls = action.safetyControls;
+    final rows = [
+      ('dry_run', controls['dry_run']),
+      ('kill_switch', controls['kill_switch']),
+      ('kis_enabled', controls['kis_enabled']),
+      ('kis_real_order_enabled', controls['kis_real_order_enabled']),
+      ('chat_live_order', controls['agent_chat_live_order_enabled']),
+      ('market_open', controls['market_open']),
+      ('entry_allowed_now', controls['entry_allowed_now']),
+      ('daily_limit_remaining', controls['daily_limit_remaining']),
+      ('max_notional_limit', controls['max_notional_limit']),
+    ];
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Text(
+        'Safety Controls',
+        style: TextStyle(
+          color: Colors.orangeAccent,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+      const SizedBox(height: 6),
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        for (final row in rows)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.orangeAccent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: Colors.orangeAccent.withValues(alpha: 0.35),
+              ),
+            ),
+            child: Text(
+              '${row.$1}: ${_controlValue(row.$2)}',
+              style: const TextStyle(
+                color: Colors.orangeAccent,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+      ]),
+    ]);
   }
 }
 
@@ -195,4 +253,10 @@ String _groupDigits(String value) {
     if (fromEnd > 1 && fromEnd % 3 == 1) buffer.write(',');
   }
   return buffer.toString();
+}
+
+String _controlValue(Object? value) {
+  if (value == null) return '-';
+  if (value is bool) return value ? 'ON' : 'OFF';
+  return value.toString();
 }

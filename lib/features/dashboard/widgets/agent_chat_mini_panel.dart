@@ -5,6 +5,7 @@ import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
 import 'agent_chat_live_order_confirmation_card.dart';
+import 'agent_chat_live_order_status_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
 
@@ -132,6 +133,7 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
             onSuggestionSelected: _sendSuggestion,
             onConfirmLiveOrder: _confirmLiveOrder,
             onCancelLiveOrder: _cancelLiveOrder,
+            onRefreshLiveOrder: _syncLiveOrder,
             liveOrderBusy: controller.isAgentLiveOrderActionBusy,
           ),
           if (controller.latestAgentPlan != null) ...[
@@ -223,6 +225,14 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
       SnackBar(content: Text(result.message)),
     );
   }
+
+  Future<void> _syncLiveOrder(AgentChatLiveOrderAction action) async {
+    final result = await widget.controller.syncAgentChatLiveOrder(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
 }
 
 class _RecentAgentMessages extends StatelessWidget {
@@ -232,6 +242,7 @@ class _RecentAgentMessages extends StatelessWidget {
     required this.onSuggestionSelected,
     required this.onConfirmLiveOrder,
     required this.onCancelLiveOrder,
+    required this.onRefreshLiveOrder,
     required this.liveOrderBusy,
   });
 
@@ -242,6 +253,8 @@ class _RecentAgentMessages extends StatelessWidget {
       onConfirmLiveOrder;
   final Future<void> Function(AgentChatLiveOrderAction action)
       onCancelLiveOrder;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onRefreshLiveOrder;
   final bool Function(int actionId) liveOrderBusy;
 
   @override
@@ -254,6 +267,7 @@ class _RecentAgentMessages extends StatelessWidget {
           onSuggestionSelected: onSuggestionSelected,
           onConfirmLiveOrder: onConfirmLiveOrder,
           onCancelLiveOrder: onCancelLiveOrder,
+          onRefreshLiveOrder: onRefreshLiveOrder,
           liveOrderBusy: liveOrderBusy,
         ),
       if (messages.any((message) => message.status == AgentChatStatus.parsing))
@@ -274,6 +288,7 @@ class _MiniMessageLine extends StatelessWidget {
     required this.onSuggestionSelected,
     required this.onConfirmLiveOrder,
     required this.onCancelLiveOrder,
+    required this.onRefreshLiveOrder,
     required this.liveOrderBusy,
   });
 
@@ -283,6 +298,8 @@ class _MiniMessageLine extends StatelessWidget {
       onConfirmLiveOrder;
   final Future<void> Function(AgentChatLiveOrderAction action)
       onCancelLiveOrder;
+  final Future<void> Function(AgentChatLiveOrderAction action)
+      onRefreshLiveOrder;
   final bool Function(int actionId) liveOrderBusy;
 
   @override
@@ -335,13 +352,22 @@ class _MiniMessageLine extends StatelessWidget {
                 ),
               ],
               if (!isUser && message.liveOrderAction != null)
-                AgentChatLiveOrderConfirmationCard(
-                  action: message.liveOrderAction!,
-                  busy: liveOrderBusy(message.liveOrderAction!.actionId),
-                  onConfirm: onConfirmLiveOrder,
-                  onCancel: onCancelLiveOrder,
-                  compact: true,
-                ),
+                if (message.liveOrderAction!.isPending)
+                  AgentChatLiveOrderConfirmationCard(
+                    action: message.liveOrderAction!,
+                    busy: liveOrderBusy(message.liveOrderAction!.actionId),
+                    onConfirm: onConfirmLiveOrder,
+                    onCancel: onCancelLiveOrder,
+                    compact: true,
+                  )
+                else
+                  AgentChatLiveOrderStatusCard(
+                    action: message.liveOrderAction!,
+                    busy: liveOrderBusy(message.liveOrderAction!.actionId),
+                    onRefresh: onRefreshLiveOrder,
+                    onCancel: onCancelLiveOrder,
+                    compact: true,
+                  ),
             ],
           ),
         ),

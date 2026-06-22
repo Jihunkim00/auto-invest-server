@@ -8,6 +8,7 @@ class AgentChatLiveOrderAction {
     required this.provider,
     required this.market,
     required this.currency,
+    this.conversationKey,
     this.actionType = 'chat_confirmed_live_order',
     this.symbolName,
     this.quantity,
@@ -19,11 +20,18 @@ class AgentChatLiveOrderAction {
     this.confirmationToken,
     this.relatedOrderId,
     this.brokerOrderId,
+    this.brokerStatus,
+    this.internalStatus,
+    this.lastSyncAt,
+    this.lastSyncPayload = const {},
+    this.audit = const {},
     this.safety = const {},
+    this.safetyControls = const {},
     this.raw = const {},
   });
 
   final int actionId;
+  final String? conversationKey;
   final String status;
   final String actionType;
   final String provider;
@@ -42,16 +50,31 @@ class AgentChatLiveOrderAction {
   final String? confirmationToken;
   final int? relatedOrderId;
   final String? brokerOrderId;
+  final String? brokerStatus;
+  final String? internalStatus;
+  final String? lastSyncAt;
+  final Map<String, dynamic> lastSyncPayload;
+  final Map<String, dynamic> audit;
   final Map<String, dynamic> safety;
+  final Map<String, dynamic> safetyControls;
   final Map<String, dynamic> raw;
 
   bool get isPending => status == 'pending_confirmation';
   bool get isTerminal =>
       status == 'submitted' ||
+      status == 'filled' ||
+      status == 'partially_filled' ||
+      status == 'rejected' ||
       status == 'blocked' ||
       status == 'expired' ||
       status == 'cancelled' ||
       status == 'failed';
+  bool get isRefreshable =>
+      relatedOrderId != null ||
+      brokerOrderId != null ||
+      status == 'submitted' ||
+      status == 'sync_required' ||
+      status == 'partially_filled';
 
   String get displayName {
     final name = symbolName?.trim();
@@ -64,6 +87,7 @@ class AgentChatLiveOrderAction {
   factory AgentChatLiveOrderAction.fromJson(Map<String, dynamic> json) {
     return AgentChatLiveOrderAction(
       actionId: _readInt(json['action_id'], 0),
+      conversationKey: _readNullableString(json['conversation_key']),
       status: _readString(json['status'], 'unknown'),
       actionType: _readString(
         json['action_type'],
@@ -85,7 +109,13 @@ class AgentChatLiveOrderAction {
       confirmationToken: _readNullableString(json['confirmation_token']),
       relatedOrderId: _readNullableInt(json['related_order_id']),
       brokerOrderId: _readNullableString(json['broker_order_id']),
+      brokerStatus: _readNullableString(json['broker_status']),
+      internalStatus: _readNullableString(json['internal_status']),
+      lastSyncAt: _readNullableString(json['last_sync_at']),
+      lastSyncPayload: _readMap(json['last_sync_payload']),
+      audit: _readMap(json['audit']),
       safety: _readMap(json['safety']),
+      safetyControls: _readMap(json['safety_controls']),
       raw: Map<String, dynamic>.from(json),
     );
   }
