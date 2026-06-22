@@ -1942,6 +1942,62 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> syncAgentChatLiveOrder(
+    AgentChatLiveOrderAction action,
+  ) async {
+    if (action.actionId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is missing an action id.',
+      );
+    }
+    if (_agentLiveOrderActionBusy.contains(action.actionId)) {
+      return const ActionResult(
+        success: false,
+        message: 'Live order action is already being processed.',
+      );
+    }
+
+    _agentLiveOrderActionBusy.add(action.actionId);
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final response = await apiClient.syncAgentChatLiveOrder(action.actionId);
+      if (response.liveOrderAction != null) {
+        _replaceLiveOrderActionInMessages(response.liveOrderAction!);
+      }
+      _appendAgentLiveOrderResponseMessage(response);
+      final synced =
+          response.answer.answerType == 'live_order_status_synced' ||
+              response.status == 'synced';
+      return ActionResult(
+        success: synced,
+        message: response.answer.text.isEmpty
+            ? synced
+                ? 'Live order status synced.'
+                : 'Live order status sync needs review.'
+            : response.answer.text,
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      agentErrorMessage = message;
+      _appendAgentAssistantMessage(
+        message,
+        status: AgentChatStatus.failed,
+        badges: const ['LIVE ORDER', 'SYNC FAILED', 'NO ORDER SUBMITTED'],
+        messageType: 'live_order_status_sync_failed',
+        metadata: {
+          'answer_type': 'live_order_status_sync_failed',
+          'live_order_action': action.raw,
+        },
+      );
+      return ActionResult(success: false, message: message);
+    } finally {
+      _agentLiveOrderActionBusy.remove(action.actionId);
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runAgentSafePlan([int? planId]) async {
     final plan = latestAgentPlan;
     final id = planId ?? plan?.id;
@@ -4794,6 +4850,7 @@ class DashboardController extends ChangeNotifier {
     switch (response.answer.answerType) {
       case 'live_order_blocked':
       case 'live_order_expired':
+      case 'live_order_status_sync_failed':
         return AgentChatStatus.blocked;
       case 'error':
         return AgentChatStatus.failed;
@@ -4816,6 +4873,9 @@ class DashboardController extends ChangeNotifier {
       badges.add('REAL ORDER');
     } else {
       badges.add('NO ORDER SUBMITTED');
+    }
+    if (response.answer.answerType == 'live_order_status_synced') {
+      badges.add('SYNCED');
     }
     if (safety['validation_called'] == true) badges.add('VALIDATED');
     if (safety['risk_approved'] == true) {
@@ -4875,7 +4935,13 @@ class DashboardController extends ChangeNotifier {
       if (action.relatedOrderId != null)
         'related_order_id': action.relatedOrderId,
       if (action.brokerOrderId != null) 'broker_order_id': action.brokerOrderId,
+      if (action.brokerStatus != null) 'broker_status': action.brokerStatus,
+      if (action.internalStatus != null) 'internal_status': action.internalStatus,
+      if (action.lastSyncAt != null) 'last_sync_at': action.lastSyncAt,
+      'last_sync_payload': action.lastSyncPayload,
+      'audit': action.audit,
       'safety': action.safety,
+      'safety_controls': action.safetyControls,
     };
   }
 

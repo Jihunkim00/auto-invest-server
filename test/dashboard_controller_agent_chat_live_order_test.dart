@@ -109,12 +109,43 @@ void main() {
 
     controller.dispose();
   });
+
+  test('syncAgentChatLiveOrder appends status bubble without manual submit',
+      () async {
+    final api = _LiveOrderFakeApi();
+    final action = AgentChatLiveOrderAction.fromJson(
+      _actionJson(status: 'submitted', relatedOrderId: 123),
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..agentMessages = [
+        AgentChatMessage(
+          id: 'assistant-submitted',
+          role: AgentChatRole.assistant,
+          text: 'Live KIS order submitted.',
+          createdAt: DateTime.utc(2026, 6, 21),
+          status: AgentChatStatus.sent,
+          metadata: {'live_order_action': action.raw},
+        ),
+      ];
+
+    final result = await controller.syncAgentChatLiveOrder(action);
+
+    expect(result.success, isTrue);
+    expect(api.syncCalls, 1);
+    expect(api.manualSubmitCalls, 0);
+    expect(controller.agentMessages.first.liveOrderAction?.status, 'filled');
+    expect(controller.agentMessages.last.messageType, 'live_order_status_synced');
+    expect(controller.agentMessages.last.safetyBadges, contains('SYNCED'));
+
+    controller.dispose();
+  });
 }
 
 class _LiveOrderFakeApi extends ApiClient {
   int chatSendCalls = 0;
   int confirmCalls = 0;
   int cancelCalls = 0;
+  int syncCalls = 0;
   int validationCalls = 0;
   int manualSubmitCalls = 0;
 
@@ -230,6 +261,29 @@ class _LiveOrderFakeApi extends ApiClient {
   }
 
   @override
+  Future<AgentChatLiveOrderResponse> syncAgentChatLiveOrder(
+    int actionId,
+  ) async {
+    syncCalls += 1;
+    return AgentChatLiveOrderResponse.fromJson({
+      'status': 'synced',
+      'answer': {
+        'role': 'assistant',
+        'text': 'Live order status synced.',
+        'answer_type': 'live_order_status_synced',
+      },
+      'live_order_action': _actionJson(
+        status: 'filled',
+        relatedOrderId: 123,
+        brokerOrderId: 'KIS-ODNO-1',
+      ),
+      'order': {'order_id': 123, 'internal_status': 'FILLED'},
+      'safety': _safety(validationCalled: false),
+      'diagnostics': {'sync_submitted_new_order': false},
+    });
+  }
+
+  @override
   Future<OrderValidationResult> validateKisOrder({
     required String symbol,
     required String side,
@@ -280,6 +334,17 @@ Map<String, dynamic> _actionJson({
     if (relatedOrderId != null) 'related_order_id': relatedOrderId,
     if (brokerOrderId != null) 'broker_order_id': brokerOrderId,
     'safety': _safety(validationCalled: status == 'submitted'),
+    'safety_controls': {
+      'dry_run': false,
+      'kill_switch': false,
+      'kis_enabled': true,
+      'kis_real_order_enabled': true,
+      'agent_chat_live_order_enabled': true,
+      'market_open': true,
+      'entry_allowed_now': true,
+      'daily_limit_remaining': 1,
+      'max_notional_limit': 50000,
+    },
   };
 }
 

@@ -666,12 +666,15 @@ def _create_agent_chat_order_actions_table_if_missing():
                     expires_at DATETIME NOT NULL,
                     confirmed_at DATETIME,
                     submitted_at DATETIME,
+                    last_state_change_at DATETIME,
+                    last_sync_at DATETIME,
                     related_order_id INTEGER,
                     broker_order_id VARCHAR(100),
                     validation_payload_json TEXT,
                     risk_payload_json TEXT,
                     request_payload_json TEXT,
                     response_payload_json TEXT,
+                    last_sync_payload_json TEXT,
                     safety_payload_json TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -687,6 +690,7 @@ def _create_agent_chat_order_actions_table_if_missing():
             "symbol": "symbol",
             "scope_hash": "scope_hash",
             "expires_at": "expires_at",
+            "last_sync_at": "last_sync_at",
             "related_order_id": "related_order_id",
             "broker_order_id": "broker_order_id",
         }.items():
@@ -696,6 +700,13 @@ def _create_agent_chat_order_actions_table_if_missing():
                     f"ON agent_chat_order_actions ({column})"
                 )
             )
+
+    for column_name, column_sql in {
+        "last_state_change_at": "DATETIME",
+        "last_sync_at": "DATETIME",
+        "last_sync_payload_json": "TEXT",
+    }.items():
+        _add_column_if_missing("agent_chat_order_actions", column_name, column_sql)
 
 
 def _create_agent_execution_tables_if_missing():

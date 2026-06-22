@@ -31,6 +31,9 @@ void main() {
     expect(find.text('Live Order Confirmation Required'), findsOneWidget);
     expect(find.text('Samsung Electronics(005930)'), findsOneWidget);
     expect(find.text('KRW 72,000'), findsWidgets);
+    expect(find.text('Safety Controls'), findsOneWidget);
+    expect(find.text('dry_run: OFF'), findsOneWidget);
+    expect(find.text('kill_switch: OFF'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('agent-chat-live-order-confirm')));
     await tester.pumpAndSettle();
@@ -120,5 +123,16 @@ AgentChatLiveOrderAction _action({String status = 'pending_confirmation'}) {
     'confirmation_phrase': 'CONFIRM 005930 BUY 1',
     'confirmation_token': 'scope-token',
     'safety': {'validation_called': false},
+    'safety_controls': {
+      'dry_run': false,
+      'kill_switch': false,
+      'kis_enabled': true,
+      'kis_real_order_enabled': true,
+      'agent_chat_live_order_enabled': true,
+      'market_open': true,
+      'entry_allowed_now': true,
+      'daily_limit_remaining': 1,
+      'max_notional_limit': 50000,
+    },
   });
 }

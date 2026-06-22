@@ -15,6 +15,11 @@ void main() {
     expect(action.quantity, 1);
     expect(action.estimatedNotional, 72000);
     expect(action.confirmationToken, 'scope-token');
+    expect(action.brokerStatus, 'ACCEPTED');
+    expect(action.internalStatus, 'SUBMITTED');
+    expect(action.lastSyncAt, '2026-06-21T12:05:00Z');
+    expect(action.safetyControls['dry_run'], isFalse);
+    expect(action.audit['requested_by'], 'agent_chat');
     expect(action.safety['validation_called'], isFalse);
     expect(action.raw['symbol'], '005930');
   });
@@ -94,6 +99,21 @@ Map<String, dynamic> _actionJson({String status = 'pending_confirmation'}) {
     'expires_at': '2026-06-21T12:02:00Z',
     'confirmation_phrase': 'CONFIRM 005930 BUY 1',
     'confirmation_token': 'scope-token',
+    'broker_status': 'ACCEPTED',
+    'internal_status': 'SUBMITTED',
+    'last_sync_at': '2026-06-21T12:05:00Z',
+    'audit': {'requested_by': 'agent_chat'},
+    'safety_controls': {
+      'dry_run': false,
+      'kill_switch': false,
+      'kis_enabled': true,
+      'kis_real_order_enabled': true,
+      'agent_chat_live_order_enabled': true,
+      'market_open': true,
+      'entry_allowed_now': true,
+      'daily_limit_remaining': 1,
+      'max_notional_limit': 50000,
+    },
     'safety': {
       'real_order_submitted': false,
       'broker_submit_called': false,
