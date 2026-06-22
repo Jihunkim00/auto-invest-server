@@ -709,6 +709,41 @@ def _create_agent_chat_order_actions_table_if_missing():
         _add_column_if_missing("agent_chat_order_actions", column_name, column_sql)
 
 
+def _create_agent_chat_live_order_settings_audits_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_chat_live_order_settings_audits (
+                    id INTEGER PRIMARY KEY,
+                    changed_by VARCHAR(80) NOT NULL DEFAULT 'operator_ui',
+                    source VARCHAR(80) NOT NULL DEFAULT 'agent_chat_live_order_settings',
+                    preset VARCHAR(80),
+                    confirm_operator_ack BOOLEAN NOT NULL DEFAULT 0,
+                    before_snapshot_json TEXT NOT NULL,
+                    after_snapshot_json TEXT NOT NULL,
+                    request_payload_json TEXT NOT NULL,
+                    safety_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "changed_by": "changed_by",
+            "source": "source",
+            "preset": "preset",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    f"ix_agent_chat_live_order_settings_audits_{name} "
+                    f"ON agent_chat_live_order_settings_audits ({column})"
+                )
+            )
+
+
 def _create_agent_execution_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -865,6 +900,7 @@ def init_db():
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()
+    _create_agent_chat_live_order_settings_audits_table_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
     _create_agent_review_queue_state_table_if_missing()

@@ -5,6 +5,7 @@ import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
 import 'agent_chat_live_order_confirmation_card.dart';
+import 'agent_chat_live_order_readiness_card.dart';
 import 'agent_chat_live_order_status_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
@@ -126,7 +127,20 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
           ),
         ],
         if (!collapsed) ...[
-          const SizedBox(height: 12),
+          if (_showReadinessCard(controller)) ...[
+            const SizedBox(height: 12),
+            AgentChatLiveOrderReadinessCard(
+              readiness: controller.agentChatLiveOrderReadiness,
+              loading: controller.isLoadingAgentChatLiveOrderReadiness,
+              error: controller.agentChatLiveOrderSettingsError,
+              applyingPreset: controller.applyingAgentChatLiveOrderPreset,
+              onRefresh: controller.refreshAgentChatLiveOrderReadiness,
+              onApplyPreset: controller.applyAgentChatLiveOrderPreset,
+              compact: !widget.expanded,
+            ),
+            const SizedBox(height: 12),
+          ] else
+            const SizedBox(height: 12),
           _RecentAgentMessages(
             messages: controller.agentMessages,
             maxItems: widget.expanded ? 5 : 3,
@@ -428,6 +442,12 @@ class _AgentInputRow extends StatelessWidget {
       ),
     ]);
   }
+}
+
+bool _showReadinessCard(DashboardController controller) {
+  return controller.agentChatLiveOrderReadiness != null ||
+      controller.isLoadingAgentChatLiveOrderReadiness ||
+      controller.agentChatLiveOrderSettingsError != null;
 }
 
 class _AgentBadge extends StatelessWidget {

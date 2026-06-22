@@ -401,6 +401,21 @@ class AgentChatOrderAction(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class AgentChatLiveOrderSettingsAudit(Base):
+    __tablename__ = "agent_chat_live_order_settings_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    changed_by = Column(String(80), nullable=False, default="operator_ui", index=True)
+    source = Column(String(80), nullable=False, default="agent_chat_live_order_settings", index=True)
+    preset = Column(String(80), nullable=True, index=True)
+    confirm_operator_ack = Column(Boolean, nullable=False, default=False)
+    before_snapshot_json = Column(Text, nullable=False)
+    after_snapshot_json = Column(Text, nullable=False)
+    request_payload_json = Column(Text, nullable=False)
+    safety_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class AgentPlan(Base):
     __tablename__ = "agent_plans"
 

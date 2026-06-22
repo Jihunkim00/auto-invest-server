@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_live_order_action.dart';
+import '../../models/agent_chat_live_order_readiness.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
@@ -435,6 +436,37 @@ class ApiClient {
         if (item is Map)
           AgentChatLiveOrderAction.fromJson(Map<String, dynamic>.from(item)),
     ];
+  }
+
+  Future<AgentChatLiveOrderReadiness>
+      fetchAgentChatLiveOrderReadiness() async {
+    final payload =
+        await _getJsonNoCache('/agent/chat/live-orders/readiness');
+    return AgentChatLiveOrderReadiness.fromJson(payload);
+  }
+
+  Future<AgentChatLiveOrderSettingsApplyResult>
+      applyAgentChatLiveOrderPreset(String preset) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/live-orders/settings/preset',
+      {
+        'preset': preset,
+        'confirm_operator_ack': true,
+      },
+    );
+    return AgentChatLiveOrderSettingsApplyResult.fromJson(payload);
+  }
+
+  Future<AgentChatLiveOrderSettingsApplyResult>
+      updateAgentChatLiveOrderSettings(Map<String, dynamic> settings) async {
+    final payload = await _putJsonBody(
+      '/agent/chat/live-orders/settings',
+      {
+        ...settings,
+        'confirm_operator_ack': true,
+      },
+    );
+    return AgentChatLiveOrderSettingsApplyResult.fromJson(payload);
   }
 
   Future<AgentChatLiveOrderResponse> syncAgentChatLiveOrder(

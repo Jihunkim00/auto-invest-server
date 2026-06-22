@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentChatLiveOrderActionPayload(BaseModel):
@@ -45,6 +47,33 @@ class AgentChatLiveOrderConfirmRequest(BaseModel):
 
 class AgentChatLiveOrderCancelRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=300)
+
+
+class AgentChatLiveOrderSettingsUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirm_operator_ack: bool = False
+    agent_chat_live_order_enabled: bool | None = None
+    agent_chat_live_order_kis_enabled: bool | None = None
+    agent_chat_live_order_buy_enabled: bool | None = None
+    agent_chat_live_order_sell_enabled: bool | None = None
+    agent_chat_live_order_requires_confirm: bool | None = None
+    agent_chat_live_order_max_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    agent_chat_live_order_max_notional_pct: float | None = Field(default=None, gt=0, le=1)
+    agent_chat_live_order_max_notional_krw: float | None = Field(default=None, gt=0)
+
+
+class AgentChatLiveOrderPresetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preset: Literal[
+        "safe_off",
+        "chat_confirmed_test",
+        "chat_confirmed_buy_only",
+        "chat_confirmed_sell_only",
+        "chat_confirmed_full_guarded",
+    ]
+    confirm_operator_ack: bool = False
 
 
 class AgentChatLiveOrderAnswer(BaseModel):

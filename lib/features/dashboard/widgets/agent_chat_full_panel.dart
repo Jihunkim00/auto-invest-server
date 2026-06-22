@@ -4,6 +4,7 @@ import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
 import '../dashboard_controller.dart';
 import 'agent_chat_live_order_confirmation_card.dart';
+import 'agent_chat_live_order_readiness_card.dart';
 import 'agent_chat_live_order_status_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
@@ -65,6 +66,15 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   const _SafetyNotice(),
+                  if (_showReadinessCard(controller))
+                    AgentChatLiveOrderReadinessCard(
+                      readiness: controller.agentChatLiveOrderReadiness,
+                      loading: controller.isLoadingAgentChatLiveOrderReadiness,
+                      error: controller.agentChatLiveOrderSettingsError,
+                      applyingPreset: controller.applyingAgentChatLiveOrderPreset,
+                      onRefresh: controller.refreshAgentChatLiveOrderReadiness,
+                      onApplyPreset: controller.applyAgentChatLiveOrderPreset,
+                    ),
                   if (controller.isLoadingAgentHistory) ...[
                     const SizedBox(height: 10),
                     const Text(
@@ -432,6 +442,12 @@ class _TypingIndicator extends StatelessWidget {
       ),
     );
   }
+}
+
+bool _showReadinessCard(DashboardController controller) {
+  return controller.agentChatLiveOrderReadiness != null ||
+      controller.isLoadingAgentChatLiveOrderReadiness ||
+      controller.agentChatLiveOrderSettingsError != null;
 }
 
 class _FullInputRow extends StatelessWidget {

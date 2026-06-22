@@ -11,10 +11,13 @@ from app.schemas.agent_chat import (
 from app.schemas.agent_chat_live_order import (
     AgentChatLiveOrderCancelRequest,
     AgentChatLiveOrderConfirmRequest,
+    AgentChatLiveOrderPresetRequest,
+    AgentChatLiveOrderSettingsUpdateRequest,
 )
 from app.schemas.agent_chat_orchestrator import AgentChatSendRequest
 from app.services.agent_chat_live_order_service import (
     AgentChatLiveOrderNotFound,
+    AgentChatLiveOrderSettingsAckRequired,
     AgentChatLiveOrderService,
 )
 from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
@@ -89,6 +92,50 @@ def list_recent_agent_chat_live_orders(
         symbol=symbol,
         conversation_key=conversation_key,
     )
+
+
+@router.get("/live-orders/readiness")
+def get_agent_chat_live_order_readiness(
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    return service.readiness(db)
+
+
+@router.post("/live-orders/settings/preset")
+def apply_agent_chat_live_order_settings_preset(
+    payload: AgentChatLiveOrderPresetRequest,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.apply_settings_preset(
+            db,
+            preset=payload.preset,
+            confirm_operator_ack=payload.confirm_operator_ack,
+        )
+    except AgentChatLiveOrderSettingsAckRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.put("/live-orders/settings")
+def update_agent_chat_live_order_settings(
+    payload: AgentChatLiveOrderSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+    service: AgentChatLiveOrderService = Depends(get_agent_chat_live_order_service),
+):
+    try:
+        return service.update_live_order_settings(
+            db,
+            payload=payload.model_dump(exclude_none=True),
+            confirm_operator_ack=payload.confirm_operator_ack,
+        )
+    except AgentChatLiveOrderSettingsAckRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/live-orders/{action_id}")
