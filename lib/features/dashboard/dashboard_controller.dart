@@ -5,6 +5,7 @@ import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_live_order_action.dart';
+import '../../models/agent_chat_live_order_readiness.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
 import '../../models/agent_command.dart';
@@ -290,6 +291,10 @@ class DashboardController extends ChangeNotifier {
   bool isLoadingAgentOperations = false;
   bool isLoadingAgentReviewQueue = false;
   String? agentOperationsError;
+  AgentChatLiveOrderReadiness? agentChatLiveOrderReadiness;
+  bool isLoadingAgentChatLiveOrderReadiness = false;
+  String? agentChatLiveOrderSettingsError;
+  String? applyingAgentChatLiveOrderPreset;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -472,6 +477,7 @@ class DashboardController extends ChangeNotifier {
       await refreshKisSafetyStatus(silent: true);
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       await refreshSchedulerStatus(silent: true);
+      await refreshAgentChatLiveOrderReadiness(silent: true);
       await refreshKisSchedulerStatus(silent: true);
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
@@ -1408,6 +1414,83 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       isLoadingAgentOperations = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAgentChatLiveOrderReadiness({
+    bool silent = false,
+  }) async {
+    if (isLoadingAgentChatLiveOrderReadiness) {
+      return const ActionResult(
+        success: false,
+        message: 'Agent Chat live-order readiness refresh already in progress.',
+      );
+    }
+
+    isLoadingAgentChatLiveOrderReadiness = true;
+    agentChatLiveOrderSettingsError = null;
+    if (!silent) notifyListeners();
+
+    try {
+      agentChatLiveOrderReadiness =
+          await apiClient.fetchAgentChatLiveOrderReadiness();
+      return const ActionResult(
+        success: true,
+        message: 'Agent Chat live-order readiness refreshed.',
+      );
+    } catch (e) {
+      agentChatLiveOrderSettingsError =
+          'Agent Chat live-order readiness unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentChatLiveOrderSettingsError!),
+      );
+    } finally {
+      isLoadingAgentChatLiveOrderReadiness = false;
+      if (!silent) notifyListeners();
+    }
+  }
+
+  Future<ActionResult> applyAgentChatLiveOrderPreset(String preset) async {
+    if (applyingAgentChatLiveOrderPreset != null) {
+      return const ActionResult(
+        success: false,
+        message: 'Agent Chat live-order preset already in progress.',
+      );
+    }
+
+    applyingAgentChatLiveOrderPreset = preset;
+    agentChatLiveOrderSettingsError = null;
+    notifyListeners();
+
+    try {
+      final result = await apiClient.applyAgentChatLiveOrderPreset(preset);
+      if (result.readiness != null) {
+        agentChatLiveOrderReadiness = result.readiness;
+      } else {
+        agentChatLiveOrderReadiness =
+            await apiClient.fetchAgentChatLiveOrderReadiness();
+      }
+      try {
+        settings = await apiClient.getOpsSettings();
+        kisSafetyStatus = kisSafetyStatusFromSettings();
+      } catch (_) {
+        // Agent Chat preset success should not be hidden by a secondary settings refresh.
+      }
+      return ActionResult(
+        success: true,
+        message: _agentChatPresetAppliedMessage(preset, result.changedKeys),
+      );
+    } catch (e) {
+      agentChatLiveOrderSettingsError =
+          'Agent Chat live-order preset failed: ${ApiErrorFormatter.format(e.toString())}';
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(agentChatLiveOrderSettingsError!),
+      );
+    } finally {
+      applyingAgentChatLiveOrderPreset = null;
       notifyListeners();
     }
   }
@@ -5406,6 +5489,32 @@ String _operationModeLabel(String preset) {
       return 'Full Live Test Mode';
   }
   return preset;
+}
+
+String _agentChatPresetLabel(String preset) {
+  switch (preset) {
+    case 'safe_off':
+      return 'Safe Off';
+    case 'chat_confirmed_test':
+      return 'Chat Confirmed Test';
+    case 'chat_confirmed_buy_only':
+      return 'Buy Only Guarded';
+    case 'chat_confirmed_sell_only':
+      return 'Sell Only Guarded';
+    case 'chat_confirmed_full_guarded':
+      return 'Full Guarded';
+  }
+  return preset;
+}
+
+String _agentChatPresetAppliedMessage(
+  String preset,
+  List<String> changedKeys,
+) {
+  final changed = changedKeys.isEmpty
+      ? 'no setting changes'
+      : '${changedKeys.length} setting(s) changed';
+  return '${_agentChatPresetLabel(preset)} applied: $changed. No order was submitted.';
 }
 
 Map<String, dynamic> _exitPreflightSourceMetadata(

@@ -13,7 +13,11 @@ from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.enums import InternalOrderStatus
-from app.db.models import AgentChatOrderAction, OrderLog
+from app.db.models import (
+    AgentChatLiveOrderSettingsAudit,
+    AgentChatOrderAction,
+    OrderLog,
+)
 from app.schemas.agent_chat_live_order import (
     AgentChatLiveOrderActionPayload,
     AgentChatLiveOrderAnswer,
@@ -40,6 +44,7 @@ from app.services.kis_order_sync_service import (
     serialize_kis_order,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_text
+from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
@@ -85,9 +90,30 @@ TERMINAL_ACTION_STATUSES = {
     STATUS_CONFIRMING,
     STATUS_SUBMITTING,
 }
+CHAT_LIVE_ORDER_SETTING_KEYS = {
+    "agent_chat_live_order_enabled",
+    "agent_chat_live_order_kis_enabled",
+    "agent_chat_live_order_buy_enabled",
+    "agent_chat_live_order_sell_enabled",
+    "agent_chat_live_order_requires_confirm",
+    "agent_chat_live_order_max_orders_per_day",
+    "agent_chat_live_order_max_notional_pct",
+    "agent_chat_live_order_max_notional_krw",
+}
+CHAT_LIVE_ORDER_PRESETS = {
+    "safe_off",
+    "chat_confirmed_test",
+    "chat_confirmed_buy_only",
+    "chat_confirmed_sell_only",
+    "chat_confirmed_full_guarded",
+}
 
 
 class AgentChatLiveOrderNotFound(Exception):
+    pass
+
+
+class AgentChatLiveOrderSettingsAckRequired(Exception):
     pass
 
 
@@ -326,6 +352,256 @@ class AgentChatLiveOrderService:
             "count": len(rows),
             "actions": [self.serialize_action(row, db=db) for row in rows],
         }
+
+    def readiness(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        now_utc = _utc_now(now)
+        settings = self.runtime_settings.get_settings_read_only(db)
+        global_settings = get_settings()
+        market_status = self._readiness_market_status(now_utc=now_utc)
+        orders_used = self._daily_action_count(db, now_utc=now_utc)
+        max_orders = int(settings.get("agent_chat_live_order_max_orders_per_day") or 0)
+        orders_remaining = max(0, max_orders - orders_used)
+        buy_enabled = bool(settings.get("agent_chat_live_order_buy_enabled"))
+        sell_enabled = bool(settings.get("agent_chat_live_order_sell_enabled"))
+        scheduler_real_orders_disabled = not any(
+            bool(settings.get(key))
+            for key in (
+                "kis_scheduler_live_enabled",
+                "kis_scheduler_allow_real_orders",
+                "kis_scheduler_configured_allow_real_orders",
+            )
+        )
+        kis_live_auto_buy_scheduler_disabled = not any(
+            bool(settings.get(key))
+            for key in (
+                "kis_scheduler_buy_enabled",
+                "kis_scheduler_allow_limited_auto_buy",
+                "kis_live_auto_buy_enabled",
+                "kis_limited_auto_buy_enabled",
+            )
+        )
+
+        checks = [
+            _readiness_check(
+                "dry_run",
+                "Dry Run",
+                ok=not bool(settings.get("dry_run")),
+                value=bool(settings.get("dry_run")),
+                failed_severity="blocking",
+                message=(
+                    "dry_run is ON. Chat-confirmed live orders remain blocked "
+                    "until the existing ops settings path disables dry-run."
+                ),
+            ),
+            _readiness_check(
+                "kill_switch",
+                "Kill Switch",
+                ok=not bool(settings.get("kill_switch")),
+                value=bool(settings.get("kill_switch")),
+                failed_severity="blocking",
+                message="kill_switch is ON. No live order path is allowed.",
+            ),
+            _readiness_check(
+                "kis_enabled",
+                "KIS Enabled",
+                ok=bool(getattr(global_settings, "kis_enabled", False)),
+                value=bool(getattr(global_settings, "kis_enabled", False)),
+                failed_severity="blocking",
+                message="KIS integration is disabled in application settings.",
+            ),
+            _readiness_check(
+                "kis_real_order_enabled",
+                "KIS Real Order",
+                ok=bool(getattr(global_settings, "kis_real_order_enabled", False)),
+                value=bool(getattr(global_settings, "kis_real_order_enabled", False)),
+                failed_severity="blocking",
+                message="KIS real-order submission is disabled in application settings.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_enabled",
+                "Agent Chat Live Order",
+                ok=bool(settings.get("agent_chat_live_order_enabled")),
+                value=bool(settings.get("agent_chat_live_order_enabled")),
+                failed_severity="blocking",
+                message="Agent Chat live order is OFF.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_kis_enabled",
+                "Agent Chat KIS Live Order",
+                ok=bool(settings.get("agent_chat_live_order_kis_enabled")),
+                value=bool(settings.get("agent_chat_live_order_kis_enabled")),
+                failed_severity="blocking",
+                message="Agent Chat KIS live order is OFF.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_buy_enabled",
+                "Buy Enabled",
+                ok=buy_enabled,
+                value=buy_enabled,
+                failed_severity="info" if sell_enabled else "blocking",
+                message="Agent Chat buy is OFF.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_sell_enabled",
+                "Sell Enabled",
+                ok=sell_enabled,
+                value=sell_enabled,
+                failed_severity="info" if buy_enabled else "blocking",
+                message="Agent Chat sell is OFF.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_requires_confirm",
+                "Requires Confirmation",
+                ok=bool(settings.get("agent_chat_live_order_requires_confirm")),
+                value=bool(settings.get("agent_chat_live_order_requires_confirm")),
+                failed_severity="blocking",
+                message="Operator confirmation must remain required.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_max_orders_per_day",
+                "Max Orders Per Day",
+                ok=max_orders > 0,
+                value=max_orders,
+                failed_severity="blocking",
+                message="Agent Chat daily live-order limit must be greater than zero.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_daily_remaining",
+                "Daily Orders Remaining",
+                ok=orders_remaining > 0,
+                value=orders_remaining,
+                failed_severity="blocking",
+                message="Agent Chat daily live-order limit has been reached.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_max_notional_krw",
+                "Max Notional KRW",
+                ok=float(settings.get("agent_chat_live_order_max_notional_krw") or 0) > 0,
+                value=settings.get("agent_chat_live_order_max_notional_krw"),
+                failed_severity="blocking",
+                message="Max notional KRW must be greater than zero.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_max_notional_pct",
+                "Max Notional Pct",
+                ok=0 < float(settings.get("agent_chat_live_order_max_notional_pct") or 0) <= 1,
+                value=settings.get("agent_chat_live_order_max_notional_pct"),
+                failed_severity="blocking",
+                message="Max notional percent must be greater than zero and at most one.",
+            ),
+            _readiness_check(
+                "agent_chat_live_order_market_order_enabled",
+                "Market Order Enabled",
+                ok=bool(settings.get("agent_chat_live_order_allow_market_order")),
+                value=bool(settings.get("agent_chat_live_order_allow_market_order")),
+                failed_severity="blocking",
+                message="Agent Chat currently creates market orders, but market orders are disabled.",
+            ),
+            _readiness_check(
+                "scheduler_real_orders_disabled",
+                "Scheduler Real Orders Disabled",
+                ok=scheduler_real_orders_disabled,
+                value=scheduler_real_orders_disabled,
+                failed_severity="warning",
+                message="KIS scheduler real-order flags are enabled outside Agent Chat.",
+            ),
+            _readiness_check(
+                "kis_live_auto_buy_scheduler_disabled",
+                "KIS Auto-Buy Scheduler Disabled",
+                ok=kis_live_auto_buy_scheduler_disabled,
+                value=kis_live_auto_buy_scheduler_disabled,
+                failed_severity="warning",
+                message="KIS live auto-buy scheduler flags are enabled outside Agent Chat.",
+            ),
+        ]
+        checks.extend(self._market_readiness_checks(market_status))
+
+        blocking = [
+            check
+            for check in checks
+            if check.get("severity") == "blocking" and check.get("ok") is not True
+        ]
+        ready = not blocking
+        status = "ready" if ready else "blocked"
+        summary = (
+            "Agent Chat chat-confirmed live orders are ready. Orders still require "
+            "an explicit chat confirmation and backend gates."
+            if ready
+            else "Agent Chat chat-confirmed live orders are currently blocked."
+        )
+
+        return {
+            "status": status,
+            "ready": ready,
+            "ready_for_chat_confirmed_live_order": ready,
+            "provider": "kis",
+            "market": "KR",
+            "summary": summary,
+            "checks": checks,
+            "blocking_reasons": [
+                {"key": check["key"], "message": check["message"]} for check in blocking
+            ],
+            "limits": {
+                "max_orders_per_day": max_orders,
+                "orders_used_today": orders_used,
+                "orders_remaining_today": orders_remaining,
+                "max_notional_krw": settings.get("agent_chat_live_order_max_notional_krw"),
+                "max_notional_pct": settings.get("agent_chat_live_order_max_notional_pct"),
+            },
+            "capabilities": {
+                "buy_enabled": buy_enabled,
+                "sell_enabled": sell_enabled,
+                "market_order_enabled": bool(settings.get("agent_chat_live_order_allow_market_order")),
+                "limit_order_enabled": bool(settings.get("agent_chat_live_order_allow_limit_order")),
+            },
+            "runtime": self._settings_snapshot(settings),
+            "market_session": market_status,
+            "safety": _readiness_safety(read_only=True, setting_changed=False),
+        }
+
+    def apply_settings_preset(
+        self,
+        db: Session,
+        *,
+        preset: str,
+        confirm_operator_ack: bool,
+    ) -> dict[str, Any]:
+        normalized = str(preset or "").strip()
+        if normalized not in CHAT_LIVE_ORDER_PRESETS:
+            raise ValueError(f"unsupported Agent Chat live-order preset: {preset}")
+        return self._apply_live_order_settings(
+            db,
+            payload=self._preset_settings_payload(normalized),
+            preset=normalized,
+            confirm_operator_ack=confirm_operator_ack,
+        )
+
+    def update_live_order_settings(
+        self,
+        db: Session,
+        *,
+        payload: dict[str, Any],
+        confirm_operator_ack: bool,
+    ) -> dict[str, Any]:
+        update_payload = {
+            key: value
+            for key, value in dict(payload).items()
+            if key != "confirm_operator_ack" and value is not None
+        }
+        forbidden = sorted(set(update_payload) - CHAT_LIVE_ORDER_SETTING_KEYS)
+        if forbidden:
+            raise ValueError(f"forbidden Agent Chat live-order setting(s): {', '.join(forbidden)}")
+        return self._apply_live_order_settings(
+            db,
+            payload=update_payload,
+            preset=None,
+            confirm_operator_ack=confirm_operator_ack,
+        )
 
     def sync(
         self,
@@ -852,6 +1128,238 @@ class AgentChatLiveOrderService:
             data=response.model_dump(mode="json"),
         )
 
+    def _preset_settings_payload(self, preset: str) -> dict[str, Any]:
+        conservative_limits = {
+            "agent_chat_live_order_max_orders_per_day": 1,
+            "agent_chat_live_order_max_notional_krw": 50000.0,
+            "agent_chat_live_order_max_notional_pct": 0.03,
+        }
+        if preset == "safe_off":
+            return {
+                "agent_chat_live_order_enabled": False,
+                "agent_chat_live_order_kis_enabled": False,
+                "agent_chat_live_order_buy_enabled": False,
+                "agent_chat_live_order_sell_enabled": False,
+                "agent_chat_live_order_requires_confirm": True,
+            }
+        if preset == "chat_confirmed_test":
+            return {
+                "agent_chat_live_order_enabled": True,
+                "agent_chat_live_order_kis_enabled": True,
+                "agent_chat_live_order_buy_enabled": False,
+                "agent_chat_live_order_sell_enabled": False,
+                "agent_chat_live_order_requires_confirm": True,
+                **conservative_limits,
+            }
+        if preset == "chat_confirmed_buy_only":
+            return {
+                "agent_chat_live_order_enabled": True,
+                "agent_chat_live_order_kis_enabled": True,
+                "agent_chat_live_order_buy_enabled": True,
+                "agent_chat_live_order_sell_enabled": False,
+                "agent_chat_live_order_requires_confirm": True,
+                **conservative_limits,
+            }
+        if preset == "chat_confirmed_sell_only":
+            return {
+                "agent_chat_live_order_enabled": True,
+                "agent_chat_live_order_kis_enabled": True,
+                "agent_chat_live_order_buy_enabled": False,
+                "agent_chat_live_order_sell_enabled": True,
+                "agent_chat_live_order_requires_confirm": True,
+                **conservative_limits,
+            }
+        if preset == "chat_confirmed_full_guarded":
+            return {
+                "agent_chat_live_order_enabled": True,
+                "agent_chat_live_order_kis_enabled": True,
+                "agent_chat_live_order_buy_enabled": True,
+                "agent_chat_live_order_sell_enabled": True,
+                "agent_chat_live_order_requires_confirm": True,
+                **conservative_limits,
+            }
+        raise ValueError(f"unsupported Agent Chat live-order preset: {preset}")
+
+    def _apply_live_order_settings(
+        self,
+        db: Session,
+        *,
+        payload: dict[str, Any],
+        preset: str | None,
+        confirm_operator_ack: bool,
+    ) -> dict[str, Any]:
+        if confirm_operator_ack is not True:
+            raise AgentChatLiveOrderSettingsAckRequired("operator_ack_required")
+        forbidden = sorted(set(payload) - CHAT_LIVE_ORDER_SETTING_KEYS)
+        if forbidden:
+            raise ValueError(f"forbidden Agent Chat live-order setting(s): {', '.join(forbidden)}")
+
+        before = self.runtime_settings.get_settings(db)
+        before_snapshot = self._settings_snapshot(before)
+        after = self.runtime_settings.update_settings(db, payload)
+        after_snapshot = self._settings_snapshot(after)
+        changed_keys = sorted(key for key in payload if before.get(key) != after.get(key))
+        unchanged_keys = sorted(key for key in payload if before.get(key) == after.get(key))
+        safety = _readiness_safety(
+            read_only=False,
+            setting_changed=bool(changed_keys),
+        )
+        audit = self._record_settings_audit(
+            db,
+            preset=preset,
+            confirm_operator_ack=confirm_operator_ack,
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+            request_payload={"preset": preset, "settings": payload},
+            safety=safety,
+        )
+        readiness = self.readiness(db)
+        return {
+            "status": "updated",
+            "applied": True,
+            "preset": preset,
+            "settings": after,
+            "changed_keys": changed_keys,
+            "unchanged_keys": unchanged_keys,
+            "audit_id": audit.id,
+            "before_snapshot": before_snapshot,
+            "after_snapshot": after_snapshot,
+            "readiness": readiness,
+            "safety": safety,
+            "warning_message": self._preset_warning_message(preset),
+        }
+
+    def _record_settings_audit(
+        self,
+        db: Session,
+        *,
+        preset: str | None,
+        confirm_operator_ack: bool,
+        before_snapshot: dict[str, Any],
+        after_snapshot: dict[str, Any],
+        request_payload: dict[str, Any],
+        safety: dict[str, Any],
+    ) -> AgentChatLiveOrderSettingsAudit:
+        row = AgentChatLiveOrderSettingsAudit(
+            changed_by="operator_ui",
+            source="agent_chat_live_order_settings",
+            preset=preset,
+            confirm_operator_ack=confirm_operator_ack,
+            before_snapshot_json=_json(before_snapshot),
+            after_snapshot_json=_json(after_snapshot),
+            request_payload_json=_json(
+                {
+                    **request_payload,
+                    "confirm_operator_ack": confirm_operator_ack,
+                }
+            ),
+            safety_json=_json(safety),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    def _settings_snapshot(self, settings: dict[str, Any]) -> dict[str, Any]:
+        global_settings = get_settings()
+        snapshot_keys = (
+            "dry_run",
+            "kill_switch",
+            "agent_chat_live_order_enabled",
+            "agent_chat_live_order_kis_enabled",
+            "agent_chat_live_order_buy_enabled",
+            "agent_chat_live_order_sell_enabled",
+            "agent_chat_live_order_requires_confirm",
+            "agent_chat_live_order_max_orders_per_day",
+            "agent_chat_live_order_max_notional_pct",
+            "agent_chat_live_order_max_notional_krw",
+            "agent_chat_live_order_allow_market_order",
+            "agent_chat_live_order_allow_limit_order",
+            "agent_chat_live_order_requires_recent_price",
+            "kis_scheduler_enabled",
+            "kis_scheduler_live_enabled",
+            "kis_scheduler_allow_real_orders",
+            "kis_scheduler_configured_allow_real_orders",
+            "kis_scheduler_buy_enabled",
+            "kis_scheduler_allow_limited_auto_buy",
+            "kis_live_auto_buy_enabled",
+            "kis_limited_auto_buy_enabled",
+            "kr_no_new_entry_after",
+        )
+        return _sanitize_payload(
+            {
+                **{key: settings.get(key) for key in snapshot_keys},
+                "kis_enabled": bool(getattr(global_settings, "kis_enabled", False)),
+                "kis_real_order_enabled": bool(
+                    getattr(global_settings, "kis_real_order_enabled", False)
+                ),
+            }
+        )
+
+    def _readiness_market_status(self, *, now_utc: datetime) -> dict[str, Any]:
+        try:
+            status = MarketSessionService().get_session_status("KR", now_utc)
+            return _sanitize_payload({"available": True, **status})
+        except Exception as exc:
+            return {
+                "available": False,
+                "error": _safe_error(exc),
+            }
+
+    def _market_readiness_checks(self, market_status: dict[str, Any]) -> list[dict[str, Any]]:
+        if market_status.get("available") is not True:
+            return [
+                _readiness_check(
+                    "market_session_status",
+                    "Market Session Status",
+                    ok=False,
+                    value=None,
+                    failed_severity="warning",
+                    message="Market session status is unavailable.",
+                )
+            ]
+        return [
+            _readiness_check(
+                "market_session_status",
+                "Market Session Status",
+                ok=market_status.get("is_market_open") is True,
+                value=market_status.get("is_market_open"),
+                failed_severity="blocking",
+                message="KR market is currently closed.",
+            ),
+            _readiness_check(
+                "no_new_entry_after_status",
+                "No New Entry After",
+                ok=market_status.get("is_entry_allowed_now") is True,
+                value=market_status.get("no_new_entry_after"),
+                failed_severity="blocking",
+                message="KR market entry cutoff has passed or entry is currently unavailable.",
+            ),
+        ]
+
+    def _preset_warning_message(self, preset: str | None) -> str:
+        if preset == "chat_confirmed_full_guarded":
+            return (
+                "Buy and sell chat-confirmed orders are enabled, but actual orders "
+                "still require explicit chat confirmation and backend safety gates."
+            )
+        if preset in {"chat_confirmed_buy_only", "chat_confirmed_sell_only"}:
+            return (
+                "This preset changes only Agent Chat live-order settings. It does "
+                "not submit orders, validate orders, or enable schedulers."
+            )
+        if preset == "chat_confirmed_test":
+            return (
+                "This preset enables the chat confirmation UX while keeping buy "
+                "and sell disabled."
+            )
+        if preset == "safe_off":
+            return "All Agent Chat live-order flags are OFF."
+        return (
+            "Agent Chat live-order settings were updated. Orders still require "
+            "explicit chat confirmation and backend gates."
+        )
+
     def _linked_order(self, db: Session | None, row: AgentChatOrderAction) -> OrderLog | None:
         if db is None:
             return None
@@ -1375,6 +1883,42 @@ def _sync_safety() -> dict[str, Any]:
         "broker_api_called": True,
         "mutation": False,
         "sync_submitted_new_order": False,
+    }
+
+
+def _readiness_safety(*, read_only: bool, setting_changed: bool) -> dict[str, Any]:
+    return {
+        "read_only": read_only,
+        "safe_execution_only": True,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+        "validation_called": False,
+        "setting_changed": setting_changed,
+        "scheduler_changed": False,
+        "confirm_live_auto_checked": False,
+        "broker_api_called": False,
+        "mutation": setting_changed,
+    }
+
+
+def _readiness_check(
+    key: str,
+    label: str,
+    *,
+    ok: bool,
+    value: Any,
+    failed_severity: str,
+    message: str,
+) -> dict[str, Any]:
+    passed = ok is True
+    return {
+        "key": key,
+        "label": label,
+        "ok": passed,
+        "value": value,
+        "severity": "ok" if passed else failed_severity,
+        "message": "OK." if passed else message,
     }
 
 
