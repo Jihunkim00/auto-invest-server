@@ -15,7 +15,7 @@ class AgentChatConversationCreateRequest(BaseModel):
 class AgentChatMessageAppendRequest(BaseModel):
     role: str = Field(default="user", max_length=20)
     text: str = Field(min_length=1)
-    message_type: str = Field(default="plain_text", max_length=40)
+    message_type: str = Field(default="plain_text", max_length=80)
     status: str = Field(default="completed", max_length=20)
     command_log_id: int | None = None
     plan_id: int | None = None

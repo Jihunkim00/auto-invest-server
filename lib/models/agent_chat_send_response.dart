@@ -1,6 +1,7 @@
 import 'agent_plan.dart';
 import 'agent_run.dart';
 import 'agent_chat_live_order_action.dart';
+import 'agent_chat_strategy_action.dart';
 import 'agent_chat_tool_result.dart';
 
 class AgentChatSendResponse {
@@ -24,6 +25,7 @@ class AgentChatSendResponse {
     this.plan,
     this.run,
     this.liveOrderAction,
+    this.strategyAction,
     this.answerType,
   });
 
@@ -37,6 +39,7 @@ class AgentChatSendResponse {
   final AgentPlan? plan;
   final AgentPlanRunResult? run;
   final AgentChatLiveOrderAction? liveOrderAction;
+  final AgentChatStrategyAction? strategyAction;
   final List<String> availableActions;
   final AgentChatSafety safety;
   final Map<String, dynamic> contextSnapshot;
@@ -53,6 +56,7 @@ class AgentChatSendResponse {
     final runJson = json['run'];
     final commandJson = json['command'];
     final liveOrderActionJson = json['live_order_action'];
+    final strategyActionJson = json['strategy_action'];
     return AgentChatSendResponse(
       conversationKey: _readString(json['conversation_key'], ''),
       userMessageId: _readNullableInt(json['user_message_id']),
@@ -71,6 +75,11 @@ class AgentChatSendResponse {
       liveOrderAction: liveOrderActionJson is Map
           ? AgentChatLiveOrderAction.fromJson(
               Map<String, dynamic>.from(liveOrderActionJson),
+            )
+          : null,
+      strategyAction: strategyActionJson is Map
+          ? AgentChatStrategyAction.fromJson(
+              Map<String, dynamic>.from(strategyActionJson),
             )
           : null,
       availableActions: _readStringList(json['available_actions']),
@@ -106,6 +115,8 @@ class AgentChatIntent {
     this.quantity,
     this.notional,
     this.currency,
+    this.requestedProfile,
+    this.targetMonthlyReturnPct,
     this.reason,
     this.modelName,
     this.raw = const {},
@@ -122,6 +133,8 @@ class AgentChatIntent {
   final double? quantity;
   final double? notional;
   final String? currency;
+  final String? requestedProfile;
+  final double? targetMonthlyReturnPct;
   final bool requiresPlan;
   final bool requiresAuth;
   final bool requiresManualConfirmation;
@@ -132,7 +145,13 @@ class AgentChatIntent {
   final List<AgentChatToolCall> selectedTools;
   final Map<String, dynamic> raw;
 
-  bool get isReadOnly => category.startsWith('read_only_');
+  bool get isReadOnly =>
+      category.startsWith('read_only_') ||
+      category == 'strategy_profile_query' ||
+      category == 'strategy_profile_compare' ||
+      category == 'strategy_profile_recommendation' ||
+      category == 'strategy_monthly_progress_query' ||
+      category == 'strategy_risk_budget_query';
 
   factory AgentChatIntent.fromJson(Map<String, dynamic> json) {
     return AgentChatIntent(
@@ -147,6 +166,9 @@ class AgentChatIntent {
       quantity: _readNullableDouble(json['quantity']),
       notional: _readNullableDouble(json['notional']),
       currency: _readNullableString(json['currency']),
+      requestedProfile: _readNullableString(json['requested_profile']),
+      targetMonthlyReturnPct:
+          _readNullableDouble(json['target_monthly_return_pct']),
       requiresPlan: json['requires_plan'] == true,
       requiresAuth: json['requires_auth'] == true,
       requiresManualConfirmation: json['requires_manual_confirmation'] == true,

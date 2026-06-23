@@ -264,6 +264,51 @@ class RuntimeSetting(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class StrategyProfile(Base):
+    __tablename__ = "strategy_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_name = Column(String(40), nullable=False, unique=True, index=True)
+    display_name = Column(String(80), nullable=False)
+    description = Column(Text, nullable=True)
+    monthly_target_return_pct = Column(Float, nullable=False)
+    monthly_target_min_pct = Column(Float, nullable=False)
+    monthly_target_max_pct = Column(Float, nullable=False)
+    monthly_max_loss_pct = Column(Float, nullable=False)
+    daily_max_loss_pct = Column(Float, nullable=False)
+    max_order_notional_pct = Column(Float, nullable=False)
+    max_order_notional_krw = Column(Float, nullable=False)
+    max_trades_per_day = Column(Integer, nullable=False)
+    max_positions = Column(Integer, nullable=False)
+    buy_score_threshold = Column(Float, nullable=False)
+    sell_score_threshold = Column(Float, nullable=False)
+    stop_loss_pct = Column(Float, nullable=False)
+    take_profit_pct = Column(Float, nullable=False)
+    max_holding_days = Column(Integer, nullable=False)
+    stop_after_monthly_target = Column(Boolean, nullable=False, default=False)
+    reduce_size_after_loss = Column(Boolean, nullable=False, default=True)
+    consecutive_loss_reduce_threshold = Column(Integer, nullable=False, default=1)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    is_builtin = Column(Boolean, nullable=False, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class StrategyProfileAudit(Base):
+    __tablename__ = "strategy_profile_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(80), nullable=False, index=True)
+    previous_profile = Column(String(40), nullable=True, index=True)
+    new_profile = Column(String(40), nullable=True, index=True)
+    before_snapshot = Column(Text, nullable=True)
+    after_snapshot = Column(Text, nullable=True)
+    confirm_operator_ack = Column(Boolean, nullable=False, default=False)
+    source = Column(String(80), nullable=False, default="unknown", index=True)
+    safety_flags = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class KisShadowExitReviewQueueState(Base):
     __tablename__ = "kis_shadow_exit_review_queue_state"
 
@@ -346,7 +391,7 @@ class AgentChatMessage(Base):
     conversation_id = Column(Integer, nullable=False, index=True)
     conversation_key = Column(String(80), nullable=False, index=True)
     role = Column(String(20), nullable=False, index=True)
-    message_type = Column(String(40), nullable=False, default="plain_text", index=True)
+    message_type = Column(String(80), nullable=False, default="plain_text", index=True)
     status = Column(String(20), nullable=False, default="completed", index=True)
     text = Column(Text, nullable=False)
     command_log_id = Column(Integer, nullable=True, index=True)
@@ -397,6 +442,27 @@ class AgentChatOrderAction(Base):
     response_payload_json = Column(Text, nullable=True)
     last_sync_payload_json = Column(Text, nullable=True)
     safety_payload_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class AgentChatStrategyAction(Base):
+    __tablename__ = "agent_chat_strategy_actions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_key = Column(String(80), nullable=False, index=True)
+    user_message_id = Column(Integer, nullable=True, index=True)
+    assistant_message_id = Column(Integer, nullable=True, index=True)
+    action_type = Column(String(80), nullable=False, default="strategy_profile_apply", index=True)
+    requested_profile = Column(String(40), nullable=False, index=True)
+    current_profile = Column(String(40), nullable=True, index=True)
+    status = Column(String(40), nullable=False, default="pending_confirmation", index=True)
+    confirmation_token_hash = Column(String(64), nullable=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    result_payload = Column(Text, nullable=True)
+    safety_flags = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

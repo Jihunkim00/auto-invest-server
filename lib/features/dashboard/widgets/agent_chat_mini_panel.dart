@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/agent_chat_live_order_action.dart';
 import '../../../models/agent_chat_message.dart';
+import '../../../models/agent_chat_strategy_action.dart';
 import '../dashboard_controller.dart';
 import 'agent_chat_live_order_confirmation_card.dart';
 import 'agent_chat_live_order_readiness_card.dart';
 import 'agent_chat_live_order_status_card.dart';
+import 'agent_chat_strategy_action_card.dart';
 import 'agent_plan_review_card.dart';
 import 'agent_chat_tool_result_card.dart';
 
@@ -149,6 +151,9 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
             onCancelLiveOrder: _cancelLiveOrder,
             onRefreshLiveOrder: _syncLiveOrder,
             liveOrderBusy: controller.isAgentLiveOrderActionBusy,
+            onConfirmStrategyAction: _confirmStrategyAction,
+            onCancelStrategyAction: _cancelStrategyAction,
+            strategyActionBusy: controller.isAgentStrategyActionBusy,
           ),
           if (controller.latestAgentPlan != null) ...[
             const SizedBox(height: 10),
@@ -247,6 +252,24 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
       SnackBar(content: Text(result.message)),
     );
   }
+
+  Future<void> _confirmStrategyAction(
+    AgentChatStrategyAction action,
+  ) async {
+    final result = await widget.controller.confirmAgentChatStrategyAction(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
+
+  Future<void> _cancelStrategyAction(AgentChatStrategyAction action) async {
+    final result = await widget.controller.cancelAgentChatStrategyAction(action);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(result.message)),
+    );
+  }
 }
 
 class _RecentAgentMessages extends StatelessWidget {
@@ -258,6 +281,9 @@ class _RecentAgentMessages extends StatelessWidget {
     required this.onCancelLiveOrder,
     required this.onRefreshLiveOrder,
     required this.liveOrderBusy,
+    required this.onConfirmStrategyAction,
+    required this.onCancelStrategyAction,
+    required this.strategyActionBusy,
   });
 
   final List<AgentChatMessage> messages;
@@ -270,6 +296,11 @@ class _RecentAgentMessages extends StatelessWidget {
   final Future<void> Function(AgentChatLiveOrderAction action)
       onRefreshLiveOrder;
   final bool Function(int actionId) liveOrderBusy;
+  final Future<void> Function(AgentChatStrategyAction action)
+      onConfirmStrategyAction;
+  final Future<void> Function(AgentChatStrategyAction action)
+      onCancelStrategyAction;
+  final bool Function(int actionId) strategyActionBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -283,6 +314,9 @@ class _RecentAgentMessages extends StatelessWidget {
           onCancelLiveOrder: onCancelLiveOrder,
           onRefreshLiveOrder: onRefreshLiveOrder,
           liveOrderBusy: liveOrderBusy,
+          onConfirmStrategyAction: onConfirmStrategyAction,
+          onCancelStrategyAction: onCancelStrategyAction,
+          strategyActionBusy: strategyActionBusy,
         ),
       if (messages.any((message) => message.status == AgentChatStatus.parsing))
         const Padding(
@@ -304,6 +338,9 @@ class _MiniMessageLine extends StatelessWidget {
     required this.onCancelLiveOrder,
     required this.onRefreshLiveOrder,
     required this.liveOrderBusy,
+    required this.onConfirmStrategyAction,
+    required this.onCancelStrategyAction,
+    required this.strategyActionBusy,
   });
 
   final AgentChatMessage message;
@@ -315,6 +352,11 @@ class _MiniMessageLine extends StatelessWidget {
   final Future<void> Function(AgentChatLiveOrderAction action)
       onRefreshLiveOrder;
   final bool Function(int actionId) liveOrderBusy;
+  final Future<void> Function(AgentChatStrategyAction action)
+      onConfirmStrategyAction;
+  final Future<void> Function(AgentChatStrategyAction action)
+      onCancelStrategyAction;
+  final bool Function(int actionId) strategyActionBusy;
 
   @override
   Widget build(BuildContext context) {
@@ -382,6 +424,14 @@ class _MiniMessageLine extends StatelessWidget {
                     onCancel: onCancelLiveOrder,
                     compact: true,
                   ),
+              if (!isUser && message.strategyAction != null)
+                AgentChatStrategyActionCard(
+                  action: message.strategyAction!,
+                  busy: strategyActionBusy(message.strategyAction!.actionId),
+                  onConfirm: onConfirmStrategyAction,
+                  onCancel: onCancelStrategyAction,
+                  compact: true,
+                ),
             ],
           ),
         ),

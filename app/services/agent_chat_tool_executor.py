@@ -13,6 +13,7 @@ from app.schemas.agent_chat_orchestrator import AgentChatIntent
 from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, AgentChatToolSafety
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_profile_service import StrategyProfileService
 
 
 class AgentChatToolExecutor:
@@ -23,11 +24,13 @@ class AgentChatToolExecutor:
         kis_client_factory: Callable[[Session], KisClient] | None = None,
         alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
         runtime_setting_service: RuntimeSettingService | None = None,
+        strategy_profile_service: StrategyProfileService | None = None,
     ) -> None:
         self.registry = registry or AgentChatToolRegistry()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
         self.runtime_setting_service = runtime_setting_service or RuntimeSettingService()
+        self.strategy_profile_service = strategy_profile_service or StrategyProfileService()
 
     def execute_many(
         self,
@@ -68,6 +71,14 @@ class AgentChatToolExecutor:
                 return self._recent_signals(db)
             if tool.tool_name == "ops_settings_lookup":
                 return self._ops_settings(db)
+            if tool.tool_name == "strategy_profiles_lookup":
+                return self._strategy_profiles(db)
+            if tool.tool_name == "active_strategy_profile_lookup":
+                return self._active_strategy_profile(db)
+            if tool.tool_name == "strategy_monthly_progress_lookup":
+                return self._strategy_monthly_progress(db)
+            if tool.tool_name == "strategy_risk_budget_lookup":
+                return self._strategy_risk_budget(db)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -173,6 +184,41 @@ class AgentChatToolExecutor:
         data = {key: settings.get(key) for key in keys if key in settings}
         return self._success("ops_settings_lookup", "settings", {"settings": data}, "Read-only safety settings lookup completed.")
 
+    def _strategy_profiles(self, db: Session) -> AgentChatToolResult:
+        data = self.strategy_profile_service.list_profiles(db)
+        return self._success(
+            "strategy_profiles_lookup",
+            "strategy_profiles",
+            data,
+            "Read-only strategy profiles lookup completed.",
+        )
+
+    def _active_strategy_profile(self, db: Session) -> AgentChatToolResult:
+        active = self.strategy_profile_service.active_profile(db)
+        data = {"active_profile": self.strategy_profile_service.serialize_profile(active)}
+        return self._success(
+            "active_strategy_profile_lookup",
+            "strategy_profile",
+            data,
+            "Read-only active strategy profile lookup completed.",
+        )
+
+    def _strategy_monthly_progress(self, db: Session) -> AgentChatToolResult:
+        return self._success(
+            "strategy_monthly_progress_lookup",
+            "strategy_monthly_progress",
+            self.strategy_profile_service.monthly_progress(db),
+            "Read-only strategy monthly progress lookup completed.",
+        )
+
+    def _strategy_risk_budget(self, db: Session) -> AgentChatToolResult:
+        return self._success(
+            "strategy_risk_budget_lookup",
+            "strategy_risk_budget",
+            self.strategy_profile_service.risk_budget(db),
+            "Read-only strategy risk budget lookup completed.",
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -258,6 +304,10 @@ class AgentChatToolExecutor:
             "recent_runs_lookup": "runs",
             "recent_signals_lookup": "signals",
             "ops_settings_lookup": "settings",
+            "strategy_profiles_lookup": "strategy_profiles",
+            "active_strategy_profile_lookup": "strategy_profile",
+            "strategy_monthly_progress_lookup": "strategy_monthly_progress",
+            "strategy_risk_budget_lookup": "strategy_risk_budget",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }

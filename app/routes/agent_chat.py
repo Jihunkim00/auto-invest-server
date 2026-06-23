@@ -14,6 +14,10 @@ from app.schemas.agent_chat_live_order import (
     AgentChatLiveOrderPresetRequest,
     AgentChatLiveOrderSettingsUpdateRequest,
 )
+from app.schemas.agent_chat_strategy import (
+    AgentChatStrategyActionCancelRequest,
+    AgentChatStrategyActionConfirmRequest,
+)
 from app.schemas.agent_chat_orchestrator import AgentChatSendRequest
 from app.services.agent_chat_live_order_service import (
     AgentChatLiveOrderNotFound,
@@ -24,6 +28,10 @@ from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorSe
 from app.services.agent_chat_service import (
     AgentChatConversationNotFound,
     AgentChatService,
+)
+from app.services.agent_chat_strategy_action_service import (
+    AgentChatStrategyActionNotFound,
+    AgentChatStrategyActionService,
 )
 
 
@@ -57,6 +65,10 @@ def get_agent_chat_orchestrator_service() -> AgentChatOrchestratorService:
 
 def get_agent_chat_live_order_service() -> AgentChatLiveOrderService:
     return AgentChatLiveOrderService()
+
+
+def get_agent_chat_strategy_action_service() -> AgentChatStrategyActionService:
+    return AgentChatStrategyActionService()
 
 
 @router.get("/diagnostics/encoding")
@@ -148,6 +160,52 @@ def get_agent_chat_live_order(
         return service.get(db, action_id=action_id)
     except AgentChatLiveOrderNotFound:
         raise HTTPException(status_code=404, detail="agent_chat_live_order_not_found")
+
+
+@router.get("/strategy-actions/{action_id}")
+def get_agent_chat_strategy_action(
+    action_id: int,
+    db: Session = Depends(get_db),
+    service: AgentChatStrategyActionService = Depends(get_agent_chat_strategy_action_service),
+):
+    try:
+        return service.get(db, action_id=action_id)
+    except AgentChatStrategyActionNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_strategy_action_not_found")
+
+
+@router.post("/strategy-actions/{action_id}/confirm")
+def confirm_agent_chat_strategy_action(
+    action_id: int,
+    payload: AgentChatStrategyActionConfirmRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AgentChatStrategyActionService = Depends(get_agent_chat_strategy_action_service),
+):
+    try:
+        return service.confirm(
+            db,
+            action_id=action_id,
+            request=payload or AgentChatStrategyActionConfirmRequest(),
+        )
+    except AgentChatStrategyActionNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_strategy_action_not_found")
+
+
+@router.post("/strategy-actions/{action_id}/cancel")
+def cancel_agent_chat_strategy_action(
+    action_id: int,
+    payload: AgentChatStrategyActionCancelRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AgentChatStrategyActionService = Depends(get_agent_chat_strategy_action_service),
+):
+    try:
+        return service.cancel(
+            db,
+            action_id=action_id,
+            reason=(payload.reason if payload else None),
+        )
+    except AgentChatStrategyActionNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_strategy_action_not_found")
 
 
 @router.post("/live-orders/{action_id}/confirm")
