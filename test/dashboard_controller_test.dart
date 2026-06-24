@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
+import 'package:auto_invest_dashboard/models/agent_chat_live_order_readiness.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_auto_readiness.dart';
 import 'package:auto_invest_dashboard/models/kis_buy_shadow_decision.dart';
@@ -24,6 +27,7 @@ import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
+import 'package:auto_invest_dashboard/models/strategy_profile.dart';
 import 'package:auto_invest_dashboard/models/trading_run.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
@@ -39,6 +43,25 @@ void main() {
     expect(controller.showingOfflineFallback, isFalse);
     expect(controller.runResult.finalBestCandidate, 'NVDA');
     expect(api.mockCalls, 0);
+
+    controller.dispose();
+  });
+
+  test('load does not wait for deferred strategy profile fetch', () async {
+    final api = _DeferredStrategyApiClient();
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load().timeout(const Duration(seconds: 1));
+
+    expect(controller.loading, isFalse);
+    expect(controller.strategyProfilesLoading, isTrue);
+    expect(controller.runResult.finalBestCandidate, isEmpty);
+
+    api.completeStrategyProfiles();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.strategyProfilesLoading, isFalse);
+    expect(controller.activeStrategyProfile?.profileName, 'safe');
 
     controller.dispose();
   });
@@ -1492,6 +1515,15 @@ class _FakeApiClient extends ApiClient {
       KisSchedulerSimulationStatus.safeDefault();
 
   @override
+  Future<AgentChatLiveOrderReadiness>
+      fetchAgentChatLiveOrderReadiness() async =>
+          _blockedAgentChatLiveOrderReadiness();
+
+  @override
+  Future<StrategyProfileList> fetchStrategyProfiles() async =>
+      _safeStrategyProfileList();
+
+  @override
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
     fetchRecentRunsCalls += 1;
     return recentRuns;
@@ -1841,6 +1873,82 @@ class _FakeApiClient extends ApiClient {
     mockCalls += 1;
     return _resultFor('MOCK');
   }
+}
+
+class _DeferredStrategyApiClient extends _FakeApiClient {
+  final Completer<StrategyProfileList> _strategyProfiles =
+      Completer<StrategyProfileList>();
+
+  @override
+  Future<StrategyProfileList> fetchStrategyProfiles() =>
+      _strategyProfiles.future;
+
+  void completeStrategyProfiles() {
+    _strategyProfiles.complete(_safeStrategyProfileList());
+  }
+}
+
+AgentChatLiveOrderReadiness _blockedAgentChatLiveOrderReadiness() {
+  return AgentChatLiveOrderReadiness.fromJson({
+    'status': 'blocked',
+    'ready': false,
+    'ready_for_chat_confirmed_live_order': false,
+    'provider': 'kis',
+    'market': 'KR',
+    'summary': 'Blocked in dashboard controller tests.',
+    'checks': const [],
+    'limits': const {
+      'max_orders_per_day': 1,
+      'orders_used_today': 0,
+      'orders_remaining_today': 1,
+      'max_notional_krw': 50000,
+      'max_notional_pct': 0.03,
+    },
+    'capabilities': const {
+      'buy_enabled': false,
+      'sell_enabled': false,
+      'market_order_enabled': true,
+      'limit_order_enabled': false,
+    },
+    'safety': const {
+      'read_only': true,
+      'real_order_submitted': false,
+      'validation_called': false,
+      'scheduler_changed': false,
+    },
+  });
+}
+
+StrategyProfileList _safeStrategyProfileList() {
+  const profile = {
+    'id': 1,
+    'profile_name': 'safe',
+    'display_name': '안정형',
+    'description': 'Safe test profile',
+    'monthly_target_return_pct': 0.015,
+    'monthly_target_min_pct': 0.01,
+    'monthly_target_max_pct': 0.02,
+    'monthly_max_loss_pct': -0.02,
+    'daily_max_loss_pct': -0.005,
+    'max_order_notional_pct': 0.02,
+    'max_order_notional_krw': 30000,
+    'max_trades_per_day': 1,
+    'max_positions': 2,
+    'buy_score_threshold': 75,
+    'sell_score_threshold': 65,
+    'stop_loss_pct': -0.012,
+    'take_profit_pct': 0.02,
+    'max_holding_days': 5,
+    'stop_after_monthly_target': true,
+    'reduce_size_after_loss': true,
+    'consecutive_loss_reduce_threshold': 1,
+    'is_active': true,
+    'is_builtin': true,
+  };
+  return StrategyProfileList.fromJson({
+    'profiles': [profile],
+    'active_profile': profile,
+  });
 }
 
 MarketWatchlist _watchlist(String market, List<String> symbols) {

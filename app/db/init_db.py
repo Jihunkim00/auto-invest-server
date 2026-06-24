@@ -1,6 +1,6 @@
 from sqlalchemy import inspect, text
 
-from app.db.database import engine
+from app.db.database import SessionLocal, engine
 from app.db.models import Base
 from app.db import models  # noqa: F401
 
@@ -209,6 +209,149 @@ def _create_runtime_settings_table_if_missing():
         )
 
 
+def _create_strategy_tables_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_profiles (
+                    id INTEGER PRIMARY KEY,
+                    profile_name VARCHAR(40) NOT NULL UNIQUE,
+                    display_name VARCHAR(80) NOT NULL,
+                    description TEXT,
+                    monthly_target_return_pct FLOAT NOT NULL,
+                    monthly_target_min_pct FLOAT NOT NULL,
+                    monthly_target_max_pct FLOAT NOT NULL,
+                    monthly_max_loss_pct FLOAT NOT NULL,
+                    daily_max_loss_pct FLOAT NOT NULL,
+                    max_order_notional_pct FLOAT NOT NULL,
+                    max_order_notional_krw FLOAT NOT NULL,
+                    max_trades_per_day INTEGER NOT NULL,
+                    max_positions INTEGER NOT NULL,
+                    buy_score_threshold FLOAT NOT NULL,
+                    sell_score_threshold FLOAT NOT NULL,
+                    stop_loss_pct FLOAT NOT NULL,
+                    take_profit_pct FLOAT NOT NULL,
+                    max_holding_days INTEGER NOT NULL,
+                    stop_after_monthly_target BOOLEAN NOT NULL DEFAULT 0,
+                    reduce_size_after_loss BOOLEAN NOT NULL DEFAULT 1,
+                    consecutive_loss_reduce_threshold INTEGER NOT NULL DEFAULT 1,
+                    is_active BOOLEAN NOT NULL DEFAULT 0,
+                    is_builtin BOOLEAN NOT NULL DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_profiles_profile_name "
+                "ON strategy_profiles (profile_name)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_is_active "
+                "ON strategy_profiles (is_active)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_is_builtin "
+                "ON strategy_profiles (is_builtin)"
+            )
+        )
+
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_profile_audits (
+                    id INTEGER PRIMARY KEY,
+                    action VARCHAR(80) NOT NULL,
+                    previous_profile VARCHAR(40),
+                    new_profile VARCHAR(40),
+                    before_snapshot TEXT,
+                    after_snapshot TEXT,
+                    confirm_operator_ack BOOLEAN NOT NULL DEFAULT 0,
+                    source VARCHAR(80) NOT NULL DEFAULT 'unknown',
+                    safety_flags TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "action": "action",
+            "previous_profile": "previous_profile",
+            "new_profile": "new_profile",
+            "source": "source",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_strategy_profile_audits_{name} "
+                    f"ON strategy_profile_audits ({column})"
+                )
+            )
+
+
+def _create_agent_chat_strategy_actions_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS agent_chat_strategy_actions (
+                    id INTEGER PRIMARY KEY,
+                    conversation_key VARCHAR(80) NOT NULL,
+                    user_message_id INTEGER,
+                    assistant_message_id INTEGER,
+                    action_type VARCHAR(80) NOT NULL DEFAULT 'strategy_profile_apply',
+                    requested_profile VARCHAR(40) NOT NULL,
+                    current_profile VARCHAR(40),
+                    status VARCHAR(40) NOT NULL DEFAULT 'pending_confirmation',
+                    confirmation_token_hash VARCHAR(64),
+                    expires_at DATETIME NOT NULL,
+                    confirmed_at DATETIME,
+                    cancelled_at DATETIME,
+                    result_payload TEXT,
+                    safety_flags TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "conversation_key": "conversation_key",
+            "user_message_id": "user_message_id",
+            "assistant_message_id": "assistant_message_id",
+            "action_type": "action_type",
+            "requested_profile": "requested_profile",
+            "current_profile": "current_profile",
+            "status": "status",
+            "confirmation_token_hash": "confirmation_token_hash",
+            "expires_at": "expires_at",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_agent_chat_strategy_actions_{name} "
+                    f"ON agent_chat_strategy_actions ({column})"
+                )
+            )
+
+
+def _seed_strategy_profiles_if_needed():
+    from app.services.strategy_profile_service import StrategyProfileService
+
+    db = SessionLocal()
+    try:
+        StrategyProfileService().ensure_seeded(db)
+    finally:
+        db.close()
+
+
 def _create_kis_shadow_exit_review_queue_state_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -406,7 +549,7 @@ def _create_agent_chat_tables_if_missing():
                     conversation_id INTEGER NOT NULL,
                     conversation_key VARCHAR(80) NOT NULL,
                     role VARCHAR(20) NOT NULL,
-                    message_type VARCHAR(40) NOT NULL DEFAULT 'plain_text',
+                    message_type VARCHAR(80) NOT NULL DEFAULT 'plain_text',
                     status VARCHAR(20) NOT NULL DEFAULT 'completed',
                     text TEXT NOT NULL,
                     command_log_id INTEGER,
@@ -894,6 +1037,9 @@ def init_db():
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _create_strategy_tables_if_missing()
+    _create_agent_chat_strategy_actions_table_if_missing()
+    _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()

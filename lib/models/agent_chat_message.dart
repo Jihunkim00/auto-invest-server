@@ -1,5 +1,6 @@
 import 'agent_chat_tool_result.dart';
 import 'agent_chat_live_order_action.dart';
+import 'agent_chat_strategy_action.dart';
 
 enum AgentChatRole {
   user,
@@ -74,6 +75,16 @@ class AgentChatMessage {
     final value = metadata['live_order_action'];
     if (value is Map) {
       return AgentChatLiveOrderAction.fromJson(Map<String, dynamic>.from(value));
+    }
+    return null;
+  }
+
+  AgentChatStrategyAction? get strategyAction {
+    final value = metadata['strategy_action'];
+    if (value is Map) {
+      return AgentChatStrategyAction.fromJson(
+        Map<String, dynamic>.from(value),
+      );
     }
     return null;
   }

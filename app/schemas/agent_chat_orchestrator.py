@@ -11,6 +11,7 @@ from app.schemas.agent_chat_tool import (
     AgentChatToolResult,
 )
 from app.schemas.agent_chat_live_order import AgentChatLiveOrderActionPayload
+from app.schemas.agent_chat_strategy import AgentChatStrategyActionPayload
 
 
 class AgentChatIntentCategory(str, Enum):
@@ -30,6 +31,12 @@ class AgentChatIntentCategory(str, Enum):
     LIVE_ORDER_REQUEST = "live_order_request"
     DANGEROUS_SETTING_REQUEST = "dangerous_setting_request"
     SCHEDULER_REQUEST = "scheduler_request"
+    STRATEGY_PROFILE_QUERY = "strategy_profile_query"
+    STRATEGY_PROFILE_COMPARE = "strategy_profile_compare"
+    STRATEGY_PROFILE_RECOMMENDATION = "strategy_profile_recommendation"
+    STRATEGY_PROFILE_CHANGE_REQUEST = "strategy_profile_change_request"
+    STRATEGY_MONTHLY_PROGRESS_QUERY = "strategy_monthly_progress_query"
+    STRATEGY_RISK_BUDGET_QUERY = "strategy_risk_budget_query"
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 
@@ -68,6 +75,8 @@ class AgentChatIntent(BaseModel):
     quantity: float | None = None
     notional: float | None = None
     currency: str | None = None
+    requested_profile: str | None = None
+    target_monthly_return_pct: float | None = None
     requires_plan: bool = False
     requires_auth: bool = False
     requires_manual_confirmation: bool = False
@@ -110,6 +119,7 @@ class AgentChatSendResponse(BaseModel):
     plan: dict[str, Any] | None = None
     run: dict[str, Any] | None = None
     live_order_action: AgentChatLiveOrderActionPayload | None = None
+    strategy_action: AgentChatStrategyActionPayload | None = None
     available_actions: list[str] = Field(default_factory=list)
     safety: AgentChatSafetyFlags = Field(default_factory=AgentChatSafetyFlags)
     context_snapshot: dict[str, Any] = Field(default_factory=dict)

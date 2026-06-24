@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
@@ -8,6 +10,7 @@ import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_live_order_readiness.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
+import '../../models/agent_chat_strategy_action.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_live_prefill.dart';
 import '../../models/agent_operations.dart';
@@ -47,6 +50,7 @@ import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
+import '../../models/strategy_profile.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -275,6 +279,7 @@ class DashboardController extends ChangeNotifier {
   bool isAgentRunning = false;
   bool isAgentPreparingTicket = false;
   final Set<int> _agentLiveOrderActionBusy = <int>{};
+  final Set<int> _agentStrategyActionBusy = <int>{};
   AgentCommandParseResult? latestAgentCommand;
   AgentPlan? latestAgentPlan;
   AgentPlanRunResult? latestAgentRun;
@@ -295,6 +300,11 @@ class DashboardController extends ChangeNotifier {
   bool isLoadingAgentChatLiveOrderReadiness = false;
   String? agentChatLiveOrderSettingsError;
   String? applyingAgentChatLiveOrderPreset;
+  List<StrategyProfile> strategyProfiles = const [];
+  StrategyProfile? activeStrategyProfile;
+  bool strategyProfilesLoading = false;
+  String? strategyProfileError;
+  String? applyingStrategyProfileName;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -394,6 +404,9 @@ class DashboardController extends ChangeNotifier {
 
   bool isAgentLiveOrderActionBusy(int actionId) =>
       _agentLiveOrderActionBusy.contains(actionId);
+
+  bool isAgentStrategyActionBusy(int actionId) =>
+      _agentStrategyActionBusy.contains(actionId);
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -511,6 +524,30 @@ class DashboardController extends ChangeNotifier {
     } finally {
       loading = false;
       notifyListeners();
+    }
+    unawaited(_loadStrategyProfileState());
+  }
+
+  Future<void> _loadStrategyProfileState() async {
+    if (strategyProfilesLoading) return;
+
+    strategyProfilesLoading = true;
+    strategyProfileError = null;
+    if (hasListeners) notifyListeners();
+
+    try {
+      final result = await apiClient.fetchStrategyProfiles().timeout(
+            const Duration(seconds: 3),
+          );
+      strategyProfiles = result.profiles;
+      activeStrategyProfile = result.activeProfile;
+    } on TimeoutException {
+      strategyProfileError = 'Strategy profiles unavailable: request timed out.';
+    } catch (e) {
+      strategyProfileError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyProfilesLoading = false;
+      if (hasListeners) notifyListeners();
     }
   }
 
@@ -1495,6 +1532,84 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshStrategyProfiles({bool silent = false}) async {
+    if (strategyProfilesLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy profiles are already loading.',
+      );
+    }
+
+    strategyProfilesLoading = true;
+    strategyProfileError = null;
+    if (!silent) notifyListeners();
+
+    try {
+      final result = await apiClient.fetchStrategyProfiles();
+      strategyProfiles = result.profiles;
+      activeStrategyProfile = result.activeProfile;
+      return ActionResult(
+        success: true,
+        message:
+            'Strategy profiles refreshed: ${result.activeProfile.displayName}.',
+      );
+    } catch (e) {
+      strategyProfileError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyProfileError!),
+      );
+    } finally {
+      strategyProfilesLoading = false;
+      if (!silent) notifyListeners();
+    }
+  }
+
+  Future<ActionResult> applyStrategyProfilePreset(String profileName) async {
+    final normalized = profileName.trim().toLowerCase();
+    if (applyingStrategyProfileName != null) {
+      return const ActionResult(
+        success: false,
+        message: 'A strategy profile change is already running.',
+      );
+    }
+
+    applyingStrategyProfileName = normalized;
+    strategyProfileError = null;
+    notifyListeners();
+
+    try {
+      final result = await apiClient.applyStrategyProfilePreset(normalized);
+      activeStrategyProfile = result.activeProfile;
+      if (strategyProfiles.isNotEmpty) {
+        strategyProfiles = [
+          for (final profile in strategyProfiles)
+            StrategyProfile.fromJson({
+              ...profile.toJson(),
+              'is_active':
+                  profile.profileName == result.activeProfile.profileName,
+            }),
+        ];
+      } else {
+        await refreshStrategyProfiles(silent: true);
+      }
+      return ActionResult(
+        success: true,
+        message:
+            '${result.activeProfile.displayName} strategy profile applied. No order submitted.',
+      );
+    } catch (e) {
+      strategyProfileError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyProfileError!),
+      );
+    } finally {
+      applyingStrategyProfileName = null;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshAgentReviewQueue({String? filter}) async {
     if (filter != null && filter.trim().isNotEmpty) {
       selectedAgentQueueFilter = filter.trim();
@@ -2021,6 +2136,132 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: false, message: message);
     } finally {
       _agentLiveOrderActionBusy.remove(action.actionId);
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> confirmAgentChatStrategyAction(
+    AgentChatStrategyAction action,
+  ) async {
+    if (action.actionId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy action is missing an action id.',
+      );
+    }
+    if (!action.isPending) {
+      return ActionResult(
+        success: false,
+        message: 'Strategy action is ${action.status}.',
+      );
+    }
+    if (_agentStrategyActionBusy.contains(action.actionId)) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy action is already being processed.',
+      );
+    }
+
+    _agentStrategyActionBusy.add(action.actionId);
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final response = await apiClient.confirmAgentChatStrategyAction(action);
+      if (response.strategyAction != null) {
+        _replaceStrategyActionInMessages(response.strategyAction!);
+      }
+      if (response.activeProfile != null) {
+        activeStrategyProfile = response.activeProfile;
+      }
+      _appendAgentStrategyActionResponseMessage(response);
+      final applied = response.status == 'applied' ||
+          response.answer.answerType == 'strategy_profile_applied';
+      return ActionResult(
+        success: applied,
+        message: response.answer.text.isEmpty
+            ? applied
+                ? 'Strategy profile applied. No order submitted.'
+                : 'Strategy profile was not applied.'
+            : response.answer.text,
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      agentErrorMessage = message;
+      _appendAgentAssistantMessage(
+        message,
+        status: AgentChatStatus.failed,
+        badges: const ['PROFILE ONLY', 'CONFIRM FAILED', 'NO ORDER SUBMIT'],
+        messageType: 'strategy_profile_blocked',
+        metadata: {
+          'answer_type': 'strategy_profile_blocked',
+          'strategy_action': action.raw,
+        },
+      );
+      return ActionResult(success: false, message: message);
+    } finally {
+      _agentStrategyActionBusy.remove(action.actionId);
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> cancelAgentChatStrategyAction(
+    AgentChatStrategyAction action,
+  ) async {
+    if (action.actionId <= 0) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy action is missing an action id.',
+      );
+    }
+    if (!action.isPending) {
+      return ActionResult(
+        success: false,
+        message: 'Strategy action is ${action.status}.',
+      );
+    }
+    if (_agentStrategyActionBusy.contains(action.actionId)) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy action is already being processed.',
+      );
+    }
+
+    _agentStrategyActionBusy.add(action.actionId);
+    agentErrorMessage = null;
+    notifyListeners();
+    try {
+      final response =
+          await apiClient.cancelAgentChatStrategyAction(action.actionId);
+      if (response.strategyAction != null) {
+        _replaceStrategyActionInMessages(response.strategyAction!);
+      }
+      _appendAgentStrategyActionResponseMessage(response);
+      final cancelled = response.status == 'cancelled' ||
+          response.answer.answerType == 'strategy_profile_cancelled';
+      return ActionResult(
+        success: cancelled,
+        message: response.answer.text.isEmpty
+            ? cancelled
+                ? 'Strategy profile change cancelled.'
+                : 'Strategy profile change was not cancelled.'
+            : response.answer.text,
+      );
+    } catch (e) {
+      final message = _primaryMessage(ApiErrorFormatter.format(e.toString()));
+      agentErrorMessage = message;
+      _appendAgentAssistantMessage(
+        message,
+        status: AgentChatStatus.failed,
+        badges: const ['PROFILE ONLY', 'CANCEL FAILED'],
+        messageType: 'strategy_profile_blocked',
+        metadata: {
+          'answer_type': 'strategy_profile_blocked',
+          'strategy_action': action.raw,
+        },
+      );
+      return ActionResult(success: false, message: message);
+    } finally {
+      _agentStrategyActionBusy.remove(action.actionId);
       notifyListeners();
     }
   }
@@ -4767,11 +5008,18 @@ class DashboardController extends ChangeNotifier {
             : AgentChatStatus.readyForReview;
       case 'live_order_confirmation_required':
         return AgentChatStatus.readyForReview;
+      case 'strategy_profile_change_confirmation_required':
+        return AgentChatStatus.readyForReview;
       case 'live_order_blocked':
       case 'live_order_expired':
+      case 'strategy_profile_blocked':
+      case 'strategy_profile_expired':
         return AgentChatStatus.blocked;
       case 'live_order_submitted':
       case 'live_order_cancelled':
+      case 'strategy_profile_applied':
+      case 'strategy_profile_cancelled':
+      case 'strategy_profile_answer':
         return AgentChatStatus.sent;
       case 'analysis_summary':
         if (response.run != null) return AgentChatStatus.safeRunCompleted;
@@ -4788,6 +5036,9 @@ class DashboardController extends ChangeNotifier {
   ) {
     final isLiveOrderAction = response.liveOrderAction != null ||
         response.answer.answerType == 'live_order_confirmation_required';
+    final isStrategyAction = response.strategyAction != null ||
+        response.answer.answerType ==
+            'strategy_profile_change_confirmation_required';
     final badges = <String>[
       response.intent.fallbackUsed ? 'FALLBACK ROUTER' : 'GPT-BACKED',
       'SERVER-SIDE API',
@@ -4799,6 +5050,14 @@ class DashboardController extends ChangeNotifier {
         'VALIDATION REQUIRED',
         'RISK GATED',
         'NO AUTO SUBMIT',
+      ]);
+    } else if (isStrategyAction) {
+      badges.addAll([
+        'PROFILE ONLY',
+        'CONFIRM REQUIRED',
+        'NO ORDER SUBMIT',
+        'STRATEGY TARGET',
+        response.strategyAction?.requestedProfile.toUpperCase() ?? '',
       ]);
     } else {
       badges.addAll(['NO ORDER', 'NO AUTO SUBMIT']);
@@ -4832,7 +5091,7 @@ class DashboardController extends ChangeNotifier {
       badges.add('AUTH REQUIRED');
     }
     if (response.answer.answerType == 'blocked') badges.add('BLOCKED');
-    return badges.toSet().toList();
+    return badges.where((badge) => badge.trim().isNotEmpty).toSet().toList();
   }
 
   Map<String, dynamic> _agentMetadataForChatSendResponse(
@@ -4854,6 +5113,8 @@ class DashboardController extends ChangeNotifier {
       'available_actions': response.availableActions,
       if (response.liveOrderAction != null)
         'live_order_action': response.liveOrderAction!.raw,
+      if (response.strategyAction != null)
+        'strategy_action': response.strategyAction!.raw,
       'safety': response.safety.raw,
       'context_snapshot': response.contextSnapshot,
       'selected_tools': [
@@ -4927,6 +5188,40 @@ class DashboardController extends ChangeNotifier {
     ];
   }
 
+  void _appendAgentStrategyActionResponseMessage(
+    AgentChatStrategyActionResponse response,
+  ) {
+    final action = response.strategyAction;
+    agentMessages = [
+      ...agentMessages,
+      AgentChatMessage(
+        id: _newAgentMessageId('assistant'),
+        role: response.answer.answerType == 'error'
+            ? AgentChatRole.error
+            : AgentChatRole.assistant,
+        text: response.answer.text,
+        createdAt: DateTime.now(),
+        status: _agentStatusForStrategyActionResponse(response),
+        conversationKey: activeAgentConversationKey,
+        messageType: response.answer.answerType,
+        safetyBadges: _agentSafetyBadgesForStrategyActionResponse(response),
+        metadata: {
+          'answer_type': response.answer.answerType,
+          'strategy_action_result': {
+            'status': response.status,
+            if (response.assistantMessageId != null)
+              'assistant_message_id': response.assistantMessageId,
+            'diagnostics': response.diagnostics,
+          },
+          if (action != null) 'strategy_action': action.raw,
+          if (response.activeProfile != null)
+            'active_profile': response.activeProfile!.toJson(),
+          'safety': response.safety,
+        },
+      ),
+    ];
+  }
+
   AgentChatStatus _agentStatusForLiveOrderResponse(
     AgentChatLiveOrderResponse response,
   ) {
@@ -4971,6 +5266,44 @@ class DashboardController extends ChangeNotifier {
     return badges.toSet().toList();
   }
 
+  AgentChatStatus _agentStatusForStrategyActionResponse(
+    AgentChatStrategyActionResponse response,
+  ) {
+    switch (response.answer.answerType) {
+      case 'strategy_profile_blocked':
+      case 'strategy_profile_expired':
+        return AgentChatStatus.blocked;
+      case 'error':
+        return AgentChatStatus.failed;
+      default:
+        return AgentChatStatus.sent;
+    }
+  }
+
+  List<String> _agentSafetyBadgesForStrategyActionResponse(
+    AgentChatStrategyActionResponse response,
+  ) {
+    final safety = response.safety;
+    final status = response.status.toUpperCase().replaceAll('_', ' ');
+    final profile =
+        response.strategyAction?.requestedProfile.toUpperCase() ?? '';
+    final badges = <String>[
+      'PROFILE ONLY',
+      if (status.isNotEmpty) status,
+      if (profile.isNotEmpty) profile,
+      'SERVER-SIDE API',
+      'NO ORDER SUBMIT',
+    ];
+    if (safety['setting_changed'] == true) {
+      badges.add('STRATEGY APPLIED');
+    } else {
+      badges.add('NO SETTINGS CHANGE');
+    }
+    if (safety['validation_called'] != true) badges.add('NO VALIDATION');
+    if (safety['scheduler_changed'] != true) badges.add('NO SCHEDULER CHANGE');
+    return badges.where((badge) => badge.trim().isNotEmpty).toSet().toList();
+  }
+
   void _replaceLiveOrderActionInMessages(AgentChatLiveOrderAction action) {
     final replacement = action.raw.isEmpty
         ? _liveOrderActionMetadata(action)
@@ -4987,6 +5320,44 @@ class DashboardController extends ChangeNotifier {
         else
           message,
     ];
+  }
+
+  void _replaceStrategyActionInMessages(AgentChatStrategyAction action) {
+    final replacement = action.raw.isEmpty
+        ? _strategyActionMetadata(action)
+        : Map<String, dynamic>.from(action.raw);
+    agentMessages = [
+      for (final message in agentMessages)
+        if (message.strategyAction?.actionId == action.actionId)
+          message.copyWith(
+            metadata: {
+              ...message.metadata,
+              'strategy_action': replacement,
+            },
+          )
+        else
+          message,
+    ];
+  }
+
+  Map<String, dynamic> _strategyActionMetadata(
+    AgentChatStrategyAction action,
+  ) {
+    return {
+      'action_id': action.actionId,
+      'status': action.status,
+      'action_type': action.actionType,
+      'requested_profile': action.requestedProfile,
+      if (action.currentProfile != null) 'current_profile': action.currentProfile,
+      if (action.expiresAt != null) 'expires_at': action.expiresAt,
+      if (action.confirmedAt != null) 'confirmed_at': action.confirmedAt,
+      if (action.cancelledAt != null) 'cancelled_at': action.cancelledAt,
+      if (action.requestedProfilePayload != null)
+        'requested_profile_payload': action.requestedProfilePayload!.toJson(),
+      if (action.activeProfile != null)
+        'active_profile': action.activeProfile!.toJson(),
+      'safety': action.safety,
+    };
   }
 
   Map<String, dynamic> _liveOrderActionMetadata(

@@ -8,6 +8,7 @@ import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_live_order_readiness.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
+import '../../models/agent_chat_strategy_action.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
@@ -46,6 +47,7 @@ import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
+import '../../models/strategy_profile.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -378,6 +380,55 @@ class ApiClient {
       'auto_create_conversation': autoCreateConversation,
     });
     return AgentChatSendResponse.fromJson(payload);
+  }
+
+  Future<StrategyProfileList> fetchStrategyProfiles() async {
+    final payload = await _getJsonNoCache('/strategy/profiles');
+    return StrategyProfileList.fromJson(payload);
+  }
+
+  Future<StrategyProfile> fetchActiveStrategyProfile() async {
+    final payload = await _getJsonNoCache('/strategy/profiles/active');
+    return StrategyProfile.fromJson(
+      Map<String, dynamic>.from(payload['active_profile'] as Map),
+    );
+  }
+
+  Future<StrategyProfileApplyResult> applyStrategyProfilePreset(
+    String profileName,
+  ) async {
+    final payload = await _postJsonBody(
+      '/strategy/profiles/apply-preset',
+      {
+        'profile_name': profileName,
+        'confirm_operator_ack': true,
+        'source': 'settings_ui',
+      },
+    );
+    return StrategyProfileApplyResult.fromJson(payload);
+  }
+
+  Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(
+    AgentChatStrategyAction action,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/strategy-actions/${action.actionId}/confirm',
+      const {
+        'confirmation': true,
+        'confirm_operator_ack': true,
+      },
+    );
+    return AgentChatStrategyActionResponse.fromJson(payload);
+  }
+
+  Future<AgentChatStrategyActionResponse> cancelAgentChatStrategyAction(
+    int actionId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/agent/chat/strategy-actions/$actionId/cancel',
+      const {},
+    );
+    return AgentChatStrategyActionResponse.fromJson(payload);
   }
 
   Future<AgentChatLiveOrderResponse> confirmAgentChatLiveOrder(

@@ -25,6 +25,8 @@ Rules:
 - Live-order wording must be category live_order_request.
 - Read-only questions must be a read_only_* category.
 - Dangerous setting changes must be dangerous_setting_request.
+- Strategy profile lookup, comparison, recommendation, monthly-progress, risk-budget, and profile-change requests must use strategy_* categories.
+- Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
 - For blocked live/settings requests choose the blocker tool candidate only.
@@ -106,7 +108,9 @@ class AgentChatIntentRouterService:
             "side": side,
             "quantity": quantity,
             "notional": amount,
-            "currency": ("KRW" if market == "KR" else "USD") if amount is not None and market in {"KR", "US"} else None,
+                "currency": ("KRW" if market == "KR" else "USD") if amount is not None and market in {"KR", "US"} else None,
+            "requested_profile": self._detect_strategy_profile(text),
+            "target_monthly_return_pct": self._detect_target_monthly_return_pct(text),
             "fallback_used": True,
             "parser_status": parser_status,
         }
@@ -119,6 +123,10 @@ class AgentChatIntentRouterService:
                 supported=False,
                 **base,
             )
+
+        strategy_intent = self._strategy_intent(text, lowered, base)
+        if strategy_intent is not None:
+            return strategy_intent
 
         if self._is_settings_status_query(text, lowered):
             return self._intent(
@@ -308,6 +316,8 @@ class AgentChatIntentRouterService:
                 "quantity": "number or null",
                 "notional": "number or null",
                 "currency": "KRW, USD, or null",
+                "requested_profile": "safe, balanced, aggressive, or null for strategy requests",
+                "target_monthly_return_pct": "number or null",
                 "requires_plan": "boolean",
                 "requires_auth": "boolean",
                 "requires_manual_confirmation": "boolean",
@@ -386,6 +396,10 @@ class AgentChatIntentRouterService:
             quantity=self._float_or_none(payload.get("quantity")),
             notional=self._float_or_none(payload.get("notional")),
             currency=self._safe_text(payload.get("currency"), 8),
+            requested_profile=self._safe_strategy_profile(payload.get("requested_profile"))
+            or self._detect_strategy_profile(message),
+            target_monthly_return_pct=self._float_or_none(payload.get("target_monthly_return_pct"))
+            or self._detect_target_monthly_return_pct(message),
             requires_plan=bool(payload.get("requires_plan", False)),
             requires_auth=bool(payload.get("requires_auth", False)),
             requires_manual_confirmation=bool(payload.get("requires_manual_confirmation", False)),
@@ -500,6 +514,170 @@ class AgentChatIntentRouterService:
             for token in ["그거", "이거", "그럼", "해당 종목", "방금 본", "본 종목", "첫 번째", "첫번째", "보유 중인"]
         )
 
+    def _strategy_intent(
+        self,
+        text: str,
+        lowered: str,
+        base: dict[str, Any],
+    ) -> AgentChatIntent | None:
+        if self._is_strategy_monthly_progress_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
+                confidence=0.9,
+                reason="User is asking for active strategy monthly progress.",
+                **base,
+            )
+        if self._is_strategy_risk_budget_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY,
+                confidence=0.9,
+                reason="User is asking for active strategy risk budget.",
+                **base,
+            )
+        if self._is_strategy_compare(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE,
+                confidence=0.9,
+                reason="User is asking to compare strategy profiles.",
+                **base,
+            )
+        if self._is_strategy_recommendation(text, lowered):
+            requested_profile = base.get("requested_profile") or self._recommend_profile_for_text(text, lowered)
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION,
+                confidence=0.88,
+                reason="User is asking for a strategy profile recommendation.",
+                requested_profile=requested_profile,
+                **{key: value for key, value in base.items() if key != "requested_profile"},
+            )
+        if self._is_strategy_change_request(text, lowered):
+            requested_profile = base.get("requested_profile") or self._recommend_profile_for_text(text, lowered)
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST,
+                confidence=0.9 if requested_profile else 0.62,
+                reason="User is asking to prepare a strategy profile change.",
+                supported=bool(requested_profile),
+                requires_manual_confirmation=True,
+                requested_profile=requested_profile,
+                **{key: value for key, value in base.items() if key != "requested_profile"},
+            )
+        if self._is_strategy_profile_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_PROFILE_QUERY,
+                confidence=0.88,
+                reason="User is asking about strategy profiles.",
+                **base,
+            )
+        return None
+
+    def _is_strategy_monthly_progress_query(self, text: str, lowered: str) -> bool:
+        return (
+            "monthly progress" in lowered
+            or "이번 달 목표 진행" in text
+            or "목표 진행률" in text
+            or ("이번 달" in text and "목표" in text and "전략" in text)
+        )
+
+    def _is_strategy_risk_budget_query(self, text: str, lowered: str) -> bool:
+        return (
+            "risk budget" in lowered
+            or "리스크 예산" in text
+            or "위험 예산" in text
+            or (("손실 한도" in text or "주문 한도" in text) and self._mentions_strategy(text, lowered))
+        )
+
+    def _is_strategy_compare(self, text: str, lowered: str) -> bool:
+        if "strategy" in lowered and any(token in lowered for token in ["compare", "difference", "vs"]):
+            return True
+        if any(token in text for token in ["차이", "비교", "다른 점", "vs", "VS"]):
+            return any(profile in text for profile in ["안정형", "보통형", "고수익형", "safe", "balanced", "aggressive"])
+        return False
+
+    def _is_strategy_recommendation(self, text: str, lowered: str) -> bool:
+        if not self._mentions_strategy(text, lowered) and not any(token in text for token in ["월 3~5", "월 5", "손실이 걱정"]):
+            return False
+        return (
+            "recommend" in lowered
+            or any(token in text for token in ["추천", "좋아", "괜찮", "뭐 써", "뭐가", "어떤 프로필", "목표면", "손실이 걱정"])
+        )
+
+    def _is_strategy_change_request(self, text: str, lowered: str) -> bool:
+        if not self._mentions_strategy(text, lowered) and self._recommend_profile_for_text(text, lowered) is None:
+            return False
+        if any(token in text for token in ["뭐야", "뭐 써", "어떤", "추천", "차이", "비교", "괜찮아", "알려줘", "보여줘"]):
+            return False
+        return (
+            "set strategy" in lowered
+            or "change strategy" in lowered
+            or any(token in text for token in ["바꿔", "바꾸", "변경", "설정", "적용", "해줘", "싶어", "운용하고 싶어", "가자", "목표로"])
+        )
+
+    def _is_strategy_profile_query(self, text: str, lowered: str) -> bool:
+        if not self._mentions_strategy(text, lowered):
+            return False
+        return (
+            "profile" in lowered
+            or "strategy" in lowered
+            or any(token in text for token in ["현재 전략", "지금 안정형", "목표 수익률", "어떤 조건", "뭐야", "설명", "보여줘", "조회"])
+        )
+
+    def _mentions_strategy(self, text: str, lowered: str) -> bool:
+        return (
+            "strategy" in lowered
+            or "profile" in lowered
+            or any(token in text for token in ["전략", "프로필", "안정형", "보통형", "고수익형", "목표 수익률", "월 목표"])
+        )
+
+    def _detect_strategy_profile(self, text: str) -> str | None:
+        lowered = str(text or "").lower()
+        compact = re.sub(r"\s+", "", str(text or ""))
+        if (
+            "balanced" in lowered
+            or "보통형" in text
+            or "보통" in text
+            or "월3~5" in compact
+            or "월3-5" in compact
+            or "3~5%" in text
+            or "3~5프로" in text
+        ):
+            return "balanced"
+        if (
+            "aggressive" in lowered
+            or "고수익형" in text
+            or "고수익" in text
+            or "공격" in text
+            or "5% 이상" in text
+            or "5프로 이상" in text
+            or "월5프로이상" in compact
+            or "월5%이상" in compact
+        ):
+            return "aggressive"
+        if "safe" in lowered or "안정형" in text or "안전" in text or "보수" in text:
+            return "safe"
+        return None
+
+    def _recommend_profile_for_text(self, text: str, lowered: str) -> str | None:
+        detected = self._detect_strategy_profile(text)
+        if detected:
+            return detected
+        if "손실" in text and any(token in text for token in ["걱정", "줄", "낮", "안전"]):
+            return "safe"
+        if "3~5" in text or "3-5" in text:
+            return "balanced"
+        if "5%" in text or "5프로" in text or "공격" in text:
+            return "aggressive"
+        return None
+
+    def _detect_target_monthly_return_pct(self, text: str) -> float | None:
+        compact = str(text or "").replace(" ", "")
+        match = re.search(r"월(\d+(?:\.\d+)?)(?:%|프로)", compact)
+        if not match:
+            return None
+        try:
+            return float(match.group(1)) / 100
+        except Exception:
+            return None
+
     def _tools_for_intent(self, intent: AgentChatIntent) -> list[AgentChatToolCall]:
         category = intent.category
         symbol = str(intent.symbol or "").strip().upper()
@@ -519,6 +697,19 @@ class AgentChatIntentRouterService:
             return [self._tool_call("recent_signals_lookup", {}, "User asked for recent signals.")]
         if category == AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY:
             return [self._tool_call("ops_settings_lookup", {}, "User asked for runtime safety status.")]
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_QUERY:
+            tool_name = "active_strategy_profile_lookup" if not intent.requested_profile else "strategy_profiles_lookup"
+            return [self._tool_call(tool_name, {"profile_name": intent.requested_profile}, "User asked about strategy profiles.")]
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE:
+            return [self._tool_call("strategy_profiles_lookup", {}, "User asked to compare strategy profiles.")]
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION:
+            return [self._tool_call("strategy_profiles_lookup", {"requested_profile": intent.requested_profile}, "User asked for a strategy recommendation.")]
+        if category == AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY:
+            return [self._tool_call("strategy_monthly_progress_lookup", {}, "User asked for monthly strategy target progress.")]
+        if category == AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY:
+            return [self._tool_call("strategy_risk_budget_lookup", {}, "User asked for strategy risk budget.")]
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
+            return [self._tool_call("strategy_profile_change_prepare", {"requested_profile": intent.requested_profile}, "User asked to prepare a strategy profile change.")]
         if category in {AgentChatIntentCategory.ANALYSIS_REQUEST, AgentChatIntentCategory.EXIT_REVIEW_REQUEST}:
             return [self._tool_call("safe_symbol_analysis", {"symbol": symbol}, "User asked for safe analysis.")]
         if category == AgentChatIntentCategory.WATCHLIST_PREVIEW_REQUEST:
@@ -751,6 +942,10 @@ class AgentChatIntentRouterService:
     def _safe_provider(self, value: Any) -> str | None:
         raw = str(value or "").strip().lower()
         return raw if raw in {"kis", "alpaca", "all", "unknown"} else None
+
+    def _safe_strategy_profile(self, value: Any) -> str | None:
+        raw = str(value or "").strip().lower()
+        return raw if raw in {"safe", "balanced", "aggressive"} else None
 
     def _safe_side(self, value: Any) -> str:
         raw = str(value or "").strip().lower()

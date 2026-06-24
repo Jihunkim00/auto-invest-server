@@ -18,6 +18,7 @@ import 'widgets/agent_review_queue_panel.dart';
 import 'widgets/broker_context_controls.dart';
 import 'widgets/operation_rehearsal_panel.dart';
 import 'widgets/portfolio_snapshot_section.dart';
+import 'widgets/strategy_profile_card.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({
@@ -78,6 +79,17 @@ class DashboardScreen extends StatelessWidget {
                     _OperationalReadinessCard(
                       controller: controller,
                       onOpenSettings: onOpenSettings,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyProfileCard(
+                      profiles: controller.strategyProfiles,
+                      activeProfile: controller.activeStrategyProfile,
+                      loading: controller.strategyProfilesLoading,
+                      error: controller.strategyProfileError,
+                      applyingProfileName:
+                          controller.applyingStrategyProfileName,
+                      onRefresh: controller.refreshStrategyProfiles,
+                      onApply: controller.applyStrategyProfilePreset,
                     ),
                     const SizedBox(height: 12),
                     AgentOperationsSummaryCard(controller: controller),

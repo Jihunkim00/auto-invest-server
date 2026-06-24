@@ -26,6 +26,7 @@ from app.services.agent_chat_intent_router_service import AgentChatIntentRouterS
 from app.services.agent_chat_live_order_service import AgentChatLiveOrderService
 from app.services.agent_chat_result_summarizer import AgentChatResultSummarizer
 from app.services.agent_chat_service import AgentChatConversationNotFound, AgentChatService
+from app.services.agent_chat_strategy_action_service import AgentChatStrategyActionService
 from app.services.agent_chat_tool_executor import AgentChatToolExecutor
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.agent_execution_gateway import AgentExecutionGateway
@@ -46,6 +47,7 @@ class AgentChatOrchestratorService:
         plan_service: AgentPlanService | None = None,
         execution_gateway: AgentExecutionGateway | None = None,
         live_order_service: AgentChatLiveOrderService | None = None,
+        strategy_action_service: AgentChatStrategyActionService | None = None,
         kis_client_factory: Callable[[Session], KisClient] | None = None,
         alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
     ) -> None:
@@ -62,6 +64,7 @@ class AgentChatOrchestratorService:
         self.live_order_service = live_order_service or AgentChatLiveOrderService(
             kis_client_factory=self.kis_client_factory,
         )
+        self.strategy_action_service = strategy_action_service or AgentChatStrategyActionService()
         self.tool_executor = tool_executor or AgentChatToolExecutor(
             registry=self.tool_registry,
             kis_client_factory=self.kis_client_factory,
@@ -157,6 +160,13 @@ class AgentChatOrchestratorService:
                 action_id=int(live_order_action["action_id"]),
                 assistant_message_id=assistant_message.get("id"),
             )
+        strategy_action = action.get("strategy_action")
+        if isinstance(strategy_action, dict) and strategy_action.get("action_id"):
+            self.strategy_action_service.update_assistant_message_id(
+                db,
+                action_id=int(strategy_action["action_id"]),
+                assistant_message_id=assistant_message.get("id"),
+            )
 
         response = AgentChatSendResponse(
             conversation_key=conversation_key,
@@ -169,6 +179,7 @@ class AgentChatOrchestratorService:
             plan=action.get("plan"),
             run=action.get("run"),
             live_order_action=live_order_action,
+            strategy_action=strategy_action,
             available_actions=action["available_actions"],
             safety=safety,
             context_snapshot=action["context_snapshot"],
@@ -214,13 +225,21 @@ class AgentChatOrchestratorService:
     ) -> dict[str, Any]:
         safety = self._base_safety(intent)
         selected_tools = intent.selected_tools
+        category = intent.category
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
+            return self._strategy_profile_change_action(
+                db,
+                intent=intent,
+                conversation_key=conversation_key,
+                user_message_id=user_message_id,
+                selected_tools=selected_tools,
+            )
         tool_results = self.tool_executor.execute_many(
             db,
             calls=selected_tools,
             intent=intent,
         ) if selected_tools else []
         self._merge_tool_safety(safety, tool_results)
-        category = intent.category
         if category in {
             AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
             AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
@@ -229,6 +248,11 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.READ_ONLY_RUNS_QUERY,
             AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
             AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY,
+            AgentChatIntentCategory.STRATEGY_PROFILE_QUERY,
+            AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE,
+            AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION,
+            AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY,
         }:
             return self._action(
                 data=self._data_from_tool_results(tool_results),
@@ -390,6 +414,45 @@ class AgentChatOrchestratorService:
     def _recent_signals(self, db: Session, *, limit: int = 10) -> dict[str, Any]:
         rows = db.query(SignalLog).order_by(SignalLog.created_at.desc(), SignalLog.id.desc()).limit(limit).all()
         return {"count": len(rows), "signals": [self._signal_summary(row) for row in rows]}
+
+    def _strategy_profile_change_action(
+        self,
+        db: Session,
+        *,
+        intent: AgentChatIntent,
+        conversation_key: str,
+        user_message_id: int | None,
+        selected_tools: list[Any],
+    ) -> dict[str, Any]:
+        safety = self._base_safety(intent)
+        safety.read_only = False
+        prepared = self.strategy_action_service.prepare(
+            db,
+            intent=intent,
+            conversation_key=conversation_key,
+            user_message_id=user_message_id,
+        )
+        prepared_safety = prepared.get("safety")
+        if isinstance(prepared_safety, dict):
+            for key, value in prepared_safety.items():
+                if hasattr(safety, key):
+                    setattr(safety, key, value)
+        if prepared.get("created") is True:
+            return self._action(
+                data=dict(prepared.get("data") or {}),
+                strategy_action=dict(prepared.get("strategy_action") or {}),
+                available_actions=list(prepared.get("available_actions") or []),
+                safety=safety,
+                selected_tools=selected_tools,
+                tool_results=[],
+                result_cards=list(prepared.get("result_cards") or []),
+            )
+        return self._action(
+            data=dict(prepared.get("data") or {"error": "strategy_profile_not_resolved"}),
+            safety=safety,
+            selected_tools=selected_tools,
+            tool_results=[],
+        )
 
     def _analysis_action(
         self,
@@ -571,6 +634,7 @@ class AgentChatOrchestratorService:
         plan: dict[str, Any] | None = None,
         run: dict[str, Any] | None = None,
         live_order_action: dict[str, Any] | None = None,
+        strategy_action: dict[str, Any] | None = None,
         available_actions: list[str] | None = None,
         command_log_id: int | None = None,
         selected_tools: list[Any] | None = None,
@@ -585,6 +649,7 @@ class AgentChatOrchestratorService:
             "plan": plan,
             "run": run,
             "live_order_action": live_order_action,
+            "strategy_action": strategy_action,
             "available_actions": available_actions or [],
             "safety": safety,
             "command_log_id": command_log_id,
@@ -651,6 +716,11 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.READ_ONLY_RUNS_QUERY,
             AgentChatIntentCategory.READ_ONLY_SIGNALS_QUERY,
             AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY,
+            AgentChatIntentCategory.STRATEGY_PROFILE_QUERY,
+            AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE,
+            AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION,
+            AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY,
             AgentChatIntentCategory.UNSUPPORTED,
             AgentChatIntentCategory.NEEDS_CLARIFICATION,
         }
@@ -680,6 +750,7 @@ class AgentChatOrchestratorService:
             "plan_id": plan.get("id"),
             "plan_run_id": run.get("plan_run_id"),
             "live_order_action": action.get("live_order_action"),
+            "strategy_action": action.get("strategy_action"),
             "available_actions": action.get("available_actions") or [],
             "safety": safety.model_dump(mode="json"),
             "context_snapshot": action.get("context_snapshot") or {},

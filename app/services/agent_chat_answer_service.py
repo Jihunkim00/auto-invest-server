@@ -64,6 +64,18 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY:
             return self._settings_answer(data)
 
+        if category in {
+            AgentChatIntentCategory.STRATEGY_PROFILE_QUERY,
+            AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE,
+            AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION,
+            AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY,
+        }:
+            return self._strategy_answer(intent, data)
+
+        if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
+            return self._strategy_change_answer(data)
+
         if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
             return self._analysis_answer(intent, plan=plan, run=run, data=data)
 
@@ -258,6 +270,86 @@ class AgentChatAnswerService:
             answer_type="read_only_result",
         )
 
+    def _strategy_answer(self, intent: AgentChatIntent, data: dict[str, Any]) -> AgentChatAnswer:
+        active = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
+        profiles = data.get("profiles") if isinstance(data.get("profiles"), list) else []
+        requested = self._profile_from_list(profiles, getattr(intent, "requested_profile", None))
+        if intent.category == AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION:
+            target = requested or self._profile_from_list(profiles, "balanced") or active
+            return AgentChatAnswer(
+                text=(
+                    f"{self._profile_label(target)}을 추천합니다. "
+                    f"월 목표는 {self._target_range(target)}, 월 손실 한도는 {self._pct(target.get('monthly_max_loss_pct'))}, "
+                    f"1회 주문 한도는 {self._money(target.get('max_order_notional_krw'))} 또는 총자산 "
+                    f"{self._pct(target.get('max_order_notional_pct'))} 기준입니다. "
+                    "이 답변은 전략 설명이며 주문을 실행하지 않습니다."
+                ),
+                answer_type="strategy_profile_answer",
+            )
+        if intent.category == AgentChatIntentCategory.STRATEGY_PROFILE_COMPARE:
+            return AgentChatAnswer(
+                text=(
+                    "안정형은 월 1~2% 목표와 낮은 손실 한도, 보통형은 월 3~5% 목표와 중간 주문 한도, "
+                    "고수익형은 월 5% 이상 목표와 더 큰 변동성을 전제로 합니다. "
+                    "세 프로필 모두 월간/일간 손실 한도와 kill switch가 우선이며, 이 비교는 주문을 실행하지 않습니다."
+                ),
+                answer_type="strategy_profile_answer",
+            )
+        if intent.category == AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY:
+            return AgentChatAnswer(
+                text=(
+                    f"현재 active profile은 {self._profile_label(active)}입니다. "
+                    f"월 목표 범위는 {self._pct(data.get('target_min_pct'))}~{self._pct(data.get('target_max_pct'))}이고, "
+                    f"PR70에서는 월 수익률 진행률을 skeleton 값 {self._pct(data.get('current_month_return_pct'))}로 반환합니다. "
+                    "실현 손익 연결은 다음 단계에서 붙입니다."
+                ),
+                answer_type="strategy_profile_answer",
+            )
+        if intent.category == AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY:
+            return AgentChatAnswer(
+                text=(
+                    f"현재 {self._profile_label(active)} 기준 리스크 예산은 월 손실 {self._pct(data.get('monthly_max_loss_pct'))}, "
+                    f"일일 손실 {self._pct(data.get('daily_max_loss_pct'))}, 1회 주문 한도 "
+                    f"{self._money(data.get('max_order_notional_krw'))} 또는 {self._pct(data.get('max_order_notional_pct'))}, "
+                    f"하루 최대 {data.get('max_trades_per_day')}회 거래입니다. 조회만 수행했고 주문은 실행하지 않았습니다."
+                ),
+                answer_type="strategy_profile_answer",
+            )
+        profile = requested or active
+        return AgentChatAnswer(
+            text=(
+                f"현재 전략 프로필은 {self._profile_label(profile)}입니다. "
+                f"월 목표 범위는 {self._target_range(profile)}, 월 손실 한도는 {self._pct(profile.get('monthly_max_loss_pct'))}, "
+                f"일일 손실 한도는 {self._pct(profile.get('daily_max_loss_pct'))}, 매수 기준 점수는 "
+                f"{profile.get('buy_score_threshold')}점입니다. 조회만 수행했고 주문은 실행하지 않았습니다."
+            ),
+            answer_type="strategy_profile_answer",
+        )
+
+    def _strategy_change_answer(self, data: dict[str, Any]) -> AgentChatAnswer:
+        action = data.get("strategy_action") if isinstance(data.get("strategy_action"), dict) else {}
+        profile = data.get("requested_profile") if isinstance(data.get("requested_profile"), dict) else {}
+        profile_name = str(action.get("requested_profile") or profile.get("profile_name") or "")
+        if not action:
+            return AgentChatAnswer(
+                text="전략 프로필 변경 대상을 확인하지 못했습니다. 안정형, 보통형, 고수익형 중 하나로 다시 요청해 주세요.",
+                answer_type="unsupported",
+            )
+        if profile_name == "aggressive":
+            warning = (
+                "고수익형은 월 5% 이상을 목표로 하지만 손실 변동성이 커질 수 있습니다. "
+                "월 손실 -6% 또는 일일 손실 -1.5% 도달 시 거래가 제한됩니다. "
+            )
+        else:
+            warning = ""
+        return AgentChatAnswer(
+            text=(
+                f"{self._profile_label(profile)} 적용을 준비했습니다. "
+                f"{warning}적용하려면 확인 버튼을 눌러주세요. 이 작업은 주문을 제출하지 않습니다."
+            ),
+            answer_type="strategy_profile_change_confirmation_required",
+        )
+
     def _analysis_answer(
         self,
         intent: AgentChatIntent,
@@ -363,7 +455,34 @@ class AgentChatAnswerService:
             return "OFF"
         return "UNKNOWN"
 
-    def _money(self, value: Any, currency: str | None) -> str:
+    def _profile_from_list(self, profiles: list[Any], profile_name: Any) -> dict[str, Any]:
+        requested = str(profile_name or "").strip().lower()
+        for item in profiles:
+            if isinstance(item, dict) and str(item.get("profile_name") or "").lower() == requested:
+                return item
+        return {}
+
+    def _profile_label(self, profile: dict[str, Any]) -> str:
+        if not isinstance(profile, dict) or not profile:
+            return "전략 프로필"
+        display = str(profile.get("display_name") or "").strip()
+        name = str(profile.get("profile_name") or "").strip()
+        if display and name:
+            return f"{display}({name})"
+        return display or name or "전략 프로필"
+
+    def _target_range(self, profile: dict[str, Any]) -> str:
+        if not isinstance(profile, dict):
+            return "-"
+        return f"{self._pct(profile.get('monthly_target_min_pct'))}~{self._pct(profile.get('monthly_target_max_pct'))}"
+
+    def _pct(self, value: Any) -> str:
+        try:
+            return f"{float(value) * 100:.1f}%"
+        except Exception:
+            return "-"
+
+    def _money(self, value: Any, currency: str | None = "KRW") -> str:
         try:
             number = float(value)
         except Exception:
