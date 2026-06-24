@@ -25,7 +25,7 @@ Rules:
 - Live-order wording must be category live_order_request.
 - Read-only questions must be a read_only_* category.
 - Dangerous setting changes must be dangerous_setting_request.
-- Strategy profile lookup, comparison, recommendation, monthly-progress, risk-budget, and profile-change requests must use strategy_* categories.
+- Strategy profile and performance lookup, comparison, recommendation, target-progress, loss-budget, and profile-change requests must use strategy_* categories.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -520,6 +520,41 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_strategy_daily_performance_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_DAILY_PERFORMANCE_QUERY,
+                confidence=0.94,
+                reason="User is asking for today's strategy performance.",
+                **base,
+            )
+        if self._is_strategy_trade_performance_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY,
+                confidence=0.92,
+                reason="User is asking for trade-level performance.",
+                **base,
+            )
+        if self._is_strategy_loss_budget_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
+                confidence=0.93,
+                reason="User is asking how much loss budget has been used.",
+                **base,
+            )
+        if self._is_strategy_target_progress_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
+                confidence=0.94,
+                reason="User is asking how much remains to a strategy target.",
+                **base,
+            )
+        if self._is_strategy_monthly_performance_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_MONTHLY_PERFORMANCE_QUERY,
+                confidence=0.94,
+                reason="User is asking for current monthly strategy performance.",
+                **base,
+            )
         if self._is_strategy_monthly_progress_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
@@ -569,6 +604,47 @@ class AgentChatIntentRouterService:
                 **base,
             )
         return None
+
+    def _is_strategy_daily_performance_query(self, text: str, lowered: str) -> bool:
+        return (
+            "daily pnl" in lowered
+            or "today pnl" in lowered
+            or ("오늘" in text and any(token in text for token in ["손익", "수익률", "손실 한도"]))
+        )
+
+    def _is_strategy_monthly_performance_query(self, text: str, lowered: str) -> bool:
+        return (
+            "monthly pnl" in lowered
+            or "monthly return" in lowered
+            or ("이번 달" in text and any(token in text for token in ["수익률", "손익", "성과"]))
+        )
+
+    def _is_strategy_target_progress_query(self, text: str, lowered: str) -> bool:
+        return (
+            "target progress" in lowered
+            or "target remaining" in lowered
+            or (
+                "목표" in text
+                and any(token in text for token in ["얼마나 남", "몇 퍼센트 남", "달성", "진행"])
+            )
+        )
+
+    def _is_strategy_trade_performance_query(self, text: str, lowered: str) -> bool:
+        return (
+            "trade performance" in lowered
+            or "recent trade return" in lowered
+            or (
+                "거래" in text
+                and any(token in text for token in ["수익률", "손실", "실현손익", "제일"])
+            )
+            or ("실현손익" in text and "평가손익" in text)
+        )
+
+    def _is_strategy_loss_budget_query(self, text: str, lowered: str) -> bool:
+        return (
+            "loss budget" in lowered
+            or ("손실 한도" in text and any(token in text for token in ["얼마나", "썼", "괜찮", "도달"]))
+        )
 
     def _is_strategy_monthly_progress_query(self, text: str, lowered: str) -> bool:
         return (
@@ -708,6 +784,17 @@ class AgentChatIntentRouterService:
             return [self._tool_call("strategy_monthly_progress_lookup", {}, "User asked for monthly strategy target progress.")]
         if category == AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY:
             return [self._tool_call("strategy_risk_budget_lookup", {}, "User asked for strategy risk budget.")]
+        if category == AgentChatIntentCategory.STRATEGY_DAILY_PERFORMANCE_QUERY:
+            return [self._tool_call("strategy_daily_performance_lookup", {}, "User asked for today's P&L.")]
+        if category == AgentChatIntentCategory.STRATEGY_MONTHLY_PERFORMANCE_QUERY:
+            return [self._tool_call("strategy_monthly_performance_lookup", {}, "User asked for monthly P&L.")]
+        if category == AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY:
+            return [self._tool_call("strategy_trade_performance_lookup", {"symbol": symbol}, "User asked for trade performance.")]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
+        }:
+            return [self._tool_call("strategy_target_progress_lookup", {"profile_name": intent.requested_profile}, "User asked for target or loss-budget progress.")]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
             return [self._tool_call("strategy_profile_change_prepare", {"requested_profile": intent.requested_profile}, "User asked to prepare a strategy profile change.")]
         if category in {AgentChatIntentCategory.ANALYSIS_REQUEST, AgentChatIntentCategory.EXIT_REVIEW_REQUEST}:

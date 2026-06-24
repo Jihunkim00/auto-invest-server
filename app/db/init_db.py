@@ -342,6 +342,57 @@ def _create_agent_chat_strategy_actions_table_if_missing():
             )
 
 
+def _create_strategy_performance_snapshots_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_performance_snapshots (
+                    id INTEGER PRIMARY KEY,
+                    provider VARCHAR(20) NOT NULL,
+                    market VARCHAR(10) NOT NULL,
+                    profile_name VARCHAR(40) NOT NULL,
+                    period_type VARCHAR(20) NOT NULL,
+                    period_key VARCHAR(20) NOT NULL,
+                    realized_pnl FLOAT NOT NULL DEFAULT 0,
+                    unrealized_pnl FLOAT NOT NULL DEFAULT 0,
+                    gross_pnl FLOAT NOT NULL DEFAULT 0,
+                    estimated_fees FLOAT NOT NULL DEFAULT 0,
+                    net_pnl_estimated FLOAT NOT NULL DEFAULT 0,
+                    pnl_pct FLOAT NOT NULL DEFAULT 0,
+                    target_progress_pct FLOAT,
+                    loss_budget_used_pct FLOAT,
+                    orders_count INTEGER NOT NULL DEFAULT 0,
+                    filled_orders_count INTEGER NOT NULL DEFAULT 0,
+                    rejected_orders_count INTEGER NOT NULL DEFAULT 0,
+                    win_rate FLOAT NOT NULL DEFAULT 0,
+                    profit_factor FLOAT,
+                    max_drawdown_pct FLOAT NOT NULL DEFAULT 0,
+                    data_quality TEXT,
+                    source_payload TEXT,
+                    safety_flags TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name in (
+            "provider",
+            "market",
+            "profile_name",
+            "period_type",
+            "period_key",
+            "created_at",
+        ):
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS "
+                    f"ix_strategy_performance_snapshots_{name} "
+                    f"ON strategy_performance_snapshots ({name})"
+                )
+            )
+
+
 def _seed_strategy_profiles_if_needed():
     from app.services.strategy_profile_service import StrategyProfileService
 
@@ -1039,6 +1090,7 @@ def init_db():
     _create_runtime_settings_table_if_missing()
     _create_strategy_tables_if_missing()
     _create_agent_chat_strategy_actions_table_if_missing()
+    _create_strategy_performance_snapshots_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()

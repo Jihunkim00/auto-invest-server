@@ -70,6 +70,11 @@ class AgentChatAnswerService:
             AgentChatIntentCategory.STRATEGY_PROFILE_RECOMMENDATION,
             AgentChatIntentCategory.STRATEGY_MONTHLY_PROGRESS_QUERY,
             AgentChatIntentCategory.STRATEGY_RISK_BUDGET_QUERY,
+            AgentChatIntentCategory.STRATEGY_DAILY_PERFORMANCE_QUERY,
+            AgentChatIntentCategory.STRATEGY_MONTHLY_PERFORMANCE_QUERY,
+            AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
         }:
             return self._strategy_answer(intent, data)
 

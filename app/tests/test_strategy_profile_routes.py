@@ -102,7 +102,7 @@ def test_monthly_progress_and_risk_budget_return_active_profile_thresholds(clien
     assert progress.status_code == 200
     assert progress.json()["active_profile"]["profile_name"] == "aggressive"
     assert progress.json()["target_min_pct"] == 0.05
-    assert progress.json()["skeleton"] is True
+    assert progress.json()["skeleton"] is False
     assert risk.status_code == 200
     assert risk.json()["monthly_max_loss_pct"] == -0.06
     assert risk.json()["max_order_notional_krw"] == 80000

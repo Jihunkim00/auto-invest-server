@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/agent_chat_tool_result.dart';
+import 'agent_chat_performance_card.dart';
 
 class AgentChatToolResultCardList extends StatelessWidget {
   const AgentChatToolResultCardList({
@@ -21,7 +22,10 @@ class AgentChatToolResultCardList extends StatelessWidget {
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       for (final card in cards) ...[
-        AgentChatToolResultCard(card: card),
+        if (_isPerformanceCard(card.cardType))
+          AgentChatPerformanceCard(card: card)
+        else
+          AgentChatToolResultCard(card: card),
         const SizedBox(height: 8),
       ],
       if (followUpSuggestions.isNotEmpty)
@@ -46,6 +50,12 @@ class AgentChatToolResultCardList extends StatelessWidget {
         ),
     ]);
   }
+}
+
+bool _isPerformanceCard(String cardType) {
+  return cardType == 'strategy_daily_performance' ||
+      cardType == 'strategy_monthly_performance' ||
+      cardType == 'strategy_trade_performance';
 }
 
 class AgentChatToolResultCard extends StatelessWidget {
