@@ -18,6 +18,7 @@ import 'package:auto_invest_dashboard/models/ops_settings.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
+import 'package:auto_invest_dashboard/models/strategy_profile.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 class FakeKisApiClient extends ApiClient {
@@ -72,6 +73,10 @@ class FakeKisApiClient extends ApiClient {
   Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
     return KisSchedulerSimulationStatus.safeDefault();
   }
+
+  @override
+  Future<StrategyProfileList> fetchStrategyProfiles() async =>
+      _safeStrategyProfileList();
 
   @override
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
@@ -1456,6 +1461,42 @@ class _OperationalReadinessApiClient extends ApiClient {
       'reason': 'test',
     });
   }
+
+  @override
+  Future<StrategyProfileList> fetchStrategyProfiles() async =>
+      _safeStrategyProfileList();
+}
+
+StrategyProfileList _safeStrategyProfileList() {
+  const profile = {
+    'id': 1,
+    'profile_name': 'safe',
+    'display_name': '안정형',
+    'description': 'Safe test profile',
+    'monthly_target_return_pct': 0.015,
+    'monthly_target_min_pct': 0.01,
+    'monthly_target_max_pct': 0.02,
+    'monthly_max_loss_pct': -0.02,
+    'daily_max_loss_pct': -0.005,
+    'max_order_notional_pct': 0.02,
+    'max_order_notional_krw': 30000,
+    'max_trades_per_day': 1,
+    'max_positions': 2,
+    'buy_score_threshold': 75,
+    'sell_score_threshold': 65,
+    'stop_loss_pct': -0.012,
+    'take_profit_pct': 0.02,
+    'max_holding_days': 5,
+    'stop_after_monthly_target': true,
+    'reduce_size_after_loss': true,
+    'consecutive_loss_reduce_threshold': 1,
+    'is_active': true,
+    'is_builtin': true,
+  };
+  return StrategyProfileList.fromJson({
+    'profiles': [profile],
+    'active_profile': profile,
+  });
 }
 
 OpsSettings _operationalSettingsForMode(String mode) {

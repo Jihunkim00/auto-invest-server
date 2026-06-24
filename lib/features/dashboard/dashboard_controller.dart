@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/network/api_client.dart';
@@ -489,7 +491,6 @@ class DashboardController extends ChangeNotifier {
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       await refreshSchedulerStatus(silent: true);
       await refreshAgentChatLiveOrderReadiness(silent: true);
-      await refreshStrategyProfiles(silent: true);
       await refreshKisSchedulerStatus(silent: true);
       await loadMarketWatchlists();
       await _refreshPortfolioSummaries();
@@ -523,6 +524,30 @@ class DashboardController extends ChangeNotifier {
     } finally {
       loading = false;
       notifyListeners();
+    }
+    unawaited(_loadStrategyProfileState());
+  }
+
+  Future<void> _loadStrategyProfileState() async {
+    if (strategyProfilesLoading) return;
+
+    strategyProfilesLoading = true;
+    strategyProfileError = null;
+    if (hasListeners) notifyListeners();
+
+    try {
+      final result = await apiClient.fetchStrategyProfiles().timeout(
+            const Duration(seconds: 3),
+          );
+      strategyProfiles = result.profiles;
+      activeStrategyProfile = result.activeProfile;
+    } on TimeoutException {
+      strategyProfileError = 'Strategy profiles unavailable: request timed out.';
+    } catch (e) {
+      strategyProfileError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyProfilesLoading = false;
+      if (hasListeners) notifyListeners();
     }
   }
 

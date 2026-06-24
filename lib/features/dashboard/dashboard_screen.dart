@@ -76,6 +76,11 @@ class DashboardScreen extends StatelessWidget {
                       onOpenManualOrder: onOpenManualOrder,
                     ),
                     const SizedBox(height: 12),
+                    _OperationalReadinessCard(
+                      controller: controller,
+                      onOpenSettings: onOpenSettings,
+                    ),
+                    const SizedBox(height: 12),
                     StrategyProfileCard(
                       profiles: controller.strategyProfiles,
                       activeProfile: controller.activeStrategyProfile,
@@ -85,11 +90,6 @@ class DashboardScreen extends StatelessWidget {
                           controller.applyingStrategyProfileName,
                       onRefresh: controller.refreshStrategyProfiles,
                       onApply: controller.applyStrategyProfilePreset,
-                    ),
-                    const SizedBox(height: 12),
-                    _OperationalReadinessCard(
-                      controller: controller,
-                      onOpenSettings: onOpenSettings,
                     ),
                     const SizedBox(height: 12),
                     AgentOperationsSummaryCard(controller: controller),
