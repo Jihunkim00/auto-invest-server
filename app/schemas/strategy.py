@@ -63,12 +63,23 @@ class StrategyProfileListResponse(BaseModel):
 
 class StrategyMonthlyProgressResponse(BaseModel):
     active_profile: StrategyProfilePayload
+    month: str | None = None
+    provider: str | None = None
+    market: str | None = None
     current_month_return_pct: float
     target_return_pct: float
     target_min_pct: float
     target_max_pct: float
     progress_ratio: float
-    skeleton: bool = True
+    target_progress_pct: float = 0
+    loss_budget_used_pct: float = 0
+    target_hit: bool = False
+    loss_limit_hit: bool = False
+    realized_pnl: float = 0
+    unrealized_pnl: float = 0
+    net_pnl_estimated: float = 0
+    data_quality: dict[str, Any] = Field(default_factory=dict)
+    skeleton: bool = False
     note: str
 
 
@@ -84,5 +95,13 @@ class StrategyRiskBudgetResponse(BaseModel):
     sell_score_threshold: float
     stop_loss_pct: float
     take_profit_pct: float
+    current_month_return_pct: float = 0
+    target_progress_pct: float = 0
+    loss_budget_used_pct: float = 0
+    target_hit: bool = False
+    loss_limit_hit: bool = False
+    new_entries_allowed_by_target: bool = True
+    new_entries_block_reason: str | None = None
+    data_quality: dict[str, Any] = Field(default_factory=dict)
     safety: dict[str, Any] = Field(default_factory=dict)
 

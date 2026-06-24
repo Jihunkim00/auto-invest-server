@@ -14,6 +14,7 @@ from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, 
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_profile_service import StrategyProfileService
+from app.services.strategy_performance_service import StrategyPerformanceService
 
 
 class AgentChatToolExecutor:
@@ -25,12 +26,21 @@ class AgentChatToolExecutor:
         alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
         runtime_setting_service: RuntimeSettingService | None = None,
         strategy_profile_service: StrategyProfileService | None = None,
+        strategy_performance_service: StrategyPerformanceService | None = None,
     ) -> None:
         self.registry = registry or AgentChatToolRegistry()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
         self.runtime_setting_service = runtime_setting_service or RuntimeSettingService()
         self.strategy_profile_service = strategy_profile_service or StrategyProfileService()
+        self.strategy_performance_service = strategy_performance_service or StrategyPerformanceService(
+            position_loader=lambda db, provider, market: (
+                self.kis_client_factory(db).list_positions()
+                if provider == "kis" and market == "KR"
+                else []
+            ),
+            strategy_profiles=self.strategy_profile_service,
+        )
 
     def execute_many(
         self,
@@ -79,6 +89,14 @@ class AgentChatToolExecutor:
                 return self._strategy_monthly_progress(db)
             if tool.tool_name == "strategy_risk_budget_lookup":
                 return self._strategy_risk_budget(db)
+            if tool.tool_name == "strategy_daily_performance_lookup":
+                return self._strategy_daily_performance(db)
+            if tool.tool_name == "strategy_monthly_performance_lookup":
+                return self._strategy_monthly_performance(db)
+            if tool.tool_name == "strategy_trade_performance_lookup":
+                return self._strategy_trade_performance(db, call)
+            if tool.tool_name == "strategy_target_progress_lookup":
+                return self._strategy_target_progress(db, call)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -219,6 +237,53 @@ class AgentChatToolExecutor:
             "Read-only strategy risk budget lookup completed.",
         )
 
+    def _strategy_daily_performance(self, db: Session) -> AgentChatToolResult:
+        return self._success(
+            "strategy_daily_performance_lookup",
+            "strategy_daily_performance",
+            self.strategy_performance_service.daily(db),
+            "Read-only daily strategy performance lookup completed.",
+        )
+
+    def _strategy_monthly_performance(self, db: Session) -> AgentChatToolResult:
+        return self._success(
+            "strategy_monthly_performance_lookup",
+            "strategy_monthly_performance",
+            self.strategy_performance_service.monthly(db),
+            "Read-only monthly strategy performance lookup completed.",
+        )
+
+    def _strategy_trade_performance(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+    ) -> AgentChatToolResult:
+        return self._success(
+            "strategy_trade_performance_lookup",
+            "strategy_trade_performance",
+            self.strategy_performance_service.trades(
+                db,
+                symbol=str(call.arguments.get("symbol") or "") or None,
+                limit=10,
+            ),
+            "Read-only trade performance lookup completed.",
+        )
+
+    def _strategy_target_progress(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+    ) -> AgentChatToolResult:
+        return self._success(
+            "strategy_target_progress_lookup",
+            "strategy_target_progress",
+            self.strategy_performance_service.monthly(
+                db,
+                profile_name=str(call.arguments.get("profile_name") or "") or None,
+            ),
+            "Read-only target and loss-budget progress lookup completed.",
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -308,6 +373,10 @@ class AgentChatToolExecutor:
             "active_strategy_profile_lookup": "strategy_profile",
             "strategy_monthly_progress_lookup": "strategy_monthly_progress",
             "strategy_risk_budget_lookup": "strategy_risk_budget",
+            "strategy_daily_performance_lookup": "strategy_daily_performance",
+            "strategy_monthly_performance_lookup": "strategy_monthly_performance",
+            "strategy_trade_performance_lookup": "strategy_trade_performance",
+            "strategy_target_progress_lookup": "strategy_target_progress",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }

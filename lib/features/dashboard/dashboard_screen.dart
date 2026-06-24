@@ -19,6 +19,9 @@ import 'widgets/broker_context_controls.dart';
 import 'widgets/operation_rehearsal_panel.dart';
 import 'widgets/portfolio_snapshot_section.dart';
 import 'widgets/strategy_profile_card.dart';
+import 'widgets/strategy_daily_pnl_card.dart';
+import 'widgets/strategy_monthly_progress_card.dart';
+import 'widgets/strategy_trade_performance_list.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({
@@ -90,6 +93,24 @@ class DashboardScreen extends StatelessWidget {
                           controller.applyingStrategyProfileName,
                       onRefresh: controller.refreshStrategyProfiles,
                       onApply: controller.applyStrategyProfilePreset,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyMonthlyProgressCard(
+                      performance: controller.strategyMonthlyPerformance,
+                      loading: controller.strategyPerformanceLoading,
+                      error: controller.strategyPerformanceError,
+                      onRefresh: controller.refreshStrategyPerformance,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyDailyPnlCard(
+                      performance: controller.strategyDailyPerformance,
+                      loading: controller.strategyPerformanceLoading,
+                      error: controller.strategyPerformanceError,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyTradePerformanceListCard(
+                      performance: controller.strategyTradePerformance,
+                      loading: controller.strategyPerformanceLoading,
                     ),
                     const SizedBox(height: 12),
                     AgentOperationsSummaryCard(controller: controller),

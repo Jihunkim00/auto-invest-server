@@ -49,6 +49,7 @@ class AgentChatService:
         "strategy_profile_cancelled",
         "strategy_profile_expired",
         "strategy_profile_blocked",
+        "strategy_performance_answer",
         "auth_required",
         "blocked",
         "unsupported",

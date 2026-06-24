@@ -51,6 +51,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
+import '../../models/strategy_performance.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -305,6 +306,11 @@ class DashboardController extends ChangeNotifier {
   bool strategyProfilesLoading = false;
   String? strategyProfileError;
   String? applyingStrategyProfileName;
+  StrategyDailyPerformance? strategyDailyPerformance;
+  StrategyMonthlyPerformance? strategyMonthlyPerformance;
+  StrategyTradePerformanceList? strategyTradePerformance;
+  bool strategyPerformanceLoading = false;
+  String? strategyPerformanceError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -526,6 +532,7 @@ class DashboardController extends ChangeNotifier {
       notifyListeners();
     }
     unawaited(_loadStrategyProfileState());
+    unawaited(_loadStrategyPerformanceState());
   }
 
   Future<void> _loadStrategyProfileState() async {
@@ -542,11 +549,37 @@ class DashboardController extends ChangeNotifier {
       strategyProfiles = result.profiles;
       activeStrategyProfile = result.activeProfile;
     } on TimeoutException {
-      strategyProfileError = 'Strategy profiles unavailable: request timed out.';
+      strategyProfileError =
+          'Strategy profiles unavailable: request timed out.';
     } catch (e) {
       strategyProfileError = ApiErrorFormatter.format(e.toString());
     } finally {
       strategyProfilesLoading = false;
+      if (hasListeners) notifyListeners();
+    }
+  }
+
+  Future<void> _loadStrategyPerformanceState() async {
+    if (strategyPerformanceLoading) return;
+    strategyPerformanceLoading = true;
+    strategyPerformanceError = null;
+    if (hasListeners) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyDailyPerformance(),
+        apiClient.fetchStrategyMonthlyPerformance(),
+        apiClient.fetchStrategyTradePerformance(limit: 10),
+      ]).timeout(const Duration(seconds: 3));
+      strategyDailyPerformance = results[0] as StrategyDailyPerformance;
+      strategyMonthlyPerformance = results[1] as StrategyMonthlyPerformance;
+      strategyTradePerformance = results[2] as StrategyTradePerformanceList;
+    } on TimeoutException {
+      strategyPerformanceError =
+          'Strategy performance unavailable: request timed out.';
+    } catch (e) {
+      strategyPerformanceError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyPerformanceLoading = false;
       if (hasListeners) notifyListeners();
     }
   }
@@ -1610,6 +1643,43 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshStrategyPerformance({
+    bool silent = false,
+  }) async {
+    if (strategyPerformanceLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy performance is already loading.',
+      );
+    }
+    strategyPerformanceLoading = true;
+    strategyPerformanceError = null;
+    if (!silent) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyDailyPerformance(),
+        apiClient.fetchStrategyMonthlyPerformance(),
+        apiClient.fetchStrategyTradePerformance(limit: 10),
+      ]);
+      strategyDailyPerformance = results[0] as StrategyDailyPerformance;
+      strategyMonthlyPerformance = results[1] as StrategyMonthlyPerformance;
+      strategyTradePerformance = results[2] as StrategyTradePerformanceList;
+      return const ActionResult(
+        success: true,
+        message: 'Strategy performance refreshed.',
+      );
+    } catch (e) {
+      strategyPerformanceError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyPerformanceError!),
+      );
+    } finally {
+      strategyPerformanceLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshAgentReviewQueue({String? filter}) async {
     if (filter != null && filter.trim().isNotEmpty) {
       selectedAgentQueueFilter = filter.trim();
@@ -2105,7 +2175,8 @@ class DashboardController extends ChangeNotifier {
     agentErrorMessage = null;
     notifyListeners();
     try {
-      final response = await apiClient.cancelAgentChatLiveOrder(action.actionId);
+      final response =
+          await apiClient.cancelAgentChatLiveOrder(action.actionId);
       if (response.liveOrderAction != null) {
         _replaceLiveOrderActionInMessages(response.liveOrderAction!);
       }
@@ -2291,9 +2362,8 @@ class DashboardController extends ChangeNotifier {
         _replaceLiveOrderActionInMessages(response.liveOrderAction!);
       }
       _appendAgentLiveOrderResponseMessage(response);
-      final synced =
-          response.answer.answerType == 'live_order_status_synced' ||
-              response.status == 'synced';
+      final synced = response.answer.answerType == 'live_order_status_synced' ||
+          response.status == 'synced';
       return ActionResult(
         success: synced,
         message: response.answer.text.isEmpty
@@ -5062,9 +5132,8 @@ class DashboardController extends ChangeNotifier {
     } else {
       badges.addAll(['NO ORDER', 'NO AUTO SUBMIT']);
     }
-    final provider =
-        response.liveOrderAction?.provider.toUpperCase() ??
-            response.intent.provider?.toUpperCase();
+    final provider = response.liveOrderAction?.provider.toUpperCase() ??
+        response.intent.provider?.toUpperCase();
     if (provider != null && provider.isNotEmpty && provider != 'UNKNOWN') {
       badges.add(provider);
     }
@@ -5348,7 +5417,8 @@ class DashboardController extends ChangeNotifier {
       'status': action.status,
       'action_type': action.actionType,
       'requested_profile': action.requestedProfile,
-      if (action.currentProfile != null) 'current_profile': action.currentProfile,
+      if (action.currentProfile != null)
+        'current_profile': action.currentProfile,
       if (action.expiresAt != null) 'expires_at': action.expiresAt,
       if (action.confirmedAt != null) 'confirmed_at': action.confirmedAt,
       if (action.cancelledAt != null) 'cancelled_at': action.cancelledAt,
@@ -5390,7 +5460,8 @@ class DashboardController extends ChangeNotifier {
         'related_order_id': action.relatedOrderId,
       if (action.brokerOrderId != null) 'broker_order_id': action.brokerOrderId,
       if (action.brokerStatus != null) 'broker_status': action.brokerStatus,
-      if (action.internalStatus != null) 'internal_status': action.internalStatus,
+      if (action.internalStatus != null)
+        'internal_status': action.internalStatus,
       if (action.lastSyncAt != null) 'last_sync_at': action.lastSyncAt,
       'last_sync_payload': action.lastSyncPayload,
       'audit': action.audit,

@@ -151,7 +151,12 @@ class AgentChatIntent {
       category == 'strategy_profile_compare' ||
       category == 'strategy_profile_recommendation' ||
       category == 'strategy_monthly_progress_query' ||
-      category == 'strategy_risk_budget_query';
+      category == 'strategy_risk_budget_query' ||
+      category == 'strategy_daily_performance_query' ||
+      category == 'strategy_monthly_performance_query' ||
+      category == 'strategy_target_progress_query' ||
+      category == 'strategy_trade_performance_query' ||
+      category == 'strategy_loss_budget_query';
 
   factory AgentChatIntent.fromJson(Map<String, dynamic> json) {
     return AgentChatIntent(

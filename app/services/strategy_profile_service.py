@@ -231,24 +231,31 @@ class StrategyProfileService:
         }
 
     def monthly_progress(self, db: Session) -> dict[str, Any]:
-        active = self.active_profile(db)
-        profile = self.serialize_profile(active)
-        target = float(active.monthly_target_return_pct or 0)
-        current = 0.0
-        progress_ratio = 0.0 if target <= 0 else current / target
+        from app.services.strategy_performance_service import StrategyPerformanceService
+
+        performance = StrategyPerformanceService(
+            strategy_profiles=self,
+        ).monthly(db)
         return {
-            "active_profile": profile,
-            "current_month_return_pct": current,
-            "target_return_pct": target,
-            "target_min_pct": float(active.monthly_target_min_pct),
-            "target_max_pct": float(active.monthly_target_max_pct),
-            "progress_ratio": progress_ratio,
-            "skeleton": True,
-            "note": "PR70 skeleton: realized P&L 연결은 PR71에서 진행합니다.",
+            **performance,
+            "target_return_pct": performance["monthly_target_return_pct"],
+            "target_min_pct": performance["monthly_target_min_pct"],
+            "target_max_pct": performance["monthly_target_max_pct"],
+            "progress_ratio": performance["target_progress_pct"] / 100,
+            "skeleton": False,
+            "note": (
+                "PR71 best-effort performance based on matched fills and "
+                "available position data."
+            ),
         }
 
     def risk_budget(self, db: Session) -> dict[str, Any]:
+        from app.services.strategy_performance_service import StrategyPerformanceService
+
         active = self.active_profile(db)
+        progress = StrategyPerformanceService(
+            strategy_profiles=self,
+        ).monthly(db)
         return {
             "active_profile": self.serialize_profile(active),
             "monthly_max_loss_pct": float(active.monthly_max_loss_pct),
@@ -261,6 +268,14 @@ class StrategyProfileService:
             "sell_score_threshold": float(active.sell_score_threshold),
             "stop_loss_pct": float(active.stop_loss_pct),
             "take_profit_pct": float(active.take_profit_pct),
+            "current_month_return_pct": progress["current_month_return_pct"],
+            "target_progress_pct": progress["target_progress_pct"],
+            "loss_budget_used_pct": progress["loss_budget_used_pct"],
+            "target_hit": progress["target_hit"],
+            "loss_limit_hit": progress["loss_limit_hit"],
+            "new_entries_allowed_by_target": progress["new_entries_allowed_by_target"],
+            "new_entries_block_reason": progress["new_entries_block_reason"],
+            "data_quality": progress["data_quality"],
             "safety": _profile_safety(setting_changed=False, read_only=True),
         }
 

@@ -48,6 +48,7 @@ import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
+import '../../models/strategy_performance.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -408,6 +409,65 @@ class ApiClient {
     return StrategyProfileApplyResult.fromJson(payload);
   }
 
+  Future<StrategyDailyPerformance> fetchStrategyDailyPerformance({
+    String provider = 'kis',
+    String market = 'KR',
+    String? date,
+  }) async {
+    final query = <String, String>{
+      'provider': provider,
+      'market': market,
+      if (date != null && date.trim().isNotEmpty) 'date': date.trim(),
+    };
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/performance/daily',
+        queryParameters: query,
+      ).toString(),
+    );
+    return StrategyDailyPerformance.fromJson(payload);
+  }
+
+  Future<StrategyMonthlyPerformance> fetchStrategyMonthlyPerformance({
+    String provider = 'kis',
+    String market = 'KR',
+    String? month,
+  }) async {
+    final query = <String, String>{
+      'provider': provider,
+      'market': market,
+      if (month != null && month.trim().isNotEmpty) 'month': month.trim(),
+    };
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/performance/monthly',
+        queryParameters: query,
+      ).toString(),
+    );
+    return StrategyMonthlyPerformance.fromJson(payload);
+  }
+
+  Future<StrategyTradePerformanceList> fetchStrategyTradePerformance({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int limit = 20,
+  }) async {
+    final query = <String, String>{
+      'provider': provider,
+      'market': market,
+      'limit': limit.toString(),
+      if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+    };
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/performance/trades',
+        queryParameters: query,
+      ).toString(),
+    );
+    return StrategyTradePerformanceList.fromJson(payload);
+  }
+
   Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(
     AgentChatStrategyAction action,
   ) async {
@@ -489,15 +549,13 @@ class ApiClient {
     ];
   }
 
-  Future<AgentChatLiveOrderReadiness>
-      fetchAgentChatLiveOrderReadiness() async {
-    final payload =
-        await _getJsonNoCache('/agent/chat/live-orders/readiness');
+  Future<AgentChatLiveOrderReadiness> fetchAgentChatLiveOrderReadiness() async {
+    final payload = await _getJsonNoCache('/agent/chat/live-orders/readiness');
     return AgentChatLiveOrderReadiness.fromJson(payload);
   }
 
-  Future<AgentChatLiveOrderSettingsApplyResult>
-      applyAgentChatLiveOrderPreset(String preset) async {
+  Future<AgentChatLiveOrderSettingsApplyResult> applyAgentChatLiveOrderPreset(
+      String preset) async {
     final payload = await _postJsonBody(
       '/agent/chat/live-orders/settings/preset',
       {

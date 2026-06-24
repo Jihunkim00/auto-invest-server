@@ -57,6 +57,18 @@ class AgentChatResultSummarizer:
                 return self._strategy_monthly_progress_answer(primary)
             if primary.result_type == "strategy_risk_budget":
                 return self._strategy_risk_budget_answer(primary)
+            if primary.result_type == "strategy_daily_performance":
+                return self._strategy_daily_performance_answer(primary)
+            if primary.result_type in {
+                "strategy_monthly_performance",
+                "strategy_target_progress",
+            }:
+                return self._strategy_monthly_performance_answer(
+                    intent,
+                    primary,
+                )
+            if primary.result_type == "strategy_trade_performance":
+                return self._strategy_trade_performance_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -94,6 +106,10 @@ class AgentChatResultSummarizer:
                 "strategy_profiles",
                 "strategy_monthly_progress",
                 "strategy_risk_budget",
+                "strategy_daily_performance",
+                "strategy_monthly_performance",
+                "strategy_target_progress",
+                "strategy_trade_performance",
             }:
                 card = self._strategy_card(result)
             elif result.result_type == "analysis":
@@ -278,6 +294,77 @@ class AgentChatResultSummarizer:
             answer_type="strategy_profile_answer",
         )
 
+    def _strategy_daily_performance_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        profile = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
+        return AgentChatAnswer(
+            text=(
+                f"오늘 {self._profile_label(profile)} 기준 추정 손익은 "
+                f"{self._money(data.get('net_pnl_estimated'))}입니다. "
+                f"실현손익 {self._money(data.get('realized_pnl'))}, "
+                f"평가손익 {self._money(data.get('unrealized_pnl'))}, "
+                f"추정 수익률 {self._pct(data.get('pnl_pct'))}입니다. "
+                "체결 수수료는 추정치이며 주문이나 validation은 실행하지 않았습니다."
+            ),
+            answer_type="strategy_performance_answer",
+        )
+
+    def _strategy_monthly_performance_answer(
+        self,
+        intent: AgentChatIntent,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        profile = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
+        current = self._number(data.get("current_month_return_pct"))
+        minimum = self._number(data.get("monthly_target_min_pct"))
+        remaining = max(minimum - current, 0.0)
+        requested = getattr(intent, "requested_profile", None)
+        basis_note = f" 요청한 {requested} 기준입니다." if requested else ""
+        return AgentChatAnswer(
+            text=(
+                f"현재 활성 전략은 {self._profile_label(profile)}입니다. "
+                f"월 목표는 {self._pct(data.get('monthly_target_min_pct'))}~"
+                f"{self._pct(data.get('monthly_target_max_pct'))}이고, "
+                f"현재 이번 달 추정 수익률은 {self._pct(current)}입니다. "
+                f"최소 목표까지 {self._pct(remaining)}p 남았고 목표 진행률은 "
+                f"{self._plain_pct(data.get('target_progress_pct'))}입니다. "
+                f"월 손실 한도 사용률은 {self._plain_pct(data.get('loss_budget_used_pct'))}입니다."
+                f"{basis_note} 실현손익과 평가손익을 합산한 추정값이며 주문은 실행하지 않았습니다."
+            ),
+            answer_type="strategy_performance_answer",
+        )
+
+    def _strategy_trade_performance_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        items = result.data.get("items") if isinstance(result.data.get("items"), list) else []
+        closed = [
+            item for item in items
+            if isinstance(item, dict) and item.get("realized_pnl") is not None
+        ]
+        if not closed:
+            text = (
+                "확정된 매수/매도 체결 쌍이 없어 실현손익을 계산하지 않았습니다. "
+                "unmatched 또는 체결가 누락 주문은 임의 수익으로 처리하지 않습니다."
+            )
+        else:
+            worst = min(closed, key=lambda item: float(item.get("realized_pnl") or 0))
+            text = (
+                f"최근 확정 거래 {len(closed)}건을 FIFO 방식으로 계산했습니다. "
+                f"가장 큰 손실은 {worst.get('symbol')} "
+                f"{self._money(worst.get('realized_pnl'))}입니다. "
+                "이 조회는 read-only이며 주문을 실행하지 않았습니다."
+            )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_performance_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -397,6 +484,64 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type == "strategy_daily_performance":
+            quality = data.get("data_quality") if isinstance(data.get("data_quality"), dict) else {}
+            return AgentChatResultCard(
+                card_type="strategy_daily_performance",
+                title="Today P&L",
+                subtitle=self._profile_label(data.get("active_profile") or {}),
+                primary_value=self._money(data.get("net_pnl_estimated")),
+                badges=["READ ONLY", "ESTIMATED", "NO ORDER", "NO VALIDATION"],
+                rows=[
+                    {"label": "Realized P&L", "value": self._money(data.get("realized_pnl"))},
+                    {"label": "Unrealized P&L", "value": self._money(data.get("unrealized_pnl"))},
+                    {"label": "Return", "value": self._pct(data.get("pnl_pct"))},
+                    {"label": "Filled orders", "value": data.get("filled_orders_count")},
+                    {"label": "Data quality", "value": ", ".join(quality.get("notes") or []) or "best effort"},
+                ],
+                data=data,
+            )
+        if result.result_type in {
+            "strategy_monthly_performance",
+            "strategy_target_progress",
+        }:
+            profile = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
+            return AgentChatResultCard(
+                card_type="strategy_monthly_performance",
+                title="Strategy Monthly Progress",
+                subtitle=self._profile_label(profile),
+                primary_value=self._pct(data.get("current_month_return_pct")),
+                badges=["READ ONLY", "ESTIMATED", "STRATEGY TARGET", "NO ORDER"],
+                rows=[
+                    {"label": "Target range", "value": self._target_range(profile)},
+                    {"label": "Target progress", "value": self._plain_pct(data.get("target_progress_pct"))},
+                    {"label": "Loss budget used", "value": self._plain_pct(data.get("loss_budget_used_pct"))},
+                    {"label": "Target hit", "value": str(bool(data.get("target_hit")))},
+                    {"label": "Loss limit hit", "value": str(bool(data.get("loss_limit_hit")))},
+                ],
+                data=data,
+            )
+        if result.result_type == "strategy_trade_performance":
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            rows = []
+            for item in items[:5]:
+                if not isinstance(item, dict):
+                    continue
+                pnl = item.get("realized_pnl")
+                if pnl is None:
+                    pnl = item.get("unrealized_pnl")
+                rows.append({
+                    "label": item.get("symbol") or "trade",
+                    "value": f"{item.get('status')} · {self._money(pnl)}",
+                })
+            return AgentChatResultCard(
+                card_type="strategy_trade_performance",
+                title="Recent Trade Performance",
+                primary_value=f"{data.get('count', len(items))}",
+                badges=["READ ONLY", "FIFO ESTIMATED", "NO ORDER", "NO VALIDATION"],
+                rows=rows,
+                data=data,
+            )
         if result.result_type == "strategy_monthly_progress":
             profile = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
             return AgentChatResultCard(
@@ -459,6 +604,15 @@ class AgentChatResultSummarizer:
         if currency == "USD":
             return f"${number:,.2f}"
         return f"{number:,.2f}"
+
+    def _number(self, value: Any) -> float:
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
+
+    def _plain_pct(self, value: Any) -> str:
+        return f"{self._number(value):.1f}%"
 
     def _on_off(self, value: Any) -> str:
         if value is True:

@@ -309,6 +309,35 @@ class StrategyProfileAudit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class StrategyPerformanceSnapshot(Base):
+    __tablename__ = "strategy_performance_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    profile_name = Column(String(40), nullable=False, index=True)
+    period_type = Column(String(20), nullable=False, index=True)
+    period_key = Column(String(20), nullable=False, index=True)
+    realized_pnl = Column(Float, nullable=False, default=0)
+    unrealized_pnl = Column(Float, nullable=False, default=0)
+    gross_pnl = Column(Float, nullable=False, default=0)
+    estimated_fees = Column(Float, nullable=False, default=0)
+    net_pnl_estimated = Column(Float, nullable=False, default=0)
+    pnl_pct = Column(Float, nullable=False, default=0)
+    target_progress_pct = Column(Float, nullable=True)
+    loss_budget_used_pct = Column(Float, nullable=True)
+    orders_count = Column(Integer, nullable=False, default=0)
+    filled_orders_count = Column(Integer, nullable=False, default=0)
+    rejected_orders_count = Column(Integer, nullable=False, default=0)
+    win_rate = Column(Float, nullable=False, default=0)
+    profit_factor = Column(Float, nullable=True)
+    max_drawdown_pct = Column(Float, nullable=False, default=0)
+    data_quality = Column(Text, nullable=True)
+    source_payload = Column(Text, nullable=True)
+    safety_flags = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
 class KisShadowExitReviewQueueState(Base):
     __tablename__ = "kis_shadow_exit_review_queue_state"
 
