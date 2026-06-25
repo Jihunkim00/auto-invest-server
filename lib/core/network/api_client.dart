@@ -49,6 +49,7 @@ import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
+import '../../models/strategy_risk.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -466,6 +467,22 @@ class ApiClient {
       ).toString(),
     );
     return StrategyTradePerformanceList.fromJson(payload);
+  }
+
+  Future<StrategyRiskState> fetchStrategyRiskState({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/risk-state',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return StrategyRiskState.fromJson(payload);
   }
 
   Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(

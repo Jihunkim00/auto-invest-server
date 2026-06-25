@@ -69,6 +69,12 @@ class AgentChatResultSummarizer:
                 )
             if primary.result_type == "strategy_trade_performance":
                 return self._strategy_trade_performance_answer(primary)
+            if primary.result_type in {
+                "strategy_risk_state",
+                "strategy_entry_risk",
+                "strategy_order_sizing",
+            }:
+                return self._strategy_risk_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -110,6 +116,9 @@ class AgentChatResultSummarizer:
                 "strategy_monthly_performance",
                 "strategy_target_progress",
                 "strategy_trade_performance",
+                "strategy_risk_state",
+                "strategy_entry_risk",
+                "strategy_order_sizing",
             }:
                 card = self._strategy_card(result)
             elif result.result_type == "analysis":
@@ -365,6 +374,43 @@ class AgentChatResultSummarizer:
             answer_type="strategy_performance_answer",
         )
 
+    def _strategy_risk_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        profile = str(data.get("active_profile") or "safe")
+        if result.result_type == "strategy_risk_state":
+            allowed = bool(data.get("new_entries_allowed"))
+            reason = data.get("primary_block_reason")
+            suffix = (
+                f" 주요 차단 사유는 {reason}입니다."
+                if not allowed and reason
+                else " 실제 주문은 종목별 buy score와 backend confirm gate를 통과해야 합니다."
+            )
+            text = (
+                f"현재 활성 전략은 {profile}입니다. 이번 달 목표 진행률은 "
+                f"{self._plain_pct(data.get('target_progress_pct'))}이고, "
+                f"현재 신규 진입은 {'가능' if allowed else '차단'} 상태입니다.{suffix} "
+                "조회만 수행했고 주문과 validation은 실행하지 않았습니다."
+            )
+        else:
+            approved = bool(data.get("approved"))
+            action = str(data.get("action") or "block")
+            block_reason = data.get("block_reason")
+            text = (
+                f"현재 활성 전략은 {profile}입니다. 진입 평가는 "
+                f"{'통과' if approved else '차단'}이며 action은 {action}입니다. "
+                f"권장 주문금액은 {self._money(data.get('recommended_notional_krw'))}입니다."
+            )
+            if block_reason:
+                text += f" 차단 사유는 {block_reason}입니다."
+            text += " 이 평가는 read-only이며 주문과 validation을 실행하지 않았습니다."
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_risk_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -484,6 +530,41 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type in {
+            "strategy_risk_state",
+            "strategy_entry_risk",
+            "strategy_order_sizing",
+        }:
+            allowed = bool(data.get("new_entries_allowed", data.get("approved", False)))
+            flags = data.get("risk_flags") if isinstance(data.get("risk_flags"), list) else []
+            badges = [
+                "ENTRY ALLOWED" if allowed else "ENTRY BLOCKED",
+                "PROFILE-AWARE",
+                "READ ONLY",
+                "NO ORDER SUBMIT",
+            ]
+            if any("size_reduced" in str(flag) or "capped" in str(flag) for flag in flags):
+                badges.append("SIZE REDUCED")
+            if data.get("target_hit") is True:
+                badges.append("TARGET HIT")
+            return AgentChatResultCard(
+                card_type=result.result_type,
+                title="Target-Aware Risk",
+                subtitle=str(data.get("active_profile") or "").upper(),
+                primary_value=(
+                    self._money(data.get("recommended_notional_krw"))
+                    if result.result_type != "strategy_risk_state"
+                    else ("ENTRY ALLOWED" if allowed else "ENTRY BLOCKED")
+                ),
+                badges=badges,
+                rows=[
+                    {"label": "Block reason", "value": data.get("primary_block_reason") or data.get("block_reason") or "-"},
+                    {"label": "Target progress", "value": self._plain_pct(data.get("target_progress_pct") or (data.get("monthly_progress") or {}).get("target_progress_pct"))},
+                    {"label": "Daily return", "value": self._pct(data.get("current_daily_return_pct") or (data.get("daily_progress") or {}).get("current_daily_return_pct"))},
+                    {"label": "Risk flags", "value": ", ".join(str(flag) for flag in flags) or "none"},
+                ],
+                data=data,
+            )
         if result.result_type == "strategy_daily_performance":
             quality = data.get("data_quality") if isinstance(data.get("data_quality"), dict) else {}
             return AgentChatResultCard(

@@ -75,6 +75,11 @@ class AgentChatAnswerService:
             AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
             AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY,
             AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
+            AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY,
+            AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
+            AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
         }:
             return self._strategy_answer(intent, data)
 
@@ -276,6 +281,23 @@ class AgentChatAnswerService:
         )
 
     def _strategy_answer(self, intent: AgentChatIntent, data: dict[str, Any]) -> AgentChatAnswer:
+        if intent.category in {
+            AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY,
+            AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
+            AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
+        }:
+            active_profile = str(data.get("active_profile") or "safe")
+            allowed = bool(data.get("new_entries_allowed", data.get("approved", False)))
+            return AgentChatAnswer(
+                text=(
+                    f"현재 활성 전략은 {active_profile}입니다. "
+                    f"신규 진입 상태는 {'가능' if allowed else '차단'}입니다. "
+                    "이 답변은 read-only risk 평가이며 주문이나 validation을 실행하지 않았습니다."
+                ),
+                answer_type="strategy_risk_answer",
+            )
         active = data.get("active_profile") if isinstance(data.get("active_profile"), dict) else {}
         profiles = data.get("profiles") if isinstance(data.get("profiles"), list) else []
         requested = self._profile_from_list(profiles, getattr(intent, "requested_profile", None))

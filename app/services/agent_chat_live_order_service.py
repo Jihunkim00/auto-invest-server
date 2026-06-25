@@ -46,6 +46,8 @@ from app.services.kis_order_sync_service import (
 from app.services.kis_payload_sanitizer import sanitize_kis_text
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
+from app.services.target_aware_risk_service import TargetAwareRiskService
 
 
 KR_TZ = ZoneInfo("Asia/Seoul")
@@ -127,6 +129,7 @@ class AgentChatLiveOrderService:
         validation_service_factory: Callable[[KisClient], KisOrderValidationService] | None = None,
         manual_order_service_factory: Callable[[KisClient], KisManualOrderService] | None = None,
         order_sync_service_factory: Callable[[KisClient], KisOrderSyncService] | None = None,
+        target_aware_risk_service: TargetAwareRiskService | None = None,
     ) -> None:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.chat_service = chat_service or AgentChatService()
@@ -139,6 +142,21 @@ class AgentChatLiveOrderService:
         )
         self.order_sync_service_factory = order_sync_service_factory or (
             lambda client: KisOrderSyncService(client)
+        )
+        self.target_aware_risk_service = target_aware_risk_service or TargetAwareRiskService(
+            budget_service=StrategyRiskBudgetService(
+                runtime_settings=self.runtime_settings,
+                position_loader=lambda db, provider, market: (
+                    self.kis_client_factory(db).list_positions()
+                    if provider == "kis" and market == "KR"
+                    else []
+                ),
+                balance_loader=lambda db, provider, market: (
+                    self.kis_client_factory(db).get_account_balance()
+                    if provider == "kis" and market == "KR"
+                    else {}
+                ),
+            )
         )
 
     def prepare(
@@ -819,6 +837,44 @@ class AgentChatLiveOrderService:
                 now_utc=now_utc,
                 risk_payload={"duplicate_order_id": duplicate.id},
             )
+
+        if row.side == "buy":
+            request_payload = _parse_json_object(row.request_payload_json)
+            target_risk = self.target_aware_risk_service.evaluate_entry(
+                db,
+                {
+                    "provider": row.provider,
+                    "market": row.market,
+                    "symbol": row.symbol,
+                    "side": row.side,
+                    "requested_notional_krw": row.estimated_notional,
+                    "buy_score": request_payload.get("buy_score"),
+                    "confidence": request_payload.get("confidence"),
+                    "trigger_source": "agent_chat_confirmed_live_order",
+                    "dry_run": False,
+                },
+            )
+            row.risk_payload_json = _json(target_risk)
+            db.commit()
+            if target_risk.get("approved") is not True:
+                return self._block(
+                    db,
+                    row,
+                    status=STATUS_BLOCKED,
+                    answer_type="live_order_blocked",
+                    reason=str(
+                        target_risk.get("block_reason")
+                        or "target_aware_risk_blocked"
+                    ),
+                    text="Live order blocked by target-aware strategy risk gate. No order was submitted.",
+                    safety={
+                        **safety,
+                        "risk_approved": False,
+                        "validation_called": False,
+                    },
+                    now_utc=now_utc,
+                    risk_payload=target_risk,
+                )
 
         client = self.kis_client_factory(db)
         validation_result = None

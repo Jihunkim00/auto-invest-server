@@ -26,6 +26,7 @@ Rules:
 - Read-only questions must be a read_only_* category.
 - Dangerous setting changes must be dangerous_setting_request.
 - Strategy profile and performance lookup, comparison, recommendation, target-progress, loss-budget, and profile-change requests must use strategy_* categories.
+- Strategy entry permission, loss-limit, target-gate, and order-sizing questions must use strategy risk categories and read-only tools.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -520,6 +521,41 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_strategy_loss_limit_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
+                confidence=0.95,
+                reason="User is asking about daily or monthly strategy loss limits.",
+                **base,
+            )
+        if self._is_strategy_target_gate_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
+                confidence=0.94,
+                reason="User is asking how target progress affects entry risk.",
+                **base,
+            )
+        if self._is_strategy_order_sizing_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
+                confidence=0.94,
+                reason="User is asking for profile-aware order sizing.",
+                **base,
+            )
+        if self._is_strategy_entry_risk_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY,
+                confidence=0.94,
+                reason="User is asking whether a new entry is currently allowed.",
+                **base,
+            )
+        if self._is_strategy_risk_state_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
+                confidence=0.92,
+                reason="User is asking for the current target-aware risk state.",
+                **base,
+            )
         if self._is_strategy_daily_performance_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_DAILY_PERFORMANCE_QUERY,
@@ -604,6 +640,69 @@ class AgentChatIntentRouterService:
                 **base,
             )
         return None
+
+    def _is_strategy_loss_limit_query(self, text: str, lowered: str) -> bool:
+        return (
+            "loss limit" in lowered
+            or "daily loss" in lowered
+            or "monthly loss" in lowered
+            or (
+                "손실 한도" in text
+                and any(token in text for token in ["오늘", "이번 달", "괜찮", "남았", "도달"])
+            )
+        )
+
+    def _is_strategy_target_gate_query(self, text: str, lowered: str) -> bool:
+        return (
+            "target gate" in lowered
+            or "target hit" in lowered
+            or (
+                "목표" in text
+                and any(token in text for token in ["달성하면", "달성 후", "근접", "주문 크기", "진입"])
+            )
+            or ("연속 손실" in text and any(token in text for token in ["주문", "크기", "줄여"]))
+        )
+
+    def _is_strategy_order_sizing_query(self, text: str, lowered: str) -> bool:
+        return (
+            "order sizing" in lowered
+            or "order size" in lowered
+            or any(
+                token in text
+                for token in [
+                    "얼마까지 주문",
+                    "주문금액이 줄",
+                    "주문 금액이 줄",
+                    "주문 크기",
+                    "권장 주문",
+                ]
+            )
+        )
+
+    def _is_strategy_entry_risk_query(self, text: str, lowered: str) -> bool:
+        return (
+            "can i buy" in lowered
+            or "entry allowed" in lowered
+            or "new entry" in lowered
+            or any(
+                token in text
+                for token in [
+                    "지금 매수해도",
+                    "신규 진입 가능",
+                    "지금 주문 가능",
+                    "왜 매수가 막",
+                    "왜 주문이 막",
+                ]
+            )
+        )
+
+    def _is_strategy_risk_state_query(self, text: str, lowered: str) -> bool:
+        return (
+            "risk state" in lowered
+            or "entry risk" in lowered
+            or "리스크 상태" in text
+            or ("신규 진입" in text and any(token in text for token in ["상태", "가능"]))
+        )
 
     def _is_strategy_daily_performance_query(self, text: str, lowered: str) -> bool:
         return (
@@ -795,6 +894,28 @@ class AgentChatIntentRouterService:
             AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
         }:
             return [self._tool_call("strategy_target_progress_lookup", {"profile_name": intent.requested_profile}, "User asked for target or loss-budget progress.")]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
+            AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
+        }:
+            return [self._tool_call("strategy_risk_state_lookup", {}, "User asked for target-aware risk state.")]
+        if category == AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_entry_risk_evaluate",
+                    {"requested_notional_krw": intent.notional},
+                    "User asked for a read-only entry risk evaluation.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_order_sizing_lookup",
+                    {"requested_notional_krw": intent.notional},
+                    "User asked for a read-only order sizing recommendation.",
+                )
+            ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
             return [self._tool_call("strategy_profile_change_prepare", {"requested_profile": intent.requested_profile}, "User asked to prepare a strategy profile change.")]
         if category in {AgentChatIntentCategory.ANALYSIS_REQUEST, AgentChatIntentCategory.EXIT_REVIEW_REQUEST}:

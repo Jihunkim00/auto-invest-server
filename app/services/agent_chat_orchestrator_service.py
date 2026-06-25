@@ -258,6 +258,11 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
             AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY,
             AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
+            AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY,
+            AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
+            AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
+            AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
         }:
             return self._action(
                 data=self._data_from_tool_results(tool_results),

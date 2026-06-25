@@ -42,6 +42,11 @@ class AgentChatIntentCategory(str, Enum):
     STRATEGY_TARGET_PROGRESS_QUERY = "strategy_target_progress_query"
     STRATEGY_TRADE_PERFORMANCE_QUERY = "strategy_trade_performance_query"
     STRATEGY_LOSS_BUDGET_QUERY = "strategy_loss_budget_query"
+    STRATEGY_RISK_STATE_QUERY = "strategy_risk_state_query"
+    STRATEGY_ENTRY_RISK_QUERY = "strategy_entry_risk_query"
+    STRATEGY_ORDER_SIZING_QUERY = "strategy_order_sizing_query"
+    STRATEGY_LOSS_LIMIT_QUERY = "strategy_loss_limit_query"
+    STRATEGY_TARGET_GATE_QUERY = "strategy_target_gate_query"
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 

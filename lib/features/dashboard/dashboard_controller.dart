@@ -52,6 +52,7 @@ import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
+import '../../models/strategy_risk.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -311,6 +312,9 @@ class DashboardController extends ChangeNotifier {
   StrategyTradePerformanceList? strategyTradePerformance;
   bool strategyPerformanceLoading = false;
   String? strategyPerformanceError;
+  StrategyRiskState? strategyRiskState;
+  bool strategyRiskLoading = false;
+  String? strategyRiskError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -533,6 +537,7 @@ class DashboardController extends ChangeNotifier {
     }
     unawaited(_loadStrategyProfileState());
     unawaited(_loadStrategyPerformanceState());
+    unawaited(_loadStrategyRiskState());
   }
 
   Future<void> _loadStrategyProfileState() async {
@@ -580,6 +585,25 @@ class DashboardController extends ChangeNotifier {
       strategyPerformanceError = ApiErrorFormatter.format(e.toString());
     } finally {
       strategyPerformanceLoading = false;
+      if (hasListeners) notifyListeners();
+    }
+  }
+
+  Future<void> _loadStrategyRiskState() async {
+    if (strategyRiskLoading) return;
+    strategyRiskLoading = true;
+    strategyRiskError = null;
+    if (hasListeners) notifyListeners();
+    try {
+      strategyRiskState = await apiClient.fetchStrategyRiskState().timeout(
+            const Duration(seconds: 3),
+          );
+    } on TimeoutException {
+      strategyRiskError = 'Strategy risk state unavailable: request timed out.';
+    } catch (e) {
+      strategyRiskError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyRiskLoading = false;
       if (hasListeners) notifyListeners();
     }
   }
@@ -1676,6 +1700,36 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyPerformanceLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyRiskState({
+    bool silent = false,
+  }) async {
+    if (strategyRiskLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy risk state is already loading.',
+      );
+    }
+    strategyRiskLoading = true;
+    strategyRiskError = null;
+    if (!silent) notifyListeners();
+    try {
+      strategyRiskState = await apiClient.fetchStrategyRiskState();
+      return const ActionResult(
+        success: true,
+        message: 'Target-aware risk state refreshed.',
+      );
+    } catch (e) {
+      strategyRiskError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyRiskError!),
+      );
+    } finally {
+      strategyRiskLoading = false;
       notifyListeners();
     }
   }
