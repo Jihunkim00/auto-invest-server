@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../models/agent_chat_tool_result.dart';
 import 'agent_chat_performance_card.dart';
+import 'agent_chat_strategy_risk_card.dart';
 
 class AgentChatToolResultCardList extends StatelessWidget {
   const AgentChatToolResultCardList({
@@ -24,6 +25,8 @@ class AgentChatToolResultCardList extends StatelessWidget {
       for (final card in cards) ...[
         if (_isPerformanceCard(card.cardType))
           AgentChatPerformanceCard(card: card)
+        else if (_isStrategyRiskCard(card.cardType))
+          AgentChatStrategyRiskCard(card: card)
         else
           AgentChatToolResultCard(card: card),
         const SizedBox(height: 8),
@@ -50,6 +53,12 @@ class AgentChatToolResultCardList extends StatelessWidget {
         ),
     ]);
   }
+}
+
+bool _isStrategyRiskCard(String cardType) {
+  return cardType == 'strategy_risk_state' ||
+      cardType == 'strategy_entry_risk' ||
+      cardType == 'strategy_order_sizing';
 }
 
 bool _isPerformanceCard(String cardType) {

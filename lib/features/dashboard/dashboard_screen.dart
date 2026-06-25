@@ -21,6 +21,7 @@ import 'widgets/portfolio_snapshot_section.dart';
 import 'widgets/strategy_profile_card.dart';
 import 'widgets/strategy_daily_pnl_card.dart';
 import 'widgets/strategy_monthly_progress_card.dart';
+import 'widgets/strategy_risk_state_card.dart';
 import 'widgets/strategy_trade_performance_list.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -93,6 +94,13 @@ class DashboardScreen extends StatelessWidget {
                           controller.applyingStrategyProfileName,
                       onRefresh: controller.refreshStrategyProfiles,
                       onApply: controller.applyStrategyProfilePreset,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyRiskStateCard(
+                      riskState: controller.strategyRiskState,
+                      loading: controller.strategyRiskLoading,
+                      error: controller.strategyRiskError,
+                      onRefresh: controller.refreshStrategyRiskState,
                     ),
                     const SizedBox(height: 12),
                     StrategyMonthlyProgressCard(

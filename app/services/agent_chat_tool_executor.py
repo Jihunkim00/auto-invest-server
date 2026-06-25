@@ -15,6 +15,7 @@ from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.strategy_performance_service import StrategyPerformanceService
+from app.services.target_aware_risk_service import TargetAwareRiskService
 
 
 class AgentChatToolExecutor:
@@ -27,6 +28,7 @@ class AgentChatToolExecutor:
         runtime_setting_service: RuntimeSettingService | None = None,
         strategy_profile_service: StrategyProfileService | None = None,
         strategy_performance_service: StrategyPerformanceService | None = None,
+        target_aware_risk_service: TargetAwareRiskService | None = None,
     ) -> None:
         self.registry = registry or AgentChatToolRegistry()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
@@ -40,6 +42,9 @@ class AgentChatToolExecutor:
                 else []
             ),
             strategy_profiles=self.strategy_profile_service,
+        )
+        self.target_aware_risk_service = (
+            target_aware_risk_service or TargetAwareRiskService()
         )
 
     def execute_many(
@@ -97,6 +102,12 @@ class AgentChatToolExecutor:
                 return self._strategy_trade_performance(db, call)
             if tool.tool_name == "strategy_target_progress_lookup":
                 return self._strategy_target_progress(db, call)
+            if tool.tool_name == "strategy_risk_state_lookup":
+                return self._strategy_risk_state(db, intent)
+            if tool.tool_name == "strategy_entry_risk_evaluate":
+                return self._strategy_entry_risk(db, call, intent)
+            if tool.tool_name == "strategy_order_sizing_lookup":
+                return self._strategy_order_sizing(db, call, intent)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -284,6 +295,72 @@ class AgentChatToolExecutor:
             "Read-only target and loss-budget progress lookup completed.",
         )
 
+    def _strategy_risk_state(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.target_aware_risk_service.risk_state(
+            db,
+            provider=str(intent.provider or "kis"),
+            market=str(intent.market or "KR"),
+        )
+        return self._success(
+            "strategy_risk_state_lookup",
+            "strategy_risk_state",
+            data,
+            "Read-only target-aware strategy risk state lookup completed.",
+        )
+
+    def _strategy_entry_risk(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        arguments = call.arguments
+        data = self.target_aware_risk_service.evaluate_entry(
+            db,
+            {
+                "provider": str(intent.provider or "kis"),
+                "market": str(intent.market or "KR"),
+                "symbol": self._symbol(call, intent) or "UNSPECIFIED",
+                "side": str(intent.side or "buy")
+                if str(intent.side or "").lower() in {"buy", "sell"}
+                else "buy",
+                "requested_notional_krw": arguments.get("requested_notional_krw")
+                or intent.notional,
+                "requested_notional_pct": arguments.get("requested_notional_pct"),
+                "buy_score": arguments.get("buy_score"),
+                "sell_score": arguments.get("sell_score"),
+                "confidence": arguments.get("confidence"),
+                "trigger_source": "agent_chat_read_only",
+                "dry_run": True,
+            },
+        )
+        return self._success(
+            "strategy_entry_risk_evaluate",
+            "strategy_entry_risk",
+            data,
+            "Read-only target-aware entry risk evaluation completed.",
+        )
+
+    def _strategy_order_sizing(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        result = self._strategy_entry_risk(db, call, intent)
+        return AgentChatToolResult(
+            tool_name="strategy_order_sizing_lookup",
+            status=result.status,
+            result_type="strategy_order_sizing",
+            data=result.data,
+            summary="Read-only target-aware order sizing recommendation completed.",
+            safety=result.safety,
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -377,6 +454,9 @@ class AgentChatToolExecutor:
             "strategy_monthly_performance_lookup": "strategy_monthly_performance",
             "strategy_trade_performance_lookup": "strategy_trade_performance",
             "strategy_target_progress_lookup": "strategy_target_progress",
+            "strategy_risk_state_lookup": "strategy_risk_state",
+            "strategy_entry_risk_evaluate": "strategy_entry_risk",
+            "strategy_order_sizing_lookup": "strategy_order_sizing",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }
