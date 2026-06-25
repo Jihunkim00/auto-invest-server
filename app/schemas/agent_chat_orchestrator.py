@@ -47,6 +47,16 @@ class AgentChatIntentCategory(str, Enum):
     STRATEGY_ORDER_SIZING_QUERY = "strategy_order_sizing_query"
     STRATEGY_LOSS_LIMIT_QUERY = "strategy_loss_limit_query"
     STRATEGY_TARGET_GATE_QUERY = "strategy_target_gate_query"
+    STRATEGY_DRY_RUN_AUTO_BUY_REQUEST = "strategy_dry_run_auto_buy_request"
+    STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY = (
+        "strategy_dry_run_auto_buy_recent_query"
+    )
+    STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY = (
+        "strategy_dry_run_auto_buy_summary_query"
+    )
+    STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY = (
+        "strategy_dry_run_auto_buy_reason_query"
+    )
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 

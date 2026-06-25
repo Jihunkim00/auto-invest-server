@@ -22,6 +22,7 @@ import 'widgets/strategy_profile_card.dart';
 import 'widgets/strategy_daily_pnl_card.dart';
 import 'widgets/strategy_monthly_progress_card.dart';
 import 'widgets/strategy_risk_state_card.dart';
+import 'widgets/strategy_dry_run_auto_buy_card.dart';
 import 'widgets/strategy_trade_performance_list.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -101,6 +102,14 @@ class DashboardScreen extends StatelessWidget {
                       loading: controller.strategyRiskLoading,
                       error: controller.strategyRiskError,
                       onRefresh: controller.refreshStrategyRiskState,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyDryRunAutoBuyCard(
+                      result: controller.strategyDryRunAutoBuyResult,
+                      loading: controller.strategyDryRunAutoBuyLoading,
+                      error: controller.strategyDryRunAutoBuyError,
+                      onRun: controller.runStrategyDryRunAutoBuy,
+                      onRefresh: controller.refreshStrategyDryRunAutoBuy,
                     ),
                     const SizedBox(height: 12),
                     StrategyMonthlyProgressCard(

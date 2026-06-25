@@ -22,17 +22,21 @@ class TargetAwareRiskService:
         *,
         provider: str = "kis",
         market: str = "KR",
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         return self.budget_service.state(
             db,
             provider=provider,
             market=market,
+            profile_name=profile_name,
         )
 
     def evaluate_entry(
         self,
         db: Session,
         request: StrategyEntryRiskEvaluationRequest | dict[str, Any],
+        *,
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         payload = (
             request
@@ -43,6 +47,7 @@ class TargetAwareRiskService:
             db,
             provider=payload.provider,
             market=payload.market,
+            profile_name=profile_name,
         )
         profile = snapshot["_profile"]
         flags = list(snapshot["risk_flags"])

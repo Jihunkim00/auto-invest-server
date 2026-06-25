@@ -18,6 +18,7 @@ _KST = ZoneInfo("Asia/Seoul")
 _IGNORED_ORDER_STATUSES = {
     "CANCELLED",
     "CANCELED",
+    "DRY_RUN_SIMULATED",
     "REJECTED",
     "REJECTED_BY_SAFETY_GATE",
     "FAILED",
@@ -49,16 +50,23 @@ class StrategyRiskBudgetService:
         *,
         provider: str = "kis",
         market: str = "KR",
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         normalized_provider = str(provider or "kis").strip().lower() or "kis"
         normalized_market = str(market or "KR").strip().upper() or "KR"
-        active = self.strategy_profiles.active_profile(db)
-        profile = self.strategy_profiles.serialize_profile(active)
-        monthly = self.performance_service.monthly(
-            db,
-            provider=normalized_provider,
-            market=normalized_market,
+        active = (
+            self.strategy_profiles.get_profile(db, profile_name)
+            if profile_name
+            else self.strategy_profiles.active_profile(db)
         )
+        profile = self.strategy_profiles.serialize_profile(active)
+        monthly_kwargs = {
+            "provider": normalized_provider,
+            "market": normalized_market,
+        }
+        if profile_name:
+            monthly_kwargs["profile_name"] = profile_name
+        monthly = self.performance_service.monthly(db, **monthly_kwargs)
         daily = self.performance_service.daily(
             db,
             provider=normalized_provider,
@@ -269,6 +277,7 @@ class StrategyRiskBudgetService:
         *,
         provider: str = "kis",
         market: str = "KR",
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         return {
             key: value
@@ -276,6 +285,7 @@ class StrategyRiskBudgetService:
                 db,
                 provider=provider,
                 market=market,
+                profile_name=profile_name,
             ).items()
             if not key.startswith("_")
         }

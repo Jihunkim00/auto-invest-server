@@ -53,6 +53,7 @@ import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
+import '../../models/strategy_dry_run_auto_buy.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -315,6 +316,10 @@ class DashboardController extends ChangeNotifier {
   StrategyRiskState? strategyRiskState;
   bool strategyRiskLoading = false;
   String? strategyRiskError;
+  StrategyDryRunAutoBuyResult? strategyDryRunAutoBuyResult;
+  List<StrategyDryRunAutoBuyResult> strategyDryRunAutoBuyRecent = const [];
+  bool strategyDryRunAutoBuyLoading = false;
+  String? strategyDryRunAutoBuyError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -538,6 +543,7 @@ class DashboardController extends ChangeNotifier {
     unawaited(_loadStrategyProfileState());
     unawaited(_loadStrategyPerformanceState());
     unawaited(_loadStrategyRiskState());
+    unawaited(_loadStrategyDryRunAutoBuyState());
   }
 
   Future<void> _loadStrategyProfileState() async {
@@ -604,6 +610,29 @@ class DashboardController extends ChangeNotifier {
       strategyRiskError = ApiErrorFormatter.format(e.toString());
     } finally {
       strategyRiskLoading = false;
+      if (hasListeners) notifyListeners();
+    }
+  }
+
+  Future<void> _loadStrategyDryRunAutoBuyState() async {
+    if (strategyDryRunAutoBuyLoading) return;
+    strategyDryRunAutoBuyLoading = true;
+    strategyDryRunAutoBuyError = null;
+    if (hasListeners) notifyListeners();
+    try {
+      final recent =
+          await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10).timeout(
+                const Duration(seconds: 3),
+              );
+      strategyDryRunAutoBuyRecent = recent.items;
+      strategyDryRunAutoBuyResult = recent.latest;
+    } on TimeoutException {
+      strategyDryRunAutoBuyError =
+          'Strategy dry-run auto buy unavailable: request timed out.';
+    } catch (e) {
+      strategyDryRunAutoBuyError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyDryRunAutoBuyLoading = false;
       if (hasListeners) notifyListeners();
     }
   }
@@ -1730,6 +1759,71 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyRiskLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runStrategyDryRunAutoBuy() async {
+    if (strategyDryRunAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy dry-run auto buy is already running.',
+      );
+    }
+    strategyDryRunAutoBuyLoading = true;
+    strategyDryRunAutoBuyError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runStrategyDryRunAutoBuy(
+        profileName: activeStrategyProfile?.profileName,
+      );
+      strategyDryRunAutoBuyResult = result;
+      final recent = await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
+      strategyDryRunAutoBuyRecent = recent.items;
+      return ActionResult(
+        success: true,
+        message: 'Dry-run auto buy completed: ${result.action}.',
+      );
+    } catch (e) {
+      strategyDryRunAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyDryRunAutoBuyError!),
+      );
+    } finally {
+      strategyDryRunAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyDryRunAutoBuy({
+    bool silent = false,
+  }) async {
+    if (strategyDryRunAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy dry-run results are already loading.',
+      );
+    }
+    strategyDryRunAutoBuyLoading = true;
+    strategyDryRunAutoBuyError = null;
+    if (!silent) notifyListeners();
+    try {
+      final recent = await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
+      strategyDryRunAutoBuyRecent = recent.items;
+      strategyDryRunAutoBuyResult = recent.latest;
+      return ActionResult(
+        success: true,
+        message: 'Recent dry-run results refreshed: ${recent.items.length}.',
+      );
+    } catch (e) {
+      strategyDryRunAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyDryRunAutoBuyError!),
+      );
+    } finally {
+      strategyDryRunAutoBuyLoading = false;
       notifyListeners();
     }
   }

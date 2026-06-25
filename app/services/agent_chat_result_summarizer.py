@@ -75,6 +75,12 @@ class AgentChatResultSummarizer:
                 "strategy_order_sizing",
             }:
                 return self._strategy_risk_answer(primary)
+            if primary.result_type in {
+                "strategy_dry_run_auto_buy",
+                "strategy_dry_run_auto_buy_recent",
+                "strategy_dry_run_auto_buy_summary",
+            }:
+                return self._strategy_dry_run_auto_buy_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -119,6 +125,9 @@ class AgentChatResultSummarizer:
                 "strategy_risk_state",
                 "strategy_entry_risk",
                 "strategy_order_sizing",
+                "strategy_dry_run_auto_buy",
+                "strategy_dry_run_auto_buy_recent",
+                "strategy_dry_run_auto_buy_summary",
             }:
                 card = self._strategy_card(result)
             elif result.result_type == "analysis":
@@ -411,6 +420,42 @@ class AgentChatResultSummarizer:
             answer_type="strategy_risk_answer",
         )
 
+    def _strategy_dry_run_auto_buy_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        if result.result_type == "strategy_dry_run_auto_buy":
+            profile = str(data.get("active_profile") or "safe")
+            action = str(data.get("action") or "hold")
+            symbol = str(data.get("selected_symbol") or "후보 없음")
+            reason = str(data.get("reason") or "unknown")
+            text = (
+                f"{profile} 기준 dry-run 자동매수 판단 결과는 {action}입니다. "
+                f"선택 후보는 {symbol}이고 사유는 {reason}입니다. "
+                "주문은 제출되지 않았고 KIS validation과 broker submit도 호출하지 않았습니다."
+            )
+        elif result.result_type == "strategy_dry_run_auto_buy_recent":
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            latest = items[0] if items and isinstance(items[0], dict) else {}
+            text = (
+                f"최근 dry-run 자동매수 결과 {len(items)}건을 조회했습니다. "
+                f"최신 결과는 {latest.get('selected_symbol') or '후보 없음'} / "
+                f"{latest.get('action') or '없음'}입니다. 주문은 제출되지 않았습니다."
+            )
+        else:
+            today = data.get("today") if isinstance(data.get("today"), dict) else {}
+            text = (
+                f"오늘 dry-run 자동매수는 총 {today.get('total', 0)}건이며 "
+                f"would_buy {today.get('would_buy', 0)}건, "
+                f"hold {today.get('hold', 0)}건, blocked {today.get('blocked', 0)}건입니다. "
+                "모두 시뮬레이션이며 주문은 제출되지 않았습니다."
+            )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_dry_run_auto_buy_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -530,6 +575,37 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type in {
+            "strategy_dry_run_auto_buy",
+            "strategy_dry_run_auto_buy_recent",
+            "strategy_dry_run_auto_buy_summary",
+        }:
+            card_data = data
+            if result.result_type == "strategy_dry_run_auto_buy_recent":
+                items = data.get("items") if isinstance(data.get("items"), list) else []
+                card_data = items[0] if items and isinstance(items[0], dict) else {}
+            action = str(card_data.get("action") or "summary").upper()
+            return AgentChatResultCard(
+                card_type=result.result_type,
+                title="Profile-Aware Dry-Run Auto Buy",
+                subtitle=str(card_data.get("active_profile") or "ALL").upper(),
+                primary_value=action,
+                badges=[
+                    "DRY RUN ONLY",
+                    "NO ORDER SUBMIT",
+                    "NO VALIDATION",
+                    "PROFILE AWARE",
+                    "TARGET AWARE",
+                    action,
+                ],
+                rows=[
+                    {"label": "Selected symbol", "value": card_data.get("selected_symbol") or "-"},
+                    {"label": "Reason", "value": card_data.get("reason") or "-"},
+                    {"label": "Recommended notional", "value": self._money(card_data.get("recommended_notional_krw"))},
+                    {"label": "Simulated quantity", "value": card_data.get("simulated_quantity") or 0},
+                ],
+                data=data,
+            )
         if result.result_type in {
             "strategy_risk_state",
             "strategy_entry_risk",

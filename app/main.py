@@ -27,6 +27,7 @@ from app.routes.portfolio import router as portfolio_router
 from app.routes.scheduler import router as scheduler_router
 from app.routes.signals import router as signals_router
 from app.routes.strategy import router as strategy_router
+from app.routes.strategy_dry_run import router as strategy_dry_run_router
 from app.routes.strategy_performance import router as strategy_performance_router
 from app.routes.strategy_risk import router as strategy_risk_router
 from app.routes.trading import router as trading_router
@@ -87,6 +88,7 @@ app.include_router(logs_router)
 app.include_router(market_analysis_router)
 app.include_router(signals_router)
 app.include_router(strategy_router)
+app.include_router(strategy_dry_run_router)
 app.include_router(strategy_performance_router)
 app.include_router(strategy_risk_router)
 app.include_router(trading_router)

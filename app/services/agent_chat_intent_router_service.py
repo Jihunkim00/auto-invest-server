@@ -27,6 +27,7 @@ Rules:
 - Dangerous setting changes must be dangerous_setting_request.
 - Strategy profile and performance lookup, comparison, recommendation, target-progress, loss-budget, and profile-change requests must use strategy_* categories.
 - Strategy entry permission, loss-limit, target-gate, and order-sizing questions must use strategy risk categories and read-only tools.
+- Strategy dry-run auto-buy simulation requests may run simulation-only tools, but must never create a live-order action.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -521,6 +522,34 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_strategy_dry_run_reason_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
+                confidence=0.95,
+                reason="User is asking why a dry-run auto-buy was blocked.",
+                **base,
+            )
+        if self._is_strategy_dry_run_recent_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
+                confidence=0.95,
+                reason="User is asking for recent dry-run auto-buy results.",
+                **base,
+            )
+        if self._is_strategy_dry_run_summary_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY,
+                confidence=0.93,
+                reason="User is asking for a dry-run auto-buy summary.",
+                **base,
+            )
+        if self._is_strategy_dry_run_request(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REQUEST,
+                confidence=0.95,
+                reason="User requested a profile-aware dry-run auto-buy simulation.",
+                **base,
+            )
         if self._is_strategy_loss_limit_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
@@ -640,6 +669,62 @@ class AgentChatIntentRouterService:
                 **base,
             )
         return None
+
+    def _is_strategy_dry_run_request(self, text: str, lowered: str) -> bool:
+        dry_context = (
+            "dry-run" in lowered
+            or "dry run" in lowered
+            or "시뮬레이션" in text
+            or "자동매수" in text
+            or (
+                self._detect_strategy_profile(text) is not None
+                and any(
+                    token in text
+                    for token in ["샀을까", "살 것 같아", "매수 가능해"]
+                )
+            )
+        )
+        return dry_context and any(
+            token in text
+            for token in [
+                "돌려봐",
+                "실행",
+                "샀을까",
+                "살 것 같아",
+                "후보 있어",
+                "매수 가능해",
+            ]
+        )
+
+    def _is_strategy_dry_run_recent_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            ("dry-run" in lowered or "dry run" in lowered or "시뮬레이션" in text)
+            and any(token in text for token in ["최근", "결과 보여", "뭐였어", "내역"])
+        )
+
+    def _is_strategy_dry_run_summary_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            ("dry-run" in lowered or "dry run" in lowered or "자동매수" in text)
+            and any(token in text for token in ["요약", "몇 건", "통계"])
+        )
+
+    def _is_strategy_dry_run_reason_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            ("dry-run" in lowered or "dry run" in lowered or "자동매수" in text)
+            and any(token in text for token in ["왜", "막혔", "차단", "실패"])
+        )
 
     def _is_strategy_loss_limit_query(self, text: str, lowered: str) -> bool:
         return (
@@ -914,6 +999,39 @@ class AgentChatIntentRouterService:
                     "strategy_order_sizing_lookup",
                     {"requested_notional_krw": intent.notional},
                     "User asked for a read-only order sizing recommendation.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REQUEST:
+            return [
+                self._tool_call(
+                    "strategy_dry_run_auto_buy_once",
+                    {
+                        "profile_name": intent.requested_profile,
+                        "symbol": symbol,
+                    },
+                    "User requested a profile-aware dry-run buy simulation.",
+                )
+            ]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
+        }:
+            return [
+                self._tool_call(
+                    "strategy_dry_run_auto_buy_recent_lookup",
+                    {
+                        "profile_name": intent.requested_profile,
+                        "symbol": symbol,
+                    },
+                    "User asked for recent dry-run buy results.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_dry_run_auto_buy_summary_lookup",
+                    {},
+                    "User asked for a dry-run buy summary.",
                 )
             ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:

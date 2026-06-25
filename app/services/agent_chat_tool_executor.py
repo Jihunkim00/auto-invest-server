@@ -13,6 +13,11 @@ from app.schemas.agent_chat_orchestrator import AgentChatIntent
 from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, AgentChatToolSafety
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
+from app.services.profile_aware_dry_run_auto_buy_service import (
+    ProfileAwareDryRunAutoBuyService,
+)
+from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.strategy_performance_service import StrategyPerformanceService
 from app.services.target_aware_risk_service import TargetAwareRiskService
@@ -29,6 +34,10 @@ class AgentChatToolExecutor:
         strategy_profile_service: StrategyProfileService | None = None,
         strategy_performance_service: StrategyPerformanceService | None = None,
         target_aware_risk_service: TargetAwareRiskService | None = None,
+        dry_run_auto_buy_service_factory: Callable[
+            [Session], ProfileAwareDryRunAutoBuyService
+        ]
+        | None = None,
     ) -> None:
         self.registry = registry or AgentChatToolRegistry()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
@@ -45,6 +54,10 @@ class AgentChatToolExecutor:
         )
         self.target_aware_risk_service = (
             target_aware_risk_service or TargetAwareRiskService()
+        )
+        self.dry_run_auto_buy_service_factory = (
+            dry_run_auto_buy_service_factory
+            or self._default_dry_run_auto_buy_service
         )
 
     def execute_many(
@@ -108,6 +121,12 @@ class AgentChatToolExecutor:
                 return self._strategy_entry_risk(db, call, intent)
             if tool.tool_name == "strategy_order_sizing_lookup":
                 return self._strategy_order_sizing(db, call, intent)
+            if tool.tool_name == "strategy_dry_run_auto_buy_once":
+                return self._strategy_dry_run_auto_buy_once(db, call, intent)
+            if tool.tool_name == "strategy_dry_run_auto_buy_recent_lookup":
+                return self._strategy_dry_run_auto_buy_recent(db, call, intent)
+            if tool.tool_name == "strategy_dry_run_auto_buy_summary_lookup":
+                return self._strategy_dry_run_auto_buy_summary(db, intent)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -361,6 +380,73 @@ class AgentChatToolExecutor:
             safety=result.safety,
         )
 
+    def _strategy_dry_run_auto_buy_once(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.dry_run_auto_buy_service_factory(db).run_once(
+            db,
+            {
+                "provider": str(intent.provider or "kis"),
+                "market": str(intent.market or "KR"),
+                "profile_name": call.arguments.get("profile_name")
+                or intent.requested_profile,
+                "symbol": call.arguments.get("symbol") or intent.symbol,
+                "max_candidates": 5,
+                "trigger_source": "agent_chat",
+                "use_watchlist": True,
+                "save_logs": True,
+            },
+        )
+        return self._success(
+            "strategy_dry_run_auto_buy_once",
+            "strategy_dry_run_auto_buy",
+            data,
+            "Profile-aware dry-run auto-buy simulation completed. No order or validation ran.",
+            read_only=False,
+        )
+
+    def _strategy_dry_run_auto_buy_recent(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.dry_run_auto_buy_service_factory(db).recent(
+            db,
+            provider=str(intent.provider or "kis"),
+            market=str(intent.market or "KR"),
+            profile_name=call.arguments.get("profile_name")
+            or intent.requested_profile,
+            symbol=call.arguments.get("symbol") or intent.symbol,
+            limit=10,
+        )
+        return self._success(
+            "strategy_dry_run_auto_buy_recent_lookup",
+            "strategy_dry_run_auto_buy_recent",
+            data,
+            "Recent profile-aware dry-run auto-buy results loaded.",
+        )
+
+    def _strategy_dry_run_auto_buy_summary(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.dry_run_auto_buy_service_factory(db).summary(
+            db,
+            provider=str(intent.provider or "kis"),
+            market=str(intent.market or "KR"),
+        )
+        return self._success(
+            "strategy_dry_run_auto_buy_summary_lookup",
+            "strategy_dry_run_auto_buy_summary",
+            data,
+            "Profile-aware dry-run auto-buy summary loaded.",
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -457,6 +543,9 @@ class AgentChatToolExecutor:
             "strategy_risk_state_lookup": "strategy_risk_state",
             "strategy_entry_risk_evaluate": "strategy_entry_risk",
             "strategy_order_sizing_lookup": "strategy_order_sizing",
+            "strategy_dry_run_auto_buy_once": "strategy_dry_run_auto_buy",
+            "strategy_dry_run_auto_buy_recent_lookup": "strategy_dry_run_auto_buy_recent",
+            "strategy_dry_run_auto_buy_summary_lookup": "strategy_dry_run_auto_buy_summary",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }
@@ -510,6 +599,30 @@ class AgentChatToolExecutor:
     def _default_kis_client(self, db: Session) -> KisClient:
         settings = get_settings()
         return KisClient(settings, KisAuthManager(settings, db))
+
+    def _default_dry_run_auto_buy_service(
+        self,
+        db: Session,
+    ) -> ProfileAwareDryRunAutoBuyService:
+        client = self.kis_client_factory(db)
+        target_risk = TargetAwareRiskService(
+            budget_service=StrategyRiskBudgetService(
+                position_loader=lambda session, provider, market: (
+                    client.list_positions()
+                    if provider == "kis" and market == "KR"
+                    else []
+                ),
+                balance_loader=lambda session, provider, market: (
+                    client.get_account_balance()
+                    if provider == "kis" and market == "KR"
+                    else {}
+                ),
+            )
+        )
+        return ProfileAwareDryRunAutoBuyService(
+            preview_service=KisWatchlistPreviewService(client, db=db),
+            target_risk_service=target_risk,
+        )
 
     def _safe_error(self, exc: Exception) -> str:
         text = str(exc).strip() or exc.__class__.__name__
