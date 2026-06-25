@@ -263,6 +263,10 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
             AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
             AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REQUEST,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
         }:
             return self._action(
                 data=self._data_from_tool_results(tool_results),

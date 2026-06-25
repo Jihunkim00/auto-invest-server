@@ -80,6 +80,10 @@ class AgentChatAnswerService:
             AgentChatIntentCategory.STRATEGY_ORDER_SIZING_QUERY,
             AgentChatIntentCategory.STRATEGY_LOSS_LIMIT_QUERY,
             AgentChatIntentCategory.STRATEGY_TARGET_GATE_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REQUEST,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
         }:
             return self._strategy_answer(intent, data)
 
@@ -281,6 +285,19 @@ class AgentChatAnswerService:
         )
 
     def _strategy_answer(self, intent: AgentChatIntent, data: dict[str, Any]) -> AgentChatAnswer:
+        if intent.category in {
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REQUEST,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY,
+            AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
+        }:
+            return AgentChatAnswer(
+                text=(
+                    "프로필 기반 자동매수 dry-run 결과를 확인했습니다. "
+                    "이 기능은 시뮬레이션 전용이며 주문, KIS validation, broker submit을 실행하지 않습니다."
+                ),
+                answer_type="strategy_dry_run_auto_buy_answer",
+            )
         if intent.category in {
             AgentChatIntentCategory.STRATEGY_RISK_STATE_QUERY,
             AgentChatIntentCategory.STRATEGY_ENTRY_RISK_QUERY,

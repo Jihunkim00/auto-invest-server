@@ -50,6 +50,7 @@ import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
+import '../../models/strategy_dry_run_auto_buy.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -483,6 +484,49 @@ class ApiClient {
       ).toString(),
     );
     return StrategyRiskState.fromJson(payload);
+  }
+
+  Future<StrategyDryRunAutoBuyResult> runStrategyDryRunAutoBuy({
+    String? profileName,
+    String? symbol,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/dry-run/auto-buy-once',
+      {
+        if (profileName != null && profileName.trim().isNotEmpty)
+          'profile_name': profileName.trim(),
+        if (symbol != null && symbol.trim().isNotEmpty)
+          'symbol': symbol.trim(),
+        'trigger_source': 'flutter_dashboard',
+        'use_watchlist': true,
+        'save_logs': true,
+      },
+    );
+    return StrategyDryRunAutoBuyResult.fromJson(payload);
+  }
+
+  Future<StrategyDryRunAutoBuyRecent> fetchStrategyDryRunAutoBuyRecent({
+    String provider = 'kis',
+    String market = 'KR',
+    String? profileName,
+    String? symbol,
+    int limit = 20,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/dry-run/recent',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'limit': limit.toString(),
+          if (profileName != null && profileName.trim().isNotEmpty)
+            'profile_name': profileName.trim(),
+          if (symbol != null && symbol.trim().isNotEmpty)
+            'symbol': symbol.trim(),
+        },
+      ).toString(),
+    );
+    return StrategyDryRunAutoBuyRecent.fromJson(payload);
   }
 
   Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(
