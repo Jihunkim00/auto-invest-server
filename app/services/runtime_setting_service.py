@@ -118,6 +118,22 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit": True,
             "strategy_live_auto_buy_block_after_target_hit": True,
             "strategy_live_auto_buy_scheduler_enabled": False,
+            "strategy_auto_buy_scheduler_enabled": False,
+            "strategy_auto_buy_scheduler_dry_run_only": True,
+            "strategy_auto_buy_scheduler_allow_live_orders": False,
+            "strategy_auto_buy_scheduler_profile_source": "active",
+            "strategy_auto_buy_scheduler_max_runs_per_day": 3,
+            "strategy_auto_buy_scheduler_min_minutes_between_runs": 60,
+            "strategy_auto_buy_scheduler_promotion_ttl_minutes": 45,
+            "strategy_auto_buy_scheduler_create_promotion_on_would_buy": True,
+            "strategy_auto_buy_scheduler_block_when_kill_switch": True,
+            "strategy_auto_buy_scheduler_block_when_market_closed": True,
+            "strategy_auto_buy_scheduler_block_after_no_new_entry_time": True,
+            "strategy_auto_buy_scheduler_no_new_entry_after": "15:00",
+            "strategy_auto_buy_scheduler_allowed_profiles": json.dumps(
+                ["safe", "balanced"], ensure_ascii=False
+            ),
+            "strategy_auto_buy_scheduler_allow_aggressive": False,
             "strategy_live_auto_exit_enabled": False,
             "strategy_live_auto_exit_requires_operator_confirm": True,
             "strategy_live_auto_exit_max_orders_per_day": 1,
@@ -353,6 +369,46 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_scheduler_enabled": bool(
                 row.strategy_live_auto_buy_scheduler_enabled
             ),
+            "strategy_auto_buy_scheduler_enabled": bool(
+                row.strategy_auto_buy_scheduler_enabled
+            ),
+            "strategy_auto_buy_scheduler_dry_run_only": bool(
+                row.strategy_auto_buy_scheduler_dry_run_only
+            ),
+            "strategy_auto_buy_scheduler_allow_live_orders": False,
+            "strategy_auto_buy_scheduler_profile_source": str(
+                row.strategy_auto_buy_scheduler_profile_source or "active"
+            ),
+            "strategy_auto_buy_scheduler_max_runs_per_day": int(
+                row.strategy_auto_buy_scheduler_max_runs_per_day
+            ),
+            "strategy_auto_buy_scheduler_min_minutes_between_runs": int(
+                row.strategy_auto_buy_scheduler_min_minutes_between_runs
+            ),
+            "strategy_auto_buy_scheduler_promotion_ttl_minutes": int(
+                row.strategy_auto_buy_scheduler_promotion_ttl_minutes
+            ),
+            "strategy_auto_buy_scheduler_create_promotion_on_would_buy": bool(
+                row.strategy_auto_buy_scheduler_create_promotion_on_would_buy
+            ),
+            "strategy_auto_buy_scheduler_block_when_kill_switch": bool(
+                row.strategy_auto_buy_scheduler_block_when_kill_switch
+            ),
+            "strategy_auto_buy_scheduler_block_when_market_closed": bool(
+                row.strategy_auto_buy_scheduler_block_when_market_closed
+            ),
+            "strategy_auto_buy_scheduler_block_after_no_new_entry_time": bool(
+                row.strategy_auto_buy_scheduler_block_after_no_new_entry_time
+            ),
+            "strategy_auto_buy_scheduler_no_new_entry_after": str(
+                row.strategy_auto_buy_scheduler_no_new_entry_after or "15:00"
+            ),
+            "strategy_auto_buy_scheduler_allowed_profiles": _decode_profiles(
+                row.strategy_auto_buy_scheduler_allowed_profiles
+            ),
+            "strategy_auto_buy_scheduler_allow_aggressive": bool(
+                row.strategy_auto_buy_scheduler_allow_aggressive
+            ),
             "strategy_live_auto_exit_enabled": bool(row.strategy_live_auto_exit_enabled),
             "strategy_live_auto_exit_requires_operator_confirm": bool(
                 row.strategy_live_auto_exit_requires_operator_confirm
@@ -430,6 +486,10 @@ class RuntimeSettingService:
         settings["strategy_live_auto_buy_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_buy_allowed_profiles")
         )
+        settings["strategy_auto_buy_scheduler_allowed_profiles"] = _decode_profiles(
+            settings.get("strategy_auto_buy_scheduler_allowed_profiles")
+        )
+        settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_exit_allowed_profiles")
         )
@@ -1740,6 +1800,20 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit",
             "strategy_live_auto_buy_block_after_target_hit",
             "strategy_live_auto_buy_scheduler_enabled",
+            "strategy_auto_buy_scheduler_enabled",
+            "strategy_auto_buy_scheduler_dry_run_only",
+            "strategy_auto_buy_scheduler_allow_live_orders",
+            "strategy_auto_buy_scheduler_profile_source",
+            "strategy_auto_buy_scheduler_max_runs_per_day",
+            "strategy_auto_buy_scheduler_min_minutes_between_runs",
+            "strategy_auto_buy_scheduler_promotion_ttl_minutes",
+            "strategy_auto_buy_scheduler_create_promotion_on_would_buy",
+            "strategy_auto_buy_scheduler_block_when_kill_switch",
+            "strategy_auto_buy_scheduler_block_when_market_closed",
+            "strategy_auto_buy_scheduler_block_after_no_new_entry_time",
+            "strategy_auto_buy_scheduler_no_new_entry_after",
+            "strategy_auto_buy_scheduler_allowed_profiles",
+            "strategy_auto_buy_scheduler_allow_aggressive",
             "strategy_live_auto_exit_enabled",
             "strategy_live_auto_exit_requires_operator_confirm",
             "strategy_live_auto_exit_max_orders_per_day",
@@ -1776,9 +1850,12 @@ class RuntimeSettingService:
                 value = str(value).upper()
             if key in {
                 "strategy_live_auto_buy_allowed_profiles",
+                "strategy_auto_buy_scheduler_allowed_profiles",
                 "strategy_live_auto_exit_allowed_profiles",
             }:
                 value = _encode_profiles(value)
+            if key == "strategy_auto_buy_scheduler_allow_live_orders":
+                value = False
             setattr(row, key, value)
 
         db.commit()
@@ -2048,6 +2125,9 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "strategy_auto_buy_scheduler_enabled",
+        "strategy_auto_buy_scheduler_allow_live_orders",
+        "strategy_auto_buy_scheduler_allow_aggressive",
         "strategy_live_auto_exit_enabled",
         "strategy_live_auto_exit_scheduler_enabled",
         "strategy_live_auto_exit_allow_aggressive",
@@ -2075,6 +2155,9 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "strategy_auto_buy_scheduler_enabled",
+        "strategy_auto_buy_scheduler_allow_live_orders",
+        "strategy_auto_buy_scheduler_allow_aggressive",
         "strategy_live_auto_exit_enabled",
         "strategy_live_auto_exit_scheduler_enabled",
         "strategy_live_auto_exit_allow_aggressive",

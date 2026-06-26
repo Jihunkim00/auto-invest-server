@@ -64,6 +64,15 @@ class AgentChatIntentCategory(str, Enum):
     STRATEGY_AUTO_BUY_BLOCK_REASON_QUERY = (
         "strategy_auto_buy_block_reason_query"
     )
+    STRATEGY_AUTO_BUY_SCHEDULER_STATUS_QUERY = (
+        "strategy_auto_buy_scheduler_status_query"
+    )
+    STRATEGY_AUTO_BUY_PROMOTION_QUEUE_QUERY = (
+        "strategy_auto_buy_promotion_queue_query"
+    )
+    STRATEGY_AUTO_BUY_PROMOTION_REASON_QUERY = (
+        "strategy_auto_buy_promotion_reason_query"
+    )
     STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY = (
         "strategy_live_auto_buy_readiness_query"
     )

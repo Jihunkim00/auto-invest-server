@@ -122,15 +122,15 @@ def route_client(db_session):
         app.dependency_overrides.clear()
 
 
-def test_operations_status_route_is_read_only_and_reports_no_dry_run(route_client):
+def test_operations_status_route_is_read_only_and_reports_scheduler_disabled(route_client):
     client, dry, live, risk = route_client
 
     response = client.get("/strategy/auto-buy/operations/status")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["auto_buy_stage"] == "no_dry_run"
-    assert body["next_operator_action"] == "run_dry_run"
+    assert body["auto_buy_stage"] == "scheduler_disabled"
+    assert body["next_operator_action"] == "enable_dry_run_scheduler_if_desired"
     assert body["dry_run"]["recent_found"] is False
     assert body["live_readiness"]["primary_block_reason"] == (
         "strategy_live_auto_buy_disabled"

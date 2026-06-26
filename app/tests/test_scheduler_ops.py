@@ -657,6 +657,47 @@ def test_us_scheduler_does_not_run_kis_services(monkeypatch):
     assert calls == ["watchlist"]
 
 
+def test_strategy_auto_buy_scheduler_slot_uses_pr78_dry_run_service_only(monkeypatch):
+    calls = []
+
+    class FakeStrategyAutoBuySchedulerService:
+        def run_dry_run_once(self, db, request):
+            calls.append(dict(request))
+            return {"status": "blocked", "block_reason": "scheduler_disabled"}
+
+    monkeypatch.setattr(
+        scheduler_service,
+        "strategy_auto_buy_scheduler_service",
+        FakeStrategyAutoBuySchedulerService(),
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisSchedulerSimulationService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("PR78 scheduler must not call KIS simulation")
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisSchedulerLiveService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("PR78 scheduler must not call KIS live")
+        ),
+    )
+
+    result = scheduler_service._run_strategy_auto_buy_dry_run_scheduled_once(
+        "strategy_auto_buy_dry_run_midday"
+    )
+
+    assert result["status"] == "blocked"
+    assert calls == [
+        {
+            "provider": "kis",
+            "market": "KR",
+            "trigger_source": "strategy_auto_buy_dry_run",
+            "scheduler_slot": "strategy_auto_buy_dry_run_midday",
+        }
+    ]
+
+
 def _patch_kis_enabled(monkeypatch):
     settings = _settings(kis_enabled=True, kis_real_order_enabled=True)
     monkeypatch.setattr("app.routes.scheduler.get_settings", lambda: settings)

@@ -26,6 +26,12 @@ from app.services.profile_aware_guarded_live_auto_exit_service import (
 from app.services.strategy_auto_buy_operations_service import (
     StrategyAutoBuyOperationsService,
 )
+from app.services.strategy_auto_buy_promotion_service import (
+    StrategyAutoBuyPromotionService,
+)
+from app.services.strategy_auto_buy_scheduler_service import (
+    StrategyAutoBuySchedulerService,
+)
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.strategy_performance_service import StrategyPerformanceService
@@ -53,6 +59,14 @@ class AgentChatToolExecutor:
         | None = None,
         auto_buy_operations_service_factory: Callable[
             [Session], StrategyAutoBuyOperationsService
+        ]
+        | None = None,
+        auto_buy_scheduler_service_factory: Callable[
+            [Session], StrategyAutoBuySchedulerService
+        ]
+        | None = None,
+        auto_buy_promotion_service_factory: Callable[
+            [Session], StrategyAutoBuyPromotionService
         ]
         | None = None,
         live_auto_exit_service_factory: Callable[
@@ -87,6 +101,14 @@ class AgentChatToolExecutor:
         self.auto_buy_operations_service_factory = (
             auto_buy_operations_service_factory
             or self._default_auto_buy_operations_service
+        )
+        self.auto_buy_scheduler_service_factory = (
+            auto_buy_scheduler_service_factory
+            or self._default_auto_buy_scheduler_service
+        )
+        self.auto_buy_promotion_service_factory = (
+            auto_buy_promotion_service_factory
+            or self._default_auto_buy_promotion_service
         )
         self.live_auto_exit_service_factory = (
             live_auto_exit_service_factory
@@ -164,6 +186,10 @@ class AgentChatToolExecutor:
                 return self._strategy_live_auto_buy_readiness(db, call, intent)
             if tool.tool_name == "strategy_auto_buy_operations_status_lookup":
                 return self._strategy_auto_buy_operations_status(db, intent)
+            if tool.tool_name == "strategy_auto_buy_scheduler_status_lookup":
+                return self._strategy_auto_buy_scheduler_status(db, intent)
+            if tool.tool_name == "strategy_auto_buy_promotions_lookup":
+                return self._strategy_auto_buy_promotions(db, call, intent)
             if tool.tool_name == "strategy_live_auto_buy_recent_lookup":
                 return self._strategy_live_auto_buy_recent(db, intent)
             if tool.tool_name == "strategy_live_auto_exit_readiness_lookup":
@@ -549,6 +575,50 @@ class AgentChatToolExecutor:
             ),
         )
 
+    def _strategy_auto_buy_scheduler_status(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.auto_buy_scheduler_service_factory(db).status(
+            db,
+            provider="kis",
+            market="KR",
+        )
+        return self._success(
+            "strategy_auto_buy_scheduler_status_lookup",
+            "strategy_auto_buy_scheduler_status",
+            data,
+            (
+                "Read-only scheduled dry-run auto-buy status loaded. "
+                "No validation, submit, live run-once, scheduler mutation, or settings mutation ran."
+            ),
+        )
+
+    def _strategy_auto_buy_promotions(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.auto_buy_promotion_service_factory(db).list(
+            db,
+            provider="kis",
+            market="KR",
+            status=call.arguments.get("status") or "pending",
+            symbol=call.arguments.get("symbol") or intent.symbol,
+            limit=10,
+        )
+        return self._success(
+            "strategy_auto_buy_promotions_lookup",
+            "strategy_auto_buy_promotions",
+            data,
+            (
+                "Read-only promotion queue loaded. Promotions are not orders "
+                "and no validation or broker submit ran."
+            ),
+        )
+
     def _strategy_live_auto_exit_readiness(
         self,
         db: Session,
@@ -708,6 +778,8 @@ class AgentChatToolExecutor:
             "strategy_dry_run_auto_buy_summary_lookup": "strategy_dry_run_auto_buy_summary",
             "strategy_live_auto_buy_readiness_lookup": "strategy_live_auto_buy_readiness",
             "strategy_auto_buy_operations_status_lookup": "strategy_auto_buy_operations_status",
+            "strategy_auto_buy_scheduler_status_lookup": "strategy_auto_buy_scheduler_status",
+            "strategy_auto_buy_promotions_lookup": "strategy_auto_buy_promotions",
             "strategy_live_auto_buy_recent_lookup": "strategy_live_auto_buy_recent",
             "strategy_live_auto_exit_readiness_lookup": "strategy_live_auto_exit_readiness",
             "strategy_live_auto_exit_recent_lookup": "strategy_live_auto_exit_recent",
@@ -831,11 +903,30 @@ class AgentChatToolExecutor:
         self,
         db: Session,
     ) -> StrategyAutoBuyOperationsService:
+        promotion_service = self.auto_buy_promotion_service_factory(db)
+        scheduler_service = self.auto_buy_scheduler_service_factory(db)
         return StrategyAutoBuyOperationsService(
             dry_run_service=self.dry_run_auto_buy_service_factory(db),
             live_auto_buy_service=self.live_auto_buy_service_factory(db),
+            scheduler_service=scheduler_service,
+            promotion_service=promotion_service,
             target_risk_service=self.target_aware_risk_service,
         )
+
+    def _default_auto_buy_scheduler_service(
+        self,
+        db: Session,
+    ) -> StrategyAutoBuySchedulerService:
+        return StrategyAutoBuySchedulerService(
+            dry_run_service=self.dry_run_auto_buy_service_factory(db),
+            promotion_service=self.auto_buy_promotion_service_factory(db),
+        )
+
+    def _default_auto_buy_promotion_service(
+        self,
+        db: Session,
+    ) -> StrategyAutoBuyPromotionService:
+        return StrategyAutoBuyPromotionService()
 
     def _default_live_auto_exit_service(
         self,

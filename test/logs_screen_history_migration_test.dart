@@ -8,8 +8,12 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
+import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
+import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
 
 import 'auto_buy_operations_model_test.dart';
+import 'auto_buy_promotion_model_test.dart';
+import 'auto_buy_scheduler_model_test.dart';
 
 void main() {
   testWidgets('Logs owns detailed run and order history after Home is compact',
@@ -134,4 +138,24 @@ class _LogsHistoryApiClient extends ApiClient {
               ready: false,
             ),
           );
+
+  @override
+  Future<StrategyAutoBuySchedulerStatus>
+      fetchStrategyAutoBuySchedulerStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async =>
+          StrategyAutoBuySchedulerStatus.fromJson(
+            autoBuySchedulerStatusJson(),
+          );
+
+  @override
+  Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({
+    String provider = 'kis',
+    String market = 'KR',
+    String status = 'pending',
+    String? symbol,
+    int limit = 20,
+  }) async =>
+      StrategyAutoBuyPromotions.fromJson(autoBuyPromotionsJson());
 }

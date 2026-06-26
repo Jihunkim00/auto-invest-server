@@ -49,6 +49,8 @@ import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
+import '../../models/strategy_auto_buy_promotion.dart';
+import '../../models/strategy_auto_buy_scheduler.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
@@ -613,6 +615,101 @@ class ApiClient {
       ).toString(),
     );
     return StrategyAutoBuyOperationsStatus.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuySchedulerStatus>
+      fetchStrategyAutoBuySchedulerStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/auto-buy/scheduler/status',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return StrategyAutoBuySchedulerStatus.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuySchedulerRunResult>
+      runStrategyAutoBuySchedulerDryRunOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/scheduler/run-dry-run-once',
+      {
+        'provider': provider,
+        'market': market,
+        if (symbol != null && symbol.trim().isNotEmpty)
+          'symbol': symbol.trim(),
+        'trigger_source': 'flutter_scheduler_panel',
+      },
+    );
+    return StrategyAutoBuySchedulerRunResult.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({
+    String provider = 'kis',
+    String market = 'KR',
+    String status = 'pending',
+    String? symbol,
+    int limit = 20,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/auto-buy/promotions',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'status': status,
+          'limit': limit.toString(),
+          if (symbol != null && symbol.trim().isNotEmpty)
+            'symbol': symbol.trim(),
+        },
+      ).toString(),
+    );
+    return StrategyAutoBuyPromotions.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuyPromotionActionResult>
+      acknowledgeStrategyAutoBuyPromotion(int promotionId) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/promotions/$promotionId/acknowledge',
+      const {},
+    );
+    return StrategyAutoBuyPromotionActionResult.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuyPromotionActionResult>
+      dismissStrategyAutoBuyPromotion(int promotionId) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/promotions/$promotionId/dismiss',
+      const {},
+    );
+    return StrategyAutoBuyPromotionActionResult.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuyPromotionActionResult>
+      markStrategyAutoBuyPromotionConverted(
+    int promotionId, {
+    int? promotedToLiveAttemptId,
+    int? relatedLiveOrderId,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/promotions/$promotionId/mark-converted',
+      {
+        if (promotedToLiveAttemptId != null)
+          'promoted_to_live_attempt_id': promotedToLiveAttemptId,
+        if (relatedLiveOrderId != null)
+          'related_live_order_id': relatedLiveOrderId,
+      },
+    );
+    return StrategyAutoBuyPromotionActionResult.fromJson(payload);
   }
 
   Future<StrategyLiveAutoBuyRunResult> syncStrategyLiveAutoBuyAttempt(

@@ -19,6 +19,12 @@ void main() {
     expect(status.dryRun.latestSymbol, '005930');
     expect(status.dryRun.latestScore, 80);
     expect(status.dryRun.wouldBuyCountToday, 1);
+    expect(status.scheduler.enabled, isTrue);
+    expect(status.scheduler.dryRunOnly, isTrue);
+    expect(status.scheduler.allowLiveOrders, isFalse);
+    expect(status.scheduler.runsToday, 1);
+    expect(status.promotions.pendingCount, 1);
+    expect(status.promotions.latestSymbol, '005930');
     expect(status.liveReadiness.ready, isTrue);
     expect(status.liveReadiness.ordersRemainingToday, 1);
     expect(status.liveAttempts.latestStatus, 'blocked');
@@ -50,6 +56,23 @@ Map<String, dynamic> autoBuyOperationsJson({
       'would_buy_count_today': 1,
       'blocked_count_today': 0,
       'summary': {'total': 1, 'would_buy': 1},
+    },
+    'scheduler': {
+      'enabled': true,
+      'dry_run_only': true,
+      'allow_live_orders': false,
+      'runs_today': 1,
+      'max_runs_per_day': 3,
+      'latest_run_status': 'would_buy',
+      'next_allowed_run_at': '2026-06-26T02:00:00Z',
+    },
+    'promotions': {
+      'pending_count': 1,
+      'latest_symbol': '005930',
+      'latest_status': 'pending',
+      'latest_expires_at': '2026-06-26T01:45:00Z',
+      'acknowledged_count_today': 0,
+      'dismissed_count_today': 0,
     },
     'live_readiness': {
       'ready': ready,

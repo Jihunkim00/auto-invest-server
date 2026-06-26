@@ -10,7 +10,9 @@ from app.schemas.strategy_auto_buy_operations import (
     StrategyAutoBuyOperationsDryRunStatus,
     StrategyAutoBuyOperationsLiveAttemptsStatus,
     StrategyAutoBuyOperationsLiveReadinessStatus,
+    StrategyAutoBuyOperationsPromotionsStatus,
     StrategyAutoBuyOperationsRiskStatus,
+    StrategyAutoBuyOperationsSchedulerStatus,
     StrategyAutoBuyOperationsSafetyStatus,
     StrategyAutoBuyOperationsStatusResponse,
 )
@@ -19,6 +21,12 @@ from app.services.profile_aware_dry_run_auto_buy_service import (
 )
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
+)
+from app.services.strategy_auto_buy_promotion_service import (
+    StrategyAutoBuyPromotionService,
+)
+from app.services.strategy_auto_buy_scheduler_service import (
+    StrategyAutoBuySchedulerService,
 )
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
@@ -37,11 +45,18 @@ class StrategyAutoBuyOperationsService:
         *,
         dry_run_service: Any | None = None,
         live_auto_buy_service: Any | None = None,
+        scheduler_service: Any | None = None,
+        promotion_service: Any | None = None,
         target_risk_service: Any | None = None,
     ) -> None:
         self.dry_run_service = dry_run_service or ProfileAwareDryRunAutoBuyService()
         self.live_auto_buy_service = (
             live_auto_buy_service or ProfileAwareGuardedLiveAutoBuyService()
+        )
+        self.promotion_service = promotion_service or StrategyAutoBuyPromotionService()
+        self.scheduler_service = scheduler_service or StrategyAutoBuySchedulerService(
+            dry_run_service=self.dry_run_service,
+            promotion_service=self.promotion_service,
         )
         self.target_risk_service = target_risk_service or TargetAwareRiskService()
 
@@ -74,6 +89,16 @@ class StrategyAutoBuyOperationsService:
             provider=normalized_provider,
             market=normalized_market,
         )
+        scheduler_raw = self._scheduler_status(
+            db,
+            provider=normalized_provider,
+            market=normalized_market,
+        )
+        promotions_raw = self._promotion_summary(
+            db,
+            provider=normalized_provider,
+            market=normalized_market,
+        )
         risk_state = self._risk_state(
             db,
             provider=normalized_provider,
@@ -81,11 +106,15 @@ class StrategyAutoBuyOperationsService:
         )
 
         dry_status = self._dry_run_status(dry_recent, dry_summary)
+        scheduler_status = self._scheduler_summary_status(scheduler_raw)
+        promotions_status = self._promotions_status(promotions_raw)
         readiness_status = self._live_readiness_status(live_readiness)
         attempts_status = self._live_attempts_status(live_recent)
         risk_status = self._risk_status(risk_state, readiness_status)
         stage = self._stage(
             dry_status=dry_status,
+            scheduler_status=scheduler_status,
+            promotions_status=promotions_status,
             readiness_status=readiness_status,
             attempts_status=attempts_status,
         )
@@ -103,6 +132,8 @@ class StrategyAutoBuyOperationsService:
             auto_buy_stage=stage,
             next_operator_action=next_action,
             dry_run=dry_status,
+            scheduler=scheduler_status,
+            promotions=promotions_status,
             live_readiness=readiness_status,
             live_attempts=attempts_status,
             risk=risk_status,
@@ -216,6 +247,58 @@ class StrategyAutoBuyOperationsService:
                 "safety": _read_only_safety(),
             }
 
+    def _scheduler_status(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+    ) -> dict[str, Any]:
+        try:
+            result = self.scheduler_service.status(
+                db,
+                provider=provider,
+                market=market,
+            )
+            return dict(result) if isinstance(result, dict) else {}
+        except Exception as exc:
+            return {
+                "enabled": False,
+                "dry_run_only": True,
+                "allow_live_orders": False,
+                "runs_today": 0,
+                "max_runs_per_day": 0,
+                "latest_scheduler_run": None,
+                "next_allowed_run_at": None,
+                "primary_block_reason": f"scheduler_status_unavailable:{exc.__class__.__name__}",
+                "safety": _read_only_safety(),
+            }
+
+    def _promotion_summary(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+    ) -> dict[str, Any]:
+        try:
+            result = self.promotion_service.summary(
+                db,
+                provider=provider,
+                market=market,
+            )
+            return dict(result) if isinstance(result, dict) else {}
+        except Exception as exc:
+            return {
+                "pending_count": 0,
+                "latest_symbol": None,
+                "latest_status": f"promotion_summary_unavailable:{exc.__class__.__name__}",
+                "latest_expires_at": None,
+                "acknowledged_count_today": 0,
+                "dismissed_count_today": 0,
+                "safety": _read_only_safety(),
+            }
+
     def _risk_state(
         self,
         db: Session,
@@ -264,6 +347,38 @@ class StrategyAutoBuyOperationsService:
                 if _text(item.get("action")) in {"blocked", "hold", "skip", "skipped"}
             ),
             summary=dict(summary.get("today") or {}),
+        )
+
+    def _scheduler_summary_status(
+        self,
+        payload: dict[str, Any],
+    ) -> StrategyAutoBuyOperationsSchedulerStatus:
+        latest = (
+            payload.get("latest_scheduler_run")
+            if isinstance(payload.get("latest_scheduler_run"), dict)
+            else {}
+        )
+        return StrategyAutoBuyOperationsSchedulerStatus(
+            enabled=payload.get("enabled") is True,
+            dry_run_only=payload.get("dry_run_only") is not False,
+            allow_live_orders=False,
+            runs_today=_int(payload.get("runs_today")),
+            max_runs_per_day=_int(payload.get("max_runs_per_day")),
+            latest_run_status=_text(latest.get("result") or latest.get("action")),
+            next_allowed_run_at=_text(payload.get("next_allowed_run_at")),
+        )
+
+    def _promotions_status(
+        self,
+        payload: dict[str, Any],
+    ) -> StrategyAutoBuyOperationsPromotionsStatus:
+        return StrategyAutoBuyOperationsPromotionsStatus(
+            pending_count=_int(payload.get("pending_count")),
+            latest_symbol=_text(payload.get("latest_symbol")),
+            latest_status=_text(payload.get("latest_status")),
+            latest_expires_at=_text(payload.get("latest_expires_at")),
+            acknowledged_count_today=_int(payload.get("acknowledged_count_today")),
+            dismissed_count_today=_int(payload.get("dismissed_count_today")),
         )
 
     def _live_readiness_status(
@@ -349,6 +464,8 @@ class StrategyAutoBuyOperationsService:
         self,
         *,
         dry_status: StrategyAutoBuyOperationsDryRunStatus,
+        scheduler_status: StrategyAutoBuyOperationsSchedulerStatus,
+        promotions_status: StrategyAutoBuyOperationsPromotionsStatus,
         readiness_status: StrategyAutoBuyOperationsLiveReadinessStatus,
         attempts_status: StrategyAutoBuyOperationsLiveAttemptsStatus,
     ) -> str:
@@ -356,18 +473,31 @@ class StrategyAutoBuyOperationsService:
             return "sync_required"
         if attempts_status.submitted_count_today > 0:
             return "submitted_today"
-        if not dry_status.recent_found:
-            return "no_dry_run"
-        if dry_status.latest_action != "would_buy":
-            return "dry_run_blocked"
-        if not readiness_status.enabled:
-            return "dry_run_would_buy"
-        if not readiness_status.ready:
-            return "live_readiness_blocked"
-        return "ready_for_operator_confirm"
+        if promotions_status.pending_count > 0:
+            return "promotion_pending"
+        if promotions_status.latest_status == "expired":
+            return "promotion_expired"
+        if dry_status.recent_found:
+            if dry_status.latest_action != "would_buy":
+                return "dry_run_blocked"
+            if not readiness_status.enabled:
+                return "dry_run_would_buy"
+            if not readiness_status.ready:
+                return "live_readiness_blocked"
+            return "ready_for_operator_confirm"
+        if not scheduler_status.enabled:
+            return "scheduler_disabled"
+        if scheduler_status.latest_run_status == "blocked":
+            return "scheduled_dry_run_blocked"
+        return "scheduled_dry_run_waiting"
 
     def _next_action(self, stage: str) -> str:
         return {
+            "scheduler_disabled": "enable_dry_run_scheduler_if_desired",
+            "scheduled_dry_run_waiting": "wait_for_scheduled_dry_run",
+            "scheduled_dry_run_blocked": "wait_for_scheduled_dry_run",
+            "promotion_pending": "review_promotion",
+            "promotion_expired": "acknowledge_or_dismiss_promotion",
             "no_dry_run": "run_dry_run",
             "dry_run_blocked": "review_block_reason",
             "dry_run_would_buy": "enable_prerequisites_manually",
