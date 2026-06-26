@@ -270,6 +270,10 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY,
             AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
             AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_READINESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_BLOCK_REASON_QUERY,
+            AgentChatIntentCategory.STRATEGY_EXIT_CANDIDATE_QUERY,
         }:
             return self._action(
                 data=self._data_from_tool_results(tool_results),
@@ -743,6 +747,10 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.STRATEGY_TARGET_PROGRESS_QUERY,
             AgentChatIntentCategory.STRATEGY_TRADE_PERFORMANCE_QUERY,
             AgentChatIntentCategory.STRATEGY_LOSS_BUDGET_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_READINESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_BLOCK_REASON_QUERY,
+            AgentChatIntentCategory.STRATEGY_EXIT_CANDIDATE_QUERY,
             AgentChatIntentCategory.UNSUPPORTED,
             AgentChatIntentCategory.NEEDS_CLARIFICATION,
         }

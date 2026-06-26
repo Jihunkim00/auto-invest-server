@@ -118,6 +118,23 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit": True,
             "strategy_live_auto_buy_block_after_target_hit": True,
             "strategy_live_auto_buy_scheduler_enabled": False,
+            "strategy_live_auto_exit_enabled": False,
+            "strategy_live_auto_exit_requires_operator_confirm": True,
+            "strategy_live_auto_exit_max_orders_per_day": 1,
+            "strategy_live_auto_exit_max_notional_krw": 50000.0,
+            "strategy_live_auto_exit_max_position_pct": 1.0,
+            "strategy_live_auto_exit_allow_stop_loss": True,
+            "strategy_live_auto_exit_allow_take_profit": False,
+            "strategy_live_auto_exit_allow_max_holding_days": False,
+            "strategy_live_auto_exit_allow_monthly_loss_exit": True,
+            "strategy_live_auto_exit_allow_target_hit_reduce": False,
+            "strategy_live_auto_exit_allowed_profiles": json.dumps(
+                ["safe", "balanced"], ensure_ascii=False
+            ),
+            "strategy_live_auto_exit_allow_aggressive": False,
+            "strategy_live_auto_exit_scheduler_enabled": False,
+            "strategy_live_auto_exit_requires_cost_basis": True,
+            "strategy_live_auto_exit_min_quantity": 1,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -336,6 +353,49 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_scheduler_enabled": bool(
                 row.strategy_live_auto_buy_scheduler_enabled
             ),
+            "strategy_live_auto_exit_enabled": bool(row.strategy_live_auto_exit_enabled),
+            "strategy_live_auto_exit_requires_operator_confirm": bool(
+                row.strategy_live_auto_exit_requires_operator_confirm
+            ),
+            "strategy_live_auto_exit_max_orders_per_day": int(
+                row.strategy_live_auto_exit_max_orders_per_day
+            ),
+            "strategy_live_auto_exit_max_notional_krw": float(
+                row.strategy_live_auto_exit_max_notional_krw
+            ),
+            "strategy_live_auto_exit_max_position_pct": float(
+                row.strategy_live_auto_exit_max_position_pct
+            ),
+            "strategy_live_auto_exit_allow_stop_loss": bool(
+                row.strategy_live_auto_exit_allow_stop_loss
+            ),
+            "strategy_live_auto_exit_allow_take_profit": bool(
+                row.strategy_live_auto_exit_allow_take_profit
+            ),
+            "strategy_live_auto_exit_allow_max_holding_days": bool(
+                row.strategy_live_auto_exit_allow_max_holding_days
+            ),
+            "strategy_live_auto_exit_allow_monthly_loss_exit": bool(
+                row.strategy_live_auto_exit_allow_monthly_loss_exit
+            ),
+            "strategy_live_auto_exit_allow_target_hit_reduce": bool(
+                row.strategy_live_auto_exit_allow_target_hit_reduce
+            ),
+            "strategy_live_auto_exit_allowed_profiles": _decode_profiles(
+                row.strategy_live_auto_exit_allowed_profiles
+            ),
+            "strategy_live_auto_exit_allow_aggressive": bool(
+                row.strategy_live_auto_exit_allow_aggressive
+            ),
+            "strategy_live_auto_exit_scheduler_enabled": bool(
+                row.strategy_live_auto_exit_scheduler_enabled
+            ),
+            "strategy_live_auto_exit_requires_cost_basis": bool(
+                row.strategy_live_auto_exit_requires_cost_basis
+            ),
+            "strategy_live_auto_exit_min_quantity": int(
+                row.strategy_live_auto_exit_min_quantity
+            ),
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -369,6 +429,9 @@ class RuntimeSettingService:
     def _finalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         settings["strategy_live_auto_buy_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_buy_allowed_profiles")
+        )
+        settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
+            settings.get("strategy_live_auto_exit_allowed_profiles")
         )
         settings["trade_limits"] = self._trade_limits(settings)
         settings["kis_limited_auto_sell_requires_valid_cost_basis"] = True
@@ -1484,6 +1547,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1509,6 +1574,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1530,6 +1597,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
             }
         if preset == "kis_sell_only_automation":
             return {
@@ -1550,6 +1619,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": True,
                 "kis_limited_auto_sell_stop_loss_enabled": True,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1571,6 +1642,8 @@ class RuntimeSettingService:
                     "kis_limited_auto_buy_enabled": True,
                     "strategy_live_auto_buy_enabled": False,
                     "strategy_live_auto_buy_scheduler_enabled": False,
+                    "strategy_live_auto_exit_enabled": False,
+                    "strategy_live_auto_exit_scheduler_enabled": False,
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
@@ -1667,6 +1740,21 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit",
             "strategy_live_auto_buy_block_after_target_hit",
             "strategy_live_auto_buy_scheduler_enabled",
+            "strategy_live_auto_exit_enabled",
+            "strategy_live_auto_exit_requires_operator_confirm",
+            "strategy_live_auto_exit_max_orders_per_day",
+            "strategy_live_auto_exit_max_notional_krw",
+            "strategy_live_auto_exit_max_position_pct",
+            "strategy_live_auto_exit_allow_stop_loss",
+            "strategy_live_auto_exit_allow_take_profit",
+            "strategy_live_auto_exit_allow_max_holding_days",
+            "strategy_live_auto_exit_allow_monthly_loss_exit",
+            "strategy_live_auto_exit_allow_target_hit_reduce",
+            "strategy_live_auto_exit_allowed_profiles",
+            "strategy_live_auto_exit_allow_aggressive",
+            "strategy_live_auto_exit_scheduler_enabled",
+            "strategy_live_auto_exit_requires_cost_basis",
+            "strategy_live_auto_exit_min_quantity",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -1686,7 +1774,10 @@ class RuntimeSettingService:
             value = payload[key]
             if key == "default_symbol" and value:
                 value = str(value).upper()
-            if key == "strategy_live_auto_buy_allowed_profiles":
+            if key in {
+                "strategy_live_auto_buy_allowed_profiles",
+                "strategy_live_auto_exit_allowed_profiles",
+            }:
                 value = _encode_profiles(value)
             setattr(row, key, value)
 
@@ -1764,6 +1855,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
             }
         if mode == "dry_run":
             return {
@@ -1782,6 +1875,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_exit_enabled": False,
+                "strategy_live_auto_exit_scheduler_enabled": False,
             }
         if mode == "sell_only_live":
             return self._preset_payload("kis_sell_only_automation")
@@ -1953,6 +2048,12 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "strategy_live_auto_exit_enabled",
+        "strategy_live_auto_exit_scheduler_enabled",
+        "strategy_live_auto_exit_allow_aggressive",
+        "strategy_live_auto_exit_allow_take_profit",
+        "strategy_live_auto_exit_allow_max_holding_days",
+        "strategy_live_auto_exit_allow_target_hit_reduce",
     )
 
 
@@ -1974,6 +2075,12 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "strategy_live_auto_exit_enabled",
+        "strategy_live_auto_exit_scheduler_enabled",
+        "strategy_live_auto_exit_allow_aggressive",
+        "strategy_live_auto_exit_allow_take_profit",
+        "strategy_live_auto_exit_allow_max_holding_days",
+        "strategy_live_auto_exit_allow_target_hit_reduce",
     }
 
 

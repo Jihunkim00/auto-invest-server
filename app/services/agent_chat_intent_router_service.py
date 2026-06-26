@@ -29,6 +29,7 @@ Rules:
 - Strategy entry permission, loss-limit, target-gate, and order-sizing questions must use strategy risk categories and read-only tools.
 - Strategy dry-run auto-buy simulation requests may run simulation-only tools, but must never create a live-order action.
 - Strategy live auto-buy questions must use read-only readiness/recent tools and must never execute run-once from chat.
+- Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -523,6 +524,34 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_strategy_live_auto_exit_recent_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY,
+                confidence=0.95,
+                reason="User is asking for recent guarded live auto-exit attempts.",
+                **base,
+            )
+        if self._is_strategy_live_auto_exit_block_reason_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_BLOCK_REASON_QUERY,
+                confidence=0.95,
+                reason="User is asking why guarded live auto-exit is blocked.",
+                **base,
+            )
+        if self._is_strategy_exit_candidate_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_EXIT_CANDIDATE_QUERY,
+                confidence=0.94,
+                reason="User is asking for held-position auto-exit candidates.",
+                **base,
+            )
+        if self._is_strategy_live_auto_exit_readiness_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_READINESS_QUERY,
+                confidence=0.95,
+                reason="User is asking for guarded live auto-exit readiness.",
+                **base,
+            )
         if self._is_strategy_live_auto_buy_recent_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
@@ -799,6 +828,84 @@ class AgentChatIntentRouterService:
                 "limit",
             ]
         ) or any(token in text for token in ["준비", "상태", "가능", "한도", "켜"])
+
+    def _is_strategy_live_auto_exit_context(self, text: str, lowered: str) -> bool:
+        return (
+            "live auto exit" in lowered
+            or "guarded live auto exit" in lowered
+            or "guarded auto exit" in lowered
+            or "strategy live auto exit" in lowered
+            or "auto exit" in lowered
+        )
+
+    def _is_strategy_live_auto_exit_recent_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_exit_context(text, lowered):
+            return False
+        return any(
+            token in lowered
+            for token in ["recent", "latest", "history", "result", "results"]
+        )
+
+    def _is_strategy_live_auto_exit_block_reason_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_exit_context(text, lowered):
+            return False
+        return any(
+            token in lowered
+            for token in ["why", "blocked", "block reason", "cannot", "can't"]
+        )
+
+    def _is_strategy_exit_candidate_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        candidate_words = [
+            "candidate",
+            "candidates",
+            "position",
+            "positions",
+            "stop loss",
+            "take profit",
+            "exit trigger",
+            "eligible",
+        ]
+        return (
+            (
+                self._is_strategy_live_auto_exit_context(text, lowered)
+                and any(token in lowered for token in candidate_words)
+            )
+            or "exit candidate" in lowered
+            or "strategy exit candidate" in lowered
+        )
+
+    def _is_strategy_live_auto_exit_readiness_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_exit_context(text, lowered):
+            return False
+        return any(
+            token in lowered
+            for token in [
+                "ready",
+                "readiness",
+                "status",
+                "available",
+                "enabled",
+                "limit",
+                "can",
+                "run once",
+            ]
+        )
 
     def _is_strategy_loss_limit_query(self, text: str, lowered: str) -> bool:
         return (
@@ -1125,6 +1232,33 @@ class AgentChatIntentRouterService:
                     "strategy_live_auto_buy_recent_lookup",
                     {},
                     "User asked for recent guarded live auto-buy attempts.",
+                )
+            ]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_READINESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_BLOCK_REASON_QUERY,
+        }:
+            return [
+                self._tool_call(
+                    "strategy_live_auto_exit_readiness_lookup",
+                    {"symbol": symbol},
+                    "User asked for guarded live auto-exit readiness.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_live_auto_exit_recent_lookup",
+                    {},
+                    "User asked for recent guarded live auto-exit attempts.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_EXIT_CANDIDATE_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_exit_candidate_lookup",
+                    {"symbol": symbol},
+                    "User asked for held-position exit candidates.",
                 )
             ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:

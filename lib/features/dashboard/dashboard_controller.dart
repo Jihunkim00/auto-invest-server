@@ -55,6 +55,7 @@ import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
 import '../../models/strategy_live_auto_buy.dart';
+import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -326,6 +327,11 @@ class DashboardController extends ChangeNotifier {
   List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
   bool strategyLiveAutoBuyLoading = false;
   String? strategyLiveAutoBuyError;
+  StrategyLiveAutoExitReadiness? strategyLiveAutoExitReadiness;
+  StrategyLiveAutoExitRunResult? strategyLiveAutoExitResult;
+  List<StrategyLiveAutoExitRunResult> strategyLiveAutoExitRecent = const [];
+  bool strategyLiveAutoExitLoading = false;
+  String? strategyLiveAutoExitError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -551,6 +557,7 @@ class DashboardController extends ChangeNotifier {
     unawaited(_loadStrategyRiskState());
     unawaited(_loadStrategyDryRunAutoBuyState());
     unawaited(_loadStrategyLiveAutoBuyState());
+    unawaited(_loadStrategyLiveAutoExitState());
   }
 
   Future<void> _loadStrategyProfileState() async {
@@ -666,6 +673,32 @@ class DashboardController extends ChangeNotifier {
       strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
     } finally {
       strategyLiveAutoBuyLoading = false;
+      if (hasListeners) notifyListeners();
+    }
+  }
+
+  Future<void> _loadStrategyLiveAutoExitState() async {
+    if (strategyLiveAutoExitLoading) return;
+    strategyLiveAutoExitLoading = true;
+    strategyLiveAutoExitError = null;
+    if (hasListeners) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoExitReadiness(),
+        apiClient.fetchStrategyLiveAutoExitRecent(limit: 10),
+      ]).timeout(const Duration(seconds: 3));
+      strategyLiveAutoExitReadiness =
+          results[0] as StrategyLiveAutoExitReadiness;
+      final recent = results[1] as StrategyLiveAutoExitRecent;
+      strategyLiveAutoExitRecent = recent.items;
+      strategyLiveAutoExitResult = recent.latest;
+    } on TimeoutException {
+      strategyLiveAutoExitError =
+          'Strategy live auto exit readiness unavailable: request timed out.';
+    } catch (e) {
+      strategyLiveAutoExitError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyLiveAutoExitLoading = false;
       if (hasListeners) notifyListeners();
     }
   }
@@ -1948,6 +1981,98 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyLiveAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runStrategyLiveAutoExitOnce() async {
+    if (strategyLiveAutoExitLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy live auto exit is already running.',
+      );
+    }
+    if (strategyLiveAutoExitReadiness?.ready != true) {
+      final reason =
+          strategyLiveAutoExitReadiness?.primaryBlockReason ?? 'not_ready';
+      return ActionResult(
+        success: false,
+        message: 'Guarded live auto exit is blocked: $reason.',
+      );
+    }
+    strategyLiveAutoExitLoading = true;
+    strategyLiveAutoExitError = null;
+    notifyListeners();
+    try {
+      final requestId =
+          'flutter-live-auto-exit-${DateTime.now().millisecondsSinceEpoch}';
+      final result = await apiClient.runStrategyLiveAutoExitOnce(
+        symbol: strategyLiveAutoExitReadiness?.selectedSymbol,
+        clientRequestId: requestId,
+      );
+      strategyLiveAutoExitResult = result;
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoExitReadiness(),
+        apiClient.fetchStrategyLiveAutoExitRecent(limit: 10),
+      ]);
+      strategyLiveAutoExitReadiness =
+          results[0] as StrategyLiveAutoExitReadiness;
+      final recent = results[1] as StrategyLiveAutoExitRecent;
+      strategyLiveAutoExitRecent = recent.items;
+      final message = result.submitted
+          ? 'Guarded live auto exit submitted: ${result.symbol ?? '-'}.'
+          : 'Guarded live auto exit blocked: ${result.blockReason ?? result.status}.';
+      return ActionResult(
+        success: result.submitted,
+        message: message,
+      );
+    } catch (e) {
+      strategyLiveAutoExitError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoExitError!),
+      );
+    } finally {
+      strategyLiveAutoExitLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyLiveAutoExit({
+    bool silent = false,
+  }) async {
+    if (strategyLiveAutoExitLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy live auto exit status is already loading.',
+      );
+    }
+    strategyLiveAutoExitLoading = true;
+    strategyLiveAutoExitError = null;
+    if (!silent) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoExitReadiness(),
+        apiClient.fetchStrategyLiveAutoExitRecent(limit: 10),
+      ]);
+      strategyLiveAutoExitReadiness =
+          results[0] as StrategyLiveAutoExitReadiness;
+      final recent = results[1] as StrategyLiveAutoExitRecent;
+      strategyLiveAutoExitRecent = recent.items;
+      strategyLiveAutoExitResult = recent.latest;
+      return ActionResult(
+        success: true,
+        message:
+            'Guarded live auto exit status refreshed: ${recent.items.length}.',
+      );
+    } catch (e) {
+      strategyLiveAutoExitError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoExitError!),
+      );
+    } finally {
+      strategyLiveAutoExitLoading = false;
       notifyListeners();
     }
   }

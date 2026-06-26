@@ -20,6 +20,9 @@ from app.services.profile_aware_dry_run_auto_buy_service import (
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
 )
+from app.services.profile_aware_guarded_live_auto_exit_service import (
+    ProfileAwareGuardedLiveAutoExitService,
+)
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.strategy_performance_service import StrategyPerformanceService
@@ -43,6 +46,10 @@ class AgentChatToolExecutor:
         | None = None,
         live_auto_buy_service_factory: Callable[
             [Session], ProfileAwareGuardedLiveAutoBuyService
+        ]
+        | None = None,
+        live_auto_exit_service_factory: Callable[
+            [Session], ProfileAwareGuardedLiveAutoExitService
         ]
         | None = None,
     ) -> None:
@@ -69,6 +76,10 @@ class AgentChatToolExecutor:
         self.live_auto_buy_service_factory = (
             live_auto_buy_service_factory
             or self._default_live_auto_buy_service
+        )
+        self.live_auto_exit_service_factory = (
+            live_auto_exit_service_factory
+            or self._default_live_auto_exit_service
         )
 
     def execute_many(
@@ -142,6 +153,12 @@ class AgentChatToolExecutor:
                 return self._strategy_live_auto_buy_readiness(db, call, intent)
             if tool.tool_name == "strategy_live_auto_buy_recent_lookup":
                 return self._strategy_live_auto_buy_recent(db, intent)
+            if tool.tool_name == "strategy_live_auto_exit_readiness_lookup":
+                return self._strategy_live_auto_exit_readiness(db, call, intent)
+            if tool.tool_name == "strategy_live_auto_exit_recent_lookup":
+                return self._strategy_live_auto_exit_recent(db, intent)
+            if tool.tool_name == "strategy_exit_candidate_lookup":
+                return self._strategy_exit_candidate(db, call, intent)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -499,6 +516,64 @@ class AgentChatToolExecutor:
             "Recent guarded live auto-buy attempts loaded.",
         )
 
+    def _strategy_live_auto_exit_readiness(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        symbol = self._kr_numeric_symbol(call, intent)
+        data = self.live_auto_exit_service_factory(db).readiness(
+            db,
+            provider="kis",
+            market="KR",
+            symbol=symbol,
+        )
+        return self._success(
+            "strategy_live_auto_exit_readiness_lookup",
+            "strategy_live_auto_exit_readiness",
+            data,
+            "Guarded live auto-exit readiness loaded. No validation or submit ran.",
+        )
+
+    def _strategy_live_auto_exit_recent(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.live_auto_exit_service_factory(db).recent(
+            db,
+            provider="kis",
+            market="KR",
+            limit=10,
+        )
+        return self._success(
+            "strategy_live_auto_exit_recent_lookup",
+            "strategy_live_auto_exit_recent",
+            data,
+            "Recent guarded live auto-exit attempts loaded.",
+        )
+
+    def _strategy_exit_candidate(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        symbol = self._kr_numeric_symbol(call, intent)
+        data = self.live_auto_exit_service_factory(db).readiness(
+            db,
+            provider="kis",
+            market="KR",
+            symbol=symbol,
+        )
+        return self._success(
+            "strategy_exit_candidate_lookup",
+            "strategy_exit_candidate",
+            data,
+            "Held-position exit candidates loaded. No validation or submit ran.",
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -600,6 +675,9 @@ class AgentChatToolExecutor:
             "strategy_dry_run_auto_buy_summary_lookup": "strategy_dry_run_auto_buy_summary",
             "strategy_live_auto_buy_readiness_lookup": "strategy_live_auto_buy_readiness",
             "strategy_live_auto_buy_recent_lookup": "strategy_live_auto_buy_recent",
+            "strategy_live_auto_exit_readiness_lookup": "strategy_live_auto_exit_readiness",
+            "strategy_live_auto_exit_recent_lookup": "strategy_live_auto_exit_recent",
+            "strategy_exit_candidate_lookup": "strategy_exit_candidate",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }
@@ -607,6 +685,16 @@ class AgentChatToolExecutor:
 
     def _symbol(self, call: AgentChatToolCall, intent: AgentChatIntent) -> str:
         return str(call.arguments.get("symbol") or intent.symbol or "").strip().upper()
+
+    def _kr_numeric_symbol(
+        self,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> str | None:
+        symbol = self._symbol(call, intent)
+        if not symbol.isdigit() or len(symbol) > 6:
+            return None
+        return symbol.zfill(6)
 
     def _order_summary(self, row: OrderLog) -> dict[str, Any]:
         return {
@@ -702,6 +790,17 @@ class AgentChatToolExecutor:
             target_risk_service=target_risk,
             positions_loader=lambda session: client.list_positions(),
             balance_loader=lambda session: client.get_account_balance(),
+            open_orders_loader=lambda session: client.list_open_orders(),
+        )
+
+    def _default_live_auto_exit_service(
+        self,
+        db: Session,
+    ) -> ProfileAwareGuardedLiveAutoExitService:
+        client = self.kis_client_factory(db)
+        return ProfileAwareGuardedLiveAutoExitService(
+            client=client,
+            positions_loader=lambda session: client.list_positions(),
             open_orders_loader=lambda session: client.list_open_orders(),
         )
 

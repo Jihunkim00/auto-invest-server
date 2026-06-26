@@ -66,6 +66,16 @@ class AgentChatIntentCategory(str, Enum):
     STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY = (
         "strategy_live_auto_buy_block_reason_query"
     )
+    STRATEGY_LIVE_AUTO_EXIT_READINESS_QUERY = (
+        "strategy_live_auto_exit_readiness_query"
+    )
+    STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY = (
+        "strategy_live_auto_exit_recent_query"
+    )
+    STRATEGY_LIVE_AUTO_EXIT_BLOCK_REASON_QUERY = (
+        "strategy_live_auto_exit_block_reason_query"
+    )
+    STRATEGY_EXIT_CANDIDATE_QUERY = "strategy_exit_candidate_query"
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 
