@@ -1716,6 +1716,10 @@ class RuntimeSettingService:
     def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
         payload = dict(payload)
         self._normalize_simplified_payload(payload)
+        if "strategy_auto_buy_scheduler_dry_run_only" in payload:
+            payload["strategy_auto_buy_scheduler_dry_run_only"] = True
+        if "strategy_auto_buy_scheduler_allow_live_orders" in payload:
+            payload["strategy_auto_buy_scheduler_allow_live_orders"] = False
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -1854,10 +1858,14 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_allowed_profiles",
             }:
                 value = _encode_profiles(value)
+            if key == "strategy_auto_buy_scheduler_dry_run_only":
+                value = True
             if key == "strategy_auto_buy_scheduler_allow_live_orders":
                 value = False
             setattr(row, key, value)
 
+        row.strategy_auto_buy_scheduler_dry_run_only = True
+        row.strategy_auto_buy_scheduler_allow_live_orders = False
         db.commit()
         db.refresh(row)
         return self.get_settings(db)

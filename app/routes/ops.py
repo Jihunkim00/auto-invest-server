@@ -100,6 +100,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     strategy_live_auto_buy_block_after_loss_limit: bool | None = None
     strategy_live_auto_buy_block_after_target_hit: bool | None = None
     strategy_live_auto_buy_scheduler_enabled: bool | None = None
+    strategy_auto_buy_scheduler_enabled: bool | None = None
     strategy_live_auto_exit_enabled: bool | None = None
     strategy_live_auto_exit_requires_operator_confirm: bool | None = None
     strategy_live_auto_exit_max_orders_per_day: int | None = Field(default=None, ge=0)

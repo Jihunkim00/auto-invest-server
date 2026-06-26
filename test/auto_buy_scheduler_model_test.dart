@@ -9,8 +9,12 @@ void main() {
     );
 
     expect(status.enabled, isFalse);
+    expect(status.provider, 'kis');
+    expect(status.market, 'KR');
     expect(status.dryRunOnly, isTrue);
+    expect(status.promotionQueueOnly, isTrue);
     expect(status.allowLiveOrders, isFalse);
+    expect(status.realOrderSubmitAllowed, isFalse);
     expect(status.activeProfile, 'safe');
     expect(status.allowedProfiles, ['safe', 'balanced']);
     expect(status.runsToday, 1);
@@ -55,8 +59,12 @@ Map<String, dynamic> autoBuySchedulerStatusJson({
 }) {
   return {
     'enabled': enabled,
+    'provider': 'kis',
+    'market': 'KR',
     'dry_run_only': true,
+    'promotion_queue_only': true,
     'allow_live_orders': false,
+    'real_order_submit_allowed': false,
     'active_profile': 'safe',
     'allowed_profiles': ['safe', 'balanced'],
     'runs_today': 1,
@@ -76,6 +84,10 @@ Map<String, dynamic> autoBuySchedulerStatusJson({
     'schedule_slots': ['09:10', '10:30', '14:30'],
     'safety': {
       'read_only': true,
+      'dry_run_only': true,
+      'promotion_queue_only': true,
+      'allow_live_orders': false,
+      'real_order_submit_allowed': false,
       'validation_called': false,
       'broker_submit_called': false,
       'manual_submit_called': false,

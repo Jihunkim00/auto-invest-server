@@ -84,11 +84,13 @@ class StrategyAutoBuySchedulerService:
         )
         return sanitize_kis_payload(
             {
+                "provider": provider,
+                "market": market,
                 "enabled": bool(settings.get("strategy_auto_buy_scheduler_enabled")),
-                "dry_run_only": bool(
-                    settings.get("strategy_auto_buy_scheduler_dry_run_only")
-                ),
+                "dry_run_only": True,
+                "promotion_queue_only": True,
                 "allow_live_orders": False,
+                "real_order_submit_allowed": False,
                 "active_profile": profile.get("profile_name"),
                 "allowed_profiles": _allowed_profiles(settings),
                 "runs_today": runs_today,
@@ -213,6 +215,7 @@ class StrategyAutoBuySchedulerService:
             "validation_called": False,
             "broker_submit_called": False,
             "manual_submit_called": False,
+            "real_order_submit_allowed": False,
             "safety": _safety(read_only=False),
         }
         run = self._save_scheduler_run(
@@ -404,6 +407,7 @@ class StrategyAutoBuySchedulerService:
             "validation_called": False,
             "broker_submit_called": False,
             "manual_submit_called": False,
+            "real_order_submit_allowed": False,
             "safety": _safety(read_only=False),
         }
 
@@ -436,6 +440,11 @@ def _allowed_profiles(settings: dict[str, Any]) -> list[str]:
 def _safety(*, read_only: bool) -> dict[str, Any]:
     return {
         "read_only": read_only,
+        "dry_run_only": True,
+        "promotion_queue_only": True,
+        "allow_live_orders": False,
+        "real_order_submit_allowed": False,
+        "scheduler_real_orders_enabled": False,
         "real_order_submitted": False,
         "validation_called": False,
         "broker_submit_called": False,

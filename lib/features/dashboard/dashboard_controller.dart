@@ -1972,6 +1972,56 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> updateStrategyAutoBuySchedulerEnabled(
+    bool enabled,
+  ) async {
+    if (strategyAutoBuySchedulerLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Auto buy scheduler status is already loading.',
+      );
+    }
+    final previousStatus = strategyAutoBuySchedulerStatus;
+    strategyAutoBuySchedulerStatus = previousStatus?.copyWith(
+      enabled: enabled,
+      clearPrimaryBlockReason: enabled,
+      primaryBlockReason: enabled ? null : 'scheduler_disabled',
+    );
+    strategyAutoBuySchedulerLoading = true;
+    strategyAutoBuySchedulerError = null;
+    notifyListeners();
+
+    final payload = {'strategy_auto_buy_scheduler_enabled': enabled};
+    try {
+      await apiClient.updateOpsSettings(payload);
+      strategyAutoBuySchedulerStatus =
+          await apiClient.fetchStrategyAutoBuySchedulerStatus();
+      _recordSettingsChangeEvent('Strategy Auto Buy Scheduler', payload);
+      return ActionResult(
+        success: true,
+        message:
+            'Dry-run scheduler ${enabled ? 'enabled' : 'disabled'} successfully.',
+      );
+    } catch (e) {
+      strategyAutoBuySchedulerStatus = previousStatus;
+      strategyAutoBuySchedulerError = ApiErrorFormatter.format(e.toString());
+      try {
+        strategyAutoBuySchedulerStatus =
+            await apiClient.fetchStrategyAutoBuySchedulerStatus();
+      } catch (_) {
+        // Keep the local rollback state if backend status is unavailable.
+      }
+      return ActionResult(
+        success: false,
+        message:
+            'Dry-run scheduler update failed: ${_primaryMessage(strategyAutoBuySchedulerError!)}',
+      );
+    } finally {
+      strategyAutoBuySchedulerLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshStrategyAutoBuyPromotions({
     bool silent = false,
   }) async {

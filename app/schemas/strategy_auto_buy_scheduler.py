@@ -124,9 +124,13 @@ class StrategyAutoBuyPromotionMarkConvertedRequest(BaseModel):
 
 
 class StrategyAutoBuySchedulerStatusResponse(BaseModel):
+    provider: str = "kis"
+    market: str = "KR"
     enabled: bool
     dry_run_only: bool
+    promotion_queue_only: bool
     allow_live_orders: bool
+    real_order_submit_allowed: bool
     active_profile: str | None = None
     allowed_profiles: list[str] = Field(default_factory=list)
     runs_today: int = 0
