@@ -201,6 +201,20 @@ def _create_runtime_settings_table_if_missing():
                     strategy_live_auto_buy_block_after_loss_limit BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_buy_block_after_target_hit BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_buy_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_auto_buy_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_auto_buy_scheduler_dry_run_only BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_auto_buy_scheduler_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_auto_buy_scheduler_profile_source VARCHAR(20) NOT NULL DEFAULT 'active',
+                    strategy_auto_buy_scheduler_max_runs_per_day INTEGER NOT NULL DEFAULT 3,
+                    strategy_auto_buy_scheduler_min_minutes_between_runs INTEGER NOT NULL DEFAULT 60,
+                    strategy_auto_buy_scheduler_promotion_ttl_minutes INTEGER NOT NULL DEFAULT 45,
+                    strategy_auto_buy_scheduler_create_promotion_on_would_buy BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_auto_buy_scheduler_block_when_kill_switch BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_auto_buy_scheduler_block_when_market_closed BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_auto_buy_scheduler_block_after_no_new_entry_time BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_auto_buy_scheduler_no_new_entry_after VARCHAR(5) NOT NULL DEFAULT '15:00',
+                    strategy_auto_buy_scheduler_allowed_profiles TEXT NOT NULL DEFAULT '["safe", "balanced"]',
+                    strategy_auto_buy_scheduler_allow_aggressive BOOLEAN NOT NULL DEFAULT 0,
                     strategy_live_auto_exit_enabled BOOLEAN NOT NULL DEFAULT 0,
                     strategy_live_auto_exit_requires_operator_confirm BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_exit_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
@@ -482,6 +496,74 @@ def _create_strategy_live_auto_buy_attempts_table_if_missing():
                     f"CREATE INDEX IF NOT EXISTS "
                     f"ix_strategy_live_auto_buy_attempts_{name} "
                     f"ON strategy_live_auto_buy_attempts ({column})"
+                )
+            )
+
+
+def _create_strategy_auto_buy_promotions_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_auto_buy_promotions (
+                    id INTEGER PRIMARY KEY,
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    active_profile VARCHAR(40),
+                    symbol VARCHAR(20),
+                    symbol_name VARCHAR(160),
+                    status VARCHAR(40) NOT NULL DEFAULT 'pending',
+                    promotion_reason TEXT,
+                    source_dry_run_signal_id INTEGER,
+                    source_dry_run_trade_run_id INTEGER,
+                    source_dry_run_order_id INTEGER,
+                    dry_run_action VARCHAR(40),
+                    buy_score FLOAT,
+                    sell_score FLOAT,
+                    final_score FLOAT,
+                    confidence FLOAT,
+                    recommended_notional_krw FLOAT,
+                    simulated_quantity FLOAT,
+                    simulated_price FLOAT,
+                    simulated_notional_krw FLOAT,
+                    target_risk_result TEXT,
+                    block_reason VARCHAR(160),
+                    risk_flags TEXT,
+                    gating_notes TEXT,
+                    expires_at DATETIME,
+                    acknowledged_at DATETIME,
+                    dismissed_at DATETIME,
+                    promoted_to_live_attempt_id INTEGER,
+                    related_live_order_id INTEGER,
+                    request_payload TEXT,
+                    response_payload TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "provider": "provider",
+            "market": "market",
+            "active_profile": "active_profile",
+            "symbol": "symbol",
+            "status": "status",
+            "source_dry_run_signal_id": "source_dry_run_signal_id",
+            "source_dry_run_trade_run_id": "source_dry_run_trade_run_id",
+            "source_dry_run_order_id": "source_dry_run_order_id",
+            "dry_run_action": "dry_run_action",
+            "block_reason": "block_reason",
+            "expires_at": "expires_at",
+            "promoted_to_live_attempt_id": "promoted_to_live_attempt_id",
+            "related_live_order_id": "related_live_order_id",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    f"ix_strategy_auto_buy_promotions_{name} "
+                    f"ON strategy_auto_buy_promotions ({column})"
                 )
             )
 
@@ -1295,6 +1377,7 @@ def init_db():
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()
+    _create_strategy_auto_buy_promotions_table_if_missing()
     _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
@@ -1417,6 +1500,20 @@ def init_db():
         "strategy_live_auto_buy_block_after_loss_limit": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_buy_block_after_target_hit": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_buy_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "strategy_auto_buy_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "strategy_auto_buy_scheduler_dry_run_only": "BOOLEAN DEFAULT 1",
+        "strategy_auto_buy_scheduler_allow_live_orders": "BOOLEAN DEFAULT 0",
+        "strategy_auto_buy_scheduler_profile_source": "VARCHAR(20) DEFAULT 'active'",
+        "strategy_auto_buy_scheduler_max_runs_per_day": "INTEGER DEFAULT 3",
+        "strategy_auto_buy_scheduler_min_minutes_between_runs": "INTEGER DEFAULT 60",
+        "strategy_auto_buy_scheduler_promotion_ttl_minutes": "INTEGER DEFAULT 45",
+        "strategy_auto_buy_scheduler_create_promotion_on_would_buy": "BOOLEAN DEFAULT 1",
+        "strategy_auto_buy_scheduler_block_when_kill_switch": "BOOLEAN DEFAULT 1",
+        "strategy_auto_buy_scheduler_block_when_market_closed": "BOOLEAN DEFAULT 1",
+        "strategy_auto_buy_scheduler_block_after_no_new_entry_time": "BOOLEAN DEFAULT 1",
+        "strategy_auto_buy_scheduler_no_new_entry_after": "VARCHAR(5) DEFAULT '15:00'",
+        "strategy_auto_buy_scheduler_allowed_profiles": "TEXT DEFAULT '[\"safe\", \"balanced\"]'",
+        "strategy_auto_buy_scheduler_allow_aggressive": "BOOLEAN DEFAULT 0",
         "strategy_live_auto_exit_enabled": "BOOLEAN DEFAULT 0",
         "strategy_live_auto_exit_requires_operator_confirm": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_exit_max_orders_per_day": "INTEGER DEFAULT 1",

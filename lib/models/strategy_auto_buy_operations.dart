@@ -5,6 +5,8 @@ class StrategyAutoBuyOperationsStatus {
     required this.autoBuyStage,
     required this.nextOperatorAction,
     required this.dryRun,
+    required this.scheduler,
+    required this.promotions,
     required this.liveReadiness,
     required this.liveAttempts,
     required this.risk,
@@ -18,6 +20,8 @@ class StrategyAutoBuyOperationsStatus {
   final String autoBuyStage;
   final String nextOperatorAction;
   final StrategyAutoBuyOperationsDryRun dryRun;
+  final StrategyAutoBuyOperationsScheduler scheduler;
+  final StrategyAutoBuyOperationsPromotions promotions;
   final StrategyAutoBuyOperationsLiveReadiness liveReadiness;
   final StrategyAutoBuyOperationsLiveAttempts liveAttempts;
   final StrategyAutoBuyOperationsRisk risk;
@@ -38,6 +42,12 @@ class StrategyAutoBuyOperationsStatus {
       dryRun: StrategyAutoBuyOperationsDryRun.fromJson(
         _map(json['dry_run']),
       ),
+      scheduler: StrategyAutoBuyOperationsScheduler.fromJson(
+        _map(json['scheduler']),
+      ),
+      promotions: StrategyAutoBuyOperationsPromotions.fromJson(
+        _map(json['promotions']),
+      ),
       liveReadiness: StrategyAutoBuyOperationsLiveReadiness.fromJson(
         _map(json['live_readiness']),
       ),
@@ -46,6 +56,72 @@ class StrategyAutoBuyOperationsStatus {
       ),
       risk: StrategyAutoBuyOperationsRisk.fromJson(_map(json['risk'])),
       safety: _map(json['safety']),
+    );
+  }
+}
+
+class StrategyAutoBuyOperationsScheduler {
+  const StrategyAutoBuyOperationsScheduler({
+    required this.enabled,
+    required this.dryRunOnly,
+    required this.allowLiveOrders,
+    required this.runsToday,
+    required this.maxRunsPerDay,
+    required this.minMinutesBetweenRuns,
+    this.latestRunStatus,
+    this.nextAllowedRunAt,
+  });
+
+  final bool enabled;
+  final bool dryRunOnly;
+  final bool allowLiveOrders;
+  final int runsToday;
+  final int maxRunsPerDay;
+  final String? latestRunStatus;
+  final DateTime? nextAllowedRunAt;
+  final int minMinutesBetweenRuns;
+
+  factory StrategyAutoBuyOperationsScheduler.fromJson(
+      Map<String, dynamic> json) {
+    return StrategyAutoBuyOperationsScheduler(
+      enabled: json['enabled'] == true,
+      dryRunOnly: json['dry_run_only'] != false,
+      allowLiveOrders: json['allow_live_orders'] == true,
+      runsToday: _int(json['runs_today']),
+      maxRunsPerDay: _int(json['max_runs_per_day']),
+      latestRunStatus: _nullableString(json['latest_run_status']),
+      nextAllowedRunAt: _dateTime(json['next_allowed_run_at']),
+      minMinutesBetweenRuns: _int(json['min_minutes_between_runs']),
+    );
+  }
+}
+
+class StrategyAutoBuyOperationsPromotions {
+  const StrategyAutoBuyOperationsPromotions({
+    required this.pendingCount,
+    required this.acknowledgedCountToday,
+    required this.dismissedCountToday,
+    this.latestSymbol,
+    this.latestStatus,
+    this.latestExpiresAt,
+  });
+
+  final int pendingCount;
+  final String? latestSymbol;
+  final String? latestStatus;
+  final DateTime? latestExpiresAt;
+  final int acknowledgedCountToday;
+  final int dismissedCountToday;
+
+  factory StrategyAutoBuyOperationsPromotions.fromJson(
+      Map<String, dynamic> json) {
+    return StrategyAutoBuyOperationsPromotions(
+      pendingCount: _int(json['pending_count']),
+      latestSymbol: _nullableString(json['latest_symbol']),
+      latestStatus: _nullableString(json['latest_status']),
+      latestExpiresAt: _dateTime(json['latest_expires_at']),
+      acknowledgedCountToday: _int(json['acknowledged_count_today']),
+      dismissedCountToday: _int(json['dismissed_count_today']),
     );
   }
 }

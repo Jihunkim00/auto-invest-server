@@ -30,6 +30,8 @@ Rules:
 - Strategy dry-run auto-buy simulation requests may run simulation-only tools, but must never create a live-order action.
 - Strategy live auto-buy questions must use read-only readiness/recent tools and must never execute run-once from chat.
 - Strategy auto-buy operations status, next-action, and block-reason questions must use the read-only operations status lookup.
+- Strategy scheduled dry-run auto-buy scheduler questions must use read-only scheduler status/promotions lookups.
+- Strategy auto-buy promotion queue questions must use read-only promotion queue lookup and must never execute run-once from chat.
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
@@ -257,6 +259,14 @@ class AgentChatIntentRouterService:
                 reason="User is asking for safe analysis.",
                 supported=bool(symbol_info),
                 requires_plan=bool(symbol_info),
+                **base,
+            )
+
+        if self._is_strategy_auto_buy_scheduler_status_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_SCHEDULER_STATUS_QUERY,
+                confidence=0.95,
+                reason="User is asking for scheduled dry-run auto-buy status.",
                 **base,
             )
 
@@ -574,6 +584,27 @@ class AgentChatIntentRouterService:
                 reason="User is asking for read-only auto-buy operations status.",
                 **base,
             )
+        if self._is_strategy_auto_buy_scheduler_status_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_SCHEDULER_STATUS_QUERY,
+                confidence=0.95,
+                reason="User is asking for scheduled dry-run auto-buy status.",
+                **base,
+            )
+        if self._is_strategy_auto_buy_promotion_reason_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_PROMOTION_REASON_QUERY,
+                confidence=0.95,
+                reason="User is asking why an auto-buy promotion exists or is blocked.",
+                **base,
+            )
+        if self._is_strategy_auto_buy_promotion_queue_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_PROMOTION_QUEUE_QUERY,
+                confidence=0.95,
+                reason="User is asking for the auto-buy promotion queue.",
+                **base,
+            )
         if self._is_strategy_live_auto_buy_recent_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
@@ -860,6 +891,73 @@ class AgentChatIntentRouterService:
         return self._is_strategy_auto_buy_operations_context(text, lowered) and any(
             token in lowered
             for token in ["why", "blocked", "block reason", "cannot", "can't"]
+        )
+
+    def _is_strategy_auto_buy_scheduler_context(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            (
+                "auto buy" in lowered
+                or "auto-buy" in lowered
+                or "automatic buy" in lowered
+            )
+            and ("scheduler" in lowered or "scheduled" in lowered)
+        )
+
+    def _is_strategy_auto_buy_scheduler_status_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_scheduler_context(text, lowered) and any(
+            token in lowered
+            for token in [
+                "status",
+                "state",
+                "dry-run",
+                "dry run",
+                "ran",
+                "run today",
+                "next",
+                "when",
+            ]
+        )
+
+    def _is_strategy_auto_buy_promotion_context(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            "promotion queue" in lowered
+            or "promotion" in lowered
+            or (
+                ("auto buy" in lowered or "auto-buy" in lowered)
+                and any(token in lowered for token in ["candidate", "queue"])
+            )
+        )
+
+    def _is_strategy_auto_buy_promotion_queue_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_promotion_context(text, lowered) and any(
+            token in lowered
+            for token in ["queue", "pending", "candidate", "candidates", "what"]
+        )
+
+    def _is_strategy_auto_buy_promotion_reason_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_promotion_context(text, lowered) and any(
+            token in lowered
+            for token in ["why", "reason", "would_buy", "would buy", "blocked"]
         )
 
     def _is_strategy_live_auto_buy_recent_query(
@@ -1300,6 +1398,25 @@ class AgentChatIntentRouterService:
                     "strategy_auto_buy_operations_status_lookup",
                     {},
                     "User asked for read-only auto-buy operations status.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_AUTO_BUY_SCHEDULER_STATUS_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_auto_buy_scheduler_status_lookup",
+                    {},
+                    "User asked for read-only scheduled dry-run auto-buy status.",
+                )
+            ]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_AUTO_BUY_PROMOTION_QUEUE_QUERY,
+            AgentChatIntentCategory.STRATEGY_AUTO_BUY_PROMOTION_REASON_QUERY,
+        }:
+            return [
+                self._tool_call(
+                    "strategy_auto_buy_promotions_lookup",
+                    {"symbol": symbol, "status": "pending"},
+                    "User asked for the read-only auto-buy promotion queue.",
                 )
             ]
         if category in {

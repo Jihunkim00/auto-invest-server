@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 
 
 StrategyAutoBuyStage = Literal[
+    "scheduler_disabled",
+    "scheduled_dry_run_waiting",
+    "scheduled_dry_run_blocked",
+    "promotion_pending",
+    "promotion_expired",
     "no_dry_run",
     "dry_run_blocked",
     "dry_run_would_buy",
@@ -17,6 +22,10 @@ StrategyAutoBuyStage = Literal[
 ]
 
 StrategyAutoBuyNextOperatorAction = Literal[
+    "enable_dry_run_scheduler_if_desired",
+    "wait_for_scheduled_dry_run",
+    "review_promotion",
+    "acknowledge_or_dismiss_promotion",
     "run_dry_run",
     "review_block_reason",
     "enable_prerequisites_manually",
@@ -67,6 +76,25 @@ class StrategyAutoBuyOperationsRiskStatus(BaseModel):
     monthly_loss_limit_hit: bool
 
 
+class StrategyAutoBuyOperationsSchedulerStatus(BaseModel):
+    enabled: bool = False
+    dry_run_only: bool = True
+    allow_live_orders: bool = False
+    runs_today: int = 0
+    max_runs_per_day: int = 0
+    latest_run_status: str | None = None
+    next_allowed_run_at: str | None = None
+
+
+class StrategyAutoBuyOperationsPromotionsStatus(BaseModel):
+    pending_count: int = 0
+    latest_symbol: str | None = None
+    latest_status: str | None = None
+    latest_expires_at: str | None = None
+    acknowledged_count_today: int = 0
+    dismissed_count_today: int = 0
+
+
 class StrategyAutoBuyOperationsSafetyStatus(BaseModel):
     read_only: bool = True
     validation_called: bool = False
@@ -83,6 +111,12 @@ class StrategyAutoBuyOperationsStatusResponse(BaseModel):
     auto_buy_stage: StrategyAutoBuyStage
     next_operator_action: StrategyAutoBuyNextOperatorAction
     dry_run: StrategyAutoBuyOperationsDryRunStatus
+    scheduler: StrategyAutoBuyOperationsSchedulerStatus = Field(
+        default_factory=StrategyAutoBuyOperationsSchedulerStatus
+    )
+    promotions: StrategyAutoBuyOperationsPromotionsStatus = Field(
+        default_factory=StrategyAutoBuyOperationsPromotionsStatus
+    )
     live_readiness: StrategyAutoBuyOperationsLiveReadinessStatus
     live_attempts: StrategyAutoBuyOperationsLiveAttemptsStatus
     risk: StrategyAutoBuyOperationsRiskStatus

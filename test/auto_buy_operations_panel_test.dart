@@ -15,6 +15,7 @@ import 'strategy_live_auto_buy_model_test.dart';
 void main() {
   testWidgets('auto buy operations panel renders status and guarded actions',
       (tester) async {
+    _setLargeViewport(tester);
     final api = _AutoBuyOpsApiClient();
     final controller = DashboardController(api, autoload: false);
     await controller.refreshStrategyAutoBuyOperations(silent: true);
@@ -30,7 +31,9 @@ void main() {
     expect(find.text('TARGET RISK GATED'), findsOneWidget);
     expect(find.text('KIS VALIDATION REQUIRED'), findsOneWidget);
     expect(find.text('ONE SHOT LIVE BUY'), findsOneWidget);
-    expect(find.text('NO SCHEDULER'), findsOneWidget);
+    expect(find.text('SCHEDULED DRY RUN'), findsOneWidget);
+    expect(find.text('PROMOTION ONLY'), findsOneWidget);
+    expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
     expect(find.text('NO AUTO RETRY'), findsOneWidget);
     expect(find.text('READY FOR OPERATOR CONFIRM'), findsWidgets);
     expect(find.textContaining('005930'), findsWidgets);
@@ -49,6 +52,7 @@ void main() {
 
   testWidgets('guarded live auto buy button requires final confirmation',
       (tester) async {
+    _setLargeViewport(tester);
     final api = _AutoBuyOpsApiClient();
     final controller = DashboardController(api, autoload: false);
     await controller.refreshStrategyAutoBuyOperations(silent: true);
@@ -80,6 +84,7 @@ void main() {
 
   testWidgets('guarded live auto buy button is disabled when readiness is blocked',
       (tester) async {
+    _setLargeViewport(tester);
     final api = _AutoBuyOpsApiClient(ready: false);
     final controller = DashboardController(api, autoload: false);
     await controller.refreshStrategyAutoBuyOperations(silent: true);
@@ -97,6 +102,13 @@ void main() {
 
     controller.dispose();
   });
+}
+
+void _setLargeViewport(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1200, 900);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
 }
 
 class _AutoBuyOpsApiClient extends ApiClient {

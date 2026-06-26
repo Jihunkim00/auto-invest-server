@@ -84,6 +84,11 @@ class AgentChatResultSummarizer:
             if primary.result_type == "strategy_auto_buy_operations_status":
                 return self._strategy_auto_buy_operations_answer(primary)
             if primary.result_type in {
+                "strategy_auto_buy_scheduler_status",
+                "strategy_auto_buy_promotions",
+            }:
+                return self._strategy_auto_buy_scheduler_answer(primary)
+            if primary.result_type in {
                 "strategy_live_auto_buy_readiness",
                 "strategy_live_auto_buy_recent",
             }:
@@ -142,6 +147,8 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy_recent",
                 "strategy_dry_run_auto_buy_summary",
                 "strategy_auto_buy_operations_status",
+                "strategy_auto_buy_scheduler_status",
+                "strategy_auto_buy_promotions",
                 "strategy_live_auto_buy_readiness",
                 "strategy_live_auto_buy_recent",
                 "strategy_live_auto_exit_readiness",
@@ -524,6 +531,36 @@ class AgentChatResultSummarizer:
             answer_type="strategy_auto_buy_operations_answer",
         )
 
+    def _strategy_auto_buy_scheduler_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        if result.result_type == "strategy_auto_buy_scheduler_status":
+            enabled = self._on_off(data.get("enabled"))
+            block = data.get("primary_block_reason") or "none"
+            pending = data.get("pending_promotion_count", 0)
+            return AgentChatAnswer(
+                text=(
+                    f"Scheduled dry-run auto-buy is {enabled}. "
+                    f"Primary block reason: {block}. Pending promotions: {pending}. "
+                    "PR78 scheduler discovery is dry-run only; no validation, broker submit, or live run-once ran from chat."
+                ),
+                answer_type="strategy_auto_buy_scheduler_answer",
+            )
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        first = items[0] if items and isinstance(items[0], dict) else {}
+        symbol = first.get("symbol") or "none"
+        reason = first.get("promotion_reason") or first.get("block_reason") or "none"
+        return AgentChatAnswer(
+            text=(
+                f"Promotion queue has {len(items)} visible candidate(s). "
+                f"Latest candidate: {symbol}; reason: {reason}. "
+                "A promotion is not an order. Chat did not acknowledge, validate, submit, or run live auto-buy."
+            ),
+            answer_type="strategy_auto_buy_promotion_answer",
+        )
+
     def _strategy_live_auto_exit_answer(
         self,
         result: AgentChatToolResult,
@@ -706,6 +743,54 @@ class AgentChatResultSummarizer:
                     {"label": "Latest symbol", "value": dry_run.get("latest_symbol") or "-"},
                     {"label": "Block reason", "value": readiness.get("primary_block_reason") or "-"},
                     {"label": "Latest live attempt", "value": attempts.get("latest_status") or "none"},
+                ],
+                data=data,
+            )
+        if result.result_type == "strategy_auto_buy_scheduler_status":
+            enabled = data.get("enabled") is True
+            return AgentChatResultCard(
+                card_type="strategy_auto_buy_scheduler_status",
+                title="Scheduled Dry-Run Auto Buy",
+                subtitle=str(data.get("active_profile") or "KIS/KR").upper(),
+                primary_value="ENABLED" if enabled else "DISABLED",
+                badges=[
+                    "SCHEDULED DRY RUN",
+                    "READ ONLY",
+                    "NO LIVE SCHEDULER",
+                    "NO VALIDATION",
+                    "NO BROKER SUBMIT",
+                    "OPERATOR CONFIRM REQUIRED",
+                ],
+                rows=[
+                    {"label": "Runs today", "value": data.get("runs_today", 0)},
+                    {"label": "Max runs", "value": data.get("max_runs_per_day", 0)},
+                    {"label": "Next allowed", "value": data.get("next_allowed_run_at") or "-"},
+                    {"label": "Block reason", "value": data.get("primary_block_reason") or "-"},
+                    {"label": "Pending promotions", "value": data.get("pending_promotion_count", 0)},
+                ],
+                data=data,
+            )
+        if result.result_type == "strategy_auto_buy_promotions":
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            first = items[0] if items and isinstance(items[0], dict) else {}
+            return AgentChatResultCard(
+                card_type="strategy_auto_buy_promotions",
+                title="Auto Buy Promotion Queue",
+                subtitle=str(first.get("active_profile") or "KIS/KR").upper(),
+                primary_value=str(first.get("symbol") or "NONE"),
+                badges=[
+                    "PROMOTION ONLY",
+                    "READ ONLY",
+                    "NO CHAT EXECUTION",
+                    "NO VALIDATION",
+                    "NO BROKER SUBMIT",
+                ],
+                rows=[
+                    {"label": "Visible candidates", "value": len(items)},
+                    {"label": "Latest status", "value": first.get("status") or "none"},
+                    {"label": "Reason", "value": first.get("promotion_reason") or "-"},
+                    {"label": "Score", "value": first.get("final_score") or first.get("buy_score") or "-"},
+                    {"label": "Expires", "value": first.get("expires_at") or "-"},
                 ],
                 data=data,
             )

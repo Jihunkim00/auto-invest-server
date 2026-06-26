@@ -20,7 +20,9 @@ void main() {
         'NO CHAT EXECUTION',
         'NO VALIDATION',
         'NO BROKER SUBMIT',
-        'NO SCHEDULER',
+        'SCHEDULED DRY RUN',
+        'PROMOTION ONLY',
+        'NO LIVE SCHEDULER',
         'NO AUTO RETRY',
       ],
       'rows': [

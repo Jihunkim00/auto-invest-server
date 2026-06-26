@@ -13,6 +13,9 @@ from app.db.database import SessionLocal
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_auto_buy_scheduler_service import (
+    StrategyAutoBuySchedulerService,
+)
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.watchlist_run_service import WatchlistRunService
 
@@ -25,6 +28,7 @@ class SchedulerService:
         self.orchestrator = TradingOrchestratorService()
         self.runtime_settings = RuntimeSettingService()
         self.watchlist_run_service = WatchlistRunService()
+        self.strategy_auto_buy_scheduler_service = StrategyAutoBuySchedulerService()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._slot_runs: set[str] = set()
@@ -37,6 +41,11 @@ class SchedulerService:
             ("open_phase", 9, 5),
             ("midday", 11, 30),
             ("before_close", 14, 50),
+        ]
+        self._strategy_auto_buy_slots = [
+            ("strategy_auto_buy_dry_run_open_phase", 9, 10),
+            ("strategy_auto_buy_dry_run_midday", 10, 30),
+            ("strategy_auto_buy_dry_run_before_close", 14, 30),
         ]
 
     def start(self):
@@ -79,6 +88,13 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_kr_scheduled_once(slot_name)
+
+            for slot_name, hour, minute in self._strategy_auto_buy_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:strategy_auto_buy_dry_run:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_strategy_auto_buy_dry_run_scheduled_once(slot_name)
 
             time.sleep(20)
 
@@ -192,6 +208,21 @@ class SchedulerService:
                     db,
                     gate_level=DEFAULT_GATE_LEVEL,
                 )
+        finally:
+            db.close()
+
+    def _run_strategy_auto_buy_dry_run_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            return self.strategy_auto_buy_scheduler_service.run_dry_run_once(
+                db,
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "trigger_source": "strategy_auto_buy_dry_run",
+                    "scheduler_slot": slot_name,
+                },
+            )
         finally:
             db.close()
 

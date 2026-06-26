@@ -30,6 +30,9 @@ from app.routes.strategy import router as strategy_router
 from app.routes.strategy_auto_buy_operations import (
     router as strategy_auto_buy_operations_router,
 )
+from app.routes.strategy_auto_buy_scheduler import (
+    router as strategy_auto_buy_scheduler_router,
+)
 from app.routes.strategy_dry_run import router as strategy_dry_run_router
 from app.routes.strategy_live_exit import router as strategy_live_exit_router
 from app.routes.strategy_live import router as strategy_live_router
@@ -94,6 +97,7 @@ app.include_router(market_analysis_router)
 app.include_router(signals_router)
 app.include_router(strategy_router)
 app.include_router(strategy_auto_buy_operations_router)
+app.include_router(strategy_auto_buy_scheduler_router)
 app.include_router(strategy_dry_run_router)
 app.include_router(strategy_live_router)
 app.include_router(strategy_live_exit_router)

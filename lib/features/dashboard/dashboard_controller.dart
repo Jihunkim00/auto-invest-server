@@ -52,6 +52,8 @@ import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
+import '../../models/strategy_auto_buy_promotion.dart';
+import '../../models/strategy_auto_buy_scheduler.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
@@ -326,6 +328,13 @@ class DashboardController extends ChangeNotifier {
   StrategyAutoBuyOperationsStatus? strategyAutoBuyOperationsStatus;
   bool strategyAutoBuyOperationsLoading = false;
   String? strategyAutoBuyOperationsError;
+  StrategyAutoBuySchedulerStatus? strategyAutoBuySchedulerStatus;
+  StrategyAutoBuySchedulerRunResult? strategyAutoBuySchedulerRunResult;
+  bool strategyAutoBuySchedulerLoading = false;
+  String? strategyAutoBuySchedulerError;
+  List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
+  bool strategyAutoBuyPromotionsLoading = false;
+  String? strategyAutoBuyPromotionsError;
   StrategyLiveAutoBuyReadiness? strategyLiveAutoBuyReadiness;
   StrategyLiveAutoBuyRunResult? strategyLiveAutoBuyResult;
   List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
@@ -1885,6 +1894,239 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyAutoBuyOperationsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyAutoBuyScheduler({
+    bool silent = false,
+  }) async {
+    if (strategyAutoBuySchedulerLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Auto buy scheduler status is already loading.',
+      );
+    }
+    strategyAutoBuySchedulerLoading = true;
+    strategyAutoBuySchedulerError = null;
+    if (!silent) notifyListeners();
+    try {
+      strategyAutoBuySchedulerStatus =
+          await apiClient.fetchStrategyAutoBuySchedulerStatus();
+      return ActionResult(
+        success: true,
+        message:
+            'Auto buy scheduler refreshed: ${strategyAutoBuySchedulerStatus!.primaryBlockReason ?? 'ready'}.',
+      );
+    } catch (e) {
+      strategyAutoBuySchedulerError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuySchedulerError!),
+      );
+    } finally {
+      strategyAutoBuySchedulerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runStrategyAutoBuySchedulerDryRunOnce() async {
+    if (strategyAutoBuySchedulerLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Scheduled dry-run auto buy is already running.',
+      );
+    }
+    strategyAutoBuySchedulerLoading = true;
+    strategyAutoBuySchedulerError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runStrategyAutoBuySchedulerDryRunOnce();
+      strategyAutoBuySchedulerRunResult = result;
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyAutoBuySchedulerStatus(),
+        apiClient.fetchStrategyAutoBuyPromotions(),
+        apiClient.fetchStrategyAutoBuyOperationsStatus(),
+      ]);
+      strategyAutoBuySchedulerStatus =
+          results[0] as StrategyAutoBuySchedulerStatus;
+      strategyAutoBuyPromotions =
+          (results[1] as StrategyAutoBuyPromotions).items;
+      strategyAutoBuyOperationsStatus =
+          results[2] as StrategyAutoBuyOperationsStatus;
+      return ActionResult(
+        success: result.status == 'ok',
+        message: result.status == 'ok'
+            ? 'Scheduled dry-run completed: ${result.action}.'
+            : 'Scheduled dry-run blocked: ${result.blockReason ?? result.status}.',
+      );
+    } catch (e) {
+      strategyAutoBuySchedulerError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuySchedulerError!),
+      );
+    } finally {
+      strategyAutoBuySchedulerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyAutoBuyPromotions({
+    bool silent = false,
+  }) async {
+    if (strategyAutoBuyPromotionsLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Auto buy promotions are already loading.',
+      );
+    }
+    strategyAutoBuyPromotionsLoading = true;
+    strategyAutoBuyPromotionsError = null;
+    if (!silent) notifyListeners();
+    try {
+      final promotions = await apiClient.fetchStrategyAutoBuyPromotions();
+      strategyAutoBuyPromotions = promotions.items;
+      return ActionResult(
+        success: true,
+        message: 'Promotion queue refreshed: ${promotions.items.length}.',
+      );
+    } catch (e) {
+      strategyAutoBuyPromotionsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuyPromotionsError!),
+      );
+    } finally {
+      strategyAutoBuyPromotionsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> acknowledgeStrategyAutoBuyPromotion(
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    try {
+      final result =
+          await apiClient.acknowledgeStrategyAutoBuyPromotion(promotion.id);
+      strategyAutoBuyPromotions = [
+        for (final item in strategyAutoBuyPromotions)
+          item.id == promotion.id ? result.promotion : item,
+      ];
+      await refreshStrategyAutoBuyOperations(silent: true);
+      notifyListeners();
+      return ActionResult(
+        success: true,
+        message: 'Promotion acknowledged: ${result.promotion.symbol ?? '-'}.',
+      );
+    } catch (e) {
+      strategyAutoBuyPromotionsError =
+          ApiErrorFormatter.format(e.toString());
+      notifyListeners();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuyPromotionsError!),
+      );
+    }
+  }
+
+  Future<ActionResult> dismissStrategyAutoBuyPromotion(
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    try {
+      final result =
+          await apiClient.dismissStrategyAutoBuyPromotion(promotion.id);
+      strategyAutoBuyPromotions = [
+        for (final item in strategyAutoBuyPromotions)
+          if (item.id != promotion.id) item,
+      ];
+      await refreshStrategyAutoBuyOperations(silent: true);
+      notifyListeners();
+      return ActionResult(
+        success: true,
+        message: 'Promotion dismissed: ${result.promotion.symbol ?? '-'}.',
+      );
+    } catch (e) {
+      strategyAutoBuyPromotionsError =
+          ApiErrorFormatter.format(e.toString());
+      notifyListeners();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuyPromotionsError!),
+      );
+    }
+  }
+
+  Future<ActionResult> runGuardedLiveAutoBuyForPromotion(
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    if (strategyLiveAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy live auto buy is already running.',
+      );
+    }
+    strategyLiveAutoBuyLoading = true;
+    strategyLiveAutoBuyError = null;
+    notifyListeners();
+    try {
+      strategyLiveAutoBuyReadiness =
+          await apiClient.fetchStrategyLiveAutoBuyReadiness(
+        symbol: promotion.symbol,
+        sourceDryRunId: promotion.sourceDryRunTradeRunId,
+      );
+      if (strategyLiveAutoBuyReadiness?.ready != true) {
+        final reason =
+            strategyLiveAutoBuyReadiness?.primaryBlockReason ?? 'not_ready';
+        return ActionResult(
+          success: false,
+          message: 'Guarded live auto buy is blocked: $reason.',
+        );
+      }
+      final requestId =
+          'flutter-promotion-auto-buy-${promotion.id}-${DateTime.now().millisecondsSinceEpoch}';
+      final result = await apiClient.runStrategyLiveAutoBuyOnce(
+        symbol: promotion.symbol,
+        sourceDryRunId: promotion.sourceDryRunTradeRunId,
+        triggerSource: 'flutter_promotion_queue',
+        clientRequestId: requestId,
+      );
+      strategyLiveAutoBuyResult = result;
+      if (result.attemptId != null || result.relatedOrderId != null) {
+        await apiClient.markStrategyAutoBuyPromotionConverted(
+          promotion.id,
+          promotedToLiveAttemptId: result.attemptId,
+          relatedLiveOrderId: result.relatedOrderId,
+        );
+      }
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyAutoBuyPromotions(),
+        apiClient.fetchStrategyAutoBuyOperationsStatus(),
+        apiClient.fetchStrategyLiveAutoBuyReadiness(),
+        apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
+      ]);
+      strategyAutoBuyPromotions =
+          (results[0] as StrategyAutoBuyPromotions).items;
+      strategyAutoBuyOperationsStatus =
+          results[1] as StrategyAutoBuyOperationsStatus;
+      strategyLiveAutoBuyReadiness =
+          results[2] as StrategyLiveAutoBuyReadiness;
+      strategyLiveAutoBuyRecent =
+          (results[3] as StrategyLiveAutoBuyRecent).items;
+      return ActionResult(
+        success: result.submitted,
+        message: result.submitted
+            ? 'Guarded live auto buy submitted: ${result.symbol ?? promotion.symbol ?? '-'}.'
+            : 'Guarded live auto buy blocked: ${result.blockReason ?? result.status}.',
+      );
+    } catch (e) {
+      strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyError!),
+      );
+    } finally {
+      strategyLiveAutoBuyLoading = false;
       notifyListeners();
     }
   }
