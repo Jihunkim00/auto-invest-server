@@ -252,6 +252,16 @@ _DEFAULT_TOOLS = [
         description="Read-only guarded live auto-buy readiness lookup. It never validates or submits orders.",
     ),
     AgentChatToolDefinition(
+        tool_name="strategy_auto_buy_operations_status_lookup",
+        display_name="Strategy Auto Buy Operations Status",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only operations status for dry-run evidence, guarded live readiness, attempts, and next operator action.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_live_auto_buy_recent_lookup",
         display_name="Strategy Live Auto Buy Recent",
         mode="read_only",

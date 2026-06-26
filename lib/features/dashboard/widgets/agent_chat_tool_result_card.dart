@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/agent_chat_tool_result.dart';
+import 'agent_chat_auto_buy_operations_card.dart';
 import 'agent_chat_performance_card.dart';
 import 'agent_chat_strategy_risk_card.dart';
 import 'agent_chat_dry_run_auto_buy_card.dart';
@@ -30,6 +31,8 @@ class AgentChatToolResultCardList extends StatelessWidget {
           AgentChatStrategyRiskCard(card: card)
         else if (_isDryRunAutoBuyCard(card.cardType))
           AgentChatDryRunAutoBuyCard(card: card)
+        else if (_isAutoBuyOperationsCard(card.cardType))
+          AgentChatAutoBuyOperationsCard(card: card)
         else
           AgentChatToolResultCard(card: card),
         const SizedBox(height: 8),
@@ -68,6 +71,10 @@ bool _isDryRunAutoBuyCard(String cardType) {
   return cardType == 'strategy_dry_run_auto_buy' ||
       cardType == 'strategy_dry_run_auto_buy_recent' ||
       cardType == 'strategy_dry_run_auto_buy_summary';
+}
+
+bool _isAutoBuyOperationsCard(String cardType) {
+  return cardType == 'strategy_auto_buy_operations_status';
 }
 
 bool _isPerformanceCard(String cardType) {

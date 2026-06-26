@@ -7,6 +7,9 @@ import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
+import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
+
+import 'auto_buy_operations_model_test.dart';
 
 void main() {
   testWidgets('Logs owns detailed run and order history after Home is compact',
@@ -117,4 +120,18 @@ class _LogsHistoryApiClient extends ApiClient {
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
       KisManualOrderSafetyStatus.safeDefault;
+
+  @override
+  Future<StrategyAutoBuyOperationsStatus>
+      fetchStrategyAutoBuyOperationsStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async =>
+          StrategyAutoBuyOperationsStatus.fromJson(
+            autoBuyOperationsJson(
+              stage: 'no_dry_run',
+              nextAction: 'run_dry_run',
+              ready: false,
+            ),
+          );
 }

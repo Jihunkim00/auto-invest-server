@@ -12,6 +12,7 @@ import '../../models/watchlist_operator_summary.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
+import 'widgets/auto_buy_operations_panel.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.controller});
@@ -54,6 +55,7 @@ class _LogsScreenState extends State<LogsScreen> {
         widget.controller.apiClient.fetchKisSchedulerStatus(),
         widget.controller.apiClient.fetchKisManualOrderSafetyStatus(),
       ]);
+      await widget.controller.refreshStrategyAutoBuyOperations(silent: true);
 
       if (!mounted) return;
       setState(() {
@@ -111,6 +113,8 @@ class _LogsScreenState extends State<LogsScreen> {
             ),
             const SizedBox(height: 12),
             _SummaryStrip(summary: _summary),
+            const SizedBox(height: 14),
+            AutoBuyOperationsPanel(controller: widget.controller),
             const SizedBox(height: 14),
             _KisSimulationOpsSummaryCard(
               loading: _loading,

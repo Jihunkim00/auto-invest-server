@@ -8,6 +8,9 @@ import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
+import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
+
+import 'auto_buy_operations_model_test.dart';
 
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
@@ -1339,5 +1342,23 @@ class _FakeLogsApiClient extends ApiClient {
       throw const ApiRequestException('logs failed');
     }
     return manualSafetyStatus;
+  }
+
+  @override
+  Future<StrategyAutoBuyOperationsStatus>
+      fetchStrategyAutoBuyOperationsStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return StrategyAutoBuyOperationsStatus.fromJson(
+      autoBuyOperationsJson(
+        stage: 'no_dry_run',
+        nextAction: 'run_dry_run',
+        ready: false,
+      ),
+    );
   }
 }
