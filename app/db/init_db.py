@@ -1038,6 +1038,54 @@ def _create_agent_chat_order_actions_table_if_missing():
                 """
             )
         )
+        existing_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(agent_chat_order_actions)"))
+        }
+        for column_name, column_sql in {
+            "conversation_key": "VARCHAR(80)",
+            "user_message_id": "INTEGER",
+            "assistant_message_id": "INTEGER",
+            "action_type": "VARCHAR(60) DEFAULT 'chat_confirmed_live_order'",
+            "provider": "VARCHAR(20) DEFAULT 'kis'",
+            "market": "VARCHAR(10) DEFAULT 'KR'",
+            "symbol": "VARCHAR(20)",
+            "symbol_name": "VARCHAR(160)",
+            "side": "VARCHAR(10)",
+            "order_type": "VARCHAR(20) DEFAULT 'market'",
+            "quantity": "FLOAT",
+            "notional_amount": "FLOAT",
+            "currency": "VARCHAR(10) DEFAULT 'KRW'",
+            "estimated_price": "FLOAT",
+            "estimated_notional": "FLOAT",
+            "status": "VARCHAR(40) DEFAULT 'pending_confirmation'",
+            "scope_hash": "VARCHAR(64)",
+            "confirmation_phrase": "VARCHAR(200)",
+            "expires_at": "DATETIME",
+            "confirmed_at": "DATETIME",
+            "submitted_at": "DATETIME",
+            "last_state_change_at": "DATETIME",
+            "last_sync_at": "DATETIME",
+            "related_order_id": "INTEGER",
+            "broker_order_id": "VARCHAR(100)",
+            "validation_payload_json": "TEXT",
+            "risk_payload_json": "TEXT",
+            "request_payload_json": "TEXT",
+            "response_payload_json": "TEXT",
+            "last_sync_payload_json": "TEXT",
+            "safety_payload_json": "TEXT",
+            "created_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+        }.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE agent_chat_order_actions "
+                        f"ADD COLUMN {column_name} {column_sql}"
+                    )
+                )
+                existing_columns.add(column_name)
+
         for name, column in {
             "conversation_key": "conversation_key",
             "user_message_id": "user_message_id",
@@ -1056,13 +1104,6 @@ def _create_agent_chat_order_actions_table_if_missing():
                     f"ON agent_chat_order_actions ({column})"
                 )
             )
-
-    for column_name, column_sql in {
-        "last_state_change_at": "DATETIME",
-        "last_sync_at": "DATETIME",
-        "last_sync_payload_json": "TEXT",
-    }.items():
-        _add_column_if_missing("agent_chat_order_actions", column_name, column_sql)
 
 
 def _create_agent_chat_live_order_settings_audits_table_if_missing():
