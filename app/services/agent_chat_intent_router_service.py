@@ -29,6 +29,7 @@ Rules:
 - Strategy entry permission, loss-limit, target-gate, and order-sizing questions must use strategy risk categories and read-only tools.
 - Strategy dry-run auto-buy simulation requests may run simulation-only tools, but must never create a live-order action.
 - Strategy live auto-buy questions must use read-only readiness/recent tools and must never execute run-once from chat.
+- Strategy auto-buy operations status, next-action, and block-reason questions must use the read-only operations status lookup.
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
@@ -552,6 +553,27 @@ class AgentChatIntentRouterService:
                 reason="User is asking for guarded live auto-exit readiness.",
                 **base,
             )
+        if self._is_strategy_auto_buy_next_action_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_NEXT_ACTION_QUERY,
+                confidence=0.95,
+                reason="User is asking for the next auto-buy operator action.",
+                **base,
+            )
+        if self._is_strategy_auto_buy_block_reason_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_BLOCK_REASON_QUERY,
+                confidence=0.95,
+                reason="User is asking why the auto-buy workflow is blocked.",
+                **base,
+            )
+        if self._is_strategy_auto_buy_operations_status_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_AUTO_BUY_OPERATIONS_STATUS_QUERY,
+                confidence=0.95,
+                reason="User is asking for read-only auto-buy operations status.",
+                **base,
+            )
         if self._is_strategy_live_auto_buy_recent_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
@@ -785,6 +807,59 @@ class AgentChatIntentRouterService:
             or "실전 자동매수" in text
             or "실전 자동 매수" in text
             or ("live" in lowered and "auto buy" in lowered)
+        )
+
+    def _is_strategy_auto_buy_operations_context(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        auto_buy = "auto buy" in lowered or "auto-buy" in lowered or "?먮룞留ㅼ닔" in text
+        return auto_buy and (
+            "operations" in lowered
+            or "ops" in lowered
+            or "console" in lowered
+            or "operator" in lowered
+            or "next action" in lowered
+            or "what should i do" in lowered
+            or "auto buy status" in lowered
+            or "auto-buy status" in lowered
+        )
+
+    def _is_strategy_auto_buy_operations_status_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_operations_context(text, lowered) and any(
+            token in lowered
+            for token in ["status", "state", "overview", "operations", "console"]
+        )
+
+    def _is_strategy_auto_buy_next_action_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_operations_context(text, lowered) and any(
+            token in lowered
+            for token in [
+                "next action",
+                "operator action",
+                "what should i do",
+                "what do i do",
+                "next step",
+            ]
+        )
+
+    def _is_strategy_auto_buy_block_reason_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return self._is_strategy_auto_buy_operations_context(text, lowered) and any(
+            token in lowered
+            for token in ["why", "blocked", "block reason", "cannot", "can't"]
         )
 
     def _is_strategy_live_auto_buy_recent_query(
@@ -1213,6 +1288,18 @@ class AgentChatIntentRouterService:
                     "strategy_dry_run_auto_buy_summary_lookup",
                     {},
                     "User asked for a dry-run buy summary.",
+                )
+            ]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_AUTO_BUY_OPERATIONS_STATUS_QUERY,
+            AgentChatIntentCategory.STRATEGY_AUTO_BUY_NEXT_ACTION_QUERY,
+            AgentChatIntentCategory.STRATEGY_AUTO_BUY_BLOCK_REASON_QUERY,
+        }:
+            return [
+                self._tool_call(
+                    "strategy_auto_buy_operations_status_lookup",
+                    {},
+                    "User asked for read-only auto-buy operations status.",
                 )
             ]
         if category in {

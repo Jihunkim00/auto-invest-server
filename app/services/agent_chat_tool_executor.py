@@ -23,6 +23,9 @@ from app.services.profile_aware_guarded_live_auto_buy_service import (
 from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
 )
+from app.services.strategy_auto_buy_operations_service import (
+    StrategyAutoBuyOperationsService,
+)
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.strategy_performance_service import StrategyPerformanceService
@@ -46,6 +49,10 @@ class AgentChatToolExecutor:
         | None = None,
         live_auto_buy_service_factory: Callable[
             [Session], ProfileAwareGuardedLiveAutoBuyService
+        ]
+        | None = None,
+        auto_buy_operations_service_factory: Callable[
+            [Session], StrategyAutoBuyOperationsService
         ]
         | None = None,
         live_auto_exit_service_factory: Callable[
@@ -76,6 +83,10 @@ class AgentChatToolExecutor:
         self.live_auto_buy_service_factory = (
             live_auto_buy_service_factory
             or self._default_live_auto_buy_service
+        )
+        self.auto_buy_operations_service_factory = (
+            auto_buy_operations_service_factory
+            or self._default_auto_buy_operations_service
         )
         self.live_auto_exit_service_factory = (
             live_auto_exit_service_factory
@@ -151,6 +162,8 @@ class AgentChatToolExecutor:
                 return self._strategy_dry_run_auto_buy_summary(db, intent)
             if tool.tool_name == "strategy_live_auto_buy_readiness_lookup":
                 return self._strategy_live_auto_buy_readiness(db, call, intent)
+            if tool.tool_name == "strategy_auto_buy_operations_status_lookup":
+                return self._strategy_auto_buy_operations_status(db, intent)
             if tool.tool_name == "strategy_live_auto_buy_recent_lookup":
                 return self._strategy_live_auto_buy_recent(db, intent)
             if tool.tool_name == "strategy_live_auto_exit_readiness_lookup":
@@ -516,6 +529,26 @@ class AgentChatToolExecutor:
             "Recent guarded live auto-buy attempts loaded.",
         )
 
+    def _strategy_auto_buy_operations_status(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = self.auto_buy_operations_service_factory(db).status(
+            db,
+            provider="kis",
+            market="KR",
+        )
+        return self._success(
+            "strategy_auto_buy_operations_status_lookup",
+            "strategy_auto_buy_operations_status",
+            data,
+            (
+                "Read-only auto-buy operations status loaded. "
+                "No validation, submit, run-once, scheduler, or settings path ran."
+            ),
+        )
+
     def _strategy_live_auto_exit_readiness(
         self,
         db: Session,
@@ -674,6 +707,7 @@ class AgentChatToolExecutor:
             "strategy_dry_run_auto_buy_recent_lookup": "strategy_dry_run_auto_buy_recent",
             "strategy_dry_run_auto_buy_summary_lookup": "strategy_dry_run_auto_buy_summary",
             "strategy_live_auto_buy_readiness_lookup": "strategy_live_auto_buy_readiness",
+            "strategy_auto_buy_operations_status_lookup": "strategy_auto_buy_operations_status",
             "strategy_live_auto_buy_recent_lookup": "strategy_live_auto_buy_recent",
             "strategy_live_auto_exit_readiness_lookup": "strategy_live_auto_exit_readiness",
             "strategy_live_auto_exit_recent_lookup": "strategy_live_auto_exit_recent",
@@ -791,6 +825,16 @@ class AgentChatToolExecutor:
             positions_loader=lambda session: client.list_positions(),
             balance_loader=lambda session: client.get_account_balance(),
             open_orders_loader=lambda session: client.list_open_orders(),
+        )
+
+    def _default_auto_buy_operations_service(
+        self,
+        db: Session,
+    ) -> StrategyAutoBuyOperationsService:
+        return StrategyAutoBuyOperationsService(
+            dry_run_service=self.dry_run_auto_buy_service_factory(db),
+            live_auto_buy_service=self.live_auto_buy_service_factory(db),
+            target_risk_service=self.target_aware_risk_service,
         )
 
     def _default_live_auto_exit_service(

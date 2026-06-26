@@ -51,6 +51,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
+import '../../models/strategy_auto_buy_operations.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
@@ -322,6 +323,9 @@ class DashboardController extends ChangeNotifier {
   List<StrategyDryRunAutoBuyResult> strategyDryRunAutoBuyRecent = const [];
   bool strategyDryRunAutoBuyLoading = false;
   String? strategyDryRunAutoBuyError;
+  StrategyAutoBuyOperationsStatus? strategyAutoBuyOperationsStatus;
+  bool strategyAutoBuyOperationsLoading = false;
+  String? strategyAutoBuyOperationsError;
   StrategyLiveAutoBuyReadiness? strategyLiveAutoBuyReadiness;
   StrategyLiveAutoBuyRunResult? strategyLiveAutoBuyResult;
   List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
@@ -1849,6 +1853,38 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyLiveAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyAutoBuyOperations({
+    bool silent = false,
+  }) async {
+    if (strategyAutoBuyOperationsLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Auto buy operations status is already loading.',
+      );
+    }
+    strategyAutoBuyOperationsLoading = true;
+    strategyAutoBuyOperationsError = null;
+    if (!silent) notifyListeners();
+    try {
+      strategyAutoBuyOperationsStatus =
+          await apiClient.fetchStrategyAutoBuyOperationsStatus();
+      return ActionResult(
+        success: true,
+        message:
+            'Auto buy operations refreshed: ${strategyAutoBuyOperationsStatus!.autoBuyStage}.',
+      );
+    } catch (e) {
+      strategyAutoBuyOperationsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuyOperationsError!),
+      );
+    } finally {
+      strategyAutoBuyOperationsLoading = false;
       notifyListeners();
     }
   }

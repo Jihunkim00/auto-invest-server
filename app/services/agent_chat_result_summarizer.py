@@ -81,6 +81,8 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy_summary",
             }:
                 return self._strategy_dry_run_auto_buy_answer(primary)
+            if primary.result_type == "strategy_auto_buy_operations_status":
+                return self._strategy_auto_buy_operations_answer(primary)
             if primary.result_type in {
                 "strategy_live_auto_buy_readiness",
                 "strategy_live_auto_buy_recent",
@@ -139,6 +141,7 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy",
                 "strategy_dry_run_auto_buy_recent",
                 "strategy_dry_run_auto_buy_summary",
+                "strategy_auto_buy_operations_status",
                 "strategy_live_auto_buy_readiness",
                 "strategy_live_auto_buy_recent",
                 "strategy_live_auto_exit_readiness",
@@ -501,6 +504,26 @@ class AgentChatResultSummarizer:
             answer_type="strategy_live_auto_buy_answer",
         )
 
+    def _strategy_auto_buy_operations_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        stage = str(data.get("auto_buy_stage") or "unknown")
+        next_action = str(data.get("next_operator_action") or "no_action")
+        readiness = data.get("live_readiness") if isinstance(data.get("live_readiness"), dict) else {}
+        reason = readiness.get("primary_block_reason") or "none"
+        text = (
+            f"Auto-buy operations stage is {stage}. "
+            f"Next operator action is {next_action}. "
+            f"Primary block reason: {reason}. "
+            "This chat lookup is read-only and did not run validation, submit, run-once, settings, or scheduler paths."
+        )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_auto_buy_operations_answer",
+        )
+
     def _strategy_live_auto_exit_answer(
         self,
         result: AgentChatToolResult,
@@ -651,6 +674,41 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type == "strategy_auto_buy_operations_status":
+            dry_run = data.get("dry_run") if isinstance(data.get("dry_run"), dict) else {}
+            readiness = data.get("live_readiness") if isinstance(data.get("live_readiness"), dict) else {}
+            attempts = data.get("live_attempts") if isinstance(data.get("live_attempts"), dict) else {}
+            stage = str(data.get("auto_buy_stage") or "unknown")
+            badges = [
+                "AUTO BUY OPS",
+                "READ ONLY",
+                "NO CHAT EXECUTION",
+                "NO VALIDATION",
+                "NO BROKER SUBMIT",
+                "NO SCHEDULER",
+                "NO AUTO RETRY",
+            ]
+            if dry_run.get("recent_found") is not True:
+                badges.append("DRY RUN EVIDENCE REQUIRED")
+            if readiness.get("target_risk_ready") is False:
+                badges.append("TARGET RISK GATED")
+            if readiness.get("ready") is True:
+                badges.append("ONE SHOT LIVE BUY")
+            return AgentChatResultCard(
+                card_type="strategy_auto_buy_operations_status",
+                title="Auto Buy Operations",
+                subtitle=str(data.get("active_profile") or "KIS/KR").upper(),
+                primary_value=stage.upper(),
+                badges=badges,
+                rows=[
+                    {"label": "Next action", "value": data.get("next_operator_action") or "-"},
+                    {"label": "Latest dry-run", "value": dry_run.get("latest_action") or "none"},
+                    {"label": "Latest symbol", "value": dry_run.get("latest_symbol") or "-"},
+                    {"label": "Block reason", "value": readiness.get("primary_block_reason") or "-"},
+                    {"label": "Latest live attempt", "value": attempts.get("latest_status") or "none"},
+                ],
+                data=data,
+            )
         if result.result_type in {
             "strategy_live_auto_exit_readiness",
             "strategy_live_auto_exit_recent",

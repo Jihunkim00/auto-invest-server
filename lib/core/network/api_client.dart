@@ -48,6 +48,7 @@ import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
+import '../../models/strategy_auto_buy_operations.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
@@ -595,6 +596,23 @@ class ApiClient {
       ).toString(),
     );
     return StrategyLiveAutoBuyRecent.fromJson(payload);
+  }
+
+  Future<StrategyAutoBuyOperationsStatus>
+      fetchStrategyAutoBuyOperationsStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/auto-buy/operations/status',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return StrategyAutoBuyOperationsStatus.fromJson(payload);
   }
 
   Future<StrategyLiveAutoBuyRunResult> syncStrategyLiveAutoBuyAttempt(
