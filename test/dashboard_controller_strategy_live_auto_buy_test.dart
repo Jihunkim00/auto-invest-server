@@ -69,6 +69,7 @@ class _LiveAutoBuyApiClient extends ApiClient {
     String provider = 'kis',
     String market = 'KR',
     String? symbol,
+    int? promotionId,
     int? sourceDryRunId,
     double? maxNotionalKrw,
     String triggerSource = 'flutter_dashboard',

@@ -31,6 +31,13 @@ class StrategyAutoBuyPromotion {
     this.dismissedAt,
     this.promotedToLiveAttemptId,
     this.relatedLiveOrderId,
+    this.convertedLiveAttemptId,
+    this.convertedOrderId,
+    this.convertedAt,
+    this.conversionStatus,
+    this.lastSyncAt,
+    this.lastSyncStatus,
+    this.tracePayload = const {},
     this.createdAt,
     this.updatedAt,
   });
@@ -64,13 +71,31 @@ class StrategyAutoBuyPromotion {
   final DateTime? dismissedAt;
   final int? promotedToLiveAttemptId;
   final int? relatedLiveOrderId;
+  final int? convertedLiveAttemptId;
+  final int? convertedOrderId;
+  final DateTime? convertedAt;
+  final String? conversionStatus;
+  final DateTime? lastSyncAt;
+  final String? lastSyncStatus;
+  final Map<String, dynamic> tracePayload;
   final Map<String, dynamic> requestPayload;
   final Map<String, dynamic> responsePayload;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  bool get canRunGuardedLive =>
-      status == 'pending' || status == 'acknowledged';
+  bool get canRunGuardedLive => status == 'pending';
+
+  bool get isConverted =>
+      status.startsWith('converted') ||
+      status.startsWith('live_order') ||
+      convertedLiveAttemptId != null ||
+      convertedOrderId != null ||
+      promotedToLiveAttemptId != null ||
+      relatedLiveOrderId != null;
+
+  int? get liveAttemptId => convertedLiveAttemptId ?? promotedToLiveAttemptId;
+
+  int? get liveOrderId => convertedOrderId ?? relatedLiveOrderId;
 
   factory StrategyAutoBuyPromotion.fromJson(Map<String, dynamic> json) {
     return StrategyAutoBuyPromotion(
@@ -83,20 +108,17 @@ class StrategyAutoBuyPromotion {
       status: _string(json['status'], 'pending'),
       promotionReason: _nullableString(json['promotion_reason']),
       sourceDryRunSignalId: _nullableInt(json['source_dry_run_signal_id']),
-      sourceDryRunTradeRunId:
-          _nullableInt(json['source_dry_run_trade_run_id']),
+      sourceDryRunTradeRunId: _nullableInt(json['source_dry_run_trade_run_id']),
       sourceDryRunOrderId: _nullableInt(json['source_dry_run_order_id']),
       dryRunAction: _nullableString(json['dry_run_action']),
       buyScore: _nullableDouble(json['buy_score']),
       sellScore: _nullableDouble(json['sell_score']),
       finalScore: _nullableDouble(json['final_score']),
       confidence: _nullableDouble(json['confidence']),
-      recommendedNotionalKrw:
-          _nullableDouble(json['recommended_notional_krw']),
+      recommendedNotionalKrw: _nullableDouble(json['recommended_notional_krw']),
       simulatedQuantity: _nullableDouble(json['simulated_quantity']),
       simulatedPrice: _nullableDouble(json['simulated_price']),
-      simulatedNotionalKrw:
-          _nullableDouble(json['simulated_notional_krw']),
+      simulatedNotionalKrw: _nullableDouble(json['simulated_notional_krw']),
       targetRiskResult: _map(json['target_risk_result']),
       blockReason: _nullableString(json['block_reason']),
       riskFlags: _strings(json['risk_flags']),
@@ -107,6 +129,13 @@ class StrategyAutoBuyPromotion {
       promotedToLiveAttemptId:
           _nullableInt(json['promoted_to_live_attempt_id']),
       relatedLiveOrderId: _nullableInt(json['related_live_order_id']),
+      convertedLiveAttemptId: _nullableInt(json['converted_live_attempt_id']),
+      convertedOrderId: _nullableInt(json['converted_order_id']),
+      convertedAt: _dateTime(json['converted_at']),
+      conversionStatus: _nullableString(json['conversion_status']),
+      lastSyncAt: _dateTime(json['last_sync_at']),
+      lastSyncStatus: _nullableString(json['last_sync_status']),
+      tracePayload: _map(json['trace_payload']),
       requestPayload: _map(json['request_payload']),
       responsePayload: _map(json['response_payload']),
       createdAt: _dateTime(json['created_at']),
@@ -130,8 +159,7 @@ class StrategyAutoBuyPromotions {
   final List<StrategyAutoBuyPromotion> items;
   final Map<String, dynamic> safety;
 
-  StrategyAutoBuyPromotion? get latest =>
-      items.isEmpty ? null : items.first;
+  StrategyAutoBuyPromotion? get latest => items.isEmpty ? null : items.first;
 
   factory StrategyAutoBuyPromotions.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items'];
@@ -217,4 +245,3 @@ List<String> _strings(Object? value) {
       if (item.toString().trim().isNotEmpty) item.toString(),
   ];
 }
-

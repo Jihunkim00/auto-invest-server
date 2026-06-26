@@ -30,8 +30,8 @@ void main() {
     expect(find.text('${'Retry'} ${'Submit'}'), findsNothing);
     expect(find.text('${'Submit'} ${'Again'}'), findsNothing);
 
-    await tester
-        .tap(find.byKey(const ValueKey('agent-chat-live-order-refresh-status')));
+    await tester.tap(
+        find.byKey(const ValueKey('agent-chat-live-order-refresh-status')));
     await tester.pumpAndSettle();
 
     expect(refreshCalls, 1);

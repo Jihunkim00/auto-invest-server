@@ -106,6 +106,8 @@ class StrategyLiveAutoBuyRunResult {
     this.sourceDryRunId,
     this.sourceSignalId,
     this.sourceTradeRunId,
+    this.promotionId,
+    this.promotionTrace = const {},
     this.quantity,
     this.estimatedPrice,
     this.submittedNotionalKrw,
@@ -130,6 +132,8 @@ class StrategyLiveAutoBuyRunResult {
   final int? sourceDryRunId;
   final int? sourceSignalId;
   final int? sourceTradeRunId;
+  final int? promotionId;
+  final Map<String, dynamic> promotionTrace;
   final bool targetRiskApproved;
   final bool validationApproved;
   final bool submitted;
@@ -164,6 +168,8 @@ class StrategyLiveAutoBuyRunResult {
       sourceDryRunId: _nullableInt(json['source_dry_run_id']),
       sourceSignalId: _nullableInt(json['source_signal_id']),
       sourceTradeRunId: _nullableInt(json['source_trade_run_id']),
+      promotionId: _nullableInt(json['promotion_id']),
+      promotionTrace: _map(json['promotion_trace']),
       targetRiskApproved: json['target_risk_approved'] == true,
       validationApproved: json['validation_approved'] == true,
       submitted: json['submitted'] == true,

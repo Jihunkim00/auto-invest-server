@@ -150,4 +150,3 @@ int? _readNullableInt(Object? value) {
   if (value is num) return value.toInt();
   return int.tryParse(value.toString());
 }
-

@@ -535,6 +535,13 @@ def _create_strategy_auto_buy_promotions_table_if_missing():
                     dismissed_at DATETIME,
                     promoted_to_live_attempt_id INTEGER,
                     related_live_order_id INTEGER,
+                    converted_live_attempt_id INTEGER,
+                    converted_order_id INTEGER,
+                    converted_at DATETIME,
+                    conversion_status VARCHAR(40),
+                    last_sync_at DATETIME,
+                    last_sync_status VARCHAR(40),
+                    trace_payload_json TEXT,
                     request_payload TEXT,
                     response_payload TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -543,6 +550,27 @@ def _create_strategy_auto_buy_promotions_table_if_missing():
                 """
             )
         )
+        existing_columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(strategy_auto_buy_promotions)"))
+        }
+        for column_name, column_sql in {
+            "converted_live_attempt_id": "INTEGER",
+            "converted_order_id": "INTEGER",
+            "converted_at": "DATETIME",
+            "conversion_status": "VARCHAR(40)",
+            "last_sync_at": "DATETIME",
+            "last_sync_status": "VARCHAR(40)",
+            "trace_payload_json": "TEXT",
+        }.items():
+            if column_name not in existing_columns:
+                conn.execute(
+                    text(
+                        "ALTER TABLE strategy_auto_buy_promotions "
+                        f"ADD COLUMN {column_name} {column_sql}"
+                    )
+                )
+                existing_columns.add(column_name)
         for name, column in {
             "provider": "provider",
             "market": "market",
@@ -557,6 +585,10 @@ def _create_strategy_auto_buy_promotions_table_if_missing():
             "expires_at": "expires_at",
             "promoted_to_live_attempt_id": "promoted_to_live_attempt_id",
             "related_live_order_id": "related_live_order_id",
+            "converted_live_attempt_id": "converted_live_attempt_id",
+            "converted_order_id": "converted_order_id",
+            "conversion_status": "conversion_status",
+            "last_sync_status": "last_sync_status",
             "created_at": "created_at",
         }.items():
             conn.execute(

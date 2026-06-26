@@ -22,7 +22,8 @@ class AgentChatStrategyActionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canAct = action.isPending && !busy;
-    final color = action.isAggressive ? Colors.orangeAccent : Colors.greenAccent;
+    final color =
+        action.isAggressive ? Colors.orangeAccent : Colors.greenAccent;
     return Container(
       key: const ValueKey('agent-chat-strategy-action-card'),
       width: double.infinity,
@@ -128,7 +129,8 @@ class _StrategyRows extends StatelessWidget {
             ? strategyProfileLabel(action.requestedProfile)
             : _pctRange(profile),
       ),
-      if (profile != null) ('Monthly loss cap', _pct(profile.monthlyMaxLossPct)),
+      if (profile != null)
+        ('Monthly loss cap', _pct(profile.monthlyMaxLossPct)),
       if (profile != null) ('Daily loss cap', _pct(profile.dailyMaxLossPct)),
       if (profile != null) ('Order limit', _money(profile.maxOrderNotionalKrw)),
       if (profile != null) ('Buy score', _score(profile.buyScoreThreshold)),
@@ -180,7 +182,8 @@ class _ActionBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.lightBlueAccent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.34)),
+        border:
+            Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.34)),
       ),
       child: Text(
         text,
@@ -210,7 +213,8 @@ String _pctRange(StrategyProfile profile) {
 
 String _pct(double value) {
   final pct = value * 100;
-  final text = pct.abs() >= 10 ? pct.toStringAsFixed(0) : pct.toStringAsFixed(1);
+  final text =
+      pct.abs() >= 10 ? pct.toStringAsFixed(0) : pct.toStringAsFixed(1);
   return '$text%';
 }
 

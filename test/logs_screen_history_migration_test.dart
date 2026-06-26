@@ -126,28 +126,26 @@ class _LogsHistoryApiClient extends ApiClient {
       KisManualOrderSafetyStatus.safeDefault;
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async =>
-          StrategyAutoBuyOperationsStatus.fromJson(
-            autoBuyOperationsJson(
-              stage: 'no_dry_run',
-              nextAction: 'run_dry_run',
-              ready: false,
-            ),
-          );
+      StrategyAutoBuyOperationsStatus.fromJson(
+        autoBuyOperationsJson(
+          stage: 'no_dry_run',
+          nextAction: 'run_dry_run',
+          ready: false,
+        ),
+      );
 
   @override
-  Future<StrategyAutoBuySchedulerStatus>
-      fetchStrategyAutoBuySchedulerStatus({
+  Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async =>
-          StrategyAutoBuySchedulerStatus.fromJson(
-            autoBuySchedulerStatusJson(),
-          );
+      StrategyAutoBuySchedulerStatus.fromJson(
+        autoBuySchedulerStatusJson(),
+      );
 
   @override
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({

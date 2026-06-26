@@ -70,7 +70,8 @@ void main() {
     );
     expect(find.textContaining('No order is submitted'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('strategy-profile-confirm-apply')));
+    await tester
+        .tap(find.byKey(const ValueKey('strategy-profile-confirm-apply')));
     await tester.pumpAndSettle();
 
     expect(appliedProfile, 'safe');

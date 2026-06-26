@@ -26,10 +26,7 @@ void main() {
                 ],
                 rows: [
                   {'label': 'Selected symbol', 'value': '005930'},
-                  {
-                    'label': 'Recommended notional',
-                    'value': '₩30,000'
-                  },
+                  {'label': 'Recommended notional', 'value': '₩30,000'},
                 ],
                 data: {'action': 'would_buy'},
               ),

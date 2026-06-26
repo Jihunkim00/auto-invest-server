@@ -30,15 +30,13 @@ class StrategyAutoBuyOperationsStatus {
   bool get readyForOperatorConfirm =>
       autoBuyStage == 'ready_for_operator_confirm' && liveReadiness.ready;
 
-  factory StrategyAutoBuyOperationsStatus.fromJson(
-      Map<String, dynamic> json) {
+  factory StrategyAutoBuyOperationsStatus.fromJson(Map<String, dynamic> json) {
     return StrategyAutoBuyOperationsStatus(
       provider: _string(json['provider'], 'kis'),
       market: _string(json['market'], 'KR'),
       activeProfile: _nullableString(json['active_profile']),
       autoBuyStage: _string(json['auto_buy_stage'], 'no_dry_run'),
-      nextOperatorAction:
-          _string(json['next_operator_action'], 'run_dry_run'),
+      nextOperatorAction: _string(json['next_operator_action'], 'run_dry_run'),
       dryRun: StrategyAutoBuyOperationsDryRun.fromJson(
         _map(json['dry_run']),
       ),
@@ -147,8 +145,7 @@ class StrategyAutoBuyOperationsDryRun {
   final int blockedCountToday;
   final Map<String, dynamic> summary;
 
-  factory StrategyAutoBuyOperationsDryRun.fromJson(
-      Map<String, dynamic> json) {
+  factory StrategyAutoBuyOperationsDryRun.fromJson(Map<String, dynamic> json) {
     return StrategyAutoBuyOperationsDryRun(
       recentFound: json['recent_found'] == true,
       latestAction: _nullableString(json['latest_action']),

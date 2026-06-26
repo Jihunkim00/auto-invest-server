@@ -74,7 +74,8 @@ class AgentChatMessage {
   AgentChatLiveOrderAction? get liveOrderAction {
     final value = metadata['live_order_action'];
     if (value is Map) {
-      return AgentChatLiveOrderAction.fromJson(Map<String, dynamic>.from(value));
+      return AgentChatLiveOrderAction.fromJson(
+          Map<String, dynamic>.from(value));
     }
     return null;
   }

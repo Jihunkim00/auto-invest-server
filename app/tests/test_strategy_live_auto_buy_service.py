@@ -8,6 +8,7 @@ from app.db.models import (
     KisOrderValidationLog,
     OrderLog,
     SignalLog,
+    StrategyAutoBuyPromotion,
     StrategyLiveAutoBuyAttempt,
     TradeRunLog,
 )
@@ -17,6 +18,9 @@ from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_auto_buy_promotion_service import (
+    StrategyAutoBuyPromotionService,
+)
 
 
 class FakeRuntimeSettings(RuntimeSettingService):
@@ -246,6 +250,25 @@ def live_request(**overrides) -> ProfileAwareGuardedLiveAutoBuyRunRequest:
     return ProfileAwareGuardedLiveAutoBuyRunRequest(**values)
 
 
+def add_promotion_for_dry_run(
+    db_session,
+    dry_run: TradeRunLog,
+    *,
+    now: datetime | None = None,
+    ttl_minutes: int = 45,
+) -> dict:
+    payload = json.loads(dry_run.response_payload)
+    payload["trade_run_id"] = dry_run.id
+    payload["signal_id"] = payload.get("signal_id") or 123
+    return StrategyAutoBuyPromotionService().create_from_dry_run(
+        db_session,
+        dry_run_result=payload,
+        request_payload={"source": "pytest"},
+        now=now or datetime.now(UTC),
+        ttl_minutes=ttl_minutes,
+    )
+
+
 def test_default_readiness_is_blocked_read_only_and_does_not_validate_or_submit(db_session):
     validation = FakeValidationService()
     broker = FakeBroker()
@@ -326,6 +349,113 @@ def test_run_once_revalidates_target_risk_validates_kis_and_submits_once(db_sess
     assert db_session.query(KisOrderValidationLog).count() == 1
 
 
+def test_run_once_with_pending_promotion_links_attempt_order_and_payloads(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    broker = FakeBroker()
+
+    result = live_service(broker=broker).run_once(
+        db_session,
+        live_request(
+            promotion_id=promotion["id"],
+            source_dry_run_id=dry_run.id,
+            client_request_id="promotion-once",
+        ),
+    )
+
+    assert result["status"] == "submitted"
+    assert result["promotion_id"] == promotion["id"]
+    assert result["promotion_trace"]["promotion_id"] == promotion["id"]
+    assert result["promotion_trace"]["source_dry_run_id"] == dry_run.id
+    row = db_session.get(StrategyAutoBuyPromotion, promotion["id"])
+    assert row.status == "live_order_created"
+    assert row.converted_live_attempt_id == result["attempt_id"]
+    assert row.converted_order_id == result["related_order_id"]
+    assert row.conversion_status == "live_order_created"
+    attempt_payload = json.loads(
+        db_session.query(StrategyLiveAutoBuyAttempt).one().request_payload
+    )
+    order = db_session.query(OrderLog).one()
+    order_payload = json.loads(order.request_payload)
+    order_response = json.loads(order.response_payload)
+    assert attempt_payload["promotion_trace"]["promotion_id"] == promotion["id"]
+    assert order_payload["promotion_trace"]["promotion_id"] == promotion["id"]
+    assert order_response["promotion_trace"]["converted_order_id"] == result["related_order_id"]
+
+
+def test_dismissed_expired_and_converted_promotions_block_before_validation_or_submit(db_session):
+    enable_live_settings(db_session)
+    service = StrategyAutoBuyPromotionService()
+
+    dismissed_dry_run = add_dry_run(db_session, symbol="005930")
+    dismissed = add_promotion_for_dry_run(db_session, dismissed_dry_run)
+    service.dismiss(db_session, dismissed["id"])
+    dismissed_validation = FakeValidationService()
+    dismissed_broker = FakeBroker()
+    dismissed_result = live_service(
+        validation=dismissed_validation,
+        broker=dismissed_broker,
+    ).run_once(
+        db_session,
+        live_request(
+            promotion_id=dismissed["id"],
+            source_dry_run_id=dismissed_dry_run.id,
+        ),
+    )
+    assert dismissed_result["block_reason"] == "promotion_dismissed"
+    assert dismissed_validation.calls == []
+    assert dismissed_broker.calls == []
+
+    expired_dry_run = add_dry_run(db_session, symbol="000660")
+    expired = add_promotion_for_dry_run(
+        db_session,
+        expired_dry_run,
+        now=datetime.now(UTC) - timedelta(minutes=10),
+        ttl_minutes=1,
+    )
+    expired_validation = FakeValidationService()
+    expired_broker = FakeBroker()
+    expired_result = live_service(
+        validation=expired_validation,
+        broker=expired_broker,
+    ).run_once(
+        db_session,
+        live_request(
+            promotion_id=expired["id"],
+            source_dry_run_id=expired_dry_run.id,
+        ),
+    )
+    assert expired_result["block_reason"] == "promotion_expired"
+    assert db_session.get(StrategyAutoBuyPromotion, expired["id"]).status == "expired"
+    assert expired_validation.calls == []
+    assert expired_broker.calls == []
+
+    converted_dry_run = add_dry_run(db_session, symbol="035420")
+    converted = add_promotion_for_dry_run(db_session, converted_dry_run)
+    service.mark_converted(
+        db_session,
+        converted["id"],
+        promoted_to_live_attempt_id=999,
+        related_live_order_id=1000,
+    )
+    converted_validation = FakeValidationService()
+    converted_broker = FakeBroker()
+    converted_result = live_service(
+        validation=converted_validation,
+        broker=converted_broker,
+    ).run_once(
+        db_session,
+        live_request(
+            promotion_id=converted["id"],
+            source_dry_run_id=converted_dry_run.id,
+        ),
+    )
+    assert converted_result["block_reason"] == "promotion_already_converted"
+    assert converted_validation.calls == []
+    assert converted_broker.calls == []
+
+
 def test_client_request_id_is_idempotent_and_does_not_submit_again(db_session):
     enable_live_settings(db_session)
     add_dry_run(db_session)
@@ -383,3 +513,28 @@ def test_sync_attempt_updates_status_without_new_submit(db_session):
     assert broker.calls == [{"symbol": "005930", "qty": 3}]
     assert sync.calls == [submitted["related_order_id"]]
     assert db_session.query(StrategyLiveAutoBuyAttempt).one().status == "filled"
+
+
+def test_sync_attempt_updates_promotion_trace(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    broker = FakeBroker()
+    sync = FakeOrderSyncService()
+    service = live_service(broker=broker, order_sync_service=sync)
+    submitted = service.run_once(
+        db_session,
+        live_request(
+            promotion_id=promotion["id"],
+            source_dry_run_id=dry_run.id,
+            client_request_id="promotion-sync",
+        ),
+    )
+
+    synced = service.sync_attempt(db_session, submitted["attempt_id"])
+
+    row = db_session.get(StrategyAutoBuyPromotion, promotion["id"])
+    assert synced["status"] == "filled"
+    assert row.status == "live_order_filled"
+    assert row.last_sync_status == "filled"
+    assert json.loads(row.trace_payload_json)["last_sync_status"] == "filled"

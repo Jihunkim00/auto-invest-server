@@ -1725,7 +1725,8 @@ class DashboardController extends ChangeNotifier {
         profileName: activeStrategyProfile?.profileName,
       );
       strategyDryRunAutoBuyResult = result;
-      final recent = await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
+      final recent =
+          await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
       strategyDryRunAutoBuyRecent = recent.items;
       return ActionResult(
         success: true,
@@ -1756,7 +1757,8 @@ class DashboardController extends ChangeNotifier {
     strategyDryRunAutoBuyError = null;
     if (!silent) notifyListeners();
     try {
-      final recent = await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
+      final recent =
+          await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10);
       strategyDryRunAutoBuyRecent = recent.items;
       strategyDryRunAutoBuyResult = recent.latest;
       return ActionResult(
@@ -1805,8 +1807,7 @@ class DashboardController extends ChangeNotifier {
         apiClient.fetchStrategyLiveAutoBuyReadiness(),
         apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
       ]);
-      strategyLiveAutoBuyReadiness =
-          results[0] as StrategyLiveAutoBuyReadiness;
+      strategyLiveAutoBuyReadiness = results[0] as StrategyLiveAutoBuyReadiness;
       final recent = results[1] as StrategyLiveAutoBuyRecent;
       strategyLiveAutoBuyRecent = recent.items;
       return ActionResult(
@@ -1844,8 +1845,7 @@ class DashboardController extends ChangeNotifier {
         apiClient.fetchStrategyLiveAutoBuyReadiness(),
         apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
       ]);
-      strategyLiveAutoBuyReadiness =
-          results[0] as StrategyLiveAutoBuyReadiness;
+      strategyLiveAutoBuyReadiness = results[0] as StrategyLiveAutoBuyReadiness;
       final recent = results[1] as StrategyLiveAutoBuyRecent;
       strategyLiveAutoBuyRecent = recent.items;
       strategyLiveAutoBuyResult = recent.latest;
@@ -1945,7 +1945,7 @@ class DashboardController extends ChangeNotifier {
       strategyAutoBuySchedulerRunResult = result;
       final results = await Future.wait<Object>([
         apiClient.fetchStrategyAutoBuySchedulerStatus(),
-        apiClient.fetchStrategyAutoBuyPromotions(),
+        apiClient.fetchStrategyAutoBuyPromotions(status: 'all'),
         apiClient.fetchStrategyAutoBuyOperationsStatus(),
       ]);
       strategyAutoBuySchedulerStatus =
@@ -1985,7 +1985,8 @@ class DashboardController extends ChangeNotifier {
     strategyAutoBuyPromotionsError = null;
     if (!silent) notifyListeners();
     try {
-      final promotions = await apiClient.fetchStrategyAutoBuyPromotions();
+      final promotions =
+          await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
       strategyAutoBuyPromotions = promotions.items;
       return ActionResult(
         success: true,
@@ -2020,8 +2021,7 @@ class DashboardController extends ChangeNotifier {
         message: 'Promotion acknowledged: ${result.promotion.symbol ?? '-'}.',
       );
     } catch (e) {
-      strategyAutoBuyPromotionsError =
-          ApiErrorFormatter.format(e.toString());
+      strategyAutoBuyPromotionsError = ApiErrorFormatter.format(e.toString());
       notifyListeners();
       return ActionResult(
         success: false,
@@ -2047,8 +2047,7 @@ class DashboardController extends ChangeNotifier {
         message: 'Promotion dismissed: ${result.promotion.symbol ?? '-'}.',
       );
     } catch (e) {
-      strategyAutoBuyPromotionsError =
-          ApiErrorFormatter.format(e.toString());
+      strategyAutoBuyPromotionsError = ApiErrorFormatter.format(e.toString());
       notifyListeners();
       return ActionResult(
         success: false,
@@ -2086,21 +2085,15 @@ class DashboardController extends ChangeNotifier {
       final requestId =
           'flutter-promotion-auto-buy-${promotion.id}-${DateTime.now().millisecondsSinceEpoch}';
       final result = await apiClient.runStrategyLiveAutoBuyOnce(
+        promotionId: promotion.id,
         symbol: promotion.symbol,
         sourceDryRunId: promotion.sourceDryRunTradeRunId,
         triggerSource: 'flutter_promotion_queue',
         clientRequestId: requestId,
       );
       strategyLiveAutoBuyResult = result;
-      if (result.attemptId != null || result.relatedOrderId != null) {
-        await apiClient.markStrategyAutoBuyPromotionConverted(
-          promotion.id,
-          promotedToLiveAttemptId: result.attemptId,
-          relatedLiveOrderId: result.relatedOrderId,
-        );
-      }
       final results = await Future.wait<Object>([
-        apiClient.fetchStrategyAutoBuyPromotions(),
+        apiClient.fetchStrategyAutoBuyPromotions(status: 'all'),
         apiClient.fetchStrategyAutoBuyOperationsStatus(),
         apiClient.fetchStrategyLiveAutoBuyReadiness(),
         apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
@@ -2109,8 +2102,7 @@ class DashboardController extends ChangeNotifier {
           (results[0] as StrategyAutoBuyPromotions).items;
       strategyAutoBuyOperationsStatus =
           results[1] as StrategyAutoBuyOperationsStatus;
-      strategyLiveAutoBuyReadiness =
-          results[2] as StrategyLiveAutoBuyReadiness;
+      strategyLiveAutoBuyReadiness = results[2] as StrategyLiveAutoBuyReadiness;
       strategyLiveAutoBuyRecent =
           (results[3] as StrategyLiveAutoBuyRecent).items;
       return ActionResult(

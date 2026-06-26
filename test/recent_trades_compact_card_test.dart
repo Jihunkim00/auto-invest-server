@@ -42,8 +42,8 @@ void main() {
         findsOneWidget);
     expect(find.byKey(const ValueKey('home-recent-compact-item-2')),
         findsOneWidget);
-    expect(find.byKey(const ValueKey('home-recent-compact-item-3')),
-        findsNothing);
+    expect(
+        find.byKey(const ValueKey('home-recent-compact-item-3')), findsNothing);
     expect(find.textContaining('AAPL'), findsOneWidget);
     expect(find.textContaining('MSFT'), findsOneWidget);
     expect(find.textContaining('NVDA'), findsOneWidget);

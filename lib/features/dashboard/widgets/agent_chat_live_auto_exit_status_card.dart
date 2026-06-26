@@ -67,9 +67,8 @@ class AgentChatLiveAutoExitStatusCard extends StatelessWidget {
         Wrap(spacing: 10, runSpacing: 8, children: [
           _Metric(
             label: 'Readiness',
-            value: ready
-                ? 'ready'
-                : readiness?.primaryBlockReason ?? 'not_ready',
+            value:
+                ready ? 'ready' : readiness?.primaryBlockReason ?? 'not_ready',
           ),
           _Metric(
             label: 'Active profile',

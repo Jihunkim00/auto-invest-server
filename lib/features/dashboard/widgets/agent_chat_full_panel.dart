@@ -73,7 +73,8 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                       readiness: controller.agentChatLiveOrderReadiness,
                       loading: controller.isLoadingAgentChatLiveOrderReadiness,
                       error: controller.agentChatLiveOrderSettingsError,
-                      applyingPreset: controller.applyingAgentChatLiveOrderPreset,
+                      applyingPreset:
+                          controller.applyingAgentChatLiveOrderPreset,
                       onRefresh: controller.refreshAgentChatLiveOrderReadiness,
                       onApplyPreset: controller.applyAgentChatLiveOrderPreset,
                     ),
@@ -108,8 +109,7 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                       liveOrderBusy: controller.isAgentLiveOrderActionBusy,
                       onConfirmStrategyAction: _confirmStrategyAction,
                       onCancelStrategyAction: _cancelStrategyAction,
-                      strategyActionBusy:
-                          controller.isAgentStrategyActionBusy,
+                      strategyActionBusy: controller.isAgentStrategyActionBusy,
                     ),
                   if (controller.isAgentParsing ||
                       controller.isAgentPlanCreating) ...[
@@ -225,7 +225,8 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
   Future<void> _confirmStrategyAction(
     AgentChatStrategyAction action,
   ) async {
-    final result = await widget.controller.confirmAgentChatStrategyAction(action);
+    final result =
+        await widget.controller.confirmAgentChatStrategyAction(action);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),
@@ -241,7 +242,8 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
   }
 
   Future<void> _cancelStrategyAction(AgentChatStrategyAction action) async {
-    final result = await widget.controller.cancelAgentChatStrategyAction(action);
+    final result =
+        await widget.controller.cancelAgentChatStrategyAction(action);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),

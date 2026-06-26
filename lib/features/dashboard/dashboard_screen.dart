@@ -176,9 +176,8 @@ class _CompactSafetyStatusBar extends StatelessWidget {
               const SizedBox(height: 8),
               Wrap(spacing: 8, runSpacing: 8, children: [
                 _SafetyPill(
-                  text: controller.isKisSelected
-                      ? 'BROKER KIS'
-                      : 'BROKER ALPACA',
+                  text:
+                      controller.isKisSelected ? 'BROKER KIS' : 'BROKER ALPACA',
                   color: Colors.lightBlueAccent,
                 ),
                 _SafetyPill(
@@ -197,9 +196,8 @@ class _CompactSafetyStatusBar extends StatelessWidget {
                 _SafetyPill(
                   text:
                       realOrdersAllowed ? 'REAL ORDERS ON' : 'REAL ORDERS OFF',
-                  color: realOrdersAllowed
-                      ? Colors.redAccent
-                      : Colors.greenAccent,
+                  color:
+                      realOrdersAllowed ? Colors.redAccent : Colors.greenAccent,
                 ),
                 _SafetyPill(
                   text: marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED',
@@ -207,8 +205,7 @@ class _CompactSafetyStatusBar extends StatelessWidget {
                 ),
                 _SafetyPill(
                   text: liveBuyArmed ? 'BUY AUTO ON' : 'BUY AUTO OFF',
-                  color:
-                      liveBuyArmed ? Colors.redAccent : Colors.greenAccent,
+                  color: liveBuyArmed ? Colors.redAccent : Colors.greenAccent,
                 ),
                 _SafetyPill(
                   text: liveSellArmed ? 'SELL AUTO ON' : 'SELL AUTO OFF',
@@ -565,7 +562,8 @@ class _CompactMetric extends StatelessWidget {
         border: Border.all(color: Colors.white12),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
         const SizedBox(height: 3),
         Text(
           value,

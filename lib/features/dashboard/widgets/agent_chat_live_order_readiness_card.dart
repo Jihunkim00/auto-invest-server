@@ -26,7 +26,8 @@ class AgentChatLiveOrderReadinessCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = readiness;
-    final statusColor = value?.ready == true ? Colors.greenAccent : Colors.orangeAccent;
+    final statusColor =
+        value?.ready == true ? Colors.greenAccent : Colors.orangeAccent;
     return Container(
       key: const ValueKey('agent-chat-live-order-readiness-card'),
       width: double.infinity,
@@ -152,7 +153,8 @@ class _BadgeRow extends StatelessWidget {
       if (sellEnabled)
         const _ReadinessPill(text: 'SELL ENABLED', color: Colors.orangeAccent),
       const _ReadinessPill(text: 'READINESS ONLY', color: Colors.greenAccent),
-      const _ReadinessPill(text: 'NO AUTO SCHEDULER', color: Colors.greenAccent),
+      const _ReadinessPill(
+          text: 'NO AUTO SCHEDULER', color: Colors.greenAccent),
       const _ReadinessPill(
         text: 'NO BACKGROUND ORDERS',
         color: Colors.greenAccent,

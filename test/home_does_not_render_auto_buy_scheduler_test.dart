@@ -17,8 +17,8 @@ void main() {
     ));
     await tester.pump();
 
-    expect(find.byKey(const ValueKey('auto-buy-scheduler-panel')),
-        findsNothing);
+    expect(
+        find.byKey(const ValueKey('auto-buy-scheduler-panel')), findsNothing);
     expect(find.byKey(const ValueKey('auto-buy-promotion-queue-panel')),
         findsNothing);
     expect(find.text('Auto Buy Scheduler'), findsNothing);

@@ -23,7 +23,9 @@ void main() {
               'provider': 'kis',
               'market': 'KR',
               'count': 1,
-              'items': [liveRunResultJson(status: 'submitted', submitted: true)],
+              'items': [
+                liveRunResultJson(status: 'submitted', submitted: true)
+              ],
               'safety': {'read_only': true},
             }),
             200,
@@ -39,6 +41,7 @@ void main() {
     final readiness = await client.fetchStrategyLiveAutoBuyReadiness();
     final run = await client.runStrategyLiveAutoBuyOnce(
       symbol: '005930',
+      promotionId: 7,
       sourceDryRunId: 20,
       clientRequestId: 'client-1',
     );
@@ -53,6 +56,7 @@ void main() {
     expect(requests[1].url.path, '/strategy/live/auto-buy/run-once');
     final body = jsonDecode(requests[1].body) as Map<String, dynamic>;
     expect(body['confirm_operator_ack'], isTrue);
+    expect(body['promotion_id'], 7);
     expect(body['trigger_source'], 'flutter_dashboard');
     expect(body['client_request_id'], 'client-1');
     expect(body.containsKey('enable_scheduler'), isFalse);

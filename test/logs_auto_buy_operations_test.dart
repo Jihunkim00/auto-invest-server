@@ -82,8 +82,7 @@ class _LogsAutoBuyOpsApiClient extends ApiClient {
       KisManualOrderSafetyStatus.safeDefault;
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -92,14 +91,13 @@ class _LogsAutoBuyOpsApiClient extends ApiClient {
   }
 
   @override
-  Future<StrategyAutoBuySchedulerStatus>
-      fetchStrategyAutoBuySchedulerStatus({
+  Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async =>
-          StrategyAutoBuySchedulerStatus.fromJson(
-            autoBuySchedulerStatusJson(),
-          );
+      StrategyAutoBuySchedulerStatus.fromJson(
+        autoBuySchedulerStatusJson(),
+      );
 
   @override
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({

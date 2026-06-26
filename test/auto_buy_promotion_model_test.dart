@@ -20,6 +20,8 @@ void main() {
     expect(item.simulatedNotionalKrw, 30000);
     expect(item.simulatedQuantity, 3);
     expect(item.riskFlags, ['dry_run_only']);
+    expect(item.liveAttemptId, isNull);
+    expect(item.tracePayload['promotion_id'], 1);
     expect(promotions.safety['broker_submit_called'], isFalse);
   });
 
@@ -32,8 +34,21 @@ void main() {
 
     expect(result.status, 'acknowledged');
     expect(result.promotion.status, 'acknowledged');
-    expect(result.promotion.canRunGuardedLive, isTrue);
+    expect(result.promotion.canRunGuardedLive, isFalse);
     expect(result.safety['broker_submit_called'], isFalse);
+  });
+
+  test('converted promotion parses audit trace and is not runnable', () {
+    final item = StrategyAutoBuyPromotion.fromJson(
+      autoBuyPromotionJson(status: 'live_order_created'),
+    );
+
+    expect(item.canRunGuardedLive, isFalse);
+    expect(item.isConverted, isTrue);
+    expect(item.liveAttemptId, 44);
+    expect(item.liveOrderId, 55);
+    expect(item.conversionStatus, 'live_order_created');
+    expect(item.lastSyncStatus, 'filled');
   });
 }
 
@@ -83,13 +98,46 @@ Map<String, dynamic> autoBuyPromotionJson({
     'risk_flags': ['dry_run_only'],
     'gating_notes': ['promotion only'],
     'expires_at': '2026-06-26T01:45:00Z',
-    'acknowledged_at': status == 'acknowledged'
-        ? '2026-06-26T01:10:00Z'
-        : null,
+    'acknowledged_at': status == 'acknowledged' ? '2026-06-26T01:10:00Z' : null,
     'dismissed_at': null,
-    'promoted_to_live_attempt_id': null,
-    'related_live_order_id': null,
-    'request_payload': {'scheduler_mode': 'strategy_auto_buy_scheduler_dry_run'},
+    'promoted_to_live_attempt_id':
+        status == 'pending' || status == 'acknowledged' ? null : 44,
+    'related_live_order_id':
+        status == 'pending' || status == 'acknowledged' ? null : 55,
+    'converted_live_attempt_id':
+        status == 'pending' || status == 'acknowledged' ? null : 44,
+    'converted_order_id':
+        status == 'pending' || status == 'acknowledged' ? null : 55,
+    'converted_at': status == 'pending' || status == 'acknowledged'
+        ? null
+        : '2026-06-26T01:20:00Z',
+    'conversion_status': status == 'pending' || status == 'acknowledged'
+        ? null
+        : 'live_order_created',
+    'last_sync_at': status == 'pending' || status == 'acknowledged'
+        ? null
+        : '2026-06-26T01:25:00Z',
+    'last_sync_status':
+        status == 'pending' || status == 'acknowledged' ? null : 'filled',
+    'trace_payload': {
+      'promotion_id': 1,
+      'source_dry_run_id': 22,
+      'source_signal_id': 11,
+      'source_trade_run_id': 22,
+      'promotion_symbol': '005930',
+      'promotion_profile': 'safe',
+      'promotion_score': 82,
+      'promotion_reason': 'target_aware_risk_approved',
+      'converted_live_attempt_id':
+          status == 'pending' || status == 'acknowledged' ? null : 44,
+      'converted_order_id':
+          status == 'pending' || status == 'acknowledged' ? null : 55,
+      'last_sync_status':
+          status == 'pending' || status == 'acknowledged' ? null : 'filled',
+    },
+    'request_payload': {
+      'scheduler_mode': 'strategy_auto_buy_scheduler_dry_run'
+    },
     'response_payload': {'action': 'would_buy'},
     'created_at': '2026-06-26T01:00:00Z',
     'updated_at': '2026-06-26T01:00:00Z',

@@ -24,8 +24,8 @@ void main() {
       home: Scaffold(body: AutoBuySchedulerPanel(controller: controller)),
     ));
 
-    expect(find.byKey(const ValueKey('auto-buy-scheduler-panel')),
-        findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('auto-buy-scheduler-panel')), findsOneWidget);
     expect(find.text('Auto Buy Scheduler'), findsOneWidget);
     expect(find.text('SCHEDULED DRY RUN'), findsOneWidget);
     expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
@@ -69,8 +69,7 @@ class _SchedulerApiClient extends ApiClient {
   int liveRunCalls = 0;
 
   @override
-  Future<StrategyAutoBuySchedulerStatus>
-      fetchStrategyAutoBuySchedulerStatus({
+  Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -116,8 +115,7 @@ class _SchedulerApiClient extends ApiClient {
   }
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {

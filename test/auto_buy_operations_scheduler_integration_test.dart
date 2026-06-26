@@ -38,8 +38,7 @@ void main() {
 
 class _OperationsSchedulerApiClient extends ApiClient {
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {

@@ -112,8 +112,7 @@ class StrategyDryRunAutoBuyRecent {
   final List<StrategyDryRunAutoBuyResult> items;
   final Map<String, dynamic> safety;
 
-  StrategyDryRunAutoBuyResult? get latest =>
-      items.isEmpty ? null : items.first;
+  StrategyDryRunAutoBuyResult? get latest => items.isEmpty ? null : items.first;
 
   factory StrategyDryRunAutoBuyRecent.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items'];
