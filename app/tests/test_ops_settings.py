@@ -111,6 +111,76 @@ def test_ops_settings_persists_kis_scheduler_sell_fields(client):
     assert get_body["kis_live_auto_sell_enabled"] is True
 
 
+def test_ops_settings_toggles_strategy_auto_buy_scheduler_only(client):
+    response = client.put(
+        "/ops/settings",
+        json={
+            "dry_run": False,
+            "kill_switch": True,
+            "strategy_live_auto_buy_enabled": True,
+            "strategy_live_auto_buy_requires_operator_confirm": False,
+        },
+    )
+    assert response.status_code == 200
+    before = response.json()["settings"]
+
+    enabled = client.put(
+        "/ops/settings",
+        json={"strategy_auto_buy_scheduler_enabled": True},
+    )
+
+    assert enabled.status_code == 200
+    settings = enabled.json()["settings"]
+    assert settings["strategy_auto_buy_scheduler_enabled"] is True
+    assert settings["strategy_auto_buy_scheduler_dry_run_only"] is True
+    assert settings["strategy_auto_buy_scheduler_allow_live_orders"] is False
+    assert settings["dry_run"] == before["dry_run"]
+    assert settings["kill_switch"] == before["kill_switch"]
+    assert settings["strategy_live_auto_buy_enabled"] == before[
+        "strategy_live_auto_buy_enabled"
+    ]
+    assert settings["strategy_live_auto_buy_requires_operator_confirm"] == before[
+        "strategy_live_auto_buy_requires_operator_confirm"
+    ]
+
+    disabled = client.put(
+        "/ops/settings",
+        json={"strategy_auto_buy_scheduler_enabled": False},
+    )
+
+    assert disabled.status_code == 200
+    settings = disabled.json()["settings"]
+    assert settings["strategy_auto_buy_scheduler_enabled"] is False
+    assert settings["strategy_auto_buy_scheduler_dry_run_only"] is True
+    assert settings["strategy_auto_buy_scheduler_allow_live_orders"] is False
+    assert settings["dry_run"] == before["dry_run"]
+    assert settings["kill_switch"] == before["kill_switch"]
+    assert settings["strategy_live_auto_buy_enabled"] == before[
+        "strategy_live_auto_buy_enabled"
+    ]
+    assert settings["strategy_live_auto_buy_requires_operator_confirm"] == before[
+        "strategy_live_auto_buy_requires_operator_confirm"
+    ]
+
+
+def test_ops_settings_ignores_strategy_auto_buy_scheduler_live_order_attempt(client):
+    response = client.put(
+        "/ops/settings",
+        json={
+            "strategy_auto_buy_scheduler_enabled": True,
+            "strategy_auto_buy_scheduler_allow_live_orders": True,
+            "kis_real_order_enabled": True,
+        },
+    )
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["strategy_auto_buy_scheduler_enabled"] is True
+    assert settings["strategy_auto_buy_scheduler_dry_run_only"] is True
+    assert settings["strategy_auto_buy_scheduler_allow_live_orders"] is False
+    assert "kis_real_order_enabled" not in settings
+
+
 def test_ops_settings_syncs_stop_loss_aliases(client):
     response = client.put(
         "/ops/settings",

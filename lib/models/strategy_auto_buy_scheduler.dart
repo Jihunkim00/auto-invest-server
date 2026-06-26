@@ -1,8 +1,12 @@
 class StrategyAutoBuySchedulerStatus {
   const StrategyAutoBuySchedulerStatus({
+    required this.provider,
+    required this.market,
     required this.enabled,
     required this.dryRunOnly,
+    required this.promotionQueueOnly,
     required this.allowLiveOrders,
+    required this.realOrderSubmitAllowed,
     required this.allowedProfiles,
     required this.runsToday,
     required this.maxRunsPerDay,
@@ -18,9 +22,13 @@ class StrategyAutoBuySchedulerStatus {
     this.latestSchedulerRun,
   });
 
+  final String provider;
+  final String market;
   final bool enabled;
   final bool dryRunOnly;
+  final bool promotionQueueOnly;
   final bool allowLiveOrders;
+  final bool realOrderSubmitAllowed;
   final String? activeProfile;
   final List<String> allowedProfiles;
   final int runsToday;
@@ -37,9 +45,13 @@ class StrategyAutoBuySchedulerStatus {
 
   factory StrategyAutoBuySchedulerStatus.fromJson(Map<String, dynamic> json) {
     return StrategyAutoBuySchedulerStatus(
+      provider: _string(json['provider'], 'kis'),
+      market: _string(json['market'], 'KR'),
       enabled: json['enabled'] == true,
       dryRunOnly: json['dry_run_only'] != false,
+      promotionQueueOnly: json['promotion_queue_only'] != false,
       allowLiveOrders: json['allow_live_orders'] == true,
+      realOrderSubmitAllowed: json['real_order_submit_allowed'] == true,
       activeProfile: _nullableString(json['active_profile']),
       allowedProfiles: _strings(json['allowed_profiles']),
       runsToday: _int(json['runs_today']),
@@ -53,6 +65,58 @@ class StrategyAutoBuySchedulerStatus {
       latestSchedulerRun: _nullableMap(json['latest_scheduler_run']),
       scheduleSlots: _strings(json['schedule_slots']),
       safety: _map(json['safety']),
+    );
+  }
+
+  StrategyAutoBuySchedulerStatus copyWith({
+    String? provider,
+    String? market,
+    bool? enabled,
+    bool? dryRunOnly,
+    bool? promotionQueueOnly,
+    bool? allowLiveOrders,
+    bool? realOrderSubmitAllowed,
+    String? activeProfile,
+    List<String>? allowedProfiles,
+    int? runsToday,
+    int? maxRunsPerDay,
+    DateTime? nextAllowedRunAt,
+    int? minMinutesBetweenRuns,
+    bool? marketOpen,
+    bool? afterNoNewEntryTime,
+    String? primaryBlockReason,
+    bool clearPrimaryBlockReason = false,
+    int? pendingPromotionCount,
+    Map<String, dynamic>? latestSchedulerRun,
+    List<String>? scheduleSlots,
+    Map<String, dynamic>? safety,
+  }) {
+    return StrategyAutoBuySchedulerStatus(
+      provider: provider ?? this.provider,
+      market: market ?? this.market,
+      enabled: enabled ?? this.enabled,
+      dryRunOnly: dryRunOnly ?? this.dryRunOnly,
+      promotionQueueOnly: promotionQueueOnly ?? this.promotionQueueOnly,
+      allowLiveOrders: allowLiveOrders ?? this.allowLiveOrders,
+      realOrderSubmitAllowed:
+          realOrderSubmitAllowed ?? this.realOrderSubmitAllowed,
+      activeProfile: activeProfile ?? this.activeProfile,
+      allowedProfiles: allowedProfiles ?? this.allowedProfiles,
+      runsToday: runsToday ?? this.runsToday,
+      maxRunsPerDay: maxRunsPerDay ?? this.maxRunsPerDay,
+      nextAllowedRunAt: nextAllowedRunAt ?? this.nextAllowedRunAt,
+      minMinutesBetweenRuns:
+          minMinutesBetweenRuns ?? this.minMinutesBetweenRuns,
+      marketOpen: marketOpen ?? this.marketOpen,
+      afterNoNewEntryTime: afterNoNewEntryTime ?? this.afterNoNewEntryTime,
+      primaryBlockReason: clearPrimaryBlockReason
+          ? null
+          : primaryBlockReason ?? this.primaryBlockReason,
+      pendingPromotionCount:
+          pendingPromotionCount ?? this.pendingPromotionCount,
+      latestSchedulerRun: latestSchedulerRun ?? this.latestSchedulerRun,
+      scheduleSlots: scheduleSlots ?? this.scheduleSlots,
+      safety: safety ?? this.safety,
     );
   }
 }

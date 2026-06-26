@@ -27,10 +27,18 @@ void main() {
     expect(
         find.byKey(const ValueKey('auto-buy-scheduler-panel')), findsOneWidget);
     expect(find.text('Auto Buy Scheduler'), findsOneWidget);
-    expect(find.text('SCHEDULED DRY RUN'), findsOneWidget);
-    expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
-    expect(find.text('Run Scheduled Dry-Run Once'), findsOneWidget);
+    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
+    expect(find.text('PROMOTION QUEUE ONLY'), findsOneWidget);
+    expect(find.text('NO LIVE ORDERS'), findsOneWidget);
+    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsOneWidget);
+    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
+    expect(find.text('Refresh Scheduler Status'), findsOneWidget);
+    expect(find.text('Run Dry-Run Once'), findsOneWidget);
     expect(find.text('Enable Live Scheduler'), findsNothing);
+    expect(find.text('Run Live Buy'), findsNothing);
+    expect(find.text('Submit Order'), findsNothing);
+    expect(find.text('Confirm Live Order'), findsNothing);
+    expect(find.text('Enable Real Orders'), findsNothing);
     expect(find.text('Enable Real Auto Buy'), findsNothing);
 
     controller.dispose();
@@ -59,14 +67,99 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('enable sends only dry-run scheduler setting payload',
+      (tester) async {
+    final api = _SchedulerApiClient();
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyScheduler(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuySchedulerPanel(controller: controller)),
+    ));
+
+    await tester.tap(find.byKey(
+      const ValueKey('enable-dry-run-scheduler-button'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(api.updateSettingsPayloads, [
+      {'strategy_auto_buy_scheduler_enabled': true},
+    ]);
+    expect(api.schedulerEnabled, isTrue);
+    expect(find.text('Disable Scheduler'), findsOneWidget);
+    expect(find.text('Enable Dry-Run Scheduler'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('disable sends only dry-run scheduler setting payload',
+      (tester) async {
+    final api = _SchedulerApiClient(schedulerEnabled: true);
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyScheduler(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuySchedulerPanel(controller: controller)),
+    ));
+
+    expect(find.text('Disable Scheduler'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('disable-scheduler-button')));
+    await tester.pumpAndSettle();
+
+    expect(api.updateSettingsPayloads, [
+      {'strategy_auto_buy_scheduler_enabled': false},
+    ]);
+    expect(api.schedulerEnabled, isFalse);
+    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('settings update failure rolls back and refreshes server status',
+      (tester) async {
+    final api = _SchedulerApiClient(updateThrows: true);
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyScheduler(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuySchedulerPanel(controller: controller)),
+    ));
+
+    await tester.tap(find.byKey(
+      const ValueKey('enable-dry-run-scheduler-button'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(api.updateSettingsPayloads, [
+      {'strategy_auto_buy_scheduler_enabled': true},
+    ]);
+    expect(api.statusCalls, 2);
+    expect(controller.strategyAutoBuySchedulerStatus?.enabled, isFalse);
+    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
+    expect(find.text('Disable Scheduler'), findsNothing);
+
+    controller.dispose();
+  });
 }
 
 class _SchedulerApiClient extends ApiClient {
+  _SchedulerApiClient({
+    this.schedulerEnabled = false,
+    this.updateThrows = false,
+  });
+
+  bool schedulerEnabled;
+  final bool updateThrows;
   int statusCalls = 0;
   int runDryRunCalls = 0;
   int fetchPromotionsCalls = 0;
   int fetchOperationsCalls = 0;
   int liveRunCalls = 0;
+  final List<Map<String, dynamic>> updateSettingsPayloads = [];
 
   @override
   Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
@@ -75,8 +168,20 @@ class _SchedulerApiClient extends ApiClient {
   }) async {
     statusCalls += 1;
     return StrategyAutoBuySchedulerStatus.fromJson(
-      autoBuySchedulerStatusJson(),
+      autoBuySchedulerStatusJson(
+        enabled: schedulerEnabled,
+        blockReason: schedulerEnabled ? null : 'scheduler_disabled',
+      ),
     );
+  }
+
+  @override
+  Future<void> updateOpsSettings(Map<String, dynamic> values) async {
+    updateSettingsPayloads.add(Map<String, dynamic>.from(values));
+    if (updateThrows) {
+      throw const ApiRequestException('settings update failed');
+    }
+    schedulerEnabled = values['strategy_auto_buy_scheduler_enabled'] == true;
   }
 
   @override

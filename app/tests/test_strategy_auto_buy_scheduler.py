@@ -126,11 +126,17 @@ def enabled_settings(**overrides) -> FakeRuntimeSettings:
 def test_scheduler_status_default_disabled(db_session):
     body = scheduler_service().status(db_session, now=_now())
 
+    assert body["provider"] == "kis"
+    assert body["market"] == "KR"
     assert body["enabled"] is False
     assert body["dry_run_only"] is True
+    assert body["promotion_queue_only"] is True
     assert body["allow_live_orders"] is False
+    assert body["real_order_submit_allowed"] is False
     assert body["primary_block_reason"] == "scheduler_disabled"
     assert body["safety"]["validation_called"] is False
+    assert body["safety"]["promotion_queue_only"] is True
+    assert body["safety"]["real_order_submit_allowed"] is False
 
 
 def test_scheduler_status_safety_allow_live_orders_false(db_session):
@@ -139,6 +145,7 @@ def test_scheduler_status_safety_allow_live_orders_false(db_session):
     ).status(db_session, now=_now())
 
     assert body["allow_live_orders"] is False
+    assert body["real_order_submit_allowed"] is False
     assert body["primary_block_reason"] == "scheduler_live_orders_forbidden"
 
 
@@ -168,9 +175,14 @@ def test_manual_scheduler_dry_run_uses_pr73_and_never_submits(db_session):
     assert body["status"] == "ok"
     assert body["created_promotion"] is True
     assert body["real_order_submitted"] is False
+    assert body["real_order_submit_allowed"] is False
     assert body["validation_called"] is False
     assert body["broker_submit_called"] is False
     assert body["manual_submit_called"] is False
+    assert body["safety"]["dry_run_only"] is True
+    assert body["safety"]["promotion_queue_only"] is True
+    assert body["safety"]["allow_live_orders"] is False
+    assert body["safety"]["real_order_submit_allowed"] is False
     assert db_session.query(KisOrderValidationLog).count() == 0
     assert db_session.query(OrderLog).count() == 0
 
@@ -272,6 +284,30 @@ def test_scheduler_run_log_safety_flags(db_session):
     assert row.trigger_source == "strategy_auto_buy_dry_run"
     assert row.result == "would_buy"
     assert "broker_submit_called" in row.request_payload
+
+
+def test_scheduler_source_has_no_live_order_calls():
+    source_paths = [
+        "app/services/strategy_auto_buy_scheduler_service.py",
+        "app/routes/strategy_auto_buy_scheduler.py",
+    ]
+    forbidden = [
+        "submit_market_buy",
+        "submit_market_sell",
+        "submit_order",
+        "submit_domestic_cash_order",
+        "submit_manual",
+        "ProfileAwareGuardedLiveAutoBuyService",
+        "KisOrderValidationService",
+        "KisManualOrderService",
+        "live/auto-buy/run-once",
+    ]
+
+    for path in source_paths:
+        with open(path, encoding="utf-8") as handle:
+            source = handle.read()
+        for pattern in forbidden:
+            assert pattern not in source
 
 
 def _now() -> datetime:
