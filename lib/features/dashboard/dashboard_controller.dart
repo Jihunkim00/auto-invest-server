@@ -54,6 +54,7 @@ import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
+import '../../models/strategy_live_auto_buy.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -320,6 +321,11 @@ class DashboardController extends ChangeNotifier {
   List<StrategyDryRunAutoBuyResult> strategyDryRunAutoBuyRecent = const [];
   bool strategyDryRunAutoBuyLoading = false;
   String? strategyDryRunAutoBuyError;
+  StrategyLiveAutoBuyReadiness? strategyLiveAutoBuyReadiness;
+  StrategyLiveAutoBuyRunResult? strategyLiveAutoBuyResult;
+  List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
+  bool strategyLiveAutoBuyLoading = false;
+  String? strategyLiveAutoBuyError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -544,6 +550,7 @@ class DashboardController extends ChangeNotifier {
     unawaited(_loadStrategyPerformanceState());
     unawaited(_loadStrategyRiskState());
     unawaited(_loadStrategyDryRunAutoBuyState());
+    unawaited(_loadStrategyLiveAutoBuyState());
   }
 
   Future<void> _loadStrategyProfileState() async {
@@ -633,6 +640,32 @@ class DashboardController extends ChangeNotifier {
       strategyDryRunAutoBuyError = ApiErrorFormatter.format(e.toString());
     } finally {
       strategyDryRunAutoBuyLoading = false;
+      if (hasListeners) notifyListeners();
+    }
+  }
+
+  Future<void> _loadStrategyLiveAutoBuyState() async {
+    if (strategyLiveAutoBuyLoading) return;
+    strategyLiveAutoBuyLoading = true;
+    strategyLiveAutoBuyError = null;
+    if (hasListeners) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoBuyReadiness(),
+        apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
+      ]).timeout(const Duration(seconds: 3));
+      strategyLiveAutoBuyReadiness =
+          results[0] as StrategyLiveAutoBuyReadiness;
+      final recent = results[1] as StrategyLiveAutoBuyRecent;
+      strategyLiveAutoBuyRecent = recent.items;
+      strategyLiveAutoBuyResult = recent.latest;
+    } on TimeoutException {
+      strategyLiveAutoBuyError =
+          'Strategy live auto buy readiness unavailable: request timed out.';
+    } catch (e) {
+      strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
+    } finally {
+      strategyLiveAutoBuyLoading = false;
       if (hasListeners) notifyListeners();
     }
   }
@@ -1824,6 +1857,97 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyDryRunAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runStrategyLiveAutoBuyOnce() async {
+    if (strategyLiveAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy live auto buy is already running.',
+      );
+    }
+    if (strategyLiveAutoBuyReadiness?.ready != true) {
+      final reason =
+          strategyLiveAutoBuyReadiness?.primaryBlockReason ?? 'not_ready';
+      return ActionResult(
+        success: false,
+        message: 'Guarded live auto buy is blocked: $reason.',
+      );
+    }
+    strategyLiveAutoBuyLoading = true;
+    strategyLiveAutoBuyError = null;
+    notifyListeners();
+    try {
+      final requestId =
+          'flutter-live-auto-buy-${DateTime.now().millisecondsSinceEpoch}';
+      final result = await apiClient.runStrategyLiveAutoBuyOnce(
+        symbol: strategyLiveAutoBuyReadiness?.selectedSymbol,
+        clientRequestId: requestId,
+      );
+      strategyLiveAutoBuyResult = result;
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoBuyReadiness(),
+        apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
+      ]);
+      strategyLiveAutoBuyReadiness =
+          results[0] as StrategyLiveAutoBuyReadiness;
+      final recent = results[1] as StrategyLiveAutoBuyRecent;
+      strategyLiveAutoBuyRecent = recent.items;
+      return ActionResult(
+        success: result.submitted,
+        message: result.submitted
+            ? 'Guarded live auto buy submitted: ${result.symbol ?? '-'}.'
+            : 'Guarded live auto buy blocked: ${result.blockReason ?? result.status}.',
+      );
+    } catch (e) {
+      strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyError!),
+      );
+    } finally {
+      strategyLiveAutoBuyLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshStrategyLiveAutoBuy({
+    bool silent = false,
+  }) async {
+    if (strategyLiveAutoBuyLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Strategy live auto buy status is already loading.',
+      );
+    }
+    strategyLiveAutoBuyLoading = true;
+    strategyLiveAutoBuyError = null;
+    if (!silent) notifyListeners();
+    try {
+      final results = await Future.wait<Object>([
+        apiClient.fetchStrategyLiveAutoBuyReadiness(),
+        apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
+      ]);
+      strategyLiveAutoBuyReadiness =
+          results[0] as StrategyLiveAutoBuyReadiness;
+      final recent = results[1] as StrategyLiveAutoBuyRecent;
+      strategyLiveAutoBuyRecent = recent.items;
+      strategyLiveAutoBuyResult = recent.latest;
+      return ActionResult(
+        success: true,
+        message:
+            'Guarded live auto buy status refreshed: ${recent.items.length}.',
+      );
+    } catch (e) {
+      strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyError!),
+      );
+    } finally {
+      strategyLiveAutoBuyLoading = false;
       notifyListeners();
     }
   }

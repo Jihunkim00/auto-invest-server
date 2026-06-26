@@ -267,6 +267,9 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_RECENT_QUERY,
             AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_SUMMARY_QUERY,
             AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY,
         }:
             return self._action(
                 data=self._data_from_tool_results(tool_results),

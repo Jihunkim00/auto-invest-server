@@ -88,6 +88,18 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_limited_auto_buy_require_market_open: bool | None = None
     kis_limited_auto_buy_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     kis_limited_auto_buy_allow_gpt_hard_block: bool | None = None
+    strategy_live_auto_buy_enabled: bool | None = None
+    strategy_live_auto_buy_requires_recent_dry_run: bool | None = None
+    strategy_live_auto_buy_recent_dry_run_ttl_minutes: int | None = Field(default=None, ge=1, le=1440)
+    strategy_live_auto_buy_max_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    strategy_live_auto_buy_max_notional_krw: float | None = Field(default=None, ge=0)
+    strategy_live_auto_buy_max_notional_pct: float | None = Field(default=None, ge=0, le=1)
+    strategy_live_auto_buy_allowed_profiles: list[str] | None = None
+    strategy_live_auto_buy_allow_aggressive: bool | None = None
+    strategy_live_auto_buy_requires_operator_confirm: bool | None = None
+    strategy_live_auto_buy_block_after_loss_limit: bool | None = None
+    strategy_live_auto_buy_block_after_target_hit: bool | None = None
+    strategy_live_auto_buy_scheduler_enabled: bool | None = None
     kis_scheduler_enabled: bool | None = None
     kis_scheduler_dry_run: bool | None = None
     kis_scheduler_live_enabled: bool | None = None

@@ -51,6 +51,7 @@ import '../../models/strategy_profile.dart';
 import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
+import '../../models/strategy_live_auto_buy.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -527,6 +528,82 @@ class ApiClient {
       ).toString(),
     );
     return StrategyDryRunAutoBuyRecent.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoBuyReadiness> fetchStrategyLiveAutoBuyReadiness({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int? sourceDryRunId,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/live/auto-buy/readiness',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          if (symbol != null && symbol.trim().isNotEmpty)
+            'symbol': symbol.trim(),
+          if (sourceDryRunId != null)
+            'source_dry_run_id': sourceDryRunId.toString(),
+        },
+      ).toString(),
+    );
+    return StrategyLiveAutoBuyReadiness.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoBuyRunResult> runStrategyLiveAutoBuyOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int? sourceDryRunId,
+    double? maxNotionalKrw,
+    String triggerSource = 'flutter_dashboard',
+    String? clientRequestId,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/live/auto-buy/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        'confirm_operator_ack': true,
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+        if (sourceDryRunId != null) 'source_dry_run_id': sourceDryRunId,
+        if (maxNotionalKrw != null) 'max_notional_krw': maxNotionalKrw,
+        'trigger_source': triggerSource,
+        if (clientRequestId != null && clientRequestId.trim().isNotEmpty)
+          'client_request_id': clientRequestId.trim(),
+      },
+    );
+    return StrategyLiveAutoBuyRunResult.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoBuyRecent> fetchStrategyLiveAutoBuyRecent({
+    String provider = 'kis',
+    String market = 'KR',
+    int limit = 20,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/live/auto-buy/recent',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'limit': limit.toString(),
+        },
+      ).toString(),
+    );
+    return StrategyLiveAutoBuyRecent.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoBuyRunResult> syncStrategyLiveAutoBuyAttempt(
+    int attemptId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/strategy/live/auto-buy/$attemptId/sync',
+      const {},
+    );
+    return StrategyLiveAutoBuyRunResult.fromJson(payload);
   }
 
   Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(

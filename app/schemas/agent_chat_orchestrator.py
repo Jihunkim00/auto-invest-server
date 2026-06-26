@@ -57,6 +57,15 @@ class AgentChatIntentCategory(str, Enum):
     STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY = (
         "strategy_dry_run_auto_buy_reason_query"
     )
+    STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY = (
+        "strategy_live_auto_buy_readiness_query"
+    )
+    STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY = (
+        "strategy_live_auto_buy_recent_query"
+    )
+    STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY = (
+        "strategy_live_auto_buy_block_reason_query"
+    )
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 

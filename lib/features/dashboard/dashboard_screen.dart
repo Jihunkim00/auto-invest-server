@@ -10,6 +10,7 @@ import '../../models/scheduler_status.dart';
 import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
 import 'widgets/agent_operations_summary_card.dart';
+import 'widgets/agent_chat_live_auto_buy_status_card.dart';
 import 'widgets/automation_event_timeline_card.dart';
 import 'widgets/automation_runtime_monitor_card.dart';
 import 'widgets/agent_chat_full_panel.dart';
@@ -23,6 +24,7 @@ import 'widgets/strategy_daily_pnl_card.dart';
 import 'widgets/strategy_monthly_progress_card.dart';
 import 'widgets/strategy_risk_state_card.dart';
 import 'widgets/strategy_dry_run_auto_buy_card.dart';
+import 'widgets/strategy_live_auto_buy_card.dart';
 import 'widgets/strategy_trade_performance_list.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -110,6 +112,24 @@ class DashboardScreen extends StatelessWidget {
                       error: controller.strategyDryRunAutoBuyError,
                       onRun: controller.runStrategyDryRunAutoBuy,
                       onRefresh: controller.refreshStrategyDryRunAutoBuy,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyLiveAutoBuyCard(
+                      readiness: controller.strategyLiveAutoBuyReadiness,
+                      latest: controller.strategyLiveAutoBuyResult,
+                      recent: controller.strategyLiveAutoBuyRecent,
+                      loading: controller.strategyLiveAutoBuyLoading,
+                      error: controller.strategyLiveAutoBuyError,
+                      onRun: controller.runStrategyLiveAutoBuyOnce,
+                      onRefresh: controller.refreshStrategyLiveAutoBuy,
+                    ),
+                    const SizedBox(height: 12),
+                    AgentChatLiveAutoBuyStatusCard(
+                      readiness: controller.strategyLiveAutoBuyReadiness,
+                      recent: controller.strategyLiveAutoBuyRecent,
+                      loading: controller.strategyLiveAutoBuyLoading,
+                      error: controller.strategyLiveAutoBuyError,
+                      onRefresh: controller.refreshStrategyLiveAutoBuy,
                     ),
                     const SizedBox(height: 12),
                     StrategyMonthlyProgressCard(

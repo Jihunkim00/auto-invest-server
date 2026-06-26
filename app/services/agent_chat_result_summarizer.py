@@ -81,6 +81,11 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy_summary",
             }:
                 return self._strategy_dry_run_auto_buy_answer(primary)
+            if primary.result_type in {
+                "strategy_live_auto_buy_readiness",
+                "strategy_live_auto_buy_recent",
+            }:
+                return self._strategy_live_auto_buy_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -128,6 +133,8 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy",
                 "strategy_dry_run_auto_buy_recent",
                 "strategy_dry_run_auto_buy_summary",
+                "strategy_live_auto_buy_readiness",
+                "strategy_live_auto_buy_recent",
             }:
                 card = self._strategy_card(result)
             elif result.result_type == "analysis":
@@ -456,6 +463,35 @@ class AgentChatResultSummarizer:
             answer_type="strategy_dry_run_auto_buy_answer",
         )
 
+    def _strategy_live_auto_buy_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        if result.result_type == "strategy_live_auto_buy_recent":
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            latest = items[0] if items and isinstance(items[0], dict) else {}
+            text = (
+                f"Recent guarded live auto-buy attempts: {len(items)}. "
+                f"Latest status is {latest.get('status') or 'none'} for "
+                f"{latest.get('symbol') or latest.get('selected_symbol') or 'no symbol'}. "
+                "This chat lookup did not validate or submit an order."
+            )
+        else:
+            ready = bool(data.get("ready"))
+            reason = data.get("primary_block_reason") or "none"
+            profile = data.get("active_profile") or "unknown"
+            symbol = data.get("selected_symbol") or "no recent dry-run symbol"
+            text = (
+                f"Guarded live auto-buy readiness is {'ready' if ready else 'blocked'} "
+                f"for profile {profile}. Selected symbol: {symbol}. "
+                f"Block reason: {reason}. Chat can only explain status; it cannot run live auto-buy."
+            )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_live_auto_buy_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -575,6 +611,37 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type in {
+            "strategy_live_auto_buy_readiness",
+            "strategy_live_auto_buy_recent",
+        }:
+            if result.result_type == "strategy_live_auto_buy_recent":
+                items = data.get("items") if isinstance(data.get("items"), list) else []
+                card_data = items[0] if items and isinstance(items[0], dict) else {}
+                primary = str(card_data.get("status") or "none").upper()
+            else:
+                card_data = data
+                primary = "READY" if data.get("ready") is True else "BLOCKED"
+            return AgentChatResultCard(
+                card_type=result.result_type,
+                title="Profile-Aware Guarded Live Auto Buy",
+                subtitle=str(card_data.get("active_profile") or data.get("active_profile") or "KIS/KR").upper(),
+                primary_value=primary,
+                badges=[
+                    "READ ONLY",
+                    "LIVE AUTO BUY",
+                    "NO CHAT EXECUTION",
+                    "NO VALIDATION",
+                    "NO BROKER SUBMIT",
+                ],
+                rows=[
+                    {"label": "Selected symbol", "value": card_data.get("selected_symbol") or card_data.get("symbol") or "-"},
+                    {"label": "Block reason", "value": card_data.get("primary_block_reason") or card_data.get("block_reason") or "-"},
+                    {"label": "Orders remaining", "value": card_data.get("orders_remaining_today", "-")},
+                    {"label": "Recent dry-run found", "value": card_data.get("recent_dry_run_found", "-")},
+                ],
+                data=data,
+            )
         if result.result_type in {
             "strategy_dry_run_auto_buy",
             "strategy_dry_run_auto_buy_recent",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -103,6 +104,20 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_require_market_open": True,
             "kis_limited_auto_buy_no_new_entry_after": "14:50",
             "kis_limited_auto_buy_allow_gpt_hard_block": False,
+            "strategy_live_auto_buy_enabled": False,
+            "strategy_live_auto_buy_requires_recent_dry_run": True,
+            "strategy_live_auto_buy_recent_dry_run_ttl_minutes": 30,
+            "strategy_live_auto_buy_max_orders_per_day": 1,
+            "strategy_live_auto_buy_max_notional_krw": 50000.0,
+            "strategy_live_auto_buy_max_notional_pct": 0.03,
+            "strategy_live_auto_buy_allowed_profiles": json.dumps(
+                ["safe", "balanced"], ensure_ascii=False
+            ),
+            "strategy_live_auto_buy_allow_aggressive": False,
+            "strategy_live_auto_buy_requires_operator_confirm": True,
+            "strategy_live_auto_buy_block_after_loss_limit": True,
+            "strategy_live_auto_buy_block_after_target_hit": True,
+            "strategy_live_auto_buy_scheduler_enabled": False,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -287,6 +302,40 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_allow_gpt_hard_block": bool(
                 row.kis_limited_auto_buy_allow_gpt_hard_block
             ),
+            "strategy_live_auto_buy_enabled": bool(row.strategy_live_auto_buy_enabled),
+            "strategy_live_auto_buy_requires_recent_dry_run": bool(
+                row.strategy_live_auto_buy_requires_recent_dry_run
+            ),
+            "strategy_live_auto_buy_recent_dry_run_ttl_minutes": int(
+                row.strategy_live_auto_buy_recent_dry_run_ttl_minutes
+            ),
+            "strategy_live_auto_buy_max_orders_per_day": int(
+                row.strategy_live_auto_buy_max_orders_per_day
+            ),
+            "strategy_live_auto_buy_max_notional_krw": float(
+                row.strategy_live_auto_buy_max_notional_krw
+            ),
+            "strategy_live_auto_buy_max_notional_pct": float(
+                row.strategy_live_auto_buy_max_notional_pct
+            ),
+            "strategy_live_auto_buy_allowed_profiles": _decode_profiles(
+                row.strategy_live_auto_buy_allowed_profiles
+            ),
+            "strategy_live_auto_buy_allow_aggressive": bool(
+                row.strategy_live_auto_buy_allow_aggressive
+            ),
+            "strategy_live_auto_buy_requires_operator_confirm": bool(
+                row.strategy_live_auto_buy_requires_operator_confirm
+            ),
+            "strategy_live_auto_buy_block_after_loss_limit": bool(
+                row.strategy_live_auto_buy_block_after_loss_limit
+            ),
+            "strategy_live_auto_buy_block_after_target_hit": bool(
+                row.strategy_live_auto_buy_block_after_target_hit
+            ),
+            "strategy_live_auto_buy_scheduler_enabled": bool(
+                row.strategy_live_auto_buy_scheduler_enabled
+            ),
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -318,6 +367,9 @@ class RuntimeSettingService:
         return self._finalize_settings(settings)
 
     def _finalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        settings["strategy_live_auto_buy_allowed_profiles"] = _decode_profiles(
+            settings.get("strategy_live_auto_buy_allowed_profiles")
+        )
         settings["trade_limits"] = self._trade_limits(settings)
         settings["kis_limited_auto_sell_requires_valid_cost_basis"] = True
         stop_loss_enabled = bool(
@@ -1430,6 +1482,8 @@ class RuntimeSettingService:
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_sell_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1453,6 +1507,8 @@ class RuntimeSettingService:
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_sell_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1472,6 +1528,8 @@ class RuntimeSettingService:
                 "kis_live_auto_sell_enabled": False,
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
             }
         if preset == "kis_sell_only_automation":
             return {
@@ -1490,6 +1548,8 @@ class RuntimeSettingService:
                 "kis_live_auto_sell_enabled": True,
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
                 "kis_limited_auto_stop_loss_enabled": True,
                 "kis_limited_auto_sell_stop_loss_enabled": True,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1509,6 +1569,8 @@ class RuntimeSettingService:
                     "kis_scheduler_allow_limited_auto_buy": True,
                     "kis_live_auto_buy_enabled": True,
                     "kis_limited_auto_buy_enabled": True,
+                    "strategy_live_auto_buy_enabled": False,
+                    "strategy_live_auto_buy_scheduler_enabled": False,
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
@@ -1593,6 +1655,18 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_require_market_open",
             "kis_limited_auto_buy_no_new_entry_after",
             "kis_limited_auto_buy_allow_gpt_hard_block",
+            "strategy_live_auto_buy_enabled",
+            "strategy_live_auto_buy_requires_recent_dry_run",
+            "strategy_live_auto_buy_recent_dry_run_ttl_minutes",
+            "strategy_live_auto_buy_max_orders_per_day",
+            "strategy_live_auto_buy_max_notional_krw",
+            "strategy_live_auto_buy_max_notional_pct",
+            "strategy_live_auto_buy_allowed_profiles",
+            "strategy_live_auto_buy_allow_aggressive",
+            "strategy_live_auto_buy_requires_operator_confirm",
+            "strategy_live_auto_buy_block_after_loss_limit",
+            "strategy_live_auto_buy_block_after_target_hit",
+            "strategy_live_auto_buy_scheduler_enabled",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -1612,6 +1686,8 @@ class RuntimeSettingService:
             value = payload[key]
             if key == "default_symbol" and value:
                 value = str(value).upper()
+            if key == "strategy_live_auto_buy_allowed_profiles":
+                value = _encode_profiles(value)
             setattr(row, key, value)
 
         db.commit()
@@ -1686,6 +1762,8 @@ class RuntimeSettingService:
                 "kis_live_auto_sell_enabled": False,
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
             }
         if mode == "dry_run":
             return {
@@ -1702,6 +1780,8 @@ class RuntimeSettingService:
                 "kis_live_auto_sell_enabled": False,
                 "kis_live_auto_buy_enabled": False,
                 "kis_limited_auto_buy_enabled": False,
+                "strategy_live_auto_buy_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
             }
         if mode == "sell_only_live":
             return self._preset_payload("kis_sell_only_automation")
@@ -1870,6 +1950,9 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "kis_limited_auto_buy_enabled",
         "kis_limited_auto_buy_requires_shadow_review",
         "kis_limited_auto_sell_allow_take_profit_trigger",
+        "strategy_live_auto_buy_enabled",
+        "strategy_live_auto_buy_scheduler_enabled",
+        "strategy_live_auto_buy_allow_aggressive",
     )
 
 
@@ -1888,11 +1971,36 @@ def _dangerous_runtime_keys() -> set[str]:
         "agent_chat_live_order_sell_enabled",
         "kis_limited_auto_buy_enabled",
         "kis_limited_auto_sell_allow_take_profit_trigger",
+        "strategy_live_auto_buy_enabled",
+        "strategy_live_auto_buy_scheduler_enabled",
+        "strategy_live_auto_buy_allow_aggressive",
     }
 
 
 def _humanize_key(key: str) -> str:
     return key.replace("_", " ").capitalize()
+
+
+def _decode_profiles(value: Any) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    else:
+        try:
+            parsed = json.loads(str(value or "[]"))
+            raw = parsed if isinstance(parsed, list) else []
+        except Exception:
+            raw = []
+    profiles = [str(item).strip() for item in raw if str(item).strip()]
+    return profiles or ["safe", "balanced"]
+
+
+def _encode_profiles(value: Any) -> str:
+    profiles = _decode_profiles(value)
+    allowed = {"safe", "balanced", "aggressive"}
+    clean = [item for item in profiles if item in allowed]
+    if not clean:
+        clean = ["safe", "balanced"]
+    return json.dumps(clean, ensure_ascii=False)
 
 
 def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:

@@ -28,6 +28,7 @@ Rules:
 - Strategy profile and performance lookup, comparison, recommendation, target-progress, loss-budget, and profile-change requests must use strategy_* categories.
 - Strategy entry permission, loss-limit, target-gate, and order-sizing questions must use strategy risk categories and read-only tools.
 - Strategy dry-run auto-buy simulation requests may run simulation-only tools, but must never create a live-order action.
+- Strategy live auto-buy questions must use read-only readiness/recent tools and must never execute run-once from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -522,6 +523,27 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_strategy_live_auto_buy_recent_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY,
+                confidence=0.95,
+                reason="User is asking for recent guarded live auto-buy attempts.",
+                **base,
+            )
+        if self._is_strategy_live_auto_buy_block_reason_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY,
+                confidence=0.95,
+                reason="User is asking why guarded live auto-buy is blocked.",
+                **base,
+            )
+        if self._is_strategy_live_auto_buy_readiness_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY,
+                confidence=0.95,
+                reason="User is asking for guarded live auto-buy readiness.",
+                **base,
+            )
         if self._is_strategy_dry_run_reason_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_DRY_RUN_AUTO_BUY_REASON_QUERY,
@@ -725,6 +747,58 @@ class AgentChatIntentRouterService:
             ("dry-run" in lowered or "dry run" in lowered or "자동매수" in text)
             and any(token in text for token in ["왜", "막혔", "차단", "실패"])
         )
+
+    def _is_strategy_live_auto_buy_context(self, text: str, lowered: str) -> bool:
+        return (
+            "live auto buy" in lowered
+            or "guarded live auto buy" in lowered
+            or "strategy live auto buy" in lowered
+            or "실전 자동매수" in text
+            or "실전 자동 매수" in text
+            or ("live" in lowered and "auto buy" in lowered)
+        )
+
+    def _is_strategy_live_auto_buy_recent_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_buy_context(text, lowered):
+            return False
+        return any(
+            token in lowered
+            for token in ["recent", "latest", "history", "result", "results"]
+        ) or any(token in text for token in ["최근", "결과", "이력", "보여"])
+
+    def _is_strategy_live_auto_buy_block_reason_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_buy_context(text, lowered):
+            return False
+        return any(
+            token in lowered for token in ["why", "blocked", "block reason"]
+        ) or any(token in text for token in ["왜", "막", "차단", "blocked"])
+
+    def _is_strategy_live_auto_buy_readiness_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        if not self._is_strategy_live_auto_buy_context(text, lowered):
+            return False
+        return any(
+            token in lowered
+            for token in [
+                "ready",
+                "readiness",
+                "status",
+                "available",
+                "enabled",
+                "limit",
+            ]
+        ) or any(token in text for token in ["준비", "상태", "가능", "한도", "켜"])
 
     def _is_strategy_loss_limit_query(self, text: str, lowered: str) -> bool:
         return (
@@ -1032,6 +1106,25 @@ class AgentChatIntentRouterService:
                     "strategy_dry_run_auto_buy_summary_lookup",
                     {},
                     "User asked for a dry-run buy summary.",
+                )
+            ]
+        if category in {
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_READINESS_QUERY,
+            AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_BLOCK_REASON_QUERY,
+        }:
+            return [
+                self._tool_call(
+                    "strategy_live_auto_buy_readiness_lookup",
+                    {"symbol": symbol},
+                    "User asked for guarded live auto-buy readiness.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_LIVE_AUTO_BUY_RECENT_QUERY:
+            return [
+                self._tool_call(
+                    "strategy_live_auto_buy_recent_lookup",
+                    {},
+                    "User asked for recent guarded live auto-buy attempts.",
                 )
             ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
