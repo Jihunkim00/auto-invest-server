@@ -35,7 +35,8 @@ void main() {
     expect(find.text('dry_run: OFF'), findsOneWidget);
     expect(find.text('kill_switch: OFF'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('agent-chat-live-order-confirm')));
+    await tester
+        .tap(find.byKey(const ValueKey('agent-chat-live-order-confirm')));
     await tester.pumpAndSettle();
 
     expect(
@@ -46,8 +47,8 @@ void main() {
     );
     expect(confirmCalls, 0);
 
-    await tester
-        .tap(find.byKey(const ValueKey('agent-chat-live-order-dialog-confirm')));
+    await tester.tap(
+        find.byKey(const ValueKey('agent-chat-live-order-dialog-confirm')));
     await tester.pumpAndSettle();
 
     expect(confirmCalls, 1);
@@ -72,7 +73,8 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('agent-chat-live-order-cancel')));
+    await tester
+        .tap(find.byKey(const ValueKey('agent-chat-live-order-cancel')));
     await tester.pumpAndSettle();
 
     expect(cancelCalls, 1);

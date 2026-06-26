@@ -32,13 +32,13 @@ void main() {
     );
     expect(find.byKey(const Key('home_recent_trades_compact_card')),
         findsOneWidget);
-    expect(find.byKey(const Key('home_advanced_details_section')),
-        findsOneWidget);
+    expect(
+        find.byKey(const Key('home_advanced_details_section')), findsOneWidget);
 
     expect(find.text('Operational Readiness'), findsNothing);
     expect(find.text('Strategy Monthly Progress'), findsNothing);
-    expect(find.byKey(const ValueKey('strategy-risk-state-card')),
-        findsNothing);
+    expect(
+        find.byKey(const ValueKey('strategy-risk-state-card')), findsNothing);
     expect(find.byKey(const ValueKey('strategy-dry-run-auto-buy-card')),
         findsNothing);
     expect(find.byKey(const ValueKey('strategy-live-auto-buy-card')),
@@ -49,17 +49,18 @@ void main() {
         findsNothing);
     expect(find.byKey(const ValueKey('agent-chat-live-auto-exit-status-card')),
         findsNothing);
-    expect(find.byKey(const Key('automation_runtime_monitor_card')),
-        findsNothing);
+    expect(
+        find.byKey(const Key('automation_runtime_monitor_card')), findsNothing);
     expect(find.byKey(const Key('operation_rehearsal_panel')), findsNothing);
-    expect(find.byKey(const Key('automation_event_timeline_card')),
-        findsNothing);
+    expect(
+        find.byKey(const Key('automation_event_timeline_card')), findsNothing);
     expect(find.byKey(const Key('portfolio_snapshot_section')), findsNothing);
 
     controller.dispose();
   });
 
-  testWidgets('Advanced details remain available but collapsed', (tester) async {
+  testWidgets('Advanced details remain available but collapsed',
+      (tester) async {
     final controller = _homeController();
 
     await tester.pumpWidget(MaterialApp(

@@ -119,7 +119,9 @@ class StrategyDryRunAutoBuyCard extends StatelessWidget {
               value: value.targetRiskApproved ? 'YES' : 'NO',
             ),
             _Metric(label: 'Reason', value: value.reason),
-            _Metric(label: 'Signal / Run', value: '${value.signalId ?? '-'} / ${value.tradeRunId ?? '-'}'),
+            _Metric(
+                label: 'Signal / Run',
+                value: '${value.signalId ?? '-'} / ${value.tradeRunId ?? '-'}'),
             _Metric(
               label: 'Last run',
               value: value.createdAt?.toLocal().toString() ?? '-',
@@ -210,6 +212,5 @@ class _Badge extends StatelessWidget {
   }
 }
 
-String _score(double? value) =>
-    value == null ? '-' : value.toStringAsFixed(1);
+String _score(double? value) => value == null ? '-' : value.toStringAsFixed(1);
 String _money(double value) => '₩${value.toStringAsFixed(0)}';

@@ -106,6 +106,34 @@ def test_create_requires_would_buy(db_session):
     assert db_session.query(StrategyAutoBuyPromotion).count() == 0
 
 
+def test_create_sanitizes_sensitive_payload_fields(db_session):
+    service = StrategyAutoBuyPromotionService()
+
+    body = service.create_from_dry_run(
+        db_session,
+        dry_run_result={
+            **_dry_run(),
+            "target_risk_result": {
+                "approved": True,
+                "appsecret": "secret-value",
+                "authorization": "Bearer secret-token",
+                "account_no": "1234567890",
+            },
+        },
+        request_payload={
+            "appkey": "secret-key",
+            "account_number": "1234567890",
+        },
+        now=_now(),
+    )
+
+    assert body["target_risk_result"]["appsecret"] == "***"
+    assert body["target_risk_result"]["authorization"] == "***"
+    assert body["target_risk_result"]["account_no"] == "12******90"
+    assert body["request_payload"]["appkey"] == "***"
+    assert body["request_payload"]["account_number"] == "12******90"
+
+
 def _dry_run() -> dict:
     return {
         "status": "ok",

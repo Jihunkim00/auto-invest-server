@@ -256,7 +256,8 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
   Future<void> _confirmStrategyAction(
     AgentChatStrategyAction action,
   ) async {
-    final result = await widget.controller.confirmAgentChatStrategyAction(action);
+    final result =
+        await widget.controller.confirmAgentChatStrategyAction(action);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),
@@ -264,7 +265,8 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
   }
 
   Future<void> _cancelStrategyAction(AgentChatStrategyAction action) async {
-    final result = await widget.controller.cancelAgentChatStrategyAction(action);
+    final result =
+        await widget.controller.cancelAgentChatStrategyAction(action);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(result.message)),

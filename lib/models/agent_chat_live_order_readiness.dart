@@ -61,8 +61,8 @@ class AgentChatLiveOrderReadiness {
           if (item is Map) Map<String, dynamic>.from(item),
       ],
       limits: AgentChatLiveOrderLimits.fromJson(_readMap(json['limits'])),
-      capabilities:
-          AgentChatLiveOrderCapabilities.fromJson(_readMap(json['capabilities'])),
+      capabilities: AgentChatLiveOrderCapabilities.fromJson(
+          _readMap(json['capabilities'])),
       safety: _readMap(json['safety']),
       runtime: _readMap(json['runtime']),
       marketSession: _readMap(json['market_session']),

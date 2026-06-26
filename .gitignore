@@ -42,3 +42,7 @@ Add-Content .gitignore "`nconfig/watchlist_kr.backup*.yaml"
 .dart_appdata/
 .dart_tool/
 
+# Keep Flutter Logs feature source tracked
+!lib/features/logs/
+!lib/features/logs/**
+

@@ -57,9 +57,12 @@ void main() {
     expect(controller.isAgentStrategyActionBusy(action.actionId), isFalse);
     expect(controller.activeStrategyProfile?.profileName, 'aggressive');
     expect(controller.agentMessages.first.strategyAction?.status, 'applied');
-    expect(controller.agentMessages.last.messageType, 'strategy_profile_applied');
-    expect(controller.agentMessages.last.safetyBadges, contains('PROFILE ONLY'));
-    expect(controller.agentMessages.last.safetyBadges, contains('NO ORDER SUBMIT'));
+    expect(
+        controller.agentMessages.last.messageType, 'strategy_profile_applied');
+    expect(
+        controller.agentMessages.last.safetyBadges, contains('PROFILE ONLY'));
+    expect(controller.agentMessages.last.safetyBadges,
+        contains('NO ORDER SUBMIT'));
     expect(
       controller.agentMessages.last.safetyBadges,
       contains('STRATEGY APPLIED'),
@@ -91,8 +94,10 @@ void main() {
     expect(api.validationCalls, 0);
     expect(api.manualSubmitCalls, 0);
     expect(controller.agentMessages.first.strategyAction?.status, 'cancelled');
-    expect(controller.agentMessages.last.messageType, 'strategy_profile_cancelled');
-    expect(controller.agentMessages.last.safetyBadges, contains('PROFILE ONLY'));
+    expect(controller.agentMessages.last.messageType,
+        'strategy_profile_cancelled');
+    expect(
+        controller.agentMessages.last.safetyBadges, contains('PROFILE ONLY'));
     expect(
       controller.agentMessages.last.safetyBadges,
       contains('NO SETTINGS CHANGE'),

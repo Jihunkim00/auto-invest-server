@@ -72,7 +72,8 @@ class StrategyProfileCard extends StatelessWidget {
           const _ProfileBadge(text: 'PROFILE ONLY'),
           const _ProfileBadge(text: 'NO ORDER SUBMIT'),
           const _ProfileBadge(text: 'STRATEGY TARGET'),
-          if (active != null) _ProfileBadge(text: active.profileName.toUpperCase()),
+          if (active != null)
+            _ProfileBadge(text: active.profileName.toUpperCase()),
         ]),
         if (error != null) ...[
           const SizedBox(height: 10),
@@ -142,7 +143,8 @@ class _ActiveProfileSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     return Wrap(spacing: 10, runSpacing: 8, children: [
       _Metric(label: 'Monthly target', value: _pctRange(profile)),
-      _Metric(label: 'Monthly loss cap', value: _pct(profile.monthlyMaxLossPct)),
+      _Metric(
+          label: 'Monthly loss cap', value: _pct(profile.monthlyMaxLossPct)),
       _Metric(label: 'Daily loss cap', value: _pct(profile.dailyMaxLossPct)),
       _Metric(
         label: 'Order limit',
@@ -186,9 +188,8 @@ class _ProfileButtons extends StatelessWidget {
       for (final profileName in available)
         OutlinedButton(
           key: ValueKey('strategy-profile-apply-$profileName'),
-          onPressed: applyingProfileName == null
-              ? () => onApply(profileName)
-              : null,
+          onPressed:
+              applyingProfileName == null ? () => onApply(profileName) : null,
           child: applyingProfileName == profileName
               ? const SizedBox(
                   width: 14,
@@ -299,7 +300,8 @@ class _ProfileBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.lightBlueAccent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.34)),
+        border:
+            Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.34)),
       ),
       child: Text(
         text,
@@ -319,7 +321,8 @@ String _pctRange(StrategyProfile profile) {
 
 String _pct(double value) {
   final pct = value * 100;
-  final text = pct.abs() >= 10 ? pct.toStringAsFixed(0) : pct.toStringAsFixed(1);
+  final text =
+      pct.abs() >= 10 ? pct.toStringAsFixed(0) : pct.toStringAsFixed(1);
   return '$text%';
 }
 

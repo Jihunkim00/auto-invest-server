@@ -82,7 +82,8 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('guarded live auto buy button is disabled when readiness is blocked',
+  testWidgets(
+      'guarded live auto buy button is disabled when readiness is blocked',
       (tester) async {
     _setLargeViewport(tester);
     final api = _AutoBuyOpsApiClient(ready: false);
@@ -124,8 +125,7 @@ class _AutoBuyOpsApiClient extends ApiClient {
   int settingMutationCalls = 0;
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -186,6 +186,7 @@ class _AutoBuyOpsApiClient extends ApiClient {
     String provider = 'kis',
     String market = 'KR',
     String? symbol,
+    int? promotionId,
     int? sourceDryRunId,
     double? maxNotionalKrw,
     String triggerSource = 'flutter_dashboard',

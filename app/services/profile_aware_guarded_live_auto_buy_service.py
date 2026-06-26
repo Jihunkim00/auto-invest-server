@@ -31,6 +31,9 @@ from app.services.profile_aware_dry_run_auto_buy_service import (
     MODE as DRY_RUN_MODE,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_auto_buy_promotion_service import (
+    StrategyAutoBuyPromotionService,
+)
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
@@ -71,6 +74,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         runtime_settings: RuntimeSettingService | None = None,
         strategy_profiles: StrategyProfileService | None = None,
         target_risk_service: TargetAwareRiskService | None = None,
+        promotion_service: StrategyAutoBuyPromotionService | None = None,
         positions_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         balance_loader: Callable[[Session], dict[str, Any]] | None = None,
         open_orders_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
@@ -86,6 +90,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.target_risk_service = target_risk_service or TargetAwareRiskService()
+        self.promotion_service = promotion_service or StrategyAutoBuyPromotionService()
         self.positions_loader = positions_loader
         self.balance_loader = balance_loader
         self.open_orders_loader = open_orders_loader
@@ -322,68 +327,161 @@ class ProfileAwareGuardedLiveAutoBuyService:
         allowed_profiles = _allowed_profiles(settings)
 
         base_request = payload.model_dump(mode="json")
-        if bool(settings.get("strategy_live_auto_buy_requires_operator_confirm")) and payload.confirm_operator_ack is not True:
+        promotion_context: dict[str, Any] | None = None
+        if payload.promotion_id is not None:
+            try:
+                promotion_context = self.promotion_service.prepare_live_conversion(
+                    db,
+                    promotion_id=int(payload.promotion_id),
+                    provider=payload.provider,
+                    market=payload.market,
+                    symbol=payload.symbol,
+                    source_dry_run_id=payload.source_dry_run_id,
+                    active_profile=profile_name,
+                    now=now_utc,
+                )
+            except ValueError as exc:
+                promotion_context = {
+                    "accepted": False,
+                    "promotion_id": payload.promotion_id,
+                    "block_reason": str(exc),
+                    "trace": {
+                        "promotion_id": payload.promotion_id,
+                        "block_reason": str(exc),
+                    },
+                }
+            base_request = _with_promotion_trace(base_request, promotion_context)
+            if promotion_context.get("accepted") is not True:
+                return self._blocked(
+                    db,
+                    request_payload=base_request,
+                    status="blocked",
+                    block_reason=str(
+                        promotion_context.get("block_reason")
+                        or "promotion_not_convertible"
+                    ),
+                    safety=safety,
+                    active_profile=profile_name,
+                    trigger_source=payload.trigger_source,
+                    client_request_id=payload.client_request_id,
+                    promotion_context=promotion_context,
+                    consume_promotion=False,
+                )
+
+        def block(
+            *,
+            status: str,
+            block_reason: str,
+            dry_run: dict[str, Any] | None = None,
+            target_risk: dict[str, Any] | None = None,
+            validation: dict[str, Any] | None = None,
+            plan: dict[str, Any] | None = None,
+            consume_promotion: bool = True,
+        ) -> dict[str, Any]:
             return self._blocked(
                 db,
                 request_payload=base_request,
-                status="blocked",
-                block_reason="confirm_operator_ack_required",
+                status=status,
+                block_reason=block_reason,
                 safety=safety,
                 active_profile=profile_name,
                 trigger_source=payload.trigger_source,
                 client_request_id=payload.client_request_id,
+                dry_run=dry_run,
+                target_risk=target_risk,
+                validation=validation,
+                plan=plan,
+                promotion_context=promotion_context,
+                consume_promotion=consume_promotion,
+            )
+
+        if bool(settings.get("strategy_live_auto_buy_requires_operator_confirm")) and payload.confirm_operator_ack is not True:
+            return block(
+                status="blocked",
+                block_reason="confirm_operator_ack_required",
+                consume_promotion=False,
             )
         if not bool(settings.get("strategy_live_auto_buy_enabled")):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="strategy_live_auto_buy_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="strategy_live_auto_buy_disabled")
         if bool(settings.get("dry_run")):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="dry_run_enabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="dry_run_enabled")
         if bool(settings.get("kill_switch")):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="kill_switch_enabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="kill_switch_enabled")
         if not bool(getattr(global_settings, "kis_enabled", False)):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="kis_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="kis_disabled")
         if not bool(getattr(global_settings, "kis_real_order_enabled", False)):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="kis_real_order_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="kis_real_order_disabled")
         if bool(settings.get("strategy_live_auto_buy_scheduler_enabled")):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="strategy_live_auto_buy_scheduler_enabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(
+                status="blocked",
+                block_reason="strategy_live_auto_buy_scheduler_enabled",
+            )
         if profile_name not in allowed_profiles or (
             profile_name == "aggressive"
             and not bool(settings.get("strategy_live_auto_buy_allow_aggressive"))
         ):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="active_profile_not_allowed", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            return block(status="blocked", block_reason="active_profile_not_allowed")
 
+        effective_source_dry_run_id = (
+            _int((promotion_context or {}).get("source_dry_run_id"))
+            if promotion_context and promotion_context.get("accepted") is True
+            else payload.source_dry_run_id
+        )
+        effective_symbol = (
+            str((promotion_context or {}).get("symbol") or "").strip()
+            if promotion_context and promotion_context.get("accepted") is True
+            else payload.symbol
+        )
         dry_run = self._recent_dry_run(
             db,
             provider=payload.provider,
             market=payload.market,
-            symbol=payload.symbol,
-            source_dry_run_id=payload.source_dry_run_id,
+            symbol=effective_symbol,
+            source_dry_run_id=effective_source_dry_run_id,
             ttl_minutes=int(settings.get("strategy_live_auto_buy_recent_dry_run_ttl_minutes") or 30),
             now_utc=now_utc,
         )
         if not dry_run.get("accepted"):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason=str(dry_run.get("block_reason") or "recent_dry_run_missing"), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(
+                status="blocked",
+                block_reason=str(dry_run.get("block_reason") or "recent_dry_run_missing"),
+                dry_run=dry_run,
+            )
 
         orders_used_today = self._orders_used_today(db, now_utc=now_utc)
         max_orders = max(0, int(settings.get("strategy_live_auto_buy_max_orders_per_day") or 0))
         if orders_used_today >= max_orders:
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="daily_live_auto_buy_limit_reached", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(
+                status="blocked",
+                block_reason="daily_live_auto_buy_limit_reached",
+                dry_run=dry_run,
+            )
 
         symbol = str(dry_run["payload"].get("selected_symbol") or "")
         try:
             account = self._account_snapshot(db)
         except ValueError as exc:
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason=_account_block_reason(exc), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(
+                status="blocked",
+                block_reason=_account_block_reason(exc),
+                dry_run=dry_run,
+            )
         max_positions = int(profile.get("max_positions") or 0)
         if len([item for item in account["positions"] if _position_qty(item) > 0]) >= max_positions:
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="max_positions_reached", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(status="blocked", block_reason="max_positions_reached", dry_run=dry_run)
         if _has_position(account["positions"], symbol):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="position_already_exists", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(status="blocked", block_reason="position_already_exists", dry_run=dry_run)
         if self._has_open_order(db, symbol, account["open_orders"]):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="duplicate_open_order", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run)
+            return block(status="blocked", block_reason="duplicate_open_order", dry_run=dry_run)
 
         target_risk = self._target_risk(db, dry_run["payload"], profile)
         if target_risk.get("approved") is not True:
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason=str(target_risk.get("block_reason") or "target_risk_rejected"), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run, target_risk=target_risk)
+            return block(
+                status="blocked",
+                block_reason=str(target_risk.get("block_reason") or "target_risk_rejected"),
+                dry_run=dry_run,
+                target_risk=target_risk,
+            )
 
         plan = self._order_plan(
             settings=settings,
@@ -393,27 +491,40 @@ class ProfileAwareGuardedLiveAutoBuyService:
             requested_notional_krw=payload.max_notional_krw,
         )
         if int(plan.get("quantity") or 0) <= 0:
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason=str(plan.get("block_reason") or "quantity_zero"), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run, target_risk=target_risk, plan=plan)
+            return block(
+                status="blocked",
+                block_reason=str(plan.get("block_reason") or "quantity_zero"),
+                dry_run=dry_run,
+                target_risk=target_risk,
+                plan=plan,
+            )
 
         cash = _cash(account["balance"])
         if cash is None or cash < float(plan.get("estimated_notional_krw") or 0):
-            return self._blocked(db, request_payload=base_request, status="blocked", block_reason="insufficient_cash", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, dry_run=dry_run, target_risk=target_risk, plan=plan)
+            return block(
+                status="blocked",
+                block_reason="insufficient_cash",
+                dry_run=dry_run,
+                target_risk=target_risk,
+                plan=plan,
+            )
 
         safety["validation_called"] = True
-        validation = self._validate_order(db, payload, dry_run, plan, target_risk)
+        validation = self._validate_order(
+            db,
+            payload,
+            dry_run,
+            plan,
+            target_risk,
+            promotion_context=promotion_context,
+        )
         if validation.get("validated_for_submission") is not True:
-            return self._blocked(
-                db,
-                request_payload=base_request,
+            return block(
                 status="validation_failed",
                 block_reason=str(
                     validation.get("primary_block_reason")
                     or (validation.get("block_reasons") or ["validation_failed"])[0]
                 ),
-                safety=safety,
-                active_profile=profile_name,
-                trigger_source=payload.trigger_source,
-                client_request_id=payload.client_request_id,
                 dry_run=dry_run,
                 target_risk=target_risk,
                 validation=validation,
@@ -431,6 +542,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             plan=plan,
             safety=safety,
             now_utc=now_utc,
+            promotion_context=promotion_context,
         )
 
     def recent(
@@ -485,7 +597,23 @@ class ProfileAwareGuardedLiveAutoBuyService:
             "internal_status": order.internal_status,
             "safety": {**_safety(read_only=True), "sync_only": True},
         }
+        response["promotion_trace"] = {
+            **_promotion_trace({"trace": response.get("promotion_trace")}),
+            "live_attempt_id": attempt.id,
+            "order_id": attempt.related_order_id,
+            "converted_live_attempt_id": attempt.id,
+            "converted_order_id": attempt.related_order_id,
+            "broker_order_id": attempt.broker_order_id,
+            "last_sync_status": status,
+        }
         attempt.response_payload = _json(response)
+        self.promotion_service.mark_live_sync(
+            db,
+            live_attempt_id=attempt.id,
+            order_id=attempt.related_order_id,
+            sync_status=status,
+            trace=response["promotion_trace"],
+        )
         db.commit()
         db.refresh(attempt)
         return sanitize_kis_payload(response)
@@ -505,8 +633,11 @@ class ProfileAwareGuardedLiveAutoBuyService:
         target_risk: dict[str, Any] | None = None,
         validation: dict[str, Any] | None = None,
         plan: dict[str, Any] | None = None,
+        promotion_context: dict[str, Any] | None = None,
+        consume_promotion: bool = True,
     ) -> dict[str, Any]:
         dry_payload = (dry_run or {}).get("payload") if isinstance(dry_run, dict) else {}
+        promotion_trace = _promotion_trace(promotion_context)
         response = self._run_response(
             status=status,
             action="blocked",
@@ -525,6 +656,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
             block_reason=block_reason,
             risk_flags=_dedupe([block_reason, *_strings((target_risk or {}).get("risk_flags"))]),
             gating_notes=_dedupe(_strings((target_risk or {}).get("gating_notes")) + [block_reason]),
+            promotion_id=_int((promotion_context or {}).get("promotion_id")),
+            promotion_trace=promotion_trace,
             safety=safety,
         )
         attempt = self._save_attempt(
@@ -539,6 +672,23 @@ class ProfileAwareGuardedLiveAutoBuyService:
         )
         response["attempt_id"] = attempt.id
         attempt.response_payload = _json(response)
+        if (
+            consume_promotion
+            and promotion_context
+            and promotion_context.get("accepted") is True
+        ):
+            self.promotion_service.mark_conversion_blocked(
+                db,
+                promotion_id=int(promotion_context["promotion_id"]),
+                live_attempt_id=attempt.id,
+                block_reason=block_reason,
+                trace={
+                    **promotion_trace,
+                    "live_attempt_id": attempt.id,
+                    "converted_live_attempt_id": attempt.id,
+                    "attempt_status": status,
+                },
+            )
         db.commit()
         return sanitize_kis_payload(response)
 
@@ -555,12 +705,14 @@ class ProfileAwareGuardedLiveAutoBuyService:
         plan: dict[str, Any],
         safety: dict[str, Any],
         now_utc: datetime,
+        promotion_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.broker is None:
-            return self._blocked(db, request_payload=request_payload, status="failed", block_reason="kis_broker_unavailable", safety=safety, active_profile=profile.get("profile_name"), trigger_source=run_request.trigger_source, client_request_id=run_request.client_request_id, dry_run=dry_run, target_risk=target_risk, validation=validation, plan=plan)
+            return self._blocked(db, request_payload=request_payload, status="failed", block_reason="kis_broker_unavailable", safety=safety, active_profile=profile.get("profile_name"), trigger_source=run_request.trigger_source, client_request_id=run_request.client_request_id, dry_run=dry_run, target_risk=target_risk, validation=validation, plan=plan, promotion_context=promotion_context)
 
         dry_payload = dry_run["payload"]
         symbol = str(dry_payload.get("selected_symbol") or "")
+        promotion_trace = _promotion_trace(promotion_context)
         order = self._create_order_log(
             db,
             request_payload=request_payload,
@@ -592,6 +744,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
             internal_status=order.internal_status,
             risk_flags=_strings(target_risk.get("risk_flags")),
             gating_notes=_strings(target_risk.get("gating_notes")),
+            promotion_id=_int((promotion_context or {}).get("promotion_id")),
+            promotion_trace=promotion_trace,
             safety=safety,
         )
         attempt = self._save_attempt(
@@ -605,6 +759,19 @@ class ProfileAwareGuardedLiveAutoBuyService:
             validation=validation,
             related_order_id=order.id,
         )
+        if promotion_context and promotion_context.get("accepted") is True:
+            self.promotion_service.mark_live_order_created(
+                db,
+                promotion_id=int(promotion_context["promotion_id"]),
+                live_attempt_id=attempt.id,
+                order_id=order.id,
+                trace={
+                    **promotion_trace,
+                    "live_attempt_id": attempt.id,
+                    "order_id": order.id,
+                    "attempt_status": "submitting",
+                },
+            )
         safety["broker_submit_called"] = True
         try:
             broker_response = self.broker.submit_market_buy(
@@ -646,11 +813,28 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 risk_flags=["broker_submit_sync_required"],
                 gating_notes=["Broker submit raised after call; manual sync is required before retry."],
                 attempt_id=attempt.id,
+                promotion_id=_int((promotion_context or {}).get("promotion_id")),
+                promotion_trace={
+                    **promotion_trace,
+                    "live_attempt_id": attempt.id,
+                    "order_id": order.id,
+                    "converted_live_attempt_id": attempt.id,
+                    "converted_order_id": order.id,
+                    "attempt_status": "sync_required",
+                },
                 safety=safety,
             )
             attempt.status = "sync_required"
             attempt.block_reason = "broker_submit_sync_required"
             attempt.response_payload = _json(response)
+            if promotion_context and promotion_context.get("accepted") is True:
+                self.promotion_service.mark_live_sync(
+                    db,
+                    live_attempt_id=attempt.id,
+                    order_id=order.id,
+                    sync_status="sync_required",
+                    trace=response["promotion_trace"],
+                )
             db.commit()
             return sanitize_kis_payload(response)
 
@@ -711,6 +895,16 @@ class ProfileAwareGuardedLiveAutoBuyService:
             attempt_id=attempt.id,
             signal_id=signal.id,
             trade_run_id=run.id,
+            promotion_id=_int((promotion_context or {}).get("promotion_id")),
+            promotion_trace={
+                **promotion_trace,
+                "live_attempt_id": attempt.id,
+                "order_id": order.id,
+                "converted_live_attempt_id": attempt.id,
+                "converted_order_id": order.id,
+                "broker_order_id": broker_order_id,
+                "attempt_status": "submitted",
+            },
             safety=safety,
         )
         order.response_payload = _json({**response, "kis_response": broker_response})
@@ -721,6 +915,14 @@ class ProfileAwareGuardedLiveAutoBuyService:
         attempt.broker_order_id = broker_order_id
         attempt.submitted_at = now_utc
         attempt.response_payload = _json(response)
+        if promotion_context and promotion_context.get("accepted") is True:
+            self.promotion_service.mark_live_order_created(
+                db,
+                promotion_id=int(promotion_context["promotion_id"]),
+                live_attempt_id=attempt.id,
+                order_id=order.id,
+                trace=response["promotion_trace"],
+            )
         db.commit()
         return sanitize_kis_payload(response)
 
@@ -731,6 +933,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         dry_run: dict[str, Any],
         plan: dict[str, Any],
         target_risk: dict[str, Any],
+        promotion_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.validation_service is None:
             return {
@@ -752,6 +955,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 "source_dry_run_id": dry_run.get("trade_run_id"),
                 "source_signal_id": dry_payload.get("signal_id"),
                 "active_profile": target_risk.get("active_profile"),
+                "promotion_trace": _promotion_trace(promotion_context),
             },
         )
         result = self.validation_service.validate(request)
@@ -1146,6 +1350,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
             "source_dry_run_id": kwargs.get("source_dry_run_id"),
             "source_signal_id": kwargs.get("source_signal_id"),
             "source_trade_run_id": kwargs.get("source_trade_run_id"),
+            "promotion_id": kwargs.get("promotion_id"),
+            "promotion_trace": kwargs.get("promotion_trace") or {},
             "target_risk_approved": bool(kwargs.get("target_risk_approved")),
             "validation_approved": bool(kwargs.get("validation_approved")),
             "submitted": bool(kwargs.get("submitted")),
@@ -1204,11 +1410,43 @@ class ProfileAwareGuardedLiveAutoBuyService:
             "block_reason": attempt.block_reason,
             "risk_flags": _parse_list(attempt.risk_flags),
             "gating_notes": _parse_list(attempt.gating_notes),
+            "promotion_id": _int(_parse_object(attempt.request_payload).get("promotion_id")),
+            "promotion_trace": _parse_object(attempt.request_payload).get("promotion_trace")
+            or _parse_object(attempt.response_payload).get("promotion_trace")
+            or {},
             "safety": _parse_object(attempt.safety_flags),
             "created_at": _iso(attempt.created_at),
             "submitted_at": _iso(attempt.submitted_at),
             "synced_at": _iso(attempt.synced_at),
         }
+
+
+def _with_promotion_trace(
+    request_payload: dict[str, Any],
+    promotion_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not promotion_context:
+        return request_payload
+    payload = dict(request_payload)
+    trace = _promotion_trace(promotion_context)
+    promotion_id = _int(promotion_context.get("promotion_id") or trace.get("promotion_id"))
+    if promotion_id is not None:
+        payload["promotion_id"] = promotion_id
+    if trace:
+        payload["promotion_trace"] = trace
+    source_dry_run_id = _int(promotion_context.get("source_dry_run_id"))
+    if source_dry_run_id is not None and payload.get("source_dry_run_id") is None:
+        payload["source_dry_run_id"] = source_dry_run_id
+    return sanitize_kis_payload(payload)
+
+
+def _promotion_trace(promotion_context: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(promotion_context, dict):
+        return {}
+    trace = promotion_context.get("trace")
+    if not isinstance(trace, dict):
+        return {}
+    return sanitize_kis_payload(dict(trace))
 
 
 def _allowed_profiles(settings: dict[str, Any]) -> list[str]:
@@ -1342,6 +1580,15 @@ def _float(value: Any) -> float | None:
         return None
     try:
         return float(str(value).replace(",", ""))
+    except Exception:
+        return None
+
+
+def _int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
     except Exception:
         return None
 

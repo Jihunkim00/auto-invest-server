@@ -90,14 +90,42 @@ void main() {
 
     expect(api.liveReadinessCalls, 2);
     expect(api.liveRunCalls, 1);
-    expect(api.markConvertedCalls, 1);
+    expect(api.lastPromotionId, 1);
+    expect(api.markConvertedCalls, 0);
     expect(api.manualSubmitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('converted promotion shows trace and hides live action',
+      (tester) async {
+    final api = _PromotionQueueApiClient(
+      promotionStatus: 'live_order_created',
+    );
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    expect(find.text('CONVERTED'), findsOneWidget);
+    expect(find.text('live_order_created'), findsOneWidget);
+    expect(find.textContaining('promotion 1 / dry-run 22'), findsOneWidget);
+    expect(find.byKey(const ValueKey('run-live-auto-buy-promotion-1')),
+        findsNothing);
 
     controller.dispose();
   });
 }
 
 class _PromotionQueueApiClient extends ApiClient {
+  _PromotionQueueApiClient({this.promotionStatus = 'pending'});
+
+  final String promotionStatus;
+
   int operationsCalls = 0;
   int promotionsCalls = 0;
   int acknowledgeCalls = 0;
@@ -107,10 +135,10 @@ class _PromotionQueueApiClient extends ApiClient {
   int liveRecentCalls = 0;
   int markConvertedCalls = 0;
   int manualSubmitCalls = 0;
+  int? lastPromotionId;
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -129,7 +157,9 @@ class _PromotionQueueApiClient extends ApiClient {
     int limit = 20,
   }) async {
     promotionsCalls += 1;
-    return StrategyAutoBuyPromotions.fromJson(autoBuyPromotionsJson());
+    return StrategyAutoBuyPromotions.fromJson(
+      autoBuyPromotionsJson(status: promotionStatus),
+    );
   }
 
   @override
@@ -144,8 +174,8 @@ class _PromotionQueueApiClient extends ApiClient {
   }
 
   @override
-  Future<StrategyAutoBuyPromotionActionResult>
-      dismissStrategyAutoBuyPromotion(int promotionId) async {
+  Future<StrategyAutoBuyPromotionActionResult> dismissStrategyAutoBuyPromotion(
+      int promotionId) async {
     dismissCalls += 1;
     return StrategyAutoBuyPromotionActionResult.fromJson({
       'status': 'dismissed',
@@ -162,7 +192,8 @@ class _PromotionQueueApiClient extends ApiClient {
     int? sourceDryRunId,
   }) async {
     liveReadinessCalls += 1;
-    return StrategyLiveAutoBuyReadiness.fromJson(liveReadinessJson(ready: true));
+    return StrategyLiveAutoBuyReadiness.fromJson(
+        liveReadinessJson(ready: true));
   }
 
   @override
@@ -170,12 +201,14 @@ class _PromotionQueueApiClient extends ApiClient {
     String provider = 'kis',
     String market = 'KR',
     String? symbol,
+    int? promotionId,
     int? sourceDryRunId,
     double? maxNotionalKrw,
     String triggerSource = 'flutter_dashboard',
     String? clientRequestId,
   }) async {
     liveRunCalls += 1;
+    lastPromotionId = promotionId;
     return StrategyLiveAutoBuyRunResult.fromJson(
       liveRunResultJson(status: 'submitted', submitted: true),
     );

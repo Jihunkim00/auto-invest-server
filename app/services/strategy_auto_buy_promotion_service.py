@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.models import StrategyAutoBuyPromotion
@@ -15,6 +16,19 @@ PROVIDER = "kis"
 MARKET = "KR"
 KST = ZoneInfo("Asia/Seoul")
 ACTIVE_STATUSES = {"pending", "acknowledged"}
+CONVERTED_STATUSES = {
+    "converted_to_live_attempt",
+    "live_order_created",
+    "live_order_synced",
+    "live_order_rejected",
+    "live_order_filled",
+}
+FINAL_STATUSES = {
+    *CONVERTED_STATUSES,
+    "dismissed",
+    "expired",
+    "conversion_blocked",
+}
 
 
 class StrategyAutoBuyPromotionService:
@@ -170,6 +184,11 @@ class StrategyAutoBuyPromotionService:
         row.status = "converted_to_live_attempt"
         row.promoted_to_live_attempt_id = promoted_to_live_attempt_id
         row.related_live_order_id = related_live_order_id
+        row.converted_live_attempt_id = promoted_to_live_attempt_id
+        row.converted_order_id = related_live_order_id
+        row.converted_at = now
+        row.conversion_status = "converted_to_live_attempt"
+        row.trace_payload_json = _json(self.trace_payload(row))
         row.updated_at = now
         db.commit()
         db.refresh(row)
@@ -178,6 +197,154 @@ class StrategyAutoBuyPromotionService:
             "promotion": self.item(row),
             "safety": _safety(read_only=False),
         }
+
+    def prepare_live_conversion(
+        self,
+        db: Session,
+        *,
+        promotion_id: int,
+        provider: str,
+        market: str,
+        symbol: str | None,
+        source_dry_run_id: int | None,
+        active_profile: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        row = self._row(db, promotion_id)
+        now_utc = _aware_utc(now)
+        normalized_provider = str(provider or PROVIDER).strip().lower()
+        normalized_market = str(market or MARKET).strip().upper()
+        normalized_symbol = _text(symbol)
+        normalized_profile = _text(active_profile)
+
+        if str(row.provider or "").lower() != normalized_provider or str(row.market or "").upper() != normalized_market:
+            return self._conversion_block("promotion_scope_mismatch", row)
+
+        if row.status == "pending" and _expired(row, now_utc):
+            row.status = "expired"
+            row.updated_at = _naive_utc(now_utc)
+            db.commit()
+            db.refresh(row)
+            return self._conversion_block("promotion_expired", row)
+
+        if _already_converted(row):
+            return self._conversion_block("promotion_already_converted", row)
+        if row.status != "pending":
+            return self._conversion_block(_status_block_reason(row.status), row)
+
+        row_symbol = _text(row.symbol)
+        if normalized_symbol and row_symbol and normalized_symbol.upper() != row_symbol.upper():
+            return self._conversion_block("promotion_symbol_mismatch", row)
+
+        row_source_dry_run_id = _int(row.source_dry_run_trade_run_id)
+        if (
+            source_dry_run_id is not None
+            and row_source_dry_run_id is not None
+            and int(source_dry_run_id) != row_source_dry_run_id
+        ):
+            return self._conversion_block("promotion_source_dry_run_mismatch", row)
+
+        row_profile = _text(row.active_profile)
+        if normalized_profile and row_profile and normalized_profile != row_profile:
+            return self._conversion_block("promotion_profile_mismatch", row)
+
+        return {
+            "accepted": True,
+            "promotion_id": row.id,
+            "row": row,
+            "source_dry_run_id": row_source_dry_run_id or source_dry_run_id,
+            "symbol": row_symbol or normalized_symbol,
+            "trace": self.trace_payload(row),
+        }
+
+    def mark_conversion_blocked(
+        self,
+        db: Session,
+        *,
+        promotion_id: int,
+        live_attempt_id: int | None,
+        block_reason: str,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        row = self._row(db, promotion_id)
+        if row.status != "pending":
+            return
+        now = _naive_utc(datetime.now(UTC))
+        row.status = "conversion_blocked"
+        row.block_reason = _text(block_reason)
+        row.converted_live_attempt_id = live_attempt_id
+        row.promoted_to_live_attempt_id = live_attempt_id
+        row.converted_at = now
+        row.conversion_status = "conversion_blocked"
+        row.trace_payload_json = _json(
+            {
+                **self.trace_payload(row),
+                **(trace or {}),
+                "conversion_status": "conversion_blocked",
+                "block_reason": block_reason,
+            }
+        )
+        row.updated_at = now
+        db.commit()
+
+    def mark_live_order_created(
+        self,
+        db: Session,
+        *,
+        promotion_id: int,
+        live_attempt_id: int,
+        order_id: int | None,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        row = self._row(db, promotion_id)
+        now = _naive_utc(datetime.now(UTC))
+        row.status = "live_order_created"
+        row.promoted_to_live_attempt_id = live_attempt_id
+        row.related_live_order_id = order_id
+        row.converted_live_attempt_id = live_attempt_id
+        row.converted_order_id = order_id
+        row.converted_at = row.converted_at or now
+        row.conversion_status = "live_order_created"
+        row.trace_payload_json = _json(
+            {
+                **self.trace_payload(row),
+                **(trace or {}),
+                "conversion_status": "live_order_created",
+            }
+        )
+        row.updated_at = now
+        db.commit()
+
+    def mark_live_sync(
+        self,
+        db: Session,
+        *,
+        live_attempt_id: int | None,
+        order_id: int | None,
+        sync_status: str,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        row = self._row_for_live_link(
+            db,
+            live_attempt_id=live_attempt_id,
+            order_id=order_id,
+        )
+        if row is None:
+            return
+        now = _naive_utc(datetime.now(UTC))
+        row.status = _promotion_status_from_sync(sync_status)
+        row.last_sync_at = now
+        row.last_sync_status = _text(sync_status)
+        row.conversion_status = _text(sync_status)
+        row.trace_payload_json = _json(
+            {
+                **self.trace_payload(row),
+                **(trace or {}),
+                "last_sync_status": sync_status,
+            }
+        )
+        row.updated_at = now
+        db.commit()
 
     def summary(
         self,
@@ -263,6 +430,14 @@ class StrategyAutoBuyPromotionService:
                 "dismissed_at": _iso(row.dismissed_at),
                 "promoted_to_live_attempt_id": row.promoted_to_live_attempt_id,
                 "related_live_order_id": row.related_live_order_id,
+                "converted_live_attempt_id": row.converted_live_attempt_id,
+                "converted_order_id": row.converted_order_id,
+                "converted_at": _iso(row.converted_at),
+                "conversion_status": row.conversion_status,
+                "last_sync_at": _iso(row.last_sync_at),
+                "last_sync_status": row.last_sync_status,
+                "trace_payload": _parse_object(row.trace_payload_json)
+                or self.trace_payload(row),
                 "request_payload": _parse_object(row.request_payload),
                 "response_payload": _parse_object(row.response_payload),
                 "created_at": _iso(row.created_at),
@@ -270,17 +445,121 @@ class StrategyAutoBuyPromotionService:
             }
         )
 
+    def trace_payload(
+        self,
+        row: StrategyAutoBuyPromotion,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        score = row.final_score if row.final_score is not None else row.buy_score
+        payload = {
+            "promotion_id": row.id,
+            "source_dry_run_id": row.source_dry_run_trade_run_id,
+            "source_signal_id": row.source_dry_run_signal_id,
+            "source_trade_run_id": row.source_dry_run_trade_run_id,
+            "promotion_created_at": _iso(row.created_at),
+            "promotion_symbol": row.symbol,
+            "promotion_profile": row.active_profile,
+            "promotion_score": score,
+            "final_buy_score": row.final_score,
+            "promotion_reason": row.promotion_reason,
+            "promotion_status": row.status,
+            "converted_live_attempt_id": row.converted_live_attempt_id
+            or row.promoted_to_live_attempt_id,
+            "converted_order_id": row.converted_order_id or row.related_live_order_id,
+            "converted_at": _iso(row.converted_at),
+            "conversion_status": row.conversion_status,
+            "last_sync_at": _iso(row.last_sync_at),
+            "last_sync_status": row.last_sync_status,
+        }
+        if extra:
+            payload.update(extra)
+        return sanitize_kis_payload(payload)
+
     def _row(self, db: Session, promotion_id: int) -> StrategyAutoBuyPromotion:
         row = db.get(StrategyAutoBuyPromotion, int(promotion_id))
         if row is None:
             raise ValueError("promotion_not_found")
         return row
 
+    def _row_for_live_link(
+        self,
+        db: Session,
+        *,
+        live_attempt_id: int | None,
+        order_id: int | None,
+    ) -> StrategyAutoBuyPromotion | None:
+        query = db.query(StrategyAutoBuyPromotion)
+        filters = []
+        if live_attempt_id is not None:
+            filters.extend(
+                [
+                    StrategyAutoBuyPromotion.converted_live_attempt_id
+                    == int(live_attempt_id),
+                    StrategyAutoBuyPromotion.promoted_to_live_attempt_id
+                    == int(live_attempt_id),
+                ]
+            )
+        if order_id is not None:
+            filters.extend(
+                [
+                    StrategyAutoBuyPromotion.converted_order_id == int(order_id),
+                    StrategyAutoBuyPromotion.related_live_order_id == int(order_id),
+                ]
+            )
+        if not filters:
+            return None
+        return query.filter(or_(*filters)).first()
+
+    def _conversion_block(
+        self,
+        block_reason: str,
+        row: StrategyAutoBuyPromotion,
+    ) -> dict[str, Any]:
+        return {
+            "accepted": False,
+            "promotion_id": row.id,
+            "block_reason": block_reason,
+            "trace": self.trace_payload(row, extra={"block_reason": block_reason}),
+        }
+
 
 def _expired(row: StrategyAutoBuyPromotion, now_utc: datetime) -> bool:
     if row.expires_at is None:
         return False
     return _aware_utc(row.expires_at) <= now_utc
+
+
+def _already_converted(row: StrategyAutoBuyPromotion) -> bool:
+    return (
+        row.status in CONVERTED_STATUSES
+        or row.converted_live_attempt_id is not None
+        or row.converted_order_id is not None
+        or row.promoted_to_live_attempt_id is not None
+        or row.related_live_order_id is not None
+    )
+
+
+def _status_block_reason(status: str | None) -> str:
+    normalized = str(status or "").strip()
+    if normalized == "dismissed":
+        return "promotion_dismissed"
+    if normalized == "expired":
+        return "promotion_expired"
+    if normalized in CONVERTED_STATUSES:
+        return "promotion_already_converted"
+    if normalized == "conversion_blocked":
+        return "promotion_conversion_blocked"
+    return "promotion_not_pending"
+
+
+def _promotion_status_from_sync(sync_status: str) -> str:
+    normalized = str(sync_status or "").strip().lower()
+    if normalized == "filled":
+        return "live_order_filled"
+    if normalized in {"rejected", "failed"}:
+        return "live_order_rejected"
+    return "live_order_synced"
 
 
 def _safety(*, read_only: bool) -> dict[str, Any]:

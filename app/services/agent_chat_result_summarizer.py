@@ -552,10 +552,19 @@ class AgentChatResultSummarizer:
         first = items[0] if items and isinstance(items[0], dict) else {}
         symbol = first.get("symbol") or "none"
         reason = first.get("promotion_reason") or first.get("block_reason") or "none"
+        trace = first.get("trace_payload") if isinstance(first.get("trace_payload"), dict) else {}
+        conversion = (
+            first.get("conversion_status")
+            or trace.get("conversion_status")
+            or first.get("status")
+            or "none"
+        )
+        sync = first.get("last_sync_status") or trace.get("last_sync_status") or "none"
         return AgentChatAnswer(
             text=(
                 f"Promotion queue has {len(items)} visible candidate(s). "
-                f"Latest candidate: {symbol}; reason: {reason}. "
+                f"Latest candidate: {symbol}; reason: {reason}; "
+                f"conversion: {conversion}; sync: {sync}. "
                 "A promotion is not an order. Chat did not acknowledge, validate, submit, or run live auto-buy."
             ),
             answer_type="strategy_auto_buy_promotion_answer",
@@ -773,6 +782,7 @@ class AgentChatResultSummarizer:
         if result.result_type == "strategy_auto_buy_promotions":
             items = data.get("items") if isinstance(data.get("items"), list) else []
             first = items[0] if items and isinstance(items[0], dict) else {}
+            trace = first.get("trace_payload") if isinstance(first.get("trace_payload"), dict) else {}
             return AgentChatResultCard(
                 card_type="strategy_auto_buy_promotions",
                 title="Auto Buy Promotion Queue",
@@ -791,6 +801,9 @@ class AgentChatResultSummarizer:
                     {"label": "Reason", "value": first.get("promotion_reason") or "-"},
                     {"label": "Score", "value": first.get("final_score") or first.get("buy_score") or "-"},
                     {"label": "Expires", "value": first.get("expires_at") or "-"},
+                    {"label": "Live attempt", "value": first.get("converted_live_attempt_id") or first.get("promoted_to_live_attempt_id") or "-"},
+                    {"label": "Order", "value": first.get("converted_order_id") or first.get("related_live_order_id") or "-"},
+                    {"label": "Sync", "value": first.get("last_sync_status") or trace.get("last_sync_status") or "-"},
                 ],
                 data=data,
             )

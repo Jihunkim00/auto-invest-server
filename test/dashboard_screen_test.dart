@@ -549,7 +549,8 @@ void main() {
         findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('Kill Switch OFF')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('Global Scheduler ON')),
+    expect(
+        find.descendant(of: card, matching: find.text('Global Scheduler ON')),
         findsOneWidget);
 
     controller.dispose();
@@ -836,15 +837,13 @@ void main() {
       const Key('automation_event_timeline_card'),
     );
 
-    final timeline =
-        find.byKey(const Key('automation_event_timeline_card'));
+    final timeline = find.byKey(const Key('automation_event_timeline_card'));
     expect(find.descendant(of: timeline, matching: find.text('KIS LIVE')),
         findsOneWidget);
     expect(find.descendant(of: timeline, matching: find.text('036540')),
         findsOneWidget);
     expect(
-        find.descendant(
-            of: timeline, matching: find.text('TRIGGER DETECTED')),
+        find.descendant(of: timeline, matching: find.text('TRIGGER DETECTED')),
         findsOneWidget);
     expect(find.descendant(of: timeline, matching: find.text('TAKE_PROFIT')),
         findsOneWidget);
@@ -959,8 +958,7 @@ void main() {
       const Key('automation_event_timeline_card'),
     );
 
-    final timeline =
-        find.byKey(const Key('automation_event_timeline_card'));
+    final timeline = find.byKey(const Key('automation_event_timeline_card'));
     expect(find.descendant(of: timeline, matching: find.text('ALPACA PAPER')),
         findsOneWidget);
     expect(find.descendant(of: timeline, matching: find.text('AAPL')),
@@ -1402,7 +1400,8 @@ Future<void> _showDashboardFinder(WidgetTester tester, Finder finder) async {
 }
 
 Future<void> _expandHomeAdvancedDetails(WidgetTester tester) async {
-  if (find.byKey(const Key('operational-readiness-card'))
+  if (find
+      .byKey(const Key('operational-readiness-card'))
       .evaluate()
       .isNotEmpty) {
     return;

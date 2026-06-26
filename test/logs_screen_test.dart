@@ -1349,8 +1349,7 @@ class _FakeLogsApiClient extends ApiClient {
   }
 
   @override
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -1367,8 +1366,7 @@ class _FakeLogsApiClient extends ApiClient {
   }
 
   @override
-  Future<StrategyAutoBuySchedulerStatus>
-      fetchStrategyAutoBuySchedulerStatus({
+  Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {

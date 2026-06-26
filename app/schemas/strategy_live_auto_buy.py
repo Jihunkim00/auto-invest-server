@@ -41,6 +41,7 @@ class ProfileAwareGuardedLiveAutoBuyRunRequest(BaseModel):
     market: str = "KR"
     symbol: str | None = None
     confirm_operator_ack: bool
+    promotion_id: int | None = Field(default=None, ge=1)
     source_dry_run_id: int | None = None
     max_notional_krw: float | None = Field(default=None, gt=0)
     trigger_source: str = Field(default="manual", min_length=1, max_length=80)
@@ -92,6 +93,8 @@ class ProfileAwareGuardedLiveAutoBuyRunResponse(BaseModel):
     source_dry_run_id: int | None = None
     source_signal_id: int | None = None
     source_trade_run_id: int | None = None
+    promotion_id: int | None = None
+    promotion_trace: dict[str, Any] = Field(default_factory=dict)
     target_risk_approved: bool
     validation_approved: bool
     submitted: bool

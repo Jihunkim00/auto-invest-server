@@ -50,7 +50,10 @@ void main() {
       },
       'data': const {},
       'strategy_action': _strategyAction(),
-      'available_actions': ['confirm_strategy_profile', 'cancel_strategy_profile'],
+      'available_actions': [
+        'confirm_strategy_profile',
+        'cancel_strategy_profile'
+      ],
       'safety': _safety(),
     });
 
@@ -58,7 +61,8 @@ void main() {
     expect(response.intent.targetMonthlyReturnPct, 0.05);
     expect(response.intent.isReadOnly, isFalse);
     expect(response.strategyAction?.isPending, isTrue);
-    expect(response.strategyAction?.requestedProfilePayload?.displayName, '고수익형');
+    expect(
+        response.strategyAction?.requestedProfilePayload?.displayName, '고수익형');
     expect(response.safety.realOrderSubmitted, isFalse);
     expect(response.safety.validationCalled, isFalse);
   });

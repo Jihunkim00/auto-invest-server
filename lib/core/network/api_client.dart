@@ -500,8 +500,7 @@ class ApiClient {
       {
         if (profileName != null && profileName.trim().isNotEmpty)
           'profile_name': profileName.trim(),
-        if (symbol != null && symbol.trim().isNotEmpty)
-          'symbol': symbol.trim(),
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
         'trigger_source': 'flutter_dashboard',
         'use_watchlist': true,
         'save_logs': true,
@@ -560,6 +559,7 @@ class ApiClient {
     String provider = 'kis',
     String market = 'KR',
     String? symbol,
+    int? promotionId,
     int? sourceDryRunId,
     double? maxNotionalKrw,
     String triggerSource = 'flutter_dashboard',
@@ -571,6 +571,7 @@ class ApiClient {
         'provider': provider,
         'market': market,
         'confirm_operator_ack': true,
+        if (promotionId != null) 'promotion_id': promotionId,
         if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
         if (sourceDryRunId != null) 'source_dry_run_id': sourceDryRunId,
         if (maxNotionalKrw != null) 'max_notional_krw': maxNotionalKrw,
@@ -600,8 +601,7 @@ class ApiClient {
     return StrategyLiveAutoBuyRecent.fromJson(payload);
   }
 
-  Future<StrategyAutoBuyOperationsStatus>
-      fetchStrategyAutoBuyOperationsStatus({
+  Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -617,8 +617,7 @@ class ApiClient {
     return StrategyAutoBuyOperationsStatus.fromJson(payload);
   }
 
-  Future<StrategyAutoBuySchedulerStatus>
-      fetchStrategyAutoBuySchedulerStatus({
+  Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({
     String provider = 'kis',
     String market = 'KR',
   }) async {
@@ -645,8 +644,7 @@ class ApiClient {
       {
         'provider': provider,
         'market': market,
-        if (symbol != null && symbol.trim().isNotEmpty)
-          'symbol': symbol.trim(),
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
         'trigger_source': 'flutter_scheduler_panel',
       },
     );
@@ -666,7 +664,8 @@ class ApiClient {
         queryParameters: {
           'provider': provider,
           'market': market,
-          'status': status,
+          if (status.trim().isNotEmpty && status != 'all')
+            'status': status.trim(),
           'limit': limit.toString(),
           if (symbol != null && symbol.trim().isNotEmpty)
             'symbol': symbol.trim(),
@@ -685,8 +684,8 @@ class ApiClient {
     return StrategyAutoBuyPromotionActionResult.fromJson(payload);
   }
 
-  Future<StrategyAutoBuyPromotionActionResult>
-      dismissStrategyAutoBuyPromotion(int promotionId) async {
+  Future<StrategyAutoBuyPromotionActionResult> dismissStrategyAutoBuyPromotion(
+      int promotionId) async {
     final payload = await _postJsonBody(
       '/strategy/auto-buy/promotions/$promotionId/dismiss',
       const {},

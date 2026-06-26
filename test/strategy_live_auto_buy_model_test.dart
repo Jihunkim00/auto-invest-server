@@ -32,6 +32,8 @@ void main() {
     expect(submitted.brokerOrderId, 'KIS-ORDER-1');
     expect(submitted.sourceSignalId, 123);
     expect(submitted.sourceTradeRunId, 20);
+    expect(submitted.promotionId, 1);
+    expect(submitted.promotionTrace['converted_order_id'], 30);
     expect(blocked.blocked, isTrue);
     expect(blocked.blockReason, 'recent_dry_run_missing');
   });
@@ -92,6 +94,18 @@ Map<String, dynamic> liveRunResultJson({
     'source_dry_run_id': 20,
     'source_signal_id': 123,
     'source_trade_run_id': 20,
+    'promotion_id': 1,
+    'promotion_trace': {
+      'promotion_id': 1,
+      'source_dry_run_id': 20,
+      'source_signal_id': 123,
+      'source_trade_run_id': 20,
+      'promotion_symbol': '005930',
+      'promotion_profile': 'safe',
+      'converted_live_attempt_id': 10,
+      'converted_order_id': submitted ? 30 : null,
+      'last_sync_status': submitted ? 'submitted' : null,
+    },
     'target_risk_approved': true,
     'validation_approved': submitted,
     'submitted': submitted,

@@ -25,8 +25,8 @@ void main() {
     final api = _ReadinessFakeApi();
     final controller = DashboardController(api, autoload: false);
 
-    final result =
-        await controller.applyAgentChatLiveOrderPreset('chat_confirmed_buy_only');
+    final result = await controller
+        .applyAgentChatLiveOrderPreset('chat_confirmed_buy_only');
 
     expect(result.success, isTrue);
     expect(result.message, contains('No order was submitted'));
@@ -55,15 +55,14 @@ class _ReadinessFakeApi extends ApiClient {
   String? lastPreset;
 
   @override
-  Future<AgentChatLiveOrderReadiness>
-      fetchAgentChatLiveOrderReadiness() async {
+  Future<AgentChatLiveOrderReadiness> fetchAgentChatLiveOrderReadiness() async {
     readinessCalls += 1;
     return _readiness(ready: false, buyEnabled: false);
   }
 
   @override
-  Future<AgentChatLiveOrderSettingsApplyResult>
-      applyAgentChatLiveOrderPreset(String preset) async {
+  Future<AgentChatLiveOrderSettingsApplyResult> applyAgentChatLiveOrderPreset(
+      String preset) async {
     presetCalls += 1;
     lastPreset = preset;
     return AgentChatLiveOrderSettingsApplyResult.fromJson({

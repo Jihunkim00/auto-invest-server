@@ -94,7 +94,10 @@ class _StatusRows extends StatelessWidget {
       ('Symbol', action.displayName),
       ('Side', action.side.toUpperCase()),
       ('Quantity', _formatQuantity(action.quantity)),
-      ('Estimated Notional', _formatMoney(action.estimatedNotional, action.currency)),
+      (
+        'Estimated Notional',
+        _formatMoney(action.estimatedNotional, action.currency)
+      ),
       ('Broker Order', action.brokerOrderId ?? '-'),
       ('Broker Status', action.brokerStatus ?? action.internalStatus ?? '-'),
       ('Last Sync', action.lastSyncAt ?? '-'),

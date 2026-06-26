@@ -10,7 +10,8 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_result.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 
 void main() {
-  test('sendAgentMessage renders pending live order without validation or submit',
+  test(
+      'sendAgentMessage renders pending live order without validation or submit',
       () async {
     final api = _LiveOrderFakeApi();
     final controller = DashboardController(api, autoload: false)
@@ -134,7 +135,8 @@ void main() {
     expect(api.syncCalls, 1);
     expect(api.manualSubmitCalls, 0);
     expect(controller.agentMessages.first.liveOrderAction?.status, 'filled');
-    expect(controller.agentMessages.last.messageType, 'live_order_status_synced');
+    expect(
+        controller.agentMessages.last.messageType, 'live_order_status_synced');
     expect(controller.agentMessages.last.safetyBadges, contains('SYNCED'));
 
     controller.dispose();

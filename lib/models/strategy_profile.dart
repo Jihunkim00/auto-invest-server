@@ -106,8 +106,7 @@ class StrategyProfile {
           'max_holding_days': maxHoldingDays,
           'stop_after_monthly_target': stopAfterMonthlyTarget,
           'reduce_size_after_loss': reduceSizeAfterLoss,
-          'consecutive_loss_reduce_threshold':
-              consecutiveLossReduceThreshold,
+          'consecutive_loss_reduce_threshold': consecutiveLossReduceThreshold,
           'is_active': isActive,
           'is_builtin': isBuiltin,
         };
@@ -215,4 +214,3 @@ double _readDouble(Object? value) {
   if (value is num) return value.toDouble();
   return double.tryParse(value?.toString() ?? '') ?? 0;
 }
-

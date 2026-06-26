@@ -11,6 +11,11 @@ StrategyAutoBuyPromotionStatus = Literal[
     "dismissed",
     "expired",
     "converted_to_live_attempt",
+    "live_order_created",
+    "live_order_synced",
+    "live_order_rejected",
+    "live_order_filled",
+    "conversion_blocked",
     "blocked",
     "stale",
 ]
@@ -84,6 +89,13 @@ class StrategyAutoBuyPromotionItem(BaseModel):
     dismissed_at: str | None = None
     promoted_to_live_attempt_id: int | None = None
     related_live_order_id: int | None = None
+    converted_live_attempt_id: int | None = None
+    converted_order_id: int | None = None
+    converted_at: str | None = None
+    conversion_status: str | None = None
+    last_sync_at: str | None = None
+    last_sync_status: str | None = None
+    trace_payload: dict[str, Any] = Field(default_factory=dict)
     request_payload: dict[str, Any] = Field(default_factory=dict)
     response_payload: dict[str, Any] = Field(default_factory=dict)
     created_at: str | None = None

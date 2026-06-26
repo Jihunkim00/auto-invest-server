@@ -69,7 +69,7 @@ void main() {
   });
 }
 
-final _mojibakeMarkers =
-    List<String>.unmodifiable([0x00EC, 0x00EB, 0x00EA, 0xFFFD].map(String.fromCharCode));
+final _mojibakeMarkers = List<String>.unmodifiable(
+    [0x00EC, 0x00EB, 0x00EA, 0xFFFD].map(String.fromCharCode));
 
 class _NoopApiClient extends ApiClient {}
