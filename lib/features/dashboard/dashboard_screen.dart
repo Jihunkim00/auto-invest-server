@@ -5,6 +5,7 @@ import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/automation_runtime_monitor.dart';
+import '../../models/log_items.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/trading_run.dart';
@@ -35,12 +36,14 @@ class DashboardScreen extends StatelessWidget {
     required this.controller,
     this.onOpenManualOrder,
     this.onReviewPosition,
+    this.onOpenLogs,
     this.onOpenSettings,
   });
 
   final DashboardController controller;
   final VoidCallback? onOpenManualOrder;
   final VoidCallback? onReviewPosition;
+  final VoidCallback? onOpenLogs;
   final VoidCallback? onOpenSettings;
 
   @override
@@ -85,118 +88,28 @@ class DashboardScreen extends StatelessWidget {
                       onOpenManualOrder: onOpenManualOrder,
                     ),
                     const SizedBox(height: 12),
-                    _OperationalReadinessCard(
+                    _CompactSafetyStatusBar(
                       controller: controller,
                       onOpenSettings: onOpenSettings,
                     ),
                     const SizedBox(height: 12),
-                    StrategyProfileCard(
-                      profiles: controller.strategyProfiles,
-                      activeProfile: controller.activeStrategyProfile,
-                      loading: controller.strategyProfilesLoading,
-                      error: controller.strategyProfileError,
-                      applyingProfileName:
-                          controller.applyingStrategyProfileName,
-                      onRefresh: controller.refreshStrategyProfiles,
-                      onApply: controller.applyStrategyProfilePreset,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyRiskStateCard(
-                      riskState: controller.strategyRiskState,
-                      loading: controller.strategyRiskLoading,
-                      error: controller.strategyRiskError,
-                      onRefresh: controller.refreshStrategyRiskState,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyDryRunAutoBuyCard(
-                      result: controller.strategyDryRunAutoBuyResult,
-                      loading: controller.strategyDryRunAutoBuyLoading,
-                      error: controller.strategyDryRunAutoBuyError,
-                      onRun: controller.runStrategyDryRunAutoBuy,
-                      onRefresh: controller.refreshStrategyDryRunAutoBuy,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyLiveAutoBuyCard(
-                      readiness: controller.strategyLiveAutoBuyReadiness,
-                      latest: controller.strategyLiveAutoBuyResult,
-                      recent: controller.strategyLiveAutoBuyRecent,
-                      loading: controller.strategyLiveAutoBuyLoading,
-                      error: controller.strategyLiveAutoBuyError,
-                      onRun: controller.runStrategyLiveAutoBuyOnce,
-                      onRefresh: controller.refreshStrategyLiveAutoBuy,
-                    ),
-                    const SizedBox(height: 12),
-                    AgentChatLiveAutoBuyStatusCard(
-                      readiness: controller.strategyLiveAutoBuyReadiness,
-                      recent: controller.strategyLiveAutoBuyRecent,
-                      loading: controller.strategyLiveAutoBuyLoading,
-                      error: controller.strategyLiveAutoBuyError,
-                      onRefresh: controller.refreshStrategyLiveAutoBuy,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyLiveAutoExitCard(
-                      readiness: controller.strategyLiveAutoExitReadiness,
-                      latest: controller.strategyLiveAutoExitResult,
-                      recent: controller.strategyLiveAutoExitRecent,
-                      loading: controller.strategyLiveAutoExitLoading,
-                      error: controller.strategyLiveAutoExitError,
-                      onRun: controller.runStrategyLiveAutoExitOnce,
-                      onRefresh: controller.refreshStrategyLiveAutoExit,
-                    ),
-                    const SizedBox(height: 12),
-                    AgentChatLiveAutoExitStatusCard(
-                      readiness: controller.strategyLiveAutoExitReadiness,
-                      recent: controller.strategyLiveAutoExitRecent,
-                      loading: controller.strategyLiveAutoExitLoading,
-                      error: controller.strategyLiveAutoExitError,
-                      onRefresh: controller.refreshStrategyLiveAutoExit,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyMonthlyProgressCard(
-                      performance: controller.strategyMonthlyPerformance,
-                      loading: controller.strategyPerformanceLoading,
-                      error: controller.strategyPerformanceError,
-                      onRefresh: controller.refreshStrategyPerformance,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyDailyPnlCard(
-                      performance: controller.strategyDailyPerformance,
-                      loading: controller.strategyPerformanceLoading,
-                      error: controller.strategyPerformanceError,
-                    ),
-                    const SizedBox(height: 12),
-                    StrategyTradePerformanceListCard(
-                      performance: controller.strategyTradePerformance,
-                      loading: controller.strategyPerformanceLoading,
-                    ),
-                    const SizedBox(height: 12),
-                    AgentOperationsSummaryCard(controller: controller),
-                    const SizedBox(height: 12),
-                    AgentReviewQueuePanel(controller: controller),
-                    const SizedBox(height: 12),
-                    _PreLiveOperationsCard(
+                    _CompactPortfolioSummaryCard(
                       controller: controller,
                       onOpenManualOrder: onOpenManualOrder,
+                      onOpenLogs: onOpenLogs,
                     ),
                     const SizedBox(height: 12),
-                    _SafetySummary(controller: controller),
-                    const SizedBox(height: 12),
-                    AutomationRuntimeMonitorCard(controller: controller),
-                    const SizedBox(height: 12),
-                    OperationRehearsalPanel(controller: controller),
-                    const SizedBox(height: 12),
-                    AutomationEventTimelineCard(controller: controller),
-                    const SizedBox(height: 12),
-                    PortfolioSnapshotSection(
+                    _RecentTradesCompactCard(
                       controller: controller,
-                      managementMode: true,
+                      onOpenLogs: onOpenLogs,
+                    ),
+                    const SizedBox(height: 12),
+                    _HomeAdvancedDetailsSection(
+                      controller: controller,
                       onOpenManualOrder: onOpenManualOrder,
                       onReviewPosition: onReviewPosition,
+                      onOpenSettings: onOpenSettings,
                     ),
-                    const SizedBox(height: 12),
-                    _NextActionCard(controller: controller),
-                    const SizedBox(height: 12),
-                    _RecentActivityCard(controller: controller),
                     if (controller.error != null) ...[
                       const SizedBox(height: 12),
                       Text(
@@ -218,6 +131,488 @@ class DashboardScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _CompactSafetyStatusBar extends StatelessWidget {
+  const _CompactSafetyStatusBar({
+    required this.controller,
+    required this.onOpenSettings,
+  });
+
+  final DashboardController controller;
+  final VoidCallback? onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = controller.settings;
+    final safety = controller.kisSafetyStatus;
+    final scheduler = controller.schedulerStatus;
+    final liveBuyArmed = settings.kisLiveAutoBuyEnabled ||
+        scheduler.liveBuyPossible ||
+        scheduler.kr.liveBuyArmed;
+    final liveSellArmed = settings.kisLiveAutoSellEnabled ||
+        scheduler.liveSellPossible ||
+        scheduler.kr.liveSellArmed;
+    final realOrdersAllowed =
+        safety.kisRealOrderEnabled || scheduler.kr.realOrdersAllowed;
+    final marketOpen = controller.isKisSelected
+        ? safety.marketOpen
+        : scheduler.us.enabledForScheduler;
+
+    return SectionCard(
+      key: const Key('home_compact_safety_status_bar'),
+      padding: const EdgeInsets.all(14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.shield_outlined, size: 20),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Safety Status',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                _SafetyPill(
+                  text: controller.isKisSelected
+                      ? 'BROKER KIS'
+                      : 'BROKER ALPACA',
+                  color: Colors.lightBlueAccent,
+                ),
+                _SafetyPill(
+                  text: settings.dryRun ? 'DRY RUN ON' : 'DRY RUN OFF',
+                  color:
+                      settings.dryRun ? Colors.amberAccent : Colors.redAccent,
+                ),
+                _SafetyPill(
+                  text: settings.killSwitch
+                      ? 'KILL SWITCH ON'
+                      : 'KILL SWITCH OFF',
+                  color: settings.killSwitch
+                      ? Colors.redAccent
+                      : Colors.greenAccent,
+                ),
+                _SafetyPill(
+                  text:
+                      realOrdersAllowed ? 'REAL ORDERS ON' : 'REAL ORDERS OFF',
+                  color: realOrdersAllowed
+                      ? Colors.redAccent
+                      : Colors.greenAccent,
+                ),
+                _SafetyPill(
+                  text: marketOpen ? 'MARKET OPEN' : 'MARKET CLOSED',
+                  color: marketOpen ? Colors.greenAccent : Colors.white70,
+                ),
+                _SafetyPill(
+                  text: liveBuyArmed ? 'BUY AUTO ON' : 'BUY AUTO OFF',
+                  color:
+                      liveBuyArmed ? Colors.redAccent : Colors.greenAccent,
+                ),
+                _SafetyPill(
+                  text: liveSellArmed ? 'SELL AUTO ON' : 'SELL AUTO OFF',
+                  color:
+                      liveSellArmed ? Colors.orangeAccent : Colors.greenAccent,
+                ),
+              ]),
+            ],
+          ),
+        ),
+        IconButton(
+          key: const ValueKey('home-open-safety-settings'),
+          tooltip: 'Open safety settings',
+          onPressed: onOpenSettings,
+          icon: const Icon(Icons.settings_outlined, size: 20),
+        ),
+      ]),
+    );
+  }
+}
+
+class _CompactPortfolioSummaryCard extends StatelessWidget {
+  const _CompactPortfolioSummaryCard({
+    required this.controller,
+    required this.onOpenManualOrder,
+    required this.onOpenLogs,
+  });
+
+  final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
+  final VoidCallback? onOpenLogs;
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = controller.isKisSelected
+        ? controller.krPortfolioSummary
+        : controller.usPortfolioSummary;
+    final market = controller.isKisSelected ? 'KR' : 'US';
+    final totalAssets =
+        summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
+    final unavailable = controller.isKisSelected &&
+        (controller.krPortfolioUnavailable || summary.hasUnavailableKisData);
+
+    return SectionCard(
+      key: const Key('home_compact_portfolio_summary_card'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.account_balance_wallet_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Portfolio Summary',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                unavailable
+                    ? '$market account data is partially unavailable.'
+                    : '$market ${summary.positionsCount} holdings, ${summary.pendingOrdersCount} pending orders',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ]),
+          ),
+          if (onOpenManualOrder != null)
+            IconButton(
+              key: const ValueKey('home-open-trading'),
+              tooltip: 'Open trading',
+              onPressed: onOpenManualOrder,
+              icon: const Icon(Icons.swap_horiz_outlined, size: 20),
+            ),
+          IconButton(
+            key: const ValueKey('home-portfolio-view-logs'),
+            tooltip: 'View all logs',
+            onPressed: onOpenLogs,
+            icon: const Icon(Icons.receipt_long_outlined, size: 20),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        Wrap(spacing: 10, runSpacing: 10, children: [
+          _CompactMetric(
+            label: 'Assets',
+            value: _formatMoney(summary.currency, totalAssets),
+          ),
+          _CompactMetric(
+            label: 'Cash',
+            value: summary.cashKnown
+                ? _formatMoney(summary.currency, summary.cash)
+                : 'Unknown',
+          ),
+          _CompactMetric(
+            label: 'P&L',
+            value: _formatSignedMoney(
+              summary.currency,
+              summary.totalUnrealizedPl,
+            ),
+            color: summary.totalUnrealizedPl >= 0
+                ? Colors.greenAccent
+                : Colors.redAccent,
+          ),
+          _CompactMetric(
+            label: 'P&L %',
+            value: _formatPercent(summary.totalUnrealizedPlpc),
+            color: summary.totalUnrealizedPl >= 0
+                ? Colors.greenAccent
+                : Colors.redAccent,
+          ),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _RecentTradesCompactCard extends StatelessWidget {
+  const _RecentTradesCompactCard({
+    required this.controller,
+    required this.onOpenLogs,
+  });
+
+  final DashboardController controller;
+  final VoidCallback? onOpenLogs;
+
+  @override
+  Widget build(BuildContext context) {
+    final orders = controller.automationRecentOrders.take(3).toList();
+    final runs = controller.recentRuns.take(3).toList();
+    final hasOrders = orders.isNotEmpty;
+    final count = hasOrders ? orders.length : runs.length;
+
+    return SectionCard(
+      key: const Key('home_recent_trades_compact_card'),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.history_outlined, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Recent Trades / Last Activity',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                count == 0
+                    ? 'No recent activity loaded.'
+                    : 'Latest $count shown',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ]),
+          ),
+          TextButton.icon(
+            key: const ValueKey('home-view-all-logs'),
+            onPressed: onOpenLogs,
+            icon: const Icon(Icons.open_in_new, size: 16),
+            label: const Text('View all logs'),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        if (count == 0)
+          const Text('No recent trades yet.',
+              style: TextStyle(color: Colors.white70))
+        else if (hasOrders)
+          for (var i = 0; i < orders.length; i++)
+            _CompactRecentLine(
+              key: ValueKey('home-recent-compact-item-$i'),
+              title:
+                  '${orders[i].side.toUpperCase()} ${orders[i].symbol} - ${orders[i].statusLabel}',
+              subtitle: _recentOrderSubtitle(orders[i]),
+              badge: orders[i].sourceLabel,
+            )
+        else
+          for (var i = 0; i < runs.length; i++)
+            _CompactRecentLine(
+              key: ValueKey('home-recent-compact-item-$i'),
+              title:
+                  '${runs[i].action.isEmpty ? 'HOLD' : runs[i].action.toUpperCase()} ${runs[i].symbol}',
+              subtitle: _recentRunSubtitle(runs[i]),
+              badge: runs[i].triggerSource,
+            ),
+      ]),
+    );
+  }
+}
+
+class _HomeAdvancedDetailsSection extends StatelessWidget {
+  const _HomeAdvancedDetailsSection({
+    required this.controller,
+    required this.onOpenManualOrder,
+    required this.onReviewPosition,
+    required this.onOpenSettings,
+  });
+
+  final DashboardController controller;
+  final VoidCallback? onOpenManualOrder;
+  final VoidCallback? onReviewPosition;
+  final VoidCallback? onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('home_advanced_details_section'),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: const ValueKey('home-advanced-details-toggle'),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          leading: const Icon(Icons.tune_outlined, size: 20),
+          title: const Text(
+            'Advanced Details',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+          children: [
+            _OperationalReadinessCard(
+              controller: controller,
+              onOpenSettings: onOpenSettings,
+            ),
+            const SizedBox(height: 12),
+            StrategyProfileCard(
+              profiles: controller.strategyProfiles,
+              activeProfile: controller.activeStrategyProfile,
+              loading: controller.strategyProfilesLoading,
+              error: controller.strategyProfileError,
+              applyingProfileName: controller.applyingStrategyProfileName,
+              onRefresh: controller.refreshStrategyProfiles,
+              onApply: controller.applyStrategyProfilePreset,
+            ),
+            const SizedBox(height: 12),
+            StrategyRiskStateCard(
+              riskState: controller.strategyRiskState,
+              loading: controller.strategyRiskLoading,
+              error: controller.strategyRiskError,
+              onRefresh: controller.refreshStrategyRiskState,
+            ),
+            const SizedBox(height: 12),
+            StrategyDryRunAutoBuyCard(
+              result: controller.strategyDryRunAutoBuyResult,
+              loading: controller.strategyDryRunAutoBuyLoading,
+              error: controller.strategyDryRunAutoBuyError,
+              onRun: controller.runStrategyDryRunAutoBuy,
+              onRefresh: controller.refreshStrategyDryRunAutoBuy,
+            ),
+            const SizedBox(height: 12),
+            StrategyLiveAutoBuyCard(
+              readiness: controller.strategyLiveAutoBuyReadiness,
+              latest: controller.strategyLiveAutoBuyResult,
+              recent: controller.strategyLiveAutoBuyRecent,
+              loading: controller.strategyLiveAutoBuyLoading,
+              error: controller.strategyLiveAutoBuyError,
+              onRun: controller.runStrategyLiveAutoBuyOnce,
+              onRefresh: controller.refreshStrategyLiveAutoBuy,
+            ),
+            const SizedBox(height: 12),
+            AgentChatLiveAutoBuyStatusCard(
+              readiness: controller.strategyLiveAutoBuyReadiness,
+              recent: controller.strategyLiveAutoBuyRecent,
+              loading: controller.strategyLiveAutoBuyLoading,
+              error: controller.strategyLiveAutoBuyError,
+              onRefresh: controller.refreshStrategyLiveAutoBuy,
+            ),
+            const SizedBox(height: 12),
+            StrategyLiveAutoExitCard(
+              readiness: controller.strategyLiveAutoExitReadiness,
+              latest: controller.strategyLiveAutoExitResult,
+              recent: controller.strategyLiveAutoExitRecent,
+              loading: controller.strategyLiveAutoExitLoading,
+              error: controller.strategyLiveAutoExitError,
+              onRun: controller.runStrategyLiveAutoExitOnce,
+              onRefresh: controller.refreshStrategyLiveAutoExit,
+            ),
+            const SizedBox(height: 12),
+            AgentChatLiveAutoExitStatusCard(
+              readiness: controller.strategyLiveAutoExitReadiness,
+              recent: controller.strategyLiveAutoExitRecent,
+              loading: controller.strategyLiveAutoExitLoading,
+              error: controller.strategyLiveAutoExitError,
+              onRefresh: controller.refreshStrategyLiveAutoExit,
+            ),
+            const SizedBox(height: 12),
+            StrategyMonthlyProgressCard(
+              performance: controller.strategyMonthlyPerformance,
+              loading: controller.strategyPerformanceLoading,
+              error: controller.strategyPerformanceError,
+              onRefresh: controller.refreshStrategyPerformance,
+            ),
+            const SizedBox(height: 12),
+            StrategyDailyPnlCard(
+              performance: controller.strategyDailyPerformance,
+              loading: controller.strategyPerformanceLoading,
+              error: controller.strategyPerformanceError,
+            ),
+            const SizedBox(height: 12),
+            StrategyTradePerformanceListCard(
+              performance: controller.strategyTradePerformance,
+              loading: controller.strategyPerformanceLoading,
+            ),
+            const SizedBox(height: 12),
+            AgentOperationsSummaryCard(controller: controller),
+            const SizedBox(height: 12),
+            AgentReviewQueuePanel(controller: controller),
+            const SizedBox(height: 12),
+            _PreLiveOperationsCard(
+              controller: controller,
+              onOpenManualOrder: onOpenManualOrder,
+            ),
+            const SizedBox(height: 12),
+            _SafetySummary(controller: controller),
+            const SizedBox(height: 12),
+            AutomationRuntimeMonitorCard(controller: controller),
+            const SizedBox(height: 12),
+            OperationRehearsalPanel(controller: controller),
+            const SizedBox(height: 12),
+            AutomationEventTimelineCard(controller: controller),
+            const SizedBox(height: 12),
+            PortfolioSnapshotSection(
+              controller: controller,
+              managementMode: true,
+              onOpenManualOrder: onOpenManualOrder,
+              onReviewPosition: onReviewPosition,
+            ),
+            const SizedBox(height: 12),
+            _NextActionCard(controller: controller),
+            const SizedBox(height: 12),
+            _RecentActivityCard(controller: controller),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactMetric extends StatelessWidget {
+  const _CompactMetric({
+    required this.label,
+    required this.value,
+    this.color,
+  });
+
+  final String label;
+  final String value;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 118),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: TextStyle(
+            color: color ?? Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ]),
+    );
+  }
+}
+
+class _CompactRecentLine extends StatelessWidget {
+  const _CompactRecentLine({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.badge,
+  });
+
+  final String title;
+  final String subtitle;
+  final String badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final badgeText = badge.trim().isEmpty ? 'activity' : badge.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Expanded(
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        _SafetyPill(text: badgeText.toUpperCase(), color: Colors.white70),
+      ]),
     );
   }
 }
@@ -1076,6 +1471,44 @@ class _ActivityLine extends StatelessWidget {
       ),
     );
   }
+}
+
+String _recentOrderSubtitle(OrderLogItem order) {
+  final qty = order.qty == null ? 'qty -' : 'qty ${_formatNumber(order.qty!)}';
+  final amount = order.notional == null
+      ? ''
+      : ' / ${_formatMoney(order.currency, order.notional!)}';
+  return '${formatTimestampWithKst(order.createdAt)} - $qty$amount';
+}
+
+String _recentRunSubtitle(TradingRun run) {
+  final reason = run.reason.trim().isEmpty ? run.result : run.reason;
+  final order = run.orderId == null ? 'No order' : 'Order ${run.orderId}';
+  return '${formatTimestampWithKst(run.timestamp)} - $order - $reason';
+}
+
+String _formatMoney(String currency, double value) {
+  final code = currency.trim().toUpperCase();
+  if (code == 'KRW') return 'KRW ${_formatWhole(value)}';
+  final prefix = code == 'USD' || code.isEmpty ? '\$' : '$code ';
+  return '$prefix${value.toStringAsFixed(2)}';
+}
+
+String _formatSignedMoney(String currency, double value) {
+  final sign = value > 0 ? '+' : '';
+  return '$sign${_formatMoney(currency, value)}';
+}
+
+String _formatPercent(double value) {
+  final sign = value > 0 ? '+' : '';
+  return '$sign${value.toStringAsFixed(2)}%';
+}
+
+String _formatWhole(double value) => value.toStringAsFixed(0);
+
+String _formatNumber(double value) {
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  return value.toStringAsFixed(2);
 }
 
 class _DataLine extends StatelessWidget {

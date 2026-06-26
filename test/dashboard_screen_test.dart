@@ -462,7 +462,9 @@ void main() {
     expect(find.byKey(const ValueKey('operational-readiness-retry')),
         findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('operational-readiness-retry')));
+    final retry = find.byKey(const ValueKey('operational-readiness-retry'));
+    await _showDashboardFinder(tester, retry);
+    await tester.tap(retry);
     await tester.pumpAndSettle();
 
     expect(api.fetchSchedulerStatusCalls, 1);
@@ -539,11 +541,16 @@ void main() {
       const Key('automation_runtime_monitor_card'),
     );
 
+    final card = find.byKey(const Key('automation_runtime_monitor_card'));
     expect(find.text('Automation Runtime Monitor'), findsOneWidget);
-    expect(find.text('Global Safety'), findsOneWidget);
-    expect(find.text('DRY RUN ON'), findsOneWidget);
-    expect(find.text('Kill Switch OFF'), findsOneWidget);
-    expect(find.text('Global Scheduler ON'), findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Global Safety')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('DRY RUN ON')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Kill Switch OFF')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('Global Scheduler ON')),
+        findsOneWidget);
 
     controller.dispose();
   });
@@ -829,12 +836,24 @@ void main() {
       const Key('automation_event_timeline_card'),
     );
 
-    expect(find.text('KIS LIVE'), findsOneWidget);
-    expect(find.text('036540'), findsOneWidget);
-    expect(find.text('TRIGGER DETECTED'), findsOneWidget);
-    expect(find.text('TAKE_PROFIT'), findsOneWidget);
-    expect(find.text('market_closed'), findsWidgets);
-    expect(find.textContaining('KST 09:16'), findsOneWidget);
+    final timeline =
+        find.byKey(const Key('automation_event_timeline_card'));
+    expect(find.descendant(of: timeline, matching: find.text('KIS LIVE')),
+        findsOneWidget);
+    expect(find.descendant(of: timeline, matching: find.text('036540')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: timeline, matching: find.text('TRIGGER DETECTED')),
+        findsOneWidget);
+    expect(find.descendant(of: timeline, matching: find.text('TAKE_PROFIT')),
+        findsOneWidget);
+    expect(find.descendant(of: timeline, matching: find.text('market_closed')),
+        findsWidgets);
+    expect(
+        find.descendant(
+            of: timeline, matching: find.textContaining('KST 09:16')),
+        findsOneWidget);
 
     controller.dispose();
   });
@@ -940,9 +959,16 @@ void main() {
       const Key('automation_event_timeline_card'),
     );
 
-    expect(find.text('ALPACA PAPER'), findsOneWidget);
-    expect(find.text('AAPL'), findsOneWidget);
-    expect(find.text('weak_final_score_gap'), findsWidgets);
+    final timeline =
+        find.byKey(const Key('automation_event_timeline_card'));
+    expect(find.descendant(of: timeline, matching: find.text('ALPACA PAPER')),
+        findsOneWidget);
+    expect(find.descendant(of: timeline, matching: find.text('AAPL')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: timeline, matching: find.text('weak_final_score_gap')),
+        findsWidgets);
 
     controller.dispose();
   });
@@ -1366,15 +1392,40 @@ Future<void> _showDashboardSection(WidgetTester tester, Key sectionKey) {
 Future<void> _showDashboardFinder(WidgetTester tester, Finder finder) async {
   final scrollable = find.byKey(const Key('dashboard_home_scroll_view'));
   expect(scrollable, findsOneWidget);
-  await tester.dragUntilVisible(
-    finder,
-    scrollable,
-    const Offset(0, -350),
-    maxIteration: 30,
-  );
+  if (finder.evaluate().isEmpty) {
+    await _expandHomeAdvancedDetails(tester);
+  }
+  await _scrollDashboardUntilBuilt(tester, finder, scrollable);
   expect(finder, findsOneWidget);
   await tester.ensureVisible(finder);
   await tester.pumpAndSettle();
+}
+
+Future<void> _expandHomeAdvancedDetails(WidgetTester tester) async {
+  if (find.byKey(const Key('operational-readiness-card'))
+      .evaluate()
+      .isNotEmpty) {
+    return;
+  }
+  final scrollable = find.byKey(const Key('dashboard_home_scroll_view'));
+  final toggle = find.byKey(const ValueKey('home-advanced-details-toggle'));
+  await _scrollDashboardUntilBuilt(tester, toggle, scrollable);
+  if (toggle.evaluate().isEmpty) return;
+  await tester.ensureVisible(toggle);
+  await tester.pumpAndSettle();
+  await tester.tap(toggle);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _scrollDashboardUntilBuilt(
+  WidgetTester tester,
+  Finder finder,
+  Finder scrollable,
+) async {
+  for (var i = 0; i < 30 && finder.evaluate().isEmpty; i++) {
+    await tester.drag(scrollable, const Offset(0, -350));
+    await tester.pumpAndSettle();
+  }
 }
 
 DashboardController _operationalController({
@@ -1404,6 +1455,7 @@ Future<void> _pumpOperationalReadiness(
     ),
   ));
   await tester.pumpAndSettle();
+  await _expandHomeAdvancedDetails(tester);
 }
 
 class _OperationalReadinessApiClient extends ApiClient {
