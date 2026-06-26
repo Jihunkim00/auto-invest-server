@@ -47,21 +47,16 @@ void main() {
     controller.dispose();
   });
 
-  test('load does not wait for deferred strategy profile fetch', () async {
+  test('load does not start deferred strategy detail fetches', () async {
     final api = _DeferredStrategyApiClient();
     final controller = DashboardController(api, autoload: false);
 
     await controller.load().timeout(const Duration(seconds: 1));
 
     expect(controller.loading, isFalse);
-    expect(controller.strategyProfilesLoading, isTrue);
-    expect(controller.runResult.finalBestCandidate, isEmpty);
-
-    api.completeStrategyProfiles();
-    await Future<void>.delayed(Duration.zero);
-
     expect(controller.strategyProfilesLoading, isFalse);
-    expect(controller.activeStrategyProfile?.profileName, 'safe');
+    expect(controller.activeStrategyProfile, isNull);
+    expect(controller.runResult.finalBestCandidate, isEmpty);
 
     controller.dispose();
   });
@@ -1882,10 +1877,6 @@ class _DeferredStrategyApiClient extends _FakeApiClient {
   @override
   Future<StrategyProfileList> fetchStrategyProfiles() =>
       _strategyProfiles.future;
-
-  void completeStrategyProfiles() {
-    _strategyProfiles.complete(_safeStrategyProfileList());
-  }
 }
 
 AgentChatLiveOrderReadiness _blockedAgentChatLiveOrderReadiness() {

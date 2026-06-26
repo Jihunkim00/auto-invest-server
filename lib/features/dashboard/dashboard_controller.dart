@@ -543,7 +543,7 @@ class DashboardController extends ChangeNotifier {
             ? 'Backend latest watchlist run unavailable; showing offline sample data.'
             : 'Backend latest watchlist run unavailable; keeping current result.';
       }
-      recentRuns = await apiClient.getRecentTradingRuns();
+      await _loadHomeRecentActivity();
       _rebuildAutomationRuntimeMonitorFromCurrentState();
       _rebuildPortfolioManagementItems();
     } catch (e) {
@@ -552,154 +552,22 @@ class DashboardController extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
-    unawaited(_loadStrategyProfileState());
-    unawaited(_loadStrategyPerformanceState());
-    unawaited(_loadStrategyRiskState());
-    unawaited(_loadStrategyDryRunAutoBuyState());
-    unawaited(_loadStrategyLiveAutoBuyState());
-    unawaited(_loadStrategyLiveAutoExitState());
   }
 
-  Future<void> _loadStrategyProfileState() async {
-    if (strategyProfilesLoading) return;
-
-    strategyProfilesLoading = true;
-    strategyProfileError = null;
-    if (hasListeners) notifyListeners();
-
+  Future<void> _loadHomeRecentActivity() async {
     try {
-      final result = await apiClient.fetchStrategyProfiles().timeout(
-            const Duration(seconds: 3),
-          );
-      strategyProfiles = result.profiles;
-      activeStrategyProfile = result.activeProfile;
-    } on TimeoutException {
-      strategyProfileError =
-          'Strategy profiles unavailable: request timed out.';
-    } catch (e) {
-      strategyProfileError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyProfilesLoading = false;
-      if (hasListeners) notifyListeners();
+      final runs = await apiClient.fetchRecentRuns(limit: 3);
+      automationRecentRuns = runs;
+      recentRuns = runs.map(_tradingRunFromLog).toList();
+    } catch (_) {
+      automationRecentRuns = const [];
+      recentRuns = const [];
     }
-  }
 
-  Future<void> _loadStrategyPerformanceState() async {
-    if (strategyPerformanceLoading) return;
-    strategyPerformanceLoading = true;
-    strategyPerformanceError = null;
-    if (hasListeners) notifyListeners();
     try {
-      final results = await Future.wait<Object>([
-        apiClient.fetchStrategyDailyPerformance(),
-        apiClient.fetchStrategyMonthlyPerformance(),
-        apiClient.fetchStrategyTradePerformance(limit: 10),
-      ]).timeout(const Duration(seconds: 3));
-      strategyDailyPerformance = results[0] as StrategyDailyPerformance;
-      strategyMonthlyPerformance = results[1] as StrategyMonthlyPerformance;
-      strategyTradePerformance = results[2] as StrategyTradePerformanceList;
-    } on TimeoutException {
-      strategyPerformanceError =
-          'Strategy performance unavailable: request timed out.';
-    } catch (e) {
-      strategyPerformanceError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyPerformanceLoading = false;
-      if (hasListeners) notifyListeners();
-    }
-  }
-
-  Future<void> _loadStrategyRiskState() async {
-    if (strategyRiskLoading) return;
-    strategyRiskLoading = true;
-    strategyRiskError = null;
-    if (hasListeners) notifyListeners();
-    try {
-      strategyRiskState = await apiClient.fetchStrategyRiskState().timeout(
-            const Duration(seconds: 3),
-          );
-    } on TimeoutException {
-      strategyRiskError = 'Strategy risk state unavailable: request timed out.';
-    } catch (e) {
-      strategyRiskError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyRiskLoading = false;
-      if (hasListeners) notifyListeners();
-    }
-  }
-
-  Future<void> _loadStrategyDryRunAutoBuyState() async {
-    if (strategyDryRunAutoBuyLoading) return;
-    strategyDryRunAutoBuyLoading = true;
-    strategyDryRunAutoBuyError = null;
-    if (hasListeners) notifyListeners();
-    try {
-      final recent =
-          await apiClient.fetchStrategyDryRunAutoBuyRecent(limit: 10).timeout(
-                const Duration(seconds: 3),
-              );
-      strategyDryRunAutoBuyRecent = recent.items;
-      strategyDryRunAutoBuyResult = recent.latest;
-    } on TimeoutException {
-      strategyDryRunAutoBuyError =
-          'Strategy dry-run auto buy unavailable: request timed out.';
-    } catch (e) {
-      strategyDryRunAutoBuyError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyDryRunAutoBuyLoading = false;
-      if (hasListeners) notifyListeners();
-    }
-  }
-
-  Future<void> _loadStrategyLiveAutoBuyState() async {
-    if (strategyLiveAutoBuyLoading) return;
-    strategyLiveAutoBuyLoading = true;
-    strategyLiveAutoBuyError = null;
-    if (hasListeners) notifyListeners();
-    try {
-      final results = await Future.wait<Object>([
-        apiClient.fetchStrategyLiveAutoBuyReadiness(),
-        apiClient.fetchStrategyLiveAutoBuyRecent(limit: 10),
-      ]).timeout(const Duration(seconds: 3));
-      strategyLiveAutoBuyReadiness =
-          results[0] as StrategyLiveAutoBuyReadiness;
-      final recent = results[1] as StrategyLiveAutoBuyRecent;
-      strategyLiveAutoBuyRecent = recent.items;
-      strategyLiveAutoBuyResult = recent.latest;
-    } on TimeoutException {
-      strategyLiveAutoBuyError =
-          'Strategy live auto buy readiness unavailable: request timed out.';
-    } catch (e) {
-      strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyLiveAutoBuyLoading = false;
-      if (hasListeners) notifyListeners();
-    }
-  }
-
-  Future<void> _loadStrategyLiveAutoExitState() async {
-    if (strategyLiveAutoExitLoading) return;
-    strategyLiveAutoExitLoading = true;
-    strategyLiveAutoExitError = null;
-    if (hasListeners) notifyListeners();
-    try {
-      final results = await Future.wait<Object>([
-        apiClient.fetchStrategyLiveAutoExitReadiness(),
-        apiClient.fetchStrategyLiveAutoExitRecent(limit: 10),
-      ]).timeout(const Duration(seconds: 3));
-      strategyLiveAutoExitReadiness =
-          results[0] as StrategyLiveAutoExitReadiness;
-      final recent = results[1] as StrategyLiveAutoExitRecent;
-      strategyLiveAutoExitRecent = recent.items;
-      strategyLiveAutoExitResult = recent.latest;
-    } on TimeoutException {
-      strategyLiveAutoExitError =
-          'Strategy live auto exit readiness unavailable: request timed out.';
-    } catch (e) {
-      strategyLiveAutoExitError = ApiErrorFormatter.format(e.toString());
-    } finally {
-      strategyLiveAutoExitLoading = false;
-      if (hasListeners) notifyListeners();
+      automationRecentOrders = await apiClient.fetchRecentOrders(limit: 3);
+    } catch (_) {
+      automationRecentOrders = const [];
     }
   }
 
