@@ -52,6 +52,7 @@ import '../../models/strategy_performance.dart';
 import '../../models/strategy_risk.dart';
 import '../../models/strategy_dry_run_auto_buy.dart';
 import '../../models/strategy_live_auto_buy.dart';
+import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 
@@ -604,6 +605,77 @@ class ApiClient {
       const {},
     );
     return StrategyLiveAutoBuyRunResult.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoExitReadiness> fetchStrategyLiveAutoExitReadiness({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/live/auto-exit/readiness',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          if (symbol != null && symbol.trim().isNotEmpty)
+            'symbol': symbol.trim(),
+        },
+      ).toString(),
+    );
+    return StrategyLiveAutoExitReadiness.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoExitRunResult> runStrategyLiveAutoExitOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int? quantity,
+    String triggerSource = 'flutter_dashboard',
+    String? clientRequestId,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/live/auto-exit/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        'confirm_operator_ack': true,
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+        if (quantity != null) 'quantity': quantity,
+        'trigger_source': triggerSource,
+        if (clientRequestId != null && clientRequestId.trim().isNotEmpty)
+          'client_request_id': clientRequestId.trim(),
+      },
+    );
+    return StrategyLiveAutoExitRunResult.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoExitRecent> fetchStrategyLiveAutoExitRecent({
+    String provider = 'kis',
+    String market = 'KR',
+    int limit = 20,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/live/auto-exit/recent',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'limit': limit.toString(),
+        },
+      ).toString(),
+    );
+    return StrategyLiveAutoExitRecent.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoExitRunResult> syncStrategyLiveAutoExitAttempt(
+    int attemptId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/strategy/live/auto-exit/$attemptId/sync',
+      const {},
+    );
+    return StrategyLiveAutoExitRunResult.fromJson(payload);
   }
 
   Future<AgentChatStrategyActionResponse> confirmAgentChatStrategyAction(

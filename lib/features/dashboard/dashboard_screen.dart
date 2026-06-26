@@ -11,6 +11,7 @@ import '../../models/trading_run.dart';
 import 'dashboard_controller.dart';
 import 'widgets/agent_operations_summary_card.dart';
 import 'widgets/agent_chat_live_auto_buy_status_card.dart';
+import 'widgets/agent_chat_live_auto_exit_status_card.dart';
 import 'widgets/automation_event_timeline_card.dart';
 import 'widgets/automation_runtime_monitor_card.dart';
 import 'widgets/agent_chat_full_panel.dart';
@@ -25,6 +26,7 @@ import 'widgets/strategy_monthly_progress_card.dart';
 import 'widgets/strategy_risk_state_card.dart';
 import 'widgets/strategy_dry_run_auto_buy_card.dart';
 import 'widgets/strategy_live_auto_buy_card.dart';
+import 'widgets/strategy_live_auto_exit_card.dart';
 import 'widgets/strategy_trade_performance_list.dart';
 
 class DashboardScreen extends StatelessWidget {
@@ -130,6 +132,24 @@ class DashboardScreen extends StatelessWidget {
                       loading: controller.strategyLiveAutoBuyLoading,
                       error: controller.strategyLiveAutoBuyError,
                       onRefresh: controller.refreshStrategyLiveAutoBuy,
+                    ),
+                    const SizedBox(height: 12),
+                    StrategyLiveAutoExitCard(
+                      readiness: controller.strategyLiveAutoExitReadiness,
+                      latest: controller.strategyLiveAutoExitResult,
+                      recent: controller.strategyLiveAutoExitRecent,
+                      loading: controller.strategyLiveAutoExitLoading,
+                      error: controller.strategyLiveAutoExitError,
+                      onRun: controller.runStrategyLiveAutoExitOnce,
+                      onRefresh: controller.refreshStrategyLiveAutoExit,
+                    ),
+                    const SizedBox(height: 12),
+                    AgentChatLiveAutoExitStatusCard(
+                      readiness: controller.strategyLiveAutoExitReadiness,
+                      recent: controller.strategyLiveAutoExitRecent,
+                      loading: controller.strategyLiveAutoExitLoading,
+                      error: controller.strategyLiveAutoExitError,
+                      onRefresh: controller.refreshStrategyLiveAutoExit,
                     ),
                     const SizedBox(height: 12),
                     StrategyMonthlyProgressCard(

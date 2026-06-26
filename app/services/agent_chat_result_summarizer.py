@@ -86,6 +86,12 @@ class AgentChatResultSummarizer:
                 "strategy_live_auto_buy_recent",
             }:
                 return self._strategy_live_auto_buy_answer(primary)
+            if primary.result_type in {
+                "strategy_live_auto_exit_readiness",
+                "strategy_live_auto_exit_recent",
+                "strategy_exit_candidate",
+            }:
+                return self._strategy_live_auto_exit_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -135,6 +141,9 @@ class AgentChatResultSummarizer:
                 "strategy_dry_run_auto_buy_summary",
                 "strategy_live_auto_buy_readiness",
                 "strategy_live_auto_buy_recent",
+                "strategy_live_auto_exit_readiness",
+                "strategy_live_auto_exit_recent",
+                "strategy_exit_candidate",
             }:
                 card = self._strategy_card(result)
             elif result.result_type == "analysis":
@@ -492,6 +501,37 @@ class AgentChatResultSummarizer:
             answer_type="strategy_live_auto_buy_answer",
         )
 
+    def _strategy_live_auto_exit_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        if result.result_type == "strategy_live_auto_exit_recent":
+            items = data.get("items") if isinstance(data.get("items"), list) else []
+            latest = items[0] if items and isinstance(items[0], dict) else {}
+            text = (
+                f"Recent guarded live auto-exit attempts: {len(items)}. "
+                f"Latest status is {latest.get('status') or 'none'} for "
+                f"{latest.get('symbol') or 'no symbol'}. "
+                "This chat lookup did not validate or submit an order."
+            )
+        else:
+            ready = bool(data.get("ready"))
+            reason = data.get("primary_block_reason") or "none"
+            profile = data.get("active_profile") or "unknown"
+            selected = data.get("selected_symbol") or "no held-position candidate"
+            candidate_count = data.get("candidate_count", 0)
+            text = (
+                f"Guarded live auto-exit readiness is {'ready' if ready else 'blocked'} "
+                f"for profile {profile}. Selected symbol: {selected}. "
+                f"Candidates: {candidate_count}. Block reason: {reason}. "
+                "Chat can only explain status and candidates; it cannot run live auto-exit."
+            )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_live_auto_exit_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -611,6 +651,40 @@ class AgentChatResultSummarizer:
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
         data = result.data
+        if result.result_type in {
+            "strategy_live_auto_exit_readiness",
+            "strategy_live_auto_exit_recent",
+            "strategy_exit_candidate",
+        }:
+            if result.result_type == "strategy_live_auto_exit_recent":
+                items = data.get("items") if isinstance(data.get("items"), list) else []
+                card_data = items[0] if items and isinstance(items[0], dict) else {}
+                primary = str(card_data.get("status") or "none").upper()
+            else:
+                card_data = data
+                primary = "READY" if data.get("ready") is True else "BLOCKED"
+            return AgentChatResultCard(
+                card_type=result.result_type,
+                title="Profile-Aware Guarded Live Auto Exit",
+                subtitle=str(card_data.get("active_profile") or data.get("active_profile") or "KIS/KR").upper(),
+                primary_value=primary,
+                badges=[
+                    "READ ONLY",
+                    "LIVE AUTO EXIT",
+                    "HELD POSITIONS ONLY",
+                    "NO CHAT EXECUTION",
+                    "NO VALIDATION",
+                    "NO BROKER SUBMIT",
+                ],
+                rows=[
+                    {"label": "Selected symbol", "value": card_data.get("selected_symbol") or card_data.get("symbol") or "-"},
+                    {"label": "Selected trigger", "value": card_data.get("selected_trigger") or card_data.get("exit_trigger") or "-"},
+                    {"label": "Block reason", "value": card_data.get("primary_block_reason") or card_data.get("block_reason") or "-"},
+                    {"label": "Candidates", "value": card_data.get("candidate_count", "-")},
+                    {"label": "Orders remaining", "value": card_data.get("orders_remaining_today", "-")},
+                ],
+                data=data,
+            )
         if result.result_type in {
             "strategy_live_auto_buy_readiness",
             "strategy_live_auto_buy_recent",

@@ -201,6 +201,21 @@ def _create_runtime_settings_table_if_missing():
                     strategy_live_auto_buy_block_after_loss_limit BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_buy_block_after_target_hit BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_buy_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_requires_operator_confirm BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_live_auto_exit_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    strategy_live_auto_exit_max_notional_krw FLOAT NOT NULL DEFAULT 50000,
+                    strategy_live_auto_exit_max_position_pct FLOAT NOT NULL DEFAULT 1.0,
+                    strategy_live_auto_exit_allow_stop_loss BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_live_auto_exit_allow_take_profit BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_allow_max_holding_days BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_allow_monthly_loss_exit BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_live_auto_exit_allow_target_hit_reduce BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_allowed_profiles TEXT NOT NULL DEFAULT '["safe", "balanced"]',
+                    strategy_live_auto_exit_allow_aggressive BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    strategy_live_auto_exit_requires_cost_basis BOOLEAN NOT NULL DEFAULT 1,
+                    strategy_live_auto_exit_min_quantity INTEGER NOT NULL DEFAULT 1,
                     kis_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     kis_scheduler_dry_run BOOLEAN NOT NULL DEFAULT 1,
                     kis_scheduler_live_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -467,6 +482,75 @@ def _create_strategy_live_auto_buy_attempts_table_if_missing():
                     f"CREATE INDEX IF NOT EXISTS "
                     f"ix_strategy_live_auto_buy_attempts_{name} "
                     f"ON strategy_live_auto_buy_attempts ({column})"
+                )
+            )
+
+
+def _create_strategy_live_auto_exit_attempts_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_live_auto_exit_attempts (
+                    id INTEGER PRIMARY KEY,
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    active_profile VARCHAR(40),
+                    symbol VARCHAR(20),
+                    symbol_name VARCHAR(160),
+                    status VARCHAR(40) NOT NULL DEFAULT 'blocked',
+                    trigger_source VARCHAR(80) NOT NULL DEFAULT 'manual',
+                    client_request_id VARCHAR(120),
+                    exit_trigger VARCHAR(40),
+                    exit_reason TEXT,
+                    quantity FLOAT,
+                    current_price FLOAT,
+                    cost_basis FLOAT,
+                    unrealized_pnl FLOAT,
+                    unrealized_pnl_pct FLOAT,
+                    stop_loss_pct FLOAT,
+                    take_profit_pct FLOAT,
+                    max_holding_days INTEGER,
+                    position_age_days FLOAT,
+                    requested_notional_krw FLOAT,
+                    approved_notional_krw FLOAT,
+                    target_risk_result TEXT,
+                    validation_result TEXT,
+                    related_order_id INTEGER,
+                    broker_order_id VARCHAR(100),
+                    block_reason VARCHAR(160),
+                    risk_flags TEXT,
+                    gating_notes TEXT,
+                    safety_flags TEXT,
+                    request_payload TEXT,
+                    response_payload TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    submitted_at DATETIME,
+                    synced_at DATETIME,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "provider": "provider",
+            "market": "market",
+            "active_profile": "active_profile",
+            "symbol": "symbol",
+            "status": "status",
+            "trigger_source": "trigger_source",
+            "client_request_id": "client_request_id",
+            "exit_trigger": "exit_trigger",
+            "related_order_id": "related_order_id",
+            "broker_order_id": "broker_order_id",
+            "block_reason": "block_reason",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS "
+                    f"ix_strategy_live_auto_exit_attempts_{name} "
+                    f"ON strategy_live_auto_exit_attempts ({column})"
                 )
             )
 
@@ -1170,6 +1254,7 @@ def init_db():
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()
+    _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
@@ -1291,6 +1376,21 @@ def init_db():
         "strategy_live_auto_buy_block_after_loss_limit": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_buy_block_after_target_hit": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_buy_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_enabled": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_requires_operator_confirm": "BOOLEAN DEFAULT 1",
+        "strategy_live_auto_exit_max_orders_per_day": "INTEGER DEFAULT 1",
+        "strategy_live_auto_exit_max_notional_krw": "FLOAT DEFAULT 50000",
+        "strategy_live_auto_exit_max_position_pct": "FLOAT DEFAULT 1.0",
+        "strategy_live_auto_exit_allow_stop_loss": "BOOLEAN DEFAULT 1",
+        "strategy_live_auto_exit_allow_take_profit": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_allow_max_holding_days": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_allow_monthly_loss_exit": "BOOLEAN DEFAULT 1",
+        "strategy_live_auto_exit_allow_target_hit_reduce": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_allowed_profiles": "TEXT DEFAULT '[\"safe\", \"balanced\"]'",
+        "strategy_live_auto_exit_allow_aggressive": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "strategy_live_auto_exit_requires_cost_basis": "BOOLEAN DEFAULT 1",
+        "strategy_live_auto_exit_min_quantity": "INTEGER DEFAULT 1",
         "kis_scheduler_enabled": "BOOLEAN DEFAULT 0",
         "kis_scheduler_dry_run": "BOOLEAN DEFAULT 1",
         "kis_scheduler_live_enabled": "BOOLEAN DEFAULT 0",

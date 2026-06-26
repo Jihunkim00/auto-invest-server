@@ -100,6 +100,21 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     strategy_live_auto_buy_block_after_loss_limit: bool | None = None
     strategy_live_auto_buy_block_after_target_hit: bool | None = None
     strategy_live_auto_buy_scheduler_enabled: bool | None = None
+    strategy_live_auto_exit_enabled: bool | None = None
+    strategy_live_auto_exit_requires_operator_confirm: bool | None = None
+    strategy_live_auto_exit_max_orders_per_day: int | None = Field(default=None, ge=0)
+    strategy_live_auto_exit_max_notional_krw: float | None = Field(default=None, ge=0)
+    strategy_live_auto_exit_max_position_pct: float | None = Field(default=None, ge=0, le=1)
+    strategy_live_auto_exit_allow_stop_loss: bool | None = None
+    strategy_live_auto_exit_allow_take_profit: bool | None = None
+    strategy_live_auto_exit_allow_max_holding_days: bool | None = None
+    strategy_live_auto_exit_allow_monthly_loss_exit: bool | None = None
+    strategy_live_auto_exit_allow_target_hit_reduce: bool | None = None
+    strategy_live_auto_exit_allowed_profiles: list[str] | None = None
+    strategy_live_auto_exit_allow_aggressive: bool | None = None
+    strategy_live_auto_exit_scheduler_enabled: bool | None = None
+    strategy_live_auto_exit_requires_cost_basis: bool | None = None
+    strategy_live_auto_exit_min_quantity: int | None = Field(default=None, ge=1)
     kis_scheduler_enabled: bool | None = None
     kis_scheduler_dry_run: bool | None = None
     kis_scheduler_live_enabled: bool | None = None
