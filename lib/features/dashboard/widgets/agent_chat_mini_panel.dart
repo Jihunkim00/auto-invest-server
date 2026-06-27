@@ -48,6 +48,7 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    final strings = controller.strings;
     final collapsed = controller.agentChatMode == AgentChatPanelMode.collapsed;
     return SectionCard(
       padding: const EdgeInsets.all(14),
@@ -55,35 +56,37 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
         Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Icon(Icons.auto_awesome_outlined, size: 20),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
-                'Agent Assistant',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
+                strings.agentAssistant,
+                style:
+                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w900),
               ),
-              SizedBox(height: 3),
+              const SizedBox(height: 3),
               Text(
-                'Ask for analysis, portfolio, or confirmed KIS order prep.',
-                style: TextStyle(color: Colors.white70, height: 1.25),
+                strings.agentAssistantSubtitle,
+                style: const TextStyle(color: Colors.white70, height: 1.25),
               ),
             ]),
           ),
           IconButton(
             key: const ValueKey('agent-chat-new-chat'),
-            tooltip: 'New Chat',
+            tooltip: strings.newChat,
             onPressed: () => _startNewChat(context),
             icon: const Icon(Icons.add_comment_outlined, size: 18),
           ),
           IconButton(
             key: const ValueKey('agent-chat-refresh-history'),
-            tooltip: 'Refresh History',
+            tooltip: strings.refreshHistory,
             onPressed: () => _refreshHistory(context),
             icon: const Icon(Icons.history, size: 18),
           ),
           IconButton(
             key: const ValueKey('agent-chat-collapse'),
-            tooltip: collapsed ? 'Expand Agent Chat' : 'Collapse Agent Chat',
+            tooltip:
+                collapsed ? strings.expandAgentChat : strings.collapseAgentChat,
             onPressed: () => controller.setAgentChatMode(
               collapsed
                   ? AgentChatPanelMode.mini
@@ -95,30 +98,30 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
           ),
           IconButton(
             key: const ValueKey('agent-chat-resize'),
-            tooltip: 'Resize Agent Chat',
+            tooltip: strings.resizeAgentChat,
             onPressed: controller.cycleAgentChatMode,
             icon: const Icon(Icons.open_in_full, size: 18),
           ),
           IconButton(
             key: const ValueKey('agent-chat-fullscreen'),
-            tooltip: 'Open Full Agent Chat',
+            tooltip: strings.openFullAgentChat,
             onPressed: () =>
                 controller.setAgentChatMode(AgentChatPanelMode.fullscreen),
             icon: const Icon(Icons.fullscreen, size: 20),
           ),
         ]),
         const SizedBox(height: 10),
-        const Wrap(spacing: 8, runSpacing: 8, children: [
-          _AgentBadge(text: 'GPT-BACKED'),
-          _AgentBadge(text: 'SERVER-SIDE API'),
-          _AgentBadge(text: 'SAFE MODE'),
-          _AgentBadge(text: 'CONFIRM REQUIRED'),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _AgentBadge(text: strings.gptBacked),
+          _AgentBadge(text: strings.serverSideApi),
+          _AgentBadge(text: strings.safeMode),
+          _AgentBadge(text: strings.confirmRequired),
         ]),
         if (controller.isLoadingAgentHistory) ...[
           const SizedBox(height: 10),
-          const Text(
-            'Loading previous chat...',
-            style: TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
+          Text(
+            strings.loadingPreviousChat,
+            style: const TextStyle(color: Colors.lightBlueAccent, fontSize: 12),
           ),
         ],
         if (controller.agentHistoryError != null) ...[
@@ -172,6 +175,8 @@ class _AgentChatMiniPanelState extends State<AgentChatMiniPanel> {
             controller: _input,
             busy: controller.isAgentParsing || controller.isAgentPlanCreating,
             onSubmitted: _send,
+            hintText: strings.askAgentHint,
+            sendLabel: strings.send,
           ),
         ],
       ]),
@@ -447,11 +452,15 @@ class _AgentInputRow extends StatelessWidget {
     required this.controller,
     required this.busy,
     required this.onSubmitted,
+    required this.hintText,
+    required this.sendLabel,
   });
 
   final TextEditingController controller;
   final bool busy;
   final VoidCallback onSubmitted;
+  final String hintText;
+  final String sendLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -467,7 +476,7 @@ class _AgentInputRow extends StatelessWidget {
             if (!busy) onSubmitted();
           },
           decoration: InputDecoration(
-            hintText: 'Ask Agent Assistant...',
+            hintText: hintText,
             isDense: true,
             filled: true,
             fillColor: Colors.black.withValues(alpha: 0.20),
@@ -490,7 +499,7 @@ class _AgentInputRow extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.send, size: 16),
-        label: const Text('Send'),
+        label: Text(sendLabel),
       ),
     ]);
   }

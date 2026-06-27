@@ -25,17 +25,16 @@ void main() {
       home: Scaffold(body: AutoBuyOperationsPanel(controller: controller)),
     ));
 
-    expect(find.text('Auto Buy Operations'), findsOneWidget);
-    expect(find.text('AUTO BUY OPS'), findsOneWidget);
-    expect(find.text('DRY RUN EVIDENCE REQUIRED'), findsOneWidget);
-    expect(find.text('TARGET RISK GATED'), findsOneWidget);
-    expect(find.text('KIS VALIDATION REQUIRED'), findsOneWidget);
-    expect(find.text('ONE SHOT LIVE BUY'), findsOneWidget);
-    expect(find.text('SCHEDULED DRY RUN'), findsOneWidget);
-    expect(find.text('PROMOTION ONLY'), findsOneWidget);
-    expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
-    expect(find.text('NO AUTO RETRY'), findsOneWidget);
-    expect(find.text('READY FOR OPERATOR CONFIRM'), findsWidgets);
+    expect(find.text('자동매수 운영'), findsWidgets);
+    expect(find.text('드라이런 근거 필요'), findsOneWidget);
+    expect(find.text('목표 위험 게이트 적용'), findsOneWidget);
+    expect(find.text('한국투자증권 검증 필요'), findsOneWidget);
+    expect(find.text('단발 실매수'), findsOneWidget);
+    expect(find.text('예약 드라이런'), findsOneWidget);
+    expect(find.text('프로모션 전용'), findsOneWidget);
+    expect(find.text('실거래 스케줄러 없음'), findsOneWidget);
+    expect(find.text('자동 재시도 없음'), findsOneWidget);
+    expect(find.text('운영자 확인 준비'), findsWidgets);
     expect(find.textContaining('005930'), findsWidgets);
 
     await tester.tap(find.byKey(
@@ -71,7 +70,7 @@ void main() {
         findsOneWidget);
     expect(api.liveRunCalls, 0);
 
-    await tester.tap(find.text('Run Guarded Live Auto Buy Once').last);
+    await tester.tap(find.text('보호된 실매수 1회 실행').last);
     await tester.pumpAndSettle();
 
     expect(api.liveReadinessCalls, 2);

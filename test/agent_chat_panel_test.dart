@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/agent_chat_full_panel.dart';
@@ -21,10 +22,10 @@ void main() {
     ));
 
     expect(find.text('Agent Assistant'), findsOneWidget);
-    expect(find.text('GPT-BACKED'), findsOneWidget);
-    expect(find.text('SERVER-SIDE API'), findsWidgets);
-    expect(find.text('SAFE MODE'), findsWidgets);
-    expect(find.text('CONFIRM REQUIRED'), findsWidgets);
+    expect(find.text('GPT 기반'), findsOneWidget);
+    expect(find.text('서버 API'), findsWidgets);
+    expect(find.text('안전 모드'), findsWidgets);
+    expect(find.text('확인 필요'), findsWidgets);
     expect(find.byKey(const ValueKey('agent-chat-mini-input')), findsOneWidget);
     expect(find.byKey(const ValueKey('agent-chat-new-chat')), findsOneWidget);
     expect(
@@ -69,40 +70,43 @@ void main() {
 
   testWidgets('full panel renders thread input toolbar and safety notice',
       (tester) async {
-    final controller =
-        DashboardController(_PanelFakeApiClient(), autoload: false)
-          ..agentChatMode = AgentChatPanelMode.fullscreen
-          ..activeAgentConversationKey = 'agent_conv_active'
-          ..agentMessages = [
-            AgentChatMessage(
-              id: 'user-1',
-              role: AgentChatRole.user,
-              text: 'Show positions',
-              createdAt: DateTime(2026, 6, 18),
-              status: AgentChatStatus.sent,
-            ),
-            AgentChatMessage(
-              id: 'assistant-1',
-              role: AgentChatRole.assistant,
-              text: 'Plan is ready for review.',
-              createdAt: DateTime(2026, 6, 18),
-              status: AgentChatStatus.readyForReview,
-              metadata: const {
-                'result_cards': [
-                  {
-                    'card_type': 'settings',
-                    'title': 'System Status',
-                    'badges': ['READ ONLY', 'NO SETTINGS CHANGE'],
-                    'rows': [
-                      {'label': 'dry_run', 'value': 'ON'},
-                    ],
-                    'data': {'dry_run': true},
-                  }
+    final controller = DashboardController(
+      _PanelFakeApiClient(),
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    )
+      ..agentChatMode = AgentChatPanelMode.fullscreen
+      ..activeAgentConversationKey = 'agent_conv_active'
+      ..agentMessages = [
+        AgentChatMessage(
+          id: 'user-1',
+          role: AgentChatRole.user,
+          text: 'Show positions',
+          createdAt: DateTime(2026, 6, 18),
+          status: AgentChatStatus.sent,
+        ),
+        AgentChatMessage(
+          id: 'assistant-1',
+          role: AgentChatRole.assistant,
+          text: 'Plan is ready for review.',
+          createdAt: DateTime(2026, 6, 18),
+          status: AgentChatStatus.readyForReview,
+          metadata: const {
+            'result_cards': [
+              {
+                'card_type': 'settings',
+                'title': 'System Status',
+                'badges': ['READ ONLY', 'NO SETTINGS CHANGE'],
+                'rows': [
+                  {'label': 'dry_run', 'value': 'ON'},
                 ],
-                'follow_up_suggestions': ['Show positions'],
-              },
-            ),
-          ];
+                'data': {'dry_run': true},
+              }
+            ],
+            'follow_up_suggestions': ['Show positions'],
+          },
+        ),
+      ];
 
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(

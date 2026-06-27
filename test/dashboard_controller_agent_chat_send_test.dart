@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_conversation.dart';
@@ -13,7 +14,11 @@ import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 void main() {
   test('sendAgentMessage uses /agent/chat/send first', () async {
     final api = _ChatSendFakeApi();
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    );
 
     final result = await controller.sendAgentMessage('삼전 현재가');
 
@@ -35,7 +40,11 @@ void main() {
 
   test('chat send failure falls back to legacy parse flow safely', () async {
     final api = _ChatSendFakeApi(failChatSend: true);
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    );
 
     final result = await controller.sendAgentMessage('show my positions');
 
@@ -55,8 +64,11 @@ void main() {
       'manual ticket response shows prefill state without validation or submit',
       () async {
     final api = _ChatSendFakeApi(response: _manualTicketResponse());
-    final controller = DashboardController(api, autoload: false)
-      ..kisLiveConfirmation = true;
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    )..kisLiveConfirmation = true;
 
     final result = await controller.sendAgentMessage('삼성전자 3만원 매수 티켓 준비해줘');
 
@@ -119,6 +131,8 @@ class _ChatSendFakeApi extends ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     chatSendCalls += 1;
     if (failChatSend) {

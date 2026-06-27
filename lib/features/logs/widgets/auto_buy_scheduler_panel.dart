@@ -13,6 +13,7 @@ class AutoBuySchedulerPanel extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final strings = controller.strings;
         final status = controller.strategyAutoBuySchedulerStatus;
         final loading = controller.strategyAutoBuySchedulerLoading;
         return Container(
@@ -37,9 +38,9 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Auto Buy Scheduler',
-                          style: TextStyle(
+                        Text(
+                          strings.autoBuyScheduler,
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
                           ),
@@ -47,8 +48,8 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                         const SizedBox(height: 3),
                         Text(
                           status == null
-                              ? 'Status not loaded'
-                              : '${status.enabled ? 'ENABLED' : 'DISABLED'} / ${status.primaryBlockReason ?? 'ready'}',
+                              ? strings.statusNotLoaded
+                              : '${status.enabled ? strings.enabled : strings.disabled} / ${status.primaryBlockReason ?? strings.ready}',
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ],
@@ -56,7 +57,7 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                   ),
                   IconButton(
                     key: const ValueKey('refresh-auto-buy-scheduler-button'),
-                    tooltip: 'Refresh Scheduler Status',
+                    tooltip: strings.refreshSchedulerStatus,
                     onPressed: loading
                         ? null
                         : () => _refresh(context, showSnack: true),
@@ -65,16 +66,7 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              const _BadgeWrap(
-                badges: [
-                  'DRY-RUN ONLY',
-                  'PROMOTION QUEUE ONLY',
-                  'NO LIVE ORDERS',
-                  'SCHEDULER REAL ORDERS DISABLED',
-                  'NO VALIDATION IN SCHEDULER',
-                  'NO BROKER SUBMIT IN SCHEDULER',
-                ],
-              ),
+              _BadgeWrap(badges: strings.schedulerSafetyBadges),
               if (controller.strategyAutoBuySchedulerError != null) ...[
                 const SizedBox(height: 10),
                 Text(
@@ -89,42 +81,42 @@ class AutoBuySchedulerPanel extends StatelessWidget {
               if (status != null) ...[
                 const SizedBox(height: 12),
                 _InfoRow(
-                  label: 'Dry-run only',
-                  value: status.dryRunOnly ? 'YES' : 'NO',
+                  label: strings.dryRunOnly,
+                  value: strings.booleanLabel(status.dryRunOnly),
                   valueColor:
                       status.dryRunOnly ? Colors.greenAccent : Colors.redAccent,
                 ),
                 _InfoRow(
-                  label: 'Live orders allowed',
-                  value: status.allowLiveOrders ? 'YES' : 'NO',
+                  label: strings.liveOrdersAllowed,
+                  value: strings.booleanLabel(status.allowLiveOrders),
                   valueColor: status.allowLiveOrders
                       ? Colors.redAccent
                       : Colors.greenAccent,
                 ),
                 _InfoRow(
-                  label: 'Real order submit allowed',
-                  value: status.realOrderSubmitAllowed ? 'YES' : 'NO',
+                  label: strings.realOrderSubmitAllowed,
+                  value: strings.booleanLabel(status.realOrderSubmitAllowed),
                   valueColor: status.realOrderSubmitAllowed
                       ? Colors.redAccent
                       : Colors.greenAccent,
                 ),
                 _InfoRow(
-                  label: 'Promotion queue only',
-                  value: status.promotionQueueOnly ? 'YES' : 'NO',
+                  label: strings.promotionQueueOnly,
+                  value: strings.booleanLabel(status.promotionQueueOnly),
                   valueColor: status.promotionQueueOnly
                       ? Colors.greenAccent
                       : Colors.redAccent,
                 ),
                 _InfoRow(
-                  label: 'Active profile',
+                  label: strings.activeProfile,
                   value: status.activeProfile ?? '-',
                 ),
                 _InfoRow(
-                  label: 'Runs today',
+                  label: strings.runsToday,
                   value: '${status.runsToday}/${status.maxRunsPerDay}',
                 ),
                 _InfoRow(
-                  label: 'Next allowed run',
+                  label: strings.nextAllowedRun,
                   value: status.nextAllowedRunAt == null
                       ? '-'
                       : formatTimestampWithKst(
@@ -132,14 +124,14 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                         ),
                 ),
                 _InfoRow(
-                  label: 'Block reason',
+                  label: strings.blockReason,
                   value: status.primaryBlockReason ?? '-',
                   valueColor: status.primaryBlockReason == null
                       ? Colors.greenAccent
                       : Colors.orangeAccent,
                 ),
                 _InfoRow(
-                  label: 'Pending promotions',
+                  label: strings.pendingPromotions,
                   value: '${status.pendingPromotionCount}',
                 ),
                 const SizedBox(height: 12),
@@ -153,7 +145,7 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                           ? null
                           : () => _refresh(context, showSnack: true),
                       icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Refresh Scheduler Status'),
+                      label: Text(strings.refreshSchedulerStatus),
                     ),
                     if (!status.enabled)
                       FilledButton.icon(
@@ -162,7 +154,7 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                             ? null
                             : () => _setSchedulerEnabled(context, true),
                         icon: const Icon(Icons.play_circle_outline, size: 18),
-                        label: const Text('Enable Dry-Run Scheduler'),
+                        label: Text(strings.enableDryRunScheduler),
                       )
                     else
                       OutlinedButton.icon(
@@ -171,13 +163,13 @@ class AutoBuySchedulerPanel extends StatelessWidget {
                             ? null
                             : () => _setSchedulerEnabled(context, false),
                         icon: const Icon(Icons.pause_circle_outline, size: 18),
-                        label: const Text('Disable Scheduler'),
+                        label: Text(strings.disableScheduler),
                       ),
                     FilledButton.icon(
                       key: const ValueKey('run-scheduled-dry-run-once-button'),
                       onPressed: loading ? null : () => _runDryRunOnce(context),
                       icon: const Icon(Icons.science_outlined, size: 18),
-                      label: const Text('Run Dry-Run Once'),
+                      label: Text(strings.runDryRunOnce),
                     ),
                   ],
                 ),

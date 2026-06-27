@@ -14,14 +14,14 @@ void main() {
         .pumpWidget(MaterialApp(home: AutoInvestApp(controller: controller)));
     await tester.pumpAndSettle();
 
-    expect(find.text('Home'), findsWidgets);
-    expect(find.text('Watchlist'), findsOneWidget);
+    expect(find.text('홈'), findsWidgets);
+    expect(find.text('관심종목'), findsOneWidget);
     expect(find.text('Manual'), findsNothing);
-    expect(find.text('Trading'), findsOneWidget);
-    expect(find.text('Analysis'), findsOneWidget);
-    expect(find.text('Logs'), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('KIS Automation'), findsOneWidget);
+    expect(find.text('거래'), findsOneWidget);
+    expect(find.text('분석'), findsOneWidget);
+    expect(find.text('기록'), findsOneWidget);
+    expect(find.text('설정'), findsOneWidget);
+    expect(find.text('한국투자증권 자동화'), findsOneWidget);
     expect(find.text('Portfolio'), findsNothing);
   });
 
@@ -38,26 +38,26 @@ void main() {
 
     await tester.tap(find.descendant(
       of: find.byKey(const ValueKey('global-broker-selector')),
-      matching: find.text('KIS'),
+      matching: find.text('한국투자증권'),
     ));
     await tester.pumpAndSettle();
 
     expect(controller.selectedProvider, SelectedProvider.kis);
 
-    await tester.tap(find.text('Watchlist'));
+    await tester.tap(find.text('관심종목'));
     await tester.pumpAndSettle();
-    expect(find.text('KIS / KR'), findsWidgets);
+    expect(find.text('한국투자증권 / 국내'), findsWidgets);
     expect(find.byKey(const ValueKey('global-broker-selector')), findsNothing);
 
-    await tester.tap(find.text('Trading'));
+    await tester.tap(find.text('거래'));
     await tester.pumpAndSettle();
     expect(find.text('KIS Analyze / Validate / Submit'), findsOneWidget);
     expect(find.text('KIS Guarded Trading'), findsNothing);
-    expect(find.text('KIS / KR'), findsWidgets);
+    expect(find.text('한국투자증권 / 국내'), findsWidgets);
 
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.text('설정'));
     await tester.pumpAndSettle();
-    expect(find.text('KIS safety and manual live status.'), findsOneWidget);
+    expect(find.text('한국투자증권 안전 상태와 수동 실거래 상태입니다.'), findsOneWidget);
     expect(find.byKey(const ValueKey('global-broker-selector')), findsNothing);
   });
 }

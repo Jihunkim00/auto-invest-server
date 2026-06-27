@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/i18n/app_language.dart';
 import '../../core/widgets/confirm_action_dialog.dart';
 import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
@@ -15,15 +16,19 @@ class SettingsScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final strings = controller.strings;
         return SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Settings',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                    strings.settings,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 BrokerContextBadge(controller: controller),
@@ -31,10 +36,12 @@ class SettingsScreen extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 controller.selectedProvider == SelectedProvider.kis
-                    ? 'KIS safety and manual live status.'
-                    : 'Alpaca paper and common safety status.',
+                    ? strings.settingsKisSubtitle
+                    : strings.settingsAlpacaSubtitle,
                 style: const TextStyle(color: Colors.white70),
               ),
+              const SizedBox(height: 12),
+              _LanguageCard(controller: controller),
               const SizedBox(height: 12),
               _OperationModeCard(controller: controller),
               const SizedBox(height: 12),
@@ -53,6 +60,56 @@ class SettingsScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _LanguageCard extends StatelessWidget {
+  const _LanguageCard({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = controller.strings;
+    return SectionCard(
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _CardHeader(
+          icon: Icons.language,
+          title: strings.language,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          strings.languageDescription,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<AppLanguage>(
+          key: const ValueKey('app-language-selector'),
+          showSelectedIcon: false,
+          segments: [
+            ButtonSegment<AppLanguage>(
+              value: AppLanguage.korean,
+              label: Text(strings.korean),
+              icon: const Icon(Icons.translate, size: 16),
+            ),
+            ButtonSegment<AppLanguage>(
+              value: AppLanguage.english,
+              label: Text(strings.english),
+              icon: const Icon(Icons.language, size: 16),
+            ),
+          ],
+          selected: {controller.appLanguage},
+          onSelectionChanged: (selection) {
+            controller.setAppLanguage(selection.first);
+          },
+        ),
+        const SizedBox(height: 8),
+        Text(
+          strings.languagePersistenceNote,
+          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ]),
     );
   }
 }

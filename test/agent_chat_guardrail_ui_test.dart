@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/agent_chat_full_panel.dart';
@@ -9,7 +10,11 @@ import 'package:auto_invest_dashboard/models/agent_chat_message.dart';
 void main() {
   testWidgets('blocked Agent Chat live-order answer exposes no live action',
       (tester) async {
-    final controller = DashboardController(_NoopApiClient(), autoload: false)
+    final controller = DashboardController(
+      _NoopApiClient(),
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    )
       ..agentChatMode = AgentChatPanelMode.fullscreen
       ..activeAgentConversationKey = 'conv_blocked_pr65'
       ..kisLiveConfirmation = true

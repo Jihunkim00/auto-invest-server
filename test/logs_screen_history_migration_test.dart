@@ -30,7 +30,7 @@ void main() {
     expect(api.recentRunsLimit, 50);
     expect(api.recentOrdersLimit, 50);
     expect(api.recentSignalsLimit, 50);
-    expect(find.text('Logs'), findsOneWidget);
+    expect(find.text('기록'), findsOneWidget);
     await _showLogsFinder(tester, find.text('Activity Timeline'));
     expect(find.text('Activity Timeline'), findsOneWidget);
     expect(find.textContaining('AAPL - HOLD'), findsOneWidget);

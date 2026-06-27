@@ -19,6 +19,8 @@ class AgentChatSendResponse {
     required this.followUpSuggestions,
     required this.diagnostics,
     required this.fallbackUsed,
+    required this.language,
+    required this.locale,
     this.userMessageId,
     this.assistantMessageId,
     this.command,
@@ -50,6 +52,8 @@ class AgentChatSendResponse {
   final Map<String, dynamic> diagnostics;
   final String? answerType;
   final bool fallbackUsed;
+  final String language;
+  final String locale;
 
   factory AgentChatSendResponse.fromJson(Map<String, dynamic> json) {
     final planJson = json['plan'];
@@ -92,6 +96,8 @@ class AgentChatSendResponse {
       diagnostics: _readMap(json['diagnostics']),
       answerType: _readNullableString(json['answer_type']),
       fallbackUsed: json['fallback_used'] == true,
+      language: _readString(json['language'], 'ko'),
+      locale: _readString(json['locale'], 'ko-KR'),
     );
   }
 }

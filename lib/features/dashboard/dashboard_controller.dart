@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/i18n/app_language.dart';
+import '../../core/i18n/app_strings.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/utils/kr_symbol.dart';
@@ -108,13 +110,30 @@ enum KisOrderHistoryFilter { open, filled, canceled, rejected, all }
 enum KisOrderHistorySort { newestFirst, oldestFirst }
 
 class DashboardController extends ChangeNotifier {
-  DashboardController(this.apiClient, {bool autoload = true}) {
+  DashboardController(
+    this.apiClient, {
+    bool autoload = true,
+    AppLanguage initialLanguage = AppLanguage.korean,
+  }) : appLanguage = initialLanguage {
+    agentMessages = _defaultAgentSafetyMessages(appLanguage);
     if (autoload) {
       load();
     }
   }
 
   final ApiClient apiClient;
+  AppLanguage appLanguage;
+
+  AppStrings get strings => AppStrings(appLanguage);
+
+  void setAppLanguage(AppLanguage language) {
+    if (appLanguage == language) return;
+    appLanguage = language;
+    if (_containsOnlyDefaultAgentSafetyMessage(agentMessages)) {
+      agentMessages = _defaultAgentSafetyMessages(appLanguage);
+    }
+    notifyListeners();
+  }
 
   OpsSettings settings = const OpsSettings(
     schedulerEnabled: false,
@@ -267,21 +286,7 @@ class DashboardController extends ChangeNotifier {
   KisOrderHistorySort kisOrderSort = KisOrderHistorySort.newestFirst;
   KisManualOrderResult? selectedKisOrder;
   AgentChatPanelMode agentChatMode = AgentChatPanelMode.mini;
-  List<AgentChatMessage> agentMessages = [
-    AgentChatMessage(
-      id: 'agent-safety-intro',
-      role: AgentChatRole.safety,
-      text:
-          'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
-      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
-      status: AgentChatStatus.sent,
-      safetyBadges: const [
-        'SERVER-SIDE API',
-        'SAFE MODE',
-        'CONFIRM REQUIRED',
-      ],
-    ),
-  ];
+  List<AgentChatMessage> agentMessages = const [];
   bool isAgentParsing = false;
   bool isAgentPlanCreating = false;
   bool isAgentRunning = false;
@@ -1299,21 +1304,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   void clearCurrentAgentChatLocal() {
-    agentMessages = [
-      AgentChatMessage(
-        id: _newAgentMessageId('safety'),
-        role: AgentChatRole.safety,
-        text:
-            'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
-        createdAt: DateTime.now(),
-        status: AgentChatStatus.sent,
-        safetyBadges: const [
-          'SERVER-SIDE API',
-          'SAFE MODE',
-          'CONFIRM REQUIRED',
-        ],
-      ),
-    ];
+    agentMessages = _defaultAgentSafetyMessages(appLanguage);
     latestAgentCommand = null;
     latestAgentPlan = null;
     latestAgentRun = null;
@@ -1383,8 +1374,9 @@ class DashboardController extends ChangeNotifier {
         conversationKey,
         limit: 100,
       );
-      agentMessages =
-          messages.isEmpty ? _defaultAgentSafetyMessages() : messages;
+      agentMessages = messages.isEmpty
+          ? _defaultAgentSafetyMessages(appLanguage)
+          : messages;
       return const ActionResult(
         success: true,
         message: 'Agent chat history loaded.',
@@ -1418,7 +1410,7 @@ class DashboardController extends ChangeNotifier {
       latestAgentPlan = null;
       latestAgentRun = null;
       latestAgentPrefill = null;
-      agentMessages = _defaultAgentSafetyMessages();
+      agentMessages = _defaultAgentSafetyMessages(appLanguage);
       return const ActionResult(
           success: true, message: 'New agent chat started.');
     } catch (e) {
@@ -1451,7 +1443,7 @@ class DashboardController extends ChangeNotifier {
       latestAgentPlan = null;
       latestAgentRun = null;
       latestAgentPrefill = null;
-      agentMessages = _defaultAgentSafetyMessages();
+      agentMessages = _defaultAgentSafetyMessages(appLanguage);
       return const ActionResult(
         success: true,
         message: 'Agent conversation archived.',
@@ -2551,9 +2543,9 @@ class DashboardController extends ChangeNotifier {
   Future<ActionResult> sendAgentMessage(String text) async {
     final cleanText = text.trim();
     if (cleanText.isEmpty) {
-      return const ActionResult(
+      return ActionResult(
         success: false,
-        message: 'Enter a message for Agent Assistant.',
+        message: strings.agentEnterMessage,
       );
     }
 
@@ -2573,13 +2565,13 @@ class DashboardController extends ChangeNotifier {
       AgentChatMessage(
         id: assistantId,
         role: AgentChatRole.assistant,
-        text: 'Parsing with the FastAPI agent endpoint...',
+        text: strings.agentParsing,
         createdAt: now,
         status: AgentChatStatus.parsing,
-        safetyBadges: const [
-          'SERVER-SIDE API',
-          'SAFE MODE',
-          'NO AUTO SUBMIT',
+        safetyBadges: [
+          strings.serverSideApi,
+          strings.safeMode,
+          strings.noAutoSubmit,
         ],
       ),
     ];
@@ -2594,6 +2586,8 @@ class DashboardController extends ChangeNotifier {
         conversationKey: activeAgentConversationKey,
         context: _agentContext(),
         autoCreateConversation: true,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
       );
       _applyAgentChatSendResponse(chatResponse);
       _replaceAgentMessage(
@@ -2606,8 +2600,8 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(
         success: chatResponse.answer.answerType != 'error',
         message: chatResponse.answer.answerType == 'error'
-            ? 'Agent chat returned an error. No order submitted.'
-            : 'Agent chat answered. No order submitted.',
+            ? strings.agentErrorNoOrder
+            : strings.agentAnsweredNoOrder,
       );
     } catch (chatSendError) {
       agentHistoryError =
@@ -2617,10 +2611,10 @@ class DashboardController extends ChangeNotifier {
         AgentChatMessage(
           id: assistantId,
           role: AgentChatRole.assistant,
-          text: 'Chat endpoint unavailable. Falling back to command review...',
+          text: strings.chatEndpointFallback,
           createdAt: now,
           status: AgentChatStatus.parsing,
-          safetyBadges: const ['FALLBACK PARSER', 'NO AUTO SUBMIT'],
+          safetyBadges: ['FALLBACK PARSER', strings.noAutoSubmit],
         ),
       );
       notifyListeners();
@@ -5748,62 +5742,66 @@ class DashboardController extends ChangeNotifier {
   List<String> _agentSafetyBadgesForChatSendResponse(
     AgentChatSendResponse response,
   ) {
+    final labels = strings;
     final isLiveOrderAction = response.liveOrderAction != null ||
         response.answer.answerType == 'live_order_confirmation_required';
     final isStrategyAction = response.strategyAction != null ||
         response.answer.answerType ==
             'strategy_profile_change_confirmation_required';
     final badges = <String>[
-      response.intent.fallbackUsed ? 'FALLBACK ROUTER' : 'GPT-BACKED',
-      'SERVER-SIDE API',
+      response.intent.fallbackUsed ? labels.fallbackRouter : labels.gptBacked,
+      labels.serverSideApi,
     ];
     if (isLiveOrderAction) {
       badges.addAll([
-        'LIVE ORDER',
-        'CONFIRM REQUIRED',
-        'VALIDATION REQUIRED',
-        'RISK GATED',
-        'NO AUTO SUBMIT',
+        labels.liveOrder,
+        labels.confirmRequired,
+        labels.validationRequired,
+        labels.riskGated,
+        labels.noAutoSubmit,
       ]);
     } else if (isStrategyAction) {
       badges.addAll([
-        'PROFILE ONLY',
-        'CONFIRM REQUIRED',
-        'NO ORDER SUBMIT',
-        'STRATEGY TARGET',
+        labels.profileOnly,
+        labels.confirmRequired,
+        labels.noOrderSubmit,
+        labels.strategyTarget,
         response.strategyAction?.requestedProfile.toUpperCase() ?? '',
       ]);
     } else {
-      badges.addAll(['NO ORDER', 'NO AUTO SUBMIT']);
+      badges.addAll([labels.noOrder, labels.noAutoSubmit]);
     }
-    final provider = response.liveOrderAction?.provider.toUpperCase() ??
-        response.intent.provider?.toUpperCase();
-    if (provider != null && provider.isNotEmpty && provider != 'UNKNOWN') {
-      badges.add(provider);
+    final provider =
+        response.liveOrderAction?.provider ?? response.intent.provider;
+    final normalizedProvider = provider?.trim().toLowerCase();
+    if (provider != null &&
+        provider.isNotEmpty &&
+        normalizedProvider != 'unknown') {
+      badges.add(labels.brokerName(provider));
     }
     if (response.safety.readOnly || response.intent.isReadOnly) {
-      badges.add('READ ONLY');
+      badges.add(labels.readOnly);
     }
     if (response.safety.safeExecutionOnly) {
-      badges.add('SAFE ANALYSIS');
+      badges.add(labels.safeAnalysis);
     }
     if (!isLiveOrderAction && !response.safety.validationCalled) {
-      badges.add('NO VALIDATION');
+      badges.add(labels.noValidation);
     }
-    if (!response.safety.settingChanged) badges.add('NO SETTINGS CHANGE');
+    if (!response.safety.settingChanged) badges.add(labels.noSettingsChange);
     if (response.availableActions.contains('prepare_manual_ticket')) {
       badges.addAll([
-        'PREFILL ONLY',
-        'MANUAL REVIEW ONLY',
-        'MANUAL VALIDATION REQUIRED',
-        'CONFIRM_LIVE MANUAL',
+        labels.prefillOnly,
+        labels.manualReviewOnly,
+        labels.manualValidationRequired,
+        labels.confirmLiveManual,
       ]);
     }
     if (response.intent.requiresAuth ||
         response.answer.answerType == 'auth_required') {
-      badges.add('AUTH REQUIRED');
+      badges.add(labels.authRequired);
     }
-    if (response.answer.answerType == 'blocked') badges.add('BLOCKED');
+    if (response.answer.answerType == 'blocked') badges.add(labels.blocked);
     return badges.where((badge) => badge.trim().isNotEmpty).toSet().toList();
   }
 
@@ -6186,19 +6184,23 @@ String _newAgentMessageId(String prefix) {
   return '$prefix-${DateTime.now().microsecondsSinceEpoch}';
 }
 
-List<AgentChatMessage> _defaultAgentSafetyMessages() {
+bool _containsOnlyDefaultAgentSafetyMessage(List<AgentChatMessage> messages) {
+  return messages.length == 1 && messages.first.role == AgentChatRole.safety;
+}
+
+List<AgentChatMessage> _defaultAgentSafetyMessages(AppLanguage language) {
+  final strings = AppStrings(language);
   return [
     AgentChatMessage(
       id: _newAgentMessageId('safety'),
       role: AgentChatRole.safety,
-      text:
-          'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.',
+      text: strings.agentSafetyIntro,
       createdAt: DateTime.now(),
       status: AgentChatStatus.sent,
-      safetyBadges: const [
-        'SERVER-SIDE API',
-        'SAFE MODE',
-        'CONFIRM REQUIRED',
+      safetyBadges: [
+        strings.serverSideApi,
+        strings.safeMode,
+        strings.confirmRequired,
       ],
     ),
   ];

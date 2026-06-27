@@ -27,14 +27,13 @@ void main() {
 
     expect(find.byKey(const ValueKey('auto-buy-promotion-queue-panel')),
         findsOneWidget);
-    expect(find.text('Auto Buy Promotion Queue'), findsOneWidget);
-    expect(find.text('PROMOTION ONLY'), findsOneWidget);
-    expect(find.text('REVIEW REQUIRED'), findsWidgets);
-    expect(find.text('NOT AN ORDER'), findsOneWidget);
-    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
-    expect(find.text('LIVE CONVERSION REQUIRES FINAL CONFIRMATION'),
-        findsOneWidget);
-    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsOneWidget);
+    expect(find.text('자동매수 프로모션 검토 목록'), findsOneWidget);
+    expect(find.text('프로모션 전용'), findsOneWidget);
+    expect(find.text('검토 필요'), findsWidgets);
+    expect(find.text('주문 아님'), findsOneWidget);
+    expect(find.text('증권사 제출 없음'), findsOneWidget);
+    expect(find.text('실거래 전환은 최종 확인 필요'), findsOneWidget);
+    expect(find.text('스케줄러 실주문 비활성화'), findsOneWidget);
     expect(find.textContaining('005930'), findsWidgets);
     expect(find.text('\u20A930,000'), findsWidgets);
     expect(find.text('3'), findsWidgets);
@@ -99,7 +98,7 @@ void main() {
         findsOneWidget);
     expect(api.liveRunCalls, 0);
 
-    await tester.tap(find.text('Convert via Guarded Live Buy').last);
+    await tester.tap(find.text('보호된 실매수로 전환').last);
     await tester.pumpAndSettle();
 
     expect(api.liveReadinessCalls, 2);
@@ -125,8 +124,8 @@ void main() {
       home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
     ));
 
-    expect(find.text('CONVERTED'), findsWidgets);
-    expect(find.text('live_order_created'), findsOneWidget);
+    expect(find.text('전환됨'), findsWidgets);
+    expect(find.text('live order created'), findsOneWidget);
     expect(find.textContaining('promotion 1 / dry-run 22'), findsOneWidget);
     expect(find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1')),
         findsNothing);

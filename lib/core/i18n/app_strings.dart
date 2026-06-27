@@ -1,0 +1,336 @@
+import 'app_language.dart';
+
+class AppStrings {
+  const AppStrings(this.appLanguage);
+
+  final AppLanguage appLanguage;
+
+  bool get isKorean => appLanguage == AppLanguage.korean;
+
+  String get appTitle => 'AUTO INVEST';
+  String get home => isKorean ? '홈' : 'Home';
+  String get watchlist => isKorean ? '관심종목' : 'Watchlist';
+  String get analysis => isKorean ? '분석' : 'Analysis';
+  String get trading => isKorean ? '거래' : 'Trading';
+  String get logs => isKorean ? '기록' : 'Logs';
+  String get settings => isKorean ? '설정' : 'Settings';
+  String get kisAutomation => isKorean ? '한국투자증권 자동화' : 'KIS Automation';
+
+  String get language => isKorean ? '언어' : 'Language';
+  String get appLanguageLabel => isKorean ? '앱 언어' : 'App language';
+  String get korean => '한국어';
+  String get english => 'English';
+  String get languageDescription => isKorean
+      ? '화면 표시와 Agent Chat 요청 언어에 즉시 적용됩니다.'
+      : 'Applies immediately to UI labels and Agent Chat requests.';
+  String get languagePersistenceNote => isKorean
+      ? '현재 선택은 실행 중인 앱에 적용됩니다.'
+      : 'The current selection applies to this running app session.';
+
+  String get kisBroker => isKorean ? '한국투자증권' : 'KIS';
+  String get alpacaBroker => isKorean ? '알파카' : 'Alpaca';
+  String get kisBrokerMarket => isKorean ? '한국투자증권 / 국내' : 'KIS / KR';
+  String get alpacaBrokerMarket => isKorean ? '알파카 / 미국' : 'Alpaca / US';
+  String get settingsKisSubtitle => isKorean
+      ? '한국투자증권 안전 상태와 수동 실거래 상태입니다.'
+      : 'KIS safety and manual live status.';
+  String get settingsAlpacaSubtitle => isKorean
+      ? '알파카 모의 계좌와 공통 안전 상태입니다.'
+      : 'Alpaca paper and common safety status.';
+  String get homeKisSubtitle => isKorean
+      ? '한국투자증권 계좌, 수동 실거래 안전 상태, 최근 국내 활동입니다.'
+      : 'KIS account, manual live safety, and recent KR activity.';
+  String get homeAlpacaSubtitle => isKorean
+      ? '알파카 모의 포트폴리오, 관심종목 상태, 최근 미국 활동입니다.'
+      : 'Alpaca paper portfolio, watchlist status, and recent US activity.';
+  String get logsKisSubtitle => isKorean
+      ? '한국투자증권 / 국내 활동을 먼저 표시합니다.'
+      : 'Showing KIS / KR activity first.';
+  String get logsAlpacaSubtitle => isKorean
+      ? '알파카 / 미국 활동을 먼저 표시합니다.'
+      : 'Showing Alpaca / US activity first.';
+
+  String get refresh => isKorean ? '새로고침' : 'Refresh';
+  String get cancel => isKorean ? '취소' : 'Cancel';
+  String get confirm => isKorean ? '확인' : 'Confirm';
+  String get yes => isKorean ? '예' : 'YES';
+  String get no => isKorean ? '아니오' : 'NO';
+  String get ready => isKorean ? '준비됨' : 'READY';
+  String get blocked => isKorean ? '차단됨' : 'BLOCKED';
+  String get enabled => isKorean ? '활성' : 'ENABLED';
+  String get disabled => isKorean ? '비활성' : 'DISABLED';
+  String get none => isKorean ? '없음' : 'none';
+  String get statusNotLoaded =>
+      isKorean ? '상태를 아직 불러오지 않았습니다' : 'Status not loaded';
+  String get safeMode => isKorean ? '안전 모드' : 'SAFE MODE';
+  String get gptBacked => isKorean ? 'GPT 기반' : 'GPT-BACKED';
+  String get fallbackRouter => isKorean ? '대체 라우터' : 'FALLBACK ROUTER';
+  String get fallbackParser => isKorean ? '대체 파서' : 'FALLBACK PARSER';
+  String get serverSideApi => isKorean ? '서버 API' : 'SERVER-SIDE API';
+  String get confirmRequired => isKorean ? '확인 필요' : 'CONFIRM REQUIRED';
+  String get noAutoSubmit => isKorean ? '자동 제출 없음' : 'NO AUTO SUBMIT';
+  String get liveOrder => isKorean ? '실주문' : 'LIVE ORDER';
+  String get validationRequired => isKorean ? '검증 필요' : 'VALIDATION REQUIRED';
+  String get riskGated => isKorean ? '위험 게이트 적용' : 'RISK GATED';
+  String get profileOnly => isKorean ? '프로필 전용' : 'PROFILE ONLY';
+  String get noOrderSubmit => isKorean ? '주문 제출 없음' : 'NO ORDER SUBMIT';
+  String get strategyTarget => isKorean ? '전략 목표' : 'STRATEGY TARGET';
+  String get noOrder => isKorean ? '주문 없음' : 'NO ORDER';
+  String get readOnly => isKorean ? '읽기 전용' : 'READ ONLY';
+  String get safeAnalysis => isKorean ? '안전 분석' : 'SAFE ANALYSIS';
+  String get noValidation => isKorean ? '검증 없음' : 'NO VALIDATION';
+  String get noSettingsChange => isKorean ? '설정 변경 없음' : 'NO SETTINGS CHANGE';
+  String get prefillOnly => isKorean ? '입력값 준비 전용' : 'PREFILL ONLY';
+  String get manualReviewOnly => isKorean ? '수동 검토 전용' : 'MANUAL REVIEW ONLY';
+  String get manualValidationRequired =>
+      isKorean ? '수동 검증 필요' : 'MANUAL VALIDATION REQUIRED';
+  String get confirmLiveManual =>
+      isKorean ? '수동 실거래 확인' : 'CONFIRM_LIVE MANUAL';
+  String get authRequired => isKorean ? '인증 필요' : 'AUTH REQUIRED';
+
+  String get agentAssistant => isKorean ? 'Agent Assistant' : 'Agent Assistant';
+  String get agentAssistantSubtitle => isKorean
+      ? '분석, 포트폴리오, 확인이 필요한 한국투자증권 주문 준비를 요청하세요.'
+      : 'Ask for analysis, portfolio, or confirmed KIS order prep.';
+  String get agentNaturalLanguageReview =>
+      isKorean ? '자연어 명령 검토' : 'Natural language command review';
+  String conversationLabel(String key) =>
+      isKorean ? '대화 $key' : 'Conversation $key';
+  String get newChat => isKorean ? '새 대화' : 'New Chat';
+  String get refreshHistory => isKorean ? '기록 새로고침' : 'Refresh History';
+  String get expandAgentChat =>
+      isKorean ? 'Agent Chat 펼치기' : 'Expand Agent Chat';
+  String get collapseAgentChat =>
+      isKorean ? 'Agent Chat 접기' : 'Collapse Agent Chat';
+  String get resizeAgentChat =>
+      isKorean ? 'Agent Chat 크기 변경' : 'Resize Agent Chat';
+  String get openFullAgentChat =>
+      isKorean ? '전체 Agent Chat 열기' : 'Open Full Agent Chat';
+  String get loadingPreviousChat =>
+      isKorean ? '이전 대화를 불러오는 중...' : 'Loading previous chat...';
+  String get askAgentHint =>
+      isKorean ? 'Agent Assistant에게 물어보세요...' : 'Ask Agent Assistant...';
+  String get messageAgentHint =>
+      isKorean ? 'Agent Assistant에게 메시지 보내기...' : 'Message Agent Assistant...';
+  String get send => isKorean ? '보내기' : 'Send';
+  String get archive => isKorean ? '보관' : 'Archive';
+  String get minimize => isKorean ? '최소화' : 'Minimize';
+  String get close => isKorean ? '닫기' : 'Close';
+  String get agentSafetyIntro => isKorean
+      ? 'Agent Chat은 명시적인 확인 카드가 있어야만 한국투자증권 실주문을 제출할 수 있습니다. 제출 전 서버 검증과 위험 게이트를 다시 실행합니다.'
+      : 'Agent Chat can only submit live KIS orders after an explicit confirmation card. Backend validation and risk gates rerun before submit.';
+  String get agentSafetyNotice => isKorean
+      ? 'Agent Chat의 한국투자증권 실주문은 명시적인 확인 카드가 필요합니다. 제출 전 서버 검증과 위험 게이트를 다시 실행하며 OpenAI API 호출은 FastAPI 서버에서만 수행됩니다.'
+      : 'Live KIS orders from Agent Chat require an explicit confirmation card. Backend validation and risk gates rerun before submit. OpenAI API is called only from the FastAPI server.';
+  String get agentEnterMessage => isKorean
+      ? 'Agent Assistant에 보낼 메시지를 입력하세요.'
+      : 'Enter a message for Agent Assistant.';
+  String get agentParsing => isKorean
+      ? 'FastAPI Agent 엔드포인트로 분석 중...'
+      : 'Parsing with the FastAPI agent endpoint...';
+  String get agentAnsweredNoOrder => isKorean
+      ? 'Agent Chat이 응답했습니다. 주문은 제출되지 않았습니다.'
+      : 'Agent chat answered. No order submitted.';
+  String get agentErrorNoOrder => isKorean
+      ? 'Agent Chat 오류가 발생했습니다. 주문은 제출되지 않았습니다.'
+      : 'Agent chat returned an error. No order submitted.';
+  String get chatEndpointFallback => isKorean
+      ? '채팅 엔드포인트를 사용할 수 없어 명령 검토로 전환합니다...'
+      : 'Chat endpoint unavailable. Falling back to command review...';
+
+  String get autoBuyOperations => isKorean ? '자동매수 운영' : 'Auto Buy Operations';
+  String get autoBuyScheduler => isKorean ? '자동매수 스케줄러' : 'Auto Buy Scheduler';
+  String get autoBuyPromotionQueue =>
+      isKorean ? '자동매수 프로모션 검토 목록' : 'Auto Buy Promotion Queue';
+  String promotionTraceCount(int count) {
+    if (isKorean) return '프로모션 추적 $count건';
+    return '$count promotion trace${count == 1 ? '' : 's'}';
+  }
+
+  String get refreshAutoBuyStatus =>
+      isKorean ? '자동매수 상태 새로고침' : 'Refresh Auto Buy Status';
+  String get refreshSchedulerStatus =>
+      isKorean ? '스케줄러 상태 새로고침' : 'Refresh Scheduler Status';
+  String get refreshPromotions => isKorean ? '프로모션 새로고침' : 'Refresh Promotions';
+  String get enableDryRunScheduler =>
+      isKorean ? '드라이런 스케줄러 켜기' : 'Enable Dry-Run Scheduler';
+  String get disableScheduler => isKorean ? '스케줄러 끄기' : 'Disable Scheduler';
+  String get runDryRunOnce => isKorean ? '드라이런 1회 실행' : 'Run Dry-Run Once';
+  String get runDryRunAutoBuyOnce =>
+      isKorean ? '드라이런 자동매수 1회 실행' : 'Run Dry-Run Auto Buy Once';
+  String get runGuardedLiveAutoBuyOnce =>
+      isKorean ? '보호된 실매수 1회 실행' : 'Run Guarded Live Auto Buy Once';
+  String get confirmGuardedLiveAutoBuy =>
+      isKorean ? '보호된 실매수 확인' : 'Confirm Guarded Live Auto Buy';
+  String guardedLiveAutoBuyReady(String profile) => isKorean
+      ? '프로필 $profile에서 보호된 실매수 1회 실행이 준비되었습니다.'
+      : 'Profile $profile is ready for a one-shot guarded live buy.';
+
+  String get dryRunOnly => isKorean ? '드라이런 전용' : 'DRY-RUN ONLY';
+  String get promotionQueueOnly =>
+      isKorean ? '프로모션 목록 전용' : 'PROMOTION QUEUE ONLY';
+  String get noLiveOrders => isKorean ? '실주문 없음' : 'NO LIVE ORDERS';
+  String get schedulerRealOrdersDisabled =>
+      isKorean ? '스케줄러 실주문 비활성화' : 'SCHEDULER REAL ORDERS DISABLED';
+  String get noValidationInScheduler =>
+      isKorean ? '스케줄러 검증 없음' : 'NO VALIDATION IN SCHEDULER';
+  String get noBrokerSubmitInScheduler =>
+      isKorean ? '스케줄러 증권사 제출 없음' : 'NO BROKER SUBMIT IN SCHEDULER';
+  String get promotionOnly => isKorean ? '프로모션 전용' : 'PROMOTION ONLY';
+  String get reviewRequired => isKorean ? '검토 필요' : 'REVIEW REQUIRED';
+  String get notAnOrder => isKorean ? '주문 아님' : 'NOT AN ORDER';
+  String get noBrokerSubmit => isKorean ? '증권사 제출 없음' : 'NO BROKER SUBMIT';
+  String get liveConversionRequiresFinalConfirmation => isKorean
+      ? '실거래 전환은 최종 확인 필요'
+      : 'LIVE CONVERSION REQUIRES FINAL CONFIRMATION';
+  String get autoBuyOps => isKorean ? '자동매수 운영' : 'AUTO BUY OPS';
+  String get dryRunEvidenceRequired =>
+      isKorean ? '드라이런 근거 필요' : 'DRY RUN EVIDENCE REQUIRED';
+  String get targetRiskGated => isKorean ? '목표 위험 게이트 적용' : 'TARGET RISK GATED';
+  String get kisValidationRequired =>
+      isKorean ? '한국투자증권 검증 필요' : 'KIS VALIDATION REQUIRED';
+  String get oneShotLiveBuy => isKorean ? '단발 실매수' : 'ONE SHOT LIVE BUY';
+  String get scheduledDryRun => isKorean ? '예약 드라이런' : 'SCHEDULED DRY RUN';
+  String get noLiveScheduler => isKorean ? '실거래 스케줄러 없음' : 'NO LIVE SCHEDULER';
+  String get noAutoRetry => isKorean ? '자동 재시도 없음' : 'NO AUTO RETRY';
+
+  String get stage => isKorean ? '단계' : 'Stage';
+  String get latestDryRun => isKorean ? '최근 드라이런' : 'Latest dry-run';
+  String get dryRunScore => isKorean ? '드라이런 점수' : 'Dry-run score';
+  String get dryRunTime => isKorean ? '드라이런 시각' : 'Dry-run time';
+  String get readiness => isKorean ? '준비 상태' : 'Readiness';
+  String get ordersRemaining => isKorean ? '남은 주문 수' : 'Orders remaining';
+  String get latestLiveAttempt =>
+      isKorean ? '최근 실거래 시도' : 'Latest live attempt';
+  String get scheduler => isKorean ? '스케줄러' : 'Scheduler';
+  String get promotions => isKorean ? '프로모션' : 'Promotions';
+  String get nextAction => isKorean ? '다음 조치' : 'Next action';
+  String get liveOrdersAllowed => isKorean ? '실주문 허용' : 'Live orders allowed';
+  String get realOrderSubmitAllowed =>
+      isKorean ? '실주문 제출 허용' : 'Real order submit allowed';
+  String get activeProfile => isKorean ? '활성 프로필' : 'Active profile';
+  String get runsToday => isKorean ? '오늘 실행' : 'Runs today';
+  String get nextAllowedRun => isKorean ? '다음 허용 실행' : 'Next allowed run';
+  String get blockReason => isKorean ? '차단 사유' : 'Block reason';
+  String get pendingPromotions => isKorean ? '대기 프로모션' : 'Pending promotions';
+
+  String get noPromotionTraces =>
+      isKorean ? '프로모션 추적이 없습니다.' : 'No promotion traces.';
+  String get score => isKorean ? '점수' : 'Score';
+  String get confidence => isKorean ? '신뢰도' : 'Confidence';
+  String get proposed => isKorean ? '제안 금액' : 'Proposed';
+  String get maxNotional => isKorean ? '최대 금액' : 'Max notional';
+  String get qty => isKorean ? '수량' : 'Qty';
+  String get price => isKorean ? '가격' : 'Price';
+  String get expires => isKorean ? '만료' : 'Expires';
+  String get age => isKorean ? '경과' : 'Age';
+  String get liveAttempt => isKorean ? '실거래 시도' : 'Live attempt';
+  String get order => isKorean ? '주문' : 'Order';
+  String get sync => isKorean ? '동기화' : 'Sync';
+  String get review => isKorean ? '검토' : 'Review';
+  String get action => isKorean ? '동작' : 'Action';
+  String get reason => isKorean ? '사유' : 'Reason';
+  String get summary => isKorean ? '요약' : 'Summary';
+  String get riskNote => isKorean ? '위험 메모' : 'Risk note';
+  String get dryRunIds => isKorean ? '드라이런 ID' : 'Dry-run IDs';
+  String get riskFlags => isKorean ? '위험 사유' : 'Risk flags';
+  String get gates => isKorean ? '게이트' : 'Gates';
+  String get warning => isKorean ? '경고' : 'Warning';
+  String get checklist => isKorean ? '체크리스트' : 'Checklist';
+  String get conversion => isKorean ? '전환' : 'Conversion';
+  String get lastSync => isKorean ? '마지막 동기화' : 'Last sync';
+  String get trace => isKorean ? '추적' : 'Trace';
+  String get markReviewed => isKorean ? '검토 완료 표시' : 'Mark Reviewed';
+  String get dismiss => isKorean ? '제외' : 'Dismiss';
+  String get convertViaGuardedLiveBuy =>
+      isKorean ? '보호된 실매수로 전환' : 'Convert via Guarded Live Buy';
+  String get converted => isKorean ? '전환됨' : 'CONVERTED';
+  String get promotionExpiredWarning => isKorean
+      ? '프로모션이 만료되었거나 오래되어 전환이 차단되었습니다.'
+      : 'Promotion is expired or stale. Conversion is blocked.';
+  String convertPromotionConfirm(String symbol) => isKorean
+      ? '$symbol 후보를 기존 보호된 실매수 엔드포인트로 전환합니다. 이 프로모션은 주문이 아니며 스케줄러는 아무 주문도 제출하지 않습니다.'
+      : 'Convert $symbol via the existing guarded live auto-buy endpoint. This promotion is not an order and the scheduler will not submit anything.';
+
+  List<String> get schedulerSafetyBadges => [
+        dryRunOnly,
+        promotionQueueOnly,
+        noLiveOrders,
+        schedulerRealOrdersDisabled,
+        noValidationInScheduler,
+        noBrokerSubmitInScheduler,
+      ];
+
+  List<String> get promotionSafetyBadges => [
+        promotionOnly,
+        reviewRequired,
+        notAnOrder,
+        noBrokerSubmit,
+        liveConversionRequiresFinalConfirmation,
+        schedulerRealOrdersDisabled,
+      ];
+
+  List<String> get autoBuyOperationsBadges => [
+        autoBuyOps,
+        dryRunEvidenceRequired,
+        targetRiskGated,
+        kisValidationRequired,
+        oneShotLiveBuy,
+        scheduledDryRun,
+        promotionOnly,
+        noLiveScheduler,
+        noAutoRetry,
+      ];
+
+  String brokerName(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'kis' ||
+        normalized == 'korea investment' ||
+        normalized == '한국투자증권') {
+      return kisBroker;
+    }
+    if (normalized == 'alpaca' || normalized == '알파카') {
+      return alpacaBroker;
+    }
+    return value;
+  }
+
+  String statusLabel(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized.isEmpty) return '-';
+    final ko = <String, String>{
+      'pending': '대기 중',
+      'pending_confirmation': '확인 대기',
+      'review_required': '검토 필요',
+      'reviewed': '검토 완료',
+      'acknowledged': '확인됨',
+      'dismissed': '제외됨',
+      'converted': '실거래 전환됨',
+      'expired': '만료됨',
+      'stale': '오래된 후보',
+      'blocked': '차단됨',
+      'skipped': '건너뜀',
+      'submitted': '제출됨',
+      'filled': '체결됨',
+      'rejected': '거절됨',
+      'sync_required': '동기화 필요',
+      'would_buy': '매수 후보',
+      'hold': '보류',
+      'ready': '준비됨',
+      'ready_for_operator_confirm': '운영자 확인 준비',
+      'submitted_today': '오늘 제출됨',
+      'dry_run_simulated': '드라이런 시뮬레이션',
+      'none': '없음',
+      'buy': '매수',
+      'sell': '매도',
+      'enabled': '활성',
+      'disabled': '비활성',
+    };
+    if (isKorean) {
+      return ko[normalized] ?? normalized.replaceAll('_', ' ');
+    }
+    return normalized.replaceAll('_', ' ').toUpperCase();
+  }
+
+  String booleanLabel(bool value) => value ? yes : no;
+}

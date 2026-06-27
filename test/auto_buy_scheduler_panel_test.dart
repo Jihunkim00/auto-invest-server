@@ -26,14 +26,14 @@ void main() {
 
     expect(
         find.byKey(const ValueKey('auto-buy-scheduler-panel')), findsOneWidget);
-    expect(find.text('Auto Buy Scheduler'), findsOneWidget);
-    expect(find.text('DRY-RUN ONLY'), findsOneWidget);
-    expect(find.text('PROMOTION QUEUE ONLY'), findsOneWidget);
-    expect(find.text('NO LIVE ORDERS'), findsOneWidget);
-    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsOneWidget);
-    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
-    expect(find.text('Refresh Scheduler Status'), findsOneWidget);
-    expect(find.text('Run Dry-Run Once'), findsOneWidget);
+    expect(find.text('자동매수 스케줄러'), findsOneWidget);
+    expect(find.text('드라이런 전용'), findsWidgets);
+    expect(find.text('프로모션 목록 전용'), findsWidgets);
+    expect(find.text('실주문 없음'), findsOneWidget);
+    expect(find.text('스케줄러 실주문 비활성화'), findsOneWidget);
+    expect(find.text('드라이런 스케줄러 켜기'), findsOneWidget);
+    expect(find.text('스케줄러 상태 새로고침'), findsOneWidget);
+    expect(find.text('드라이런 1회 실행'), findsOneWidget);
     expect(find.text('Enable Live Scheduler'), findsNothing);
     expect(find.text('Run Live Buy'), findsNothing);
     expect(find.text('Submit Order'), findsNothing);
@@ -88,8 +88,8 @@ void main() {
       {'strategy_auto_buy_scheduler_enabled': true},
     ]);
     expect(api.schedulerEnabled, isTrue);
-    expect(find.text('Disable Scheduler'), findsOneWidget);
-    expect(find.text('Enable Dry-Run Scheduler'), findsNothing);
+    expect(find.text('스케줄러 끄기'), findsOneWidget);
+    expect(find.text('드라이런 스케줄러 켜기'), findsNothing);
 
     controller.dispose();
   });
@@ -105,7 +105,7 @@ void main() {
       home: Scaffold(body: AutoBuySchedulerPanel(controller: controller)),
     ));
 
-    expect(find.text('Disable Scheduler'), findsOneWidget);
+    expect(find.text('스케줄러 끄기'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('disable-scheduler-button')));
     await tester.pumpAndSettle();
 
@@ -113,7 +113,7 @@ void main() {
       {'strategy_auto_buy_scheduler_enabled': false},
     ]);
     expect(api.schedulerEnabled, isFalse);
-    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
+    expect(find.text('드라이런 스케줄러 켜기'), findsOneWidget);
 
     controller.dispose();
   });
@@ -139,8 +139,8 @@ void main() {
     ]);
     expect(api.statusCalls, 2);
     expect(controller.strategyAutoBuySchedulerStatus?.enabled, isFalse);
-    expect(find.text('Enable Dry-Run Scheduler'), findsOneWidget);
-    expect(find.text('Disable Scheduler'), findsNothing);
+    expect(find.text('드라이런 스케줄러 켜기'), findsOneWidget);
+    expect(find.text('스케줄러 끄기'), findsNothing);
 
     controller.dispose();
   });

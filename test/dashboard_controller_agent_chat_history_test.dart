@@ -207,6 +207,8 @@ class _AgentChatHistoryFakeApi extends ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     chatSendCalls += 1;
     chatConversationKey = conversationKey;

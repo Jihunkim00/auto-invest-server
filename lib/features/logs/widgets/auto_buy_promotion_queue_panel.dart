@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/i18n/app_strings.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../models/strategy_auto_buy_promotion.dart';
 import '../../dashboard/dashboard_controller.dart';
@@ -14,6 +15,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final strings = controller.strings;
         final loading = controller.strategyAutoBuyPromotionsLoading ||
             controller.strategyLiveAutoBuyLoading;
         final items = controller.strategyAutoBuyPromotions;
@@ -40,16 +42,16 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Auto Buy Promotion Queue',
-                            style: TextStyle(
+                          Text(
+                            strings.autoBuyPromotionQueue,
+                            style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            '${items.length} promotion trace${items.length == 1 ? '' : 's'}',
+                            strings.promotionTraceCount(items.length),
                             style: const TextStyle(color: Colors.white70),
                           ),
                         ],
@@ -57,7 +59,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                     ),
                     IconButton(
                       key: const ValueKey('refresh-promotions-button'),
-                      tooltip: 'Refresh Promotions',
+                      tooltip: strings.refreshPromotions,
                       onPressed: loading
                           ? null
                           : () => _refresh(context, showSnack: true),
@@ -66,16 +68,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                const _BadgeWrap(
-                  badges: [
-                    'PROMOTION ONLY',
-                    'REVIEW REQUIRED',
-                    'NOT AN ORDER',
-                    'NO BROKER SUBMIT',
-                    'LIVE CONVERSION REQUIRES FINAL CONFIRMATION',
-                    'SCHEDULER REAL ORDERS DISABLED',
-                  ],
-                ),
+                _BadgeWrap(badges: strings.promotionSafetyBadges),
                 if (controller.strategyAutoBuyPromotionsError != null) ...[
                   const SizedBox(height: 10),
                   Text(
@@ -98,15 +91,15 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                           ? null
                           : () => _refresh(context, showSnack: true),
                       icon: const Icon(Icons.refresh, size: 18),
-                      label: const Text('Refresh Promotions'),
+                      label: Text(strings.refreshPromotions),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
                 if (items.isEmpty)
-                  const Text(
-                    'No promotion traces.',
-                    style: TextStyle(color: Colors.white70),
+                  Text(
+                    strings.noPromotionTraces,
+                    style: const TextStyle(color: Colors.white70),
                   )
                 else
                   Column(
@@ -116,6 +109,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                           padding: const EdgeInsets.only(bottom: 10),
                           child: _PromotionTile(
                             promotion: item,
+                            strings: strings,
                             loading: loading,
                             liveReady: controller
                                     .strategyAutoBuyOperationsStatus
@@ -172,23 +166,24 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
     BuildContext context,
     StrategyAutoBuyPromotion promotion,
   ) async {
+    final strings = controller.strings;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         key: const ValueKey('promotion-live-confirm-dialog'),
-        title: const Text('LIVE CONVERSION REQUIRES FINAL CONFIRMATION'),
+        title: Text(strings.liveConversionRequiresFinalConfirmation),
         content: Text(
-          'Convert ${promotion.symbol ?? '-'} via the existing guarded live auto-buy endpoint. This promotion is not an order and the scheduler will not submit anything.',
+          strings.convertPromotionConfirm(promotion.symbol ?? '-'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(strings.cancel),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.verified_user_outlined),
-            label: const Text('Convert via Guarded Live Buy'),
+            label: Text(strings.convertViaGuardedLiveBuy),
           ),
         ],
       ),
@@ -211,6 +206,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
 class _PromotionTile extends StatelessWidget {
   const _PromotionTile({
     required this.promotion,
+    required this.strings,
     required this.loading,
     required this.liveReady,
     required this.onMarkReviewed,
@@ -219,6 +215,7 @@ class _PromotionTile extends StatelessWidget {
   });
 
   final StrategyAutoBuyPromotion promotion;
+  final AppStrings strings;
   final bool loading;
   final bool liveReady;
   final VoidCallback onMarkReviewed;
@@ -230,8 +227,9 @@ class _PromotionTile extends StatelessWidget {
     final score = promotion.finalScore ?? promotion.buyScore;
     final canConvert = promotion.canRunGuardedLive && liveReady;
     final converted = promotion.isConverted;
-    final reviewLabel =
-        (promotion.reviewStatus ?? promotion.status).replaceAll('_', ' ');
+    final reviewLabel = strings.statusLabel(
+      promotion.reviewStatus ?? promotion.status,
+    );
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -259,7 +257,9 @@ class _PromotionTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                converted ? 'CONVERTED' : promotion.status.toUpperCase(),
+                converted
+                    ? strings.converted
+                    : strings.statusLabel(promotion.status),
                 style: const TextStyle(
                   color: Colors.amberAccent,
                   fontSize: 11,
@@ -273,13 +273,13 @@ class _PromotionTile extends StatelessWidget {
             spacing: 12,
             runSpacing: 6,
             children: [
-              _Metric(label: 'Score', value: _number(score)),
+              _Metric(label: strings.score, value: _number(score)),
               _Metric(
-                label: 'Confidence',
+                label: strings.confidence,
                 value: _number(promotion.confidence),
               ),
               _Metric(
-                label: 'Proposed',
+                label: strings.proposed,
                 value: _money(
                   promotion.proposedNotionalKrw ??
                       promotion.recommendedNotionalKrw ??
@@ -287,19 +287,19 @@ class _PromotionTile extends StatelessWidget {
                 ),
               ),
               _Metric(
-                label: 'Max notional',
+                label: strings.maxNotional,
                 value: _money(promotion.maxNotionalKrw),
               ),
               _Metric(
-                label: 'Qty',
+                label: strings.qty,
                 value: _number(promotion.simulatedQuantity),
               ),
               _Metric(
-                label: 'Price',
+                label: strings.price,
                 value: _money(promotion.simulatedPrice),
               ),
               _Metric(
-                label: 'Expires',
+                label: strings.expires,
                 value: promotion.expiresAt == null
                     ? '-'
                     : formatTimestampWithKst(
@@ -307,96 +307,98 @@ class _PromotionTile extends StatelessWidget {
                       ),
               ),
               _Metric(
-                label: 'Age',
+                label: strings.age,
                 value: promotion.promotionAgeMinutes == null
                     ? '-'
                     : '${_number(promotion.promotionAgeMinutes)} min',
               ),
               if (promotion.liveAttemptId != null)
                 _Metric(
-                  label: 'Live attempt',
+                  label: strings.liveAttempt,
                   value: promotion.liveAttemptId.toString(),
                 ),
               if (promotion.liveOrderId != null)
                 _Metric(
-                  label: 'Order',
+                  label: strings.order,
                   value: promotion.liveOrderId.toString(),
                 ),
               if (promotion.lastSyncStatus != null)
                 _Metric(
-                  label: 'Sync',
-                  value: promotion.lastSyncStatus!.toUpperCase(),
+                  label: strings.sync,
+                  value: strings.statusLabel(promotion.lastSyncStatus!),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           _DetailRow(
-            label: 'Review',
-            value: promotion.reviewRequired
-                ? 'REVIEW REQUIRED'
-                : reviewLabel.toUpperCase(),
+            label: strings.review,
+            value:
+                promotion.reviewRequired ? strings.reviewRequired : reviewLabel,
           ),
           _DetailRow(
-            label: 'Action',
-            value: promotion.dryRunAction ?? '-',
+            label: strings.action,
+            value: promotion.dryRunAction == null
+                ? '-'
+                : strings.statusLabel(promotion.dryRunAction!),
           ),
           _DetailRow(
-            label: 'Reason',
+            label: strings.reason,
             value: promotion.promotionReason ?? promotion.blockReason ?? '-',
           ),
           if (promotion.reviewSummary != null)
             _DetailRow(
-              label: 'Summary',
+              label: strings.summary,
               value: promotion.reviewSummary!,
             ),
           if (promotion.primaryRiskNote != null)
             _DetailRow(
-              label: 'Risk note',
+              label: strings.riskNote,
               value: promotion.primaryRiskNote!,
             ),
           _DetailRow(
-            label: 'Dry-run IDs',
+            label: strings.dryRunIds,
             value:
                 'signal ${promotion.sourceDryRunSignalId ?? '-'} / run ${promotion.sourceDryRunTradeRunId ?? '-'} / order ${promotion.sourceDryRunOrderId ?? '-'}',
           ),
           if (promotion.riskFlags.isNotEmpty)
             _DetailRow(
-                label: 'Risk flags', value: promotion.riskFlags.join(', ')),
+                label: strings.riskFlags,
+                value: promotion.riskFlags.join(', ')),
           if (promotion.gatingNotes.isNotEmpty)
             _DetailRow(
-                label: 'Gates', value: promotion.gatingNotes.join(' | ')),
+                label: strings.gates, value: promotion.gatingNotes.join(' | ')),
           if (promotion.isExpired)
-            const _DetailRow(
-              label: 'Warning',
-              value: 'Promotion is expired or stale. Conversion is blocked.',
+            _DetailRow(
+              label: strings.warning,
+              value: strings.promotionExpiredWarning,
             ),
           if (promotion.conversionBlockReason != null)
             _DetailRow(
-              label: 'Blocked',
+              label: strings.blocked,
               value: promotion.conversionBlockReason!,
             ),
           if (promotion.reviewChecklist.isNotEmpty)
             _DetailRow(
-              label: 'Checklist',
+              label: strings.checklist,
               value: promotion.reviewChecklist
                   .map((item) => '${item.ok ? 'OK' : 'BLOCK'} ${item.label}')
                   .join(' | '),
             ),
           if (promotion.conversionStatus != null)
             _DetailRow(
-              label: 'Conversion',
-              value: promotion.conversionStatus!,
+              label: strings.conversion,
+              value: strings.statusLabel(promotion.conversionStatus!),
             ),
           if (promotion.lastSyncAt != null)
             _DetailRow(
-              label: 'Last sync',
+              label: strings.lastSync,
               value: formatTimestampWithKst(
                 promotion.lastSyncAt!.toIso8601String(),
               ),
             ),
           if (promotion.tracePayload.isNotEmpty)
             _DetailRow(
-              label: 'Trace',
+              label: strings.trace,
               value:
                   'promotion ${promotion.tracePayload['promotion_id'] ?? promotion.id} / dry-run ${promotion.tracePayload['source_dry_run_id'] ?? promotion.sourceDryRunTradeRunId ?? '-'} / attempt ${promotion.liveAttemptId ?? '-'} / order ${promotion.liveOrderId ?? '-'}',
             ),
@@ -411,7 +413,7 @@ class _PromotionTile extends StatelessWidget {
                     ? null
                     : onMarkReviewed,
                 icon: const Icon(Icons.visibility_outlined, size: 18),
-                label: const Text('Mark Reviewed'),
+                label: Text(strings.markReviewed),
               ),
               OutlinedButton.icon(
                 key: ValueKey('dismiss-promotion-${promotion.id}'),
@@ -419,7 +421,7 @@ class _PromotionTile extends StatelessWidget {
                     ? null
                     : onDismiss,
                 icon: const Icon(Icons.close, size: 18),
-                label: const Text('Dismiss'),
+                label: Text(strings.dismiss),
               ),
               if (promotion.canRunGuardedLive)
                 FilledButton.icon(
@@ -428,7 +430,7 @@ class _PromotionTile extends StatelessWidget {
                   ),
                   onPressed: loading || !canConvert ? null : onConvert,
                   icon: const Icon(Icons.verified_user_outlined, size: 18),
-                  label: const Text('Convert via Guarded Live Buy'),
+                  label: Text(strings.convertViaGuardedLiveBuy),
                 ),
             ],
           ),
