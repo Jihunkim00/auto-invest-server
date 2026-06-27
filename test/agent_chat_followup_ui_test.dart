@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/dashboard/widgets/agent_chat_full_panel.dart';
@@ -12,7 +13,11 @@ void main() {
       'follow-up suggestion chip sends the suggestion through chat send',
       (tester) async {
     final api = _FollowUpFakeApiClient();
-    final controller = DashboardController(api, autoload: false)
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    )
       ..agentChatMode = AgentChatPanelMode.fullscreen
       ..activeAgentConversationKey = 'conv_followup_pr65'
       ..agentMessages = [
@@ -80,6 +85,8 @@ class _FollowUpFakeApiClient extends ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     sentMessages.add(message);
     sentConversationKeys.add(conversationKey);

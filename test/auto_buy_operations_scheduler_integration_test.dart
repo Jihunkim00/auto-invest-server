@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/widgets/auto_buy_operations_panel.dart';
@@ -17,7 +18,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _OperationsSchedulerApiClient();
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    );
     await controller.refreshStrategyAutoBuyOperations(silent: true);
 
     await tester.pumpWidget(MaterialApp(
@@ -30,7 +35,7 @@ void main() {
     expect(find.text('SCHEDULED DRY RUN'), findsOneWidget);
     expect(find.text('PROMOTION ONLY'), findsOneWidget);
     expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
-    expect(find.textContaining('1 pending'), findsOneWidget);
+    expect(find.textContaining('1 PENDING'), findsOneWidget);
 
     controller.dispose();
   });

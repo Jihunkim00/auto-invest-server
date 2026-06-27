@@ -9,19 +9,20 @@ class GlobalBrokerSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = controller.strings;
     return SegmentedButton<SelectedProvider>(
       key: const ValueKey('global-broker-selector'),
       showSelectedIcon: false,
-      segments: const [
+      segments: [
         ButtonSegment(
           value: SelectedProvider.alpaca,
-          label: Text('Alpaca'),
-          icon: Icon(Icons.public, size: 16),
+          label: Text(strings.alpacaBroker),
+          icon: const Icon(Icons.public, size: 16),
         ),
         ButtonSegment(
           value: SelectedProvider.kis,
-          label: Text('KIS'),
-          icon: Icon(Icons.account_balance, size: 16),
+          label: Text(strings.kisBroker),
+          icon: const Icon(Icons.account_balance, size: 16),
         ),
       ],
       selected: {controller.selectedProvider},
@@ -39,6 +40,7 @@ class BrokerContextBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isKis = controller.selectedProvider == SelectedProvider.kis;
+    final strings = controller.strings;
     final color = isKis ? Colors.redAccent : Colors.lightBlueAccent;
     return Container(
       key: const ValueKey('selected-broker-context-badge'),
@@ -49,7 +51,7 @@ class BrokerContextBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.38)),
       ),
       child: Text(
-        isKis ? 'KIS / KR' : 'Alpaca / US',
+        isKis ? strings.kisBrokerMarket : strings.alpacaBrokerMarket,
         style: TextStyle(
           color: color,
           fontSize: 12,

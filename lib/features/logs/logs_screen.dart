@@ -85,6 +85,7 @@ class _LogsScreenState extends State<LogsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = widget.controller.strings;
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _loadLogs,
@@ -93,16 +94,19 @@ class _LogsScreenState extends State<LogsScreen> {
           children: [
             Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Logs',
-                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+                    strings.logs,
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 BrokerContextBadge(controller: widget.controller),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Refresh logs',
+                  tooltip: '${strings.refresh} ${strings.logs}',
                   onPressed: _loading ? null : _loadLogs,
                   icon: const Icon(Icons.refresh),
                 ),
@@ -111,8 +115,8 @@ class _LogsScreenState extends State<LogsScreen> {
             const SizedBox(height: 6),
             Text(
               widget.controller.selectedProvider == SelectedProvider.kis
-                  ? 'Showing KIS / KR activity first.'
-                  : 'Showing Alpaca / US activity first.',
+                  ? strings.logsKisSubtitle
+                  : strings.logsAlpacaSubtitle,
               style: const TextStyle(color: Colors.white70),
             ),
             const SizedBox(height: 12),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/i18n/app_strings.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../dashboard/dashboard_controller.dart';
 import '../../../models/strategy_auto_buy_operations.dart';
@@ -14,6 +15,7 @@ class AutoBuyOperationsPanel extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final strings = controller.strings;
         final status = controller.strategyAutoBuyOperationsStatus;
         final loading = controller.strategyAutoBuyOperationsLoading ||
             controller.strategyDryRunAutoBuyLoading ||
@@ -39,9 +41,9 @@ class AutoBuyOperationsPanel extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Auto Buy Operations',
-                          style: TextStyle(
+                        Text(
+                          strings.autoBuyOperations,
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w900,
                           ),
@@ -49,8 +51,8 @@ class AutoBuyOperationsPanel extends StatelessWidget {
                         const SizedBox(height: 3),
                         Text(
                           status == null
-                              ? 'Status not loaded'
-                              : '${_label(status.autoBuyStage)} / ${_label(status.nextOperatorAction)}',
+                              ? strings.statusNotLoaded
+                              : '${strings.statusLabel(status.autoBuyStage)} / ${strings.statusLabel(status.nextOperatorAction)}',
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ],
@@ -58,7 +60,7 @@ class AutoBuyOperationsPanel extends StatelessWidget {
                   ),
                   IconButton(
                     key: const ValueKey('refresh-auto-buy-status-button'),
-                    tooltip: 'Refresh Auto Buy Status',
+                    tooltip: strings.refreshAutoBuyStatus,
                     onPressed: loading
                         ? null
                         : () => _refresh(context, showSnack: true),
@@ -67,19 +69,7 @@ class AutoBuyOperationsPanel extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              const _BadgeWrap(
-                badges: [
-                  'AUTO BUY OPS',
-                  'DRY RUN EVIDENCE REQUIRED',
-                  'TARGET RISK GATED',
-                  'KIS VALIDATION REQUIRED',
-                  'ONE SHOT LIVE BUY',
-                  'SCHEDULED DRY RUN',
-                  'PROMOTION ONLY',
-                  'NO LIVE SCHEDULER',
-                  'NO AUTO RETRY',
-                ],
-              ),
+              _BadgeWrap(badges: strings.autoBuyOperationsBadges),
               if (controller.strategyAutoBuyOperationsError != null) ...[
                 const SizedBox(height: 10),
                 Text(
@@ -93,11 +83,12 @@ class AutoBuyOperationsPanel extends StatelessWidget {
               ],
               if (status != null) ...[
                 const SizedBox(height: 12),
-                _StatusGrid(status: status),
+                _StatusGrid(status: status, strings: strings),
                 const SizedBox(height: 12),
                 _ActionRow(
                   loading: loading,
                   status: status,
+                  strings: strings,
                   onRefresh: () => _refresh(context, showSnack: true),
                   onDryRun: () => _runDryRun(context),
                   onLiveRun: () => _confirmLiveRun(context, status),
@@ -130,23 +121,24 @@ class AutoBuyOperationsPanel extends StatelessWidget {
     BuildContext context,
     StrategyAutoBuyOperationsStatus status,
   ) async {
+    final strings = controller.strings;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         key: const ValueKey('auto-buy-live-confirm-dialog'),
-        title: const Text('Confirm Guarded Live Auto Buy'),
+        title: Text(strings.confirmGuardedLiveAutoBuy),
         content: Text(
-          'Profile ${status.activeProfile ?? '-'} is ready for a one-shot guarded live buy.',
+          strings.guardedLiveAutoBuyReady(status.activeProfile ?? '-'),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+            child: Text(strings.cancel),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.check_circle_outline),
-            label: const Text('Run Guarded Live Auto Buy Once'),
+            label: Text(strings.runGuardedLiveAutoBuyOnce),
           ),
         ],
       ),
@@ -169,9 +161,10 @@ class AutoBuyOperationsPanel extends StatelessWidget {
 }
 
 class _StatusGrid extends StatelessWidget {
-  const _StatusGrid({required this.status});
+  const _StatusGrid({required this.status, required this.strings});
 
   final StrategyAutoBuyOperationsStatus status;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
@@ -179,55 +172,56 @@ class _StatusGrid extends StatelessWidget {
     return Column(
       children: [
         _InfoRow(
-          label: 'Stage',
-          value: _label(status.autoBuyStage),
+          label: strings.stage,
+          value: strings.statusLabel(status.autoBuyStage),
           valueColor: _stageColor(status.autoBuyStage),
         ),
         _InfoRow(
-          label: 'Latest dry-run',
+          label: strings.latestDryRun,
           value:
-              '${status.dryRun.latestAction ?? 'none'} / ${status.dryRun.latestSymbol ?? '-'}',
+              '${strings.statusLabel(status.dryRun.latestAction ?? 'none')} / ${status.dryRun.latestSymbol ?? '-'}',
         ),
         _InfoRow(
-          label: 'Dry-run score',
+          label: strings.dryRunScore,
           value: status.dryRun.latestScore?.toStringAsFixed(1) ?? '-',
         ),
         _InfoRow(
-          label: 'Dry-run time',
+          label: strings.dryRunTime,
           value: latestTime == null
               ? '-'
               : formatTimestampWithKst(latestTime.toIso8601String()),
         ),
         _InfoRow(
-          label: 'Readiness',
+          label: strings.readiness,
           value: status.liveReadiness.ready
-              ? 'READY'
-              : status.liveReadiness.primaryBlockReason ?? 'BLOCKED',
+              ? strings.ready
+              : status.liveReadiness.primaryBlockReason ?? strings.blocked,
           valueColor: status.liveReadiness.ready
               ? Colors.greenAccent
               : Colors.orangeAccent,
         ),
         _InfoRow(
-          label: 'Orders remaining',
+          label: strings.ordersRemaining,
           value: '${status.liveReadiness.ordersRemainingToday}',
         ),
         _InfoRow(
-          label: 'Latest live attempt',
-          value: status.liveAttempts.latestStatus ?? 'none',
-        ),
-        _InfoRow(
-          label: 'Scheduler',
+          label: strings.latestLiveAttempt,
           value:
-              '${status.scheduler.enabled ? 'ENABLED' : 'DISABLED'} / ${status.scheduler.runsToday}/${status.scheduler.maxRunsPerDay}',
+              strings.statusLabel(status.liveAttempts.latestStatus ?? 'none'),
         ),
         _InfoRow(
-          label: 'Promotions',
+          label: strings.scheduler,
           value:
-              '${status.promotions.pendingCount} pending / ${status.promotions.latestStatus ?? 'none'}',
+              '${status.scheduler.enabled ? strings.enabled : strings.disabled} / ${status.scheduler.runsToday}/${status.scheduler.maxRunsPerDay}',
         ),
         _InfoRow(
-          label: 'Next action',
-          value: _label(status.nextOperatorAction),
+          label: strings.promotions,
+          value:
+              '${status.promotions.pendingCount} ${strings.statusLabel('pending')} / ${strings.statusLabel(status.promotions.latestStatus ?? 'none')}',
+        ),
+        _InfoRow(
+          label: strings.nextAction,
+          value: strings.statusLabel(status.nextOperatorAction),
           valueColor: Colors.lightBlueAccent,
         ),
       ],
@@ -239,6 +233,7 @@ class _ActionRow extends StatelessWidget {
   const _ActionRow({
     required this.loading,
     required this.status,
+    required this.strings,
     required this.onRefresh,
     required this.onDryRun,
     required this.onLiveRun,
@@ -246,6 +241,7 @@ class _ActionRow extends StatelessWidget {
 
   final bool loading;
   final StrategyAutoBuyOperationsStatus status;
+  final AppStrings strings;
   final VoidCallback onRefresh;
   final VoidCallback onDryRun;
   final VoidCallback onLiveRun;
@@ -260,19 +256,19 @@ class _ActionRow extends StatelessWidget {
           key: const ValueKey('auto-buy-status-refresh-action'),
           onPressed: loading ? null : onRefresh,
           icon: const Icon(Icons.refresh, size: 18),
-          label: const Text('Refresh Auto Buy Status'),
+          label: Text(strings.refreshAutoBuyStatus),
         ),
         OutlinedButton.icon(
           key: const ValueKey('run-dry-run-auto-buy-once-button'),
           onPressed: loading ? null : onDryRun,
           icon: const Icon(Icons.science_outlined, size: 18),
-          label: const Text('Run Dry-Run Auto Buy Once'),
+          label: Text(strings.runDryRunAutoBuyOnce),
         ),
         FilledButton.icon(
           key: const ValueKey('run-guarded-live-auto-buy-once-button'),
           onPressed: loading || !status.liveReadiness.ready ? null : onLiveRun,
           icon: const Icon(Icons.verified_user_outlined, size: 18),
-          label: const Text('Run Guarded Live Auto Buy Once'),
+          label: Text(strings.runGuardedLiveAutoBuyOnce),
         ),
       ],
     );
@@ -354,10 +350,6 @@ class _BadgeWrap extends StatelessWidget {
       ],
     );
   }
-}
-
-String _label(String value) {
-  return value.replaceAll('_', ' ').toUpperCase();
 }
 
 Color _stageColor(String stage) {

@@ -29,11 +29,11 @@ void main() {
 
     expect(api.operationsCalls, 1);
     expect(api.recentRunsLimit, 50);
-    expect(find.text('Logs'), findsOneWidget);
-    expect(find.text('Auto Buy Operations'), findsOneWidget);
-    expect(find.text('AUTO BUY OPS'), findsOneWidget);
-    expect(find.text('Run Dry-Run Auto Buy Once'), findsOneWidget);
-    expect(find.text('Run Guarded Live Auto Buy Once'), findsOneWidget);
+    expect(find.text('기록'), findsOneWidget);
+    expect(find.text('자동매수 운영'), findsWidgets);
+    expect(find.text('자동매수 운영'), findsWidgets);
+    expect(find.text('드라이런 자동매수 1회 실행'), findsOneWidget);
+    expect(find.text('보호된 실매수 1회 실행'), findsOneWidget);
     expect(find.text('Enable Scheduler'), findsNothing);
     expect(find.text('Turn Off Dry Run'), findsNothing);
     expect(find.text('Disable Kill Switch'), findsNothing);

@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.agent_chat_tool import (
     AgentChatResultCard,
@@ -109,6 +109,34 @@ class AgentChatSendRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     context: AgentChatContext | dict[str, Any] = Field(default_factory=AgentChatContext)
     auto_create_conversation: bool = True
+    language: str = Field(default="ko", max_length=10)
+    locale: str = Field(default="ko-KR", max_length=20)
+
+    @field_validator("language", mode="before")
+    @classmethod
+    def normalize_language(cls, value: Any) -> str:
+        normalized = str(value or "").strip().lower()
+        if normalized in {"en", "en-us", "english"}:
+            return "en"
+        return "ko"
+
+    @field_validator("locale", mode="before")
+    @classmethod
+    def normalize_locale(cls, value: Any) -> str:
+        normalized = str(value or "").strip().lower().replace("_", "-")
+        if normalized.startswith("en"):
+            return "en-US"
+        return "ko-KR"
+
+    @model_validator(mode="after")
+    def align_locale_with_language(self) -> "AgentChatSendRequest":
+        if self.language == "en" or self.locale == "en-US":
+            self.language = "en"
+            self.locale = "en-US"
+        else:
+            self.language = "ko"
+            self.locale = "ko-KR"
+        return self
 
     def context_dict(self) -> dict[str, Any]:
         if isinstance(self.context, AgentChatContext):
@@ -165,6 +193,8 @@ class AgentChatSafetyFlags(BaseModel):
 
 class AgentChatSendResponse(BaseModel):
     conversation_key: str
+    language: str = "ko"
+    locale: str = "ko-KR"
     user_message_id: int | None = None
     assistant_message_id: int | None = None
     intent: AgentChatIntent

@@ -51,6 +51,7 @@ class DashboardScreen extends StatelessWidget {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
+        final strings = controller.strings;
         return SafeArea(
           child: Stack(
             children: [
@@ -63,10 +64,10 @@ class DashboardScreen extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            'Home',
-                            style: TextStyle(
+                            strings.home,
+                            style: const TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.w700,
                             ),
@@ -78,8 +79,8 @@ class DashboardScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       controller.selectedProvider == SelectedProvider.kis
-                          ? 'KIS account, manual live safety, and recent KR activity.'
-                          : 'Alpaca paper portfolio, watchlist status, and recent US activity.',
+                          ? strings.homeKisSubtitle
+                          : strings.homeAlpacaSubtitle,
                       style: const TextStyle(color: Colors.white70),
                     ),
                     const SizedBox(height: 14),

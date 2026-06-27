@@ -73,6 +73,9 @@ class AgentChatOrchestratorService:
 
     def send(self, db: Session, *, request: AgentChatSendRequest) -> dict[str, Any]:
         context = request.context_dict()
+        context["language"] = request.language
+        context["locale"] = request.locale
+        context["language_instruction"] = self._language_instruction(request.language)
         conversation_key = self._resolve_conversation_key(db, request=request)
         previous_context = self.context_service.load_context(
             db,
@@ -90,6 +93,9 @@ class AgentChatOrchestratorService:
                 "metadata": {
                     "source": str(context.get("source") or "api"),
                     "conversation_title": request.message,
+                    "language": request.language,
+                    "locale": request.locale,
+                    "language_instruction": context["language_instruction"],
                 },
             },
         )["message"]
@@ -130,6 +136,9 @@ class AgentChatOrchestratorService:
             answer=answer,
             action=action,
         )
+        diagnostics["language"] = request.language
+        diagnostics["locale"] = request.locale
+        diagnostics["language_instruction"] = context["language_instruction"]
         assistant_message = self.chat_service.append_message(
             db,
             conversation_key=conversation_key,
@@ -170,6 +179,8 @@ class AgentChatOrchestratorService:
 
         response = AgentChatSendResponse(
             conversation_key=conversation_key,
+            language=request.language,
+            locale=request.locale,
             user_message_id=user_message.get("id"),
             assistant_message_id=assistant_message.get("id"),
             intent=intent,
@@ -831,6 +842,11 @@ class AgentChatOrchestratorService:
             "tool_count": len(action.get("tool_results") or []),
             "result_card_count": len(action.get("result_cards") or []),
         }
+
+    def _language_instruction(self, language: str) -> str:
+        if language == "en":
+            return "Respond in English. Do not translate tickers, IDs, enum values, indicators, or broker API field names."
+        return "Respond in Korean. Do not translate tickers, IDs, enum values, indicators, or broker API field names."
 
     def _contains_mojibake_marker(self, text: str) -> bool:
         markers = tuple(chr(code) for code in (0x00EC, 0x00EB, 0x00EA, 0xFFFD, 0xCC59, 0xCC58, 0xCC57))

@@ -107,6 +107,26 @@ def test_agent_chat_send_reuses_existing_conversation(client):
     assert response.json()["intent"]["category"] == "read_only_positions_query"
 
 
+def test_agent_chat_send_accepts_english_language_context(client):
+    response = client.post(
+        "/agent/chat/send",
+        json={
+            "conversation_key": None,
+            "message": "show Samsung price",
+            "context": {"default_market": "KR", "default_provider": "kis"},
+            "language": "en-US",
+            "locale": "en_US",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["language"] == "en"
+    assert payload["locale"] == "en-US"
+    assert payload["diagnostics"]["language"] == "en"
+    assert "Respond in English" in payload["diagnostics"]["language_instruction"]
+
+
 def test_agent_chat_send_invalid_conversation_returns_404(client):
     response = client.post(
         "/agent/chat/send",

@@ -23,6 +23,8 @@ void main() {
         findsNothing);
     expect(find.text('Auto Buy Scheduler'), findsNothing);
     expect(find.text('Auto Buy Promotion Queue'), findsNothing);
+    expect(find.text('자동매수 스케줄러'), findsNothing);
+    expect(find.text('자동매수 프로모션 검토 목록'), findsNothing);
 
     controller.dispose();
   });

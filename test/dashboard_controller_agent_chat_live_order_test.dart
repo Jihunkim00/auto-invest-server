@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_conversation.dart';
@@ -14,8 +15,11 @@ void main() {
       'sendAgentMessage renders pending live order without validation or submit',
       () async {
     final api = _LiveOrderFakeApi();
-    final controller = DashboardController(api, autoload: false)
-      ..kisLiveConfirmation = true;
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    )..kisLiveConfirmation = true;
 
     final result = await controller.sendAgentMessage('Buy Samsung 1 share');
 
@@ -184,6 +188,8 @@ class _LiveOrderFakeApi extends ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     chatSendCalls += 1;
     return AgentChatSendResponse.fromJson({

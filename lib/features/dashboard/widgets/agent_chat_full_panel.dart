@@ -47,6 +47,7 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    final strings = controller.strings;
     return Material(
       color: Colors.black.withValues(alpha: 0.88),
       child: SafeArea(
@@ -67,7 +68,7 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                 controller: _scroll,
                 padding: const EdgeInsets.all(16),
                 children: [
-                  const _SafetyNotice(),
+                  _SafetyNotice(text: strings.agentSafetyNotice),
                   if (_showReadinessCard(controller))
                     AgentChatLiveOrderReadinessCard(
                       readiness: controller.agentChatLiveOrderReadiness,
@@ -80,9 +81,9 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                     ),
                   if (controller.isLoadingAgentHistory) ...[
                     const SizedBox(height: 10),
-                    const Text(
-                      'Loading previous chat...',
-                      style: TextStyle(
+                    Text(
+                      strings.loadingPreviousChat,
+                      style: const TextStyle(
                         color: Colors.lightBlueAccent,
                         fontSize: 12,
                       ),
@@ -140,6 +141,8 @@ class _AgentChatFullPanelState extends State<AgentChatFullPanel> {
                     controller.isAgentRunning ||
                     controller.isAgentPreparingTicket,
                 onSubmitted: _send,
+                hintText: strings.messageAgentHint,
+                sendLabel: strings.send,
               ),
             ),
           ]),
@@ -258,6 +261,7 @@ class _FullToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = controller.strings;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(children: [
@@ -267,36 +271,39 @@ class _FullToolbar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Agent Assistant',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+              Text(
+                strings.agentAssistant,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 2),
               Text(
                 controller.activeAgentConversationKey == null
-                    ? 'Natural language command review'
-                    : 'Conversation ${controller.activeAgentConversationKey}',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ? strings.agentNaturalLanguageReview
+                    : strings.conversationLabel(
+                        controller.activeAgentConversationKey!,
+                      ),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ],
           ),
         ),
-        const Flexible(
+        Flexible(
           child: Wrap(
             alignment: WrapAlignment.end,
             spacing: 6,
             runSpacing: 6,
             children: [
-              _ToolbarBadge(text: 'GPT-BACKED'),
-              _ToolbarBadge(text: 'SAFE MODE'),
-              _ToolbarBadge(text: 'SERVER-SIDE API'),
+              _ToolbarBadge(text: strings.gptBacked),
+              _ToolbarBadge(text: strings.safeMode),
+              _ToolbarBadge(text: strings.serverSideApi),
             ],
           ),
         ),
         const SizedBox(width: 8),
         IconButton(
           key: const ValueKey('agent-chat-full-new-chat'),
-          tooltip: 'New Chat',
+          tooltip: strings.newChat,
           onPressed: () {
             controller.startNewAgentConversation();
           },
@@ -304,7 +311,7 @@ class _FullToolbar extends StatelessWidget {
         ),
         IconButton(
           key: const ValueKey('agent-chat-full-refresh-history'),
-          tooltip: 'Refresh History',
+          tooltip: strings.refreshHistory,
           onPressed: () {
             final key = controller.activeAgentConversationKey;
             if (key == null) {
@@ -317,7 +324,7 @@ class _FullToolbar extends StatelessWidget {
         ),
         IconButton(
           key: const ValueKey('agent-chat-full-archive'),
-          tooltip: 'Archive',
+          tooltip: strings.archive,
           onPressed: () {
             controller.archiveAgentConversation();
           },
@@ -325,19 +332,19 @@ class _FullToolbar extends StatelessWidget {
         ),
         IconButton(
           key: const ValueKey('agent-chat-minimize'),
-          tooltip: 'Minimize',
+          tooltip: strings.minimize,
           onPressed: () => controller.setAgentChatMode(AgentChatPanelMode.mini),
           icon: const Icon(Icons.minimize, size: 20),
         ),
         IconButton(
           key: const ValueKey('agent-chat-full-resize'),
-          tooltip: 'Resize',
+          tooltip: strings.resizeAgentChat,
           onPressed: controller.cycleAgentChatMode,
           icon: const Icon(Icons.close_fullscreen, size: 18),
         ),
         IconButton(
           key: const ValueKey('agent-chat-close'),
-          tooltip: 'Close',
+          tooltip: strings.close,
           onPressed: () =>
               controller.setAgentChatMode(AgentChatPanelMode.collapsed),
           icon: const Icon(Icons.close, size: 20),
@@ -348,7 +355,9 @@ class _FullToolbar extends StatelessWidget {
 }
 
 class _SafetyNotice extends StatelessWidget {
-  const _SafetyNotice();
+  const _SafetyNotice({required this.text});
+
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -361,9 +370,9 @@ class _SafetyNotice extends StatelessWidget {
           color: Colors.lightBlueAccent.withValues(alpha: 0.24),
         ),
       ),
-      child: const Text(
-        'Live KIS orders from Agent Chat require an explicit confirmation card. Backend validation and risk gates rerun before submit. OpenAI API is called only from the FastAPI server.',
-        style: TextStyle(color: Colors.lightBlueAccent, height: 1.25),
+      child: Text(
+        text,
+        style: const TextStyle(color: Colors.lightBlueAccent, height: 1.25),
       ),
     );
   }
@@ -504,11 +513,15 @@ class _FullInputRow extends StatelessWidget {
     required this.controller,
     required this.busy,
     required this.onSubmitted,
+    required this.hintText,
+    required this.sendLabel,
   });
 
   final TextEditingController controller;
   final bool busy;
   final VoidCallback onSubmitted;
+  final String hintText;
+  final String sendLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -524,7 +537,7 @@ class _FullInputRow extends StatelessWidget {
             if (!busy) onSubmitted();
           },
           decoration: InputDecoration(
-            hintText: 'Message Agent Assistant...',
+            hintText: hintText,
             filled: true,
             fillColor: Colors.black.withValues(alpha: 0.28),
             border: OutlineInputBorder(
@@ -546,7 +559,7 @@ class _FullInputRow extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.send, size: 16),
-        label: const Text('Send'),
+        label: Text(sendLabel),
       ),
     ]);
   }

@@ -380,12 +380,16 @@ class ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     final payload = await _postJsonBody('/agent/chat/send', {
       'conversation_key': conversationKey,
       'message': message,
       'context': context ?? const <String, dynamic>{},
       'auto_create_conversation': autoCreateConversation,
+      'language': language,
+      'locale': locale,
     });
     return AgentChatSendResponse.fromJson(payload);
   }

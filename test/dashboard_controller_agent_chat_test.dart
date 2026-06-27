@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_conversation.dart';
@@ -24,6 +25,8 @@ void main() {
     expect(api.chatSendCalls, 1);
     expect(api.chatConversationKey, 'agent_conv_created_1');
     expect(api.chatContext?['conversation_key'], 'agent_conv_created_1');
+    expect(api.chatLanguage, 'ko');
+    expect(api.chatLocale, 'ko-KR');
     expect(api.parseCalls, 0);
     expect(api.createPlanCalls, 0);
     expect(api.runPlanCalls, 0);
@@ -40,7 +43,7 @@ void main() {
     );
     expect(controller.agentMessages.last.text, 'Read-only positions summary.');
     expect(controller.agentMessages.last.status, AgentChatStatus.sent);
-    expect(controller.agentMessages.last.safetyBadges, contains('READ ONLY'));
+    expect(controller.agentMessages.last.safetyBadges, contains('읽기 전용'));
 
     controller.dispose();
   });
@@ -77,6 +80,21 @@ void main() {
 
     controller.dispose();
   });
+
+  test('sendAgentMessage forwards selected English language', () async {
+    final api = _AgentChatFakeApiClient();
+    final controller = DashboardController(api, autoload: false);
+
+    controller.setAppLanguage(AppLanguage.english);
+    final result = await controller.sendAgentMessage('show my positions');
+
+    expect(result.success, isTrue);
+    expect(api.chatLanguage, 'en');
+    expect(api.chatLocale, 'en-US');
+    expect(controller.agentMessages.last.safetyBadges, contains('READ ONLY'));
+
+    controller.dispose();
+  });
 }
 
 class _AgentChatFakeApiClient extends ApiClient {
@@ -91,6 +109,8 @@ class _AgentChatFakeApiClient extends ApiClient {
   int validationCalls = 0;
   int submitCalls = 0;
   String? chatConversationKey;
+  String? chatLanguage;
+  String? chatLocale;
   Map<String, dynamic>? chatContext;
 
   @override
@@ -126,9 +146,13 @@ class _AgentChatFakeApiClient extends ApiClient {
     String? conversationKey,
     Map<String, dynamic>? context,
     bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
   }) async {
     chatSendCalls += 1;
     chatConversationKey = conversationKey;
+    chatLanguage = language;
+    chatLocale = locale;
     chatContext = context;
     return AgentChatSendResponse.fromJson({
       'conversation_key': conversationKey ?? 'agent_conv_created_1',

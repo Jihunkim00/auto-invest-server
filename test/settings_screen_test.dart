@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/settings/settings_screen.dart';
@@ -22,7 +23,10 @@ void main() {
     expect(find.text('Scope: Global'), findsOneWidget);
     expect(find.text('Affects: Alpaca + KIS'), findsOneWidget);
 
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    final dropdown = find.byType(DropdownButtonFormField<String>);
+    await tester.ensureVisible(dropdown);
+    await tester.pumpAndSettle();
+    await tester.tap(dropdown);
     await tester.pumpAndSettle();
 
     expect(find.text('Safe Mode'), findsWidgets);
@@ -30,6 +34,29 @@ void main() {
     expect(find.text('Manual Live Trading'), findsWidgets);
     expect(find.text('KIS Sell-only Automation'), findsWidgets);
     expect(find.text('Full Live Test Mode'), findsWidgets);
+
+    controller.dispose();
+  });
+
+  testWidgets('Settings language selector switches UI immediately',
+      (tester) async {
+    final controller = _controller();
+
+    await tester.pumpWidget(_wrap(controller));
+
+    expect(controller.appLanguage.code, 'ko');
+    expect(find.text('언어'), findsOneWidget);
+    expect(find.text('한국투자증권 안전 상태와 수동 실거래 상태입니다.'), findsOneWidget);
+
+    await tester.tap(find.descendant(
+      of: find.byKey(const ValueKey('app-language-selector')),
+      matching: find.text('English'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(controller.appLanguage.code, 'en');
+    expect(find.text('Language'), findsOneWidget);
+    expect(find.text('KIS safety and manual live status.'), findsOneWidget);
 
     controller.dispose();
   });
@@ -301,7 +328,10 @@ void _useTallSettingsViewport(WidgetTester tester) {
 }
 
 Future<void> _selectOperationMode(WidgetTester tester, String label) async {
-  await tester.tap(find.byType(DropdownButtonFormField<String>));
+  final dropdown = find.byType(DropdownButtonFormField<String>);
+  await tester.ensureVisible(dropdown);
+  await tester.pumpAndSettle();
+  await tester.tap(dropdown);
   await tester.pumpAndSettle();
   await tester.tap(find.text(label).last);
   await tester.pumpAndSettle();
