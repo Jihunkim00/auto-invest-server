@@ -69,10 +69,11 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                 const _BadgeWrap(
                   badges: [
                     'PROMOTION ONLY',
-                    'NO LIVE SCHEDULER',
-                    'NO VALIDATION IN SCHEDULER',
-                    'NO BROKER SUBMIT IN SCHEDULER',
-                    'OPERATOR CONFIRM REQUIRED',
+                    'REVIEW REQUIRED',
+                    'NOT AN ORDER',
+                    'NO BROKER SUBMIT',
+                    'LIVE CONVERSION REQUIRES FINAL CONFIRMATION',
+                    'SCHEDULER REAL ORDERS DISABLED',
                   ],
                 ),
                 if (controller.strategyAutoBuyPromotionsError != null) ...[
@@ -121,9 +122,9 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                                     ?.liveReadiness
                                     .ready ==
                                 true,
-                            onAcknowledge: () => _acknowledge(context, item),
+                            onMarkReviewed: () => _markReviewed(context, item),
                             onDismiss: () => _dismiss(context, item),
-                            onRunLive: () => _confirmLiveRun(context, item),
+                            onConvert: () => _confirmLiveRun(context, item),
                           ),
                         ),
                     ],
@@ -145,11 +146,11 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
     _snack(context, result.message);
   }
 
-  Future<void> _acknowledge(
+  Future<void> _markReviewed(
     BuildContext context,
     StrategyAutoBuyPromotion promotion,
   ) async {
-    final result = await controller.acknowledgeStrategyAutoBuyPromotion(
+    final result = await controller.markStrategyAutoBuyPromotionReviewed(
       promotion,
     );
     if (!context.mounted) return;
@@ -175,9 +176,9 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         key: const ValueKey('promotion-live-confirm-dialog'),
-        title: const Text('Confirm Guarded Live Auto Buy'),
+        title: const Text('LIVE CONVERSION REQUIRES FINAL CONFIRMATION'),
         content: Text(
-          'Run guarded live auto buy for ${promotion.symbol ?? '-'} using the existing one-shot path.',
+          'Convert ${promotion.symbol ?? '-'} via the existing guarded live auto-buy endpoint. This promotion is not an order and the scheduler will not submit anything.',
         ),
         actions: [
           TextButton(
@@ -187,7 +188,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
           FilledButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.verified_user_outlined),
-            label: const Text('Run Guarded Live Auto Buy'),
+            label: const Text('Convert via Guarded Live Buy'),
           ),
         ],
       ),
@@ -212,23 +213,25 @@ class _PromotionTile extends StatelessWidget {
     required this.promotion,
     required this.loading,
     required this.liveReady,
-    required this.onAcknowledge,
+    required this.onMarkReviewed,
     required this.onDismiss,
-    required this.onRunLive,
+    required this.onConvert,
   });
 
   final StrategyAutoBuyPromotion promotion;
   final bool loading;
   final bool liveReady;
-  final VoidCallback onAcknowledge;
+  final VoidCallback onMarkReviewed;
   final VoidCallback onDismiss;
-  final VoidCallback onRunLive;
+  final VoidCallback onConvert;
 
   @override
   Widget build(BuildContext context) {
     final score = promotion.finalScore ?? promotion.buyScore;
-    final canRun = promotion.canRunGuardedLive && liveReady;
+    final canConvert = promotion.canRunGuardedLive && liveReady;
     final converted = promotion.isConverted;
+    final reviewLabel =
+        (promotion.reviewStatus ?? promotion.status).replaceAll('_', ' ');
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -272,8 +275,20 @@ class _PromotionTile extends StatelessWidget {
             children: [
               _Metric(label: 'Score', value: _number(score)),
               _Metric(
-                label: 'Notional',
-                value: _money(promotion.simulatedNotionalKrw),
+                label: 'Confidence',
+                value: _number(promotion.confidence),
+              ),
+              _Metric(
+                label: 'Proposed',
+                value: _money(
+                  promotion.proposedNotionalKrw ??
+                      promotion.recommendedNotionalKrw ??
+                      promotion.simulatedNotionalKrw,
+                ),
+              ),
+              _Metric(
+                label: 'Max notional',
+                value: _money(promotion.maxNotionalKrw),
               ),
               _Metric(
                 label: 'Qty',
@@ -290,6 +305,12 @@ class _PromotionTile extends StatelessWidget {
                     : formatTimestampWithKst(
                         promotion.expiresAt!.toIso8601String(),
                       ),
+              ),
+              _Metric(
+                label: 'Age',
+                value: promotion.promotionAgeMinutes == null
+                    ? '-'
+                    : '${_number(promotion.promotionAgeMinutes)} min',
               ),
               if (promotion.liveAttemptId != null)
                 _Metric(
@@ -310,9 +331,29 @@ class _PromotionTile extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _DetailRow(
+            label: 'Review',
+            value: promotion.reviewRequired
+                ? 'REVIEW REQUIRED'
+                : reviewLabel.toUpperCase(),
+          ),
+          _DetailRow(
+            label: 'Action',
+            value: promotion.dryRunAction ?? '-',
+          ),
+          _DetailRow(
             label: 'Reason',
             value: promotion.promotionReason ?? promotion.blockReason ?? '-',
           ),
+          if (promotion.reviewSummary != null)
+            _DetailRow(
+              label: 'Summary',
+              value: promotion.reviewSummary!,
+            ),
+          if (promotion.primaryRiskNote != null)
+            _DetailRow(
+              label: 'Risk note',
+              value: promotion.primaryRiskNote!,
+            ),
           _DetailRow(
             label: 'Dry-run IDs',
             value:
@@ -324,6 +365,23 @@ class _PromotionTile extends StatelessWidget {
           if (promotion.gatingNotes.isNotEmpty)
             _DetailRow(
                 label: 'Gates', value: promotion.gatingNotes.join(' | ')),
+          if (promotion.isExpired)
+            const _DetailRow(
+              label: 'Warning',
+              value: 'Promotion is expired or stale. Conversion is blocked.',
+            ),
+          if (promotion.conversionBlockReason != null)
+            _DetailRow(
+              label: 'Blocked',
+              value: promotion.conversionBlockReason!,
+            ),
+          if (promotion.reviewChecklist.isNotEmpty)
+            _DetailRow(
+              label: 'Checklist',
+              value: promotion.reviewChecklist
+                  .map((item) => '${item.ok ? 'OK' : 'BLOCK'} ${item.label}')
+                  .join(' | '),
+            ),
           if (promotion.conversionStatus != null)
             _DetailRow(
               label: 'Conversion',
@@ -348,27 +406,29 @@ class _PromotionTile extends StatelessWidget {
             runSpacing: 8,
             children: [
               OutlinedButton.icon(
-                key: ValueKey('acknowledge-promotion-${promotion.id}'),
-                onPressed: loading || promotion.status != 'pending'
+                key: ValueKey('mark-reviewed-promotion-${promotion.id}'),
+                onPressed: loading || !promotion.reviewRequired
                     ? null
-                    : onAcknowledge,
+                    : onMarkReviewed,
                 icon: const Icon(Icons.visibility_outlined, size: 18),
-                label: const Text('Acknowledge'),
+                label: const Text('Mark Reviewed'),
               ),
               OutlinedButton.icon(
                 key: ValueKey('dismiss-promotion-${promotion.id}'),
-                onPressed: loading || promotion.status == 'dismissed'
+                onPressed: loading || promotion.isDismissed || converted
                     ? null
                     : onDismiss,
                 icon: const Icon(Icons.close, size: 18),
                 label: const Text('Dismiss'),
               ),
-              if (promotion.status == 'pending')
+              if (promotion.canRunGuardedLive)
                 FilledButton.icon(
-                  key: ValueKey('run-live-auto-buy-promotion-${promotion.id}'),
-                  onPressed: loading || !canRun ? null : onRunLive,
+                  key: ValueKey(
+                    'convert-guarded-live-buy-promotion-${promotion.id}',
+                  ),
+                  onPressed: loading || !canConvert ? null : onConvert,
                   icon: const Icon(Icons.verified_user_outlined, size: 18),
-                  label: const Text('Run Guarded Live Auto Buy'),
+                  label: const Text('Convert via Guarded Live Buy'),
                 ),
             ],
           ),

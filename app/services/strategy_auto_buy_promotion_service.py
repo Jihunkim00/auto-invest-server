@@ -15,7 +15,9 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 PROVIDER = "kis"
 MARKET = "KR"
 KST = ZoneInfo("Asia/Seoul")
-ACTIVE_STATUSES = {"pending", "acknowledged"}
+ACTIVE_STATUSES = {"pending", "acknowledged", "reviewed"}
+REVIEWED_STATUSES = {"acknowledged", "reviewed"}
+CONVERTIBLE_STATUSES = {"pending", *REVIEWED_STATUSES}
 CONVERTED_STATUSES = {
     "converted_to_live_attempt",
     "live_order_created",
@@ -157,6 +159,21 @@ class StrategyAutoBuyPromotionService:
             "safety": _safety(read_only=False),
         }
 
+    def mark_reviewed(self, db: Session, promotion_id: int) -> dict[str, Any]:
+        row = self._row(db, promotion_id)
+        now = _naive_utc(datetime.now(UTC))
+        if row.status in {"pending", "acknowledged"}:
+            row.status = "reviewed"
+            row.acknowledged_at = row.acknowledged_at or now
+            row.updated_at = now
+            db.commit()
+            db.refresh(row)
+        return {
+            "status": row.status,
+            "promotion": self.item(row),
+            "safety": _safety(read_only=False),
+        }
+
     def dismiss(self, db: Session, promotion_id: int) -> dict[str, Any]:
         row = self._row(db, promotion_id)
         now = _naive_utc(datetime.now(UTC))
@@ -220,7 +237,7 @@ class StrategyAutoBuyPromotionService:
         if str(row.provider or "").lower() != normalized_provider or str(row.market or "").upper() != normalized_market:
             return self._conversion_block("promotion_scope_mismatch", row)
 
-        if row.status == "pending" and _expired(row, now_utc):
+        if row.status in CONVERTIBLE_STATUSES and _expired(row, now_utc):
             row.status = "expired"
             row.updated_at = _naive_utc(now_utc)
             db.commit()
@@ -229,7 +246,7 @@ class StrategyAutoBuyPromotionService:
 
         if _already_converted(row):
             return self._conversion_block("promotion_already_converted", row)
-        if row.status != "pending":
+        if row.status not in CONVERTIBLE_STATUSES:
             return self._conversion_block(_status_block_reason(row.status), row)
 
         row_symbol = _text(row.symbol)
@@ -267,7 +284,7 @@ class StrategyAutoBuyPromotionService:
         trace: dict[str, Any] | None = None,
     ) -> None:
         row = self._row(db, promotion_id)
-        if row.status != "pending":
+        if row.status not in CONVERTIBLE_STATUSES:
             return
         now = _naive_utc(datetime.now(UTC))
         row.status = "conversion_blocked"
@@ -399,6 +416,7 @@ class StrategyAutoBuyPromotionService:
         }
 
     def item(self, row: StrategyAutoBuyPromotion) -> dict[str, Any]:
+        review = self._review_metadata(row)
         return sanitize_kis_payload(
             {
                 "id": row.id,
@@ -407,7 +425,23 @@ class StrategyAutoBuyPromotionService:
                 "active_profile": row.active_profile,
                 "symbol": row.symbol,
                 "symbol_name": row.symbol_name,
-                "status": row.status,
+                "status": review["status"],
+                "raw_status": row.status,
+                "review_status": review["review_status"],
+                "review_required": review["review_required"],
+                "review_checklist": review["review_checklist"],
+                "review_summary": review["review_summary"],
+                "primary_risk_note": review["primary_risk_note"],
+                "score_summary": review["score_summary"],
+                "dry_run_evidence": review["dry_run_evidence"],
+                "target_risk_summary": review["target_risk_summary"],
+                "proposed_notional_krw": review["proposed_notional_krw"],
+                "max_notional_krw": review["max_notional_krw"],
+                "promotion_age_minutes": review["promotion_age_minutes"],
+                "expired": review["expired"],
+                "stale": review["stale"],
+                "conversion_allowed_by_state": review["conversion_allowed_by_state"],
+                "conversion_block_reason": review["conversion_block_reason"],
                 "promotion_reason": row.promotion_reason,
                 "source_dry_run_signal_id": row.source_dry_run_signal_id,
                 "source_dry_run_trade_run_id": row.source_dry_run_trade_run_id,
@@ -427,6 +461,9 @@ class StrategyAutoBuyPromotionService:
                 "gating_notes": _parse_list(row.gating_notes),
                 "expires_at": _iso(row.expires_at),
                 "acknowledged_at": _iso(row.acknowledged_at),
+                "reviewed_at": _iso(row.acknowledged_at)
+                if row.status in REVIEWED_STATUSES
+                else None,
                 "dismissed_at": _iso(row.dismissed_at),
                 "promoted_to_live_attempt_id": row.promoted_to_live_attempt_id,
                 "related_live_order_id": row.related_live_order_id,
@@ -475,6 +512,136 @@ class StrategyAutoBuyPromotionService:
         if extra:
             payload.update(extra)
         return sanitize_kis_payload(payload)
+
+    def _review_metadata(self, row: StrategyAutoBuyPromotion) -> dict[str, Any]:
+        now_utc = datetime.now(UTC)
+        expired = _expired(row, now_utc)
+        already_converted = _already_converted(row)
+        raw_status = str(row.status or "").strip()
+        display_status = (
+            "expired"
+            if raw_status in CONVERTIBLE_STATUSES and expired
+            else raw_status
+        )
+        review_status = _review_status(
+            raw_status,
+            expired=expired,
+            already_converted=already_converted,
+        )
+        conversion_block_reason = _conversion_block_reason(
+            raw_status,
+            expired=expired,
+            already_converted=already_converted,
+        )
+        conversion_allowed = conversion_block_reason is None
+        target_risk = _parse_object(row.target_risk_result)
+        risk_flags = _parse_list(row.risk_flags)
+        gating_notes = _parse_list(row.gating_notes)
+        proposed_notional = (
+            row.recommended_notional_krw
+            if row.recommended_notional_krw is not None
+            else row.simulated_notional_krw
+        )
+        max_notional = _target_max_notional(target_risk)
+        score = row.final_score if row.final_score is not None else row.buy_score
+        age_minutes = None
+        if row.created_at is not None:
+            age_minutes = max(
+                0.0,
+                (_aware_utc(now_utc) - _aware_utc(row.created_at)).total_seconds()
+                / 60,
+            )
+        primary_risk_note = (
+            row.block_reason
+            or _text(target_risk.get("primary_block_reason"))
+            or _text(target_risk.get("block_reason"))
+            or (_text(risk_flags[0]) if risk_flags else None)
+            or (_text(gating_notes[0]) if gating_notes else None)
+        )
+        return {
+            "status": display_status,
+            "review_status": review_status,
+            "review_required": raw_status == "pending" and not expired,
+            "review_checklist": [
+                _review_check(
+                    "promotion_only",
+                    True,
+                    "Promotion item is not an order.",
+                ),
+                _review_check(
+                    "dry_run_would_buy",
+                    row.dry_run_action == "would_buy",
+                    "Dry-run evidence action is would_buy.",
+                ),
+                _review_check(
+                    "not_expired",
+                    not expired,
+                    "Promotion is not expired or stale.",
+                ),
+                _review_check(
+                    "not_dismissed",
+                    raw_status != "dismissed",
+                    "Promotion has not been dismissed.",
+                ),
+                _review_check(
+                    "not_converted",
+                    not already_converted,
+                    "Promotion has not already been converted.",
+                ),
+                _review_check(
+                    "final_confirmation_required",
+                    True,
+                    "Live conversion still requires final operator confirmation.",
+                ),
+                _review_check(
+                    "scheduler_dry_run_only",
+                    True,
+                    "Scheduler remains dry-run only and cannot submit broker orders.",
+                ),
+            ],
+            "review_summary": _review_summary(
+                row,
+                review_status=review_status,
+                conversion_block_reason=conversion_block_reason,
+            ),
+            "primary_risk_note": primary_risk_note,
+            "score_summary": {
+                "score": score,
+                "final_score": row.final_score,
+                "buy_score": row.buy_score,
+                "sell_score": row.sell_score,
+                "confidence": row.confidence,
+                "label": _score_label(score, row.confidence),
+            },
+            "dry_run_evidence": {
+                "action": row.dry_run_action,
+                "source_signal_id": row.source_dry_run_signal_id,
+                "source_trade_run_id": row.source_dry_run_trade_run_id,
+                "source_order_id": row.source_dry_run_order_id,
+                "simulated_quantity": row.simulated_quantity,
+                "simulated_price": row.simulated_price,
+                "simulated_notional_krw": row.simulated_notional_krw,
+            },
+            "target_risk_summary": {
+                "approved": target_risk.get("approved"),
+                "block_reason": target_risk.get("primary_block_reason")
+                or target_risk.get("block_reason")
+                or row.block_reason,
+                "risk_flags": risk_flags,
+                "gating_notes": gating_notes,
+                "proposed_notional_krw": proposed_notional,
+                "max_notional_krw": max_notional,
+            },
+            "proposed_notional_krw": proposed_notional,
+            "max_notional_krw": max_notional,
+            "promotion_age_minutes": (
+                round(age_minutes, 1) if age_minutes is not None else None
+            ),
+            "expired": expired,
+            "stale": expired,
+            "conversion_allowed_by_state": conversion_allowed,
+            "conversion_block_reason": conversion_block_reason,
+        }
 
     def _row(self, db: Session, promotion_id: int) -> StrategyAutoBuyPromotion:
         row = db.get(StrategyAutoBuyPromotion, int(promotion_id))
@@ -560,6 +727,106 @@ def _promotion_status_from_sync(sync_status: str) -> str:
     if normalized in {"rejected", "failed"}:
         return "live_order_rejected"
     return "live_order_synced"
+
+
+def _review_status(
+    status: str,
+    *,
+    expired: bool,
+    already_converted: bool,
+) -> str:
+    if already_converted:
+        return "converted"
+    if expired and status in CONVERTIBLE_STATUSES:
+        return "expired"
+    if status == "dismissed":
+        return "dismissed"
+    if status == "conversion_blocked":
+        return "blocked"
+    if status in REVIEWED_STATUSES:
+        return "reviewed"
+    if status == "pending":
+        return "pending_review"
+    return status or "unknown"
+
+
+def _conversion_block_reason(
+    status: str,
+    *,
+    expired: bool,
+    already_converted: bool,
+) -> str | None:
+    if already_converted:
+        return "promotion_already_converted"
+    if expired and status in CONVERTIBLE_STATUSES:
+        return "promotion_expired"
+    if status == "dismissed":
+        return "promotion_dismissed"
+    if status == "conversion_blocked":
+        return "promotion_conversion_blocked"
+    if status not in CONVERTIBLE_STATUSES:
+        return _status_block_reason(status)
+    return None
+
+
+def _review_check(key: str, ok: bool, label: str) -> dict[str, Any]:
+    return {
+        "key": key,
+        "ok": bool(ok),
+        "label": label,
+    }
+
+
+def _review_summary(
+    row: StrategyAutoBuyPromotion,
+    *,
+    review_status: str,
+    conversion_block_reason: str | None,
+) -> str:
+    symbol = row.symbol or "selected symbol"
+    action = row.dry_run_action or "dry-run"
+    if conversion_block_reason:
+        return (
+            f"{symbol} promotion review is {review_status}; "
+            f"conversion is blocked by {conversion_block_reason}."
+        )
+    return (
+        f"{symbol} was promoted from {action} evidence. Review risk notes, "
+        "then use the guarded live-buy confirmation flow if appropriate."
+    )
+
+
+def _score_label(score: float | None, confidence: float | None) -> str:
+    if score is None and confidence is None:
+        return "score unavailable"
+    parts = []
+    if score is not None:
+        parts.append(f"score {score:g}")
+    if confidence is not None:
+        parts.append(f"confidence {confidence:g}")
+    return " / ".join(parts)
+
+
+def _target_max_notional(target_risk: dict[str, Any]) -> float | None:
+    for key in (
+        "max_notional_krw",
+        "max_order_notional_krw",
+        "approved_notional_krw",
+    ):
+        value = _float(target_risk.get(key))
+        if value is not None:
+            return value
+    thresholds = target_risk.get("profile_thresholds")
+    if isinstance(thresholds, dict):
+        for key in (
+            "max_order_notional_krw",
+            "max_notional_krw",
+            "approved_notional_krw",
+        ):
+            value = _float(thresholds.get(key))
+            if value is not None:
+                return value
+    return None
 
 
 def _safety(*, read_only: bool) -> dict[str, Any]:

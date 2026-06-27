@@ -29,7 +29,12 @@ void main() {
         findsOneWidget);
     expect(find.text('Auto Buy Promotion Queue'), findsOneWidget);
     expect(find.text('PROMOTION ONLY'), findsOneWidget);
-    expect(find.text('NO LIVE SCHEDULER'), findsOneWidget);
+    expect(find.text('REVIEW REQUIRED'), findsWidgets);
+    expect(find.text('NOT AN ORDER'), findsOneWidget);
+    expect(find.text('NO BROKER SUBMIT'), findsOneWidget);
+    expect(find.text('LIVE CONVERSION REQUIRES FINAL CONFIRMATION'),
+        findsOneWidget);
+    expect(find.text('SCHEDULER REAL ORDERS DISABLED'), findsOneWidget);
     expect(find.textContaining('005930'), findsWidgets);
     expect(find.text('\u20A930,000'), findsWidgets);
     expect(find.text('3'), findsWidgets);
@@ -39,7 +44,7 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('promotion queue acknowledge and dismiss are local actions',
+  testWidgets('promotion queue mark reviewed and dismiss are local actions',
       (tester) async {
     final api = _PromotionQueueApiClient();
     final controller = DashboardController(api, autoload: false);
@@ -51,12 +56,19 @@ void main() {
       home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
     ));
 
-    await tester.tap(find.byKey(const ValueKey('acknowledge-promotion-1')));
+    final markReviewed =
+        find.byKey(const ValueKey('mark-reviewed-promotion-1'));
+    await tester.ensureVisible(markReviewed);
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('dismiss-promotion-1')));
+    await tester.tap(markReviewed);
+    await tester.pumpAndSettle();
+    final dismiss = find.byKey(const ValueKey('dismiss-promotion-1'));
+    await tester.ensureVisible(dismiss);
+    await tester.pumpAndSettle();
+    await tester.tap(dismiss);
     await tester.pumpAndSettle();
 
-    expect(api.acknowledgeCalls, 1);
+    expect(api.markReviewedCalls, 1);
     expect(api.dismissCalls, 1);
     expect(api.liveRunCalls, 0);
     expect(api.manualSubmitCalls, 0);
@@ -76,16 +88,18 @@ void main() {
       home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
     ));
 
-    await tester.tap(
-      find.byKey(const ValueKey('run-live-auto-buy-promotion-1')),
-    );
+    final convert =
+        find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1'));
+    await tester.ensureVisible(convert);
+    await tester.pumpAndSettle();
+    await tester.tap(convert);
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('promotion-live-confirm-dialog')),
         findsOneWidget);
     expect(api.liveRunCalls, 0);
 
-    await tester.tap(find.text('Run Guarded Live Auto Buy').last);
+    await tester.tap(find.text('Convert via Guarded Live Buy').last);
     await tester.pumpAndSettle();
 
     expect(api.liveReadinessCalls, 2);
@@ -111,13 +125,37 @@ void main() {
       home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
     ));
 
-    expect(find.text('CONVERTED'), findsOneWidget);
+    expect(find.text('CONVERTED'), findsWidgets);
     expect(find.text('live_order_created'), findsOneWidget);
     expect(find.textContaining('promotion 1 / dry-run 22'), findsOneWidget);
-    expect(find.byKey(const ValueKey('run-live-auto-buy-promotion-1')),
+    expect(find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1')),
         findsNothing);
 
     controller.dispose();
+  });
+
+  testWidgets('dismissed and expired promotions block convert action',
+      (tester) async {
+    for (final status in ['dismissed', 'expired']) {
+      final api = _PromotionQueueApiClient(promotionStatus: status);
+      final controller = DashboardController(api, autoload: false);
+      await controller.refreshStrategyAutoBuyOperations(silent: true);
+      await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData.dark(),
+        home:
+            Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1')),
+          findsNothing);
+      expect(find.textContaining('promotion_'), findsWidgets);
+      expect(api.liveRunCalls, 0);
+
+      controller.dispose();
+    }
   });
 }
 
@@ -128,7 +166,7 @@ class _PromotionQueueApiClient extends ApiClient {
 
   int operationsCalls = 0;
   int promotionsCalls = 0;
-  int acknowledgeCalls = 0;
+  int markReviewedCalls = 0;
   int dismissCalls = 0;
   int liveReadinessCalls = 0;
   int liveRunCalls = 0;
@@ -164,11 +202,11 @@ class _PromotionQueueApiClient extends ApiClient {
 
   @override
   Future<StrategyAutoBuyPromotionActionResult>
-      acknowledgeStrategyAutoBuyPromotion(int promotionId) async {
-    acknowledgeCalls += 1;
+      markStrategyAutoBuyPromotionReviewed(int promotionId) async {
+    markReviewedCalls += 1;
     return StrategyAutoBuyPromotionActionResult.fromJson({
-      'status': 'acknowledged',
-      'promotion': autoBuyPromotionJson(status: 'acknowledged'),
+      'status': 'reviewed',
+      'promotion': autoBuyPromotionJson(status: 'reviewed'),
       'safety': {'read_only': true, 'broker_submit_called': false},
     });
   }

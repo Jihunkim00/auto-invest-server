@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from fastapi.testclient import TestClient
+
+from app.db.database import get_db
 from app.db.models import (
     KisOrderValidationLog,
     OrderLog,
     StrategyAutoBuyPromotion,
 )
+from app.main import app
 from app.services.strategy_auto_buy_promotion_service import (
     StrategyAutoBuyPromotionService,
 )
@@ -27,7 +31,41 @@ def test_promotions_list_returns_pending_promotion(db_session):
     assert body["count"] == 1
     assert body["items"][0]["symbol"] == "005930"
     assert body["items"][0]["source_dry_run_trade_run_id"] == 22
+    assert body["items"][0]["review_status"] == "pending_review"
+    assert body["items"][0]["review_required"] is True
+    assert body["items"][0]["conversion_allowed_by_state"] is True
+    assert body["items"][0]["conversion_block_reason"] is None
+    assert body["items"][0]["proposed_notional_krw"] == 30000
+    assert body["items"][0]["dry_run_evidence"]["action"] == "would_buy"
+    assert body["items"][0]["score_summary"]["score"] == 82
     assert body["safety"]["read_only"] is True
+
+
+def test_promotions_route_returns_review_metadata(db_session):
+    service = StrategyAutoBuyPromotionService()
+    service.create_from_dry_run(
+        db_session,
+        dry_run_result=_dry_run(),
+        request_payload={"source": "pytest"},
+        now=_now(),
+    )
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = TestClient(app).get("/strategy/auto-buy/promotions")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["review_status"] == "pending_review"
+    assert item["review_required"] is True
+    assert item["review_checklist"]
+    assert item["review_summary"]
+    assert item["target_risk_summary"]["approved"] is True
 
 
 def test_acknowledge_updates_local_state_only(db_session):
@@ -47,6 +85,27 @@ def test_acknowledge_updates_local_state_only(db_session):
     assert db_session.query(OrderLog).count() == 0
     assert db_session.query(KisOrderValidationLog).count() == 0
     assert body["safety"]["broker_submit_called"] is False
+
+
+def test_mark_reviewed_updates_local_state_only(db_session):
+    service = StrategyAutoBuyPromotionService()
+    promotion = service.create_from_dry_run(
+        db_session,
+        dry_run_result=_dry_run(),
+        now=_now(),
+    )
+
+    body = service.mark_reviewed(db_session, promotion["id"])
+
+    assert body["status"] == "reviewed"
+    assert body["promotion"]["review_status"] == "reviewed"
+    assert body["promotion"]["review_required"] is False
+    assert body["promotion"]["conversion_allowed_by_state"] is True
+    row = db_session.get(StrategyAutoBuyPromotion, promotion["id"])
+    assert row.status == "reviewed"
+    assert row.acknowledged_at is not None
+    assert db_session.query(OrderLog).count() == 0
+    assert db_session.query(KisOrderValidationLog).count() == 0
 
 
 def test_dismiss_updates_local_state_only(db_session):
@@ -162,5 +221,5 @@ def _dry_run() -> dict:
 
 
 def _now() -> datetime:
-    return datetime(2026, 6, 26, 1, 0, tzinfo=UTC)
+    return datetime.now(UTC)
 
