@@ -794,13 +794,27 @@ class AgentChatResultSummarizer:
                     "NO CHAT EXECUTION",
                     "NO VALIDATION",
                     "NO BROKER SUBMIT",
+                    "REVIEW REQUIRED"
+                    if first.get("review_required") is True
+                    else "REVIEW STATUS",
                 ],
                 rows=[
                     {"label": "Visible candidates", "value": len(items)},
                     {"label": "Latest status", "value": first.get("status") or "none"},
+                    {"label": "Review status", "value": first.get("review_status") or "-"},
                     {"label": "Reason", "value": first.get("promotion_reason") or "-"},
-                    {"label": "Score", "value": first.get("final_score") or first.get("buy_score") or "-"},
+                    {
+                        "label": "Score",
+                        "value": (
+                            (first.get("score_summary") or {}).get("label")
+                            if isinstance(first.get("score_summary"), dict)
+                            else first.get("final_score")
+                            or first.get("buy_score")
+                            or "-"
+                        ),
+                    },
                     {"label": "Expires", "value": first.get("expires_at") or "-"},
+                    {"label": "Conversion block", "value": first.get("conversion_block_reason") or "-"},
                     {"label": "Live attempt", "value": first.get("converted_live_attempt_id") or first.get("promoted_to_live_attempt_id") or "-"},
                     {"label": "Order", "value": first.get("converted_order_id") or first.get("related_live_order_id") or "-"},
                     {"label": "Sync", "value": first.get("last_sync_status") or trace.get("last_sync_status") or "-"},

@@ -384,6 +384,33 @@ def test_run_once_with_pending_promotion_links_attempt_order_and_payloads(db_ses
     assert order_response["promotion_trace"]["converted_order_id"] == result["related_order_id"]
 
 
+def test_reviewed_promotion_still_requires_final_operator_confirmation(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion_service = StrategyAutoBuyPromotionService()
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    promotion_service.mark_reviewed(db_session, promotion["id"])
+    validation = FakeValidationService()
+    broker = FakeBroker()
+
+    result = live_service(validation=validation, broker=broker).run_once(
+        db_session,
+        live_request(
+            promotion_id=promotion["id"],
+            source_dry_run_id=dry_run.id,
+            confirm_operator_ack=False,
+        ),
+    )
+
+    row = db_session.get(StrategyAutoBuyPromotion, promotion["id"])
+    assert result["status"] == "blocked"
+    assert result["block_reason"] == "confirm_operator_ack_required"
+    assert row.status == "reviewed"
+    assert validation.calls == []
+    assert broker.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
 def test_dismissed_expired_and_converted_promotions_block_before_validation_or_submit(db_session):
     enable_live_settings(db_session)
     service = StrategyAutoBuyPromotionService()

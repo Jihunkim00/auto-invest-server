@@ -684,6 +684,15 @@ class ApiClient {
     return StrategyAutoBuyPromotionActionResult.fromJson(payload);
   }
 
+  Future<StrategyAutoBuyPromotionActionResult>
+      markStrategyAutoBuyPromotionReviewed(int promotionId) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/promotions/$promotionId/mark-reviewed',
+      const {},
+    );
+    return StrategyAutoBuyPromotionActionResult.fromJson(payload);
+  }
+
   Future<StrategyAutoBuyPromotionActionResult> dismissStrategyAutoBuyPromotion(
       int promotionId) async {
     final payload = await _postJsonBody(

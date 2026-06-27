@@ -2080,6 +2080,40 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> markStrategyAutoBuyPromotionReviewed(
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    try {
+      final result =
+          await apiClient.markStrategyAutoBuyPromotionReviewed(promotion.id);
+      strategyAutoBuyPromotions = [
+        for (final item in strategyAutoBuyPromotions)
+          item.id == promotion.id ? result.promotion : item,
+      ];
+      await refreshStrategyAutoBuyOperations(silent: true);
+      notifyListeners();
+      return ActionResult(
+        success: true,
+        message:
+            'Promotion marked reviewed: ${result.promotion.symbol ?? '-'}.',
+      );
+    } catch (e) {
+      strategyAutoBuyPromotionsError = ApiErrorFormatter.format(e.toString());
+      try {
+        final promotions =
+            await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
+        strategyAutoBuyPromotions = promotions.items;
+      } catch (_) {
+        // Keep the explicit action error as the user-facing failure.
+      }
+      notifyListeners();
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyAutoBuyPromotionsError!),
+      );
+    }
+  }
+
   Future<ActionResult> dismissStrategyAutoBuyPromotion(
     StrategyAutoBuyPromotion promotion,
   ) async {
@@ -2088,7 +2122,7 @@ class DashboardController extends ChangeNotifier {
           await apiClient.dismissStrategyAutoBuyPromotion(promotion.id);
       strategyAutoBuyPromotions = [
         for (final item in strategyAutoBuyPromotions)
-          if (item.id != promotion.id) item,
+          item.id == promotion.id ? result.promotion : item,
       ];
       await refreshStrategyAutoBuyOperations(silent: true);
       notifyListeners();
@@ -2098,6 +2132,13 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       strategyAutoBuyPromotionsError = ApiErrorFormatter.format(e.toString());
+      try {
+        final promotions =
+            await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
+        strategyAutoBuyPromotions = promotions.items;
+      } catch (_) {
+        // Keep the explicit action error as the user-facing failure.
+      }
       notifyListeners();
       return ActionResult(
         success: false,
@@ -2109,6 +2150,14 @@ class DashboardController extends ChangeNotifier {
   Future<ActionResult> runGuardedLiveAutoBuyForPromotion(
     StrategyAutoBuyPromotion promotion,
   ) async {
+    if (!promotion.canRunGuardedLive) {
+      final reason = promotion.conversionBlockReason ?? 'promotion_blocked';
+      await refreshStrategyAutoBuyPromotions(silent: true);
+      return ActionResult(
+        success: false,
+        message: 'Guarded live auto buy is blocked: $reason.',
+      );
+    }
     if (strategyLiveAutoBuyLoading) {
       return const ActionResult(
         success: false,
@@ -2127,6 +2176,9 @@ class DashboardController extends ChangeNotifier {
       if (strategyLiveAutoBuyReadiness?.ready != true) {
         final reason =
             strategyLiveAutoBuyReadiness?.primaryBlockReason ?? 'not_ready';
+        final promotions =
+            await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
+        strategyAutoBuyPromotions = promotions.items;
         return ActionResult(
           success: false,
           message: 'Guarded live auto buy is blocked: $reason.',
@@ -2163,6 +2215,13 @@ class DashboardController extends ChangeNotifier {
       );
     } catch (e) {
       strategyLiveAutoBuyError = ApiErrorFormatter.format(e.toString());
+      try {
+        final promotions =
+            await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
+        strategyAutoBuyPromotions = promotions.items;
+      } catch (_) {
+        // Preserve the live conversion error as the user-facing failure.
+      }
       return ActionResult(
         success: false,
         message: _primaryMessage(strategyLiveAutoBuyError!),

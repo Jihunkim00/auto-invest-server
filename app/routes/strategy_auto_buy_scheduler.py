@@ -114,6 +114,23 @@ def acknowledge_strategy_auto_buy_promotion(
 
 
 @router.post(
+    "/promotions/{promotion_id}/mark-reviewed",
+    response_model=StrategyAutoBuyPromotionActionResponse,
+)
+def mark_strategy_auto_buy_promotion_reviewed(
+    promotion_id: int,
+    db: Session = Depends(get_db),
+    service: StrategyAutoBuyPromotionService = Depends(
+        get_strategy_auto_buy_promotion_service
+    ),
+):
+    try:
+        return service.mark_reviewed(db, promotion_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
     "/promotions/{promotion_id}/dismiss",
     response_model=StrategyAutoBuyPromotionActionResponse,
 )

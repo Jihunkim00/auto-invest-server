@@ -311,7 +311,7 @@ def test_scheduler_source_has_no_live_order_calls():
 
 
 def _now() -> datetime:
-    return datetime(2026, 6, 26, 1, 0, tzinfo=UTC)
+    return datetime.now(UTC)
 
 
 def _dry_safety() -> dict:

@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 StrategyAutoBuyPromotionStatus = Literal[
     "pending",
     "acknowledged",
+    "reviewed",
     "dismissed",
     "expired",
     "converted_to_live_attempt",
@@ -67,6 +68,22 @@ class StrategyAutoBuyPromotionItem(BaseModel):
     symbol: str | None = None
     symbol_name: str | None = None
     status: str
+    raw_status: str | None = None
+    review_status: str | None = None
+    review_required: bool = False
+    review_checklist: list[dict[str, Any]] = Field(default_factory=list)
+    review_summary: str | None = None
+    primary_risk_note: str | None = None
+    score_summary: dict[str, Any] = Field(default_factory=dict)
+    dry_run_evidence: dict[str, Any] = Field(default_factory=dict)
+    target_risk_summary: dict[str, Any] = Field(default_factory=dict)
+    proposed_notional_krw: float | None = None
+    max_notional_krw: float | None = None
+    promotion_age_minutes: float | None = None
+    expired: bool = False
+    stale: bool = False
+    conversion_allowed_by_state: bool = False
+    conversion_block_reason: str | None = None
     promotion_reason: str | None = None
     source_dry_run_signal_id: int | None = None
     source_dry_run_trade_run_id: int | None = None
@@ -86,6 +103,7 @@ class StrategyAutoBuyPromotionItem(BaseModel):
     gating_notes: list[str] = Field(default_factory=list)
     expires_at: str | None = None
     acknowledged_at: str | None = None
+    reviewed_at: str | None = None
     dismissed_at: str | None = None
     promoted_to_live_attempt_id: int | None = None
     related_live_order_id: int | None = None

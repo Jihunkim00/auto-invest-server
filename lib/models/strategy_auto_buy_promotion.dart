@@ -1,3 +1,31 @@
+class StrategyAutoBuyPromotionReviewCheck {
+  const StrategyAutoBuyPromotionReviewCheck({
+    required this.key,
+    required this.label,
+    required this.ok,
+  });
+
+  final String key;
+  final String label;
+  final bool ok;
+
+  factory StrategyAutoBuyPromotionReviewCheck.fromJson(Object? value) {
+    if (value is Map) {
+      final json = Map<String, dynamic>.from(value);
+      return StrategyAutoBuyPromotionReviewCheck(
+        key: _string(json['key'], 'check'),
+        label: _string(json['label'] ?? json['message'], 'Review check'),
+        ok: _bool(json['ok']),
+      );
+    }
+    return StrategyAutoBuyPromotionReviewCheck(
+      key: 'check',
+      label: _string(value, 'Review check'),
+      ok: true,
+    );
+  }
+}
+
 class StrategyAutoBuyPromotion {
   const StrategyAutoBuyPromotion({
     required this.id,
@@ -12,6 +40,22 @@ class StrategyAutoBuyPromotion {
     this.activeProfile,
     this.symbol,
     this.symbolName,
+    this.rawStatus,
+    this.reviewStatus,
+    this.reviewRequired = false,
+    this.reviewChecklist = const [],
+    this.reviewSummary,
+    this.primaryRiskNote,
+    this.scoreSummary = const {},
+    this.dryRunEvidence = const {},
+    this.targetRiskSummary = const {},
+    this.proposedNotionalKrw,
+    this.maxNotionalKrw,
+    this.promotionAgeMinutes,
+    this.expired = false,
+    this.stale = false,
+    this.conversionAllowedByState = false,
+    this.conversionBlockReason,
     this.promotionReason,
     this.sourceDryRunSignalId,
     this.sourceDryRunTradeRunId,
@@ -28,6 +72,7 @@ class StrategyAutoBuyPromotion {
     this.blockReason,
     this.expiresAt,
     this.acknowledgedAt,
+    this.reviewedAt,
     this.dismissedAt,
     this.promotedToLiveAttemptId,
     this.relatedLiveOrderId,
@@ -49,6 +94,22 @@ class StrategyAutoBuyPromotion {
   final String? symbol;
   final String? symbolName;
   final String status;
+  final String? rawStatus;
+  final String? reviewStatus;
+  final bool reviewRequired;
+  final List<StrategyAutoBuyPromotionReviewCheck> reviewChecklist;
+  final String? reviewSummary;
+  final String? primaryRiskNote;
+  final Map<String, dynamic> scoreSummary;
+  final Map<String, dynamic> dryRunEvidence;
+  final Map<String, dynamic> targetRiskSummary;
+  final double? proposedNotionalKrw;
+  final double? maxNotionalKrw;
+  final double? promotionAgeMinutes;
+  final bool expired;
+  final bool stale;
+  final bool conversionAllowedByState;
+  final String? conversionBlockReason;
   final String? promotionReason;
   final int? sourceDryRunSignalId;
   final int? sourceDryRunTradeRunId;
@@ -68,6 +129,7 @@ class StrategyAutoBuyPromotion {
   final List<String> gatingNotes;
   final DateTime? expiresAt;
   final DateTime? acknowledgedAt;
+  final DateTime? reviewedAt;
   final DateTime? dismissedAt;
   final int? promotedToLiveAttemptId;
   final int? relatedLiveOrderId;
@@ -83,7 +145,18 @@ class StrategyAutoBuyPromotion {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
-  bool get canRunGuardedLive => status == 'pending';
+  bool get canRunGuardedLive =>
+      conversionAllowedByState && !isConverted && !isDismissed && !isExpired;
+
+  bool get isDismissed => status == 'dismissed' || reviewStatus == 'dismissed';
+
+  bool get isExpired =>
+      expired || stale || status == 'expired' || reviewStatus == 'expired';
+
+  bool get isReviewed =>
+      reviewStatus == 'reviewed' ||
+      status == 'reviewed' ||
+      status == 'acknowledged';
 
   bool get isConverted =>
       status.startsWith('converted') ||
@@ -98,6 +171,8 @@ class StrategyAutoBuyPromotion {
   int? get liveOrderId => convertedOrderId ?? relatedLiveOrderId;
 
   factory StrategyAutoBuyPromotion.fromJson(Map<String, dynamic> json) {
+    final status = _string(json['status'], 'pending');
+    final expired = _bool(json['expired']) || _bool(json['stale']);
     return StrategyAutoBuyPromotion(
       id: _int(json['id']),
       provider: _string(json['provider'], 'kis'),
@@ -105,7 +180,25 @@ class StrategyAutoBuyPromotion {
       activeProfile: _nullableString(json['active_profile']),
       symbol: _nullableString(json['symbol']),
       symbolName: _nullableString(json['symbol_name']),
-      status: _string(json['status'], 'pending'),
+      status: status,
+      rawStatus: _nullableString(json['raw_status']),
+      reviewStatus: _nullableString(json['review_status']),
+      reviewRequired: _bool(json['review_required']),
+      reviewChecklist: _reviewChecks(json['review_checklist']),
+      reviewSummary: _nullableString(json['review_summary']),
+      primaryRiskNote: _nullableString(json['primary_risk_note']),
+      scoreSummary: _map(json['score_summary']),
+      dryRunEvidence: _map(json['dry_run_evidence']),
+      targetRiskSummary: _map(json['target_risk_summary']),
+      proposedNotionalKrw: _nullableDouble(json['proposed_notional_krw']),
+      maxNotionalKrw: _nullableDouble(json['max_notional_krw']),
+      promotionAgeMinutes: _nullableDouble(json['promotion_age_minutes']),
+      expired: expired,
+      stale: _bool(json['stale']),
+      conversionAllowedByState:
+          _nullableBool(json['conversion_allowed_by_state']) ??
+              _fallbackConversionAllowed(json, status, expired),
+      conversionBlockReason: _nullableString(json['conversion_block_reason']),
       promotionReason: _nullableString(json['promotion_reason']),
       sourceDryRunSignalId: _nullableInt(json['source_dry_run_signal_id']),
       sourceDryRunTradeRunId: _nullableInt(json['source_dry_run_trade_run_id']),
@@ -125,6 +218,7 @@ class StrategyAutoBuyPromotion {
       gatingNotes: _strings(json['gating_notes']),
       expiresAt: _dateTime(json['expires_at']),
       acknowledgedAt: _dateTime(json['acknowledged_at']),
+      reviewedAt: _dateTime(json['reviewed_at']),
       dismissedAt: _dateTime(json['dismissed_at']),
       promotedToLiveAttemptId:
           _nullableInt(json['promoted_to_live_attempt_id']),
@@ -228,6 +322,17 @@ double? _nullableDouble(Object? value) {
   return double.tryParse(value.toString().replaceAll(',', '').trim());
 }
 
+bool _bool(Object? value) => _nullableBool(value) ?? false;
+
+bool? _nullableBool(Object? value) {
+  if (value == null) return null;
+  if (value is bool) return value;
+  final text = value.toString().trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return null;
+}
+
 DateTime? _dateTime(Object? value) {
   final text = value?.toString().trim();
   if (text == null || text.isEmpty || text == 'null') return null;
@@ -244,4 +349,36 @@ List<String> _strings(Object? value) {
     for (final item in value)
       if (item.toString().trim().isNotEmpty) item.toString(),
   ];
+}
+
+List<StrategyAutoBuyPromotionReviewCheck> _reviewChecks(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      StrategyAutoBuyPromotionReviewCheck.fromJson(item),
+  ];
+}
+
+bool _fallbackConversionAllowed(
+  Map<String, dynamic> json,
+  String status,
+  bool expired,
+) {
+  if (expired) return false;
+  if (status == 'dismissed' ||
+      status == 'expired' ||
+      status == 'conversion_blocked' ||
+      status.startsWith('converted') ||
+      status.startsWith('live_order')) {
+    return false;
+  }
+  if (_nullableInt(json['converted_live_attempt_id']) != null ||
+      _nullableInt(json['converted_order_id']) != null ||
+      _nullableInt(json['promoted_to_live_attempt_id']) != null ||
+      _nullableInt(json['related_live_order_id']) != null) {
+    return false;
+  }
+  return status == 'pending' ||
+      status == 'reviewed' ||
+      status == 'acknowledged';
 }
