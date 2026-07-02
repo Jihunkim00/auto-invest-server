@@ -37,6 +37,29 @@ void main() {
     expect(blocked.blocked, isTrue);
     expect(blocked.blockReason, 'recent_dry_run_missing');
   });
+
+  test('preflight result parses read-only checklist states', () {
+    final allowed = StrategyLiveAutoBuyPreflightResult.fromJson(
+      livePreflightJson(status: 'allowed'),
+    );
+    final blocked = StrategyLiveAutoBuyPreflightResult.fromJson(
+      livePreflightJson(
+        status: 'blocked',
+        primaryBlockReason: 'promotion_dismissed',
+      ),
+    );
+
+    expect(allowed.isAllowed, isTrue);
+    expect(allowed.canSubmitAfterConfirmation, isTrue);
+    expect(allowed.finalConfirmationRequired, isTrue);
+    expect(allowed.isReadOnly, isTrue);
+    expect(allowed.orderId, isNull);
+    expect(allowed.brokerOrderId, isNull);
+    expect(allowed.checklist.first.key, 'promotion_exists');
+    expect(blocked.isBlocked, isTrue);
+    expect(blocked.primaryBlockReason, 'promotion_dismissed');
+    expect(blocked.canSubmitAfterConfirmation, isFalse);
+  });
 }
 
 Map<String, dynamic> liveReadinessJson({bool ready = false}) {
@@ -129,6 +152,77 @@ Map<String, dynamic> liveRunResultJson({
       'broker_submit_called': submitted,
       'manual_submit_called': false,
       'scheduler_changed': false,
+    },
+  };
+}
+
+Map<String, dynamic> livePreflightJson({
+  String status = 'allowed',
+  String? primaryBlockReason,
+}) {
+  final blocked = status == 'blocked';
+  return {
+    'promotion_id': 1,
+    'symbol': '005930',
+    'provider': 'kis',
+    'market': 'KR',
+    'preflight_status': status,
+    'can_submit_after_confirmation': !blocked && status == 'allowed',
+    'final_confirmation_required': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'order_id': null,
+    'broker_order_id': null,
+    'promotion_status': status == 'review_required' ? 'pending' : 'reviewed',
+    'review_status':
+        status == 'review_required' ? 'pending_review' : 'reviewed',
+    'promotion_state_allowed': !blocked,
+    'promotion_state_block_reason': primaryBlockReason,
+    'stale_or_expired': false,
+    'market_session_allowed': true,
+    'market_session_block_reason': null,
+    'dry_run': false,
+    'kill_switch': false,
+    'kis_real_order_enabled': true,
+    'live_auto_buy_enabled': true,
+    'active_profile_name': 'safe',
+    'score_summary': {'score': 82, 'confidence': 0.8},
+    'risk_flags': blocked ? [primaryBlockReason] : [],
+    'gating_notes': blocked ? [primaryBlockReason] : ['All gates passed.'],
+    'proposed_notional_krw': 30000,
+    'max_notional_krw': 50000,
+    'available_cash_krw': 1000000,
+    'estimated_quantity': 3,
+    'checklist': [
+      {
+        'key': 'promotion_exists',
+        'status': 'pass',
+        'label_key': 'promotion_exists',
+        'detail': 'Promotion exists.',
+        'blocking': false,
+      },
+      {
+        'key':
+            blocked ? 'promotion_not_dismissed' : 'final_confirmation_required',
+        'status': blocked ? 'fail' : 'pass',
+        'label_key':
+            blocked ? 'promotion_not_dismissed' : 'final_confirmation_required',
+        'detail': blocked
+            ? 'Promotion has not been dismissed.'
+            : 'Final confirmation is required.',
+        'blocking': blocked,
+      },
+    ],
+    'primary_block_reason': primaryBlockReason,
+    'next_required_action':
+        blocked ? 'resolve_block' : 'final_operator_confirmation',
+    'safety': {
+      'read_only': true,
+      'real_order_submitted': false,
+      'validation_called': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
     },
   };
 }

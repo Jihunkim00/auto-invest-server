@@ -252,6 +252,81 @@ class AppStrings {
       ? '$symbol 후보를 기존 보호된 실매수 엔드포인트로 전환합니다. 이 프로모션은 주문이 아니며 스케줄러는 아무 주문도 제출하지 않습니다.'
       : 'Convert $symbol via the existing guarded live auto-buy endpoint. This promotion is not an order and the scheduler will not submit anything.';
 
+  String get preflightLiveBuy =>
+      isKorean ? '매수 전환 사전 점검' : 'Preflight Live Buy';
+  String get preflightResult => isKorean ? '사전 점검 결과' : 'Preflight Result';
+  String get allowed => isKorean ? '전환 가능' : 'Allowed';
+  String get finalConfirmationRequiredShort =>
+      isKorean ? '최종 확인 필요' : 'Final confirmation required';
+  String get noLiveOrderSubmitted =>
+      isKorean ? '실주문 없음' : 'No live order submitted';
+  String get primaryBlockReason =>
+      isKorean ? '주요 차단 사유' : 'Primary block reason';
+  String get preflightChecklist => isKorean ? '점검 목록' : 'Checklist';
+  String get estimatedNotional => isKorean ? '예상 주문 금액' : 'Estimated notional';
+  String get availableCash => isKorean ? '사용 가능 예수금' : 'Available cash';
+  String get gatingNotes => isKorean ? '차단/검토 사유' : 'Gating notes';
+  String get preflightAlreadyRunning => isKorean
+      ? '매수 전환 사전 점검이 이미 실행 중입니다.'
+      : 'Live buy preflight is already running.';
+  String preflightCompletedMessage(String status, String? reason) {
+    final label = statusLabel(status);
+    if (reason == null || reason.trim().isEmpty) {
+      return isKorean ? '사전 점검 완료: $label.' : 'Preflight completed: $label.';
+    }
+    return isKorean
+        ? '사전 점검 완료: $label / $reason.'
+        : 'Preflight completed: $label / $reason.';
+  }
+
+  String preflightBlocksConversion(String reason) => isKorean
+      ? '사전 점검 결과 전환이 차단되었습니다: $reason.'
+      : 'Preflight blocks conversion: $reason.';
+
+  String preflightChecklistLabel(String key) {
+    final normalized = key.trim().toLowerCase();
+    final ko = <String, String>{
+      'promotion_exists': '프로모션 존재',
+      'promotion_not_dismissed': '제외되지 않음',
+      'promotion_not_expired': '만료되지 않음',
+      'promotion_not_converted': '이미 전환되지 않음',
+      'promotion_state_allowed': '프로모션 상태 허용',
+      'promotion_scope_matches': '프로모션 범위 일치',
+      'review_completed_or_allowed': '검토 완료 또는 허용',
+      'final_confirmation_required': '최종 확인 필요',
+      'kill_switch_off': '킬 스위치 꺼짐',
+      'dry_run_off_for_live_submit': '실주문 전 dry_run 꺼짐',
+      'kis_real_orders_enabled': '한국투자증권 실주문 허용',
+      'market_session_allowed': '시장 세션 허용',
+      'no_new_entry_window_allowed': '신규 진입 시간 허용',
+      'cash_sufficient': '예수금 충분',
+      'score_gate_passed': '점수 기준 통과',
+      'risk_gate_passed': '리스크 기준 통과',
+      'duplicate_order_block': '중복 주문 차단 확인',
+      'daily_limit_check': '일일 한도 확인',
+      'live_auto_buy_enabled': '보호된 실매수 활성',
+      'scheduler_live_disabled': '스케줄러 실주문 비활성',
+      'active_profile_allowed': '활성 프로필 허용',
+      'max_positions': '최대 보유 종목 확인',
+      'order_plan_quantity': '예상 수량 확인',
+      'account_snapshot': '계좌 조회',
+    };
+    if (isKorean) {
+      return ko[normalized] ?? normalized.replaceAll('_', ' ');
+    }
+    return normalized.replaceAll('_', ' ').toUpperCase();
+  }
+
+  String preflightChecklistStatus(String status) {
+    final normalized = status.trim().toLowerCase();
+    if (isKorean) {
+      if (normalized == 'pass') return '통과';
+      if (normalized == 'warn') return '주의';
+      if (normalized == 'fail') return '실패';
+    }
+    return normalized.toUpperCase();
+  }
+
   List<String> get schedulerSafetyBadges => [
         dryRunOnly,
         promotionQueueOnly,
@@ -302,6 +377,7 @@ class AppStrings {
       'pending': '대기 중',
       'pending_confirmation': '확인 대기',
       'review_required': '검토 필요',
+      'allowed': '전환 가능',
       'reviewed': '검토 완료',
       'acknowledged': '확인됨',
       'dismissed': '제외됨',

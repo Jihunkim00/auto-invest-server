@@ -110,6 +110,73 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('preflight button renders read-only Korean result',
+      (tester) async {
+    final api = _PromotionQueueApiClient(preflightStatus: 'allowed');
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    final preflight =
+        find.byKey(const ValueKey('preflight-live-buy-promotion-1'));
+    await tester.ensureVisible(preflight);
+    await tester.pumpAndSettle();
+    await tester.tap(preflight);
+    await tester.pumpAndSettle();
+
+    expect(api.preflightCalls, 1);
+    expect(api.liveRunCalls, 0);
+    expect(api.manualSubmitCalls, 0);
+    expect(api.lastPreflightPromotionId, 1);
+    expect(api.lastPreflightSentConfirmLive, isFalse);
+    expect(find.text('매수 전환 사전 점검'), findsOneWidget);
+    expect(find.text('사전 점검 결과'), findsOneWidget);
+    expect(find.text('실주문 없음'), findsOneWidget);
+    expect(find.text('점검 목록'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('blocked preflight disables guarded live conversion',
+      (tester) async {
+    final api = _PromotionQueueApiClient(
+      preflightStatus: 'blocked',
+      preflightBlockReason: 'promotion_dismissed',
+    );
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    final preflight =
+        find.byKey(const ValueKey('preflight-live-buy-promotion-1'));
+    await tester.ensureVisible(preflight);
+    await tester.pumpAndSettle();
+    await tester.tap(preflight);
+    await tester.pumpAndSettle();
+
+    final convert =
+        find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1'));
+    await tester.ensureVisible(convert);
+    await tester.pumpAndSettle();
+    final button = tester.widget<FilledButton>(convert);
+
+    expect(button.onPressed, isNull);
+    expect(api.liveRunCalls, 0);
+    expect(find.textContaining('promotion_dismissed'), findsWidgets);
+
+    controller.dispose();
+  });
+
   testWidgets('converted promotion shows trace and hides live action',
       (tester) async {
     final api = _PromotionQueueApiClient(
@@ -159,20 +226,29 @@ void main() {
 }
 
 class _PromotionQueueApiClient extends ApiClient {
-  _PromotionQueueApiClient({this.promotionStatus = 'pending'});
+  _PromotionQueueApiClient({
+    this.promotionStatus = 'pending',
+    this.preflightStatus = 'allowed',
+    this.preflightBlockReason,
+  });
 
   final String promotionStatus;
+  final String preflightStatus;
+  final String? preflightBlockReason;
 
   int operationsCalls = 0;
   int promotionsCalls = 0;
   int markReviewedCalls = 0;
   int dismissCalls = 0;
+  int preflightCalls = 0;
   int liveReadinessCalls = 0;
   int liveRunCalls = 0;
   int liveRecentCalls = 0;
   int markConvertedCalls = 0;
   int manualSubmitCalls = 0;
   int? lastPromotionId;
+  int? lastPreflightPromotionId;
+  bool lastPreflightSentConfirmLive = false;
 
   @override
   Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
@@ -231,6 +307,28 @@ class _PromotionQueueApiClient extends ApiClient {
     liveReadinessCalls += 1;
     return StrategyLiveAutoBuyReadiness.fromJson(
         liveReadinessJson(ready: true));
+  }
+
+  @override
+  Future<StrategyLiveAutoBuyPreflightResult> preflightStrategyLiveAutoBuy({
+    required int promotionId,
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int? sourceDryRunId,
+    double? maxNotionalKrw,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    preflightCalls += 1;
+    lastPreflightPromotionId = promotionId;
+    lastPreflightSentConfirmLive = false;
+    return StrategyLiveAutoBuyPreflightResult.fromJson(
+      livePreflightJson(
+        status: preflightStatus,
+        primaryBlockReason: preflightBlockReason,
+      ),
+    );
   }
 
   @override

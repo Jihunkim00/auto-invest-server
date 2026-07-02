@@ -274,6 +274,82 @@ class StrategyAutoBuyPromotionService:
             "trace": self.trace_payload(row),
         }
 
+    def preflight_context(
+        self,
+        db: Session,
+        *,
+        promotion_id: int,
+        provider: str,
+        market: str,
+        symbol: str | None,
+        source_dry_run_id: int | None,
+        active_profile: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Read-only promotion eligibility context for guarded live-buy preview."""
+        row = self._row(db, promotion_id)
+        now_utc = _aware_utc(now)
+        normalized_provider = str(provider or PROVIDER).strip().lower()
+        normalized_market = str(market or MARKET).strip().upper()
+        normalized_symbol = _text(symbol)
+        normalized_profile = _text(active_profile)
+        raw_status = str(row.status or "").strip()
+        expired = raw_status in CONVERTIBLE_STATUSES and _expired(row, now_utc)
+        stale_or_expired = expired or raw_status == "expired"
+        already_converted = _already_converted(row)
+        state_block_reason = _conversion_block_reason(
+            raw_status,
+            expired=expired,
+            already_converted=already_converted,
+        )
+        block_reason = state_block_reason
+        row_symbol = _text(row.symbol)
+        row_source_dry_run_id = _int(row.source_dry_run_trade_run_id)
+        row_profile = _text(row.active_profile)
+
+        if (
+            str(row.provider or "").lower() != normalized_provider
+            or str(row.market or "").upper() != normalized_market
+        ):
+            block_reason = block_reason or "promotion_scope_mismatch"
+        elif normalized_symbol and row_symbol and normalized_symbol.upper() != row_symbol.upper():
+            block_reason = block_reason or "promotion_symbol_mismatch"
+        elif (
+            source_dry_run_id is not None
+            and row_source_dry_run_id is not None
+            and int(source_dry_run_id) != row_source_dry_run_id
+        ):
+            block_reason = block_reason or "promotion_source_dry_run_mismatch"
+        elif normalized_profile and row_profile and normalized_profile != row_profile:
+            block_reason = block_reason or "promotion_profile_mismatch"
+
+        item = self.item(row)
+        return sanitize_kis_payload(
+            {
+                "accepted": block_reason is None,
+                "promotion_id": row.id,
+                "promotion": item,
+                "promotion_status": item.get("status") or raw_status,
+                "raw_status": raw_status,
+                "review_status": item.get("review_status"),
+                "review_required": bool(item.get("review_required")),
+                "promotion_state_allowed": state_block_reason is None,
+                "promotion_state_block_reason": state_block_reason,
+                "stale_or_expired": stale_or_expired,
+                "block_reason": block_reason,
+                "source_dry_run_id": row_source_dry_run_id or source_dry_run_id,
+                "symbol": row_symbol or normalized_symbol,
+                "trace": self.trace_payload(
+                    row,
+                    extra=(
+                        {"block_reason": block_reason}
+                        if block_reason is not None
+                        else None
+                    ),
+                ),
+            }
+        )
+
     def mark_conversion_blocked(
         self,
         db: Session,

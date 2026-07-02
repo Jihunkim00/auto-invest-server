@@ -35,7 +35,10 @@ from app.routes.strategy_auto_buy_scheduler import (
 )
 from app.routes.strategy_dry_run import router as strategy_dry_run_router
 from app.routes.strategy_live_exit import router as strategy_live_exit_router
-from app.routes.strategy_live import router as strategy_live_router
+from app.routes.strategy_live import (
+    compat_router as strategy_live_auto_buy_compat_router,
+    router as strategy_live_router,
+)
 from app.routes.strategy_performance import router as strategy_performance_router
 from app.routes.strategy_risk import router as strategy_risk_router
 from app.routes.trading import router as trading_router
@@ -100,6 +103,7 @@ app.include_router(strategy_auto_buy_operations_router)
 app.include_router(strategy_auto_buy_scheduler_router)
 app.include_router(strategy_dry_run_router)
 app.include_router(strategy_live_router)
+app.include_router(strategy_live_auto_buy_compat_router)
 app.include_router(strategy_live_exit_router)
 app.include_router(strategy_performance_router)
 app.include_router(strategy_risk_router)

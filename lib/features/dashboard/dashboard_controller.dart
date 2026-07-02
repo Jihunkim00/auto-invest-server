@@ -342,7 +342,11 @@ class DashboardController extends ChangeNotifier {
   String? strategyAutoBuyPromotionsError;
   StrategyLiveAutoBuyReadiness? strategyLiveAutoBuyReadiness;
   StrategyLiveAutoBuyRunResult? strategyLiveAutoBuyResult;
+  Map<int, StrategyLiveAutoBuyPreflightResult> strategyLiveAutoBuyPreflights =
+      const {};
   List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
+  bool strategyLiveAutoBuyPreflightLoading = false;
+  String? strategyLiveAutoBuyPreflightError;
   bool strategyLiveAutoBuyLoading = false;
   String? strategyLiveAutoBuyError;
   StrategyLiveAutoExitReadiness? strategyLiveAutoExitReadiness;
@@ -452,6 +456,10 @@ class DashboardController extends ChangeNotifier {
 
   bool isAgentStrategyActionBusy(int actionId) =>
       _agentStrategyActionBusy.contains(actionId);
+
+  StrategyLiveAutoBuyPreflightResult? strategyLiveAutoBuyPreflightForPromotion(
+          int promotionId) =>
+      strategyLiveAutoBuyPreflights[promotionId];
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -2030,6 +2038,11 @@ class DashboardController extends ChangeNotifier {
       final promotions =
           await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
       strategyAutoBuyPromotions = promotions.items;
+      strategyLiveAutoBuyPreflights = {
+        for (final item in promotions.items)
+          if (strategyLiveAutoBuyPreflights.containsKey(item.id))
+            item.id: strategyLiveAutoBuyPreflights[item.id]!,
+      };
       return ActionResult(
         success: true,
         message: 'Promotion queue refreshed: ${promotions.items.length}.',
@@ -2056,6 +2069,10 @@ class DashboardController extends ChangeNotifier {
         for (final item in strategyAutoBuyPromotions)
           item.id == promotion.id ? result.promotion : item,
       ];
+      strategyLiveAutoBuyPreflights = {
+        for (final entry in strategyLiveAutoBuyPreflights.entries)
+          if (entry.key != promotion.id) entry.key: entry.value,
+      };
       await refreshStrategyAutoBuyOperations(silent: true);
       notifyListeners();
       return ActionResult(
@@ -2082,6 +2099,10 @@ class DashboardController extends ChangeNotifier {
         for (final item in strategyAutoBuyPromotions)
           item.id == promotion.id ? result.promotion : item,
       ];
+      strategyLiveAutoBuyPreflights = {
+        for (final entry in strategyLiveAutoBuyPreflights.entries)
+          if (entry.key != promotion.id) entry.key: entry.value,
+      };
       await refreshStrategyAutoBuyOperations(silent: true);
       notifyListeners();
       return ActionResult(
@@ -2116,6 +2137,10 @@ class DashboardController extends ChangeNotifier {
         for (final item in strategyAutoBuyPromotions)
           item.id == promotion.id ? result.promotion : item,
       ];
+      strategyLiveAutoBuyPreflights = {
+        for (final entry in strategyLiveAutoBuyPreflights.entries)
+          if (entry.key != promotion.id) entry.key: entry.value,
+      };
       await refreshStrategyAutoBuyOperations(silent: true);
       notifyListeners();
       return ActionResult(
@@ -2139,6 +2164,50 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> preflightGuardedLiveAutoBuyForPromotion(
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    if (strategyLiveAutoBuyPreflightLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.preflightAlreadyRunning,
+      );
+    }
+    strategyLiveAutoBuyPreflightLoading = true;
+    strategyLiveAutoBuyPreflightError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.preflightStrategyLiveAutoBuy(
+        promotionId: promotion.id,
+        symbol: promotion.symbol,
+        sourceDryRunId: promotion.sourceDryRunTradeRunId,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      strategyLiveAutoBuyPreflights = {
+        ...strategyLiveAutoBuyPreflights,
+        promotion.id: result,
+      };
+      return ActionResult(
+        success: !result.isBlocked,
+        message: strings.preflightCompletedMessage(
+          result.preflightStatus,
+          result.primaryBlockReason,
+        ),
+      );
+    } catch (e) {
+      strategyLiveAutoBuyPreflightError =
+          ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyPreflightError!),
+      );
+    } finally {
+      strategyLiveAutoBuyPreflightLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> runGuardedLiveAutoBuyForPromotion(
     StrategyAutoBuyPromotion promotion,
   ) async {
@@ -2148,6 +2217,15 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(
         success: false,
         message: 'Guarded live auto buy is blocked: $reason.',
+      );
+    }
+    final preflight = strategyLiveAutoBuyPreflights[promotion.id];
+    if (preflight != null && !preflight.isAllowed) {
+      final reason =
+          preflight.primaryBlockReason ?? preflight.nextRequiredAction;
+      return ActionResult(
+        success: false,
+        message: strings.preflightBlocksConversion(reason),
       );
     }
     if (strategyLiveAutoBuyLoading) {
@@ -2194,6 +2272,12 @@ class DashboardController extends ChangeNotifier {
       ]);
       strategyAutoBuyPromotions =
           (results[0] as StrategyAutoBuyPromotions).items;
+      strategyLiveAutoBuyPreflights = {
+        for (final item in strategyAutoBuyPromotions)
+          if (item.canRunGuardedLive &&
+              strategyLiveAutoBuyPreflights.containsKey(item.id))
+            item.id: strategyLiveAutoBuyPreflights[item.id]!,
+      };
       strategyAutoBuyOperationsStatus =
           results[1] as StrategyAutoBuyOperationsStatus;
       strategyLiveAutoBuyReadiness = results[2] as StrategyLiveAutoBuyReadiness;

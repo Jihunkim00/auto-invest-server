@@ -160,6 +160,24 @@ class FakeOrderSyncService:
         return order
 
 
+class FakeMarketSessions:
+    def __init__(self, *, open: bool = True, entry_allowed: bool = True):
+        self.open = open
+        self.entry_allowed = entry_allowed
+        self.calls: list[dict] = []
+
+    def get_session_status(self, market, now=None):
+        self.calls.append({"market": market, "now": now})
+        return {
+            "market": market,
+            "timezone": "Asia/Seoul",
+            "is_market_open": self.open,
+            "is_entry_allowed_now": self.entry_allowed,
+            "is_near_close": False,
+            "no_new_entry_after": "15:00",
+        }
+
+
 def live_service(
     *,
     runtime: FakeRuntimeSettings | None = None,
@@ -167,6 +185,7 @@ def live_service(
     validation: FakeValidationService | None = None,
     broker: FakeBroker | None = None,
     order_sync_service: FakeOrderSyncService | None = None,
+    market_sessions: FakeMarketSessions | None = None,
     positions=None,
     balance=None,
     open_orders=None,
@@ -177,6 +196,7 @@ def live_service(
         validation_service=validation or FakeValidationService(),
         broker=broker or FakeBroker(),
         order_sync_service=order_sync_service,
+        market_sessions=market_sessions or FakeMarketSessions(),
         positions_loader=lambda db: list(positions if positions is not None else []),
         balance_loader=lambda db: dict(balance or {"cash": 1_000_000}),
         open_orders_loader=lambda db: list(open_orders if open_orders is not None else []),
@@ -407,6 +427,175 @@ def test_reviewed_promotion_still_requires_final_operator_confirmation(db_sessio
     assert result["block_reason"] == "confirm_operator_ack_required"
     assert row.status == "reviewed"
     assert validation.calls == []
+    assert broker.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_preflight_reviewed_promotion_is_allowed_without_order_side_effects(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion_service = StrategyAutoBuyPromotionService()
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    promotion_service.mark_reviewed(db_session, promotion["id"])
+    validation = FakeValidationService()
+    broker = FakeBroker()
+
+    result = live_service(validation=validation, broker=broker).preflight(
+        db_session,
+        {
+            "promotion_id": promotion["id"],
+            "provider": "kis",
+            "market": "KR",
+            "symbol": "005930",
+            "source_dry_run_id": dry_run.id,
+            "confirm_live": True,
+        },
+    )
+
+    row = db_session.get(StrategyAutoBuyPromotion, promotion["id"])
+    assert result["preflight_status"] == "allowed"
+    assert result["can_submit_after_confirmation"] is True
+    assert result["final_confirmation_required"] is True
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert result["order_id"] is None
+    assert result["broker_order_id"] is None
+    assert result["promotion_id"] == promotion["id"]
+    assert result["promotion_status"] == "reviewed"
+    assert result["promotion_state_allowed"] is True
+    assert result["estimated_quantity"] == 3
+    assert result["available_cash_krw"] == 1_000_000
+    assert row.status == "reviewed"
+    assert validation.calls == []
+    assert broker.calls == []
+    assert db_session.query(StrategyLiveAutoBuyAttempt).count() == 0
+    assert db_session.query(OrderLog).count() == 0
+    assert db_session.query(KisOrderValidationLog).count() == 0
+
+
+def test_preflight_pending_promotion_returns_review_required_without_submit(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    broker = FakeBroker()
+
+    result = live_service(broker=broker).preflight(
+        db_session,
+        {"promotion_id": promotion["id"], "source_dry_run_id": dry_run.id},
+    )
+
+    assert result["preflight_status"] == "review_required"
+    assert result["can_submit_after_confirmation"] is False
+    assert result["next_required_action"] == "mark_reviewed"
+    assert any(
+        item["key"] == "review_completed_or_allowed"
+        and item["status"] == "warn"
+        and item["blocking"] is False
+        for item in result["checklist"]
+    )
+    assert broker.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_preflight_dismissed_expired_and_converted_promotions_are_blocked(db_session):
+    enable_live_settings(db_session)
+    service = StrategyAutoBuyPromotionService()
+
+    dismissed_dry_run = add_dry_run(db_session, symbol="005930")
+    dismissed = add_promotion_for_dry_run(db_session, dismissed_dry_run)
+    service.dismiss(db_session, dismissed["id"])
+    dismissed_broker = FakeBroker()
+    dismissed_result = live_service(broker=dismissed_broker).preflight(
+        db_session,
+        {
+            "promotion_id": dismissed["id"],
+            "source_dry_run_id": dismissed_dry_run.id,
+        },
+    )
+    assert dismissed_result["preflight_status"] == "blocked"
+    assert dismissed_result["primary_block_reason"] == "promotion_dismissed"
+    assert dismissed_broker.calls == []
+
+    expired_dry_run = add_dry_run(db_session, symbol="000660")
+    expired = add_promotion_for_dry_run(
+        db_session,
+        expired_dry_run,
+        now=datetime.now(UTC) - timedelta(minutes=10),
+        ttl_minutes=1,
+    )
+    expired_result = live_service().preflight(
+        db_session,
+        {"promotion_id": expired["id"], "source_dry_run_id": expired_dry_run.id},
+    )
+    assert expired_result["preflight_status"] == "blocked"
+    assert expired_result["primary_block_reason"] == "promotion_expired"
+    assert db_session.get(StrategyAutoBuyPromotion, expired["id"]).status == "pending"
+
+    converted_dry_run = add_dry_run(db_session, symbol="035420")
+    converted = add_promotion_for_dry_run(db_session, converted_dry_run)
+    service.mark_converted(
+        db_session,
+        converted["id"],
+        promoted_to_live_attempt_id=999,
+        related_live_order_id=1000,
+    )
+    converted_result = live_service().preflight(
+        db_session,
+        {
+            "promotion_id": converted["id"],
+            "source_dry_run_id": converted_dry_run.id,
+        },
+    )
+    assert converted_result["preflight_status"] == "blocked"
+    assert converted_result["primary_block_reason"] == "promotion_already_converted"
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_preflight_invalid_promotion_returns_safe_block_without_submit(db_session):
+    enable_live_settings(db_session)
+    validation = FakeValidationService()
+    broker = FakeBroker()
+
+    result = live_service(validation=validation, broker=broker).preflight(
+        db_session,
+        {"promotion_id": 9999, "provider": "kis", "market": "KR"},
+    )
+
+    assert result["preflight_status"] == "blocked"
+    assert result["primary_block_reason"] == "promotion_not_found"
+    assert result["real_order_submitted"] is False
+    assert validation.calls == []
+    assert broker.calls == []
+    assert db_session.query(StrategyLiveAutoBuyAttempt).count() == 0
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_guarded_live_submit_revalidates_promotion_state_after_preflight(db_session):
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion_service = StrategyAutoBuyPromotionService()
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+    promotion_service.mark_reviewed(db_session, promotion["id"])
+    broker = FakeBroker()
+    service = live_service(broker=broker)
+
+    preflight = service.preflight(
+        db_session,
+        {"promotion_id": promotion["id"], "source_dry_run_id": dry_run.id},
+    )
+    promotion_service.dismiss(db_session, promotion["id"])
+    result = service.run_once(
+        db_session,
+        live_request(
+            promotion_id=promotion["id"],
+            source_dry_run_id=dry_run.id,
+        ),
+    )
+
+    assert preflight["preflight_status"] == "allowed"
+    assert result["status"] == "blocked"
+    assert result["block_reason"] == "promotion_dismissed"
     assert broker.calls == []
     assert db_session.query(OrderLog).count() == 0
 

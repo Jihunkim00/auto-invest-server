@@ -18,6 +18,7 @@ from app.db.models import (
     TradeRunLog,
 )
 from app.schemas.strategy_live_auto_buy import (
+    ProfileAwareGuardedLiveAutoBuyPreflightRequest,
     ProfileAwareGuardedLiveAutoBuyRunRequest,
 )
 from app.services.kis_order_sync_service import KisOrderSyncService
@@ -27,6 +28,7 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.market_session_service import MarketSessionService
 from app.services.profile_aware_dry_run_auto_buy_service import (
     MODE as DRY_RUN_MODE,
 )
@@ -75,6 +77,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         strategy_profiles: StrategyProfileService | None = None,
         target_risk_service: TargetAwareRiskService | None = None,
         promotion_service: StrategyAutoBuyPromotionService | None = None,
+        market_sessions: MarketSessionService | None = None,
         positions_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         balance_loader: Callable[[Session], dict[str, Any]] | None = None,
         open_orders_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
@@ -91,6 +94,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.target_risk_service = target_risk_service or TargetAwareRiskService()
         self.promotion_service = promotion_service or StrategyAutoBuyPromotionService()
+        self.market_sessions = market_sessions or MarketSessionService()
         self.positions_loader = positions_loader
         self.balance_loader = balance_loader
         self.open_orders_loader = open_orders_loader
@@ -301,6 +305,428 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 "safety": _safety(read_only=True),
             }
         )
+
+    def preflight(
+        self,
+        db: Session,
+        request: ProfileAwareGuardedLiveAutoBuyPreflightRequest | dict[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        payload = (
+            request
+            if isinstance(request, ProfileAwareGuardedLiveAutoBuyPreflightRequest)
+            else ProfileAwareGuardedLiveAutoBuyPreflightRequest.model_validate(request)
+        )
+        now_utc = _utc_now(now)
+        settings = self.runtime_settings.get_settings_read_only(db)
+        global_settings = self._global_settings()
+        profile = self._active_profile(db)
+        profile_name = str(profile.get("profile_name") or "safe")
+        allowed_profiles = _allowed_profiles(settings)
+        checklist: list[dict[str, Any]] = []
+        risk_flags: list[str] = []
+        gating_notes: list[str] = []
+        primary: str | None = None
+        available_cash: float | None = None
+        estimated_quantity: int | None = None
+        proposed_notional: float | None = None
+        score_summary: dict[str, Any] = {}
+
+        def gate(
+            key: str,
+            ok: bool,
+            reason: str,
+            detail: str,
+            *,
+            blocking: bool = True,
+        ) -> None:
+            nonlocal primary
+            checklist.append(
+                _preflight_check(
+                    key,
+                    "pass" if ok else ("fail" if blocking else "warn"),
+                    detail,
+                    blocking=blocking and not ok,
+                )
+            )
+            if ok:
+                return
+            gating_notes.append(detail)
+            if blocking:
+                primary = primary or reason
+                risk_flags.append(reason)
+
+        try:
+            promotion_context = self.promotion_service.preflight_context(
+                db,
+                promotion_id=int(payload.promotion_id),
+                provider=payload.provider,
+                market=payload.market,
+                symbol=payload.symbol,
+                source_dry_run_id=payload.source_dry_run_id,
+                active_profile=profile_name,
+                now=now_utc,
+            )
+        except ValueError as exc:
+            promotion_context = {
+                "accepted": False,
+                "promotion_id": payload.promotion_id,
+                "promotion_status": None,
+                "review_status": None,
+                "promotion_state_allowed": False,
+                "promotion_state_block_reason": str(exc) or "promotion_not_found",
+                "stale_or_expired": False,
+                "block_reason": str(exc) or "promotion_not_found",
+                "symbol": payload.symbol,
+                "promotion": {},
+                "trace": {
+                    "promotion_id": payload.promotion_id,
+                    "block_reason": str(exc) or "promotion_not_found",
+                },
+            }
+
+        promotion = (
+            promotion_context.get("promotion")
+            if isinstance(promotion_context.get("promotion"), dict)
+            else {}
+        )
+        promotion_status = _text_or_none(promotion_context.get("promotion_status"))
+        review_status = _text_or_none(promotion_context.get("review_status"))
+        review_required = bool(promotion_context.get("review_required"))
+        stale_or_expired = bool(promotion_context.get("stale_or_expired"))
+        promotion_state_allowed = bool(
+            promotion_context.get("promotion_state_allowed")
+        )
+        promotion_state_block_reason = _text_or_none(
+            promotion_context.get("promotion_state_block_reason")
+        )
+        promotion_block_reason = _text_or_none(promotion_context.get("block_reason"))
+        if isinstance(promotion, dict):
+            score_summary = (
+                dict(promotion.get("score_summary"))
+                if isinstance(promotion.get("score_summary"), dict)
+                else {}
+            )
+            risk_flags.extend(_strings(promotion.get("risk_flags")))
+            gating_notes.extend(_strings(promotion.get("gating_notes")))
+            proposed_notional = _float(
+                promotion.get("proposed_notional_krw")
+                or promotion.get("recommended_notional_krw")
+                or promotion.get("simulated_notional_krw")
+            )
+
+        gate(
+            "promotion_exists",
+            promotion_status is not None,
+            "promotion_not_found",
+            "Promotion exists in the promotion queue.",
+        )
+        gate(
+            "promotion_not_dismissed",
+            promotion_status != "dismissed",
+            "promotion_dismissed",
+            "Promotion has not been dismissed.",
+        )
+        gate(
+            "promotion_not_expired",
+            not stale_or_expired,
+            "promotion_expired",
+            "Promotion is not expired or stale.",
+        )
+        gate(
+            "promotion_not_converted",
+            promotion_state_block_reason != "promotion_already_converted",
+            "promotion_already_converted",
+            "Promotion has not already been converted.",
+        )
+        gate(
+            "promotion_state_allowed",
+            promotion_state_allowed,
+            promotion_state_block_reason or "promotion_not_convertible",
+            "Promotion status is eligible for guarded live-buy preflight.",
+        )
+        if promotion_block_reason and promotion_state_block_reason is None:
+            gate(
+                "promotion_scope_matches",
+                False,
+                promotion_block_reason,
+                "Promotion scope matches provider, market, symbol, dry-run, and profile.",
+            )
+        elif promotion_status is not None:
+            gate(
+                "promotion_scope_matches",
+                True,
+                "promotion_scope_mismatch",
+                "Promotion scope matches provider, market, symbol, dry-run, and profile.",
+            )
+        if review_required:
+            gate(
+                "review_completed_or_allowed",
+                False,
+                "promotion_review_required",
+                "Promotion is still pending operator review.",
+                blocking=False,
+            )
+        else:
+            gate(
+                "review_completed_or_allowed",
+                True,
+                "promotion_review_required",
+                "Promotion review is complete or not required.",
+            )
+
+        scheduler_live_enabled = bool(
+            settings.get("strategy_live_auto_buy_scheduler_enabled")
+        )
+        gate(
+            "live_auto_buy_enabled",
+            bool(settings.get("strategy_live_auto_buy_enabled")),
+            "strategy_live_auto_buy_disabled",
+            "Guarded live auto-buy is enabled.",
+        )
+        gate(
+            "kill_switch_off",
+            not bool(settings.get("kill_switch")),
+            "kill_switch_enabled",
+            "Kill switch is off.",
+        )
+        gate(
+            "dry_run_off_for_live_submit",
+            not bool(settings.get("dry_run")),
+            "dry_run_enabled",
+            "Runtime dry_run is off for the final guarded live submit.",
+        )
+        gate(
+            "kis_real_orders_enabled",
+            bool(getattr(global_settings, "kis_real_order_enabled", False)),
+            "kis_real_order_disabled",
+            "KIS real-order setting is enabled.",
+        )
+        gate(
+            "scheduler_live_disabled",
+            not scheduler_live_enabled,
+            "strategy_live_auto_buy_scheduler_enabled",
+            "Scheduler live auto-buy remains disabled.",
+        )
+        profile_allowed = profile_name in allowed_profiles and (
+            profile_name != "aggressive"
+            or bool(settings.get("strategy_live_auto_buy_allow_aggressive"))
+        )
+        gate(
+            "active_profile_allowed",
+            profile_allowed,
+            "active_profile_not_allowed",
+            f"Active profile {profile_name or 'unknown'} is allowed.",
+        )
+
+        market_session = self._market_session_status(payload.market, now_utc)
+        market_open = market_session.get("is_market_open") is True
+        entry_allowed_now = market_session.get("is_entry_allowed_now") is True
+        market_session_block_reason = None if market_open else "market_closed"
+        gate(
+            "market_session_allowed",
+            market_open,
+            "market_closed",
+            "Market session is open for guarded live buy.",
+        )
+        gate(
+            "no_new_entry_window_allowed",
+            entry_allowed_now,
+            "after_no_new_entry_time",
+            "No-new-entry window still allows a buy.",
+        )
+
+        dry_run: dict[str, Any] = {}
+        target_risk: dict[str, Any] = {}
+        plan: dict[str, Any] = {}
+        account: dict[str, Any] | None = None
+        effective_source_dry_run_id = _int(promotion_context.get("source_dry_run_id"))
+        if effective_source_dry_run_id is None:
+            effective_source_dry_run_id = payload.source_dry_run_id
+        effective_symbol = _text_or_none(promotion_context.get("symbol")) or payload.symbol
+
+        if primary is None:
+            dry_run = self._recent_dry_run(
+                db,
+                provider=payload.provider,
+                market=payload.market,
+                symbol=effective_symbol,
+                source_dry_run_id=effective_source_dry_run_id,
+                ttl_minutes=int(
+                    settings.get("strategy_live_auto_buy_recent_dry_run_ttl_minutes")
+                    or 30
+                ),
+                now_utc=now_utc,
+            )
+            gate(
+                "score_gate_passed",
+                bool(dry_run.get("accepted")),
+                str(dry_run.get("block_reason") or "recent_dry_run_missing"),
+                "Recent dry-run would_buy evidence exists and is fresh.",
+            )
+
+        orders_used_today = self._orders_used_today(db, now_utc=now_utc)
+        max_orders = max(
+            0, int(settings.get("strategy_live_auto_buy_max_orders_per_day") or 0)
+        )
+        gate(
+            "daily_limit_check",
+            orders_used_today < max_orders,
+            "daily_live_auto_buy_limit_reached",
+            f"Guarded live auto-buy daily usage is {orders_used_today}/{max_orders}.",
+        )
+
+        if primary is None and dry_run.get("accepted"):
+            try:
+                account = self._account_snapshot(db)
+            except ValueError as exc:
+                gate("account_snapshot", False, _account_block_reason(exc), str(exc))
+            else:
+                available_cash = _cash(account["balance"])
+                selected_symbol = str(dry_run["payload"].get("selected_symbol") or "")
+                max_positions = int(profile.get("max_positions") or 0)
+                position_count = len(
+                    [item for item in account["positions"] if _position_qty(item) > 0]
+                )
+                gate(
+                    "max_positions",
+                    position_count < max_positions,
+                    "max_positions_reached",
+                    f"Current KIS positions are {position_count}/{max_positions}.",
+                )
+                gate(
+                    "duplicate_order_block",
+                    not _has_position(account["positions"], selected_symbol)
+                    and not self._has_open_order(
+                        db,
+                        selected_symbol,
+                        account["open_orders"],
+                    ),
+                    "duplicate_open_order",
+                    "No existing position or open buy order blocks this symbol.",
+                )
+            if primary is None:
+                target_risk = self._target_risk(db, dry_run["payload"], profile)
+                risk_flags.extend(_strings(target_risk.get("risk_flags")))
+                gating_notes.extend(_strings(target_risk.get("gating_notes")))
+                gate(
+                    "risk_gate_passed",
+                    target_risk.get("approved") is True,
+                    str(target_risk.get("block_reason") or "target_risk_rejected"),
+                    "Target-aware risk approves the live entry preview.",
+                )
+                if primary is None:
+                    plan = self._order_plan(
+                        settings=settings,
+                        profile=profile,
+                        dry_run_payload=dry_run["payload"],
+                        target_risk=target_risk,
+                        requested_notional_krw=payload.max_notional_krw,
+                    )
+                    estimated_quantity = int(plan.get("quantity") or 0) or None
+                    proposed_notional = _float(plan.get("estimated_notional_krw"))
+                    gate(
+                        "order_plan_quantity",
+                        bool((plan.get("quantity") or 0) > 0),
+                        str(plan.get("block_reason") or "quantity_zero"),
+                        "Estimated final order quantity is greater than zero.",
+                    )
+                    gate(
+                        "cash_sufficient",
+                        available_cash is not None
+                        and available_cash
+                        >= float(plan.get("estimated_notional_krw") or 0),
+                        "insufficient_cash",
+                        "Available KIS cash covers the estimated notional.",
+                    )
+        else:
+            if not any(item["key"] == "cash_sufficient" for item in checklist):
+                checklist.append(
+                    _preflight_check(
+                        "cash_sufficient",
+                        "warn",
+                        "Cash sufficiency was not checked because an earlier gate is blocked.",
+                        blocking=False,
+                    )
+                )
+
+        gate(
+            "final_confirmation_required",
+            True,
+            "final_confirmation_required",
+            "Final guarded live auto-buy confirmation is still required.",
+        )
+
+        preflight_status = (
+            "blocked"
+            if primary is not None
+            else "review_required"
+            if review_required
+            else "allowed"
+        )
+        next_required_action = (
+            "resolve_block"
+            if preflight_status == "blocked"
+            else "mark_reviewed"
+            if preflight_status == "review_required"
+            else "final_operator_confirmation"
+        )
+
+        response = sanitize_kis_payload(
+            {
+                "promotion_id": _int(promotion_context.get("promotion_id"))
+                or payload.promotion_id,
+                "symbol": effective_symbol,
+                "provider": payload.provider,
+                "market": payload.market,
+                "preflight_status": preflight_status,
+                "can_submit_after_confirmation": preflight_status == "allowed",
+                "final_confirmation_required": True,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+                "order_id": None,
+                "broker_order_id": None,
+                "promotion_status": promotion_status,
+                "review_status": review_status,
+                "promotion_state_allowed": promotion_state_allowed,
+                "promotion_state_block_reason": promotion_state_block_reason,
+                "stale_or_expired": stale_or_expired,
+                "market_session_allowed": market_open,
+                "market_session_block_reason": market_session_block_reason,
+                "dry_run": bool(settings.get("dry_run")),
+                "kill_switch": bool(settings.get("kill_switch")),
+                "kis_real_order_enabled": bool(
+                    getattr(global_settings, "kis_real_order_enabled", False)
+                ),
+                "live_auto_buy_enabled": bool(
+                    settings.get("strategy_live_auto_buy_enabled")
+                ),
+                "active_profile_name": profile_name,
+                "score_summary": score_summary,
+                "risk_flags": _dedupe(risk_flags),
+                "gating_notes": _dedupe(gating_notes),
+                "proposed_notional_krw": proposed_notional,
+                "max_notional_krw": _float(
+                    settings.get("strategy_live_auto_buy_max_notional_krw")
+                ),
+                "available_cash_krw": available_cash,
+                "estimated_quantity": estimated_quantity,
+                "checklist": [],
+                "primary_block_reason": primary,
+                "next_required_action": next_required_action,
+                "safety": _safety(read_only=True),
+            }
+        )
+        response["checklist"] = [
+            {
+                **item,
+                "detail": sanitize_kis_payload(item.get("detail"), key="detail"),
+            }
+            for item in checklist
+        ]
+        return response
 
     def run_once(
         self,
@@ -1101,6 +1527,18 @@ class ProfileAwareGuardedLiveAutoBuyService:
             "open_orders": open_orders if isinstance(open_orders, list) else [],
         }
 
+    def _market_session_status(self, market: str, now_utc: datetime) -> dict[str, Any]:
+        try:
+            result = self.market_sessions.get_session_status(market, now=now_utc)
+            return result if isinstance(result, dict) else {}
+        except Exception as exc:
+            return {
+                "market": market,
+                "is_market_open": False,
+                "is_entry_allowed_now": False,
+                "closure_reason": _safe_error(exc),
+            }
+
     def _orders_used_today(self, db: Session, *, now_utc: datetime) -> int:
         start_utc, end_utc = _kr_day_bounds_utc(now_utc)
         return (
@@ -1483,6 +1921,23 @@ def _check(key: str, ok: bool, message: str, *, reason: str) -> dict[str, Any]:
     }
 
 
+def _preflight_check(
+    key: str,
+    status: str,
+    detail: str,
+    *,
+    blocking: bool,
+) -> dict[str, Any]:
+    return {
+        "key": key,
+        "status": status,
+        "label_key": key,
+        "display_label": key.replace("_", " ").title(),
+        "detail": detail,
+        "blocking": bool(blocking),
+    }
+
+
 def _account_block_reason(exc: ValueError) -> str:
     reason = str(exc).split(":", 1)[0].strip()
     return reason or "account_snapshot_unavailable"
@@ -1591,6 +2046,11 @@ def _int(value: Any) -> int | None:
         return int(value)
     except Exception:
         return None
+
+
+def _text_or_none(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
 
 
 def _strings(value: Any) -> list[str]:
