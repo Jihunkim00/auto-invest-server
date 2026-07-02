@@ -14,6 +14,7 @@ from app.core.enums import InternalOrderStatus
 from app.db.models import (
     OrderLog,
     SignalLog,
+    StrategyAutoBuyPromotion,
     StrategyLiveAutoBuyAttempt,
     TradeRunLog,
 )
@@ -1044,6 +1045,23 @@ class ProfileAwareGuardedLiveAutoBuyService:
         db.refresh(attempt)
         return sanitize_kis_payload(response)
 
+    def result(self, db: Session, attempt_id: int) -> dict[str, Any]:
+        attempt = db.get(StrategyLiveAutoBuyAttempt, int(attempt_id))
+        if attempt is None:
+            raise ValueError("strategy_live_auto_buy_attempt_not_found")
+        return self._result_from_attempt(db, attempt)
+
+    def sync_result(self, db: Session, attempt_id: int) -> dict[str, Any]:
+        attempt = db.get(StrategyLiveAutoBuyAttempt, int(attempt_id))
+        if attempt is None:
+            raise ValueError("strategy_live_auto_buy_attempt_not_found")
+        if attempt.related_order_id:
+            self.sync_attempt(db, attempt_id)
+            refreshed = db.get(StrategyLiveAutoBuyAttempt, int(attempt_id))
+            if refreshed is not None:
+                attempt = refreshed
+        return self._result_from_attempt(db, attempt, sync_only=True)
+
     def _blocked(
         self,
         db: Session,
@@ -1825,6 +1843,181 @@ class ProfileAwareGuardedLiveAutoBuyService:
         payload["safety"] = safety
         return sanitize_kis_payload(payload)
 
+    def _result_from_attempt(
+        self,
+        db: Session,
+        attempt: StrategyLiveAutoBuyAttempt,
+        *,
+        sync_only: bool = False,
+    ) -> dict[str, Any]:
+        response = self._response_from_attempt(attempt)
+        request_payload = _parse_object(attempt.request_payload)
+        order = (
+            db.get(OrderLog, int(attempt.related_order_id))
+            if attempt.related_order_id
+            else None
+        )
+        promotion = self._promotion_for_attempt(
+            db,
+            attempt=attempt,
+            response=response,
+            request_payload=request_payload,
+            order=order,
+        )
+        promotion_item = (
+            self.promotion_service.item(promotion) if promotion is not None else {}
+        )
+        safety = _result_safety(attempt, response, order, sync_only=sync_only)
+        broker_order_id = (
+            attempt.broker_order_id
+            or response.get("broker_order_id")
+            or (order.broker_order_id if order is not None else None)
+            or (order.kis_odno if order is not None else None)
+        )
+        internal_status = (
+            order.internal_status
+            if order is not None
+            else response.get("internal_status") or attempt.status
+        )
+        broker_status = (
+            (order.broker_status or order.broker_order_status)
+            if order is not None
+            else response.get("broker_status")
+        )
+        submitted_quantity = _first_float(
+            response.get("quantity"),
+            attempt.quantity,
+            order.requested_qty if order is not None else None,
+            order.qty if order is not None else None,
+        )
+        average_fill_price = _first_float(
+            order.avg_fill_price if order is not None else None,
+            order.filled_avg_price if order is not None else None,
+        )
+        filled_quantity = _first_float(order.filled_qty if order is not None else None)
+        filled_notional = (
+            filled_quantity * average_fill_price
+            if filled_quantity is not None and average_fill_price is not None
+            else None
+        )
+        promotion_id = _first_int(
+            response.get("promotion_id"),
+            request_payload.get("promotion_id"),
+            promotion.id if promotion is not None else None,
+            _parse_object(response.get("promotion_trace")).get("promotion_id"),
+        )
+        result_status = _result_status(
+            attempt_status=attempt.status,
+            internal_status=internal_status,
+            broker_status=broker_status,
+            safety=safety,
+            has_order=order is not None,
+        )
+        audit_trace = _result_audit_trace(
+            attempt=attempt,
+            response=response,
+            request_payload=request_payload,
+            order=order,
+            promotion_item=promotion_item,
+        )
+        payload = {
+            "attempt_id": attempt.id,
+            "promotion_id": promotion_id,
+            "symbol": response.get("symbol") or attempt.symbol,
+            "provider": attempt.provider or PROVIDER,
+            "market": attempt.market or MARKET,
+            "action": response.get("action") or attempt.status,
+            "result_status": result_status,
+            "internal_status": internal_status,
+            "broker_status": broker_status,
+            "order_id": attempt.related_order_id,
+            "broker_order_id": broker_order_id,
+            "kis_odno": (order.kis_odno if order is not None else None)
+            or broker_order_id,
+            "related_order_log_id": attempt.related_order_id,
+            "related_signal_id": _first_int(
+                response.get("signal_id"),
+                attempt.source_signal_id,
+            ),
+            "real_order_submitted": bool(safety.get("real_order_submitted")),
+            "broker_submit_called": bool(safety.get("broker_submit_called")),
+            "manual_submit_called": bool(safety.get("manual_submit_called")),
+            "submitted_at": _iso(
+                attempt.submitted_at
+                or (order.submitted_at if order is not None else None)
+            ),
+            "last_synced_at": _iso(
+                attempt.synced_at
+                or (order.last_synced_at if order is not None else None)
+                or (promotion.last_sync_at if promotion is not None else None)
+            ),
+            "filled_at": _iso(order.filled_at if order is not None else None),
+            "submitted_quantity": submitted_quantity,
+            "filled_quantity": filled_quantity,
+            "submitted_notional": _first_float(
+                response.get("submitted_notional_krw"),
+                attempt.estimated_notional_krw,
+                order.notional if order is not None else None,
+            ),
+            "filled_notional": filled_notional,
+            "average_fill_price": average_fill_price,
+            "block_reason": (
+                response.get("block_reason")
+                or attempt.block_reason
+                or (order.error_message if order is not None else None)
+            ),
+            "risk_flags": _dedupe(
+                _strings(response.get("risk_flags")) + _parse_strings(attempt.risk_flags)
+            ),
+            "gating_notes": _dedupe(
+                _strings(response.get("gating_notes"))
+                + _parse_strings(attempt.gating_notes)
+            ),
+            "promotion_review_status": promotion_item.get("review_status")
+            or (promotion.status if promotion is not None else None),
+            "promotion_conversion_status": promotion_item.get("conversion_status")
+            or (promotion.conversion_status if promotion is not None else None),
+            "audit_trace": audit_trace,
+            "next_safe_action": _next_safe_action(result_status),
+            "safety": safety,
+        }
+        return sanitize_kis_payload(payload)
+
+    def _promotion_for_attempt(
+        self,
+        db: Session,
+        *,
+        attempt: StrategyLiveAutoBuyAttempt,
+        response: dict[str, Any],
+        request_payload: dict[str, Any],
+        order: OrderLog | None,
+    ) -> StrategyAutoBuyPromotion | None:
+        trace = response.get("promotion_trace")
+        trace_payload = trace if isinstance(trace, dict) else {}
+        promotion_id = _first_int(
+            response.get("promotion_id"),
+            request_payload.get("promotion_id"),
+            trace_payload.get("promotion_id"),
+        )
+        if promotion_id is not None:
+            row = db.get(StrategyAutoBuyPromotion, promotion_id)
+            if row is not None:
+                return row
+        for column, value in (
+            (StrategyAutoBuyPromotion.converted_live_attempt_id, attempt.id),
+            (StrategyAutoBuyPromotion.promoted_to_live_attempt_id, attempt.id),
+            (StrategyAutoBuyPromotion.converted_order_id, attempt.related_order_id),
+            (StrategyAutoBuyPromotion.related_live_order_id, attempt.related_order_id),
+            (StrategyAutoBuyPromotion.converted_order_id, order.id if order else None),
+            (StrategyAutoBuyPromotion.related_live_order_id, order.id if order else None),
+        ):
+            if value is None:
+                continue
+            row = db.query(StrategyAutoBuyPromotion).filter(column == value).first()
+            if row is not None:
+                return row
+        return None
+
     def _attempt_item(self, attempt: StrategyLiveAutoBuyAttempt) -> dict[str, Any]:
         payload = _parse_object(attempt.response_payload)
         if payload:
@@ -1999,6 +2192,146 @@ def _attempt_status_from_order(order: OrderLog) -> str:
     return "submitted"
 
 
+def _result_status(
+    *,
+    attempt_status: str | None,
+    internal_status: str | None,
+    broker_status: str | None,
+    safety: dict[str, Any],
+    has_order: bool,
+) -> str:
+    internal = str(internal_status or "").strip().upper()
+    broker = str(broker_status or "").strip().lower()
+    attempt = str(attempt_status or "").strip().lower()
+    if internal == InternalOrderStatus.FILLED.value or attempt == "filled":
+        return "filled"
+    if internal == InternalOrderStatus.PARTIALLY_FILLED.value:
+        return "partially_filled"
+    if internal in {
+        InternalOrderStatus.REJECTED.value,
+        InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+        InternalOrderStatus.FAILED.value,
+        InternalOrderStatus.CANCELED.value,
+        InternalOrderStatus.EXPIRED.value,
+    } or attempt in {"rejected", "failed", "canceled", "cancelled", "expired"}:
+        return "rejected"
+    if internal in {
+        InternalOrderStatus.UNKNOWN_STALE.value,
+        InternalOrderStatus.SYNC_FAILED.value,
+    } or attempt in {"sync_required", "pending_sync"} or "sync_required" in broker:
+        return "pending_sync"
+    if attempt in {"blocked", "validation_failed"}:
+        return "blocked"
+    if has_order or attempt in {"submitting", "submitted"}:
+        return "submitted"
+    if safety.get("broker_submit_called") and not safety.get("real_order_submitted"):
+        return "pending_sync"
+    return "unknown"
+
+
+def _next_safe_action(result_status: str) -> str:
+    if result_status == "blocked":
+        return "review_block_reason"
+    if result_status == "pending_sync":
+        return "sync_order_status"
+    if result_status == "submitted":
+        return "refresh_result"
+    if result_status in {"filled", "partially_filled", "rejected"}:
+        return "review_result"
+    return "refresh_result"
+
+
+def _result_safety(
+    attempt: StrategyLiveAutoBuyAttempt,
+    response: dict[str, Any],
+    order: OrderLog | None,
+    *,
+    sync_only: bool,
+) -> dict[str, Any]:
+    safety = {
+        **_safety(read_only=True),
+        **_parse_object(attempt.safety_flags),
+    }
+    response_safety = response.get("safety")
+    if isinstance(response_safety, dict):
+        safety.update(response_safety)
+    request_payload = _parse_object(order.request_payload) if order is not None else {}
+    order_safety = request_payload.get("safety")
+    if isinstance(order_safety, dict):
+        safety.update(order_safety)
+    if response.get("submitted") is True and order is not None:
+        safety["real_order_submitted"] = True
+        safety["broker_submit_called"] = True
+    if (
+        order is not None
+        and not safety.get("broker_submit_called")
+        and str(attempt.status or "").lower() in {"submitted", "filled"}
+    ):
+        safety["broker_submit_called"] = True
+    if (
+        order is not None
+        and not safety.get("real_order_submitted")
+        and str(attempt.status or "").lower() in {"submitted", "filled"}
+    ):
+        safety["real_order_submitted"] = True
+    safety["read_only"] = True
+    safety["sync_only"] = bool(sync_only)
+    safety["manual_submit_called"] = bool(safety.get("manual_submit_called"))
+    safety["scheduler_changed"] = False
+    safety["setting_changed"] = False
+    safety["dry_run_changed"] = False
+    safety["kill_switch_changed"] = False
+    safety["kis_real_order_changed"] = False
+    return sanitize_kis_payload(safety)
+
+
+def _result_audit_trace(
+    *,
+    attempt: StrategyLiveAutoBuyAttempt,
+    response: dict[str, Any],
+    request_payload: dict[str, Any],
+    order: OrderLog | None,
+    promotion_item: dict[str, Any],
+) -> dict[str, Any]:
+    promotion_trace = response.get("promotion_trace")
+    if not isinstance(promotion_trace, dict):
+        promotion_trace = request_payload.get("promotion_trace")
+    if not isinstance(promotion_trace, dict):
+        promotion_trace = promotion_item.get("trace_payload")
+    if not isinstance(promotion_trace, dict):
+        promotion_trace = {}
+    order_trace = {}
+    if order is not None:
+        order_trace = {
+            "order_id": order.id,
+            "broker_order_id": order.broker_order_id,
+            "kis_odno": order.kis_odno or order.broker_order_id,
+            "internal_status": order.internal_status,
+            "broker_status": order.broker_status or order.broker_order_status,
+            "submitted_at": _iso(order.submitted_at),
+            "last_synced_at": _iso(order.last_synced_at),
+            "filled_at": _iso(order.filled_at),
+        }
+    return sanitize_kis_payload(
+        {
+            "attempt": {
+                "attempt_id": attempt.id,
+                "status": attempt.status,
+                "trigger_source": attempt.trigger_source,
+                "client_request_id": attempt.client_request_id,
+                "source_dry_run_id": attempt.source_dry_run_id,
+                "source_signal_id": attempt.source_signal_id,
+                "source_trade_run_id": attempt.source_trade_run_id,
+                "created_at": _iso(attempt.created_at),
+                "submitted_at": _iso(attempt.submitted_at),
+                "synced_at": _iso(attempt.synced_at),
+            },
+            "promotion": promotion_trace,
+            "order": order_trace,
+        }
+    )
+
+
 def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:
     local = _utc_now(now_utc).astimezone(KR_TZ)
     start_local = datetime.combine(local.date(), time.min, tzinfo=KR_TZ)
@@ -2048,6 +2381,22 @@ def _int(value: Any) -> int | None:
         return None
 
 
+def _first_int(*values: Any) -> int | None:
+    for value in values:
+        parsed = _int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _text_or_none(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
@@ -2057,6 +2406,10 @@ def _strings(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _parse_strings(value: Any) -> list[str]:
+    return [str(item) for item in _parse_list(value) if str(item).strip()]
 
 
 def _dedupe(values: list[str]) -> list[str]:

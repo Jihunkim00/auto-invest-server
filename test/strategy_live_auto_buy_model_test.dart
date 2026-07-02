@@ -60,6 +60,31 @@ void main() {
     expect(blocked.primaryBlockReason, 'promotion_dismissed');
     expect(blocked.canSubmitAfterConfirmation, isFalse);
   });
+
+  test('conversion result parses order trace and sync state', () {
+    final submitted = StrategyLiveAutoBuyResult.fromJson(liveResultJson());
+    final pendingSync = StrategyLiveAutoBuyResult.fromJson(
+      liveResultJson(
+        resultStatus: 'pending_sync',
+        internalStatus: 'UNKNOWN_STALE',
+      ),
+    );
+
+    expect(submitted.attemptId, 10);
+    expect(submitted.promotionId, 1);
+    expect(submitted.resultStatus, 'submitted');
+    expect(submitted.orderId, 30);
+    expect(submitted.brokerOrderId, 'KIS-ORDER-1');
+    expect(submitted.kisOdno, 'KIS-ORDER-1');
+    expect(submitted.realOrderSubmitted, isTrue);
+    expect(submitted.brokerSubmitCalled, isTrue);
+    expect(submitted.manualSubmitCalled, isFalse);
+    expect(submitted.submittedQuantity, 3);
+    expect(submitted.submittedNotional, 30000);
+    expect(submitted.auditTrace['promotion']['promotion_id'], 1);
+    expect(submitted.syncRequired, isFalse);
+    expect(pendingSync.syncRequired, isTrue);
+  });
 }
 
 Map<String, dynamic> liveReadinessJson({bool ready = false}) {
@@ -222,6 +247,63 @@ Map<String, dynamic> livePreflightJson({
       'real_order_submitted': false,
       'validation_called': false,
       'broker_submit_called': false,
+      'manual_submit_called': false,
+    },
+  };
+}
+
+Map<String, dynamic> liveResultJson({
+  String resultStatus = 'submitted',
+  String internalStatus = 'SUBMITTED',
+  bool realOrderSubmitted = true,
+  bool brokerSubmitCalled = true,
+  bool includeOrder = true,
+}) {
+  return {
+    'attempt_id': 10,
+    'promotion_id': 1,
+    'symbol': '005930',
+    'provider': 'kis',
+    'market': 'KR',
+    'action': resultStatus,
+    'result_status': resultStatus,
+    'internal_status': internalStatus,
+    'broker_status': 'accepted',
+    'order_id': includeOrder ? 30 : null,
+    'broker_order_id': includeOrder ? 'KIS-ORDER-1' : null,
+    'kis_odno': includeOrder ? 'KIS-ORDER-1' : null,
+    'related_order_log_id': includeOrder ? 30 : null,
+    'related_signal_id': includeOrder ? 11 : null,
+    'real_order_submitted': realOrderSubmitted,
+    'broker_submit_called': brokerSubmitCalled,
+    'manual_submit_called': false,
+    'submitted_at': '2026-06-25T03:01:00Z',
+    'last_synced_at': null,
+    'filled_at': null,
+    'submitted_quantity': 3,
+    'filled_quantity': null,
+    'submitted_notional': 30000,
+    'filled_notional': null,
+    'average_fill_price': null,
+    'block_reason': null,
+    'risk_flags': [],
+    'gating_notes': ['All guarded gates passed.'],
+    'promotion_review_status': 'reviewed',
+    'promotion_conversion_status': 'live_order_created',
+    'audit_trace': {
+      'attempt': {'attempt_id': 10},
+      'promotion': {'promotion_id': 1, 'source_dry_run_id': 20},
+      'order': includeOrder
+          ? {'order_id': 30, 'broker_order_id': 'KIS-ORDER-1'}
+          : {},
+    },
+    'next_safe_action':
+        resultStatus == 'pending_sync' ? 'sync_order_status' : 'refresh_result',
+    'safety': {
+      'read_only': true,
+      'sync_only': false,
+      'real_order_submitted': realOrderSubmitted,
+      'broker_submit_called': brokerSubmitCalled,
       'manual_submit_called': false,
     },
   };

@@ -342,11 +342,14 @@ class DashboardController extends ChangeNotifier {
   String? strategyAutoBuyPromotionsError;
   StrategyLiveAutoBuyReadiness? strategyLiveAutoBuyReadiness;
   StrategyLiveAutoBuyRunResult? strategyLiveAutoBuyResult;
+  StrategyLiveAutoBuyResult? latestStrategyLiveAutoBuyConversionResult;
   Map<int, StrategyLiveAutoBuyPreflightResult> strategyLiveAutoBuyPreflights =
       const {};
   List<StrategyLiveAutoBuyRunResult> strategyLiveAutoBuyRecent = const [];
   bool strategyLiveAutoBuyPreflightLoading = false;
   String? strategyLiveAutoBuyPreflightError;
+  bool strategyLiveAutoBuyResultLoading = false;
+  String? strategyLiveAutoBuyResultError;
   bool strategyLiveAutoBuyLoading = false;
   String? strategyLiveAutoBuyError;
   StrategyLiveAutoExitReadiness? strategyLiveAutoExitReadiness;
@@ -460,6 +463,14 @@ class DashboardController extends ChangeNotifier {
   StrategyLiveAutoBuyPreflightResult? strategyLiveAutoBuyPreflightForPromotion(
           int promotionId) =>
       strategyLiveAutoBuyPreflights[promotionId];
+
+  StrategyLiveAutoBuyResult? strategyLiveAutoBuyResultForPromotion(
+    int promotionId,
+  ) {
+    final result = latestStrategyLiveAutoBuyConversionResult;
+    if (result == null) return null;
+    return result.matchesPromotion(promotionId) ? result : null;
+  }
 
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
@@ -2208,6 +2219,93 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshGuardedLiveAutoBuyResult(
+    StrategyLiveAutoBuyResult result,
+  ) async {
+    if (strategyLiveAutoBuyResultLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.liveBuyResultAlreadyLoading,
+      );
+    }
+    strategyLiveAutoBuyResultLoading = true;
+    strategyLiveAutoBuyResultError = null;
+    notifyListeners();
+    try {
+      final refreshed =
+          await apiClient.fetchStrategyLiveAutoBuyResult(result.attemptId);
+      latestStrategyLiveAutoBuyConversionResult = refreshed;
+      return ActionResult(
+        success: true,
+        message: strings.liveBuyResultRefreshed(
+          strings.statusLabel(refreshed.resultStatus),
+        ),
+      );
+    } catch (e) {
+      strategyLiveAutoBuyResultError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyResultError!),
+      );
+    } finally {
+      strategyLiveAutoBuyResultLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> syncGuardedLiveAutoBuyResult(
+    StrategyLiveAutoBuyResult result,
+  ) async {
+    if (strategyLiveAutoBuyResultLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.liveBuyResultAlreadyLoading,
+      );
+    }
+    strategyLiveAutoBuyResultLoading = true;
+    strategyLiveAutoBuyResultError = null;
+    notifyListeners();
+    try {
+      final synced =
+          await apiClient.syncStrategyLiveAutoBuyResult(result.attemptId);
+      latestStrategyLiveAutoBuyConversionResult = synced;
+      try {
+        final promotions =
+            await apiClient.fetchStrategyAutoBuyPromotions(status: 'all');
+        strategyAutoBuyPromotions = promotions.items;
+      } catch (_) {
+        // Keep the synced result visible even if the queue refresh fails.
+      }
+      return ActionResult(
+        success: true,
+        message: strings.liveBuyResultSynced(
+          strings.statusLabel(synced.resultStatus),
+        ),
+      );
+    } catch (e) {
+      strategyLiveAutoBuyResultError = ApiErrorFormatter.format(e.toString());
+      try {
+        latestStrategyLiveAutoBuyConversionResult =
+            await apiClient.fetchStrategyLiveAutoBuyResult(result.attemptId);
+      } catch (_) {
+        // Preserve the sync error as the visible failure.
+      }
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(strategyLiveAutoBuyResultError!),
+      );
+    } finally {
+      strategyLiveAutoBuyResultLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearGuardedLiveAutoBuyResult() {
+    latestStrategyLiveAutoBuyConversionResult = null;
+    strategyLiveAutoBuyResultError = null;
+    notifyListeners();
+  }
+
   Future<ActionResult> runGuardedLiveAutoBuyForPromotion(
     StrategyAutoBuyPromotion promotion,
   ) async {
@@ -2264,6 +2362,15 @@ class DashboardController extends ChangeNotifier {
         clientRequestId: requestId,
       );
       strategyLiveAutoBuyResult = result;
+      if (result.attemptId != null) {
+        try {
+          latestStrategyLiveAutoBuyConversionResult =
+              await apiClient.fetchStrategyLiveAutoBuyResult(result.attemptId!);
+        } catch (e) {
+          strategyLiveAutoBuyResultError =
+              ApiErrorFormatter.format(e.toString());
+        }
+      }
       final results = await Future.wait<Object>([
         apiClient.fetchStrategyAutoBuyPromotions(status: 'all'),
         apiClient.fetchStrategyAutoBuyOperationsStatus(),

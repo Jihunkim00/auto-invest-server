@@ -364,6 +364,130 @@ class StrategyLiveAutoBuyRunResult {
   }
 }
 
+class StrategyLiveAutoBuyResult {
+  const StrategyLiveAutoBuyResult({
+    required this.attemptId,
+    required this.provider,
+    required this.market,
+    required this.action,
+    required this.resultStatus,
+    required this.realOrderSubmitted,
+    required this.brokerSubmitCalled,
+    required this.manualSubmitCalled,
+    required this.riskFlags,
+    required this.gatingNotes,
+    required this.auditTrace,
+    required this.nextSafeAction,
+    required this.safety,
+    this.promotionId,
+    this.symbol,
+    this.internalStatus,
+    this.brokerStatus,
+    this.orderId,
+    this.brokerOrderId,
+    this.kisOdno,
+    this.relatedOrderLogId,
+    this.relatedSignalId,
+    this.submittedAt,
+    this.lastSyncedAt,
+    this.filledAt,
+    this.submittedQuantity,
+    this.filledQuantity,
+    this.submittedNotional,
+    this.filledNotional,
+    this.averageFillPrice,
+    this.blockReason,
+    this.promotionReviewStatus,
+    this.promotionConversionStatus,
+  });
+
+  final int attemptId;
+  final int? promotionId;
+  final String? symbol;
+  final String provider;
+  final String market;
+  final String action;
+  final String resultStatus;
+  final String? internalStatus;
+  final String? brokerStatus;
+  final int? orderId;
+  final String? brokerOrderId;
+  final String? kisOdno;
+  final int? relatedOrderLogId;
+  final int? relatedSignalId;
+  final bool realOrderSubmitted;
+  final bool brokerSubmitCalled;
+  final bool manualSubmitCalled;
+  final DateTime? submittedAt;
+  final DateTime? lastSyncedAt;
+  final DateTime? filledAt;
+  final double? submittedQuantity;
+  final double? filledQuantity;
+  final double? submittedNotional;
+  final double? filledNotional;
+  final double? averageFillPrice;
+  final String? blockReason;
+  final List<String> riskFlags;
+  final List<String> gatingNotes;
+  final String? promotionReviewStatus;
+  final String? promotionConversionStatus;
+  final Map<String, dynamic> auditTrace;
+  final String nextSafeAction;
+  final Map<String, dynamic> safety;
+
+  bool get blocked => resultStatus == 'blocked';
+  bool get submitted => resultStatus == 'submitted';
+  bool get filled => resultStatus == 'filled';
+  bool get rejected => resultStatus == 'rejected';
+  bool get partiallyFilled => resultStatus == 'partially_filled';
+  bool get syncRequired =>
+      resultStatus == 'pending_sync' ||
+      nextSafeAction == 'sync_order_status' ||
+      internalStatus == 'UNKNOWN_STALE' ||
+      internalStatus == 'SYNC_FAILED';
+
+  bool matchesPromotion(int promotionId) => this.promotionId == promotionId;
+
+  factory StrategyLiveAutoBuyResult.fromJson(Map<String, dynamic> json) {
+    return StrategyLiveAutoBuyResult(
+      attemptId: _int(json['attempt_id']),
+      promotionId: _nullableInt(json['promotion_id']),
+      symbol: _nullableString(json['symbol']),
+      provider: _string(json['provider'], 'kis'),
+      market: _string(json['market'], 'KR'),
+      action: _string(json['action'], 'unknown'),
+      resultStatus: _string(json['result_status'], 'unknown'),
+      internalStatus: _nullableString(json['internal_status']),
+      brokerStatus: _nullableString(json['broker_status']),
+      orderId: _nullableInt(json['order_id']),
+      brokerOrderId: _nullableString(json['broker_order_id']),
+      kisOdno: _nullableString(json['kis_odno']),
+      relatedOrderLogId: _nullableInt(json['related_order_log_id']),
+      relatedSignalId: _nullableInt(json['related_signal_id']),
+      realOrderSubmitted: json['real_order_submitted'] == true,
+      brokerSubmitCalled: json['broker_submit_called'] == true,
+      manualSubmitCalled: json['manual_submit_called'] == true,
+      submittedAt: _dateTime(json['submitted_at']),
+      lastSyncedAt: _dateTime(json['last_synced_at']),
+      filledAt: _dateTime(json['filled_at']),
+      submittedQuantity: _nullableDouble(json['submitted_quantity']),
+      filledQuantity: _nullableDouble(json['filled_quantity']),
+      submittedNotional: _nullableDouble(json['submitted_notional']),
+      filledNotional: _nullableDouble(json['filled_notional']),
+      averageFillPrice: _nullableDouble(json['average_fill_price']),
+      blockReason: _nullableString(json['block_reason']),
+      riskFlags: _strings(json['risk_flags']),
+      gatingNotes: _strings(json['gating_notes']),
+      promotionReviewStatus: _nullableString(json['promotion_review_status']),
+      promotionConversionStatus:
+          _nullableString(json['promotion_conversion_status']),
+      auditTrace: _map(json['audit_trace']),
+      nextSafeAction: _string(json['next_safe_action'], 'refresh_result'),
+      safety: _map(json['safety']),
+    );
+  }
+}
+
 class StrategyLiveAutoBuyRecent {
   const StrategyLiveAutoBuyRecent({
     required this.provider,

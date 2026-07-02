@@ -613,6 +613,25 @@ class ApiClient {
     return StrategyLiveAutoBuyPreflightResult.fromJson(payload);
   }
 
+  Future<StrategyLiveAutoBuyResult> fetchStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    final payload = await _getJsonNoCache(
+      '/strategy/live-auto-buy/results/$attemptId',
+    );
+    return StrategyLiveAutoBuyResult.fromJson(payload);
+  }
+
+  Future<StrategyLiveAutoBuyResult> syncStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/strategy/live-auto-buy/results/$attemptId/sync',
+      const {},
+    );
+    return StrategyLiveAutoBuyResult.fromJson(payload);
+  }
+
   Future<StrategyLiveAutoBuyRecent> fetchStrategyLiveAutoBuyRecent({
     String provider = 'kis',
     String market = 'KR',

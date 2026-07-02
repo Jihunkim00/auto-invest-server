@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/widgets/auto_buy_promotion_queue_panel.dart';
@@ -24,6 +25,7 @@ void main() {
       theme: ThemeData.dark(),
       home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
     ));
+    final strings = controller.strings;
 
     expect(find.byKey(const ValueKey('auto-buy-promotion-queue-panel')),
         findsOneWidget);
@@ -31,7 +33,7 @@ void main() {
     expect(find.text('프로모션 전용'), findsOneWidget);
     expect(find.text('검토 필요'), findsWidgets);
     expect(find.text('주문 아님'), findsOneWidget);
-    expect(find.text('증권사 제출 없음'), findsOneWidget);
+    expect(find.text(strings.noBrokerSubmit), findsOneWidget);
     expect(find.text('실거래 전환은 최종 확인 필요'), findsOneWidget);
     expect(find.text('스케줄러 실주문 비활성화'), findsOneWidget);
     expect(find.textContaining('005930'), findsWidgets);
@@ -98,14 +100,168 @@ void main() {
         findsOneWidget);
     expect(api.liveRunCalls, 0);
 
-    await tester.tap(find.text('보호된 실매수로 전환').last);
+    await tester
+        .tap(find.byKey(const ValueKey('promotion-live-confirm-submit')));
     await tester.pumpAndSettle();
 
     expect(api.liveReadinessCalls, 2);
     expect(api.liveRunCalls, 1);
+    expect(api.liveResultCalls, 1);
     expect(api.lastPromotionId, 1);
     expect(api.markConvertedCalls, 0);
     expect(api.manualSubmitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('conversion result panel renders Korean labels and syncs safely',
+      (tester) async {
+    final api = _PromotionQueueApiClient(resultStatus: 'pending_sync');
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    final convert =
+        find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1'));
+    await tester.ensureVisible(convert);
+    await tester.pumpAndSettle();
+    await tester.tap(convert);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('promotion-live-confirm-submit')));
+    await tester.pumpAndSettle();
+
+    final strings = controller.strings;
+    expect(find.text(strings.liveBuyConversionResult), findsOneWidget);
+    expect(find.text(strings.liveOrderSubmitted), findsOneWidget);
+    expect(find.text(strings.syncOrderStatus), findsOneWidget);
+    expect(find.text('KIS-ORDER-1'), findsWidgets);
+    expect(find.byKey(const ValueKey('guarded_live_buy_result_panel')),
+        findsOneWidget);
+    final syncButton =
+        find.byKey(const ValueKey('guarded_live_buy_result_sync_button'));
+    expect(syncButton, findsOneWidget);
+
+    await tester.ensureVisible(syncButton);
+    await tester.pumpAndSettle();
+    await tester.tap(syncButton);
+    await tester.pumpAndSettle();
+
+    expect(api.liveResultCalls, 1);
+    expect(api.liveResultSyncCalls, 1);
+    expect(api.liveRunCalls, 1);
+    expect(api.manualSubmitCalls, 0);
+    expect(find.text('Retry Order'), findsNothing);
+    expect(find.text('Submit Again'), findsNothing);
+    expect(find.text('Force Convert'), findsNothing);
+    expect(find.text('Auto Retry'), findsNothing);
+    expect(find.text('Enable Live Scheduler'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('blocked conversion result shows no broker submit',
+      (tester) async {
+    final api = _PromotionQueueApiClient(
+      resultStatus: 'blocked',
+      resultRealOrderSubmitted: false,
+      resultBrokerSubmitCalled: false,
+    );
+    final controller = DashboardController(api, autoload: false);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    final convert =
+        find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1'));
+    await tester.ensureVisible(convert);
+    await tester.pumpAndSettle();
+    await tester.tap(convert);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('promotion-live-confirm-submit')));
+    await tester.pumpAndSettle();
+
+    final strings = controller.strings;
+    final resultPanel =
+        find.byKey(const ValueKey('guarded_live_buy_result_panel'));
+    expect(resultPanel, findsOneWidget);
+    expect(
+      find.descendant(
+        of: resultPanel,
+        matching: find.text(strings.liveBuyConversionResult),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: resultPanel,
+        matching: find.text(strings.noLiveOrderSubmitted),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: resultPanel,
+        matching: find.text(strings.noBrokerSubmit),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: resultPanel,
+        matching: find.text(strings.liveOrderSubmitted),
+      ),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('guarded_live_buy_result_sync_button')),
+        findsNothing);
+    expect(find.text('KIS-ORDER-1'), findsNothing);
+    expect(api.liveRunCalls, 1);
+    expect(api.liveResultCalls, 1);
+    expect(api.liveResultSyncCalls, 0);
+    expect(api.manualSubmitCalls, 0);
+
+    controller.dispose();
+  });
+
+  testWidgets('conversion result panel renders English labels', (tester) async {
+    final api = _PromotionQueueApiClient(resultStatus: 'pending_sync');
+    final controller = DashboardController(api, autoload: false);
+    controller.setAppLanguage(AppLanguage.english);
+    await controller.refreshStrategyAutoBuyOperations(silent: true);
+    await controller.refreshStrategyAutoBuyPromotions(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: AutoBuyPromotionQueuePanel(controller: controller)),
+    ));
+
+    final convert =
+        find.byKey(const ValueKey('convert-guarded-live-buy-promotion-1'));
+    await tester.ensureVisible(convert);
+    await tester.pumpAndSettle();
+    await tester.tap(convert);
+    await tester.pumpAndSettle();
+    await tester
+        .tap(find.byKey(const ValueKey('promotion-live-confirm-submit')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Live Buy Conversion Result'), findsOneWidget);
+    expect(find.text('Live Order Submitted'), findsOneWidget);
+    expect(find.text('Sync Order Status'), findsOneWidget);
+    expect(find.text('KIS Order No.'), findsOneWidget);
+    expect(api.liveRunCalls, 1);
+    expect(api.liveResultCalls, 1);
 
     controller.dispose();
   });
@@ -230,11 +386,17 @@ class _PromotionQueueApiClient extends ApiClient {
     this.promotionStatus = 'pending',
     this.preflightStatus = 'allowed',
     this.preflightBlockReason,
+    this.resultStatus = 'submitted',
+    this.resultRealOrderSubmitted = true,
+    this.resultBrokerSubmitCalled = true,
   });
 
   final String promotionStatus;
   final String preflightStatus;
   final String? preflightBlockReason;
+  final String resultStatus;
+  final bool resultRealOrderSubmitted;
+  final bool resultBrokerSubmitCalled;
 
   int operationsCalls = 0;
   int promotionsCalls = 0;
@@ -243,6 +405,8 @@ class _PromotionQueueApiClient extends ApiClient {
   int preflightCalls = 0;
   int liveReadinessCalls = 0;
   int liveRunCalls = 0;
+  int liveResultCalls = 0;
+  int liveResultSyncCalls = 0;
   int liveRecentCalls = 0;
   int markConvertedCalls = 0;
   int manualSubmitCalls = 0;
@@ -346,6 +510,38 @@ class _PromotionQueueApiClient extends ApiClient {
     lastPromotionId = promotionId;
     return StrategyLiveAutoBuyRunResult.fromJson(
       liveRunResultJson(status: 'submitted', submitted: true),
+    );
+  }
+
+  @override
+  Future<StrategyLiveAutoBuyResult> fetchStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    liveResultCalls += 1;
+    return StrategyLiveAutoBuyResult.fromJson(
+      liveResultJson(
+        resultStatus: resultStatus,
+        internalStatus:
+            resultStatus == 'pending_sync' ? 'UNKNOWN_STALE' : 'SUBMITTED',
+        realOrderSubmitted: resultRealOrderSubmitted,
+        brokerSubmitCalled: resultBrokerSubmitCalled,
+        includeOrder: resultStatus != 'blocked',
+      ),
+    );
+  }
+
+  @override
+  Future<StrategyLiveAutoBuyResult> syncStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    liveResultSyncCalls += 1;
+    return StrategyLiveAutoBuyResult.fromJson(
+      liveResultJson(
+        resultStatus: 'filled',
+        internalStatus: 'FILLED',
+        realOrderSubmitted: resultRealOrderSubmitted,
+        brokerSubmitCalled: resultBrokerSubmitCalled,
+      ),
     );
   }
 
