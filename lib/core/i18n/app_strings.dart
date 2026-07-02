@@ -179,7 +179,7 @@ class AppStrings {
   String get promotionOnly => isKorean ? '프로모션 전용' : 'PROMOTION ONLY';
   String get reviewRequired => isKorean ? '검토 필요' : 'REVIEW REQUIRED';
   String get notAnOrder => isKorean ? '주문 아님' : 'NOT AN ORDER';
-  String get noBrokerSubmit => isKorean ? '증권사 제출 없음' : 'NO BROKER SUBMIT';
+  String get noBrokerSubmit => isKorean ? '브로커 제출 없음' : 'NO BROKER SUBMIT';
   String get liveConversionRequiresFinalConfirmation => isKorean
       ? '실거래 전환은 최종 확인 필요'
       : 'LIVE CONVERSION REQUIRES FINAL CONFIRMATION';
@@ -266,6 +266,33 @@ class AppStrings {
   String get estimatedNotional => isKorean ? '예상 주문 금액' : 'Estimated notional';
   String get availableCash => isKorean ? '사용 가능 예수금' : 'Available cash';
   String get gatingNotes => isKorean ? '차단/검토 사유' : 'Gating notes';
+  String get liveBuyConversionResult =>
+      isKorean ? '실매수 전환 결과' : 'Live Buy Conversion Result';
+  String get liveOrderSubmitted =>
+      isKorean ? '실주문 제출됨' : 'Live Order Submitted';
+  String get brokerOrderId => isKorean ? '브로커 주문 번호' : 'Broker Order ID';
+  String get kisOrderNo => isKorean ? '한국투자증권 주문번호' : 'KIS Order No.';
+  String get relatedOrderLog => isKorean ? '주문 로그' : 'Order Log';
+  String get filledQuantity => isKorean ? '체결 수량' : 'Filled Quantity';
+  String get submittedQuantity => isKorean ? '제출 수량' : 'Submitted Quantity';
+  String get averageFillPrice => isKorean ? '평균 체결가' : 'Average Fill Price';
+  String get filledNotional => isKorean ? '체결 금액' : 'Filled Notional';
+  String get syncOrderStatus => isKorean ? '주문 상태 동기화' : 'Sync Order Status';
+  String get refreshResult => isKorean ? '결과 새로고침' : 'Refresh Result';
+  String get backToPromotionQueue =>
+      isKorean ? '프로모션 목록으로 돌아가기' : 'Back to Promotion Queue';
+  String get auditTrace => isKorean ? '감사 추적' : 'Audit Trace';
+  String get internalStatus => isKorean ? '내부 상태' : 'Internal Status';
+  String get brokerStatus => isKorean ? '브로커 상태' : 'Broker Status';
+  String get syncRequired => isKorean ? '동기화 필요' : 'Sync Required';
+  String get liveBuyResultAlreadyLoading => isKorean
+      ? '실매수 전환 결과를 이미 불러오는 중입니다.'
+      : 'Live buy result is already loading.';
+  String liveBuyResultRefreshed(String status) => isKorean
+      ? '전환 결과 새로고침 완료: $status.'
+      : 'Conversion result refreshed: $status.';
+  String liveBuyResultSynced(String status) =>
+      isKorean ? '주문 상태 동기화 완료: $status.' : 'Order status synced: $status.';
   String get preflightAlreadyRunning => isKorean
       ? '매수 전환 사전 점검이 이미 실행 중입니다.'
       : 'Live buy preflight is already running.';
@@ -388,8 +415,10 @@ class AppStrings {
       'skipped': '건너뜀',
       'submitted': '제출됨',
       'filled': '체결됨',
+      'partially_filled': '부분 체결됨',
       'rejected': '거절됨',
       'sync_required': '동기화 필요',
+      'pending_sync': '동기화 필요',
       'would_buy': '매수 후보',
       'hold': '보류',
       'ready': '준비됨',

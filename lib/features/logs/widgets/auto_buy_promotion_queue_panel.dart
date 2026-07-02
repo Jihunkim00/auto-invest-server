@@ -19,6 +19,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
         final strings = controller.strings;
         final loading = controller.strategyAutoBuyPromotionsLoading ||
             controller.strategyLiveAutoBuyPreflightLoading ||
+            controller.strategyLiveAutoBuyResultLoading ||
             controller.strategyLiveAutoBuyLoading;
         final items = controller.strategyAutoBuyPromotions;
         return Container(
@@ -122,10 +123,20 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                                 .strategyLiveAutoBuyPreflightForPromotion(
                               item.id,
                             ),
+                            result: controller
+                                .strategyLiveAutoBuyResultForPromotion(item.id),
+                            resultLoading:
+                                controller.strategyLiveAutoBuyResultLoading,
                             onMarkReviewed: () => _markReviewed(context, item),
                             onDismiss: () => _dismiss(context, item),
                             onPreflight: () => _preflight(context, item),
                             onConvert: () => _confirmLiveRun(context, item),
+                            onRefreshResult: (result) =>
+                                _refreshResult(context, result),
+                            onSyncResult: (result) =>
+                                _syncResult(context, result),
+                            onClearResult:
+                                controller.clearGuardedLiveAutoBuyResult,
                           ),
                         ),
                     ],
@@ -199,6 +210,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
             child: Text(strings.cancel),
           ),
           FilledButton.icon(
+            key: const ValueKey('promotion-live-confirm-submit'),
             onPressed: () => Navigator.of(context).pop(true),
             icon: const Icon(Icons.verified_user_outlined),
             label: Text(strings.convertViaGuardedLiveBuy),
@@ -212,6 +224,24 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
     );
     if (!context.mounted) return;
     _snack(context, result.message);
+  }
+
+  Future<void> _refreshResult(
+    BuildContext context,
+    StrategyLiveAutoBuyResult result,
+  ) async {
+    final action = await controller.refreshGuardedLiveAutoBuyResult(result);
+    if (!context.mounted) return;
+    _snack(context, action.message);
+  }
+
+  Future<void> _syncResult(
+    BuildContext context,
+    StrategyLiveAutoBuyResult result,
+  ) async {
+    final action = await controller.syncGuardedLiveAutoBuyResult(result);
+    if (!context.mounted) return;
+    _snack(context, action.message);
   }
 
   void _snack(BuildContext context, String message) {
@@ -228,10 +258,15 @@ class _PromotionTile extends StatelessWidget {
     required this.loading,
     required this.liveReady,
     required this.preflight,
+    required this.result,
+    required this.resultLoading,
     required this.onMarkReviewed,
     required this.onDismiss,
     required this.onPreflight,
     required this.onConvert,
+    required this.onRefreshResult,
+    required this.onSyncResult,
+    required this.onClearResult,
   });
 
   final StrategyAutoBuyPromotion promotion;
@@ -239,10 +274,15 @@ class _PromotionTile extends StatelessWidget {
   final bool loading;
   final bool liveReady;
   final StrategyLiveAutoBuyPreflightResult? preflight;
+  final StrategyLiveAutoBuyResult? result;
+  final bool resultLoading;
   final VoidCallback onMarkReviewed;
   final VoidCallback onDismiss;
   final VoidCallback onPreflight;
   final VoidCallback onConvert;
+  final ValueChanged<StrategyLiveAutoBuyResult> onRefreshResult;
+  final ValueChanged<StrategyLiveAutoBuyResult> onSyncResult;
+  final VoidCallback onClearResult;
 
   @override
   Widget build(BuildContext context) {
@@ -439,6 +479,17 @@ class _PromotionTile extends StatelessWidget {
               strings: strings,
             ),
           ],
+          if (result != null) ...[
+            const SizedBox(height: 10),
+            _LiveBuyResultPanel(
+              result: result!,
+              strings: strings,
+              loading: resultLoading,
+              onRefresh: () => onRefreshResult(result!),
+              onSync: () => onSyncResult(result!),
+              onClear: onClearResult,
+            ),
+          ],
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
@@ -594,6 +645,204 @@ class _PreflightResultPanel extends StatelessWidget {
   }
 }
 
+class _LiveBuyResultPanel extends StatelessWidget {
+  const _LiveBuyResultPanel({
+    required this.result,
+    required this.strings,
+    required this.loading,
+    required this.onRefresh,
+    required this.onSync,
+    required this.onClear,
+  });
+
+  final StrategyLiveAutoBuyResult result;
+  final AppStrings strings;
+  final bool loading;
+  final VoidCallback onRefresh;
+  final VoidCallback onSync;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasLiveOrderSubmission = _hasLiveOrderSubmission(result);
+    final hasBrokerSubmission = _hasBrokerSubmission(result);
+    final canSync = _canSyncResult(result);
+    return Column(
+      key: const ValueKey('guarded_live_buy_result_panel'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Divider(color: Colors.white.withValues(alpha: 0.14)),
+        Row(
+          children: [
+            Icon(
+              result.blocked
+                  ? Icons.block
+                  : result.filled
+                      ? Icons.task_alt
+                      : result.rejected
+                          ? Icons.report_gmailerrorred_outlined
+                          : result.syncRequired
+                              ? Icons.sync_problem_outlined
+                              : Icons.receipt_long_outlined,
+              color: _resultStatusColor(result),
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                strings.liveBuyConversionResult,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            Text(
+              strings.statusLabel(result.resultStatus),
+              style: TextStyle(
+                color: _resultStatusColor(result),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            _SmallBadge(
+              text: hasLiveOrderSubmission
+                  ? strings.liveOrderSubmitted
+                  : strings.noLiveOrderSubmitted,
+            ),
+            _SmallBadge(
+              text: hasBrokerSubmission
+                  ? strings.brokerName(result.provider)
+                  : strings.noBrokerSubmit,
+            ),
+            if (result.syncRequired) _SmallBadge(text: strings.syncRequired),
+          ],
+        ),
+        _DetailRow(
+          label: strings.liveAttempt,
+          value: result.attemptId.toString(),
+        ),
+        if (result.orderId != null)
+          _DetailRow(
+            label: strings.relatedOrderLog,
+            value: result.orderId.toString(),
+          ),
+        if (result.brokerOrderId != null)
+          _DetailRow(
+            label: strings.brokerOrderId,
+            value: result.brokerOrderId!,
+          ),
+        if (result.kisOdno != null)
+          _DetailRow(
+            label: strings.kisOrderNo,
+            value: result.kisOdno!,
+          ),
+        if (result.internalStatus != null)
+          _DetailRow(
+            label: strings.internalStatus,
+            value: strings.statusLabel(result.internalStatus!),
+          ),
+        if (result.brokerStatus != null)
+          _DetailRow(
+            label: strings.brokerStatus,
+            value: result.brokerStatus!,
+          ),
+        if (hasLiveOrderSubmission)
+          _DetailRow(
+            label: strings.submittedQuantity,
+            value: _number(result.submittedQuantity),
+          ),
+        if (hasLiveOrderSubmission && result.submittedNotional != null)
+          _DetailRow(
+            label: strings.estimatedNotional,
+            value: _money(result.submittedNotional),
+          ),
+        if (result.filledQuantity != null)
+          _DetailRow(
+            label: strings.filledQuantity,
+            value: _number(result.filledQuantity),
+          ),
+        if (result.averageFillPrice != null)
+          _DetailRow(
+            label: strings.averageFillPrice,
+            value: _money(result.averageFillPrice),
+          ),
+        if (result.filledNotional != null)
+          _DetailRow(
+            label: strings.filledNotional,
+            value: _money(result.filledNotional),
+          ),
+        if (result.blockReason != null)
+          _DetailRow(
+            label: strings.primaryBlockReason,
+            value: result.blockReason!,
+          ),
+        if (result.riskFlags.isNotEmpty)
+          _DetailRow(
+            label: strings.riskFlags,
+            value: result.riskFlags.join(', '),
+          ),
+        if (result.gatingNotes.isNotEmpty)
+          _DetailRow(
+            label: strings.gatingNotes,
+            value: result.gatingNotes.join(' | '),
+          ),
+        if (result.promotionReviewStatus != null)
+          _DetailRow(
+            label: strings.review,
+            value: strings.statusLabel(result.promotionReviewStatus!),
+          ),
+        if (result.promotionConversionStatus != null)
+          _DetailRow(
+            label: strings.conversion,
+            value: strings.statusLabel(result.promotionConversionStatus!),
+          ),
+        if (result.lastSyncedAt != null)
+          _DetailRow(
+            label: strings.lastSync,
+            value: formatTimestampWithKst(
+              result.lastSyncedAt!.toIso8601String(),
+            ),
+          ),
+        if (result.auditTrace.isNotEmpty)
+          _DetailRow(
+            label: strings.auditTrace,
+            value: _auditSummary(result.auditTrace),
+          ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              key: const ValueKey('guarded_live_buy_result_refresh_button'),
+              onPressed: loading ? null : onRefresh,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: Text(strings.refreshResult),
+            ),
+            if (canSync)
+              OutlinedButton.icon(
+                key: const ValueKey('guarded_live_buy_result_sync_button'),
+                onPressed: loading ? null : onSync,
+                icon: const Icon(Icons.sync, size: 18),
+                label: Text(strings.syncOrderStatus),
+              ),
+            TextButton.icon(
+              key: const ValueKey('guarded_live_buy_result_back_button'),
+              onPressed: loading ? null : onClear,
+              icon: const Icon(Icons.arrow_back, size: 18),
+              label: Text(strings.backToPromotionQueue),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _SmallBadge extends StatelessWidget {
   const _SmallBadge({required this.text});
 
@@ -723,6 +972,53 @@ Color _preflightStatusColor(StrategyLiveAutoBuyPreflightResult preflight) {
   if (preflight.isAllowed) return Colors.greenAccent;
   if (preflight.isBlocked) return Colors.orangeAccent;
   return Colors.amberAccent;
+}
+
+Color _resultStatusColor(StrategyLiveAutoBuyResult result) {
+  if (result.filled) return Colors.greenAccent;
+  if (result.partiallyFilled || result.submitted) return Colors.lightBlueAccent;
+  if (result.syncRequired) return Colors.amberAccent;
+  if (result.rejected || result.blocked) return Colors.orangeAccent;
+  return Colors.white70;
+}
+
+bool _hasLiveOrderSubmission(StrategyLiveAutoBuyResult result) {
+  return result.realOrderSubmitted && !result.blocked;
+}
+
+bool _hasBrokerSubmission(StrategyLiveAutoBuyResult result) {
+  return result.brokerSubmitCalled && !result.blocked;
+}
+
+bool _hasSyncableSubmittedOrder(StrategyLiveAutoBuyResult result) {
+  return result.realOrderSubmitted &&
+      result.brokerSubmitCalled &&
+      result.orderId != null &&
+      !result.blocked;
+}
+
+bool _canSyncResult(StrategyLiveAutoBuyResult result) {
+  return _hasSyncableSubmittedOrder(result);
+}
+
+String _auditSummary(Map<String, dynamic> auditTrace) {
+  final attempt = auditTrace['attempt'];
+  final promotion = auditTrace['promotion'];
+  final order = auditTrace['order'];
+  final values = <String>[];
+  if (promotion is Map && promotion['promotion_id'] != null) {
+    values.add('promotion ${promotion['promotion_id']}');
+  }
+  if (promotion is Map && promotion['source_dry_run_id'] != null) {
+    values.add('dry-run ${promotion['source_dry_run_id']}');
+  }
+  if (attempt is Map && attempt['attempt_id'] != null) {
+    values.add('attempt ${attempt['attempt_id']}');
+  }
+  if (order is Map && order['order_id'] != null) {
+    values.add('order ${order['order_id']}');
+  }
+  return values.isEmpty ? auditTrace.toString() : values.join(' / ');
 }
 
 String _number(num? value) {

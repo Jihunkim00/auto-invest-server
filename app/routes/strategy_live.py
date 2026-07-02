@@ -12,6 +12,7 @@ from app.schemas.strategy_live_auto_buy import (
     ProfileAwareGuardedLiveAutoBuyPreflightResponse,
     ProfileAwareGuardedLiveAutoBuyReadinessResponse,
     ProfileAwareGuardedLiveAutoBuyRecentResponse,
+    ProfileAwareGuardedLiveAutoBuyResultResponse,
     ProfileAwareGuardedLiveAutoBuyRunRequest,
     ProfileAwareGuardedLiveAutoBuyRunResponse,
 )
@@ -143,6 +144,52 @@ def get_guarded_live_auto_buy_recent(
     ),
 ):
     return service.recent(db, provider=provider, market=market, limit=limit)
+
+
+@compat_router.get(
+    "/results/{attempt_id}",
+    response_model=ProfileAwareGuardedLiveAutoBuyResultResponse,
+)
+@router.get(
+    "/auto-buy/results/{attempt_id}",
+    response_model=ProfileAwareGuardedLiveAutoBuyResultResponse,
+)
+def get_guarded_live_auto_buy_result(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    service: ProfileAwareGuardedLiveAutoBuyService = Depends(
+        get_profile_aware_guarded_live_auto_buy_service
+    ),
+):
+    try:
+        return service.result(db, attempt_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "not_found" in message else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
+
+
+@compat_router.post(
+    "/results/{attempt_id}/sync",
+    response_model=ProfileAwareGuardedLiveAutoBuyResultResponse,
+)
+@router.post(
+    "/auto-buy/results/{attempt_id}/sync",
+    response_model=ProfileAwareGuardedLiveAutoBuyResultResponse,
+)
+def sync_guarded_live_auto_buy_result(
+    attempt_id: int,
+    db: Session = Depends(get_db),
+    service: ProfileAwareGuardedLiveAutoBuyService = Depends(
+        get_profile_aware_guarded_live_auto_buy_service
+    ),
+):
+    try:
+        return service.sync_result(db, attempt_id)
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 404 if "not_found" in message else 400
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 @router.post(

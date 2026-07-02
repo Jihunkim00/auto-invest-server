@@ -206,6 +206,42 @@ class ProfileAwareGuardedLiveAutoBuyRunResponse(BaseModel):
     safety: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProfileAwareGuardedLiveAutoBuyResultResponse(BaseModel):
+    attempt_id: int
+    promotion_id: int | None = None
+    symbol: str | None = None
+    provider: str
+    market: str
+    action: str
+    result_status: str
+    internal_status: str | None = None
+    broker_status: str | None = None
+    order_id: int | None = None
+    broker_order_id: str | None = None
+    kis_odno: str | None = None
+    related_order_log_id: int | None = None
+    related_signal_id: int | None = None
+    real_order_submitted: bool = False
+    broker_submit_called: bool = False
+    manual_submit_called: bool = False
+    submitted_at: str | None = None
+    last_synced_at: str | None = None
+    filled_at: str | None = None
+    submitted_quantity: float | None = None
+    filled_quantity: float | None = None
+    submitted_notional: float | None = None
+    filled_notional: float | None = None
+    average_fill_price: float | None = None
+    block_reason: str | None = None
+    risk_flags: list[str] = Field(default_factory=list)
+    gating_notes: list[str] = Field(default_factory=list)
+    promotion_review_status: str | None = None
+    promotion_conversion_status: str | None = None
+    audit_trace: dict[str, Any] = Field(default_factory=dict)
+    next_safe_action: str
+    safety: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProfileAwareGuardedLiveAutoBuyRecentResponse(BaseModel):
     provider: str
     market: str

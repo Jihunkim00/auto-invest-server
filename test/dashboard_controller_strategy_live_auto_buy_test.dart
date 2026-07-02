@@ -40,6 +40,28 @@ void main() {
     expect(api.mutationCalls, 0);
     controller.dispose();
   });
+
+  test('sync guarded live auto buy result uses sync endpoint only', () async {
+    final api = _LiveAutoBuyApiClient();
+    final controller = DashboardController(api, autoload: false);
+    final result = StrategyLiveAutoBuyResult.fromJson(
+      liveResultJson(
+        resultStatus: 'pending_sync',
+        internalStatus: 'UNKNOWN_STALE',
+      ),
+    );
+
+    final action = await controller.syncGuardedLiveAutoBuyResult(result);
+
+    expect(action.success, isTrue);
+    expect(api.resultSyncCalls, 1);
+    expect(api.resultFetchCalls, 0);
+    expect(api.runCalls, 0);
+    expect(api.mutationCalls, 0);
+    expect(
+        controller.latestStrategyLiveAutoBuyConversionResult?.filled, isTrue);
+    controller.dispose();
+  });
 }
 
 class _LiveAutoBuyApiClient extends ApiClient {
@@ -49,6 +71,8 @@ class _LiveAutoBuyApiClient extends ApiClient {
   int readinessCalls = 0;
   int runCalls = 0;
   int recentCalls = 0;
+  int resultFetchCalls = 0;
+  int resultSyncCalls = 0;
   int mutationCalls = 0;
 
   @override
@@ -96,6 +120,24 @@ class _LiveAutoBuyApiClient extends ApiClient {
       market: market,
       items: [item],
       safety: const {'read_only': true},
+    );
+  }
+
+  @override
+  Future<StrategyLiveAutoBuyResult> fetchStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    resultFetchCalls += 1;
+    return StrategyLiveAutoBuyResult.fromJson(liveResultJson());
+  }
+
+  @override
+  Future<StrategyLiveAutoBuyResult> syncStrategyLiveAutoBuyResult(
+    int attemptId,
+  ) async {
+    resultSyncCalls += 1;
+    return StrategyLiveAutoBuyResult.fromJson(
+      liveResultJson(resultStatus: 'filled', internalStatus: 'FILLED'),
     );
   }
 
