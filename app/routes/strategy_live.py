@@ -8,6 +8,8 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.strategy_live_auto_buy import (
+    ProfileAwareGuardedLiveAutoBuyPreflightRequest,
+    ProfileAwareGuardedLiveAutoBuyPreflightResponse,
     ProfileAwareGuardedLiveAutoBuyReadinessResponse,
     ProfileAwareGuardedLiveAutoBuyRecentResponse,
     ProfileAwareGuardedLiveAutoBuyRunRequest,
@@ -21,6 +23,7 @@ from app.services.target_aware_risk_service import TargetAwareRiskService
 
 
 router = APIRouter(prefix="/strategy/live", tags=["strategy-live"])
+compat_router = APIRouter(prefix="/strategy/live-auto-buy", tags=["strategy-live"])
 
 
 def get_profile_aware_guarded_live_auto_buy_service(
@@ -92,6 +95,24 @@ def get_guarded_live_auto_buy_readiness(
         symbol=symbol,
         source_dry_run_id=source_dry_run_id,
     )
+
+
+@compat_router.post(
+    "/preflight",
+    response_model=ProfileAwareGuardedLiveAutoBuyPreflightResponse,
+)
+@router.post(
+    "/auto-buy/preflight",
+    response_model=ProfileAwareGuardedLiveAutoBuyPreflightResponse,
+)
+def preflight_guarded_live_auto_buy(
+    payload: ProfileAwareGuardedLiveAutoBuyPreflightRequest,
+    db: Session = Depends(get_db),
+    service: ProfileAwareGuardedLiveAutoBuyService = Depends(
+        get_profile_aware_guarded_live_auto_buy_service
+    ),
+):
+    return service.preflight(db, payload)
 
 
 @router.post(

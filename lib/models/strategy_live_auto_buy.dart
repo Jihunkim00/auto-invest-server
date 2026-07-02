@@ -88,6 +88,178 @@ class StrategyLiveAutoBuyReadiness {
   }
 }
 
+class StrategyLiveAutoBuyPreflightChecklistItem {
+  const StrategyLiveAutoBuyPreflightChecklistItem({
+    required this.key,
+    required this.status,
+    this.labelKey,
+    this.displayLabel,
+    this.detail,
+    this.blocking = false,
+  });
+
+  final String key;
+  final String status;
+  final String? labelKey;
+  final String? displayLabel;
+  final String? detail;
+  final bool blocking;
+
+  bool get passed => status == 'pass';
+  bool get warning => status == 'warn';
+  bool get failed => status == 'fail';
+
+  factory StrategyLiveAutoBuyPreflightChecklistItem.fromJson(Object? value) {
+    if (value is Map) {
+      final json = Map<String, dynamic>.from(value);
+      return StrategyLiveAutoBuyPreflightChecklistItem(
+        key: _string(json['key'], 'check'),
+        status: _string(json['status'], 'warn'),
+        labelKey: _nullableString(json['label_key']),
+        displayLabel: _nullableString(json['display_label']),
+        detail: _nullableString(json['detail']),
+        blocking: json['blocking'] == true,
+      );
+    }
+    return StrategyLiveAutoBuyPreflightChecklistItem(
+      key: 'check',
+      status: 'warn',
+      detail: _nullableString(value),
+    );
+  }
+}
+
+class StrategyLiveAutoBuyPreflightResult {
+  const StrategyLiveAutoBuyPreflightResult({
+    required this.provider,
+    required this.market,
+    required this.preflightStatus,
+    required this.canSubmitAfterConfirmation,
+    required this.finalConfirmationRequired,
+    required this.realOrderSubmitted,
+    required this.brokerSubmitCalled,
+    required this.manualSubmitCalled,
+    required this.promotionStateAllowed,
+    required this.staleOrExpired,
+    required this.dryRun,
+    required this.killSwitch,
+    required this.kisRealOrderEnabled,
+    required this.liveAutoBuyEnabled,
+    required this.scoreSummary,
+    required this.riskFlags,
+    required this.gatingNotes,
+    required this.checklist,
+    required this.nextRequiredAction,
+    required this.safety,
+    this.promotionId,
+    this.symbol,
+    this.orderId,
+    this.brokerOrderId,
+    this.promotionStatus,
+    this.reviewStatus,
+    this.promotionStateBlockReason,
+    this.marketSessionAllowed,
+    this.marketSessionBlockReason,
+    this.activeProfileName,
+    this.proposedNotionalKrw,
+    this.maxNotionalKrw,
+    this.availableCashKrw,
+    this.estimatedQuantity,
+    this.primaryBlockReason,
+  });
+
+  final int? promotionId;
+  final String? symbol;
+  final String provider;
+  final String market;
+  final String preflightStatus;
+  final bool canSubmitAfterConfirmation;
+  final bool finalConfirmationRequired;
+  final bool realOrderSubmitted;
+  final bool brokerSubmitCalled;
+  final bool manualSubmitCalled;
+  final int? orderId;
+  final String? brokerOrderId;
+  final String? promotionStatus;
+  final String? reviewStatus;
+  final bool promotionStateAllowed;
+  final String? promotionStateBlockReason;
+  final bool staleOrExpired;
+  final bool? marketSessionAllowed;
+  final String? marketSessionBlockReason;
+  final bool dryRun;
+  final bool killSwitch;
+  final bool kisRealOrderEnabled;
+  final bool liveAutoBuyEnabled;
+  final String? activeProfileName;
+  final Map<String, dynamic> scoreSummary;
+  final List<String> riskFlags;
+  final List<String> gatingNotes;
+  final double? proposedNotionalKrw;
+  final double? maxNotionalKrw;
+  final double? availableCashKrw;
+  final int? estimatedQuantity;
+  final List<StrategyLiveAutoBuyPreflightChecklistItem> checklist;
+  final String? primaryBlockReason;
+  final String nextRequiredAction;
+  final Map<String, dynamic> safety;
+
+  bool get isAllowed => preflightStatus == 'allowed';
+  bool get isBlocked => preflightStatus == 'blocked';
+  bool get requiresReview => preflightStatus == 'review_required';
+  bool get isReadOnly =>
+      realOrderSubmitted == false &&
+      brokerSubmitCalled == false &&
+      manualSubmitCalled == false &&
+      safety['read_only'] == true;
+
+  factory StrategyLiveAutoBuyPreflightResult.fromJson(
+      Map<String, dynamic> json) {
+    return StrategyLiveAutoBuyPreflightResult(
+      promotionId: _nullableInt(json['promotion_id']),
+      symbol: _nullableString(json['symbol']),
+      provider: _string(json['provider'], 'kis'),
+      market: _string(json['market'], 'KR'),
+      preflightStatus: _string(json['preflight_status'], 'blocked'),
+      canSubmitAfterConfirmation: json['can_submit_after_confirmation'] == true,
+      finalConfirmationRequired: json['final_confirmation_required'] != false,
+      realOrderSubmitted: json['real_order_submitted'] == true,
+      brokerSubmitCalled: json['broker_submit_called'] == true,
+      manualSubmitCalled: json['manual_submit_called'] == true,
+      orderId: _nullableInt(json['order_id']),
+      brokerOrderId: _nullableString(json['broker_order_id']),
+      promotionStatus: _nullableString(json['promotion_status']),
+      reviewStatus: _nullableString(json['review_status']),
+      promotionStateAllowed: json['promotion_state_allowed'] == true,
+      promotionStateBlockReason:
+          _nullableString(json['promotion_state_block_reason']),
+      staleOrExpired: json['stale_or_expired'] == true,
+      marketSessionAllowed: json.containsKey('market_session_allowed')
+          ? json['market_session_allowed'] == true
+          : null,
+      marketSessionBlockReason:
+          _nullableString(json['market_session_block_reason']),
+      dryRun: json['dry_run'] == true,
+      killSwitch: json['kill_switch'] == true,
+      kisRealOrderEnabled: json['kis_real_order_enabled'] == true,
+      liveAutoBuyEnabled: json['live_auto_buy_enabled'] == true,
+      activeProfileName: _nullableString(json['active_profile_name']),
+      scoreSummary: _map(json['score_summary']),
+      riskFlags: _strings(json['risk_flags']),
+      gatingNotes: _strings(json['gating_notes']),
+      proposedNotionalKrw: _nullableDouble(json['proposed_notional_krw']),
+      maxNotionalKrw: _nullableDouble(json['max_notional_krw']),
+      availableCashKrw: _nullableDouble(json['available_cash_krw']),
+      estimatedQuantity: _nullableInt(json['estimated_quantity']),
+      checklist: _preflightChecklist(json['checklist']),
+      primaryBlockReason: _nullableString(json['primary_block_reason']),
+      nextRequiredAction:
+          _string(json['next_required_action'], 'resolve_block'),
+      safety: _map(json['safety']),
+    );
+  }
+}
+
 class StrategyLiveAutoBuyRunResult {
   const StrategyLiveAutoBuyRunResult({
     required this.status,
@@ -266,6 +438,15 @@ List<Map<String, dynamic>> _maps(Object? value) {
   return [
     for (final item in value)
       if (item is Map) Map<String, dynamic>.from(item),
+  ];
+}
+
+List<StrategyLiveAutoBuyPreflightChecklistItem> _preflightChecklist(
+    Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value)
+      StrategyLiveAutoBuyPreflightChecklistItem.fromJson(item),
   ];
 }
 

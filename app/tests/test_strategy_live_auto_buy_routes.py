@@ -10,6 +10,7 @@ from app.routes.strategy_live import get_profile_aware_guarded_live_auto_buy_ser
 from app.tests.test_strategy_live_auto_buy_service import (
     FakeBroker,
     add_dry_run,
+    add_promotion_for_dry_run,
     enable_live_settings,
     live_service,
 )
@@ -85,3 +86,46 @@ def test_run_once_and_recent_routes(client):
     assert recent.json()["count"] == 1
     assert recent.json()["items"][0]["status"] == "submitted"
     assert recent.json()["safety"]["read_only"] is True
+
+
+def test_preflight_route_is_read_only_and_ignores_confirm_live(client):
+    test_client, db_session, broker = client
+    enable_live_settings(db_session)
+    dry_run = add_dry_run(db_session)
+    promotion = add_promotion_for_dry_run(db_session, dry_run)
+
+    response = test_client.post(
+        "/strategy/live-auto-buy/preflight",
+        json={
+            "promotion_id": promotion["id"],
+            "provider": "kis",
+            "market": "KR",
+            "symbol": "005930",
+            "source_dry_run_id": dry_run.id,
+            "confirm_live": True,
+        },
+    )
+    alias_response = test_client.post(
+        "/strategy/live/auto-buy/preflight",
+        json={
+            "promotion_id": promotion["id"],
+            "provider": "kis",
+            "market": "KR",
+            "symbol": "005930",
+            "source_dry_run_id": dry_run.id,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["preflight_status"] == "review_required"
+    assert body["final_confirmation_required"] is True
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["manual_submit_called"] is False
+    assert body["order_id"] is None
+    assert body["broker_order_id"] is None
+    assert body["safety"]["read_only"] is True
+    assert alias_response.status_code == 200
+    assert broker.calls == []
+    assert db_session.query(StrategyLiveAutoBuyAttempt).count() == 0

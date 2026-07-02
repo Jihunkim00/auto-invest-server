@@ -66,4 +66,38 @@ void main() {
     expect(requests[2].method, 'GET');
     expect(requests[2].url.path, '/strategy/live/auto-buy/recent');
   });
+
+  test('preflight API calls read-only endpoint without confirmation body',
+      () async {
+    final requests = <http.Request>[];
+    final client = ApiClient(
+      client: MockClient((request) async {
+        requests.add(request);
+        return http.Response(
+            jsonEncode(livePreflightJson(status: 'allowed')), 200);
+      }),
+    );
+
+    final result = await client.preflightStrategyLiveAutoBuy(
+      promotionId: 7,
+      symbol: '005930',
+      sourceDryRunId: 20,
+      language: 'en',
+      locale: 'en-US',
+    );
+
+    expect(result.isAllowed, isTrue);
+    expect(requests, hasLength(1));
+    expect(requests.single.method, 'POST');
+    expect(requests.single.url.path, '/strategy/live-auto-buy/preflight');
+    final body = jsonDecode(requests.single.body) as Map<String, dynamic>;
+    expect(body['promotion_id'], 7);
+    expect(body['symbol'], '005930');
+    expect(body['source_dry_run_id'], 20);
+    expect(body['language'], 'en');
+    expect(body['locale'], 'en-US');
+    expect(body.containsKey('confirm_live'), isFalse);
+    expect(body.containsKey('confirm_operator_ack'), isFalse);
+    expect(body.containsKey('submit_order'), isFalse);
+  });
 }

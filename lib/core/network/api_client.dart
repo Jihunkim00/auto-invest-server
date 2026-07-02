@@ -587,6 +587,32 @@ class ApiClient {
     return StrategyLiveAutoBuyRunResult.fromJson(payload);
   }
 
+  Future<StrategyLiveAutoBuyPreflightResult> preflightStrategyLiveAutoBuy({
+    required int promotionId,
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    int? sourceDryRunId,
+    double? maxNotionalKrw,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/live-auto-buy/preflight',
+      {
+        'promotion_id': promotionId,
+        'provider': provider,
+        'market': market,
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+        if (sourceDryRunId != null) 'source_dry_run_id': sourceDryRunId,
+        if (maxNotionalKrw != null) 'max_notional_krw': maxNotionalKrw,
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return StrategyLiveAutoBuyPreflightResult.fromJson(payload);
+  }
+
   Future<StrategyLiveAutoBuyRecent> fetchStrategyLiveAutoBuyRecent({
     String provider = 'kis',
     String market = 'KR',

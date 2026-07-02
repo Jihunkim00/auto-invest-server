@@ -22,5 +22,9 @@ void main() {
     expect(ko.statusLabel('review_required'), '검토 필요');
     expect(en.statusLabel('sync_required'), 'SYNC REQUIRED');
     expect(en.statusLabel('review_required'), 'REVIEW REQUIRED');
+    expect(ko.preflightLiveBuy, '매수 전환 사전 점검');
+    expect(ko.noLiveOrderSubmitted, '실주문 없음');
+    expect(en.preflightLiveBuy, 'Preflight Live Buy');
+    expect(en.noLiveOrderSubmitted, 'No live order submitted');
   });
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/i18n/app_strings.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../models/strategy_auto_buy_promotion.dart';
+import '../../../models/strategy_live_auto_buy.dart';
 import '../../dashboard/dashboard_controller.dart';
 
 class AutoBuyPromotionQueuePanel extends StatelessWidget {
@@ -17,6 +18,7 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
       builder: (context, _) {
         final strings = controller.strings;
         final loading = controller.strategyAutoBuyPromotionsLoading ||
+            controller.strategyLiveAutoBuyPreflightLoading ||
             controller.strategyLiveAutoBuyLoading;
         final items = controller.strategyAutoBuyPromotions;
         return Container(
@@ -116,8 +118,13 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
                                     ?.liveReadiness
                                     .ready ==
                                 true,
+                            preflight: controller
+                                .strategyLiveAutoBuyPreflightForPromotion(
+                              item.id,
+                            ),
                             onMarkReviewed: () => _markReviewed(context, item),
                             onDismiss: () => _dismiss(context, item),
+                            onPreflight: () => _preflight(context, item),
                             onConvert: () => _confirmLiveRun(context, item),
                           ),
                         ),
@@ -156,6 +163,17 @@ class AutoBuyPromotionQueuePanel extends StatelessWidget {
     StrategyAutoBuyPromotion promotion,
   ) async {
     final result = await controller.dismissStrategyAutoBuyPromotion(
+      promotion,
+    );
+    if (!context.mounted) return;
+    _snack(context, result.message);
+  }
+
+  Future<void> _preflight(
+    BuildContext context,
+    StrategyAutoBuyPromotion promotion,
+  ) async {
+    final result = await controller.preflightGuardedLiveAutoBuyForPromotion(
       promotion,
     );
     if (!context.mounted) return;
@@ -209,8 +227,10 @@ class _PromotionTile extends StatelessWidget {
     required this.strings,
     required this.loading,
     required this.liveReady,
+    required this.preflight,
     required this.onMarkReviewed,
     required this.onDismiss,
+    required this.onPreflight,
     required this.onConvert,
   });
 
@@ -218,14 +238,18 @@ class _PromotionTile extends StatelessWidget {
   final AppStrings strings;
   final bool loading;
   final bool liveReady;
+  final StrategyLiveAutoBuyPreflightResult? preflight;
   final VoidCallback onMarkReviewed;
   final VoidCallback onDismiss;
+  final VoidCallback onPreflight;
   final VoidCallback onConvert;
 
   @override
   Widget build(BuildContext context) {
     final score = promotion.finalScore ?? promotion.buyScore;
-    final canConvert = promotion.canRunGuardedLive && liveReady;
+    final preflightBlocksConvert = preflight != null && !preflight!.isAllowed;
+    final canConvert =
+        promotion.canRunGuardedLive && liveReady && !preflightBlocksConvert;
     final converted = promotion.isConverted;
     final reviewLabel = strings.statusLabel(
       promotion.reviewStatus ?? promotion.status,
@@ -377,6 +401,12 @@ class _PromotionTile extends StatelessWidget {
               label: strings.blocked,
               value: promotion.conversionBlockReason!,
             ),
+          if (preflightBlocksConvert)
+            _DetailRow(
+              label: strings.primaryBlockReason,
+              value: preflight!.primaryBlockReason ??
+                  preflight!.nextRequiredAction,
+            ),
           if (promotion.reviewChecklist.isNotEmpty)
             _DetailRow(
               label: strings.checklist,
@@ -402,11 +432,24 @@ class _PromotionTile extends StatelessWidget {
               value:
                   'promotion ${promotion.tracePayload['promotion_id'] ?? promotion.id} / dry-run ${promotion.tracePayload['source_dry_run_id'] ?? promotion.sourceDryRunTradeRunId ?? '-'} / attempt ${promotion.liveAttemptId ?? '-'} / order ${promotion.liveOrderId ?? '-'}',
             ),
+          if (preflight != null) ...[
+            const SizedBox(height: 10),
+            _PreflightResultPanel(
+              preflight: preflight!,
+              strings: strings,
+            ),
+          ],
           const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
+              OutlinedButton.icon(
+                key: ValueKey('preflight-live-buy-promotion-${promotion.id}'),
+                onPressed: loading ? null : onPreflight,
+                icon: const Icon(Icons.fact_check_outlined, size: 18),
+                label: Text(strings.preflightLiveBuy),
+              ),
               OutlinedButton.icon(
                 key: ValueKey('mark-reviewed-promotion-${promotion.id}'),
                 onPressed: loading || !promotion.reviewRequired
@@ -435,6 +478,135 @@ class _PromotionTile extends StatelessWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PreflightResultPanel extends StatelessWidget {
+  const _PreflightResultPanel({
+    required this.preflight,
+    required this.strings,
+  });
+
+  final StrategyLiveAutoBuyPreflightResult preflight;
+  final AppStrings strings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: ValueKey('preflight-result-promotion-${preflight.promotionId}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Divider(color: Colors.white.withValues(alpha: 0.14)),
+        Row(
+          children: [
+            Icon(
+              preflight.isAllowed
+                  ? Icons.check_circle_outline
+                  : preflight.isBlocked
+                      ? Icons.block
+                      : Icons.info_outline,
+              color: _preflightStatusColor(preflight),
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                strings.preflightResult,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            Text(
+              _preflightStatusLabel(strings, preflight),
+              style: TextStyle(
+                color: _preflightStatusColor(preflight),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            _SmallBadge(text: strings.finalConfirmationRequiredShort),
+            _SmallBadge(text: strings.noLiveOrderSubmitted),
+            _SmallBadge(text: strings.noBrokerSubmit),
+            _SmallBadge(text: strings.notAnOrder),
+          ],
+        ),
+        if (preflight.primaryBlockReason != null)
+          _DetailRow(
+            label: strings.primaryBlockReason,
+            value: preflight.primaryBlockReason!,
+          ),
+        _DetailRow(
+          label: strings.estimatedNotional,
+          value: _money(preflight.proposedNotionalKrw),
+        ),
+        _DetailRow(
+          label: strings.availableCash,
+          value: _money(preflight.availableCashKrw),
+        ),
+        if (preflight.riskFlags.isNotEmpty)
+          _DetailRow(
+            label: strings.riskFlags,
+            value: preflight.riskFlags.join(', '),
+          ),
+        if (preflight.gatingNotes.isNotEmpty)
+          _DetailRow(
+            label: strings.gatingNotes,
+            value: preflight.gatingNotes.join(' | '),
+          ),
+        if (preflight.checklist.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text(
+            strings.preflightChecklist,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (final item in preflight.checklist.take(12))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                '${strings.preflightChecklistStatus(item.status)} ${strings.preflightChecklistLabel(item.labelKey ?? item.key)}'
+                '${item.blocking ? ' / ${strings.blocked}' : ''}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: item.failed
+                      ? Colors.orangeAccent
+                      : item.warning
+                          ? Colors.amberAccent
+                          : Colors.white70,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SmallBadge extends StatelessWidget {
+  const _SmallBadge({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: Colors.lightBlueAccent,
+        fontSize: 11,
+        fontWeight: FontWeight.w900,
       ),
     );
   }
@@ -535,6 +707,22 @@ class _BadgeWrap extends StatelessWidget {
       ],
     );
   }
+}
+
+String _preflightStatusLabel(
+  AppStrings strings,
+  StrategyLiveAutoBuyPreflightResult preflight,
+) {
+  if (preflight.isAllowed) return strings.allowed;
+  if (preflight.isBlocked) return strings.blocked;
+  if (preflight.requiresReview) return strings.reviewRequired;
+  return strings.statusLabel(preflight.preflightStatus);
+}
+
+Color _preflightStatusColor(StrategyLiveAutoBuyPreflightResult preflight) {
+  if (preflight.isAllowed) return Colors.greenAccent;
+  if (preflight.isBlocked) return Colors.orangeAccent;
+  return Colors.amberAccent;
 }
 
 String _number(num? value) {
