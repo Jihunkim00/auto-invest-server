@@ -259,9 +259,9 @@ class AppStrings {
   String get finalConfirmationRequiredShort =>
       isKorean ? '최종 확인 필요' : 'Final confirmation required';
   String get noLiveOrderSubmitted =>
-      isKorean ? '실주문 없음' : 'No live order submitted';
+      isKorean ? '실주문 없음' : 'No Live Order Submitted';
   String get primaryBlockReason =>
-      isKorean ? '주요 차단 사유' : 'Primary block reason';
+      isKorean ? '주요 차단 사유' : 'Primary Block Reason';
   String get preflightChecklist => isKorean ? '점검 목록' : 'Checklist';
   String get estimatedNotional => isKorean ? '예상 주문 금액' : 'Estimated notional';
   String get availableCash => isKorean ? '사용 가능 예수금' : 'Available cash';
@@ -310,6 +310,49 @@ class AppStrings {
       ? '사전 점검 결과 전환이 차단되었습니다: $reason.'
       : 'Preflight blocks conversion: $reason.';
 
+  String get positionExitReview =>
+      isKorean ? '포지션 청산 검토' : 'Position Exit Review';
+  String get heldPositions => isKorean ? '보유 포지션' : 'Held Positions';
+  String get sellPreflight => isKorean ? '매도 사전 점검' : 'Sell Preflight';
+  String get preflightOnly => isKorean ? '사전 점검 전용' : 'Preflight Only';
+  String get noBrokerSubmitDisplay =>
+      isKorean ? '브로커 제출 없음' : 'No Broker Submit';
+  String get finalConfirmationRequiredDisplay =>
+      isKorean ? '최종 확인 필요' : 'Final Confirmation Required';
+  String get quantityHeld => isKorean ? '보유 수량' : 'Quantity Held';
+  String get availableQuantity => isKorean ? '매도 가능 수량' : 'Available Quantity';
+  String get averageEntryPrice => isKorean ? '평균 매수가' : 'Average Entry Price';
+  String get currentPriceLabel => isKorean ? '현재가' : 'Current Price';
+  String get marketValue => isKorean ? '평가금액' : 'Market Value';
+  String get unrealizedPl => isKorean ? '평가손익' : 'Unrealized P/L';
+  String get stopLossCondition => isKorean ? '손절 조건' : 'Stop-Loss Condition';
+  String get takeProfitCondition =>
+      isKorean ? '익절 조건' : 'Take-Profit Condition';
+  String get nextRequiredAction =>
+      isKorean ? '다음 필요 조치' : 'Next Required Action';
+  String get refreshPositions => isKorean ? '보유 포지션 새로고침' : 'Refresh Positions';
+  String get runSellPreflight =>
+      isKorean ? '매도 사전 점검 실행' : 'Run Sell Preflight';
+  String get backToPositions => isKorean ? '보유 포지션으로' : 'Back to Positions';
+  String get requestedQuantity => isKorean ? '요청 수량' : 'Requested Quantity';
+  String get symbolLabel => isKorean ? '종목' : 'Symbol';
+  String get estimatedSellNotional =>
+      isKorean ? '예상 매도 금액' : 'Estimated Sell Notional';
+  String get noHeldPositions => isKorean ? '보유 포지션 없음.' : 'No held positions.';
+  String get sellPreflightAlreadyRunning =>
+      isKorean ? '매도 사전 점검이 이미 실행 중입니다.' : 'Sell preflight is already running.';
+  String sellPreflightCompletedMessage(String status, String? reason) {
+    final label = statusLabel(status);
+    if (reason == null || reason.trim().isEmpty) {
+      return isKorean
+          ? '매도 사전 점검 완료: $label.'
+          : 'Sell preflight completed: $label.';
+    }
+    return isKorean
+        ? '매도 사전 점검 완료: $label / $reason.'
+        : 'Sell preflight completed: $label / $reason.';
+  }
+
   String preflightChecklistLabel(String key) {
     final normalized = key.trim().toLowerCase();
     final ko = <String, String>{
@@ -336,6 +379,16 @@ class AppStrings {
       'active_profile_allowed': '활성 프로필 허용',
       'max_positions': '최대 보유 종목 확인',
       'order_plan_quantity': '예상 수량 확인',
+      'position_exists': '보유 포지션 존재',
+      'available_quantity_positive': '매도 가능 수량',
+      'requested_quantity_valid': '요청 수량 확인',
+      'broker_read_available': '브로커 조회 가능',
+      'cost_basis_available': '평균 매수금액 확인',
+      'pl_calculation_safe': '손익 계산 안전',
+      'duplicate_sell_order_check': '중복 매도 주문 확인',
+      'open_order_conflict_check': '미체결 주문 충돌 확인',
+      'stop_loss_or_take_profit_context': '손절/익절 조건',
+      'manual_review_required': '수동 검토 필요',
       'account_snapshot': '계좌 조회',
     };
     if (isKorean) {

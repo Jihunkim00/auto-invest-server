@@ -15,6 +15,7 @@ import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
 import 'widgets/auto_buy_operations_panel.dart';
 import 'widgets/auto_buy_promotion_queue_panel.dart';
 import 'widgets/auto_buy_scheduler_panel.dart';
+import 'widgets/position_exit_review_panel.dart';
 
 class LogsScreen extends StatefulWidget {
   const LogsScreen({super.key, required this.controller});
@@ -60,6 +61,7 @@ class _LogsScreenState extends State<LogsScreen> {
       await widget.controller.refreshStrategyAutoBuyOperations(silent: true);
       await widget.controller.refreshStrategyAutoBuyScheduler(silent: true);
       await widget.controller.refreshStrategyAutoBuyPromotions(silent: true);
+      await widget.controller.refreshPositionExitReview(silent: true);
 
       if (!mounted) return;
       setState(() {
@@ -123,6 +125,8 @@ class _LogsScreenState extends State<LogsScreen> {
             _SummaryStrip(summary: _summary),
             const SizedBox(height: 14),
             AutoBuyOperationsPanel(controller: widget.controller),
+            const SizedBox(height: 14),
+            PositionExitReviewPanel(controller: widget.controller),
             const SizedBox(height: 14),
             AutoBuySchedulerPanel(controller: widget.controller),
             const SizedBox(height: 14),

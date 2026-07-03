@@ -46,6 +46,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/position_exit_review.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -648,6 +649,35 @@ class ApiClient {
       ).toString(),
     );
     return StrategyLiveAutoBuyRecent.fromJson(payload);
+  }
+
+  Future<PositionExitReview> fetchPositionExitReview() async {
+    final payload = await _getJsonNoCache('/strategy/positions/exit-review');
+    return PositionExitReview.fromJson(payload);
+  }
+
+  Future<PositionSellPreflightResult> runPositionSellPreflight({
+    required String symbol,
+    String provider = 'kis',
+    String market = 'KR',
+    String quantityMode = 'full',
+    double? quantity,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final normalized = symbol.trim();
+    final payload = await _postJsonBody(
+      '/strategy/positions/$normalized/sell-preflight',
+      {
+        'provider': provider,
+        'market': market,
+        'quantity_mode': quantityMode,
+        if (quantityMode == 'partial' && quantity != null) 'quantity': quantity,
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return PositionSellPreflightResult.fromJson(payload);
   }
 
   Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({

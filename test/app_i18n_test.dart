@@ -25,6 +25,12 @@ void main() {
     expect(ko.preflightLiveBuy, '매수 전환 사전 점검');
     expect(ko.noLiveOrderSubmitted, '실주문 없음');
     expect(en.preflightLiveBuy, 'Preflight Live Buy');
-    expect(en.noLiveOrderSubmitted, 'No live order submitted');
+    expect(en.noLiveOrderSubmitted, 'No Live Order Submitted');
+    expect(ko.positionExitReview, '포지션 청산 검토');
+    expect(ko.sellPreflight, '매도 사전 점검');
+    expect(ko.noBrokerSubmitDisplay, '브로커 제출 없음');
+    expect(en.positionExitReview, 'Position Exit Review');
+    expect(en.sellPreflight, 'Sell Preflight');
+    expect(en.noBrokerSubmitDisplay, 'No Broker Submit');
   });
 }
