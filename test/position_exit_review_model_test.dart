@@ -1,0 +1,164 @@
+import 'package:flutter_test/flutter_test.dart';
+
+import 'package:auto_invest_dashboard/models/position_exit_review.dart';
+
+void main() {
+  test('position exit review parses held position P/L and safety', () {
+    final review = PositionExitReview.fromJson(positionExitReviewJson());
+
+    expect(review.provider, 'kis');
+    expect(review.market, 'KR');
+    expect(review.totalPositionValue, 9800);
+    expect(review.totalUnrealizedPl, -200);
+    expect(review.totalUnrealizedPlPct, -0.02);
+    expect(review.safety['read_only'], isTrue);
+    expect(review.positions, hasLength(1));
+
+    final item = review.positions.single;
+    expect(item.symbol, '005930');
+    expect(item.quantity, 2);
+    expect(item.availableQuantity, 2);
+    expect(item.costBasis, 10000);
+    expect(item.currentValue, 9800);
+    expect(item.unrealizedPlPct, -0.02);
+    expect(item.stopLossTriggered, isTrue);
+    expect(item.exitReviewStatus, 'review_required');
+  });
+
+  test('sell preflight parses read-only blocked and allowed states', () {
+    final allowed = PositionSellPreflightResult.fromJson(
+      positionSellPreflightJson(status: 'allowed'),
+    );
+    final blocked = PositionSellPreflightResult.fromJson(
+      positionSellPreflightJson(
+        status: 'blocked',
+        primaryBlockReason: 'no_held_position',
+      ),
+    );
+
+    expect(allowed.isAllowed, isTrue);
+    expect(allowed.isReadOnly, isTrue);
+    expect(allowed.realOrderSubmitted, isFalse);
+    expect(allowed.brokerSubmitCalled, isFalse);
+    expect(allowed.manualSubmitCalled, isFalse);
+    expect(allowed.orderId, isNull);
+    expect(allowed.kisOdno, isNull);
+    expect(allowed.estimatedSellNotional, 9800);
+    expect(allowed.unrealizedPlPct, -0.02);
+    expect(allowed.checklist.first.key, 'position_exists');
+
+    expect(blocked.isBlocked, isTrue);
+    expect(blocked.primaryBlockReason, 'no_held_position');
+    expect(blocked.canSubmitAfterConfirmation, isFalse);
+  });
+}
+
+Map<String, dynamic> positionExitReviewJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'positions': [
+      {
+        'symbol': '005930',
+        'name': 'Samsung',
+        'provider': 'kis',
+        'market': 'KR',
+        'quantity': 2,
+        'available_quantity': 2,
+        'average_price': 5000,
+        'cost_basis': 10000,
+        'current_price': 4900,
+        'current_value': 9800,
+        'unrealized_pl': -200,
+        'unrealized_pl_pct': -0.02,
+        'day_pl': -20,
+        'entry_source': 'manual_live',
+        'related_buy_order_id': 12,
+        'related_promotion_id': 3,
+        'stop_loss_threshold_pct': 2,
+        'take_profit_threshold_pct': 2,
+        'stop_loss_triggered': true,
+        'take_profit_triggered': false,
+        'exit_review_status': 'review_required',
+        'primary_risk_note': 'Stop-loss condition reached.',
+        'risk_flags': ['stop_loss_triggered'],
+        'gating_notes': ['Read-only position exit review.'],
+        'next_safe_action': 'run_sell_preflight',
+      },
+    ],
+    'total_position_value': 9800,
+    'total_unrealized_pl': -200,
+    'total_unrealized_pl_pct': -0.02,
+    'updated_at': '2026-07-03T00:00:00Z',
+    'safety_flags': ['read_only', 'preflight_only'],
+    'safety': {
+      'read_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    },
+  };
+}
+
+Map<String, dynamic> positionSellPreflightJson({
+  String status = 'allowed',
+  String? primaryBlockReason,
+}) {
+  final blocked = status == 'blocked';
+  return {
+    'symbol': '005930',
+    'provider': 'kis',
+    'market': 'KR',
+    'preflight_status': status,
+    'can_submit_after_confirmation': !blocked && status == 'allowed',
+    'final_confirmation_required': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'order_id': null,
+    'broker_order_id': null,
+    'kis_odno': null,
+    'position_exists': !blocked,
+    'quantity_held': blocked ? null : 2,
+    'available_quantity': blocked ? null : 2,
+    'requested_quantity': blocked ? null : 2,
+    'estimated_sell_notional': blocked ? null : 9800,
+    'current_price': 4900,
+    'average_price': 5000,
+    'cost_basis': 10000,
+    'current_value': 9800,
+    'unrealized_pl': -200,
+    'unrealized_pl_pct': -0.02,
+    'stop_loss_threshold_pct': 2,
+    'take_profit_threshold_pct': 2,
+    'stop_loss_triggered': !blocked,
+    'take_profit_triggered': false,
+    'kill_switch': false,
+    'dry_run': false,
+    'kis_real_order_enabled': true,
+    'market_session_allowed': true,
+    'no_new_entry_window_allowed': true,
+    'risk_flags': blocked ? [primaryBlockReason] : ['stop_loss_triggered'],
+    'gating_notes': ['Sell preflight is read-only.'],
+    'checklist': [
+      {
+        'key': 'position_exists',
+        'status': blocked ? 'fail' : 'pass',
+        'label_key': 'position_exists',
+        'detail': blocked ? 'No held position.' : 'Held position was found.',
+        'blocking': blocked,
+      },
+    ],
+    'primary_block_reason': primaryBlockReason,
+    'next_required_action': blocked
+        ? 'resolve_no_held_position'
+        : 'final_operator_confirmation_required',
+    'safety': {
+      'read_only': true,
+      'preflight_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    },
+  };
+}

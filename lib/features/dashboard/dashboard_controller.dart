@@ -51,6 +51,7 @@ import '../../models/ops_settings.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/position_exit_review.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -357,6 +358,12 @@ class DashboardController extends ChangeNotifier {
   List<StrategyLiveAutoExitRunResult> strategyLiveAutoExitRecent = const [];
   bool strategyLiveAutoExitLoading = false;
   String? strategyLiveAutoExitError;
+  PositionExitReview? positionExitReview;
+  PositionSellPreflightResult? latestPositionSellPreflight;
+  bool positionExitReviewLoading = false;
+  String? positionExitReviewError;
+  bool positionSellPreflightLoading = false;
+  String? positionSellPreflightError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1875,6 +1882,81 @@ class DashboardController extends ChangeNotifier {
       strategyLiveAutoBuyLoading = false;
       notifyListeners();
     }
+  }
+
+  Future<ActionResult> refreshPositionExitReview({
+    bool silent = false,
+  }) async {
+    if (positionExitReviewLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Position exit review is already loading.',
+      );
+    }
+    positionExitReviewLoading = true;
+    positionExitReviewError = null;
+    if (!silent) notifyListeners();
+    try {
+      positionExitReview = await apiClient.fetchPositionExitReview();
+      return ActionResult(
+        success: true,
+        message:
+            'Position exit review refreshed: ${positionExitReview!.positions.length}.',
+      );
+    } catch (e) {
+      positionExitReviewError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionExitReviewError!),
+      );
+    } finally {
+      positionExitReviewLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runPositionSellPreflight(
+    PositionExitReviewItem position,
+  ) async {
+    if (positionSellPreflightLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.sellPreflightAlreadyRunning,
+      );
+    }
+    positionSellPreflightLoading = true;
+    positionSellPreflightError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runPositionSellPreflight(
+        symbol: position.symbol,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      latestPositionSellPreflight = result;
+      return ActionResult(
+        success: !result.isBlocked,
+        message: strings.sellPreflightCompletedMessage(
+          result.preflightStatus,
+          result.primaryBlockReason,
+        ),
+      );
+    } catch (e) {
+      positionSellPreflightError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionSellPreflightError!),
+      );
+    } finally {
+      positionSellPreflightLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearPositionSellPreflight() {
+    latestPositionSellPreflight = null;
+    positionSellPreflightError = null;
+    notifyListeners();
   }
 
   Future<ActionResult> refreshStrategyAutoBuyOperations({

@@ -40,6 +40,7 @@ from app.routes.strategy_live import (
     router as strategy_live_router,
 )
 from app.routes.strategy_performance import router as strategy_performance_router
+from app.routes.strategy_positions import router as strategy_positions_router
 from app.routes.strategy_risk import router as strategy_risk_router
 from app.routes.trading import router as trading_router
 from app.services.runtime_diagnostics import (
@@ -106,6 +107,7 @@ app.include_router(strategy_live_router)
 app.include_router(strategy_live_auto_buy_compat_router)
 app.include_router(strategy_live_exit_router)
 app.include_router(strategy_performance_router)
+app.include_router(strategy_positions_router)
 app.include_router(strategy_risk_router)
 app.include_router(trading_router)
 app.include_router(ops_router)

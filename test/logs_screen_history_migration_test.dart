@@ -7,6 +7,7 @@ import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
+import 'package:auto_invest_dashboard/models/position_exit_review.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
@@ -156,4 +157,27 @@ class _LogsHistoryApiClient extends ApiClient {
     int limit = 20,
   }) async =>
       StrategyAutoBuyPromotions.fromJson(autoBuyPromotionsJson());
+
+  @override
+  Future<PositionExitReview> fetchPositionExitReview() async =>
+      PositionExitReview.fromJson(_positionExitReviewJson());
+}
+
+Map<String, dynamic> _positionExitReviewJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'positions': const [],
+    'total_position_value': 0,
+    'total_unrealized_pl': 0,
+    'total_unrealized_pl_pct': null,
+    'updated_at': '2026-07-03T00:00:00Z',
+    'safety_flags': const ['read_only', 'preflight_only'],
+    'safety': const {
+      'read_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    },
+  };
 }
