@@ -33,6 +33,7 @@ Rules:
 - Strategy scheduled dry-run auto-buy scheduler questions must use read-only scheduler status/promotions lookups.
 - Strategy auto-buy promotion queue questions must use read-only promotion queue lookup and must never execute run-once from chat.
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
+- Daily operations summary and broker reconciliation questions must use the read-only daily_ops_summary_lookup tool; never sync broker orders from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -140,6 +141,14 @@ class AgentChatIntentRouterService:
                 AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY,
                 confidence=0.88,
                 reason="User is asking for read-only runtime safety status.",
+                **base,
+            )
+
+        if self._is_daily_ops_summary_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.READ_ONLY_DAILY_OPS_SUMMARY_QUERY,
+                confidence=0.9,
+                reason="User is asking for daily operations summary or broker reconciliation.",
                 **base,
             )
 
@@ -1311,6 +1320,18 @@ class AgentChatIntentRouterService:
             return [self._tool_call("recent_signals_lookup", {}, "User asked for recent signals.")]
         if category == AgentChatIntentCategory.READ_ONLY_SETTINGS_QUERY:
             return [self._tool_call("ops_settings_lookup", {}, "User asked for runtime safety status.")]
+        if category == AgentChatIntentCategory.READ_ONLY_DAILY_OPS_SUMMARY_QUERY:
+            return [
+                self._tool_call(
+                    "daily_ops_summary_lookup",
+                    {
+                        "provider": intent.provider,
+                        "market": intent.market,
+                        "include_details": True,
+                    },
+                    "User asked for daily operations summary and broker reconciliation.",
+                )
+            ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_QUERY:
             tool_name = "active_strategy_profile_lookup" if not intent.requested_profile else "strategy_profiles_lookup"
             return [self._tool_call(tool_name, {"profile_name": intent.requested_profile}, "User asked about strategy profiles.")]
@@ -1659,6 +1680,25 @@ class AgentChatIntentRouterService:
             or "알려" in text
         )
         return mentions_setting and status_word
+
+    def _is_daily_ops_summary_query(self, text: str, lowered: str) -> bool:
+        return (
+            "daily operations summary" in lowered
+            or "daily ops summary" in lowered
+            or "ops daily summary" in lowered
+            or "operations summary" in lowered
+            or "broker reconciliation" in lowered
+            or "reconciliation summary" in lowered
+            or (
+                "daily" in lowered
+                and "summary" in lowered
+                and any(token in lowered for token in ["ops", "operations", "order", "broker"])
+            )
+            or (
+                "reconcile" in lowered
+                and any(token in lowered for token in ["broker", "order", "orders"])
+            )
+        )
 
     def _is_scheduler_request(self, text: str, lowered: str) -> bool:
         return "스케줄" in text or "scheduler" in lowered

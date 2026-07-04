@@ -51,6 +51,8 @@ class AgentChatResultSummarizer:
                 return self._count_answer(primary, "\ucd5c\uadfc \uc2e0\ud638", "read_only_result")
             if primary.result_type == "settings":
                 return self._settings_answer(primary)
+            if primary.result_type == "daily_ops_summary":
+                return self._daily_ops_summary_answer(primary)
             if primary.result_type in {"strategy_profile", "strategy_profiles"}:
                 return self._strategy_profile_answer(intent, primary)
             if primary.result_type == "strategy_monthly_progress":
@@ -129,6 +131,8 @@ class AgentChatResultSummarizer:
                 card = self._balance_card(result)
             elif result.result_type == "settings":
                 card = self._settings_card(result)
+            elif result.result_type == "daily_ops_summary":
+                card = self._daily_ops_summary_card(result)
             elif result.result_type in {"orders", "runs", "signals"}:
                 card = self._count_card(result)
             elif result.result_type in {
@@ -273,6 +277,34 @@ class AgentChatResultSummarizer:
                 f"scheduler\ub294 {scheduler}\uc785\ub2c8\ub2e4. "
                 "이 상태 정보는 조회만 수행했으며 설정을 변경하지 않았습니다."
             ),
+            answer_type="read_only_result",
+        )
+
+    def _daily_ops_summary_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        trade = data.get("trade_activity") if isinstance(data.get("trade_activity"), dict) else {}
+        pnl = data.get("pnl_summary") if isinstance(data.get("pnl_summary"), dict) else {}
+        orders = data.get("order_summary") if isinstance(data.get("order_summary"), dict) else {}
+        reconciliation = (
+            data.get("reconciliation")
+            if isinstance(data.get("reconciliation"), dict)
+            else {}
+        )
+        currency = str(pnl.get("currency") or "KRW")
+        text = (
+            f"{data.get('date')} daily operations summary is "
+            f"{reconciliation.get('status') or 'unknown'}. "
+            f"Orders today: {orders.get('total_orders_today', 0)}, "
+            f"sync required: {orders.get('sync_required_count', 0)}, "
+            f"blocked attempts: {trade.get('blocked_attempt_count', 0)}, "
+            f"realized P/L: {self._money(pnl.get('realized_pl'), currency)}. "
+            "This lookup used local cached/log DB state only and did not sync, validate, retry, submit, trade, change settings, or run a scheduler."
+        )
+        return AgentChatAnswer(
+            text=text,
             answer_type="read_only_result",
         )
 
@@ -692,6 +724,42 @@ class AgentChatResultSummarizer:
             badges=["READ ONLY", "NO SETTINGS CHANGE"],
             rows=rows,
             data=settings,
+        )
+
+    def _daily_ops_summary_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
+        data = result.data
+        trade = data.get("trade_activity") if isinstance(data.get("trade_activity"), dict) else {}
+        pnl = data.get("pnl_summary") if isinstance(data.get("pnl_summary"), dict) else {}
+        orders = data.get("order_summary") if isinstance(data.get("order_summary"), dict) else {}
+        promotions = data.get("promotion_summary") if isinstance(data.get("promotion_summary"), dict) else {}
+        reconciliation = (
+            data.get("reconciliation")
+            if isinstance(data.get("reconciliation"), dict)
+            else {}
+        )
+        currency = str(pnl.get("currency") or "KRW")
+        return AgentChatResultCard(
+            card_type="daily_ops_summary",
+            title="Daily Operations Summary",
+            subtitle=f"{str(data.get('provider') or '').upper()} / {data.get('market') or '-'} / {data.get('date') or '-'}",
+            primary_value=str(reconciliation.get("status") or "UNKNOWN").upper(),
+            badges=[
+                "READ ONLY",
+                "LOCAL DB ONLY",
+                "NO SYNC",
+                "NO VALIDATION",
+                "NO BROKER SUBMIT",
+                "NO SETTINGS CHANGE",
+            ],
+            rows=[
+                {"label": "Orders today", "value": orders.get("total_orders_today", 0)},
+                {"label": "Sync required", "value": orders.get("sync_required_count", 0)},
+                {"label": "Realized P/L", "value": self._money(pnl.get("realized_pl"), currency)},
+                {"label": "Unrealized P/L", "value": self._money(pnl.get("unrealized_pl"), currency)},
+                {"label": "Promotions pending", "value": promotions.get("pending", 0)},
+                {"label": "Blocked attempts", "value": trade.get("blocked_attempt_count", 0)},
+            ],
+            data=data,
         )
 
     def _count_card(self, result: AgentChatToolResult) -> AgentChatResultCard:

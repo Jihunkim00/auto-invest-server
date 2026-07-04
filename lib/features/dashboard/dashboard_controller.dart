@@ -21,6 +21,7 @@ import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/candidate.dart';
+import '../../models/daily_ops_summary.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
 import '../../models/kis_buy_shadow_decision.dart';
@@ -335,6 +336,9 @@ class DashboardController extends ChangeNotifier {
   StrategyAutoBuyOperationsStatus? strategyAutoBuyOperationsStatus;
   bool strategyAutoBuyOperationsLoading = false;
   String? strategyAutoBuyOperationsError;
+  DailyOpsSummary? dailyOpsSummary;
+  bool dailyOpsSummaryLoading = false;
+  String? dailyOpsSummaryError;
   StrategyAutoBuySchedulerStatus? strategyAutoBuySchedulerStatus;
   StrategyAutoBuySchedulerRunResult? strategyAutoBuySchedulerRunResult;
   bool strategyAutoBuySchedulerLoading = false;
@@ -2128,6 +2132,41 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       guardedPositionSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshDailyOpsSummary({
+    bool silent = false,
+  }) async {
+    if (dailyOpsSummaryLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.dailyOpsSummaryAlreadyLoading,
+      );
+    }
+    dailyOpsSummaryLoading = true;
+    dailyOpsSummaryError = null;
+    if (!silent) notifyListeners();
+    try {
+      dailyOpsSummary = await apiClient.fetchDailyOpsSummary(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+      );
+      return ActionResult(
+        success: true,
+        message: strings.dailyOpsSummaryRefreshed(
+          dailyOpsSummary!.orderSummary.totalOrdersToday,
+        ),
+      );
+    } catch (e) {
+      dailyOpsSummaryError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(dailyOpsSummaryError!),
+      );
+    } finally {
+      dailyOpsSummaryLoading = false;
       notifyListeners();
     }
   }

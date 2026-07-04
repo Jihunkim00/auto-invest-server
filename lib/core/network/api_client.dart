@@ -15,6 +15,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/candidate.dart';
+import '../../models/daily_ops_summary.dart';
 import '../../models/agent_live_prefill.dart';
 import '../../models/kis_auto_readiness.dart';
 import '../../models/kis_auto_simulator_result.dart';
@@ -777,6 +778,26 @@ class ApiClient {
       ).toString(),
     );
     return StrategyAutoBuyOperationsStatus.fromJson(payload);
+  }
+
+  Future<DailyOpsSummary> fetchDailyOpsSummary({
+    String provider = 'kis',
+    String market = 'KR',
+    String? date,
+    bool includeDetails = true,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/ops/daily-summary',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'include_details': includeDetails.toString(),
+          if (date != null && date.trim().isNotEmpty) 'date': date.trim(),
+        },
+      ).toString(),
+    );
+    return DailyOpsSummary.fromJson(payload);
   }
 
   Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({

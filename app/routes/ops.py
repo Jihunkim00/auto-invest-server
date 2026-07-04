@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date as date_cls
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,7 @@ from app.db.database import get_db
 from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
+from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.trading_service import TradingService
@@ -165,6 +167,24 @@ def get_settings(db: Session = Depends(get_db)):
 def get_settings_catalog(db: Session = Depends(get_db)):
     svc = RuntimeSettingService()
     return svc.settings_catalog(db)
+
+
+@router.get("/daily-summary")
+def get_daily_summary(
+    date_value: date_cls | None = Query(default=None, alias="date"),
+    provider: str | None = Query(default=None, max_length=20),
+    market: str | None = Query(default=None, max_length=10),
+    include_details: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    svc = DailyOpsSummaryService()
+    return svc.summary(
+        db,
+        date_value=date_value,
+        provider=provider,
+        market=market,
+        include_details=include_details,
+    )
 
 
 @router.put("/settings")
