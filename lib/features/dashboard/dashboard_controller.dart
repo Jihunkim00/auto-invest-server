@@ -52,6 +52,7 @@ import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
+import '../../models/position_lifecycle.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -361,12 +362,15 @@ class DashboardController extends ChangeNotifier {
   PositionExitReview? positionExitReview;
   PositionSellPreflightResult? latestPositionSellPreflight;
   GuardedPositionSellResult? latestGuardedPositionSellResult;
+  PositionLifecycle? positionLifecycle;
   bool positionExitReviewLoading = false;
   String? positionExitReviewError;
   bool positionSellPreflightLoading = false;
   String? positionSellPreflightError;
   bool guardedPositionSellLoading = false;
   String? guardedPositionSellError;
+  bool positionLifecycleLoading = false;
+  String? positionLifecycleError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1914,6 +1918,41 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       positionExitReviewLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshPositionLifecycle({
+    bool silent = false,
+    String status = 'all',
+  }) async {
+    if (positionLifecycleLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Position lifecycle is already loading.',
+      );
+    }
+    positionLifecycleLoading = true;
+    positionLifecycleError = null;
+    if (!silent) notifyListeners();
+    try {
+      positionLifecycle = await apiClient.fetchPositionLifecycle(
+        status: status,
+      );
+      return ActionResult(
+        success: true,
+        message: strings.positionLifecycleRefreshed(
+          positionLifecycle!.items.length,
+        ),
+      );
+    } catch (e) {
+      positionLifecycleError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionLifecycleError!),
+      );
+    } finally {
+      positionLifecycleLoading = false;
       notifyListeners();
     }
   }

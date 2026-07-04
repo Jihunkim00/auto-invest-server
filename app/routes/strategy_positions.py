@@ -1,18 +1,22 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.db.database import get_db
+from app.schemas.position_lifecycle import PositionLifecycleResponse
 from app.schemas.position_exit_review import (
     GuardedPositionSellRequest,
     GuardedPositionSellResponse,
     PositionExitReviewResponse,
     PositionSellPreflightRequest,
     PositionSellPreflightResponse,
+)
+from app.services.position_lifecycle_audit_service import (
+    PositionLifecycleAuditService,
 )
 from app.services.position_exit_review_service import PositionExitReviewService
 
@@ -28,6 +32,10 @@ def get_position_exit_review_service(
     return PositionExitReviewService(client)
 
 
+def get_position_lifecycle_audit_service() -> PositionLifecycleAuditService:
+    return PositionLifecycleAuditService()
+
+
 @router.get(
     "/exit-review",
     response_model=PositionExitReviewResponse,
@@ -37,6 +45,58 @@ def get_position_exit_review(
     service: PositionExitReviewService = Depends(get_position_exit_review_service),
 ):
     return service.exit_review(db)
+
+
+@router.get(
+    "/lifecycle",
+    response_model=PositionLifecycleResponse,
+)
+def get_position_lifecycle(
+    symbol: str | None = Query(default=None, max_length=20),
+    provider: str = Query(default="kis", max_length=20),
+    market: str = Query(default="KR", max_length=10),
+    status: str = Query(default="all", max_length=20),
+    limit: int = Query(default=50, ge=1, le=200),
+    include_events: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    service: PositionLifecycleAuditService = Depends(
+        get_position_lifecycle_audit_service
+    ),
+):
+    return service.list(
+        db,
+        symbol=symbol,
+        provider=provider,
+        market=market,
+        status=status,
+        limit=limit,
+        include_events=include_events,
+    )
+
+
+@router.get(
+    "/lifecycle/{symbol}",
+    response_model=PositionLifecycleResponse,
+)
+def get_position_lifecycle_detail(
+    symbol: str,
+    provider: str = Query(default="kis", max_length=20),
+    market: str = Query(default="KR", max_length=10),
+    status: str = Query(default="all", max_length=20),
+    include_events: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    service: PositionLifecycleAuditService = Depends(
+        get_position_lifecycle_audit_service
+    ),
+):
+    return service.detail(
+        db,
+        symbol=symbol,
+        provider=provider,
+        market=market,
+        status=status,
+        include_events=include_events,
+    )
 
 
 @router.post(
