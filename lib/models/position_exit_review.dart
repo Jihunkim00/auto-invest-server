@@ -319,6 +319,127 @@ class PositionSellPreflightChecklistItem {
   final bool blocking;
 }
 
+class GuardedPositionSellResult {
+  const GuardedPositionSellResult({
+    required this.symbol,
+    required this.provider,
+    required this.market,
+    required this.action,
+    required this.resultStatus,
+    this.attemptId,
+    required this.confirmLive,
+    required this.finalConfirmationRequired,
+    required this.realOrderSubmitted,
+    required this.brokerSubmitCalled,
+    required this.manualSubmitCalled,
+    this.orderId,
+    this.brokerOrderId,
+    this.kisOdno,
+    this.requestedQuantity,
+    this.submittedQuantity,
+    this.estimatedSellNotional,
+    this.currentPrice,
+    this.averagePrice,
+    this.costBasis,
+    this.unrealizedPl,
+    this.unrealizedPlPct,
+    required this.riskFlags,
+    required this.gatingNotes,
+    required this.checklist,
+    this.primaryBlockReason,
+    required this.nextSafeAction,
+    this.submittedAt,
+    this.lastSyncedAt,
+    this.brokerStatus,
+    this.internalStatus,
+    required this.safety,
+    required this.rawPayload,
+  });
+
+  factory GuardedPositionSellResult.fromJson(Map<String, dynamic> json) {
+    final rawChecklist = json['checklist'];
+    return GuardedPositionSellResult(
+      symbol: _string(json['symbol'], ''),
+      provider: _string(json['provider'], 'kis'),
+      market: _string(json['market'], 'KR'),
+      action: _string(json['action'], 'sell'),
+      resultStatus: _string(json['result_status'], 'unknown'),
+      attemptId: _nullableInt(json['attempt_id']),
+      confirmLive: json['confirm_live'] == true,
+      finalConfirmationRequired: json['final_confirmation_required'] != false,
+      realOrderSubmitted: json['real_order_submitted'] == true,
+      brokerSubmitCalled: json['broker_submit_called'] == true,
+      manualSubmitCalled: json['manual_submit_called'] == true,
+      orderId: _nullableInt(json['order_id']),
+      brokerOrderId: _nullableString(json['broker_order_id']),
+      kisOdno: _nullableString(json['kis_odno']),
+      requestedQuantity: _nullableDouble(json['requested_quantity']),
+      submittedQuantity: _nullableDouble(json['submitted_quantity']),
+      estimatedSellNotional: _nullableDouble(json['estimated_sell_notional']),
+      currentPrice: _nullableDouble(json['current_price']),
+      averagePrice: _nullableDouble(json['average_price']),
+      costBasis: _nullableDouble(json['cost_basis']),
+      unrealizedPl: _nullableDouble(json['unrealized_pl']),
+      unrealizedPlPct: _nullableDouble(json['unrealized_pl_pct']),
+      riskFlags: _strings(json['risk_flags']),
+      gatingNotes: _strings(json['gating_notes']),
+      checklist: rawChecklist is List
+          ? [
+              for (final item in rawChecklist)
+                PositionSellPreflightChecklistItem.fromJson(item),
+            ]
+          : const [],
+      primaryBlockReason: _nullableString(json['primary_block_reason']),
+      nextSafeAction: _string(json['next_safe_action'], 'refresh_result'),
+      submittedAt: _nullableDateTime(json['submitted_at']),
+      lastSyncedAt: _nullableDateTime(json['last_synced_at']),
+      brokerStatus: _nullableString(json['broker_status']),
+      internalStatus: _nullableString(json['internal_status']),
+      safety: _map(json['safety']),
+      rawPayload: Map<String, dynamic>.from(json),
+    );
+  }
+
+  final String symbol;
+  final String provider;
+  final String market;
+  final String action;
+  final String resultStatus;
+  final int? attemptId;
+  final bool confirmLive;
+  final bool finalConfirmationRequired;
+  final bool realOrderSubmitted;
+  final bool brokerSubmitCalled;
+  final bool manualSubmitCalled;
+  final int? orderId;
+  final String? brokerOrderId;
+  final String? kisOdno;
+  final double? requestedQuantity;
+  final double? submittedQuantity;
+  final double? estimatedSellNotional;
+  final double? currentPrice;
+  final double? averagePrice;
+  final double? costBasis;
+  final double? unrealizedPl;
+  final double? unrealizedPlPct;
+  final List<String> riskFlags;
+  final List<String> gatingNotes;
+  final List<PositionSellPreflightChecklistItem> checklist;
+  final String? primaryBlockReason;
+  final String nextSafeAction;
+  final DateTime? submittedAt;
+  final DateTime? lastSyncedAt;
+  final String? brokerStatus;
+  final String? internalStatus;
+  final Map<String, dynamic> safety;
+  final Map<String, dynamic> rawPayload;
+
+  bool get isBlocked => resultStatus == 'blocked';
+  bool get isDryRunSimulated => resultStatus == 'dry_run_simulated';
+  bool get isSubmitted => resultStatus == 'submitted';
+  bool get canSync => attemptId != null && orderId != null;
+}
+
 String _string(Object? value, String fallback) {
   final text = value?.toString().trim();
   return text == null || text.isEmpty || text == 'null' ? fallback : text;

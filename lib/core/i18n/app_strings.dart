@@ -353,6 +353,64 @@ class AppStrings {
         : 'Sell preflight completed: $label / $reason.';
   }
 
+  String get executeGuardedLiveSell =>
+      isKorean ? '蹂댄샇???ㅻℓ???ㅽ뻾' : 'Execute Guarded Live Sell';
+  String get liveSellExecutionResult =>
+      isKorean ? '?ㅻℓ???ㅽ뻾 寃곌낵' : 'Live Sell Execution Result';
+  String get guardedLiveSellConfirmTitle =>
+      isKorean ? '蹂댄샇???ㅻℓ???뺤씤' : 'Confirm Guarded Live Sell';
+  String get guardedLiveSellLiveWarning => isKorean
+      ? 'dry_run=false이고 寃뚯씠?몄씠 ?덉슜?섎㈃ ?ㅼ＜臾몄쑝濡??쒖텧?⑸땲??'
+      : 'This is a live sell order if dry_run=false and backend gates allow it.';
+  String get guardedLiveSellDryRunWarning => isKorean
+      ? 'dry_run=true ?곹깭?먯꽌??釉뚮줈而??쒖텧???놁뒿?덈떎.'
+      : 'Dry-run is on, so no live sell will be submitted.';
+  String guardedLiveSellConfirmBody({
+    required String symbol,
+    required String quantity,
+    required String notional,
+    required String unrealizedPl,
+    required bool dryRun,
+  }) {
+    if (isKorean) {
+      return '醫낅ぉ: $symbol\n留ㅻ룄 ?섎웾: $quantity\n?덉긽 留ㅻ룄 湲덉븸: $notional\n?됯??먯씡: $unrealizedPl\n?먮룞 ?ъ떆?????놁뒿?덈떎.\n${dryRun ? guardedLiveSellDryRunWarning : guardedLiveSellLiveWarning}';
+    }
+    return 'Symbol: $symbol\nSell quantity: $quantity\nEstimated sell notional: $notional\nUnrealized P/L: $unrealizedPl\nNo auto retry.\n${dryRun ? guardedLiveSellDryRunWarning : guardedLiveSellLiveWarning}';
+  }
+
+  String get sellQuantity => isKorean ? '留ㅻ룄 ?섎웾' : 'Sell Quantity';
+  String get guardedLiveSellAlreadyRunning => isKorean
+      ? '蹂댄샇???ㅻℓ???대? ?ㅽ뻾 以묒엯?덈떎.'
+      : 'Guarded live sell is already running.';
+  String get guardedLiveSellResultUnavailable =>
+      isKorean ? '?ㅻℓ???ㅽ뻾 寃곌낵媛 ?놁뒿?덈떎.' : 'Live sell result is unavailable.';
+  String get refreshGuardedLiveSellResult =>
+      isKorean ? '寃곌낵 ?덈줈怨좎묠' : 'Refresh Result';
+
+  String guardedLiveSellCompletedMessage(String status, String? reason) {
+    final label = statusLabel(status);
+    if (reason == null || reason.trim().isEmpty) {
+      return isKorean
+          ? '?ㅻℓ???ㅽ뻾 寃곌낵: $label.'
+          : 'Live sell execution result: $label.';
+    }
+    return isKorean
+        ? '?ㅻℓ???ㅽ뻾 寃곌낵: $label / $reason.'
+        : 'Live sell execution result: $label / $reason.';
+  }
+
+  String guardedLiveSellResultRefreshed(String status) => isKorean
+      ? '?ㅻℓ???ㅽ뻾 寃곌낵 ?덈줈怨좎묠 ?꾨즺: ${statusLabel(status)}.'
+      : 'Live sell result refreshed: ${statusLabel(status)}.';
+
+  String guardedLiveSellResultSynced(String status) => isKorean
+      ? '二쇰Ц ?곹깭 ?숆린???꾨즺: ${statusLabel(status)}.'
+      : 'Order status synced: ${statusLabel(status)}.';
+
+  String preflightBlocksGuardedSell(String reason) => isKorean
+      ? '留ㅻ룄 ?ъ쟾 ?먭? 寃곌낵 ?ㅽ뻾??李⑤떒?섏뿀?듬땲?? $reason.'
+      : 'Sell preflight blocks execution: $reason.';
+
   String preflightChecklistLabel(String key) {
     final normalized = key.trim().toLowerCase();
     final ko = <String, String>{
@@ -391,8 +449,16 @@ class AppStrings {
       'manual_review_required': '수동 검토 필요',
       'account_snapshot': '계좌 조회',
     };
+    final guardedSellKo = <String, String>{
+      'final_confirmation_received': '理쒖쥌 ?뺤씤 ?꾨즺',
+      'dry_run_allows_live_submit': 'dry_run ?ㅼ＜臾??덉슜',
+      'broker_submit_ready': '釉뚮줈而??쒖텧 以鍮?',
+      'manual_review_complete': '?섎룞 寃???꾨즺',
+    };
     if (isKorean) {
-      return ko[normalized] ?? normalized.replaceAll('_', ' ');
+      return guardedSellKo[normalized] ??
+          ko[normalized] ??
+          normalized.replaceAll('_', ' ');
     }
     return normalized.replaceAll('_', ' ').toUpperCase();
   }

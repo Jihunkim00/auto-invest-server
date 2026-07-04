@@ -51,6 +51,29 @@ void main() {
     expect(blocked.primaryBlockReason, 'no_held_position');
     expect(blocked.canSubmitAfterConfirmation, isFalse);
   });
+
+  test('guarded sell result parses submitted and dry-run states', () {
+    final submitted = GuardedPositionSellResult.fromJson(
+      guardedSellResultJson(status: 'submitted', submitted: true),
+    );
+    final dryRun = GuardedPositionSellResult.fromJson(
+      guardedSellResultJson(status: 'dry_run_simulated'),
+    );
+
+    expect(submitted.isSubmitted, isTrue);
+    expect(submitted.realOrderSubmitted, isTrue);
+    expect(submitted.brokerSubmitCalled, isTrue);
+    expect(submitted.manualSubmitCalled, isTrue);
+    expect(submitted.canSync, isTrue);
+    expect(submitted.orderId, 42);
+    expect(submitted.kisOdno, 'KIS-SELL-1');
+    expect(submitted.submittedQuantity, 2);
+
+    expect(dryRun.isDryRunSimulated, isTrue);
+    expect(dryRun.realOrderSubmitted, isFalse);
+    expect(dryRun.brokerSubmitCalled, isFalse);
+    expect(dryRun.canSync, isFalse);
+  });
 }
 
 Map<String, dynamic> positionExitReviewJson() {
@@ -159,6 +182,63 @@ Map<String, dynamic> positionSellPreflightJson({
       'real_order_submitted': false,
       'broker_submit_called': false,
       'manual_submit_called': false,
+    },
+  };
+}
+
+Map<String, dynamic> guardedSellResultJson({
+  String status = 'submitted',
+  bool submitted = false,
+}) {
+  return {
+    'symbol': '005930',
+    'provider': 'kis',
+    'market': 'KR',
+    'action': 'sell',
+    'result_status': status,
+    'attempt_id': 7,
+    'confirm_live': true,
+    'final_confirmation_required': true,
+    'real_order_submitted': submitted,
+    'broker_submit_called': submitted,
+    'manual_submit_called': submitted,
+    'order_id': submitted ? 42 : null,
+    'broker_order_id': submitted ? 'KIS-SELL-1' : null,
+    'kis_odno': submitted ? 'KIS-SELL-1' : null,
+    'requested_quantity': 2,
+    'submitted_quantity': submitted ? 2 : null,
+    'estimated_sell_notional': 9800,
+    'current_price': 4900,
+    'average_price': 5000,
+    'cost_basis': 10000,
+    'unrealized_pl': -200,
+    'unrealized_pl_pct': -0.02,
+    'risk_flags': status == 'dry_run_simulated'
+        ? ['dry_run_enabled']
+        : ['stop_loss_triggered'],
+    'gating_notes': ['Guarded sell manual only.'],
+    'checklist': [
+      {
+        'key': 'final_confirmation_received',
+        'status': 'pass',
+        'label_key': 'final_confirmation_received',
+        'detail': 'Final confirmation was received.',
+        'blocking': false,
+      },
+    ],
+    'primary_block_reason':
+        status == 'dry_run_simulated' ? 'dry_run_enabled' : null,
+    'next_safe_action':
+        submitted ? 'sync_order_status' : 'review_dry_run_result',
+    'submitted_at': submitted ? '2026-07-03T01:00:00Z' : null,
+    'last_synced_at': null,
+    'broker_status': submitted ? 'submitted' : null,
+    'internal_status': submitted ? 'SUBMITTED' : null,
+    'safety': {
+      'manual_only': true,
+      'real_order_submitted': submitted,
+      'broker_submit_called': submitted,
+      'manual_submit_called': submitted,
     },
   };
 }

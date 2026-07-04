@@ -52,6 +52,7 @@ void main() {
     expect(find.text('Auto Sell'), findsNothing);
     expect(find.text('Liquidate All'), findsNothing);
     expect(find.text('Retry Sell'), findsNothing);
+    expect(find.text('Auto Retry'), findsNothing);
     expect(find.text('Enable Live Scheduler'), findsNothing);
 
     controller.dispose();
@@ -100,7 +101,78 @@ void main() {
       find.byKey(const ValueKey('position-exit-review-checklist')),
       findsOneWidget,
     );
+    expect(
+      find.byKey(const ValueKey('execute-guarded-live-sell-button')),
+      findsOneWidget,
+    );
     expect(find.text('점검 목록'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('allowed preflight opens guarded sell confirmation and submits',
+      (tester) async {
+    _setLargeViewport(tester);
+    final api = _PositionExitReviewApiClient();
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      initialLanguage: AppLanguage.english,
+    );
+    await controller.refreshPositionExitReview(silent: true);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(body: PositionExitReviewPanel(controller: controller)),
+    ));
+
+    final preflightButton = find.byKey(
+      const ValueKey('position-exit-review-sell-preflight-button'),
+    );
+    await tester.ensureVisible(preflightButton);
+    await tester.pumpAndSettle();
+    await tester.tap(preflightButton);
+    await tester.pumpAndSettle();
+
+    final executeButton = find.byKey(
+      const ValueKey('execute-guarded-live-sell-button'),
+    );
+    expect(executeButton, findsOneWidget);
+    await tester.tap(executeButton);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('guarded-live-sell-confirm-dialog')),
+      findsOneWidget,
+    );
+    expect(find.text('Execute Guarded Live Sell'), findsWidgets);
+    expect(api.guardedSellCalls, 0);
+
+    await tester.tap(find.byKey(
+      const ValueKey('confirm-guarded-live-sell-button'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(api.guardedSellCalls, 1);
+    expect(api.sentConfirmLive, isTrue);
+    expect(api.lastGuardedSellSymbol, '005930');
+    expect(
+      find.byKey(const ValueKey('guarded-live-sell-result-panel')),
+      findsOneWidget,
+    );
+    expect(find.text('Live Sell Execution Result'), findsOneWidget);
+    expect(find.text('Live Order Submitted'), findsOneWidget);
+    expect(find.text('Sell Quantity'), findsOneWidget);
+    expect(find.text('Estimated Sell Notional'), findsWidgets);
+
+    final syncButton = find.byKey(
+      const ValueKey('sync-guarded-live-sell-result-button'),
+    );
+    await tester.tap(syncButton);
+    await tester.pumpAndSettle();
+    expect(api.syncSellResultCalls, 1);
+    expect(api.manualSubmitCalls, 0);
+    expect(api.liveBuyCalls, 0);
 
     controller.dispose();
   });
@@ -151,6 +223,14 @@ void main() {
         matching: find.text('duplicate_open_sell_order'),
       ),
       findsWidgets,
+    );
+    expect(
+      find.byKey(const ValueKey('execute-guarded-live-sell-button')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('guarded-live-sell-confirm-dialog')),
+      findsNothing,
     );
     expect(api.liveBuyCalls, 0);
     expect(api.manualSubmitCalls, 0);
@@ -238,9 +318,13 @@ class _PositionExitReviewApiClient extends ApiClient {
   final String? primaryBlockReason;
   int reviewCalls = 0;
   int preflightCalls = 0;
+  int guardedSellCalls = 0;
+  int refreshSellResultCalls = 0;
+  int syncSellResultCalls = 0;
   int liveBuyCalls = 0;
   int manualSubmitCalls = 0;
   String? lastPreflightSymbol;
+  String? lastGuardedSellSymbol;
   bool sentConfirmLive = false;
 
   @override
@@ -267,6 +351,48 @@ class _PositionExitReviewApiClient extends ApiClient {
         status: preflightStatus,
         primaryBlockReason: primaryBlockReason,
       ),
+    );
+  }
+
+  @override
+  Future<GuardedPositionSellResult> runGuardedPositionSell({
+    required String symbol,
+    String provider = 'kis',
+    String market = 'KR',
+    String quantityMode = 'full',
+    double? quantity,
+    required bool confirmLive,
+    String? clientRequestId,
+    String language = 'ko',
+    String locale = 'ko-KR',
+    String? preflightId,
+    String reason = 'manual_exit',
+  }) async {
+    guardedSellCalls += 1;
+    lastGuardedSellSymbol = symbol;
+    sentConfirmLive = confirmLive;
+    return GuardedPositionSellResult.fromJson(
+      guardedSellResultJson(status: 'submitted', submitted: true),
+    );
+  }
+
+  @override
+  Future<GuardedPositionSellResult> fetchGuardedPositionSellResult(
+    int attemptId,
+  ) async {
+    refreshSellResultCalls += 1;
+    return GuardedPositionSellResult.fromJson(
+      guardedSellResultJson(status: 'submitted', submitted: true),
+    );
+  }
+
+  @override
+  Future<GuardedPositionSellResult> syncGuardedPositionSellResult(
+    int attemptId,
+  ) async {
+    syncSellResultCalls += 1;
+    return GuardedPositionSellResult.fromJson(
+      guardedSellResultJson(status: 'filled', submitted: true),
     );
   }
 
