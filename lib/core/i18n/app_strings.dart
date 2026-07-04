@@ -310,6 +310,30 @@ class AppStrings {
       ? '사전 점검 결과 전환이 차단되었습니다: $reason.'
       : 'Preflight blocks conversion: $reason.';
 
+  String get positionLifecycle =>
+      isKorean ? '?ъ????앹븷二쇨린' : 'Position Lifecycle';
+  String get tradeFlowAudit => isKorean ? '嫄곕옒 ?먮쫫 媛먯궗' : 'Trade Flow Audit';
+  String get lifecycleOpen => isKorean ? '蹂댁쑀 以?' : 'Open';
+  String get lifecycleClosed => isKorean ? '醫낅즺??' : 'Closed';
+  String get entryLabel => isKorean ? '吏꾩엯' : 'Entry';
+  String get exitLabel => isKorean ? '泥?궛' : 'Exit';
+  String get realizedPl => isKorean ? '?ㅽ쁽?먯씡' : 'Realized P/L';
+  String get averageExitPrice => isKorean ? '?됯퇏 留ㅻ룄媛' : 'Average Exit Price';
+  String get holdingPeriod => isKorean ? '蹂댁쑀 湲곌컙' : 'Holding Period';
+  String get relatedPromotion => isKorean ? '愿???꾨낫' : 'Related Promotion';
+  String get relatedOrder => isKorean ? '愿??二쇰Ц' : 'Related Order';
+  String get calculationIncomplete =>
+      isKorean ? '怨꾩궛 遺덉셿??' : 'Calculation Incomplete';
+  String get insufficientData => isKorean ? '?곗씠??遺議?' : 'Insufficient Data';
+  String get refreshLifecycle =>
+      isKorean ? '?ъ????앹븷二쇨린 ?덈줈怨좎묠' : 'Refresh Lifecycle';
+  String get noLifecycleItems => isKorean
+      ? '?쒖떆?????ъ????앹븷二쇨린媛 ?놁뒿?덈떎.'
+      : 'No position lifecycle records.';
+  String positionLifecycleRefreshed(int count) => isKorean
+      ? '?ъ????앹븷二쇨린 ?덈줈怨좎묠 ?꾨즺: $count.'
+      : 'Position lifecycle refreshed: $count.';
+
   String get positionExitReview =>
       isKorean ? '포지션 청산 검토' : 'Position Exit Review';
   String get heldPositions => isKorean ? '보유 포지션' : 'Held Positions';
@@ -514,6 +538,43 @@ class AppStrings {
       return alpacaBroker;
     }
     return value;
+  }
+
+  String lifecycleEventLabel(String value) {
+    final normalized = value.trim().toLowerCase();
+    final ko = <String, String>{
+      'promotion_created': '?꾨낫 ?앹꽦',
+      'promotion_reviewed': '?꾨낫 寃??',
+      'buy_preflight': '留ㅼ닔 ?ъ쟾 ?먭?',
+      'guarded_buy_submitted': '吏꾩엯 二쇰Ц ?쒖텧',
+      'buy_filled': '吏꾩엯 泥닿껐',
+      'position_opened': '蹂댁쑀 ?쒖옉',
+      'sell_preflight': '留ㅻ룄 ?ъ쟾 ?먭?',
+      'guarded_sell_submitted': '泥?궛 二쇰Ц ?쒖텧',
+      'sell_filled': '泥?궛 泥닿껐',
+      'position_closed': '蹂댁쑀 醫낅즺',
+      'sync_update': '?숆린??媛깆떊',
+      'blocked': '李⑤떒??',
+      'unknown': '?뚯씤 遺덇?',
+    };
+    final en = <String, String>{
+      'promotion_created': 'Promotion Created',
+      'promotion_reviewed': 'Promotion Reviewed',
+      'buy_preflight': 'Buy Preflight',
+      'guarded_buy_submitted': 'Guarded Buy Submitted',
+      'buy_filled': 'Buy Filled',
+      'position_opened': 'Position Opened',
+      'sell_preflight': 'Sell Preflight',
+      'guarded_sell_submitted': 'Guarded Sell Submitted',
+      'sell_filled': 'Sell Filled',
+      'position_closed': 'Position Closed',
+      'sync_update': 'Sync Update',
+      'blocked': 'Blocked',
+      'unknown': 'Unknown',
+    };
+    return isKorean
+        ? (ko[normalized] ?? normalized.replaceAll('_', ' '))
+        : (en[normalized] ?? normalized.replaceAll('_', ' '));
   }
 
   String statusLabel(String value) {

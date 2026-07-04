@@ -47,6 +47,7 @@ import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
+import '../../models/position_lifecycle.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -732,6 +733,34 @@ class ApiClient {
       const {},
     );
     return GuardedPositionSellResult.fromJson(payload);
+  }
+
+  Future<PositionLifecycle> fetchPositionLifecycle({
+    String? symbol,
+    String provider = 'kis',
+    String market = 'KR',
+    String status = 'all',
+    int limit = 50,
+    bool includeEvents = true,
+  }) async {
+    final queryParameters = <String, String>{
+      'provider': provider,
+      'market': market,
+      'status': status,
+      'limit': limit.toString(),
+      'include_events': includeEvents.toString(),
+    };
+    final normalizedSymbol = symbol?.trim();
+    if (normalizedSymbol != null && normalizedSymbol.isNotEmpty) {
+      queryParameters['symbol'] = normalizedSymbol;
+    }
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/positions/lifecycle',
+        queryParameters: queryParameters,
+      ).toString(),
+    );
+    return PositionLifecycle.fromJson(payload);
   }
 
   Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({

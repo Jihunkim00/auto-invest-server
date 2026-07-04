@@ -9,6 +9,7 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/position_exit_review.dart';
+import 'package:auto_invest_dashboard/models/position_lifecycle.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
@@ -1400,6 +1401,21 @@ class _FakeLogsApiClient extends ApiClient {
     }
     return PositionExitReview.fromJson(_positionExitReviewJson());
   }
+
+  @override
+  Future<PositionLifecycle> fetchPositionLifecycle({
+    String? symbol,
+    String provider = 'kis',
+    String market = 'KR',
+    String status = 'all',
+    int limit = 50,
+    bool includeEvents = true,
+  }) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return PositionLifecycle.fromJson(_positionLifecycleJson());
+  }
 }
 
 Map<String, dynamic> _positionExitReviewJson() {
@@ -1418,5 +1434,30 @@ Map<String, dynamic> _positionExitReviewJson() {
       'broker_submit_called': false,
       'manual_submit_called': false,
     },
+  };
+}
+
+Map<String, dynamic> _positionLifecycleJson() {
+  return {
+    'provider': 'kis',
+    'market': 'KR',
+    'generated_at': '2026-07-03T00:00:00Z',
+    'items': const [],
+    'totals': const {
+      'open_position_count': 0,
+      'closed_lifecycle_count': 0,
+      'total_current_value': 0,
+      'total_unrealized_pl': 0,
+      'total_realized_pl': 0,
+      'total_realized_pl_pct': null,
+      'incomplete_calculation_count': 0,
+    },
+    'safety': const {
+      'read_only': true,
+      'real_order_submitted': false,
+      'broker_submit_called': false,
+      'manual_submit_called': false,
+    },
+    'audit_flags': const ['read_only_lifecycle'],
   };
 }
