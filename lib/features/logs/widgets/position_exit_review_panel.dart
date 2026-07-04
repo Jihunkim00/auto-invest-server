@@ -17,8 +17,10 @@ class PositionExitReviewPanel extends StatelessWidget {
         final strings = controller.strings;
         final review = controller.positionExitReview;
         final loading = controller.positionExitReviewLoading ||
-            controller.positionSellPreflightLoading;
+            controller.positionSellPreflightLoading ||
+            controller.guardedPositionSellLoading;
         final preflight = controller.latestPositionSellPreflight;
+        final sellResult = controller.latestGuardedPositionSellResult;
         return Container(
           key: const ValueKey('position-exit-review-panel'),
           padding: const EdgeInsets.all(14),
@@ -88,6 +90,13 @@ class PositionExitReviewPanel extends StatelessWidget {
                   style: const TextStyle(color: Colors.orangeAccent),
                 ),
               ],
+              if (controller.guardedPositionSellError != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  controller.guardedPositionSellError!,
+                  style: const TextStyle(color: Colors.orangeAccent),
+                ),
+              ],
               if (loading && review == null) ...[
                 const SizedBox(height: 12),
                 const LinearProgressIndicator(),
@@ -96,8 +105,13 @@ class PositionExitReviewPanel extends StatelessWidget {
               if (preflight != null)
                 _PreflightResult(
                   result: preflight,
+                  sellResult: sellResult,
                   strings: strings,
+                  loading: loading,
                   onBack: controller.clearPositionSellPreflight,
+                  onExecute: () => _confirmAndExecute(context, preflight),
+                  onRefreshResult: () => _refreshGuardedResult(context),
+                  onSyncResult: () => _syncGuardedResult(context),
                 )
               else if (review == null)
                 _EmptyLine(text: strings.statusNotLoaded)
@@ -141,6 +155,63 @@ class PositionExitReviewPanel extends StatelessWidget {
     PositionExitReviewItem position,
   ) async {
     final result = await controller.runPositionSellPreflight(position);
+    if (!context.mounted) return;
+    _snack(context, result.message);
+  }
+
+  Future<void> _confirmAndExecute(
+    BuildContext context,
+    PositionSellPreflightResult preflight,
+  ) async {
+    final strings = controller.strings;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          key: const ValueKey('guarded-live-sell-confirm-dialog'),
+          title: Text(strings.guardedLiveSellConfirmTitle),
+          content: Text(
+            strings.guardedLiveSellConfirmBody(
+              symbol: preflight.symbol,
+              quantity: _number(preflight.requestedQuantity),
+              notional: _money(
+                preflight.estimatedSellNotional,
+                preflight.market,
+              ),
+              unrealizedPl:
+                  '${_money(preflight.unrealizedPl, preflight.market)} / ${_percent(preflight.unrealizedPlPct)}',
+              dryRun: preflight.dryRun,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(strings.cancel),
+            ),
+            FilledButton.icon(
+              key: const ValueKey('confirm-guarded-live-sell-button'),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.verified_user_outlined, size: 18),
+              label: Text(strings.executeGuardedLiveSell),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !context.mounted) return;
+    final result = await controller.executeGuardedPositionSell(preflight);
+    if (!context.mounted) return;
+    _snack(context, result.message);
+  }
+
+  Future<void> _refreshGuardedResult(BuildContext context) async {
+    final result = await controller.refreshGuardedPositionSellResult();
+    if (!context.mounted) return;
+    _snack(context, result.message);
+  }
+
+  Future<void> _syncGuardedResult(BuildContext context) async {
+    final result = await controller.syncGuardedPositionSellResult();
     if (!context.mounted) return;
     _snack(context, result.message);
   }
@@ -317,13 +388,23 @@ class _PositionRow extends StatelessWidget {
 class _PreflightResult extends StatelessWidget {
   const _PreflightResult({
     required this.result,
+    required this.sellResult,
     required this.strings,
+    required this.loading,
     required this.onBack,
+    required this.onExecute,
+    required this.onRefreshResult,
+    required this.onSyncResult,
   });
 
   final PositionSellPreflightResult result;
+  final GuardedPositionSellResult? sellResult;
   final AppStrings strings;
+  final bool loading;
   final VoidCallback onBack;
+  final VoidCallback onExecute;
+  final VoidCallback onRefreshResult;
+  final VoidCallback onSyncResult;
 
   @override
   Widget build(BuildContext context) {
@@ -485,8 +566,162 @@ class _PreflightResult extends StatelessWidget {
                   _ChecklistChip(item: item, strings: strings),
               ],
             ),
+            if (result.canSubmitAfterConfirmation) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                key: const ValueKey('execute-guarded-live-sell-button'),
+                onPressed: loading ? null : onExecute,
+                icon: const Icon(Icons.verified_user_outlined, size: 18),
+                label: Text(strings.executeGuardedLiveSell),
+              ),
+            ],
+            if (sellResult != null) ...[
+              const SizedBox(height: 12),
+              _GuardedSellResultPanel(
+                result: sellResult!,
+                strings: strings,
+                loading: loading,
+                onRefreshResult: onRefreshResult,
+                onSyncResult: onSyncResult,
+              ),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _GuardedSellResultPanel extends StatelessWidget {
+  const _GuardedSellResultPanel({
+    required this.result,
+    required this.strings,
+    required this.loading,
+    required this.onRefreshResult,
+    required this.onSyncResult,
+  });
+
+  final GuardedPositionSellResult result;
+  final AppStrings strings;
+  final bool loading;
+  final VoidCallback onRefreshResult;
+  final VoidCallback onSyncResult;
+
+  @override
+  Widget build(BuildContext context) {
+    final statusColor = result.isSubmitted || result.realOrderSubmitted
+        ? Colors.greenAccent
+        : result.isBlocked
+            ? Colors.redAccent
+            : Colors.orangeAccent;
+    return Container(
+      key: const ValueKey('guarded-live-sell-result-panel'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.receipt_long_outlined, color: statusColor, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      strings.liveSellExecutionResult,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      strings.statusLabel(result.resultStatus),
+                      style: TextStyle(
+                        color: statusColor.withValues(alpha: 0.82),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _BadgeWrap(labels: [
+            result.realOrderSubmitted
+                ? strings.liveOrderSubmitted
+                : strings.noBrokerSubmitDisplay,
+            strings.noAutoRetry,
+            strings.finalConfirmationRequiredDisplay,
+          ]),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 12,
+            runSpacing: 7,
+            children: [
+              _MetricChip(label: strings.symbolLabel, value: result.symbol),
+              _MetricChip(
+                label: strings.sellQuantity,
+                value: _number(
+                  result.submittedQuantity ?? result.requestedQuantity,
+                ),
+              ),
+              _MetricChip(
+                label: strings.estimatedSellNotional,
+                value: _money(result.estimatedSellNotional, result.market),
+              ),
+              _MetricChip(
+                label: strings.unrealizedPl,
+                value:
+                    '${_money(result.unrealizedPl, result.market)} / ${_percent(result.unrealizedPlPct)}',
+              ),
+              if (result.orderId != null)
+                _MetricChip(
+                  label: strings.relatedOrderLog,
+                  value: result.orderId.toString(),
+                ),
+              if (result.kisOdno != null)
+                _MetricChip(label: strings.kisOrderNo, value: result.kisOdno!),
+            ],
+          ),
+          if (result.primaryBlockReason != null) ...[
+            const SizedBox(height: 10),
+            _SmallText(
+              label: strings.primaryBlockReason,
+              value: result.primaryBlockReason!,
+            ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const ValueKey('refresh-guarded-live-sell-result-button'),
+                onPressed: loading ? null : onRefreshResult,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: Text(strings.refreshGuardedLiveSellResult),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('sync-guarded-live-sell-result-button'),
+                onPressed: loading || !result.canSync ? null : onSyncResult,
+                icon: const Icon(Icons.sync, size: 18),
+                label: Text(strings.syncOrderStatus),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

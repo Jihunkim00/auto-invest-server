@@ -680,6 +680,60 @@ class ApiClient {
     return PositionSellPreflightResult.fromJson(payload);
   }
 
+  Future<GuardedPositionSellResult> runGuardedPositionSell({
+    required String symbol,
+    String provider = 'kis',
+    String market = 'KR',
+    String quantityMode = 'full',
+    double? quantity,
+    required bool confirmLive,
+    String? clientRequestId,
+    String language = 'ko',
+    String locale = 'ko-KR',
+    String? preflightId,
+    String reason = 'manual_exit',
+  }) async {
+    final normalized = symbol.trim();
+    final payload = await _postJsonBody(
+      '/strategy/positions/$normalized/guarded-sell',
+      {
+        'symbol': normalized,
+        'provider': provider,
+        'market': market,
+        'quantity_mode': quantityMode,
+        if (quantityMode == 'partial' && quantity != null) 'quantity': quantity,
+        'confirm_live': confirmLive,
+        if (clientRequestId != null && clientRequestId.trim().isNotEmpty)
+          'client_request_id': clientRequestId.trim(),
+        'language': language,
+        'locale': locale,
+        if (preflightId != null && preflightId.trim().isNotEmpty)
+          'preflight_id': preflightId.trim(),
+        'reason': reason,
+      },
+    );
+    return GuardedPositionSellResult.fromJson(payload);
+  }
+
+  Future<GuardedPositionSellResult> fetchGuardedPositionSellResult(
+    int attemptId,
+  ) async {
+    final payload = await _getJsonNoCache(
+      '/strategy/positions/sell-results/$attemptId',
+    );
+    return GuardedPositionSellResult.fromJson(payload);
+  }
+
+  Future<GuardedPositionSellResult> syncGuardedPositionSellResult(
+    int attemptId,
+  ) async {
+    final payload = await _postJsonBody(
+      '/strategy/positions/sell-results/$attemptId/sync',
+      const {},
+    );
+    return GuardedPositionSellResult.fromJson(payload);
+  }
+
   Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({
     String provider = 'kis',
     String market = 'KR',

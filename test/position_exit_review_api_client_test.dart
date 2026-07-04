@@ -17,6 +17,24 @@ void main() {
         if (request.url.path == '/strategy/positions/exit-review') {
           return http.Response(jsonEncode(positionExitReviewJson()), 200);
         }
+        if (request.url.path == '/strategy/positions/005930/guarded-sell') {
+          return http.Response(
+            jsonEncode(guardedSellResultJson(
+              status: 'submitted',
+              submitted: true,
+            )),
+            200,
+          );
+        }
+        if (request.url.path == '/strategy/positions/sell-results/7/sync') {
+          return http.Response(
+            jsonEncode(guardedSellResultJson(
+              status: 'filled',
+              submitted: true,
+            )),
+            200,
+          );
+        }
         return http.Response(
           jsonEncode(positionSellPreflightJson(status: 'allowed')),
           200,
@@ -30,26 +48,51 @@ void main() {
       language: 'en',
       locale: 'en-US',
     );
+    final guardedSell = await client.runGuardedPositionSell(
+      symbol: '005930',
+      confirmLive: true,
+      clientRequestId: 'guarded-ui-test',
+      language: 'en',
+      locale: 'en-US',
+      reason: 'stop_loss_review',
+    );
+    final synced = await client.syncGuardedPositionSellResult(7);
 
     expect(review.positions.single.symbol, '005930');
     expect(preflight.isAllowed, isTrue);
-    expect(requests, hasLength(2));
+    expect(guardedSell.realOrderSubmitted, isTrue);
+    expect(synced.resultStatus, 'filled');
+    expect(requests, hasLength(4));
     expect(requests.first.method, 'GET');
     expect(requests.first.url.path, '/strategy/positions/exit-review');
-    expect(requests.last.method, 'POST');
-    expect(requests.last.url.path, '/strategy/positions/005930/sell-preflight');
+    expect(requests[1].method, 'POST');
+    expect(requests[1].url.path, '/strategy/positions/005930/sell-preflight');
 
-    final body = jsonDecode(requests.last.body) as Map<String, dynamic>;
-    expect(body['provider'], 'kis');
-    expect(body['market'], 'KR');
-    expect(body['quantity_mode'], 'full');
-    expect(body['language'], 'en');
-    expect(body['locale'], 'en-US');
-    expect(body.containsKey('confirm_live'), isFalse);
-    expect(body.containsKey('confirm_operator_ack'), isFalse);
-    expect(body.containsKey('submit_order'), isFalse);
-    expect(body.containsKey('manual_submit'), isFalse);
-    expect(body.containsKey('dry_run'), isFalse);
-    expect(body.containsKey('kill_switch'), isFalse);
+    final preflightBody = jsonDecode(requests[1].body) as Map<String, dynamic>;
+    expect(preflightBody['provider'], 'kis');
+    expect(preflightBody['market'], 'KR');
+    expect(preflightBody['quantity_mode'], 'full');
+    expect(preflightBody['language'], 'en');
+    expect(preflightBody['locale'], 'en-US');
+    expect(preflightBody.containsKey('confirm_live'), isFalse);
+    expect(preflightBody.containsKey('confirm_operator_ack'), isFalse);
+    expect(preflightBody.containsKey('submit_order'), isFalse);
+    expect(preflightBody.containsKey('manual_submit'), isFalse);
+    expect(preflightBody.containsKey('dry_run'), isFalse);
+    expect(preflightBody.containsKey('kill_switch'), isFalse);
+
+    expect(requests[2].method, 'POST');
+    expect(requests[2].url.path, '/strategy/positions/005930/guarded-sell');
+    final guardedBody = jsonDecode(requests[2].body) as Map<String, dynamic>;
+    expect(guardedBody['confirm_live'], isTrue);
+    expect(guardedBody['client_request_id'], 'guarded-ui-test');
+    expect(guardedBody['reason'], 'stop_loss_review');
+    expect(guardedBody.containsKey('confirm_operator_ack'), isFalse);
+
+    expect(requests[3].method, 'POST');
+    expect(requests[3].url.path, '/strategy/positions/sell-results/7/sync');
+    final syncBody = jsonDecode(requests[3].body) as Map<String, dynamic>;
+    expect(syncBody.containsKey('confirm_live'), isFalse);
+    expect(syncBody.containsKey('manual_submit'), isFalse);
   });
 }

@@ -360,10 +360,13 @@ class DashboardController extends ChangeNotifier {
   String? strategyLiveAutoExitError;
   PositionExitReview? positionExitReview;
   PositionSellPreflightResult? latestPositionSellPreflight;
+  GuardedPositionSellResult? latestGuardedPositionSellResult;
   bool positionExitReviewLoading = false;
   String? positionExitReviewError;
   bool positionSellPreflightLoading = false;
   String? positionSellPreflightError;
+  bool guardedPositionSellLoading = false;
+  String? guardedPositionSellError;
   final String agentConversationId =
       'flutter-agent-${DateTime.now().millisecondsSinceEpoch}';
 
@@ -1934,6 +1937,7 @@ class DashboardController extends ChangeNotifier {
         locale: appLanguage.localeCode,
       );
       latestPositionSellPreflight = result;
+      latestGuardedPositionSellResult = null;
       return ActionResult(
         success: !result.isBlocked,
         message: strings.sellPreflightCompletedMessage(
@@ -1955,8 +1959,138 @@ class DashboardController extends ChangeNotifier {
 
   void clearPositionSellPreflight() {
     latestPositionSellPreflight = null;
+    latestGuardedPositionSellResult = null;
     positionSellPreflightError = null;
+    guardedPositionSellError = null;
     notifyListeners();
+  }
+
+  Future<ActionResult> executeGuardedPositionSell(
+    PositionSellPreflightResult preflight,
+  ) async {
+    if (guardedPositionSellLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.guardedLiveSellAlreadyRunning,
+      );
+    }
+    if (!preflight.canSubmitAfterConfirmation) {
+      return ActionResult(
+        success: false,
+        message: strings.preflightBlocksGuardedSell(
+          preflight.primaryBlockReason ?? preflight.preflightStatus,
+        ),
+      );
+    }
+    guardedPositionSellLoading = true;
+    guardedPositionSellError = null;
+    notifyListeners();
+    try {
+      final quantityMode = _guardedSellQuantityMode(preflight);
+      final result = await apiClient.runGuardedPositionSell(
+        symbol: preflight.symbol,
+        provider: preflight.provider,
+        market: preflight.market,
+        quantityMode: quantityMode,
+        quantity:
+            quantityMode == 'partial' ? preflight.requestedQuantity : null,
+        confirmLive: true,
+        clientRequestId:
+            'guarded-sell-${preflight.symbol}-${DateTime.now().millisecondsSinceEpoch}',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+        reason: _guardedSellReason(preflight),
+      );
+      latestGuardedPositionSellResult = result;
+      return ActionResult(
+        success: !result.isBlocked,
+        message: strings.guardedLiveSellCompletedMessage(
+          result.resultStatus,
+          result.primaryBlockReason,
+        ),
+      );
+    } catch (e) {
+      guardedPositionSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(guardedPositionSellError!),
+      );
+    } finally {
+      guardedPositionSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshGuardedPositionSellResult() async {
+    final attemptId = latestGuardedPositionSellResult?.attemptId;
+    if (attemptId == null) {
+      return ActionResult(
+        success: false,
+        message: strings.guardedLiveSellResultUnavailable,
+      );
+    }
+    if (guardedPositionSellLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.guardedLiveSellAlreadyRunning,
+      );
+    }
+    guardedPositionSellLoading = true;
+    guardedPositionSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.fetchGuardedPositionSellResult(attemptId);
+      latestGuardedPositionSellResult = result;
+      return ActionResult(
+        success: true,
+        message: strings.guardedLiveSellResultRefreshed(result.resultStatus),
+      );
+    } catch (e) {
+      guardedPositionSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(guardedPositionSellError!),
+      );
+    } finally {
+      guardedPositionSellLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> syncGuardedPositionSellResult() async {
+    final attemptId = latestGuardedPositionSellResult?.attemptId;
+    if (attemptId == null) {
+      return ActionResult(
+        success: false,
+        message: strings.guardedLiveSellResultUnavailable,
+      );
+    }
+    if (guardedPositionSellLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.guardedLiveSellAlreadyRunning,
+      );
+    }
+    guardedPositionSellLoading = true;
+    guardedPositionSellError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.syncGuardedPositionSellResult(attemptId);
+      latestGuardedPositionSellResult = result;
+      return ActionResult(
+        success: true,
+        message: strings.guardedLiveSellResultSynced(result.resultStatus),
+      );
+    } catch (e) {
+      guardedPositionSellError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(guardedPositionSellError!),
+      );
+    } finally {
+      guardedPositionSellLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<ActionResult> refreshStrategyAutoBuyOperations({
@@ -6876,6 +7010,19 @@ String _agentChatPresetAppliedMessage(
       ? 'no setting changes'
       : '${changedKeys.length} setting(s) changed';
   return '${_agentChatPresetLabel(preset)} applied: $changed. No order was submitted.';
+}
+
+String _guardedSellQuantityMode(PositionSellPreflightResult preflight) {
+  final requested = preflight.requestedQuantity;
+  final available = preflight.availableQuantity;
+  if (requested == null || available == null) return 'full';
+  return requested < available ? 'partial' : 'full';
+}
+
+String _guardedSellReason(PositionSellPreflightResult preflight) {
+  if (preflight.stopLossTriggered) return 'stop_loss_review';
+  if (preflight.takeProfitTriggered) return 'take_profit_review';
+  return 'manual_exit';
 }
 
 Map<String, dynamic> _exitPreflightSourceMetadata(
