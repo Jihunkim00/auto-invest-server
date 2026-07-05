@@ -14,6 +14,7 @@ void main() {
     final controller = await _pumpSnapshot(tester);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
+    expect(find.text('전역: 알파카 / 미국'), findsOneWidget);
     expect(find.text(r'$1,000.00'), findsOneWidget);
     expect(find.text('CASH'), findsOneWidget);
     expect(find.text(r'$123.45'), findsOneWidget);
@@ -25,6 +26,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('KR Portfolio / KIS Read-only'), findsOneWidget);
+    expect(find.text('전역: 한국투자 / 국내'), findsOneWidget);
     expect(find.text('READ-ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
     expect(find.text('AVAILABLE CASH'), findsOneWidget);

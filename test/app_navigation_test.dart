@@ -36,10 +36,7 @@ void main() {
         find.byKey(const ValueKey('global-broker-selector')), findsOneWidget);
     expect(controller.selectedProvider, SelectedProvider.alpaca);
 
-    await tester.tap(find.descendant(
-      of: find.byKey(const ValueKey('global-broker-selector')),
-      matching: find.text('한국투자증권'),
-    ));
+    await tester.tap(find.byKey(const ValueKey('broker-option-kis-label')));
     await tester.pumpAndSettle();
 
     expect(controller.selectedProvider, SelectedProvider.kis);

@@ -25,6 +25,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final strings = controller.strings;
     final summary = controller.selectedPortfolioSummary;
     final selectedMarket = controller.selectedPortfolioMarket;
     final isKr = selectedMarket == PortfolioMarket.kr;
@@ -45,6 +46,13 @@ class PortfolioSnapshotSection extends StatelessWidget {
     final countText = isKr && summary.hasUnavailableKisData
         ? '${summary.positionsUnavailable ? '--' : summary.positionsCount} held / ${summary.openOrdersUnavailable ? '--' : summary.pendingOrdersCount} pending'
         : '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending';
+    final globalBrokerBadge = isKr
+        ? strings.isKorean
+            ? '전역: ${strings.brokerCompactDisplayName('kis')} / 국내'
+            : 'GLOBAL: ${strings.brokerCompactDisplayName('kis')} / KR'
+        : strings.isKorean
+            ? '전역: ${strings.brokerCompactDisplayName('alpaca')} / 미국'
+            : 'GLOBAL: ${strings.brokerCompactDisplayName('alpaca').toUpperCase()} / US';
 
     return SectionCard(
       key: const Key('portfolio_snapshot_section'),
@@ -93,7 +101,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
                   style: const TextStyle(
                       color: Colors.white70, fontWeight: FontWeight.w800)),
               _SoftBadge(
-                text: isKr ? 'GLOBAL: KIS / KR' : 'GLOBAL: ALPACA / US',
+                text: globalBrokerBadge,
                 color: isKr ? Colors.redAccent : Colors.lightBlueAccent,
               ),
               if (isKr) ...[
