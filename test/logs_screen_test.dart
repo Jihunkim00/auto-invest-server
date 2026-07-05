@@ -5,6 +5,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/core/utils/timestamp_formatter.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/daily_ops_summary.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
@@ -17,6 +18,7 @@ import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
 import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
+import 'daily_ops_summary_model_test.dart';
 
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
@@ -1348,6 +1350,21 @@ class _FakeLogsApiClient extends ApiClient {
       throw const ApiRequestException('logs failed');
     }
     return manualSafetyStatus;
+  }
+
+  @override
+  Future<DailyOpsSummary> fetchDailyOpsSummary({
+    String provider = 'kis',
+    String market = 'KR',
+    String? date,
+    bool includeDetails = true,
+  }) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return DailyOpsSummary.fromJson(
+      dailyOpsSummaryJson(provider: provider, market: market),
+    );
   }
 
   @override

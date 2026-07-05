@@ -110,6 +110,16 @@ _DEFAULT_TOOLS = [
         description="Read-only runtime safety settings lookup.",
     ),
     AgentChatToolDefinition(
+        tool_name="daily_ops_summary_lookup",
+        display_name="Daily Operations Summary",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only local daily operations, P&L, order, promotion, scheduler, risk, and reconciliation summary. It never syncs, validates, submits, retries, or changes settings.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_profiles_lookup",
         display_name="Strategy Profiles Lookup",
         mode="read_only",

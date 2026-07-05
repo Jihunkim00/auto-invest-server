@@ -152,6 +152,37 @@ class AppStrings {
   String get refreshSchedulerStatus =>
       isKorean ? '스케줄러 상태 새로고침' : 'Refresh Scheduler Status';
   String get refreshPromotions => isKorean ? '프로모션 새로고침' : 'Refresh Promotions';
+  String get dailyOperationsSummary =>
+      isKorean ? '일일 운영 요약' : 'Daily Operations Summary';
+  String get refreshDailySummary =>
+      isKorean ? '일일 운영 요약 새로고침' : 'Refresh Daily Summary';
+  String get brokerReconciliation =>
+      isKorean ? '브로커 대사' : 'Broker Reconciliation';
+  String get todaysTradeActivity =>
+      isKorean ? '오늘 거래 활동' : 'Today\'s Trade Activity';
+  String get plSummary => isKorean ? '손익 요약' : 'P/L Summary';
+  String get orderSummary => isKorean ? '주문 요약' : 'Order Summary';
+  String get promotionSummary => isKorean ? '프로모션 요약' : 'Promotion Summary';
+  String get schedulerSummary => isKorean ? '스케줄러 요약' : 'Scheduler Summary';
+  String get riskSummary => isKorean ? '리스크 요약' : 'Risk Summary';
+  String get attentionRequired => isKorean ? '확인 필요' : 'Attention Required';
+  String get okStatus => isKorean ? '정상' : 'OK';
+  String get nextSafeActions => isKorean ? '다음 안전 조치' : 'Next Safe Actions';
+  String get ordersToday => isKorean ? '오늘 주문' : 'Orders Today';
+  String get promotionsPending =>
+      isKorean ? '대기 중인 프로모션' : 'Promotions Pending';
+  String get blockedAttempts => isKorean ? '차단된 시도' : 'Blocked Attempts';
+  String get generatedAt => isKorean ? '생성 시각' : 'Generated At';
+  String get detailsLabel => isKorean ? '상세' : 'Details';
+  String get localDbOnly => isKorean ? '로컬 DB 전용' : 'LOCAL DB ONLY';
+  String get noSync => isKorean ? '동기화 없음' : 'NO SYNC';
+  String get noRetry => isKorean ? '재시도 없음' : 'NO RETRY';
+  String get dailyOpsSummaryAlreadyLoading => isKorean
+      ? '일일 운영 요약을 이미 불러오는 중입니다.'
+      : 'Daily operations summary is already loading.';
+  String dailyOpsSummaryRefreshed(int orderCount) => isKorean
+      ? '일일 운영 요약 새로고침 완료: 주문 $orderCount건.'
+      : 'Daily operations summary refreshed: $orderCount orders.';
   String get enableDryRunScheduler =>
       isKorean ? '드라이런 스케줄러 켜기' : 'Enable Dry-Run Scheduler';
   String get disableScheduler => isKorean ? '스케줄러 끄기' : 'Disable Scheduler';
