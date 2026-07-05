@@ -29,6 +29,8 @@ class AppStrings {
 
   String get kisBroker => isKorean ? '한국투자증권' : 'KIS';
   String get alpacaBroker => isKorean ? '알파카' : 'Alpaca';
+  String get kisBrokerCompact => isKorean ? '한국투자' : 'KIS';
+  String get alpacaBrokerCompact => alpacaBroker;
   String get kisBrokerMarket => isKorean ? '한국투자증권 / 국내' : 'KIS / KR';
   String get alpacaBrokerMarket => isKorean ? '알파카 / 미국' : 'Alpaca / US';
   String get settingsKisSubtitle => isKorean
@@ -583,9 +585,32 @@ class AppStrings {
       ];
 
   String brokerName(String value) {
+    return brokerFullDisplayName(value);
+  }
+
+  String brokerDisplayName(String value) {
+    return brokerFullDisplayName(value);
+  }
+
+  String brokerCompactDisplayName(String value) {
     final normalized = value.trim().toLowerCase();
     if (normalized == 'kis' ||
         normalized == 'korea investment' ||
+        normalized == '한국투자' ||
+        normalized == '한국투자증권') {
+      return kisBrokerCompact;
+    }
+    if (normalized == 'alpaca' || normalized == '알파카') {
+      return alpacaBrokerCompact;
+    }
+    return value;
+  }
+
+  String brokerFullDisplayName(String value) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'kis' ||
+        normalized == 'korea investment' ||
+        normalized == '한국투자' ||
         normalized == '한국투자증권') {
       return kisBroker;
     }

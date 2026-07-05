@@ -474,7 +474,8 @@ class DashboardController extends ChangeNotifier {
 
   String get selectedMarketCode => isKisSelected ? 'KR' : 'US';
 
-  String get selectedBrokerLabel => isKisSelected ? 'KIS / KR' : 'Alpaca / US';
+  String get selectedBrokerLabel =>
+      isKisSelected ? strings.kisBrokerMarket : strings.alpacaBrokerMarket;
 
   bool isAgentLiveOrderActionBusy(int actionId) =>
       _agentLiveOrderActionBusy.contains(actionId);

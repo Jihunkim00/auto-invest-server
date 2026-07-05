@@ -16,8 +16,15 @@ void main() {
 
     expect(ko.brokerName('kis'), '한국투자증권');
     expect(ko.brokerName('alpaca'), '알파카');
+    expect(ko.brokerDisplayName('kis'), '한국투자증권');
+    expect(ko.brokerCompactDisplayName('kis'), '한국투자');
+    expect(ko.brokerFullDisplayName('kis'), '한국투자증권');
+    expect(ko.brokerCompactDisplayName('alpaca'), '알파카');
     expect(en.brokerName('kis'), 'KIS');
     expect(en.brokerName('alpaca'), 'Alpaca');
+    expect(en.brokerDisplayName('kis'), 'KIS');
+    expect(en.brokerCompactDisplayName('kis'), 'KIS');
+    expect(en.brokerFullDisplayName('alpaca'), 'Alpaca');
     expect(ko.statusLabel('sync_required'), '동기화 필요');
     expect(ko.statusLabel('review_required'), '검토 필요');
     expect(en.statusLabel('sync_required'), 'SYNC REQUIRED');
