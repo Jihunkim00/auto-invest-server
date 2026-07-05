@@ -51,6 +51,7 @@ import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
+import '../../models/operator_alerts.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
@@ -339,6 +340,9 @@ class DashboardController extends ChangeNotifier {
   DailyOpsSummary? dailyOpsSummary;
   bool dailyOpsSummaryLoading = false;
   String? dailyOpsSummaryError;
+  OperatorAlerts? operatorAlerts;
+  bool operatorAlertsLoading = false;
+  String? operatorAlertsError;
   StrategyAutoBuySchedulerStatus? strategyAutoBuySchedulerStatus;
   StrategyAutoBuySchedulerRunResult? strategyAutoBuySchedulerRunResult;
   bool strategyAutoBuySchedulerLoading = false;
@@ -2167,6 +2171,41 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       dailyOpsSummaryLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshOperatorAlerts({
+    bool silent = false,
+  }) async {
+    if (operatorAlertsLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.operatorAlertsAlreadyLoading,
+      );
+    }
+    operatorAlertsLoading = true;
+    operatorAlertsError = null;
+    if (!silent) notifyListeners();
+    try {
+      operatorAlerts = await apiClient.fetchOperatorAlerts(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+      );
+      return ActionResult(
+        success: true,
+        message: strings.operatorAlertsRefreshed(
+          operatorAlerts!.summary.activeAlertCount,
+        ),
+      );
+    } catch (e) {
+      operatorAlertsError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(operatorAlertsError!),
+      );
+    } finally {
+      operatorAlertsLoading = false;
       notifyListeners();
     }
   }

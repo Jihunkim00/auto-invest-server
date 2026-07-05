@@ -51,6 +51,8 @@ void main() {
         findsNothing);
     expect(find.byKey(const ValueKey('agent-chat-live-auto-exit-status-card')),
         findsNothing);
+    expect(find.byKey(const ValueKey('operator-alerts-panel')), findsNothing);
+    expect(find.text('Operator Alert Center'), findsNothing);
     expect(
         find.byKey(const Key('automation_runtime_monitor_card')), findsNothing);
     expect(find.byKey(const Key('operation_rehearsal_panel')), findsNothing);

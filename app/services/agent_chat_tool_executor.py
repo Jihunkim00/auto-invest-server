@@ -14,6 +14,7 @@ from app.schemas.agent_chat_orchestrator import AgentChatIntent
 from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, AgentChatToolSafety
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
+from app.services.operator_alerts_service import OperatorAlertsService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.profile_aware_dry_run_auto_buy_service import (
@@ -158,6 +159,8 @@ class AgentChatToolExecutor:
                 return self._ops_settings(db)
             if tool.tool_name == "daily_ops_summary_lookup":
                 return self._daily_ops_summary(db, call, intent)
+            if tool.tool_name == "operator_alerts_lookup":
+                return self._operator_alerts(db, call, intent)
             if tool.tool_name == "strategy_profiles_lookup":
                 return self._strategy_profiles(db)
             if tool.tool_name == "active_strategy_profile_lookup":
@@ -336,6 +339,33 @@ class AgentChatToolExecutor:
             (
                 "Read-only daily operations summary loaded from local DB state. "
                 "No sync, validation, submit, retry, scheduler, or settings path ran."
+            ),
+        )
+
+    def _operator_alerts(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = OperatorAlertsService(
+            runtime_settings=self.runtime_setting_service,
+        ).alerts(
+            db,
+            severity=str(call.arguments.get("severity") or "all"),
+            status=str(call.arguments.get("status") or "active"),
+            provider=str(call.arguments.get("provider") or intent.provider or "kis"),
+            market=str(call.arguments.get("market") or intent.market or "KR"),
+            limit=20,
+            include_details=bool(call.arguments.get("include_details", True)),
+        )
+        return self._success(
+            "operator_alerts_lookup",
+            "operator_alerts",
+            data,
+            (
+                "Read-only operator alerts loaded from local DB state. "
+                "No sync, validation, submit, scheduler, or settings path ran."
             ),
         )
 
@@ -799,6 +829,7 @@ class AgentChatToolExecutor:
             "recent_signals_lookup": "signals",
             "ops_settings_lookup": "settings",
             "daily_ops_summary_lookup": "daily_ops_summary",
+            "operator_alerts_lookup": "operator_alerts",
             "strategy_profiles_lookup": "strategy_profiles",
             "active_strategy_profile_lookup": "strategy_profile",
             "strategy_monthly_progress_lookup": "strategy_monthly_progress",
