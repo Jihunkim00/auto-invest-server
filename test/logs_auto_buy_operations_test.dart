@@ -4,9 +4,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/daily_ops_summary.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
+import 'package:auto_invest_dashboard/models/operator_alerts.dart';
 import 'package:auto_invest_dashboard/models/position_exit_review.dart';
 import 'package:auto_invest_dashboard/models/position_lifecycle.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
@@ -16,6 +18,8 @@ import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
 import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
+import 'daily_ops_summary_model_test.dart';
+import 'operator_alerts_model_test.dart';
 
 void main() {
   testWidgets('Logs screen loads and shows auto buy operations panel',
@@ -32,6 +36,11 @@ void main() {
     expect(api.operationsCalls, 1);
     expect(api.recentRunsLimit, 50);
     expect(find.text('기록'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('auto-buy-operations-panel')),
+      500,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('자동매수 운영'), findsWidgets);
     expect(find.text('자동매수 운영'), findsWidgets);
     expect(find.text('드라이런 자동매수 1회 실행'), findsOneWidget);
@@ -110,6 +119,31 @@ class _LogsAutoBuyOpsApiClient extends ApiClient {
     int limit = 20,
   }) async =>
       StrategyAutoBuyPromotions.fromJson(autoBuyPromotionsJson());
+
+  @override
+  Future<OperatorAlerts> fetchOperatorAlerts({
+    String provider = 'kis',
+    String market = 'KR',
+    String severity = 'all',
+    String status = 'active',
+    int limit = 50,
+    bool includeDetails = true,
+  }) async =>
+      OperatorAlerts.fromJson(operatorAlertsJson(
+        provider: provider,
+        market: market,
+      ));
+
+  @override
+  Future<DailyOpsSummary> fetchDailyOpsSummary({
+    String provider = 'kis',
+    String market = 'KR',
+    String? date,
+    bool includeDetails = true,
+  }) async =>
+      DailyOpsSummary.fromJson(
+        dailyOpsSummaryJson(provider: provider, market: market),
+      );
 
   @override
   Future<PositionExitReview> fetchPositionExitReview() async =>

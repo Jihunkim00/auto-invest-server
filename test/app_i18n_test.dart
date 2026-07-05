@@ -32,5 +32,12 @@ void main() {
     expect(en.positionExitReview, 'Position Exit Review');
     expect(en.sellPreflight, 'Sell Preflight');
     expect(en.noBrokerSubmitDisplay, 'No Broker Submit');
+    expect(en.operatorAlertCenter, 'Operator Alert Center');
+    expect(en.riskAlerts, 'Risk Alerts');
+    expect(en.rejectedOrder, 'Rejected Order');
+    expect(en.operatorReadOnly, 'Read Only');
+    expect(en.operatorNoLiveOrders, 'No Live Orders');
+    expect(ko.operatorAlertCenter, isNotEmpty);
+    expect(ko.riskAlerts, isNotEmpty);
   });
 }

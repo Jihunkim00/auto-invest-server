@@ -44,6 +44,7 @@ import '../../models/managed_position.dart';
 import '../../models/market_watchlist.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/order_validation_result.dart';
+import '../../models/operator_alerts.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
@@ -798,6 +799,30 @@ class ApiClient {
       ).toString(),
     );
     return DailyOpsSummary.fromJson(payload);
+  }
+
+  Future<OperatorAlerts> fetchOperatorAlerts({
+    String provider = 'kis',
+    String market = 'KR',
+    String severity = 'all',
+    String status = 'active',
+    int limit = 50,
+    bool includeDetails = true,
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/ops/alerts',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+          'severity': severity,
+          'status': status,
+          'limit': limit.toString(),
+          'include_details': includeDetails.toString(),
+        },
+      ).toString(),
+    );
+    return OperatorAlerts.fromJson(payload);
   }
 
   Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({

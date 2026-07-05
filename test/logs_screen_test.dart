@@ -9,6 +9,7 @@ import 'package:auto_invest_dashboard/models/daily_ops_summary.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
+import 'package:auto_invest_dashboard/models/operator_alerts.dart';
 import 'package:auto_invest_dashboard/models/position_exit_review.dart';
 import 'package:auto_invest_dashboard/models/position_lifecycle.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
@@ -19,11 +20,12 @@ import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
 import 'daily_ops_summary_model_test.dart';
+import 'operator_alerts_model_test.dart';
 
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 6400);
+    tester.view.physicalSize = const Size(1200, 8000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -930,7 +932,7 @@ Future<void> _pumpLogs(
   WidgetTester tester,
   DashboardController controller,
 ) async {
-  tester.view.physicalSize = const Size(1200, 6400);
+  tester.view.physicalSize = const Size(1200, 8000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -1364,6 +1366,23 @@ class _FakeLogsApiClient extends ApiClient {
     }
     return DailyOpsSummary.fromJson(
       dailyOpsSummaryJson(provider: provider, market: market),
+    );
+  }
+
+  @override
+  Future<OperatorAlerts> fetchOperatorAlerts({
+    String provider = 'kis',
+    String market = 'KR',
+    String severity = 'all',
+    String status = 'active',
+    int limit = 50,
+    bool includeDetails = true,
+  }) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return OperatorAlerts.fromJson(
+      operatorAlertsJson(provider: provider, market: market),
     );
   }
 

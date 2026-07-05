@@ -53,6 +53,8 @@ class AgentChatResultSummarizer:
                 return self._settings_answer(primary)
             if primary.result_type == "daily_ops_summary":
                 return self._daily_ops_summary_answer(primary)
+            if primary.result_type == "operator_alerts":
+                return self._operator_alerts_answer(primary)
             if primary.result_type in {"strategy_profile", "strategy_profiles"}:
                 return self._strategy_profile_answer(intent, primary)
             if primary.result_type == "strategy_monthly_progress":
@@ -133,6 +135,8 @@ class AgentChatResultSummarizer:
                 card = self._settings_card(result)
             elif result.result_type == "daily_ops_summary":
                 card = self._daily_ops_summary_card(result)
+            elif result.result_type == "operator_alerts":
+                card = self._operator_alerts_card(result)
             elif result.result_type in {"orders", "runs", "signals"}:
                 card = self._count_card(result)
             elif result.result_type in {
@@ -302,6 +306,34 @@ class AgentChatResultSummarizer:
             f"blocked attempts: {trade.get('blocked_attempt_count', 0)}, "
             f"realized P/L: {self._money(pnl.get('realized_pl'), currency)}. "
             "This lookup used local cached/log DB state only and did not sync, validate, retry, submit, trade, change settings, or run a scheduler."
+        )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="read_only_result",
+        )
+
+    def _operator_alerts_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        alerts = data.get("alerts") if isinstance(data.get("alerts"), list) else []
+        first = alerts[0] if alerts and isinstance(alerts[0], dict) else {}
+        text = (
+            f"Operator alerts: {summary.get('active_alert_count', 0)} active, "
+            f"{summary.get('critical_count', 0)} critical, "
+            f"{summary.get('warning_count', 0)} warning, "
+            f"{summary.get('sync_required_count', 0)} sync-required. "
+        )
+        if first:
+            text += (
+                f"Primary alert: {first.get('title') or first.get('reason_code')}; "
+                f"next safe action: {first.get('next_safe_action') or 'review only'}. "
+            )
+        text += (
+            "This lookup used local DB state only and did not sync, validate, "
+            "submit, trade, change settings, or run a scheduler."
         )
         return AgentChatAnswer(
             text=text,
@@ -758,6 +790,35 @@ class AgentChatResultSummarizer:
                 {"label": "Unrealized P/L", "value": self._money(pnl.get("unrealized_pl"), currency)},
                 {"label": "Promotions pending", "value": promotions.get("pending", 0)},
                 {"label": "Blocked attempts", "value": trade.get("blocked_attempt_count", 0)},
+            ],
+            data=data,
+        )
+
+    def _operator_alerts_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        alerts = data.get("alerts") if isinstance(data.get("alerts"), list) else []
+        first = alerts[0] if alerts and isinstance(alerts[0], dict) else {}
+        return AgentChatResultCard(
+            card_type="operator_alerts",
+            title="Operator Alert Center",
+            subtitle=f"{str(data.get('provider') or '').upper()} / {data.get('market') or '-'}",
+            primary_value=str(summary.get("active_alert_count", 0)),
+            badges=[
+                "READ ONLY",
+                "LOCAL DB ONLY",
+                "NO SYNC",
+                "NO VALIDATION",
+                "NO BROKER SUBMIT",
+                "NO SETTINGS CHANGE",
+            ],
+            rows=[
+                {"label": "Critical", "value": summary.get("critical_count", 0)},
+                {"label": "Warning", "value": summary.get("warning_count", 0)},
+                {"label": "Sync required", "value": summary.get("sync_required_count", 0)},
+                {"label": "Rejected orders", "value": summary.get("rejected_order_count", 0)},
+                {"label": "Primary reason", "value": first.get("reason_code") or "-"},
+                {"label": "Next safe action", "value": first.get("next_safe_action") or "-"},
             ],
             data=data,
         )

@@ -60,6 +60,7 @@ class AppStrings {
   String get enabled => isKorean ? '활성' : 'ENABLED';
   String get disabled => isKorean ? '비활성' : 'DISABLED';
   String get none => isKorean ? '없음' : 'none';
+  String get status => isKorean ? '상태' : 'Status';
   String get statusNotLoaded =>
       isKorean ? '상태를 아직 불러오지 않았습니다' : 'Status not loaded';
   String get safeMode => isKorean ? '안전 모드' : 'SAFE MODE';
@@ -154,6 +155,29 @@ class AppStrings {
   String get refreshPromotions => isKorean ? '프로모션 새로고침' : 'Refresh Promotions';
   String get dailyOperationsSummary =>
       isKorean ? '일일 운영 요약' : 'Daily Operations Summary';
+  String get operatorAlertCenter =>
+      isKorean ? '운영 알림 센터' : 'Operator Alert Center';
+  String get riskAlerts => isKorean ? '위험 알림' : 'Risk Alerts';
+  String get critical => isKorean ? '심각' : 'Critical';
+  String get info => isKorean ? '정보' : 'Info';
+  String get rejectedOrder => isKorean ? '거절된 주문' : 'Rejected Order';
+  String get stalePromotion => isKorean ? '오래된 프로모션' : 'Stale Promotion';
+  String get primaryReason => isKorean ? '주요 사유' : 'Primary Reason';
+  String get nextSafeAction => isKorean ? '다음 안전 조치' : 'Next Safe Action';
+  String get relatedItem => isKorean ? '관련 항목' : 'Related Item';
+  String get refreshAlerts => isKorean ? '새로고침' : 'Refresh';
+  String get operatorReadOnly => isKorean ? '읽기 전용' : 'Read Only';
+  String get operatorNoLiveOrders => isKorean ? '실주문 없음' : 'No Live Orders';
+  String get schedulerDryRunOnly =>
+      isKorean ? '스케줄러 모의 실행 전용' : 'Scheduler Dry-Run Only';
+  String get noOperatorAlerts =>
+      isKorean ? '활성 운영 알림이 없습니다.' : 'No active alerts.';
+  String get operatorAlertsAlreadyLoading => isKorean
+      ? '운영 알림을 이미 불러오는 중입니다.'
+      : 'Operator alerts are already loading.';
+  String operatorAlertsRefreshed(int count) => isKorean
+      ? '운영 알림 새로고침 완료: 활성 $count건'
+      : 'Operator alerts refreshed: $count active.';
   String get refreshDailySummary =>
       isKorean ? '일일 운영 요약 새로고침' : 'Refresh Daily Summary';
   String get brokerReconciliation =>

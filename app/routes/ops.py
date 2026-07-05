@@ -15,6 +15,7 @@ from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
+from app.services.operator_alerts_service import OperatorAlertsService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.trading_service import TradingService
@@ -183,6 +184,28 @@ def get_daily_summary(
         date_value=date_value,
         provider=provider,
         market=market,
+        include_details=include_details,
+    )
+
+
+@router.get("/alerts")
+def get_operator_alerts(
+    severity: Literal["critical", "warning", "info", "all"] = Query(default="all"),
+    status: Literal["active", "acknowledged", "resolved", "all"] = Query(default="active"),
+    provider: str | None = Query(default=None, max_length=20),
+    market: str | None = Query(default=None, max_length=10),
+    limit: int = Query(default=50, ge=1, le=200),
+    include_details: bool = Query(default=True),
+    db: Session = Depends(get_db),
+):
+    svc = OperatorAlertsService()
+    return svc.alerts(
+        db,
+        severity=severity,
+        status=status,
+        provider=provider,
+        market=market,
+        limit=limit,
         include_details=include_details,
     )
 
