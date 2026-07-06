@@ -255,15 +255,20 @@ def apply_settings_preset(
 
 @router.get("/production-readiness")
 def get_production_readiness(
+    provider: str | None = Query(default=None, max_length=20),
+    market: str | None = Query(default=None, max_length=10),
+    include_details: bool = Query(default=True),
     include_raw: bool = Query(default=False),
     days: int = Query(default=7, ge=1, le=365),
     include_recent: bool = Query(default=True),
     db: Session = Depends(get_db),
 ):
-    client = _kis_client(db)
-    service = OpsProductionReadinessService(client)
+    service = OpsProductionReadinessService()
     return service.readiness(
         db,
+        provider=provider,
+        market=market,
+        include_details=include_details,
         include_raw=include_raw,
         days=days,
         include_recent=include_recent,

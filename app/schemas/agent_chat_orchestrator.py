@@ -26,6 +26,9 @@ class AgentChatIntentCategory(str, Enum):
     READ_ONLY_SETTINGS_QUERY = "read_only_settings_query"
     READ_ONLY_DAILY_OPS_SUMMARY_QUERY = "read_only_daily_ops_summary_query"
     READ_ONLY_OPERATOR_ALERTS_QUERY = "read_only_operator_alerts_query"
+    READ_ONLY_PRODUCTION_READINESS_QUERY = (
+        "read_only_production_readiness_query"
+    )
     ANALYSIS_REQUEST = "analysis_request"
     WATCHLIST_PREVIEW_REQUEST = "watchlist_preview_request"
     EXIT_REVIEW_REQUEST = "exit_review_request"

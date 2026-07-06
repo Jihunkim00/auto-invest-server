@@ -1911,11 +1911,17 @@ class ApiClient {
   }
 
   Future<OpsProductionReadiness> fetchOpsProductionReadiness({
+    String provider = 'kis',
+    String market = 'KR',
+    bool includeDetails = true,
     bool includeRaw = false,
     int days = 7,
     bool includeRecent = true,
   }) async {
     final query = Uri(queryParameters: {
+      'provider': provider,
+      'market': market,
+      'include_details': includeDetails.toString(),
       'include_raw': includeRaw.toString(),
       'days': days.toString(),
       'include_recent': includeRecent.toString(),

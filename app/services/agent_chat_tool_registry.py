@@ -130,6 +130,16 @@ _DEFAULT_TOOLS = [
         description="Read-only operator alert lookup from local DB state. It never syncs, validates, submits, changes settings, or runs a scheduler.",
     ),
     AgentChatToolDefinition(
+        tool_name="ops_production_readiness_lookup",
+        display_name="Production Readiness Lookup",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only production readiness and safety checklist lookup from local state.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_profiles_lookup",
         display_name="Strategy Profiles Lookup",
         mode="read_only",
