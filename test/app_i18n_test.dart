@@ -44,6 +44,35 @@ void main() {
     expect(en.rejectedOrder, 'Rejected Order');
     expect(en.operatorReadOnly, 'Read Only');
     expect(en.operatorNoLiveOrders, 'No Live Orders');
+    expect(ko.productionReadiness, '운영 준비 점검');
+    expect(ko.liveReadinessStatus, '실전 준비 상태');
+    expect(ko.readinessBlocked, '차단됨');
+    expect(ko.automationUnlockNotAllowed, '자동화 해제 불가');
+    expect(en.productionReadiness, 'Production Readiness');
+    expect(en.liveReadinessStatus, 'Live Readiness Status');
+    expect(en.readinessReady, 'Ready');
+    expect(en.readinessWarning, 'Warning');
+    expect(en.readinessBlocked, 'Blocked');
+    expect(en.readinessUnknown, 'Unknown');
+    expect(en.readinessStatusLabel('blocked'), 'Blocked');
+    expect(en.productionReadinessRefreshInProgress,
+        'Production readiness refresh already in progress.');
+    expect(en.productionReadinessStatus('Blocked'),
+        'Production readiness: Blocked.');
+    expect(en.primaryBlockReasons, 'Primary Block Reasons');
+    expect(en.nextSafeActions, 'Next Safe Actions');
+    expect(en.runtimeSettings, 'Runtime Settings');
+    expect(en.brokerStatus, 'Broker Status');
+    expect(en.schedulerSafety, 'Scheduler Safety');
+    expect(en.orderReconciliation, 'Order Reconciliation');
+    expect(en.positionsPnl, 'Positions / P&L');
+    expect(en.alertStatus, 'Alert Status');
+    expect(en.agentChatSafety, 'Agent Chat Safety');
+    expect(en.guardedBuy, 'Guarded Buy');
+    expect(en.guardedSell, 'Guarded Sell');
+    expect(en.databaseStatus, 'Database');
+    expect(en.automationUnlockNotAllowed, 'Automation Unlock Not Allowed');
+    expect(ko.readinessStatusLabel('blocked'), ko.readinessBlocked);
     expect(ko.operatorAlertCenter, isNotEmpty);
     expect(ko.riskAlerts, isNotEmpty);
   });

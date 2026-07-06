@@ -55,6 +55,8 @@ class AgentChatResultSummarizer:
                 return self._daily_ops_summary_answer(primary)
             if primary.result_type == "operator_alerts":
                 return self._operator_alerts_answer(primary)
+            if primary.result_type == "production_readiness":
+                return self._production_readiness_answer(primary)
             if primary.result_type in {"strategy_profile", "strategy_profiles"}:
                 return self._strategy_profile_answer(intent, primary)
             if primary.result_type == "strategy_monthly_progress":
@@ -137,6 +139,8 @@ class AgentChatResultSummarizer:
                 card = self._daily_ops_summary_card(result)
             elif result.result_type == "operator_alerts":
                 card = self._operator_alerts_card(result)
+            elif result.result_type == "production_readiness":
+                card = self._production_readiness_card(result)
             elif result.result_type in {"orders", "runs", "signals"}:
                 card = self._count_card(result)
             elif result.result_type in {
@@ -334,6 +338,32 @@ class AgentChatResultSummarizer:
         text += (
             "This lookup used local DB state only and did not sync, validate, "
             "submit, trade, change settings, or run a scheduler."
+        )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="read_only_result",
+        )
+
+    def _production_readiness_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        blockers = data.get("blocking_reasons") if isinstance(data.get("blocking_reasons"), list) else []
+        actions = data.get("next_safe_actions") if isinstance(data.get("next_safe_actions"), list) else []
+        blocker_text = ", ".join(str(item) for item in blockers[:3]) or "none"
+        action_text = str(actions[0]) if actions else "Continue read-only review."
+        text = (
+            f"Production readiness is {data.get('overall_status') or 'unknown'} "
+            f"with score {data.get('readiness_score', 0)}. "
+            f"Checks: {summary.get('ready_count', 0)} ready, "
+            f"{summary.get('warning_count', 0)} warning, "
+            f"{summary.get('blocked_count', 0)} blocked, "
+            f"{summary.get('unknown_count', 0)} unknown. "
+            f"Primary blockers: {blocker_text}. "
+            f"Next safe action: {action_text} "
+            "This was a read-only readiness summary only."
         )
         return AgentChatAnswer(
             text=text,
@@ -821,6 +851,37 @@ class AgentChatResultSummarizer:
                 {"label": "Next safe action", "value": first.get("next_safe_action") or "-"},
             ],
             data=data,
+        )
+
+    def _production_readiness_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        return AgentChatResultCard(
+            card_type="production_readiness",
+            title="Production Readiness",
+            subtitle=f"{str(data.get('provider') or '').upper()} / {data.get('market') or '-'}",
+            primary_value=str(data.get("overall_status") or "unknown").upper(),
+            badges=[
+                "READ ONLY",
+                "NO LIVE ORDERS",
+                "AUTOMATION UNLOCK NOT ALLOWED",
+            ],
+            rows=[
+                {"label": "Score", "value": data.get("readiness_score", 0)},
+                {"label": "Blocked checks", "value": summary.get("blocked_count", 0)},
+                {"label": "Warnings", "value": summary.get("warning_count", 0)},
+                {"label": "Active alerts", "value": summary.get("active_alert_count", 0)},
+                {"label": "Sync required", "value": summary.get("sync_required_alert_count", 0)},
+                {"label": "Guarded buy", "value": summary.get("can_use_guarded_live_buy", False)},
+                {"label": "Guarded sell", "value": summary.get("can_use_guarded_live_sell", False)},
+            ],
+            data={
+                "overall_status": data.get("overall_status"),
+                "readiness_score": data.get("readiness_score"),
+                "summary": summary,
+                "blocking_reasons": data.get("blocking_reasons") or [],
+                "next_safe_actions": data.get("next_safe_actions") or [],
+            },
         )
 
     def _count_card(self, result: AgentChatToolResult) -> AgentChatResultCard:

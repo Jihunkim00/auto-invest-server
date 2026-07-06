@@ -25,12 +25,15 @@ void main() {
 
     expect(requests.single.method, 'GET');
     expect(requests.single.url.path, '/ops/production-readiness');
+    expect(requests.single.url.queryParameters['provider'], 'kis');
+    expect(requests.single.url.queryParameters['market'], 'KR');
+    expect(requests.single.url.queryParameters['include_details'], 'true');
     expect(requests.single.url.queryParameters['include_raw'], 'false');
     expect(requests.single.url.queryParameters['days'], '7');
     expect(requests.single.url.queryParameters['include_recent'], 'true');
     expect(requests.single.url.path, isNot(contains('/kis/orders')));
     expect(result.readinessOnly, isTrue);
-    expect(result.overallStatus, 'BLOCKED');
+    expect(result.overallStatus, 'blocked');
   });
 
   testWidgets('operations readiness card renders default safe blocked state',
@@ -226,6 +229,9 @@ class _FakeOpsReadinessApi extends ApiClient {
 
   @override
   Future<OpsProductionReadiness> fetchOpsProductionReadiness({
+    String provider = 'kis',
+    String market = 'KR',
+    bool includeDetails = true,
     bool includeRaw = false,
     int days = 7,
     bool includeRecent = true,

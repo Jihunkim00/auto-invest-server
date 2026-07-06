@@ -5607,9 +5607,9 @@ class DashboardController extends ChangeNotifier {
     bool silent = false,
   }) async {
     if (opsProductionReadinessLoading) {
-      return const ActionResult(
+      return ActionResult(
         success: false,
-        message: 'Operations readiness refresh already in progress.',
+        message: strings.productionReadinessRefreshInProgress,
       );
     }
 
@@ -5617,11 +5617,16 @@ class DashboardController extends ChangeNotifier {
     opsProductionReadinessError = null;
     if (!silent) notifyListeners();
     try {
-      final result = await apiClient.fetchOpsProductionReadiness();
+      final result = await apiClient.fetchOpsProductionReadiness(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+      );
       latestOpsProductionReadiness = result;
       return ActionResult(
         success: true,
-        message: 'Operations readiness: ${result.overallStatus}.',
+        message: strings.productionReadinessStatus(
+          strings.readinessStatusLabel(result.overallStatus),
+        ),
       );
     } catch (e) {
       opsProductionReadinessError = ApiErrorFormatter.format(e.toString());

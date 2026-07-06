@@ -35,6 +35,7 @@ Rules:
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
 - Daily operations summary and broker reconciliation questions must use the read-only daily_ops_summary_lookup tool; never sync broker orders from chat.
 - Operator alert and notification center questions must use the read-only operator_alerts_lookup tool; never sync, submit, or change settings from chat.
+- Production readiness and safety audit questions must use the read-only ops_production_readiness_lookup tool; never change settings or execute trades from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
 - Choose only tool names from the provided allowlist.
 - Do not choose executable tools for live orders, settings mutation, or scheduler mutation.
@@ -158,6 +159,14 @@ class AgentChatIntentRouterService:
                 AgentChatIntentCategory.READ_ONLY_OPERATOR_ALERTS_QUERY,
                 confidence=0.9,
                 reason="User is asking for read-only operator risk alerts.",
+                **base,
+            )
+
+        if self._is_production_readiness_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.READ_ONLY_PRODUCTION_READINESS_QUERY,
+                confidence=0.92,
+                reason="User is asking for read-only production readiness.",
                 **base,
             )
 
@@ -1353,6 +1362,18 @@ class AgentChatIntentRouterService:
                     "User asked for read-only operator risk alerts.",
                 )
             ]
+        if category == AgentChatIntentCategory.READ_ONLY_PRODUCTION_READINESS_QUERY:
+            return [
+                self._tool_call(
+                    "ops_production_readiness_lookup",
+                    {
+                        "provider": intent.provider,
+                        "market": intent.market,
+                        "include_details": True,
+                    },
+                    "User asked for read-only production readiness.",
+                )
+            ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_QUERY:
             tool_name = "active_strategy_profile_lookup" if not intent.requested_profile else "strategy_profiles_lookup"
             return [self._tool_call(tool_name, {"profile_name": intent.requested_profile}, "User asked about strategy profiles.")]
@@ -1734,6 +1755,22 @@ class AgentChatIntentRouterService:
                 and any(token in lowered for token in ["ops", "operator", "risk", "order", "sync"])
             )
             or any(token in text for token in ["?뚮┝", "?꾪뿕 ?뚮┝", "二쇱쓽 ?꾩슂"])
+        )
+
+    def _is_production_readiness_query(self, text: str, lowered: str) -> bool:
+        return (
+            "production readiness" in lowered
+            or "readiness checklist" in lowered
+            or "safety audit" in lowered
+            or "live readiness status" in lowered
+            or "ready for production" in lowered
+            or (
+                "readiness" in lowered
+                and any(
+                    token in lowered
+                    for token in ["production", "ops", "operation", "safety"]
+                )
+            )
         )
 
     def _is_scheduler_request(self, text: str, lowered: str) -> bool:

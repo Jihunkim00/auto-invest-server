@@ -170,6 +170,51 @@ class AppStrings {
   String get refreshAlerts => isKorean ? '새로고침' : 'Refresh';
   String get operatorReadOnly => isKorean ? '읽기 전용' : 'Read Only';
   String get operatorNoLiveOrders => isKorean ? '실주문 없음' : 'No Live Orders';
+  String get productionReadiness =>
+      isKorean ? '운영 준비 점검' : 'Production Readiness';
+  String get productionReadinessRefreshInProgress => isKorean
+      ? '운영 준비 점검 새로고침 중입니다.'
+      : 'Production readiness refresh already in progress.';
+  String get liveReadinessStatus =>
+      isKorean ? '실전 준비 상태' : 'Live Readiness Status';
+  String get readinessReady => isKorean ? '준비 완료' : 'Ready';
+  String get readinessWarning => isKorean ? '주의 필요' : 'Warning';
+  String get readinessBlocked => isKorean ? '차단됨' : 'Blocked';
+  String get readinessUnknown => isKorean ? '확인 불가' : 'Unknown';
+  String readinessStatusLabel(String status) {
+    switch (status.toLowerCase()) {
+      case 'ready':
+        return readinessReady;
+      case 'warning':
+      case 'warn':
+        return readinessWarning;
+      case 'blocked':
+      case 'fail':
+        return readinessBlocked;
+      default:
+        return readinessUnknown;
+    }
+  }
+
+  String productionReadinessStatus(String status) =>
+      isKorean ? '운영 준비 상태: $status.' : 'Production readiness: $status.';
+  String get primaryBlockReasons =>
+      isKorean ? '주요 차단 사유' : 'Primary Block Reasons';
+  String get runtimeSettings => isKorean ? '런타임 설정' : 'Runtime Settings';
+  String get schedulerSafety => isKorean ? '스케줄러 안전' : 'Scheduler Safety';
+  String get orderReconciliation => isKorean ? '주문 대조' : 'Order Reconciliation';
+  String get positionsPnl => isKorean ? '포지션 / 손익' : 'Positions / P&L';
+  String get alertStatus => isKorean ? '알림 상태' : 'Alert Status';
+  String get agentChatSafety => isKorean ? '에이전트 채팅 안전' : 'Agent Chat Safety';
+  String get guardedBuy => isKorean ? '가드 매수' : 'Guarded Buy';
+  String get guardedSell => isKorean ? '가드 매도' : 'Guarded Sell';
+  String get databaseStatus => isKorean ? '데이터베이스' : 'Database';
+  String get automationUnlockNotAllowed =>
+      isKorean ? '자동화 해제 불가' : 'Automation Unlock Not Allowed';
+  String get refreshProductionReadiness =>
+      isKorean ? '운영 준비 점검 새로고침' : 'Refresh Production Readiness';
+  String get blockedChecks => isKorean ? '차단 항목' : 'Blocked Checks';
+  String get groupedChecklist => isKorean ? '체크리스트' : 'Checklist';
   String get schedulerDryRunOnly =>
       isKorean ? '스케줄러 모의 실행 전용' : 'Scheduler Dry-Run Only';
   String get noOperatorAlerts =>

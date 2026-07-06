@@ -2174,7 +2174,7 @@ class _OperationsReadinessCardBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final result = controller.latestOpsProductionReadiness;
-    final status = result?.overallStatus ?? 'NOT LOADED';
+    final status = (result?.overallStatus ?? 'NOT LOADED').toUpperCase();
     return Container(
       key: const Key('ops_production_readiness_card'),
       width: double.infinity,

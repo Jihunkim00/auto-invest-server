@@ -15,6 +15,9 @@ from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, 
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.operator_alerts_service import OperatorAlertsService
+from app.services.ops_production_readiness_service import (
+    OpsProductionReadinessService,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.profile_aware_dry_run_auto_buy_service import (
@@ -161,6 +164,8 @@ class AgentChatToolExecutor:
                 return self._daily_ops_summary(db, call, intent)
             if tool.tool_name == "operator_alerts_lookup":
                 return self._operator_alerts(db, call, intent)
+            if tool.tool_name == "ops_production_readiness_lookup":
+                return self._production_readiness(db, call, intent)
             if tool.tool_name == "strategy_profiles_lookup":
                 return self._strategy_profiles(db)
             if tool.tool_name == "active_strategy_profile_lookup":
@@ -367,6 +372,29 @@ class AgentChatToolExecutor:
                 "Read-only operator alerts loaded from local DB state. "
                 "No sync, validation, submit, scheduler, or settings path ran."
             ),
+        )
+
+    def _production_readiness(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        service = OpsProductionReadinessService(
+            self.kis_client_factory(db),
+            runtime_settings=self.runtime_setting_service,
+        )
+        data = service.readiness(
+            db,
+            provider=str(call.arguments.get("provider") or intent.provider or "kis"),
+            market=str(call.arguments.get("market") or intent.market or "KR"),
+            include_details=bool(call.arguments.get("include_details", True)),
+        )
+        return self._success(
+            "ops_production_readiness_lookup",
+            "production_readiness",
+            data,
+            "Read-only production readiness checklist loaded from local state.",
         )
 
     def _strategy_profiles(self, db: Session) -> AgentChatToolResult:

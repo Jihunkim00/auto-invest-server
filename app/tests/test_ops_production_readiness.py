@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,8 +11,15 @@ import app.routes.ops as ops_routes
 from app.config import Settings
 from app.core.enums import InternalOrderStatus
 from app.db.database import get_db
-from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
+from app.db.models import OrderLog, RuntimeSetting
 from app.main import app
+from app.schemas.agent_chat_orchestrator import (
+    AgentChatIntent,
+    AgentChatIntentCategory,
+)
+from app.schemas.agent_chat_tool import AgentChatToolCall
+from app.services.agent_chat_tool_executor import AgentChatToolExecutor
+from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
@@ -41,23 +48,22 @@ def _settings(**overrides):
 
 
 class _FakeClient:
-    def __init__(self, *, settings=None, open_orders=None):
+    def __init__(self, *, settings=None):
         self.settings = settings or _settings()
-        self.open_orders = open_orders if open_orders is not None else []
         self.submit_calls = 0
+        self.read_calls = 0
 
     def get_account_balance(self):
-        return {
-            "cash": 500000,
-            "total_asset_value": 1000000,
-            "stock_evaluation_amount": 500000,
-        }
+        self.read_calls += 1
+        return {"cash": 500000}
 
     def list_positions(self):
-        return [{"symbol": "005930", "qty": 1, "current_price": 70000}]
+        self.read_calls += 1
+        return []
 
     def list_open_orders(self):
-        return self.open_orders
+        self.read_calls += 1
+        return []
 
     def submit_order(self, *args, **kwargs):
         self.submit_calls += 1
@@ -72,18 +78,6 @@ class _FakeClient:
         raise AssertionError("readiness endpoint must not submit")
 
     def submit_market_sell(self, *args, **kwargs):
-        self.submit_calls += 1
-        raise AssertionError("readiness endpoint must not submit")
-
-    @property
-    def client(self):
-        return self
-
-    @property
-    def broker(self):
-        return self
-
-    def submit(self, *args, **kwargs):
         self.submit_calls += 1
         raise AssertionError("readiness endpoint must not submit")
 
@@ -103,198 +97,229 @@ def api_client(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_endpoint_returns_readiness_only_and_does_not_submit(api_client, db_session):
+def test_endpoint_returns_pr91_readiness_shape_and_is_read_only(api_client, db_session):
     client, fake = api_client
 
     response = client.get("/ops/production-readiness")
 
     assert response.status_code == 200
     body = response.json()
+    assert body["generated_at"]
+    assert body["timezone"] == "Asia/Seoul"
+    assert body["provider"] == "kis"
+    assert body["market"] == "KR"
+    assert body["overall_status"] in {"ready", "warning", "blocked", "unknown"}
+    assert isinstance(body["readiness_score"], int)
+    assert body["summary"]["can_enable_scheduler_live_orders"] is False
+    assert body["summary"]["scheduler_real_orders_allowed"] is False
+    assert body["summary"]["automation_unlock_allowed"] is False
+    assert body["safety_flags"]["read_only"] is True
+    assert body["safety_flags"]["orders_mutated"] is False
     assert body["mode"] == "ops_production_readiness"
     assert body["readiness_only"] is True
-    assert body["summary"]["overall_status"] in {"SAFE_DRY_RUN", "BLOCKED"}
-    assert body["summary"]["overall_status"] not in {"LIVE_READY", "LIVE_ENABLED"}
-    assert body["live_trading_ready"] is False
-    assert body["paper_or_dry_run_ready"] is True
+    assert body["checklist"]
     assert fake.submit_calls == 0
+    assert fake.read_calls == 0
     assert db_session.query(OrderLog).count() == 0
 
+    item = body["checklist"][0]
+    assert {
+        "key",
+        "category",
+        "status",
+        "title",
+        "detail",
+        "blocking",
+        "severity",
+        "related_type",
+        "related_id",
+        "next_safe_action",
+    }.issubset(item)
 
-def test_kill_switch_true_returns_blocking_issue(api_client, db_session):
+
+def test_query_parameters_provider_market_include_details(api_client):
+    client, _ = api_client
+
+    response = client.get(
+        "/ops/production-readiness",
+        params={"provider": "alpaca", "market": "US", "include_details": False},
+    )
+
+    body = response.json()
+    assert body["provider"] == "alpaca"
+    assert body["market"] == "US"
+    assert body["details"] == {}
+    assert body["checklist"]
+
+
+def test_kill_switch_true_produces_blocked_check(api_client, db_session):
     client, _ = api_client
     db_session.add(RuntimeSetting(kill_switch=True, dry_run=True))
     db_session.commit()
 
     body = client.get("/ops/production-readiness").json()
 
-    assert "kill_switch_enabled" in body["blocking_issues"]
-    kill_switch_check = _check_by_key(body, "kill_switch")
-    assert kill_switch_check["status"] == "FAIL"
+    assert body["overall_status"] == "blocked"
+    assert "kill_switch_off" in body["blocking_reasons"]
+    check = _check_by_key(body, "kill_switch_off")
+    assert check["status"] == "fail"
+    assert check["blocking"] is True
+    assert check["severity"] == "critical"
 
 
-def test_dry_run_blocks_live_but_is_safe_for_dry_run(api_client, db_session):
+def test_dry_run_blocks_live_without_critical_system_failure(api_client, db_session):
     client, _ = api_client
     db_session.add(RuntimeSetting(dry_run=True, kill_switch=False))
     db_session.commit()
 
     body = client.get("/ops/production-readiness").json()
 
-    assert body["summary"]["dry_run"] is True
-    assert body["live_trading_ready"] is False
+    check = _check_by_key(body, "dry_run_blocks_live_submit")
+    assert check["status"] == "warn"
+    assert check["blocking"] is True
+    assert check["severity"] == "warning"
+    assert body["summary"]["can_use_guarded_live_buy"] is False
+    assert body["summary"]["can_use_guarded_live_sell"] is False
     assert body["paper_or_dry_run_ready"] is True
-    assert "dry_run_enabled" in body["blocking_issues"]
 
 
-def test_scheduler_real_orders_disabled_blocks_live_readiness(api_client):
+def test_scheduler_real_orders_are_never_allowed_by_readiness(api_client, db_session):
     client, _ = api_client
+    db_session.add(
+        RuntimeSetting(
+            dry_run=False,
+            kill_switch=False,
+            kis_scheduler_allow_real_orders=True,
+            kis_scheduler_configured_allow_real_orders=True,
+            strategy_auto_buy_scheduler_allow_live_orders=True,
+        )
+    )
+    db_session.commit()
 
     body = client.get("/ops/production-readiness").json()
 
-    assert body["scheduler"]["scheduler_real_orders_allowed"] is False
-    assert "scheduler_real_orders_disabled" in body["blocking_issues"]
+    assert body["summary"]["scheduler_real_orders_allowed"] is False
+    assert body["summary"]["can_enable_scheduler_live_orders"] is False
+    assert body["safety_flags"]["scheduler_real_orders_allowed"] is False
+    assert body["safety_flags"]["automation_unlock_allowed"] is False
+    assert _check_by_key(body, "scheduler_real_orders_allowed")["status"] == "fail"
 
 
-def test_kr_watchlist_baseline_verifies_count_and_required_symbols(api_client):
+def test_pending_rejected_stale_and_duplicate_orders_warn(api_client, db_session):
     client, _ = api_client
-
-    body = client.get("/ops/production-readiness").json()
-    watchlist_check = _check_by_key(body, "kr_watchlist_baseline")
-
-    assert watchlist_check["status"] == "PASS"
-    assert watchlist_check["value"]["symbol_count"] == 50
-    assert watchlist_check["value"]["required_symbols"]["005930"] is True
-    assert watchlist_check["value"]["required_symbols"]["035420"] is True
-
-
-def test_db_writable_check_passes_in_pytest_database(api_client):
-    client, _ = api_client
-
-    body = client.get("/ops/production-readiness").json()
-
-    assert _check_by_key(body, "db_writable")["status"] == "PASS"
-
-
-def test_recent_activity_summary_counts_runs_and_orders(api_client, db_session):
-    client, _ = api_client
-    now = datetime.now(UTC).replace(tzinfo=None)
+    stale_time = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=2)
     db_session.add_all(
         [
-            TradeRunLog(
-                run_key="run-1",
-                trigger_source="scheduler_guarded_buy",
-                symbol="005930",
-                mode="kis_scheduler_guarded_buy",
-                result="blocked",
-                reason="scheduler_real_orders_disabled",
-                response_payload=json.dumps(
-                    {
-                        "block_reasons": ["scheduler_real_orders_disabled"],
-                        "real_order_submitted": False,
-                    }
-                ),
-                created_at=now,
-            ),
-            TradeRunLog(
-                run_key="run-2",
-                trigger_source="scheduler_dry_run",
-                symbol="WATCHLIST",
-                mode="kis_scheduler_dry_run_orchestration",
-                result="completed",
-                reason="dry_run_completed",
-                created_at=now,
-            ),
-            OrderLog(
-                broker="kis",
-                market="KR",
-                symbol="005930",
-                side="buy",
-                order_type="market",
-                qty=1,
-                internal_status=InternalOrderStatus.SUBMITTED.value,
-                broker_order_id="BRK-1",
-                kis_odno="ODNO-1",
-                response_payload=json.dumps(
-                    {
-                        "source": "kis_limited_auto_buy",
-                        "real_order_submitted": True,
-                        "broker_submit_called": True,
-                        "manual_submit_called": True,
-                    }
-                ),
-                created_at=now,
-            ),
+            _order("005930", InternalOrderStatus.UNKNOWN_STALE.value),
+            _order("035420", InternalOrderStatus.REJECTED.value),
+            _order("000660", InternalOrderStatus.SUBMITTED.value, created_at=stale_time),
+            _order("000660", InternalOrderStatus.PENDING.value, created_at=stale_time),
         ]
     )
     db_session.commit()
 
     body = client.get("/ops/production-readiness").json()
 
-    assert body["today"]["total_runs"] == 2
-    assert body["today"]["scheduler_guarded_buy_runs"] == 1
-    assert body["today"]["scheduler_dry_run_runs"] == 1
-    assert body["today"]["order_logs_created"] == 1
-    assert body["today"]["broker_submits"] == 1
-    assert body["today"]["real_order_submitted_count"] == 1
-    assert body["today"]["manual_submit_count"] == 1
-    assert body["risk"]["today_broker_submit_count"] == 1
+    assert _check_by_key(body, "pending_sync_count")["status"] == "warn"
+    assert _check_by_key(body, "rejected_order_count")["status"] == "warn"
+    assert _check_by_key(body, "unknown_order_count")["status"] == "warn"
+    assert _check_by_key(body, "stale_order_count")["status"] == "warn"
+    assert _check_by_key(body, "duplicate_open_order_risk_count")["status"] == "warn"
+    assert body["summary"]["pending_sync_count"] >= 1
+    assert body["summary"]["rejected_order_count"] >= 1
 
 
-def test_safety_checks_include_required_keys(api_client):
+def test_incomplete_pl_produces_warning(api_client, db_session):
     client, _ = api_client
-
-    body = client.get("/ops/production-readiness").json()
-    keys = {item["key"] for item in body["safety_checks"]}
-
-    for key in {
-        "dry_run",
-        "kill_switch",
-        "kis_real_order_enabled",
-        "scheduler_real_orders_allowed",
-        "scheduler_sell_enabled",
-        "scheduler_buy_enabled",
-        "kr_watchlist_baseline",
-        "db_writable",
-        "production_docs_present",
-        "env_example_present",
-        "required_env_vars_documented",
-    }:
-        assert key in keys
-
-
-def test_docs_and_env_checks_are_represented(api_client):
-    client, _ = api_client
+    db_session.add(
+        _order(
+            "005930",
+            InternalOrderStatus.FILLED.value,
+            side="buy",
+            qty=3,
+            filled_qty=3,
+            filled_avg_price=None,
+        )
+    )
+    db_session.commit()
 
     body = client.get("/ops/production-readiness").json()
 
-    assert "documentation" in body
-    assert "README.md" in body["documentation"]["files"]
-    assert ".env.example" in body["documentation"]["files"]
-    assert _check_by_key(body, "production_docs_present")["status"] in {
-        "PASS",
-        "FAIL",
-    }
+    assert _check_by_key(body, "incomplete_pl_count")["status"] == "warn"
+    assert _check_by_key(body, "lifecycle_calculation_incomplete_count")[
+        "status"
+    ] == "warn"
+    assert body["details"]["positions"]["incomplete_pl_count"] >= 1
 
 
-def test_endpoint_does_not_create_order_log(api_client, db_session):
+def test_active_alerts_are_reflected_from_alert_service(api_client, db_session):
     client, _ = api_client
-    before = db_session.query(OrderLog).count()
+    db_session.add(_order("005930", InternalOrderStatus.REJECTED.value))
+    db_session.commit()
+
+    body = client.get("/ops/production-readiness").json()
+
+    assert body["summary"]["active_alert_count"] >= 1
+    assert _check_by_key(body, "active_alert_count")["status"] == "warn"
+
+
+def test_endpoint_does_not_mutate_settings_or_orders(api_client, db_session):
+    client, _ = api_client
+    db_session.add(RuntimeSetting(dry_run=True, kill_switch=False))
+    db_session.add(_order("005930", InternalOrderStatus.REQUESTED.value))
+    db_session.commit()
+    before_settings = db_session.query(RuntimeSetting).count()
+    before_orders = db_session.query(OrderLog).count()
 
     response = client.get("/ops/production-readiness")
 
     assert response.status_code == 200
-    assert db_session.query(OrderLog).count() == before
+    assert db_session.query(RuntimeSetting).count() == before_settings
+    assert db_session.query(OrderLog).count() == before_orders
 
 
-def test_endpoint_does_not_call_broker_submit_methods(api_client):
+def test_endpoint_does_not_call_broker_submit_or_read_methods(api_client):
     client, fake = api_client
 
     response = client.get("/ops/production-readiness")
 
     assert response.status_code == 200
     assert fake.submit_calls == 0
+    assert fake.read_calls == 0
 
 
-def test_ops_readiness_service_has_no_direct_submit_path():
+def test_agent_chat_production_readiness_tool_is_read_only(db_session):
+    registry = AgentChatToolRegistry()
+    assert registry.can_auto_execute("ops_production_readiness_lookup") is True
+
+    executor = AgentChatToolExecutor(
+        registry=registry,
+        kis_client_factory=lambda db: _FakeClient(),
+    )
+    result = executor.execute(
+        db_session,
+        call=AgentChatToolCall(
+            tool_name="ops_production_readiness_lookup",
+            arguments={"provider": "kis", "market": "KR"},
+        ),
+        intent=AgentChatIntent(
+            category=AgentChatIntentCategory.READ_ONLY_PRODUCTION_READINESS_QUERY,
+            provider="kis",
+            market="KR",
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.result_type == "production_readiness"
+    assert result.data["safety_flags"]["read_only"] is True
+    assert result.safety.read_only is True
+    assert result.safety.mutation is False
+    assert result.safety.real_order_submitted is False
+    assert result.safety.broker_submit_called is False
+    assert result.safety.scheduler_changed is False
+
+
+def test_ops_readiness_service_has_no_direct_trade_path():
     source = inspect.getsource(OpsProductionReadinessService)
 
     for forbidden in [
@@ -303,14 +328,42 @@ def test_ops_readiness_service_has_no_direct_submit_path():
         "submit_market_buy",
         "submit_market_sell",
         "submit_manual",
-        "self.client.submit",
-        "self.broker.submit",
+        "KisManualOrderService",
+        "confirm_live",
+        "update_settings",
+        "set_setting",
+        "sync_order",
     ]:
         assert forbidden not in source
 
 
+def _order(
+    symbol: str,
+    status: str,
+    *,
+    side: str = "buy",
+    qty: float | None = 1,
+    filled_qty: float | None = None,
+    filled_avg_price: float | None = None,
+    created_at: datetime | None = None,
+) -> OrderLog:
+    return OrderLog(
+        broker="kis",
+        market="KR",
+        symbol=symbol,
+        side=side,
+        order_type="market",
+        qty=qty,
+        filled_qty=filled_qty,
+        filled_avg_price=filled_avg_price,
+        internal_status=status,
+        request_payload=json.dumps({"read_only_test": True}),
+        created_at=created_at or datetime.now(UTC).replace(tzinfo=None),
+    )
+
+
 def _check_by_key(body, key):
-    for item in body["safety_checks"]:
+    for item in body["checklist"]:
         if item["key"] == key:
             return item
-    raise AssertionError(f"missing safety check {key}")
+    raise AssertionError(f"missing checklist item {key}")
