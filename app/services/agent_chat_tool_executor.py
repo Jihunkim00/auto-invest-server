@@ -381,7 +381,6 @@ class AgentChatToolExecutor:
         intent: AgentChatIntent,
     ) -> AgentChatToolResult:
         service = OpsProductionReadinessService(
-            self.kis_client_factory(db),
             runtime_settings=self.runtime_setting_service,
         )
         data = service.readiness(

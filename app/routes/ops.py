@@ -263,8 +263,7 @@ def get_production_readiness(
     include_recent: bool = Query(default=True),
     db: Session = Depends(get_db),
 ):
-    client = _kis_client(db)
-    service = OpsProductionReadinessService(client)
+    service = OpsProductionReadinessService()
     return service.readiness(
         db,
         provider=provider,

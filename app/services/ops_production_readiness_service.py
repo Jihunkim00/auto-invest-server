@@ -10,7 +10,6 @@ from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, RuntimeSetting, StrategyProfile, TradeRunLog
@@ -68,14 +67,12 @@ class OpsProductionReadinessService:
 
     def __init__(
         self,
-        client: KisClient | None = None,
         *,
         runtime_settings: RuntimeSettingService | None = None,
         alerts_service: OperatorAlertsService | None = None,
         lifecycle_service: PositionLifecycleAuditService | None = None,
         tool_registry: AgentChatToolRegistry | None = None,
     ) -> None:
-        self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.alerts_service = alerts_service or OperatorAlertsService(
             runtime_settings=self.runtime_settings,
@@ -223,8 +220,6 @@ class OpsProductionReadinessService:
         return values
 
     def _app_settings(self) -> Any:
-        if self.client is not None and getattr(self.client, "settings", None) is not None:
-            return self.client.settings
         return get_settings()
 
     def _alert_metrics(
