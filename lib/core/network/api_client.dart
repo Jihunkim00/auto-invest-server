@@ -14,6 +14,7 @@ import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
+import '../../models/auto_exit_candidate.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/agent_live_prefill.dart';
@@ -657,6 +658,35 @@ class ApiClient {
   Future<PositionExitReview> fetchPositionExitReview() async {
     final payload = await _getJsonNoCache('/strategy/positions/exit-review');
     return PositionExitReview.fromJson(payload);
+  }
+
+  Future<AutoExitCandidates> fetchAutoExitCandidates({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    bool includeDetails = true,
+    String? minSeverity,
+  }) async {
+    final queryParameters = <String, String>{
+      'provider': provider,
+      'market': market,
+      'include_details': includeDetails.toString(),
+    };
+    final normalizedSymbol = symbol?.trim();
+    if (normalizedSymbol != null && normalizedSymbol.isNotEmpty) {
+      queryParameters['symbol'] = normalizedSymbol;
+    }
+    final severity = minSeverity?.trim();
+    if (severity != null && severity.isNotEmpty) {
+      queryParameters['min_severity'] = severity;
+    }
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/positions/exit-candidates',
+        queryParameters: queryParameters,
+      ).toString(),
+    );
+    return AutoExitCandidates.fromJson(payload);
   }
 
   Future<PositionSellPreflightResult> runPositionSellPreflight({

@@ -20,6 +20,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
+import '../../models/auto_exit_candidate.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -367,6 +368,9 @@ class DashboardController extends ChangeNotifier {
   List<StrategyLiveAutoExitRunResult> strategyLiveAutoExitRecent = const [];
   bool strategyLiveAutoExitLoading = false;
   String? strategyLiveAutoExitError;
+  AutoExitCandidates? autoExitCandidates;
+  bool autoExitCandidatesLoading = false;
+  String? autoExitCandidatesError;
   PositionExitReview? positionExitReview;
   PositionSellPreflightResult? latestPositionSellPreflight;
   GuardedPositionSellResult? latestGuardedPositionSellResult;
@@ -1931,6 +1935,43 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshAutoExitCandidates({
+    bool silent = false,
+    String? minSeverity,
+  }) async {
+    if (autoExitCandidatesLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.autoExitCandidatesAlreadyLoading,
+      );
+    }
+    autoExitCandidatesLoading = true;
+    autoExitCandidatesError = null;
+    if (!silent) notifyListeners();
+    try {
+      autoExitCandidates = await apiClient.fetchAutoExitCandidates(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+        minSeverity: minSeverity,
+      );
+      return ActionResult(
+        success: true,
+        message: strings.autoExitCandidatesRefreshed(
+          autoExitCandidates!.summary.candidateCount,
+        ),
+      );
+    } catch (e) {
+      autoExitCandidatesError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(autoExitCandidatesError!),
+      );
+    } finally {
+      autoExitCandidatesLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshPositionLifecycle({
     bool silent = false,
     String status = 'all',
@@ -1981,6 +2022,59 @@ class DashboardController extends ChangeNotifier {
     try {
       final result = await apiClient.runPositionSellPreflight(
         symbol: position.symbol,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      latestPositionSellPreflight = result;
+      latestGuardedPositionSellResult = null;
+      return ActionResult(
+        success: !result.isBlocked,
+        message: strings.sellPreflightCompletedMessage(
+          result.preflightStatus,
+          result.primaryBlockReason,
+        ),
+      );
+    } catch (e) {
+      positionSellPreflightError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionSellPreflightError!),
+      );
+    } finally {
+      positionSellPreflightLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutoExitCandidateSellPreflight(
+    AutoExitCandidate candidate,
+  ) async {
+    if (!candidate.canRunSellPreflight) {
+      return ActionResult(
+        success: false,
+        message: strings.sellPreflightBlockedForCandidate(
+          candidate.syncRequired
+              ? strings.syncRequired
+              : candidate.openSellOrderConflict
+                  ? strings.duplicateSellOrder
+                  : candidate.primaryReason,
+        ),
+      );
+    }
+    if (positionSellPreflightLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.sellPreflightAlreadyRunning,
+      );
+    }
+    positionSellPreflightLoading = true;
+    positionSellPreflightError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runPositionSellPreflight(
+        symbol: candidate.symbol,
+        provider: candidate.provider,
+        market: candidate.market,
         language: appLanguage.code,
         locale: appLanguage.localeCode,
       );

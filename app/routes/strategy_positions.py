@@ -8,6 +8,7 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.position_lifecycle import PositionLifecycleResponse
+from app.schemas.auto_exit_candidate import AutoExitCandidatesResponse
 from app.schemas.position_exit_review import (
     GuardedPositionSellRequest,
     GuardedPositionSellResponse,
@@ -18,6 +19,7 @@ from app.schemas.position_exit_review import (
 from app.services.position_lifecycle_audit_service import (
     PositionLifecycleAuditService,
 )
+from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
 
 
@@ -36,6 +38,14 @@ def get_position_lifecycle_audit_service() -> PositionLifecycleAuditService:
     return PositionLifecycleAuditService()
 
 
+def get_auto_exit_candidate_service(
+    exit_review_service: PositionExitReviewService = Depends(
+        get_position_exit_review_service
+    ),
+) -> AutoExitCandidateService:
+    return AutoExitCandidateService(exit_review_service)
+
+
 @router.get(
     "/exit-review",
     response_model=PositionExitReviewResponse,
@@ -45,6 +55,29 @@ def get_position_exit_review(
     service: PositionExitReviewService = Depends(get_position_exit_review_service),
 ):
     return service.exit_review(db)
+
+
+@router.get(
+    "/exit-candidates",
+    response_model=AutoExitCandidatesResponse,
+)
+def get_auto_exit_candidates(
+    provider: str | None = Query(default=None, max_length=20),
+    market: str | None = Query(default=None, max_length=10),
+    symbol: str | None = Query(default=None, max_length=20),
+    include_details: bool = Query(default=True),
+    min_severity: str | None = Query(default=None, max_length=20),
+    db: Session = Depends(get_db),
+    service: AutoExitCandidateService = Depends(get_auto_exit_candidate_service),
+):
+    return service.candidates(
+        db,
+        provider=provider,
+        market=market,
+        symbol=symbol,
+        include_details=include_details,
+        min_severity=min_severity,
+    )
 
 
 @router.get(

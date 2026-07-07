@@ -102,9 +102,10 @@ class AgentChatResultSummarizer:
             if primary.result_type in {
                 "strategy_live_auto_exit_readiness",
                 "strategy_live_auto_exit_recent",
-                "strategy_exit_candidate",
             }:
                 return self._strategy_live_auto_exit_answer(primary)
+            if primary.result_type == "strategy_exit_candidate":
+                return self._strategy_exit_candidate_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -165,9 +166,10 @@ class AgentChatResultSummarizer:
                 "strategy_live_auto_buy_recent",
                 "strategy_live_auto_exit_readiness",
                 "strategy_live_auto_exit_recent",
-                "strategy_exit_candidate",
             }:
                 card = self._strategy_card(result)
+            elif result.result_type == "strategy_exit_candidate":
+                card = self._strategy_exit_candidate_card(result)
             elif result.result_type == "analysis":
                 card = self._analysis_card(result)
             else:
@@ -695,6 +697,33 @@ class AgentChatResultSummarizer:
             answer_type="strategy_live_auto_exit_answer",
         )
 
+    def _strategy_exit_candidate_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        candidates = data.get("candidates") if isinstance(data.get("candidates"), list) else []
+        first = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+        text = (
+            f"Auto exit candidates: {summary.get('candidate_count', len(candidates))}. "
+            f"Critical: {summary.get('critical_count', 0)}, "
+            f"warnings: {summary.get('warning_count', 0)}, "
+            f"sync-required: {summary.get('sync_required_count', 0)}. "
+        )
+        if first:
+            text += (
+                f"Primary candidate: {first.get('symbol') or '-'} "
+                f"{first.get('candidate_type') or 'review'}; "
+                f"reason: {first.get('primary_reason') or '-'}; "
+                f"next safe action: {first.get('next_safe_action') or 'review only'}. "
+            )
+        text += "This chat lookup did not run sell preflight or execute a sell order."
+        return AgentChatAnswer(
+            text=text,
+            answer_type="strategy_exit_candidate_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -906,6 +935,37 @@ class AgentChatResultSummarizer:
             primary_value=str(analysis.get("action") or "review").upper(),
             badges=["SAFE ANALYSIS", "NO ORDER", "NO VALIDATION"],
             data=analysis,
+        )
+
+    def _strategy_exit_candidate_card(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatResultCard:
+        data = result.data
+        summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+        candidates = data.get("candidates") if isinstance(data.get("candidates"), list) else []
+        first = candidates[0] if candidates and isinstance(candidates[0], dict) else {}
+        return AgentChatResultCard(
+            card_type="strategy_exit_candidate",
+            title="Auto Exit Candidates",
+            subtitle=f"{str(data.get('provider') or 'kis').upper()} / {data.get('market') or 'KR'}",
+            primary_value=str(summary.get("candidate_count", len(candidates))),
+            badges=[
+                "READ ONLY",
+                "NO LIVE ORDERS",
+                "NO BROKER SUBMIT",
+                "PREFLIGHT HINT ONLY",
+            ],
+            rows=[
+                {"label": "Critical", "value": summary.get("critical_count", 0)},
+                {"label": "Warnings", "value": summary.get("warning_count", 0)},
+                {"label": "Stop-loss", "value": summary.get("stop_loss_count", 0)},
+                {"label": "Take-profit", "value": summary.get("take_profit_count", 0)},
+                {"label": "Sync required", "value": summary.get("sync_required_count", 0)},
+                {"label": "First symbol", "value": first.get("symbol") or "-"},
+                {"label": "First reason", "value": first.get("primary_reason") or "-"},
+            ],
+            data=data,
         )
 
     def _strategy_card(self, result: AgentChatToolResult) -> AgentChatResultCard:

@@ -42,6 +42,17 @@ void main() {
     expect(en.operatorAlertCenter, 'Operator Alert Center');
     expect(en.riskAlerts, 'Risk Alerts');
     expect(en.rejectedOrder, 'Rejected Order');
+    expect(en.autoExitCandidates, 'Auto Exit Candidates');
+    expect(en.positionMonitoring, 'Position Monitoring');
+    expect(en.stopLossCandidate, 'Stop-Loss Candidate');
+    expect(en.takeProfitCandidate, 'Take-Profit Candidate');
+    expect(en.trendBreakdown, 'Trend Breakdown');
+    expect(en.weakMomentum, 'Weak Momentum');
+    expect(en.nearCloseRisk, 'Near-Close Risk');
+    expect(en.duplicateSellOrder, 'Duplicate Sell Order');
+    expect(en.manualReviewRequired, 'Manual Review Required');
+    expect(en.refreshExitCandidates, 'Refresh Exit Candidates');
+    expect(en.autoExitCandidateTypeLabel('sync_required'), 'Sync Required');
     expect(en.operatorReadOnly, 'Read Only');
     expect(en.operatorNoLiveOrders, 'No Live Orders');
     expect(ko.productionReadiness, '운영 준비 점검');
@@ -75,5 +86,7 @@ void main() {
     expect(ko.readinessStatusLabel('blocked'), ko.readinessBlocked);
     expect(ko.operatorAlertCenter, isNotEmpty);
     expect(ko.riskAlerts, isNotEmpty);
+    expect(ko.autoExitCandidates, isNotEmpty);
+    expect(ko.positionMonitoring, isNotEmpty);
   });
 }

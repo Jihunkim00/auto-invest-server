@@ -15,6 +15,7 @@ import '../dashboard/widgets/result_presentation_helpers.dart' as presentation;
 import 'widgets/auto_buy_operations_panel.dart';
 import 'widgets/auto_buy_promotion_queue_panel.dart';
 import 'widgets/auto_buy_scheduler_panel.dart';
+import 'widgets/auto_exit_candidates_panel.dart';
 import 'widgets/daily_ops_summary_panel.dart';
 import 'widgets/operator_alerts_panel.dart';
 import 'widgets/position_lifecycle_panel.dart';
@@ -68,6 +69,7 @@ class _LogsScreenState extends State<LogsScreen> {
       await widget.controller.refreshStrategyAutoBuyOperations(silent: true);
       await widget.controller.refreshStrategyAutoBuyScheduler(silent: true);
       await widget.controller.refreshStrategyAutoBuyPromotions(silent: true);
+      await widget.controller.refreshAutoExitCandidates(silent: true);
       await widget.controller.refreshPositionExitReview(silent: true);
       await widget.controller.refreshPositionLifecycle(silent: true);
 
@@ -139,6 +141,8 @@ class _LogsScreenState extends State<LogsScreen> {
             ProductionReadinessPanel(controller: widget.controller),
             const SizedBox(height: 14),
             AutoBuyOperationsPanel(controller: widget.controller),
+            const SizedBox(height: 14),
+            AutoExitCandidatesPanel(controller: widget.controller),
             const SizedBox(height: 14),
             PositionExitReviewPanel(controller: widget.controller),
             const SizedBox(height: 14),

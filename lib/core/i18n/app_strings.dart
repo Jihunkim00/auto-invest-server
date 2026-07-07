@@ -170,6 +170,68 @@ class AppStrings {
   String get refreshAlerts => isKorean ? '새로고침' : 'Refresh';
   String get operatorReadOnly => isKorean ? '읽기 전용' : 'Read Only';
   String get operatorNoLiveOrders => isKorean ? '실주문 없음' : 'No Live Orders';
+  String get autoExitCandidates =>
+      isKorean ? '자동 청산 후보' : 'Auto Exit Candidates';
+  String get positionMonitoring =>
+      isKorean ? '보유 종목 자동 감시' : 'Position Monitoring';
+  String get stopLossCandidate => isKorean ? '손절 후보' : 'Stop-Loss Candidate';
+  String get takeProfitCandidate =>
+      isKorean ? '익절 후보' : 'Take-Profit Candidate';
+  String get trendBreakdown => isKorean ? '추세 이탈' : 'Trend Breakdown';
+  String get weakMomentum => isKorean ? '모멘텀 약화' : 'Weak Momentum';
+  String get nearCloseRisk => isKorean ? '장마감 리스크' : 'Near-Close Risk';
+  String get duplicateSellOrder =>
+      isKorean ? '중복 매도 주문' : 'Duplicate Sell Order';
+  String get manualReviewRequired =>
+      isKorean ? '수동 검토 필요' : 'Manual Review Required';
+  String get refreshExitCandidates =>
+      isKorean ? '청산 후보 새로고침' : 'Refresh Exit Candidates';
+  String get totalCandidates => isKorean ? '전체 후보' : 'Total Candidates';
+  String get thresholdValues => isKorean ? '임계값' : 'Threshold Values';
+  String get relatedReferences => isKorean ? '관련 참조' : 'Related References';
+  String get autoExitCandidatesAlreadyLoading => isKorean
+      ? '자동 청산 후보를 이미 불러오는 중입니다.'
+      : 'Auto exit candidates are already loading.';
+  String autoExitCandidatesRefreshed(int count) => isKorean
+      ? '자동 청산 후보 새로고침 완료: $count건.'
+      : 'Auto exit candidates refreshed: $count.';
+  String sellPreflightBlockedForCandidate(String reason) => isKorean
+      ? '이 후보는 매도 사전 점검을 실행할 수 없습니다: $reason.'
+      : 'Sell preflight is disabled for this candidate: $reason.';
+  String autoExitCandidateTypeLabel(String type) {
+    switch (type) {
+      case 'stop_loss':
+        return stopLossCandidate;
+      case 'take_profit':
+        return takeProfitCandidate;
+      case 'trend_breakdown':
+        return trendBreakdown;
+      case 'weak_momentum':
+        return weakMomentum;
+      case 'near_close_risk':
+        return nearCloseRisk;
+      case 'duplicate_sell_conflict':
+        return duplicateSellOrder;
+      case 'sync_required':
+        return syncRequired;
+      case 'manual_review':
+        return manualReviewRequired;
+    }
+    return type.replaceAll('_', ' ');
+  }
+
+  String autoExitSeverityLabel(String severity) {
+    switch (severity) {
+      case 'critical':
+        return critical;
+      case 'warning':
+        return warning;
+      case 'info':
+        return info;
+    }
+    return severity;
+  }
+
   String get productionReadiness =>
       isKorean ? '운영 준비 점검' : 'Production Readiness';
   String get productionReadinessRefreshInProgress => isKorean
