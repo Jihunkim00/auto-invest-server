@@ -51,6 +51,7 @@ import '../../models/ops_settings.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
+import '../../models/position_management_dry_run.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -687,6 +688,43 @@ class ApiClient {
       ).toString(),
     );
     return AutoExitCandidates.fromJson(payload);
+  }
+
+  Future<PositionManagementDryRun> fetchPositionManagementDryRunLatest({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/positions/management/dry-run/latest',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return PositionManagementDryRun.fromJson(payload);
+  }
+
+  Future<PositionManagementDryRun> runPositionManagementDryRunOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    bool includeSellPreflight = true,
+  }) async {
+    final normalizedSymbol = symbol?.trim();
+    final payload = await _postJsonBody(
+      '/strategy/positions/management/run-dry-run-once',
+      {
+        'provider': provider,
+        'market': market,
+        'trigger_source': 'manual_position_management_dry_run',
+        'include_sell_preflight': includeSellPreflight,
+        if (normalizedSymbol != null && normalizedSymbol.isNotEmpty)
+          'symbol': normalizedSymbol,
+      },
+    );
+    return PositionManagementDryRun.fromJson(payload);
   }
 
   Future<PositionSellPreflightResult> runPositionSellPreflight({

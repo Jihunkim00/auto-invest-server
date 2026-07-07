@@ -352,6 +352,16 @@ _DEFAULT_TOOLS = [
         description="Read-only held-position exit candidate lookup. It never validates or submits orders.",
     ),
     AgentChatToolDefinition(
+        tool_name="position_management_dry_run_latest_lookup",
+        display_name="Position Management Dry-Run Latest",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only lookup for the latest position management dry-run result. It never starts a run, validates a live order, or submits orders.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_profile_change_prepare",
         display_name="Strategy Profile Change Prepare",
         mode="prefill_only",

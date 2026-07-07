@@ -53,6 +53,16 @@ void main() {
     expect(en.manualReviewRequired, 'Manual Review Required');
     expect(en.refreshExitCandidates, 'Refresh Exit Candidates');
     expect(en.autoExitCandidateTypeLabel('sync_required'), 'Sync Required');
+    expect(en.positionManagementDryRun, 'Position Management Dry-Run');
+    expect(en.positionsFirst, 'Positions First');
+    expect(en.autoExitCandidateCheck, 'Auto Exit Candidate Check');
+    expect(en.dryRunOnly, 'DRY-RUN ONLY');
+    expect(en.noSellExecution, 'No Sell Execution');
+    expect(en.positionsChecked, 'Positions Checked');
+    expect(en.exitCandidates, 'Exit Candidates');
+    expect(en.criticalCandidates, 'Critical Candidates');
+    expect(en.runPositionManagementDryRunOnce,
+        'Run Position Management Dry-Run Once');
     expect(en.operatorReadOnly, 'Read Only');
     expect(en.operatorNoLiveOrders, 'No Live Orders');
     expect(ko.productionReadiness, '운영 준비 점검');
@@ -88,5 +98,7 @@ void main() {
     expect(ko.riskAlerts, isNotEmpty);
     expect(ko.autoExitCandidates, isNotEmpty);
     expect(ko.positionMonitoring, isNotEmpty);
+    expect(ko.positionManagementDryRun, isNotEmpty);
+    expect(ko.positionsFirst, isNotEmpty);
   });
 }

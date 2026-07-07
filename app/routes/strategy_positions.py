@@ -9,6 +9,10 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.position_lifecycle import PositionLifecycleResponse
 from app.schemas.auto_exit_candidate import AutoExitCandidatesResponse
+from app.schemas.position_management_dry_run import (
+    PositionManagementDryRunRequest,
+    PositionManagementDryRunResponse,
+)
 from app.schemas.position_exit_review import (
     GuardedPositionSellRequest,
     GuardedPositionSellResponse,
@@ -20,6 +24,9 @@ from app.services.position_lifecycle_audit_service import (
     PositionLifecycleAuditService,
 )
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
+from app.services.position_management_dry_run_service import (
+    PositionManagementDryRunService,
+)
 from app.services.position_exit_review_service import PositionExitReviewService
 
 
@@ -44,6 +51,17 @@ def get_auto_exit_candidate_service(
     ),
 ) -> AutoExitCandidateService:
     return AutoExitCandidateService(exit_review_service)
+
+
+def get_position_management_dry_run_service(
+    exit_review_service: PositionExitReviewService = Depends(
+        get_position_exit_review_service
+    ),
+) -> PositionManagementDryRunService:
+    return PositionManagementDryRunService(
+        auto_exit_candidates=AutoExitCandidateService(exit_review_service),
+        exit_review_service=exit_review_service,
+    )
 
 
 @router.get(
@@ -78,6 +96,36 @@ def get_auto_exit_candidates(
         include_details=include_details,
         min_severity=min_severity,
     )
+
+
+@router.post(
+    "/management/run-dry-run-once",
+    response_model=PositionManagementDryRunResponse,
+)
+def run_position_management_dry_run_once(
+    payload: PositionManagementDryRunRequest | None = None,
+    db: Session = Depends(get_db),
+    service: PositionManagementDryRunService = Depends(
+        get_position_management_dry_run_service
+    ),
+):
+    request = payload or PositionManagementDryRunRequest()
+    return service.run_once(db, request, require_enabled=False)
+
+
+@router.get(
+    "/management/dry-run/latest",
+    response_model=PositionManagementDryRunResponse,
+)
+def get_latest_position_management_dry_run(
+    provider: str = Query(default="kis", max_length=20),
+    market: str = Query(default="KR", max_length=10),
+    db: Session = Depends(get_db),
+    service: PositionManagementDryRunService = Depends(
+        get_position_management_dry_run_service
+    ),
+):
+    return service.latest(db, provider=provider, market=market)
 
 
 @router.get(

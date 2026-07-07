@@ -570,7 +570,7 @@ class PositionExitReviewService:
         return sanitize_kis_payload(response)
 
     def _snapshot(self, db: Session) -> dict[str, Any]:
-        runtime = self.runtime_settings.get_settings(db)
+        runtime = self.runtime_settings.get_settings_read_only(db)
         settings = self.client.settings
         positions, positions_error = self._read_positions()
         open_orders, open_orders_error = self._read_open_orders()

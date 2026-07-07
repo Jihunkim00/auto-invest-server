@@ -12,6 +12,11 @@ from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
+from app.services.position_management_dry_run_service import (
+    PositionManagementDryRunService,
+)
+from app.services.auto_exit_candidate_service import AutoExitCandidateService
+from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_auto_buy_scheduler_service import (
     StrategyAutoBuySchedulerService,
@@ -29,6 +34,11 @@ class SchedulerService:
         self.runtime_settings = RuntimeSettingService()
         self.watchlist_run_service = WatchlistRunService()
         self.strategy_auto_buy_scheduler_service = StrategyAutoBuySchedulerService()
+        self.position_management_slots = [
+            ("position_management_dry_run_open_phase", 9, 0),
+            ("position_management_dry_run_midday", 10, 25),
+            ("position_management_dry_run_before_close", 14, 25),
+        ]
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._slot_runs: set[str] = set()
@@ -88,6 +98,13 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_kr_scheduled_once(slot_name)
+
+            for slot_name, hour, minute in self.position_management_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:position_management_dry_run:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_position_management_dry_run_scheduled_once(slot_name)
 
             for slot_name, hour, minute in self._strategy_auto_buy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
@@ -222,6 +239,32 @@ class SchedulerService:
                     "trigger_source": "strategy_auto_buy_dry_run",
                     "scheduler_slot": slot_name,
                 },
+            )
+        finally:
+            db.close()
+
+    def _run_position_management_dry_run_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            settings_obj = get_settings()
+            kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+            exit_review_service = PositionExitReviewService(
+                kis_client,
+                runtime_settings=self.runtime_settings,
+            )
+            return PositionManagementDryRunService(
+                auto_exit_candidates=AutoExitCandidateService(exit_review_service),
+                exit_review_service=exit_review_service,
+                runtime_settings=self.runtime_settings,
+            ).run_once(
+                db,
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "trigger_source": "position_management_dry_run",
+                    "scheduler_slot": slot_name,
+                },
+                require_enabled=True,
             )
         finally:
             db.close()

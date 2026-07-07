@@ -198,6 +198,29 @@ class AppStrings {
   String sellPreflightBlockedForCandidate(String reason) => isKorean
       ? '이 후보는 매도 사전 점검을 실행할 수 없습니다: $reason.'
       : 'Sell preflight is disabled for this candidate: $reason.';
+  String get positionManagementDryRun =>
+      isKorean ? '포지션 자동관리 드라이런' : 'Position Management Dry-Run';
+  String get positionsFirst => isKorean ? '보유 종목 우선 점검' : 'Positions First';
+  String get autoExitCandidateCheck =>
+      isKorean ? '자동 청산 후보 점검' : 'Auto Exit Candidate Check';
+  String get noSellExecution => isKorean ? '매도 실행 없음' : 'No Sell Execution';
+  String get positionsChecked => isKorean ? '점검 포지션' : 'Positions Checked';
+  String get exitCandidates => isKorean ? '청산 후보' : 'Exit Candidates';
+  String get criticalCandidates => isKorean ? '중요 후보' : 'Critical Candidates';
+  String get latestRunResult => isKorean ? '최근 실행 결과' : 'Latest Run Result';
+  String get runPositionManagementDryRunOnce =>
+      isKorean ? '포지션 자동관리 드라이런 1회 실행' : 'Run Position Management Dry-Run Once';
+  String get refreshPositionManagementDryRun =>
+      isKorean ? '포지션 자동관리 드라이런 새로고침' : 'Refresh Position Management Dry-Run';
+  String get positionManagementDryRunAlreadyLoading => isKorean
+      ? '포지션 자동관리 드라이런을 이미 불러오는 중입니다.'
+      : 'Position management dry-run is already loading.';
+  String positionManagementDryRunRefreshed(int count) => isKorean
+      ? '포지션 자동관리 드라이런 새로고침 완료: 청산 후보 $count건.'
+      : 'Position management dry-run refreshed: $count exit candidates.';
+  String positionManagementDryRunCompleted(String status, int count) => isKorean
+      ? '포지션 자동관리 드라이런 완료: $status / 청산 후보 $count건.'
+      : 'Position management dry-run completed: $status / $count exit candidates.';
   String autoExitCandidateTypeLabel(String type) {
     switch (type) {
       case 'stop_loss':

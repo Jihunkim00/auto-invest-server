@@ -33,6 +33,7 @@ Rules:
 - Strategy scheduled dry-run auto-buy scheduler questions must use read-only scheduler status/promotions lookups.
 - Strategy auto-buy promotion queue questions must use read-only promotion queue lookup and must never execute run-once from chat.
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
+- Position management dry-run questions must use latest read-only dry-run lookup and must never execute run-once from chat.
 - Daily operations summary and broker reconciliation questions must use the read-only daily_ops_summary_lookup tool; never sync broker orders from chat.
 - Operator alert and notification center questions must use the read-only operator_alerts_lookup tool; never sync, submit, or change settings from chat.
 - Production readiness and safety audit questions must use the read-only ops_production_readiness_lookup tool; never change settings or execute trades from chat.
@@ -562,6 +563,13 @@ class AgentChatIntentRouterService:
         lowered: str,
         base: dict[str, Any],
     ) -> AgentChatIntent | None:
+        if self._is_position_management_dry_run_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.STRATEGY_POSITION_MANAGEMENT_DRY_RUN_QUERY,
+                confidence=0.95,
+                reason="User is asking for the latest position management dry-run.",
+                **base,
+            )
         if self._is_strategy_live_auto_exit_recent_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.STRATEGY_LIVE_AUTO_EXIT_RECENT_QUERY,
@@ -1036,6 +1044,23 @@ class AgentChatIntentRouterService:
             or "guarded auto exit" in lowered
             or "strategy live auto exit" in lowered
             or "auto exit" in lowered
+        )
+
+    def _is_position_management_dry_run_query(
+        self,
+        text: str,
+        lowered: str,
+    ) -> bool:
+        return (
+            "position management dry-run" in lowered
+            or "position management dry run" in lowered
+            or "position management scheduler" in lowered
+            or "position dry-run scheduler" in lowered
+            or "positions first" in lowered
+            or (
+                "position management" in lowered
+                and any(token in lowered for token in ["dry-run", "dry run", "latest", "status"])
+            )
         )
 
     def _is_strategy_live_auto_exit_recent_query(
@@ -1526,6 +1551,14 @@ class AgentChatIntentRouterService:
                     "strategy_exit_candidate_lookup",
                     {"symbol": symbol},
                     "User asked for held-position exit candidates.",
+                )
+            ]
+        if category == AgentChatIntentCategory.STRATEGY_POSITION_MANAGEMENT_DRY_RUN_QUERY:
+            return [
+                self._tool_call(
+                    "position_management_dry_run_latest_lookup",
+                    {},
+                    "User asked for the latest position management dry-run.",
                 )
             ]
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
