@@ -97,6 +97,9 @@ class AgentChatIntentCategory(str, Enum):
         "strategy_live_auto_exit_block_reason_query"
     )
     STRATEGY_EXIT_CANDIDATE_QUERY = "strategy_exit_candidate_query"
+    STRATEGY_POSITION_MANAGEMENT_DRY_RUN_QUERY = (
+        "strategy_position_management_dry_run_query"
+    )
     UNSUPPORTED = "unsupported"
     NEEDS_CLARIFICATION = "needs_clarification"
 

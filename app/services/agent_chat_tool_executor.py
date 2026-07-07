@@ -20,6 +20,9 @@ from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
 from app.services.position_exit_review_service import PositionExitReviewService
+from app.services.position_management_dry_run_service import (
+    PositionManagementDryRunService,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.profile_aware_dry_run_auto_buy_service import (
@@ -212,6 +215,8 @@ class AgentChatToolExecutor:
                 return self._strategy_live_auto_exit_recent(db, intent)
             if tool.tool_name == "strategy_exit_candidate_lookup":
                 return self._strategy_exit_candidate(db, call, intent)
+            if tool.tool_name == "position_management_dry_run_latest_lookup":
+                return self._position_management_dry_run_latest(db, intent)
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
@@ -779,6 +784,31 @@ class AgentChatToolExecutor:
             "Held-position exit candidates loaded. No preflight or sell execution ran.",
         )
 
+    def _position_management_dry_run_latest(
+        self,
+        db: Session,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        exit_review = PositionExitReviewService(
+            self.kis_client_factory(db),
+            runtime_settings=self.runtime_setting_service,
+        )
+        data = PositionManagementDryRunService(
+            auto_exit_candidates=AutoExitCandidateService(exit_review),
+            exit_review_service=exit_review,
+            runtime_settings=self.runtime_setting_service,
+        ).latest(
+            db,
+            provider=str(intent.provider or "kis"),
+            market=str(intent.market or "KR"),
+        )
+        return self._success(
+            "position_management_dry_run_latest_lookup",
+            "position_management_dry_run",
+            data,
+            "Latest position management dry-run loaded. Chat did not start a run or submit an order.",
+        )
+
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
         data = {
             "analysis": {
@@ -888,6 +918,7 @@ class AgentChatToolExecutor:
             "strategy_live_auto_exit_readiness_lookup": "strategy_live_auto_exit_readiness",
             "strategy_live_auto_exit_recent_lookup": "strategy_live_auto_exit_recent",
             "strategy_exit_candidate_lookup": "strategy_exit_candidate",
+            "position_management_dry_run_latest_lookup": "position_management_dry_run",
             "watchlist_preview": "analysis",
             "safe_symbol_analysis": "analysis",
         }

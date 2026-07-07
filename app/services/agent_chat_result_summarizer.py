@@ -106,6 +106,8 @@ class AgentChatResultSummarizer:
                 return self._strategy_live_auto_exit_answer(primary)
             if primary.result_type == "strategy_exit_candidate":
                 return self._strategy_exit_candidate_answer(primary)
+            if primary.result_type == "position_management_dry_run":
+                return self._position_management_dry_run_answer(primary)
             if primary.result_type == "analysis":
                 return self._analysis_answer(intent, primary)
 
@@ -170,6 +172,8 @@ class AgentChatResultSummarizer:
                 card = self._strategy_card(result)
             elif result.result_type == "strategy_exit_candidate":
                 card = self._strategy_exit_candidate_card(result)
+            elif result.result_type == "position_management_dry_run":
+                card = self._position_management_dry_run_card(result)
             elif result.result_type == "analysis":
                 card = self._analysis_card(result)
             else:
@@ -724,6 +728,25 @@ class AgentChatResultSummarizer:
             answer_type="strategy_exit_candidate_answer",
         )
 
+    def _position_management_dry_run_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        text = (
+            f"Position management dry-run status: {data.get('result_status') or 'unknown'}. "
+            f"Positions checked: {data.get('positions_checked', 0)}, "
+            f"exit candidates: {data.get('exit_candidate_count', 0)}, "
+            f"critical: {data.get('critical_candidate_count', 0)}, "
+            f"sync-required: {data.get('sync_required_count', 0)}. "
+            f"Primary reason: {data.get('primary_reason') or 'none'}. "
+            "This chat lookup did not start a dry-run, run guarded sell, or submit an order."
+        )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="position_management_dry_run_answer",
+        )
+
     def _analysis_answer(self, intent: AgentChatIntent, result: AgentChatToolResult) -> AgentChatAnswer:
         analysis = result.data.get("analysis") if isinstance(result.data.get("analysis"), dict) else {}
         symbol = analysis.get("symbol") or intent.symbol or "\uc774 \uc885\ubaa9"
@@ -964,6 +987,36 @@ class AgentChatResultSummarizer:
                 {"label": "Sync required", "value": summary.get("sync_required_count", 0)},
                 {"label": "First symbol", "value": first.get("symbol") or "-"},
                 {"label": "First reason", "value": first.get("primary_reason") or "-"},
+            ],
+            data=data,
+        )
+
+    def _position_management_dry_run_card(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatResultCard:
+        data = result.data
+        actions = data.get("next_safe_actions") if isinstance(data.get("next_safe_actions"), list) else []
+        return AgentChatResultCard(
+            card_type="position_management_dry_run",
+            title="Position Management Dry-Run",
+            subtitle=f"{str(data.get('provider') or 'kis').upper()} / {data.get('market') or 'KR'}",
+            primary_value=str(data.get("result_status") or "unknown").upper(),
+            badges=[
+                "DRY-RUN ONLY",
+                "POSITIONS FIRST",
+                "NO LIVE ORDERS",
+                "NO BROKER SUBMIT",
+                "NO SELL EXECUTION",
+            ],
+            rows=[
+                {"label": "Positions checked", "value": data.get("positions_checked", 0)},
+                {"label": "Exit candidates", "value": data.get("exit_candidate_count", 0)},
+                {"label": "Critical", "value": data.get("critical_candidate_count", 0)},
+                {"label": "Sync required", "value": data.get("sync_required_count", 0)},
+                {"label": "Duplicate sells", "value": data.get("duplicate_sell_conflict_count", 0)},
+                {"label": "Primary reason", "value": data.get("primary_reason") or "-"},
+                {"label": "Next safe action", "value": actions[0] if actions else "-"},
             ],
             data=data,
         )

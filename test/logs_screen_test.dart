@@ -13,6 +13,7 @@ import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/operator_alerts.dart';
 import 'package:auto_invest_dashboard/models/position_exit_review.dart';
 import 'package:auto_invest_dashboard/models/position_lifecycle.dart';
+import 'package:auto_invest_dashboard/models/position_management_dry_run.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
@@ -26,7 +27,7 @@ import 'operator_alerts_model_test.dart';
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 8000);
+    tester.view.physicalSize = const Size(1200, 10000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -933,7 +934,7 @@ Future<void> _pumpLogs(
   WidgetTester tester,
   DashboardController controller,
 ) async {
-  tester.view.physicalSize = const Size(1200, 8000);
+  tester.view.physicalSize = const Size(1200, 10000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -1454,6 +1455,19 @@ class _FakeLogsApiClient extends ApiClient {
   }
 
   @override
+  Future<PositionManagementDryRun> fetchPositionManagementDryRunLatest({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    if (throwFetch) {
+      throw const ApiRequestException('logs failed');
+    }
+    return PositionManagementDryRun.fromJson(
+      _positionManagementDryRunJson(provider: provider, market: market),
+    );
+  }
+
+  @override
   Future<PositionLifecycle> fetchPositionLifecycle({
     String? symbol,
     String provider = 'kis',
@@ -1489,6 +1503,48 @@ Map<String, dynamic> _autoExitCandidatesJson() {
       'sync_required_count': 0,
     },
     'safety_flags': const ['read_only', 'no_live_orders'],
+  };
+}
+
+Map<String, dynamic> _positionManagementDryRunJson({
+  String provider = 'kis',
+  String market = 'KR',
+}) {
+  return {
+    'run_id': null,
+    'generated_at': '2026-07-07T00:00:00Z',
+    'provider': provider,
+    'market': market,
+    'trigger_source': 'position_management_dry_run_latest_lookup',
+    'dry_run_only': true,
+    'real_order_submitted': false,
+    'broker_submit_called': false,
+    'manual_submit_called': false,
+    'positions_checked': 0,
+    'exit_candidate_count': 0,
+    'critical_candidate_count': 0,
+    'warning_candidate_count': 0,
+    'simulated_sell_preflight_count': 0,
+    'blocked_preflight_count': 0,
+    'sync_required_count': 0,
+    'duplicate_sell_conflict_count': 0,
+    'result_status': 'skipped',
+    'primary_reason': 'no_recent_position_management_dry_run',
+    'risk_flags': const ['no_recent_run'],
+    'gating_notes': const [
+      'No position management dry-run has been recorded yet.'
+    ],
+    'candidates': const [],
+    'sell_preflight_results': const [],
+    'next_safe_actions': const ['Continue monitoring held positions.'],
+    'priority': 'positions_first',
+    'entry_orders_allowed': false,
+    'exit_orders_allowed': false,
+    'dry_run_monitoring_only': true,
+    'scheduler_enabled': false,
+    'scheduler_dry_run_only': true,
+    'scheduler_allow_live_orders': false,
+    'safety': const {'dry_run_only': true},
   };
 }
 

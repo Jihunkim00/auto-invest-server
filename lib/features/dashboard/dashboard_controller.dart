@@ -56,6 +56,7 @@ import '../../models/operator_alerts.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
+import '../../models/position_management_dry_run.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -371,6 +372,9 @@ class DashboardController extends ChangeNotifier {
   AutoExitCandidates? autoExitCandidates;
   bool autoExitCandidatesLoading = false;
   String? autoExitCandidatesError;
+  PositionManagementDryRun? positionManagementDryRun;
+  bool positionManagementDryRunLoading = false;
+  String? positionManagementDryRunError;
   PositionExitReview? positionExitReview;
   PositionSellPreflightResult? latestPositionSellPreflight;
   GuardedPositionSellResult? latestGuardedPositionSellResult;
@@ -1968,6 +1972,77 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       autoExitCandidatesLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshPositionManagementDryRun({
+    bool silent = false,
+  }) async {
+    if (positionManagementDryRunLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.positionManagementDryRunAlreadyLoading,
+      );
+    }
+    positionManagementDryRunLoading = true;
+    positionManagementDryRunError = null;
+    if (!silent) notifyListeners();
+    try {
+      positionManagementDryRun =
+          await apiClient.fetchPositionManagementDryRunLatest(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+      );
+      return ActionResult(
+        success: true,
+        message: strings.positionManagementDryRunRefreshed(
+          positionManagementDryRun!.exitCandidateCount,
+        ),
+      );
+    } catch (e) {
+      positionManagementDryRunError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionManagementDryRunError!),
+      );
+    } finally {
+      positionManagementDryRunLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runPositionManagementDryRunOnce() async {
+    if (positionManagementDryRunLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.positionManagementDryRunAlreadyLoading,
+      );
+    }
+    positionManagementDryRunLoading = true;
+    positionManagementDryRunError = null;
+    notifyListeners();
+    try {
+      positionManagementDryRun =
+          await apiClient.runPositionManagementDryRunOnce(
+        provider: selectedProviderCode,
+        market: selectedMarketCode,
+      );
+      return ActionResult(
+        success: positionManagementDryRun!.resultStatus != 'error',
+        message: strings.positionManagementDryRunCompleted(
+          positionManagementDryRun!.resultStatus,
+          positionManagementDryRun!.exitCandidateCount,
+        ),
+      );
+    } catch (e) {
+      positionManagementDryRunError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(positionManagementDryRunError!),
+      );
+    } finally {
+      positionManagementDryRunLoading = false;
       notifyListeners();
     }
   }

@@ -485,13 +485,29 @@ class DailyOpsSummaryService:
         promotion_summary: dict[str, Any],
     ) -> dict[str, Any]:
         actions = [self._run_action(row) for row in runs_today]
+        position_management_runs = [
+            row
+            for row in runs_today
+            if "position_management_dry_run" in str(row.mode or "").lower()
+        ]
+        position_payloads = [self._json_obj(row.response_payload) for row in position_management_runs]
         return {
             "scheduler_enabled": bool(
                 settings.get("strategy_auto_buy_scheduler_enabled")
+                or settings.get("position_management_scheduler_enabled")
                 or settings.get("scheduler_enabled")
             ),
             "dry_run_only": bool(settings.get("strategy_auto_buy_scheduler_dry_run_only", True)),
             "run_count_today": len(runs_today),
+            "position_management_dry_run_count": len(position_management_runs),
+            "position_management_exit_candidate_count": sum(
+                int(payload.get("exit_candidate_count") or 0)
+                for payload in position_payloads
+            ),
+            "position_management_critical_candidate_count": sum(
+                int(payload.get("critical_candidate_count") or 0)
+                for payload in position_payloads
+            ),
             "would_buy_count": len([item for item in actions if item == "would_buy"]),
             "hold_count": len([item for item in actions if item == "hold"]),
             "skipped_count": len(
@@ -1038,7 +1054,11 @@ class DailyOpsSummaryService:
                 str(row.response_payload or ""),
             ]
         ).lower()
-        return "strategy_auto_buy_scheduler" in text or "strategy_auto_buy_dry_run" in text
+        return (
+            "strategy_auto_buy_scheduler" in text
+            or "strategy_auto_buy_dry_run" in text
+            or "position_management_dry_run" in text
+        )
 
     def _run_action(self, row: TradeRunLog) -> str:
         payload = self._json_obj(row.response_payload)
