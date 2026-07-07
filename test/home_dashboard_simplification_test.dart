@@ -46,6 +46,8 @@ void main() {
     expect(find.byKey(const ValueKey('strategy-live-auto-exit-card')),
         findsNothing);
     expect(
+        find.byKey(const ValueKey('auto-exit-candidates-panel')), findsNothing);
+    expect(
         find.byKey(const ValueKey('position-lifecycle-panel')), findsNothing);
     expect(find.byKey(const ValueKey('agent-chat-live-auto-buy-status-card')),
         findsNothing);

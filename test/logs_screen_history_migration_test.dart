@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/auto_exit_candidate.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
@@ -164,6 +165,16 @@ class _LogsHistoryApiClient extends ApiClient {
       PositionExitReview.fromJson(_positionExitReviewJson());
 
   @override
+  Future<AutoExitCandidates> fetchAutoExitCandidates({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    bool includeDetails = true,
+    String? minSeverity,
+  }) async =>
+      AutoExitCandidates.fromJson(_autoExitCandidatesJson());
+
+  @override
   Future<PositionLifecycle> fetchPositionLifecycle({
     String? symbol,
     String provider = 'kis',
@@ -173,6 +184,29 @@ class _LogsHistoryApiClient extends ApiClient {
     bool includeEvents = true,
   }) async =>
       PositionLifecycle.fromJson(_positionLifecycleJson());
+}
+
+Map<String, dynamic> _autoExitCandidatesJson() {
+  return {
+    'generated_at': '2026-07-07T00:00:00Z',
+    'timezone': 'Asia/Seoul',
+    'provider': 'kis',
+    'market': 'KR',
+    'candidates': const [],
+    'summary': const {
+      'candidate_count': 0,
+      'critical_count': 0,
+      'warning_count': 0,
+      'info_count': 0,
+      'stop_loss_count': 0,
+      'take_profit_count': 0,
+      'trend_breakdown_count': 0,
+      'manual_review_count': 0,
+      'duplicate_sell_block_count': 0,
+      'sync_required_count': 0,
+    },
+    'safety_flags': const ['read_only', 'no_live_orders'],
+  };
 }
 
 Map<String, dynamic> _positionExitReviewJson() {

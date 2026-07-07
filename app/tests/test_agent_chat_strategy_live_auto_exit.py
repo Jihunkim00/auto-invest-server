@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,6 +27,33 @@ from app.tests.test_strategy_live_auto_exit_service import (
 )
 
 
+class _FakeKisClient:
+    def __init__(self, positions: list[dict]):
+        self.settings = SimpleNamespace(
+            kis_enabled=True,
+            kis_real_order_enabled=True,
+        )
+        self.positions = positions
+
+    def list_positions(self):
+        return list(self.positions)
+
+    def list_open_orders(self):
+        return []
+
+
+def _candidate_position():
+    position = stop_loss_position()
+    cost_basis = position["quantity"] * position["avg_entry_price"]
+    return {
+        **position,
+        "qty": position["quantity"],
+        "available_quantity": position["quantity"],
+        "cost_basis": cost_basis,
+        "unrealized_pl": position["current_value"] - cost_basis,
+    }
+
+
 @pytest.fixture()
 def client(db_session):
     broker = FakeBroker()
@@ -40,6 +69,7 @@ def client(db_session):
         return AgentChatOrchestratorService(
             intent_router=AgentChatIntentRouterService(settings=_router_settings()),
             tool_executor=AgentChatToolExecutor(
+                kis_client_factory=lambda db: _FakeKisClient([_candidate_position()]),
                 live_auto_exit_service_factory=lambda db: chat_live_exit_service,
             ),
         )
@@ -103,7 +133,7 @@ def test_agent_chat_exit_candidate_lookup_is_read_only(client):
     assert body["intent"]["category"] == "strategy_exit_candidate_query"
     assert body["selected_tools"][0]["tool_name"] == "strategy_exit_candidate_lookup"
     assert body["tool_results"][0]["result_type"] == "strategy_exit_candidate"
-    assert body["tool_results"][0]["data"]["candidates"][0]["trigger"] == "stop_loss"
+    assert body["tool_results"][0]["data"]["candidates"][0]["candidate_type"] == "stop_loss"
     assert body["live_order_action"] is None
     assert body["safety"]["validation_called"] is False
     assert broker.calls == []

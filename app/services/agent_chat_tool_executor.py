@@ -13,11 +13,13 @@ from app.db.models import OrderLog, SignalLog, TradeRunLog
 from app.schemas.agent_chat_orchestrator import AgentChatIntent
 from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, AgentChatToolSafety
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
+from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.operator_alerts_service import OperatorAlertsService
 from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
+from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.profile_aware_dry_run_auto_buy_service import (
@@ -757,17 +759,24 @@ class AgentChatToolExecutor:
         intent: AgentChatIntent,
     ) -> AgentChatToolResult:
         symbol = self._kr_numeric_symbol(call, intent)
-        data = self.live_auto_exit_service_factory(db).readiness(
+        data = AutoExitCandidateService(
+            PositionExitReviewService(
+                self.kis_client_factory(db),
+                runtime_settings=self.runtime_setting_service,
+            )
+        ).candidates(
             db,
             provider="kis",
             market="KR",
             symbol=symbol,
+            include_details=bool(call.arguments.get("include_details", True)),
+            min_severity=str(call.arguments.get("min_severity") or "info"),
         )
         return self._success(
             "strategy_exit_candidate_lookup",
             "strategy_exit_candidate",
             data,
-            "Held-position exit candidates loaded. No validation or submit ran.",
+            "Held-position exit candidates loaded. No preflight or sell execution ran.",
         )
 
     def _analysis_stub(self, tool_name: str, result_type: str) -> AgentChatToolResult:
