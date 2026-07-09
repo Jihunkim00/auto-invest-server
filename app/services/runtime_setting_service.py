@@ -26,6 +26,14 @@ KIS_BUY_EXECUTION_FLAGS = (
     "kis_live_auto_buy_enabled",
     "kis_limited_auto_buy_enabled",
 )
+KIS_SELL_EXECUTION_FLAGS = (
+    "auto_sell_live_phase1_enabled",
+    "auto_sell_live_phase1_allow_real_orders",
+    "kis_scheduler_sell_enabled",
+    "kis_scheduler_allow_limited_auto_sell",
+    "kis_live_auto_sell_enabled",
+    "kis_limited_auto_sell_enabled",
+)
 OPERATION_MODE_PRESETS = {
     "safe_mode",
     "dry_run_simulation",
@@ -127,6 +135,15 @@ class RuntimeSettingService:
             "auto_buy_live_phase1_require_production_ready": True,
             "auto_buy_live_phase1_allow_real_orders": False,
             "auto_buy_live_phase1_provider": "kis",
+            "auto_sell_live_phase1_enabled": False,
+            "auto_sell_live_phase1_max_orders_per_day": 1,
+            "auto_sell_live_phase1_allow_real_orders": False,
+            "auto_sell_live_phase1_require_production_ready": True,
+            "auto_sell_live_phase1_provider": "kis",
+            "auto_sell_live_phase1_allowed_candidate_types": json.dumps(
+                ["stop_loss", "take_profit", "trend_breakdown", "weak_momentum"],
+                ensure_ascii=False,
+            ),
             "strategy_auto_buy_scheduler_enabled": False,
             "strategy_auto_buy_scheduler_dry_run_only": True,
             "strategy_auto_buy_scheduler_allow_live_orders": False,
@@ -401,6 +418,24 @@ class RuntimeSettingService:
             ),
             "auto_buy_live_phase1_provider": str(
                 row.auto_buy_live_phase1_provider or "kis"
+            ),
+            "auto_sell_live_phase1_enabled": bool(
+                row.auto_sell_live_phase1_enabled
+            ),
+            "auto_sell_live_phase1_max_orders_per_day": int(
+                row.auto_sell_live_phase1_max_orders_per_day
+            ),
+            "auto_sell_live_phase1_allow_real_orders": bool(
+                row.auto_sell_live_phase1_allow_real_orders
+            ),
+            "auto_sell_live_phase1_require_production_ready": bool(
+                row.auto_sell_live_phase1_require_production_ready
+            ),
+            "auto_sell_live_phase1_provider": str(
+                row.auto_sell_live_phase1_provider or "kis"
+            ),
+            "auto_sell_live_phase1_allowed_candidate_types": _decode_candidate_types(
+                row.auto_sell_live_phase1_allowed_candidate_types
             ),
             "strategy_auto_buy_scheduler_enabled": bool(
                 row.strategy_auto_buy_scheduler_enabled
@@ -759,6 +794,10 @@ class RuntimeSettingService:
         )
         live_auto_sell_enabled = bool(settings["kis_live_auto_sell_enabled"])
         limited_auto_sell_enabled = bool(settings["kis_limited_auto_sell_enabled"])
+        phase1_sell_enabled = bool(settings.get("auto_sell_live_phase1_enabled"))
+        phase1_sell_allow_real_orders = bool(
+            settings.get("auto_sell_live_phase1_allow_real_orders")
+        )
         stop_loss_enabled = bool(
             settings["kis_limited_auto_stop_loss_enabled"]
             or settings["kis_limited_auto_sell_stop_loss_enabled"]
@@ -784,10 +823,12 @@ class RuntimeSettingService:
             or bool(settings["kis_scheduler_buy_enabled"])
             or bool(settings["kis_scheduler_allow_limited_auto_buy"])
         )
+        phase1_sell_requested = bool(phase1_sell_enabled or phase1_sell_allow_real_orders)
         live_requested = bool(
             scheduler_live_requested
             or live_auto_sell_enabled
             or limited_auto_sell_enabled
+            or phase1_sell_requested
             or buy_gate_enabled
         )
         scheduler_path_enabled = bool(
@@ -799,6 +840,9 @@ class RuntimeSettingService:
             and scheduler_allow_limited_auto_sell
             and live_auto_sell_enabled
             and sell_gate_enabled
+        )
+        phase1_sell_execution_configured = bool(
+            phase1_sell_enabled and phase1_sell_allow_real_orders
         )
         kis_enabled = bool(getattr(self.settings, "kis_enabled", False))
         kis_real_order_enabled = bool(
@@ -814,10 +858,21 @@ class RuntimeSettingService:
             and kis_real_order_enabled
         )
         live_sell_armed = bool(sell_execution_configured and real_order_prereqs_met)
+        phase1_sell_armed = bool(
+            phase1_sell_execution_configured
+            and not dry_run
+            and not kill_switch
+            and kis_enabled
+            and kis_real_order_enabled
+        )
+        live_sell_armed = bool(live_sell_armed or phase1_sell_armed)
         live_buy_armed = bool(
             buy_gate_enabled and not dry_run and not kill_switch and kis_enabled
         )
-        sell_only_mode = bool(sell_execution_configured and not buy_gate_enabled)
+        sell_only_mode = bool(
+            (sell_execution_configured or phase1_sell_execution_configured)
+            and not buy_gate_enabled
+        )
 
         daily_live_order_limit = max(
             0,
@@ -860,6 +915,11 @@ class RuntimeSettingService:
         ):
             risky_flags.append("auto_buy_live_phase1_max_orders_per_day_high")
         if (
+            int(settings["auto_sell_live_phase1_max_orders_per_day"] or 0)
+            > CONSERVATIVE_LIVE_ORDER_LIMIT
+        ):
+            risky_flags.append("auto_sell_live_phase1_max_orders_per_day_high")
+        if (
             float(settings["kis_limited_auto_sell_max_notional_pct"] or 0)
             > CONSERVATIVE_MAX_NOTIONAL_PCT
         ):
@@ -896,6 +956,10 @@ class RuntimeSettingService:
                 blocking_flags.append("kis_disabled")
             if scheduler_live_requested and not kis_real_order_enabled:
                 blocking_flags.append("kis_real_order_disabled")
+            if phase1_sell_requested and not kis_enabled:
+                blocking_flags.append("kis_disabled")
+            if phase1_sell_requested and not kis_real_order_enabled:
+                blocking_flags.append("kis_real_order_disabled")
         blocking_flags = _dedupe(blocking_flags)
 
         all_live_flags_off = not any(
@@ -909,6 +973,8 @@ class RuntimeSettingService:
                 limited_auto_sell_enabled,
                 stop_loss_enabled,
                 take_profit_enabled,
+                phase1_sell_enabled,
+                phase1_sell_allow_real_orders,
                 buy_gate_enabled,
             ]
         )
@@ -1028,6 +1094,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled",
                 "auto_buy_live_phase1_enabled",
                 "auto_buy_live_phase1_allow_real_orders",
+                "auto_sell_live_phase1_enabled",
+                "auto_sell_live_phase1_allow_real_orders",
             )
         )
         if not bool(settings["dry_run"]) and not scheduler_live_flags:
@@ -1664,6 +1732,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1696,6 +1766,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1724,6 +1796,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1751,6 +1825,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1779,6 +1855,8 @@ class RuntimeSettingService:
                     "strategy_live_auto_buy_scheduler_enabled": False,
                     "auto_buy_live_phase1_enabled": False,
                     "auto_buy_live_phase1_allow_real_orders": False,
+                    "auto_sell_live_phase1_enabled": False,
+                    "auto_sell_live_phase1_allow_real_orders": False,
                     "strategy_live_auto_exit_enabled": False,
                     "strategy_live_auto_exit_scheduler_enabled": False,
                     "position_management_scheduler_enabled": False,
@@ -1895,6 +1973,12 @@ class RuntimeSettingService:
             "auto_buy_live_phase1_require_production_ready",
             "auto_buy_live_phase1_allow_real_orders",
             "auto_buy_live_phase1_provider",
+            "auto_sell_live_phase1_enabled",
+            "auto_sell_live_phase1_max_orders_per_day",
+            "auto_sell_live_phase1_allow_real_orders",
+            "auto_sell_live_phase1_require_production_ready",
+            "auto_sell_live_phase1_provider",
+            "auto_sell_live_phase1_allowed_candidate_types",
             "strategy_auto_buy_scheduler_enabled",
             "strategy_auto_buy_scheduler_dry_run_only",
             "strategy_auto_buy_scheduler_allow_live_orders",
@@ -1952,6 +2036,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_allowed_profiles",
             }:
                 value = _encode_profiles(value)
+            if key == "auto_sell_live_phase1_allowed_candidate_types":
+                value = _encode_candidate_types(value)
             if key == "strategy_auto_buy_scheduler_dry_run_only":
                 value = True
             if key == "strategy_auto_buy_scheduler_allow_live_orders":
@@ -1986,6 +2072,7 @@ class RuntimeSettingService:
             payload.setdefault("kis_live_auto_max_orders_per_day", value)
             payload.setdefault("kis_limited_auto_sell_max_orders_per_day", value)
             payload.setdefault("kis_limited_auto_buy_max_orders_per_day", value)
+            payload.setdefault("auto_sell_live_phase1_max_orders_per_day", value)
         if "max_positions" in payload:
             payload.setdefault("max_open_positions", payload["max_positions"])
             payload.setdefault(
@@ -2042,6 +2129,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -2067,6 +2156,8 @@ class RuntimeSettingService:
                 "strategy_live_auto_buy_scheduler_enabled": False,
                 "auto_buy_live_phase1_enabled": False,
                 "auto_buy_live_phase1_allow_real_orders": False,
+                "auto_sell_live_phase1_enabled": False,
+                "auto_sell_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -2245,6 +2336,8 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_buy_allow_aggressive",
         "auto_buy_live_phase1_enabled",
         "auto_buy_live_phase1_allow_real_orders",
+        "auto_sell_live_phase1_enabled",
+        "auto_sell_live_phase1_allow_real_orders",
         "strategy_auto_buy_scheduler_enabled",
         "strategy_auto_buy_scheduler_allow_live_orders",
         "strategy_auto_buy_scheduler_allow_aggressive",
@@ -2279,6 +2372,8 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_buy_allow_aggressive",
         "auto_buy_live_phase1_enabled",
         "auto_buy_live_phase1_allow_real_orders",
+        "auto_sell_live_phase1_enabled",
+        "auto_sell_live_phase1_allow_real_orders",
         "strategy_auto_buy_scheduler_enabled",
         "strategy_auto_buy_scheduler_allow_live_orders",
         "strategy_auto_buy_scheduler_allow_aggressive",
@@ -2316,6 +2411,34 @@ def _encode_profiles(value: Any) -> str:
     if not clean:
         clean = ["safe", "balanced"]
     return json.dumps(clean, ensure_ascii=False)
+
+
+def _decode_candidate_types(value: Any) -> list[str]:
+    allowed = {
+        "stop_loss",
+        "take_profit",
+        "trend_breakdown",
+        "weak_momentum",
+        "near_close_risk",
+    }
+    if isinstance(value, list):
+        raw = value
+    else:
+        try:
+            parsed = json.loads(str(value or "[]"))
+            raw = parsed if isinstance(parsed, list) else []
+        except Exception:
+            raw = []
+    clean = []
+    for item in raw:
+        text = str(item or "").strip().lower()
+        if text in allowed and text not in clean:
+            clean.append(text)
+    return clean or ["stop_loss", "take_profit", "trend_breakdown", "weak_momentum"]
+
+
+def _encode_candidate_types(value: Any) -> str:
+    return json.dumps(_decode_candidate_types(value), ensure_ascii=False)
 
 
 def _kr_day_bounds_utc(now_utc: datetime) -> tuple[datetime, datetime]:

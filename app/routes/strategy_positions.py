@@ -14,6 +14,8 @@ from app.schemas.position_management_dry_run import (
     PositionManagementDryRunResponse,
 )
 from app.schemas.position_exit_review import (
+    AutoSellLivePhase1Response,
+    AutoSellLivePhase1RunRequest,
     GuardedPositionSellRequest,
     GuardedPositionSellResponse,
     PositionExitReviewResponse,
@@ -28,6 +30,10 @@ from app.services.position_management_dry_run_service import (
     PositionManagementDryRunService,
 )
 from app.services.position_exit_review_service import PositionExitReviewService
+from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
+from app.services.profile_aware_guarded_live_auto_exit_service import (
+    ProfileAwareGuardedLiveAutoExitService,
+)
 
 
 router = APIRouter(prefix="/strategy/positions", tags=["strategy-positions"])
@@ -61,6 +67,27 @@ def get_position_management_dry_run_service(
     return PositionManagementDryRunService(
         auto_exit_candidates=AutoExitCandidateService(exit_review_service),
         exit_review_service=exit_review_service,
+    )
+
+
+def get_auto_sell_live_phase1_service(
+    exit_review_service: PositionExitReviewService = Depends(
+        get_position_exit_review_service
+    ),
+) -> AutoSellLivePhase1Service:
+    client = exit_review_service.client
+    runtime_settings = exit_review_service.runtime_settings
+    guarded_exit = ProfileAwareGuardedLiveAutoExitService(
+        client=client,
+        runtime_settings=runtime_settings,
+        positions_loader=lambda session: client.list_positions(),
+        open_orders_loader=lambda session: client.list_open_orders(),
+    )
+    return AutoSellLivePhase1Service(
+        runtime_settings=runtime_settings,
+        auto_exit_candidates=AutoExitCandidateService(exit_review_service),
+        exit_review_service=exit_review_service,
+        guarded_exit_service=guarded_exit,
     )
 
 
@@ -126,6 +153,36 @@ def get_latest_position_management_dry_run(
     ),
 ):
     return service.latest(db, provider=provider, market=market)
+
+
+@router.get(
+    "/auto-sell/live-phase1/status",
+    response_model=AutoSellLivePhase1Response,
+)
+def get_auto_sell_live_phase1_status(
+    provider: str = Query(default="kis", max_length=20),
+    market: str = Query(default="KR", max_length=10),
+    db: Session = Depends(get_db),
+    service: AutoSellLivePhase1Service = Depends(
+        get_auto_sell_live_phase1_service
+    ),
+):
+    return service.status(db, provider=provider, market=market)
+
+
+@router.post(
+    "/auto-sell/live-phase1/run-once",
+    response_model=AutoSellLivePhase1Response,
+)
+def run_auto_sell_live_phase1_once(
+    payload: AutoSellLivePhase1RunRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AutoSellLivePhase1Service = Depends(
+        get_auto_sell_live_phase1_service
+    ),
+):
+    request = payload or AutoSellLivePhase1RunRequest()
+    return service.run_once(db, request)
 
 
 @router.get(

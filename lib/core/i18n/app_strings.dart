@@ -146,16 +146,26 @@ class AppStrings {
   String get autoBuyPromotionQueue =>
       isKorean ? '자동매수 프로모션 검토 목록' : 'Auto Buy Promotion Queue';
   String get autoBuyPhase1 => isKorean ? '자동매수 1단계' : 'Auto Buy Phase 1';
+  String get autoSellPhase1 => isKorean ? '자동매도 1단계' : 'Auto Sell Phase 1';
   String get limitedLiveAutoBuy =>
       isKorean ? '제한된 실자동매수' : 'Limited Live Auto Buy';
+  String get limitedLiveAutoSell =>
+      isKorean ? '제한형 실자동매도' : 'Limited Live Auto Sell';
   String get disabledByDefault => isKorean ? '기본 비활성화' : 'Disabled by Default';
   String get maxOnePerDay => isKorean ? '하루 최대 1회' : 'Max 1 Per Day';
   String get readinessRequired => isKorean ? '준비 점검 필요' : 'Readiness Required';
+  String get heldPositionsOnly =>
+      isKorean ? '보유 포지션 전용' : 'Held Positions Only';
+  String get riskReductionOnly =>
+      isKorean ? '리스크 축소 전용' : 'Risk Reduction Only';
   String get liveOrderConditions =>
       isKorean ? '실주문 가능 조건' : 'Live Order Conditions';
   String get autoBuyBlocked => isKorean ? '자동매수 차단됨' : 'Auto Buy Blocked';
   String get autoBuySubmitted => isKorean ? '자동매수 제출됨' : 'Auto Buy Submitted';
   String get autoBuyResult => isKorean ? '자동매수 결과' : 'Auto Buy Result';
+  String get autoSellBlocked => isKorean ? '자동매도 차단됨' : 'Auto Sell Blocked';
+  String get autoSellSubmitted => isKorean ? '자동매도 제출됨' : 'Auto Sell Submitted';
+  String get autoSellResult => isKorean ? '자동매도 결과' : 'Auto Sell Result';
   String get latestRun => isKorean ? '최근 실행' : 'Latest Run';
   String get liveOrderSubmittedTitle =>
       isKorean ? '실주문 제출됨' : 'Live Order Submitted';
@@ -163,8 +173,12 @@ class AppStrings {
   String get noBrokerSubmitTitle => isKorean ? '브로커 제출 없음' : 'No Broker Submit';
   String get refreshAutoBuyPhase1Status =>
       isKorean ? '자동매수 1단계 상태 새로고침' : 'Refresh Phase 1 Status';
+  String get refreshAutoSellPhase1Status =>
+      isKorean ? '자동매도 1단계 상태 새로고침' : 'Refresh Sell Phase 1 Status';
   String get runPhase1AttemptOnce =>
       isKorean ? '1단계 1회 시도' : 'Run Phase 1 Once';
+  String get runPhase1SellAttemptOnce =>
+      isKorean ? '1단계 매도 1회 시도' : 'Run Phase 1 Sell Once';
   String get liveOrderConditionsSummary => isKorean
       ? '명시적으로 활성화되고 dry_run=false, 킬 스위치 해제, KIS 실주문 허용, 운영 준비 완료, 포지션 점검 통과일 때만 제출됩니다.'
       : 'Submits only when explicitly enabled, dry_run=false, kill switch is off, KIS real orders are allowed, production readiness is ready, and position checks pass.';
@@ -178,14 +192,37 @@ class AppStrings {
       isKorean ? '자동매수 1단계 차단: $reason.' : 'Auto Buy Phase 1 blocked: $reason.';
   String get autoBuyPhase1Submitted =>
       isKorean ? '자동매수 1단계 주문이 제출되었습니다.' : 'Auto Buy Phase 1 order submitted.';
+  String get autoSellPhase1AlreadyLoading => isKorean
+      ? '자동매도 1단계 상태를 이미 불러오는 중입니다.'
+      : 'Auto Sell Phase 1 status is already loading.';
+  String autoSellPhase1Refreshed(String status) => isKorean
+      ? '자동매도 1단계 상태 새로고침 완료: $status.'
+      : 'Auto Sell Phase 1 refreshed: $status.';
+  String autoSellPhase1Blocked(String reason) => isKorean
+      ? '자동매도 1단계 차단: $reason.'
+      : 'Auto Sell Phase 1 blocked: $reason.';
+  String get autoSellPhase1Submitted =>
+      isKorean ? '자동매도 1단계 주문이 제출되었습니다.' : 'Auto Sell Phase 1 order submitted.';
   String get selectedPromotion => isKorean ? '선택된 프로모션' : 'Selected Promotion';
+  String get selectedExitCandidate =>
+      isKorean ? '선택된 청산 후보' : 'Selected Exit Candidate';
   String get selectedSymbol => isKorean ? '선택 종목' : 'Selected Symbol';
+  String get candidateType => isKorean ? '후보 유형' : 'Candidate Type';
+  String get candidateSeverity => isKorean ? '후보 심각도' : 'Candidate Severity';
+  String get sellPreflightStatus =>
+      isKorean ? '매도 사전 점검 상태' : 'Sell Preflight Status';
   String get dailyLimit => isKorean ? '일일 한도' : 'Daily Limit';
   String get usedRemaining => isKorean ? '사용 / 남음' : 'Used / Remaining';
   String get maxAllowedNotional =>
       isKorean ? '허용 최대 주문금액' : 'Max Allowed Notional';
   String get noAutoBuyYet =>
       isKorean ? '아직 자동매수 실행 내역이 없습니다.' : 'No auto-buy run yet.';
+  String get noAutoSellYet =>
+      isKorean ? '아직 자동매도 실행 내역이 없습니다.' : 'No auto-sell run yet.';
+  String get exitCandidateRequired =>
+      isKorean ? '청산 후보 필요' : 'Exit Candidate Required';
+  String get stopLossTakeProfitCandidate =>
+      isKorean ? '손절/익절 후보' : 'Stop-Loss / Take-Profit Candidate';
   String promotionTraceCount(int count) {
     if (isKorean) return '프로모션 추적 $count건';
     return '$count promotion trace${count == 1 ? '' : 's'}';
@@ -761,6 +798,15 @@ class AppStrings {
         positionsFirst,
         readinessRequired,
         noLiveScheduler,
+        noAutoRetryTitle,
+      ];
+
+  List<String> get autoSellPhase1Badges => [
+        disabledByDefault,
+        maxOnePerDay,
+        heldPositionsOnly,
+        riskReductionOnly,
+        readinessRequired,
         noAutoRetryTitle,
       ];
 
