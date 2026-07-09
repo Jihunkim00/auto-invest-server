@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.da
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
 import 'package:auto_invest_dashboard/models/auto_exit_candidate.dart';
 import 'package:auto_invest_dashboard/models/auto_buy_live_phase1.dart';
+import 'package:auto_invest_dashboard/models/auto_sell_live_phase1.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
 import 'package:auto_invest_dashboard/models/log_items.dart';
@@ -17,6 +18,7 @@ import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
 
 import 'auto_buy_live_phase1_model_test.dart';
+import 'auto_sell_live_phase1_model_test.dart';
 import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
@@ -150,6 +152,13 @@ class _LogsHistoryApiClient extends ApiClient {
     String market = 'KR',
   }) async =>
       AutoBuyLivePhase1Result.fromJson(autoBuyLivePhase1Json());
+
+  @override
+  Future<AutoSellLivePhase1Result> fetchAutoSellLivePhase1Status({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async =>
+      AutoSellLivePhase1Result.fromJson(autoSellLivePhase1Json());
 
   @override
   Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({

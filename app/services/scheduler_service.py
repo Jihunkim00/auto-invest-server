@@ -13,6 +13,7 @@ from app.db.database import SessionLocal
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
+from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
 from app.services.position_management_dry_run_service import (
     PositionManagementDryRunService,
 )
@@ -24,6 +25,9 @@ from app.services.strategy_auto_buy_scheduler_service import (
 )
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
+)
+from app.services.profile_aware_guarded_live_auto_exit_service import (
+    ProfileAwareGuardedLiveAutoExitService,
 )
 from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.target_aware_risk_service import TargetAwareRiskService
@@ -237,11 +241,14 @@ class SchedulerService:
     def _run_strategy_auto_buy_dry_run_scheduled_once(self, slot_name: str):
         db = SessionLocal()
         try:
-            phase1_requested = self._phase1_scheduler_hook_requested(db)
+            buy_phase1_requested = self._phase1_scheduler_hook_requested(db)
+            sell_phase1_requested = self._auto_sell_phase1_scheduler_hook_requested(db)
+            phase1_requested = buy_phase1_requested or sell_phase1_requested
             kis_client = None
             auto_exit_candidates = None
             position_management_service = None
             position_result = None
+            exit_review_service = None
             if phase1_requested:
                 settings_obj = get_settings()
                 kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
@@ -265,6 +272,37 @@ class SchedulerService:
                     },
                     require_enabled=False,
                 )
+            sell_phase1_result = None
+            if (
+                sell_phase1_requested
+                and kis_client is not None
+                and auto_exit_candidates is not None
+                and exit_review_service is not None
+            ):
+                sell_phase1_result = AutoSellLivePhase1Service(
+                    runtime_settings=self.runtime_settings,
+                    auto_exit_candidates=auto_exit_candidates,
+                    exit_review_service=exit_review_service,
+                    guarded_exit_service=self._phase1_guarded_sell_service(
+                        db,
+                        kis_client,
+                    ),
+                ).run_once(
+                    db,
+                    {
+                        "provider": "kis",
+                        "market": "KR",
+                        "trigger_source": "scheduler_phase1",
+                    },
+                )
+                if self._auto_sell_phase1_should_skip_buy(sell_phase1_result):
+                    return {
+                        "position_management": position_result,
+                        "auto_sell_phase1": sell_phase1_result,
+                        "dry_run": None,
+                        "phase1": None,
+                        "buy_skipped": True,
+                    }
             dry_result = self.strategy_auto_buy_scheduler_service.run_dry_run_once(
                 db,
                 {
@@ -276,7 +314,7 @@ class SchedulerService:
             )
             phase1_result = None
             if (
-                phase1_requested
+                buy_phase1_requested
                 and kis_client is not None
                 and auto_exit_candidates is not None
                 and position_management_service is not None
@@ -298,8 +336,16 @@ class SchedulerService:
             if phase1_result is not None:
                 return {
                     "position_management": position_result,
+                    "auto_sell_phase1": sell_phase1_result,
                     "dry_run": dry_result,
                     "phase1": phase1_result,
+                }
+            if sell_phase1_result is not None:
+                return {
+                    "position_management": position_result,
+                    "auto_sell_phase1": sell_phase1_result,
+                    "dry_run": dry_result,
+                    "phase1": None,
                 }
             return dry_result
         finally:
@@ -314,6 +360,35 @@ class SchedulerService:
             and not settings.get("dry_run")
             and not settings.get("kill_switch")
             and getattr(app_settings, "kis_real_order_enabled", False)
+        )
+
+    def _auto_sell_phase1_scheduler_hook_requested(self, db) -> bool:
+        settings = self.runtime_settings.get_settings_read_only(db)
+        app_settings = get_settings()
+        return bool(
+            settings.get("auto_sell_live_phase1_enabled")
+            and settings.get("auto_sell_live_phase1_allow_real_orders")
+            and not settings.get("dry_run")
+            and not settings.get("kill_switch")
+            and getattr(app_settings, "kis_real_order_enabled", False)
+        )
+
+    def _auto_sell_phase1_should_skip_buy(self, result: dict | None) -> bool:
+        if not isinstance(result, dict):
+            return False
+        status = str(result.get("result_status") or "")
+        if status in {"submitted", "filled", "pending_sync"}:
+            return True
+        return bool(
+            str(result.get("candidate_severity") or "") == "critical"
+            and status
+            in {
+                "blocked",
+                "dry_run_blocked",
+                "rejected",
+                "error",
+                "pending_sync",
+            }
         )
 
     def _phase1_guarded_buy_service(self, db, kis_client: KisClient):
@@ -335,6 +410,14 @@ class SchedulerService:
             target_risk_service=target_risk,
             positions_loader=positions,
             balance_loader=balance,
+            open_orders_loader=lambda session: kis_client.list_open_orders(),
+        )
+
+    def _phase1_guarded_sell_service(self, db, kis_client: KisClient):
+        return ProfileAwareGuardedLiveAutoExitService(
+            client=kis_client,
+            runtime_settings=self.runtime_settings,
+            positions_loader=lambda session: kis_client.list_positions(),
             open_orders_loader=lambda session: kis_client.list_open_orders(),
         )
 

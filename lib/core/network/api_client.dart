@@ -16,6 +16,7 @@ import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_buy_live_phase1.dart';
+import '../../models/auto_sell_live_phase1.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/agent_live_prefill.dart';
@@ -966,6 +967,49 @@ class ApiClient {
       },
     );
     return AutoBuyLivePhase1Result.fromJson(payload);
+  }
+
+  Future<AutoSellLivePhase1Result> fetchAutoSellLivePhase1Status({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/positions/auto-sell/live-phase1/status',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return AutoSellLivePhase1Result.fromJson(payload);
+  }
+
+  Future<AutoSellLivePhase1Result> runAutoSellLivePhase1Once({
+    String provider = 'kis',
+    String market = 'KR',
+    String? symbol,
+    String? candidateId,
+    String triggerSource = 'manual_phase1_test',
+    String language = 'ko',
+    String locale = 'ko-KR',
+    bool confirmPhase1Run = true,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/positions/auto-sell/live-phase1/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        if (symbol != null && symbol.trim().isNotEmpty) 'symbol': symbol.trim(),
+        if (candidateId != null && candidateId.trim().isNotEmpty)
+          'candidate_id': candidateId.trim(),
+        'trigger_source': triggerSource,
+        'language': language,
+        'locale': locale,
+        'confirm_phase1_run': confirmPhase1Run,
+      },
+    );
+    return AutoSellLivePhase1Result.fromJson(payload);
   }
 
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({

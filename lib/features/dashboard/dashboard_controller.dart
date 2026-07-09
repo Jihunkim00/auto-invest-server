@@ -22,6 +22,7 @@ import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_exit_candidate.dart';
+import '../../models/auto_sell_live_phase1.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -354,6 +355,10 @@ class DashboardController extends ChangeNotifier {
   AutoBuyLivePhase1Result? autoBuyLivePhase1Result;
   bool autoBuyLivePhase1Loading = false;
   String? autoBuyLivePhase1Error;
+  AutoSellLivePhase1Result? autoSellLivePhase1Status;
+  AutoSellLivePhase1Result? autoSellLivePhase1Result;
+  bool autoSellLivePhase1Loading = false;
+  String? autoSellLivePhase1Error;
   List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
   bool strategyAutoBuyPromotionsLoading = false;
   String? strategyAutoBuyPromotionsError;
@@ -2576,6 +2581,100 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       autoBuyLivePhase1Loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAutoSellLivePhase1({
+    bool silent = false,
+  }) async {
+    if (autoSellLivePhase1Loading) {
+      return ActionResult(
+        success: false,
+        message: strings.autoSellPhase1AlreadyLoading,
+      );
+    }
+    autoSellLivePhase1Loading = true;
+    autoSellLivePhase1Error = null;
+    if (!silent) notifyListeners();
+    try {
+      autoSellLivePhase1Status = await apiClient.fetchAutoSellLivePhase1Status(
+        provider: 'kis',
+        market: 'KR',
+      );
+      return ActionResult(
+        success: true,
+        message: strings.autoSellPhase1Refreshed(
+          strings.statusLabel(autoSellLivePhase1Status!.resultStatus),
+        ),
+      );
+    } catch (e) {
+      autoSellLivePhase1Error = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(autoSellLivePhase1Error!),
+      );
+    } finally {
+      autoSellLivePhase1Loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutoSellLivePhase1Once() async {
+    if (autoSellLivePhase1Loading) {
+      return ActionResult(
+        success: false,
+        message: strings.autoSellPhase1AlreadyLoading,
+      );
+    }
+    autoSellLivePhase1Loading = true;
+    autoSellLivePhase1Error = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runAutoSellLivePhase1Once(
+        provider: 'kis',
+        market: 'KR',
+        triggerSource: 'manual_phase1_test',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+        confirmPhase1Run: true,
+      );
+      autoSellLivePhase1Result = result;
+      autoSellLivePhase1Status = result;
+      final refreshes = await Future.wait<Object>([
+        apiClient.fetchAutoExitCandidates(
+          provider: 'kis',
+          market: 'KR',
+          includeDetails: true,
+        ),
+        apiClient.fetchPositionManagementDryRunLatest(
+          provider: 'kis',
+          market: 'KR',
+        ),
+        apiClient.fetchAutoSellLivePhase1Status(
+          provider: 'kis',
+          market: 'KR',
+        ),
+      ]);
+      autoExitCandidates = refreshes[0] as AutoExitCandidates;
+      positionManagementDryRun = refreshes[1] as PositionManagementDryRun;
+      autoSellLivePhase1Status = refreshes[2] as AutoSellLivePhase1Result;
+      return ActionResult(
+        success: result.submitted,
+        message: result.submitted
+            ? strings.autoSellPhase1Submitted
+            : strings.autoSellPhase1Blocked(
+                result.primaryBlockReason ?? result.resultStatus,
+              ),
+      );
+    } catch (e) {
+      autoSellLivePhase1Error = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(autoSellLivePhase1Error!),
+      );
+    } finally {
+      autoSellLivePhase1Loading = false;
       notifyListeners();
     }
   }

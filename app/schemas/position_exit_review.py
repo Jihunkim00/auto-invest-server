@@ -160,3 +160,83 @@ class GuardedPositionSellResponse(BaseModel):
     internal_status: str | None = None
     sanitized_broker_payload: dict[str, Any] | None = None
     safety: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutoSellLivePhase1RunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = "kis"
+    market: str = "KR"
+    symbol: str | None = Field(default=None, max_length=20)
+    candidate_id: str | None = Field(default=None, max_length=160)
+    trigger_source: str = Field(default="manual_phase1_test", max_length=80)
+    language: str | None = Field(default=None, max_length=20)
+    locale: str | None = Field(default=None, max_length=20)
+    confirm_phase1_run: bool | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def normalize_phase1_provider(cls, value: str) -> str:
+        provider = str(value or "").strip().lower()
+        if provider != "kis":
+            raise ValueError("auto-sell live phase1 supports provider=kis only.")
+        return provider
+
+    @field_validator("market")
+    @classmethod
+    def normalize_phase1_market(cls, value: str) -> str:
+        market = str(value or "").strip().upper()
+        if market != "KR":
+            raise ValueError("auto-sell live phase1 supports market=KR only.")
+        return market
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_phase1_symbol(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        symbol = str(value).strip().upper()
+        if symbol.isdigit() and len(symbol) < 6:
+            return symbol.zfill(6)
+        return symbol or None
+
+    @field_validator("trigger_source")
+    @classmethod
+    def normalize_trigger_source(cls, value: str) -> str:
+        text = str(value or "").strip()
+        return text or "manual_phase1_test"
+
+
+class AutoSellLivePhase1Response(BaseModel):
+    run_id: int | None = None
+    generated_at: str
+    provider: str = "kis"
+    market: str = "KR"
+    trigger_source: str
+    automation_phase: str = "phase1_auto_sell"
+    auto_sell_live_enabled: bool
+    result_status: str
+    real_order_submitted: bool = False
+    broker_submit_called: bool = False
+    manual_submit_called: bool = False
+    selected_candidate_id: str | None = None
+    selected_symbol: str | None = None
+    candidate_type: str | None = None
+    candidate_severity: str | None = None
+    production_readiness_status: str | None = None
+    sell_preflight_status: str | None = None
+    order_id: int | None = None
+    broker_order_id: str | None = None
+    kis_odno: str | None = None
+    submitted_quantity: float | None = None
+    submitted_notional: float | None = None
+    available_quantity: float | None = None
+    daily_auto_sell_count: int = 0
+    daily_auto_sell_limit: int = 1
+    risk_flags: list[str] = Field(default_factory=list)
+    gating_notes: list[str] = Field(default_factory=list)
+    checklist: list[dict[str, Any]] = Field(default_factory=list)
+    primary_block_reason: str | None = None
+    next_safe_action: str
+    latest_run: dict[str, Any] | None = None
+    safety: dict[str, Any] = Field(default_factory=dict)
