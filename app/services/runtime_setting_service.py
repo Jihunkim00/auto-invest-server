@@ -19,6 +19,8 @@ NY_TZ = ZoneInfo("America/New_York")
 CONSERVATIVE_LIVE_ORDER_LIMIT = 1
 CONSERVATIVE_MAX_NOTIONAL_PCT = 0.03
 KIS_BUY_EXECUTION_FLAGS = (
+    "auto_buy_live_phase1_enabled",
+    "auto_buy_live_phase1_allow_real_orders",
     "kis_scheduler_buy_enabled",
     "kis_scheduler_allow_limited_auto_buy",
     "kis_live_auto_buy_enabled",
@@ -118,6 +120,13 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit": True,
             "strategy_live_auto_buy_block_after_target_hit": True,
             "strategy_live_auto_buy_scheduler_enabled": False,
+            "auto_buy_live_phase1_enabled": False,
+            "auto_buy_live_phase1_max_orders_per_day": 1,
+            "auto_buy_live_phase1_max_notional_pct": 0.03,
+            "auto_buy_live_phase1_max_notional_krw": 50000.0,
+            "auto_buy_live_phase1_require_production_ready": True,
+            "auto_buy_live_phase1_allow_real_orders": False,
+            "auto_buy_live_phase1_provider": "kis",
             "strategy_auto_buy_scheduler_enabled": False,
             "strategy_auto_buy_scheduler_dry_run_only": True,
             "strategy_auto_buy_scheduler_allow_live_orders": False,
@@ -372,6 +381,27 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_scheduler_enabled": bool(
                 row.strategy_live_auto_buy_scheduler_enabled
             ),
+            "auto_buy_live_phase1_enabled": bool(
+                row.auto_buy_live_phase1_enabled
+            ),
+            "auto_buy_live_phase1_max_orders_per_day": int(
+                row.auto_buy_live_phase1_max_orders_per_day
+            ),
+            "auto_buy_live_phase1_max_notional_pct": float(
+                row.auto_buy_live_phase1_max_notional_pct
+            ),
+            "auto_buy_live_phase1_max_notional_krw": float(
+                row.auto_buy_live_phase1_max_notional_krw
+            ),
+            "auto_buy_live_phase1_require_production_ready": bool(
+                row.auto_buy_live_phase1_require_production_ready
+            ),
+            "auto_buy_live_phase1_allow_real_orders": bool(
+                row.auto_buy_live_phase1_allow_real_orders
+            ),
+            "auto_buy_live_phase1_provider": str(
+                row.auto_buy_live_phase1_provider or "kis"
+            ),
             "strategy_auto_buy_scheduler_enabled": bool(
                 row.strategy_auto_buy_scheduler_enabled
             ),
@@ -542,6 +572,7 @@ class RuntimeSettingService:
                 float(settings["kis_live_auto_max_notional_pct"] or 0),
                 float(settings["kis_limited_auto_sell_max_notional_pct"] or 0),
                 float(settings["kis_limited_auto_buy_max_notional_pct"] or 0),
+                float(settings["auto_buy_live_phase1_max_notional_pct"] or 0),
             ),
             1.0,
         )
@@ -824,6 +855,11 @@ class RuntimeSettingService:
         ):
             risky_flags.append("kis_live_auto_max_orders_per_day_high")
         if (
+            int(settings["auto_buy_live_phase1_max_orders_per_day"] or 0)
+            > CONSERVATIVE_LIVE_ORDER_LIMIT
+        ):
+            risky_flags.append("auto_buy_live_phase1_max_orders_per_day_high")
+        if (
             float(settings["kis_limited_auto_sell_max_notional_pct"] or 0)
             > CONSERVATIVE_MAX_NOTIONAL_PCT
         ):
@@ -833,6 +869,11 @@ class RuntimeSettingService:
             > CONSERVATIVE_MAX_NOTIONAL_PCT
         ):
             risky_flags.append("kis_live_auto_max_notional_pct_high")
+        if (
+            float(settings["auto_buy_live_phase1_max_notional_pct"] or 0)
+            > CONSERVATIVE_MAX_NOTIONAL_PCT
+        ):
+            risky_flags.append("auto_buy_live_phase1_max_notional_pct_high")
         risky_flags = _dedupe(risky_flags)
 
         blocking_flags: list[str] = []
@@ -985,6 +1026,8 @@ class RuntimeSettingService:
                 "kis_live_auto_sell_enabled",
                 "kis_live_auto_buy_enabled",
                 "kis_limited_auto_buy_enabled",
+                "auto_buy_live_phase1_enabled",
+                "auto_buy_live_phase1_allow_real_orders",
             )
         )
         if not bool(settings["dry_run"]) and not scheduler_live_flags:
@@ -1619,6 +1662,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1649,6 +1694,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1675,6 +1722,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1700,6 +1749,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -1726,6 +1777,8 @@ class RuntimeSettingService:
                     "kis_limited_auto_buy_enabled": True,
                     "strategy_live_auto_buy_enabled": False,
                     "strategy_live_auto_buy_scheduler_enabled": False,
+                    "auto_buy_live_phase1_enabled": False,
+                    "auto_buy_live_phase1_allow_real_orders": False,
                     "strategy_live_auto_exit_enabled": False,
                     "strategy_live_auto_exit_scheduler_enabled": False,
                     "position_management_scheduler_enabled": False,
@@ -1835,6 +1888,13 @@ class RuntimeSettingService:
             "strategy_live_auto_buy_block_after_loss_limit",
             "strategy_live_auto_buy_block_after_target_hit",
             "strategy_live_auto_buy_scheduler_enabled",
+            "auto_buy_live_phase1_enabled",
+            "auto_buy_live_phase1_max_orders_per_day",
+            "auto_buy_live_phase1_max_notional_pct",
+            "auto_buy_live_phase1_max_notional_krw",
+            "auto_buy_live_phase1_require_production_ready",
+            "auto_buy_live_phase1_allow_real_orders",
+            "auto_buy_live_phase1_provider",
             "strategy_auto_buy_scheduler_enabled",
             "strategy_auto_buy_scheduler_dry_run_only",
             "strategy_auto_buy_scheduler_allow_live_orders",
@@ -1980,6 +2040,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -2003,6 +2065,8 @@ class RuntimeSettingService:
                 "kis_limited_auto_buy_enabled": False,
                 "strategy_live_auto_buy_enabled": False,
                 "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
@@ -2179,6 +2243,8 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "auto_buy_live_phase1_enabled",
+        "auto_buy_live_phase1_allow_real_orders",
         "strategy_auto_buy_scheduler_enabled",
         "strategy_auto_buy_scheduler_allow_live_orders",
         "strategy_auto_buy_scheduler_allow_aggressive",
@@ -2211,6 +2277,8 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_buy_scheduler_enabled",
         "strategy_live_auto_buy_allow_aggressive",
+        "auto_buy_live_phase1_enabled",
+        "auto_buy_live_phase1_allow_real_orders",
         "strategy_auto_buy_scheduler_enabled",
         "strategy_auto_buy_scheduler_allow_live_orders",
         "strategy_auto_buy_scheduler_allow_aggressive",

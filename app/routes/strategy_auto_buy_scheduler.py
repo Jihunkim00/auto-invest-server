@@ -3,9 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 from app.db.database import get_db
+from app.routes.strategy_live import get_profile_aware_guarded_live_auto_buy_service
 from app.routes.strategy_dry_run import get_profile_aware_dry_run_auto_buy_service
 from app.schemas.strategy_auto_buy_scheduler import (
+    AutoBuyLivePhase1Response,
+    AutoBuyLivePhase1RunRequest,
     StrategyAutoBuyPromotionActionResponse,
     StrategyAutoBuyPromotionMarkConvertedRequest,
     StrategyAutoBuyPromotionsResponse,
@@ -15,6 +21,12 @@ from app.schemas.strategy_auto_buy_scheduler import (
 )
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
+)
+from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
+from app.services.auto_exit_candidate_service import AutoExitCandidateService
+from app.services.position_exit_review_service import PositionExitReviewService
+from app.services.position_management_dry_run_service import (
+    PositionManagementDryRunService,
 )
 from app.services.strategy_auto_buy_promotion_service import (
     StrategyAutoBuyPromotionService,
@@ -48,6 +60,31 @@ def get_strategy_auto_buy_scheduler_service(
     )
 
 
+def get_auto_buy_live_phase1_service(
+    db: Session = Depends(get_db),
+    guarded_buy_service=Depends(
+        get_profile_aware_guarded_live_auto_buy_service
+    ),
+    promotion_service: StrategyAutoBuyPromotionService = Depends(
+        get_strategy_auto_buy_promotion_service
+    ),
+) -> AutoBuyLivePhase1Service:
+    settings = get_settings()
+    kis_client = KisClient(settings, KisAuthManager(settings, db))
+    exit_review_service = PositionExitReviewService(kis_client)
+    auto_exit_candidates = AutoExitCandidateService(exit_review_service)
+    position_management_service = PositionManagementDryRunService(
+        auto_exit_candidates=auto_exit_candidates,
+        exit_review_service=exit_review_service,
+    )
+    return AutoBuyLivePhase1Service(
+        guarded_buy_service=guarded_buy_service,
+        promotion_service=promotion_service,
+        auto_exit_candidates=auto_exit_candidates,
+        position_management_service=position_management_service,
+    )
+
+
 @router.get("/scheduler/status", response_model=StrategyAutoBuySchedulerStatusResponse)
 def get_strategy_auto_buy_scheduler_status(
     provider: str = Query(default="kis", max_length=20),
@@ -72,6 +109,31 @@ def run_strategy_auto_buy_scheduler_dry_run_once(
     ),
 ):
     return service.run_dry_run_once(db, payload)
+
+
+@router.get(
+    "/live-phase1/status",
+    response_model=AutoBuyLivePhase1Response,
+)
+def get_auto_buy_live_phase1_status(
+    provider: str = Query(default="kis", max_length=20),
+    market: str = Query(default="KR", max_length=10),
+    db: Session = Depends(get_db),
+    service: AutoBuyLivePhase1Service = Depends(get_auto_buy_live_phase1_service),
+):
+    return service.status(db, provider=provider, market=market)
+
+
+@router.post(
+    "/live-phase1/run-once",
+    response_model=AutoBuyLivePhase1Response,
+)
+def run_auto_buy_live_phase1_once(
+    payload: AutoBuyLivePhase1RunRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AutoBuyLivePhase1Service = Depends(get_auto_buy_live_phase1_service),
+):
+    return service.run_once(db, payload)
 
 
 @router.get("/promotions", response_model=StrategyAutoBuyPromotionsResponse)

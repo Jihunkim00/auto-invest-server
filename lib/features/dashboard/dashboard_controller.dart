@@ -20,6 +20,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_runtime_monitor.dart';
+import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
@@ -349,6 +350,10 @@ class DashboardController extends ChangeNotifier {
   StrategyAutoBuySchedulerRunResult? strategyAutoBuySchedulerRunResult;
   bool strategyAutoBuySchedulerLoading = false;
   String? strategyAutoBuySchedulerError;
+  AutoBuyLivePhase1Result? autoBuyLivePhase1Status;
+  AutoBuyLivePhase1Result? autoBuyLivePhase1Result;
+  bool autoBuyLivePhase1Loading = false;
+  String? autoBuyLivePhase1Error;
   List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
   bool strategyAutoBuyPromotionsLoading = false;
   String? strategyAutoBuyPromotionsError;
@@ -2482,6 +2487,95 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       strategyAutoBuySchedulerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAutoBuyLivePhase1({
+    bool silent = false,
+  }) async {
+    if (autoBuyLivePhase1Loading) {
+      return ActionResult(
+        success: false,
+        message: strings.autoBuyPhase1AlreadyLoading,
+      );
+    }
+    autoBuyLivePhase1Loading = true;
+    autoBuyLivePhase1Error = null;
+    if (!silent) notifyListeners();
+    try {
+      autoBuyLivePhase1Status = await apiClient.fetchAutoBuyLivePhase1Status(
+        provider: 'kis',
+        market: 'KR',
+      );
+      return ActionResult(
+        success: true,
+        message: strings.autoBuyPhase1Refreshed(
+          strings.statusLabel(autoBuyLivePhase1Status!.resultStatus),
+        ),
+      );
+    } catch (e) {
+      autoBuyLivePhase1Error = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(autoBuyLivePhase1Error!),
+      );
+    } finally {
+      autoBuyLivePhase1Loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutoBuyLivePhase1Once() async {
+    if (autoBuyLivePhase1Loading) {
+      return ActionResult(
+        success: false,
+        message: strings.autoBuyPhase1AlreadyLoading,
+      );
+    }
+    autoBuyLivePhase1Loading = true;
+    autoBuyLivePhase1Error = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runAutoBuyLivePhase1Once(
+        provider: 'kis',
+        market: 'KR',
+        triggerSource: 'manual_phase1_test',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+        confirmPhase1Run: true,
+      );
+      autoBuyLivePhase1Result = result;
+      autoBuyLivePhase1Status = result;
+      final refreshes = await Future.wait<Object>([
+        apiClient.fetchStrategyAutoBuyPromotions(status: 'all'),
+        apiClient.fetchStrategyAutoBuyOperationsStatus(),
+        apiClient.fetchAutoBuyLivePhase1Status(
+          provider: 'kis',
+          market: 'KR',
+        ),
+      ]);
+      strategyAutoBuyPromotions =
+          (refreshes[0] as StrategyAutoBuyPromotions).items;
+      strategyAutoBuyOperationsStatus =
+          refreshes[1] as StrategyAutoBuyOperationsStatus;
+      autoBuyLivePhase1Status = refreshes[2] as AutoBuyLivePhase1Result;
+      return ActionResult(
+        success: result.submitted,
+        message: result.submitted
+            ? strings.autoBuyPhase1Submitted
+            : strings.autoBuyPhase1Blocked(
+                result.primaryBlockReason ?? result.resultStatus,
+              ),
+      );
+    } catch (e) {
+      autoBuyLivePhase1Error = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(autoBuyLivePhase1Error!),
+      );
+    } finally {
+      autoBuyLivePhase1Loading = false;
       notifyListeners();
     }
   }

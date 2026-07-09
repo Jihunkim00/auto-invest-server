@@ -55,6 +55,14 @@ void main() {
     expect(en.autoExitCandidateTypeLabel('sync_required'), 'Sync Required');
     expect(en.positionManagementDryRun, 'Position Management Dry-Run');
     expect(en.positionsFirst, 'Positions First');
+    expect(en.autoBuyPhase1, 'Auto Buy Phase 1');
+    expect(en.limitedLiveAutoBuy, 'Limited Live Auto Buy');
+    expect(en.disabledByDefault, 'Disabled by Default');
+    expect(en.maxOnePerDay, 'Max 1 Per Day');
+    expect(en.readinessRequired, 'Readiness Required');
+    expect(en.refreshAutoBuyPhase1Status, 'Refresh Phase 1 Status');
+    expect(en.runPhase1AttemptOnce, 'Run Phase 1 Once');
+    expect(en.autoBuyPhase1Badges, contains(en.noAutoRetryTitle));
     expect(en.autoExitCandidateCheck, 'Auto Exit Candidate Check');
     expect(en.dryRunOnly, 'DRY-RUN ONLY');
     expect(en.noSellExecution, 'No Sell Execution');
