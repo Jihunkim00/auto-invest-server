@@ -145,6 +145,47 @@ class AppStrings {
   String get autoBuyScheduler => isKorean ? '자동매수 스케줄러' : 'Auto Buy Scheduler';
   String get autoBuyPromotionQueue =>
       isKorean ? '자동매수 프로모션 검토 목록' : 'Auto Buy Promotion Queue';
+  String get autoBuyPhase1 => isKorean ? '자동매수 1단계' : 'Auto Buy Phase 1';
+  String get limitedLiveAutoBuy =>
+      isKorean ? '제한된 실자동매수' : 'Limited Live Auto Buy';
+  String get disabledByDefault => isKorean ? '기본 비활성화' : 'Disabled by Default';
+  String get maxOnePerDay => isKorean ? '하루 최대 1회' : 'Max 1 Per Day';
+  String get readinessRequired => isKorean ? '준비 점검 필요' : 'Readiness Required';
+  String get liveOrderConditions =>
+      isKorean ? '실주문 가능 조건' : 'Live Order Conditions';
+  String get autoBuyBlocked => isKorean ? '자동매수 차단됨' : 'Auto Buy Blocked';
+  String get autoBuySubmitted => isKorean ? '자동매수 제출됨' : 'Auto Buy Submitted';
+  String get autoBuyResult => isKorean ? '자동매수 결과' : 'Auto Buy Result';
+  String get latestRun => isKorean ? '최근 실행' : 'Latest Run';
+  String get liveOrderSubmittedTitle =>
+      isKorean ? '실주문 제출됨' : 'Live Order Submitted';
+  String get noAutoRetryTitle => isKorean ? '자동 재시도 없음' : 'No Auto Retry';
+  String get noBrokerSubmitTitle => isKorean ? '브로커 제출 없음' : 'No Broker Submit';
+  String get refreshAutoBuyPhase1Status =>
+      isKorean ? '자동매수 1단계 상태 새로고침' : 'Refresh Phase 1 Status';
+  String get runPhase1AttemptOnce =>
+      isKorean ? '1단계 1회 시도' : 'Run Phase 1 Once';
+  String get liveOrderConditionsSummary => isKorean
+      ? '명시적으로 활성화되고 dry_run=false, 킬 스위치 해제, KIS 실주문 허용, 운영 준비 완료, 포지션 점검 통과일 때만 제출됩니다.'
+      : 'Submits only when explicitly enabled, dry_run=false, kill switch is off, KIS real orders are allowed, production readiness is ready, and position checks pass.';
+  String get autoBuyPhase1AlreadyLoading => isKorean
+      ? '자동매수 1단계 상태를 이미 불러오는 중입니다.'
+      : 'Auto Buy Phase 1 status is already loading.';
+  String autoBuyPhase1Refreshed(String status) => isKorean
+      ? '자동매수 1단계 상태 새로고침 완료: $status.'
+      : 'Auto Buy Phase 1 refreshed: $status.';
+  String autoBuyPhase1Blocked(String reason) =>
+      isKorean ? '자동매수 1단계 차단: $reason.' : 'Auto Buy Phase 1 blocked: $reason.';
+  String get autoBuyPhase1Submitted =>
+      isKorean ? '자동매수 1단계 주문이 제출되었습니다.' : 'Auto Buy Phase 1 order submitted.';
+  String get selectedPromotion => isKorean ? '선택된 프로모션' : 'Selected Promotion';
+  String get selectedSymbol => isKorean ? '선택 종목' : 'Selected Symbol';
+  String get dailyLimit => isKorean ? '일일 한도' : 'Daily Limit';
+  String get usedRemaining => isKorean ? '사용 / 남음' : 'Used / Remaining';
+  String get maxAllowedNotional =>
+      isKorean ? '허용 최대 주문금액' : 'Max Allowed Notional';
+  String get noAutoBuyYet =>
+      isKorean ? '아직 자동매수 실행 내역이 없습니다.' : 'No auto-buy run yet.';
   String promotionTraceCount(int count) {
     if (isKorean) return '프로모션 추적 $count건';
     return '$count promotion trace${count == 1 ? '' : 's'}';
@@ -714,6 +755,15 @@ class AppStrings {
         noAutoRetry,
       ];
 
+  List<String> get autoBuyPhase1Badges => [
+        disabledByDefault,
+        maxOnePerDay,
+        positionsFirst,
+        readinessRequired,
+        noLiveScheduler,
+        noAutoRetryTitle,
+      ];
+
   String brokerName(String value) {
     return brokerFullDisplayName(value);
   }
@@ -804,11 +854,15 @@ class AppStrings {
       'blocked': '차단됨',
       'skipped': '건너뜀',
       'submitted': '제출됨',
+      'dry_run_blocked': '드라이런 차단',
       'filled': '체결됨',
       'partially_filled': '부분 체결됨',
       'rejected': '거절됨',
       'sync_required': '동기화 필요',
       'pending_sync': '동기화 필요',
+      'production_ready': '운영 준비 완료',
+      'warning': '주의',
+      'error': '오류',
       'would_buy': '매수 후보',
       'hold': '보류',
       'ready': '준비됨',

@@ -15,6 +15,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/auto_exit_candidate.dart';
+import '../../models/auto_buy_live_phase1.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/agent_live_prefill.dart';
@@ -925,6 +926,46 @@ class ApiClient {
       },
     );
     return StrategyAutoBuySchedulerRunResult.fromJson(payload);
+  }
+
+  Future<AutoBuyLivePhase1Result> fetchAutoBuyLivePhase1Status({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/strategy/auto-buy/live-phase1/status',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return AutoBuyLivePhase1Result.fromJson(payload);
+  }
+
+  Future<AutoBuyLivePhase1Result> runAutoBuyLivePhase1Once({
+    String provider = 'kis',
+    String market = 'KR',
+    int? promotionId,
+    String triggerSource = 'manual_phase1_test',
+    String language = 'ko',
+    String locale = 'ko-KR',
+    bool confirmPhase1Run = true,
+  }) async {
+    final payload = await _postJsonBody(
+      '/strategy/auto-buy/live-phase1/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        if (promotionId != null) 'promotion_id': promotionId,
+        'trigger_source': triggerSource,
+        'language': language,
+        'locale': locale,
+        'confirm_phase1_run': confirmPhase1Run,
+      },
+    );
+    return AutoBuyLivePhase1Result.fromJson(payload);
   }
 
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({

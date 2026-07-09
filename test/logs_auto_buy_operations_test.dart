@@ -13,10 +13,12 @@ import 'package:auto_invest_dashboard/models/operator_alerts.dart';
 import 'package:auto_invest_dashboard/models/position_exit_review.dart';
 import 'package:auto_invest_dashboard/models/position_lifecycle.dart';
 import 'package:auto_invest_dashboard/models/position_management_dry_run.dart';
+import 'package:auto_invest_dashboard/models/auto_buy_live_phase1.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_operations.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_promotion.dart';
 import 'package:auto_invest_dashboard/models/strategy_auto_buy_scheduler.dart';
 
+import 'auto_buy_live_phase1_model_test.dart';
 import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
@@ -102,6 +104,13 @@ class _LogsAutoBuyOpsApiClient extends ApiClient {
     operationsCalls += 1;
     return StrategyAutoBuyOperationsStatus.fromJson(autoBuyOperationsJson());
   }
+
+  @override
+  Future<AutoBuyLivePhase1Result> fetchAutoBuyLivePhase1Status({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async =>
+      AutoBuyLivePhase1Result.fromJson(autoBuyLivePhase1Json());
 
   @override
   Future<StrategyAutoBuySchedulerStatus> fetchStrategyAutoBuySchedulerStatus({

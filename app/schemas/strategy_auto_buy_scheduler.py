@@ -180,3 +180,71 @@ class StrategyAutoBuySchedulerRunResponse(BaseModel):
     broker_submit_called: bool = False
     manual_submit_called: bool = False
     safety: dict[str, Any] = Field(default_factory=dict)
+
+
+class AutoBuyLivePhase1RunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = "kis"
+    market: str = "KR"
+    promotion_id: int | None = Field(default=None, ge=1)
+    trigger_source: str = Field(default="manual_phase1_test", max_length=80)
+    language: str | None = Field(default=None, max_length=20)
+    locale: str | None = Field(default=None, max_length=20)
+    confirm_phase1_run: bool | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def normalize_phase1_provider(cls, value: str) -> str:
+        provider = str(value or "").strip().lower()
+        if provider != "kis":
+            raise ValueError("auto-buy live phase1 supports provider=kis only.")
+        return provider
+
+    @field_validator("market")
+    @classmethod
+    def normalize_phase1_market(cls, value: str) -> str:
+        market = str(value or "").strip().upper()
+        if market != "KR":
+            raise ValueError("auto-buy live phase1 supports market=KR only.")
+        return market
+
+    @field_validator("trigger_source")
+    @classmethod
+    def normalize_trigger_source(cls, value: str) -> str:
+        text = str(value or "").strip()
+        return text or "manual_phase1_test"
+
+
+class AutoBuyLivePhase1Response(BaseModel):
+    run_id: int | None = None
+    generated_at: str
+    provider: str = "kis"
+    market: str = "KR"
+    trigger_source: str
+    automation_phase: str = "phase1_auto_buy"
+    auto_buy_live_enabled: bool
+    result_status: str
+    real_order_submitted: bool = False
+    broker_submit_called: bool = False
+    manual_submit_called: bool = False
+    selected_promotion_id: int | None = None
+    selected_symbol: str | None = None
+    candidate_score: float | None = None
+    production_readiness_status: str | None = None
+    preflight_status: str | None = None
+    order_id: int | None = None
+    broker_order_id: str | None = None
+    kis_odno: str | None = None
+    submitted_quantity: float | None = None
+    submitted_notional: float | None = None
+    max_allowed_notional: float | None = None
+    daily_auto_buy_count: int = 0
+    daily_auto_buy_limit: int = 1
+    risk_flags: list[str] = Field(default_factory=list)
+    gating_notes: list[str] = Field(default_factory=list)
+    checklist: list[dict[str, Any]] = Field(default_factory=list)
+    primary_block_reason: str | None = None
+    next_safe_action: str
+    latest_run: dict[str, Any] | None = None
+    safety: dict[str, Any] = Field(default_factory=dict)
