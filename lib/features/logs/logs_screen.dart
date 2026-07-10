@@ -16,6 +16,7 @@ import 'widgets/auto_buy_operations_panel.dart';
 import 'widgets/auto_buy_live_phase1_panel.dart';
 import 'widgets/auto_buy_promotion_queue_panel.dart';
 import 'widgets/auto_buy_scheduler_panel.dart';
+import 'widgets/automation_mode_status_panel.dart';
 import 'widgets/auto_exit_candidates_panel.dart';
 import 'widgets/auto_sell_live_phase1_panel.dart';
 import 'widgets/daily_ops_summary_panel.dart';
@@ -70,6 +71,7 @@ class _LogsScreenState extends State<LogsScreen> {
       await widget.controller.refreshOperatorAlerts(silent: true);
       await widget.controller.refreshDailyOpsSummary(silent: true);
       await widget.controller.refreshOpsProductionReadiness(silent: true);
+      await widget.controller.refreshAutomationModeStatus(silent: true);
       await widget.controller.refreshPortfolioOrchestrator(silent: true);
       await widget.controller.refreshStrategyAutoBuyOperations(silent: true);
       await widget.controller.refreshAutoBuyLivePhase1(silent: true);
@@ -147,6 +149,8 @@ class _LogsScreenState extends State<LogsScreen> {
             DailyOpsSummaryPanel(controller: widget.controller),
             const SizedBox(height: 14),
             ProductionReadinessPanel(controller: widget.controller),
+            const SizedBox(height: 14),
+            AutomationModeStatusPanel(controller: widget.controller),
             const SizedBox(height: 14),
             AutoBuyOperationsPanel(controller: widget.controller),
             const SizedBox(height: 14),

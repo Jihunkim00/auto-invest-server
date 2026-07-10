@@ -309,6 +309,177 @@ class AppStrings {
   String get refreshAlerts => isKorean ? '새로고침' : 'Refresh';
   String get operatorReadOnly => isKorean ? '읽기 전용' : 'Read Only';
   String get operatorNoLiveOrders => isKorean ? '실주문 없음' : 'No Live Orders';
+  String get automationModeControl =>
+      isKorean ? '자동화 모드 제어' : 'Automation Mode Control';
+  String get automationModeControlSubtitle => isKorean
+      ? '자동화 계층의 모드만 바꾸며 독립 안전 게이트는 그대로 둡니다.'
+      : 'Changes only automation-layer mode flags; independent safety gates remain separate.';
+  String get automationOff => isKorean ? '자동화 끄기' : 'Automation Off';
+  String get monitoringOnly => isKorean ? '모니터링 전용' : 'Monitoring Only';
+  String get dryRunAutomation => isKorean ? '드라이런 자동화' : 'Dry-Run Automation';
+  String get phase1LiveReady => isKorean ? '1단계 실거래 준비' : 'Phase 1 Live Ready';
+  String get liveOrderEligibility =>
+      isKorean ? '실주문 가능 여부' : 'Live Order Eligibility';
+  String get currentMode => isKorean ? '현재 모드' : 'Current Mode';
+  String get effectiveStatus => isKorean ? '적용 상태' : 'Effective Status';
+  String get blockingReasons => isKorean ? '차단 사유' : 'Blocking Reasons';
+  String get warningReasons => isKorean ? '주의 사유' : 'Warning Reasons';
+  String get independentSafetyGatesRequired =>
+      isKorean ? '독립 안전 게이트 필요' : 'Independent Safety Gates Required';
+  String get dryRunIsSeparate =>
+      isKorean ? '드라이런은 별도입니다' : 'Dry-run is separate';
+  String get killSwitchIsSeparate =>
+      isKorean ? '킬 스위치는 별도입니다' : 'Kill switch is separate';
+  String get kisRealOrdersAreSeparate =>
+      isKorean ? 'KIS 실주문 설정은 별도입니다' : 'KIS real orders are separate';
+  String get turnOffAutomation => isKorean ? '자동화 끄기' : 'Turn Off Automation';
+  String get changeWithRiskAcknowledgement =>
+      isKorean ? '위험 인지 후 변경' : 'Change with Risk Acknowledgement';
+  String get selectAutomationMode =>
+      isKorean ? '자동화 모드 선택' : 'Select Automation Mode';
+  String get optionalReason => isKorean ? '선택 사유' : 'Optional Reason';
+  String get operatorRiskAcknowledgement => isKorean
+      ? '운영자가 모드 변경 위험을 확인했습니다.'
+      : 'Operator acknowledges the risks of changing this mode.';
+  String get acknowledgementRequiredForMode => isKorean
+      ? '이 모드는 위험 인지가 필요합니다.'
+      : 'This mode requires risk acknowledgement.';
+  String get automationModeStatusAlreadyLoading => isKorean
+      ? '자동화 모드 상태를 이미 불러오는 중입니다.'
+      : 'Automation mode status is already loading.';
+  String automationModeStatusRefreshed(String status) => isKorean
+      ? '자동화 모드 상태 새로고침 완료: $status.'
+      : 'Automation mode status refreshed: $status.';
+  String automationModeChanged(String mode) =>
+      isKorean ? '자동화 모드 변경 완료: $mode.' : 'Automation mode changed: $mode.';
+  String get automationModeTurnedOff =>
+      isKorean ? '자동화 모드가 꺼졌습니다.' : 'Automation mode turned off.';
+  String get automationModeNotLoaded => isKorean
+      ? '자동화 모드 상태를 아직 불러오지 않았습니다.'
+      : 'Automation mode status not loaded.';
+  String get liveOrdersRemainBlocked => isKorean
+      ? '독립 안전 게이트가 모두 통과할 때까지 실주문은 계속 차단됩니다.'
+      : 'Live orders remain blocked until independent gates pass.';
+  String get automationModeModules =>
+      isKorean ? '자동화 모듈' : 'Automation Modules';
+  String get noBrokerSubmitModeControl =>
+      isKorean ? '브로커 제출 없음' : 'No Broker Submit';
+  String get modeUpdated => isKorean ? '모드 변경 시각' : 'Mode Updated';
+  String automationModeLabel(String mode) {
+    switch (mode.trim().toLowerCase()) {
+      case 'monitor_only':
+        return monitoringOnly;
+      case 'dry_run_auto':
+        return dryRunAutomation;
+      case 'phase1_live_ready':
+        return phase1LiveReady;
+      case 'off':
+      default:
+        return automationOff;
+    }
+  }
+
+  String automationControlLabel(String value) {
+    final normalized = value.trim().toLowerCase();
+    final ko = <String, String>{
+      'off': '꺼짐',
+      'monitoring': '모니터링',
+      'dry_run_ready': '드라이런 준비',
+      'live_ready_blocked': '실거래 준비 차단',
+      'live_ready': '실거래 준비',
+      'automation_mode_off': '자동화 모드 꺼짐',
+      'phase1_live_disabled_in_monitor_only': '모니터링 전용에서 1단계 실거래 차단',
+      'phase1_live_disabled_in_dry_run_auto': '드라이런 자동화에서 1단계 실거래 차단',
+      'dry_run_enabled': '드라이런 켜짐',
+      'kill_switch_enabled': '킬 스위치 켜짐',
+      'kis_disabled': 'KIS 비활성',
+      'kis_real_order_disabled': 'KIS 실주문 비활성',
+      'production_readiness_not_ready': '운영 준비 미완료',
+      'portfolio_orchestrator_disabled': '포트폴리오 오케스트레이터 비활성',
+      'portfolio_orchestrator_live_orders_disabled': '오케스트레이터 실주문 비활성',
+      'auto_buy_live_phase1_disabled': '자동매수 1단계 비활성',
+      'auto_buy_live_phase1_real_orders_disabled': '자동매수 1단계 실주문 비활성',
+      'auto_sell_live_phase1_disabled': '자동매도 1단계 비활성',
+      'auto_sell_live_phase1_real_orders_disabled': '자동매도 1단계 실주문 비활성',
+      'pending_order_blocker_exists': '대기 주문 차단 항목 있음',
+      'sync_required_order_exists': '동기화 필요 주문 있음',
+      'daily_trade_limit_reached': '일일 거래 한도 도달',
+      'dry_run_is_separate': dryRunIsSeparate,
+      'kill_switch_is_separate': killSwitchIsSeparate,
+      'kis_real_orders_are_separate': kisRealOrdersAreSeparate,
+      'production_readiness_needs_review': '운영 준비 상태 검토 필요',
+      'automation_is_off': '자동화가 꺼져 있습니다',
+      'review_monitoring_status': '모니터링 상태 검토',
+      'review_dry_run_results': '드라이런 결과 검토',
+      'run_phase1_orchestrator_only_if_operator_intends':
+          '운영자가 의도할 때만 1단계 오케스트레이터 검토',
+      'review_phase1_live_readiness': '1단계 실거래 준비 상태 검토',
+      'review_dry_run_setting_without_changing_it_here':
+          '여기서 변경하지 말고 드라이런 설정 검토',
+      'review_kill_switch_without_changing_it_here': '여기서 변경하지 말고 킬 스위치 검토',
+      'review_broker_real_order_setting_separately': '브로커 실주문 설정 별도 검토',
+      'review_production_readiness': '운영 준비 상태 검토',
+      'review_pending_orders': '대기 주문 검토',
+      'reconcile_orders_before_live_automation': '실거래 자동화 전 주문 동기화',
+      'wait_for_next_trading_day': '다음 거래일까지 대기',
+      'review_blocking_reasons': '차단 사유 검토',
+    };
+    final en = <String, String>{
+      'off': 'Off',
+      'monitoring': 'Monitoring',
+      'dry_run_ready': 'Dry-run Ready',
+      'live_ready_blocked': 'Live Ready Blocked',
+      'live_ready': 'Live Ready',
+      'automation_mode_off': 'Automation Mode Off',
+      'phase1_live_disabled_in_monitor_only':
+          'Phase 1 live disabled in Monitoring Only',
+      'phase1_live_disabled_in_dry_run_auto':
+          'Phase 1 live disabled in Dry-Run Automation',
+      'dry_run_enabled': 'Dry-run enabled',
+      'kill_switch_enabled': 'Kill switch enabled',
+      'kis_disabled': 'KIS disabled',
+      'kis_real_order_disabled': 'KIS real orders disabled',
+      'production_readiness_not_ready': 'Production readiness not ready',
+      'portfolio_orchestrator_disabled': 'Portfolio orchestrator disabled',
+      'portfolio_orchestrator_live_orders_disabled':
+          'Portfolio orchestrator live orders disabled',
+      'auto_buy_live_phase1_disabled': 'Auto buy Phase 1 disabled',
+      'auto_buy_live_phase1_real_orders_disabled':
+          'Auto buy Phase 1 real orders disabled',
+      'auto_sell_live_phase1_disabled': 'Auto sell Phase 1 disabled',
+      'auto_sell_live_phase1_real_orders_disabled':
+          'Auto sell Phase 1 real orders disabled',
+      'pending_order_blocker_exists': 'Pending order blocker exists',
+      'sync_required_order_exists': 'Sync-required order exists',
+      'daily_trade_limit_reached': 'Daily trade limit reached',
+      'dry_run_is_separate': dryRunIsSeparate,
+      'kill_switch_is_separate': killSwitchIsSeparate,
+      'kis_real_orders_are_separate': kisRealOrdersAreSeparate,
+      'production_readiness_needs_review': 'Production readiness needs review',
+      'automation_is_off': 'Automation is off',
+      'review_monitoring_status': 'Review monitoring status',
+      'review_dry_run_results': 'Review dry-run results',
+      'run_phase1_orchestrator_only_if_operator_intends':
+          'Review Phase 1 orchestrator only if the operator intends',
+      'review_phase1_live_readiness': 'Review Phase 1 live readiness',
+      'review_dry_run_setting_without_changing_it_here':
+          'Review dry-run setting without changing it here',
+      'review_kill_switch_without_changing_it_here':
+          'Review kill switch without changing it here',
+      'review_broker_real_order_setting_separately':
+          'Review broker real-order setting separately',
+      'review_production_readiness': 'Review production readiness',
+      'review_pending_orders': 'Review pending orders',
+      'reconcile_orders_before_live_automation':
+          'Reconcile orders before live automation',
+      'wait_for_next_trading_day': 'Wait for next trading day',
+      'review_blocking_reasons': 'Review blocking reasons',
+    };
+    return isKorean
+        ? (ko[normalized] ?? _automationFallbackLabel(normalized))
+        : (en[normalized] ?? _automationFallbackLabel(normalized));
+  }
+
   String get autoExitCandidates =>
       isKorean ? '자동 청산 후보' : 'Auto Exit Candidates';
   String get positionMonitoring =>
@@ -1001,4 +1172,16 @@ class AppStrings {
   }
 
   String booleanLabel(bool value) => value ? yes : no;
+}
+
+String _automationFallbackLabel(String value) {
+  final words = value
+      .replaceAll('_', ' ')
+      .split(' ')
+      .where((word) => word.trim().isNotEmpty);
+  return words
+      .map((word) => word.length <= 1
+          ? word.toUpperCase()
+          : '${word[0].toUpperCase()}${word.substring(1)}')
+      .join(' ');
 }

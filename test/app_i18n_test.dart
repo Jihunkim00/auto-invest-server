@@ -132,7 +132,36 @@ void main() {
     expect(en.guardedSell, 'Guarded Sell');
     expect(en.databaseStatus, 'Database');
     expect(en.automationUnlockNotAllowed, 'Automation Unlock Not Allowed');
+    expect(en.automationModeControl, 'Automation Mode Control');
+    expect(en.automationOff, 'Automation Off');
+    expect(en.monitoringOnly, 'Monitoring Only');
+    expect(en.dryRunAutomation, 'Dry-Run Automation');
+    expect(en.phase1LiveReady, 'Phase 1 Live Ready');
+    expect(en.liveOrderEligibility, 'Live Order Eligibility');
+    expect(en.currentMode, 'Current Mode');
+    expect(en.effectiveStatus, 'Effective Status');
+    expect(en.blockingReasons, 'Blocking Reasons');
+    expect(en.warningReasons, 'Warning Reasons');
+    expect(en.nextSafeAction, 'Next Safe Action');
+    expect(
+      en.independentSafetyGatesRequired,
+      'Independent Safety Gates Required',
+    );
+    expect(en.dryRunIsSeparate, 'Dry-run is separate');
+    expect(en.killSwitchIsSeparate, 'Kill switch is separate');
+    expect(en.kisRealOrdersAreSeparate, 'KIS real orders are separate');
+    expect(en.turnOffAutomation, 'Turn Off Automation');
+    expect(
+      en.changeWithRiskAcknowledgement,
+      'Change with Risk Acknowledgement',
+    );
+    expect(en.disabledByDefault, 'Disabled by Default');
+    expect(en.automationModeLabel('phase1_live_ready'), 'Phase 1 Live Ready');
+    expect(en.automationControlLabel('dry_run_is_separate'),
+        'Dry-run is separate');
     expect(ko.readinessStatusLabel('blocked'), ko.readinessBlocked);
+    expect(ko.automationModeControl, isNotEmpty);
+    expect(ko.automationControlLabel('automation_mode_off'), isNotEmpty);
     expect(ko.operatorAlertCenter, isNotEmpty);
     expect(ko.riskAlerts, isNotEmpty);
     expect(ko.autoExitCandidates, isNotEmpty);
