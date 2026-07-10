@@ -50,6 +50,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/operator_alerts.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
+import '../../models/portfolio_orchestrator.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
@@ -1010,6 +1011,44 @@ class ApiClient {
       },
     );
     return AutoSellLivePhase1Result.fromJson(payload);
+  }
+
+  Future<PortfolioOrchestratorResult> fetchPortfolioOrchestratorLatest({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/automation/portfolio/latest',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return PortfolioOrchestratorResult.fromJson(payload);
+  }
+
+  Future<PortfolioOrchestratorResult> runPortfolioOrchestratorOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String triggerSource = 'manual_orchestrator_test',
+    String mode = 'dry_run_monitoring',
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/portfolio/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        'trigger_source': triggerSource,
+        'mode': mode,
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return PortfolioOrchestratorResult.fromJson(payload);
   }
 
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({
