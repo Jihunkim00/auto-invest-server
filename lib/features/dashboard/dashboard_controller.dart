@@ -55,6 +55,7 @@ import '../../models/ops_settings.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/operator_alerts.dart';
+import '../../models/portfolio_orchestrator.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
@@ -359,6 +360,10 @@ class DashboardController extends ChangeNotifier {
   AutoSellLivePhase1Result? autoSellLivePhase1Result;
   bool autoSellLivePhase1Loading = false;
   String? autoSellLivePhase1Error;
+  PortfolioOrchestratorResult? portfolioOrchestratorStatus;
+  PortfolioOrchestratorResult? portfolioOrchestratorResult;
+  bool portfolioOrchestratorLoading = false;
+  String? portfolioOrchestratorError;
   List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
   bool strategyAutoBuyPromotionsLoading = false;
   String? strategyAutoBuyPromotionsError;
@@ -2675,6 +2680,91 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       autoSellLivePhase1Loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshPortfolioOrchestrator({
+    bool silent = false,
+  }) async {
+    if (portfolioOrchestratorLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.portfolioOrchestratorAlreadyLoading,
+      );
+    }
+    portfolioOrchestratorLoading = true;
+    portfolioOrchestratorError = null;
+    if (!silent) notifyListeners();
+    try {
+      portfolioOrchestratorStatus =
+          await apiClient.fetchPortfolioOrchestratorLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+      return ActionResult(
+        success: true,
+        message: strings.portfolioOrchestratorRefreshed(
+          strings.statusLabel(portfolioOrchestratorStatus!.resultStatus),
+        ),
+      );
+    } catch (e) {
+      portfolioOrchestratorError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(portfolioOrchestratorError!),
+      );
+    } finally {
+      portfolioOrchestratorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Runs only the orchestrator endpoint in monitoring mode. It does not
+  /// mutate runtime settings or issue follow-up phase-service requests.
+  Future<ActionResult> runPortfolioOrchestratorOnce() async {
+    if (portfolioOrchestratorLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.portfolioOrchestratorAlreadyLoading,
+      );
+    }
+    portfolioOrchestratorLoading = true;
+    portfolioOrchestratorError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runPortfolioOrchestratorOnce(
+        provider: 'kis',
+        market: 'KR',
+        triggerSource: 'manual_orchestrator_test',
+        mode: 'dry_run_monitoring',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      portfolioOrchestratorResult = result;
+      portfolioOrchestratorStatus = result;
+      return ActionResult(
+        success: result.completed,
+        message: result.sellSubmitted
+            ? strings.portfolioOrchestratorSellSubmitted
+            : result.buySubmitted
+                ? strings.portfolioOrchestratorBuySubmitted
+                : result.completed
+                    ? strings.portfolioOrchestratorCompleted(
+                        strings.statusLabel(result.resultStatus),
+                      )
+                    : strings.portfolioOrchestratorBlocked(
+                        result.primaryBlockReason ?? result.resultStatus,
+                      ),
+      );
+    } catch (e) {
+      portfolioOrchestratorError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(portfolioOrchestratorError!),
+      );
+    } finally {
+      portfolioOrchestratorLoading = false;
       notifyListeners();
     }
   }

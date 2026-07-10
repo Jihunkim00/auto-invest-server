@@ -180,6 +180,14 @@ class RuntimeSettingService:
             "position_management_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
             "position_management_scheduler_allow_live_orders": False,
+            "portfolio_orchestrator_enabled": False,
+            "portfolio_orchestrator_allow_live_orders": False,
+            "portfolio_orchestrator_positions_first": True,
+            "portfolio_orchestrator_max_actions_per_run": 1,
+            "portfolio_orchestrator_require_production_ready": True,
+            "portfolio_orchestrator_skip_buy_if_sell_candidate": True,
+            "portfolio_orchestrator_skip_buy_if_sync_required": True,
+            "portfolio_orchestrator_skip_buy_if_exit_critical": True,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -527,6 +535,30 @@ class RuntimeSettingService:
                 row.position_management_scheduler_dry_run_only
             ),
             "position_management_scheduler_allow_live_orders": False,
+            "portfolio_orchestrator_enabled": bool(
+                row.portfolio_orchestrator_enabled
+            ),
+            "portfolio_orchestrator_allow_live_orders": bool(
+                row.portfolio_orchestrator_allow_live_orders
+            ),
+            "portfolio_orchestrator_positions_first": bool(
+                row.portfolio_orchestrator_positions_first
+            ),
+            "portfolio_orchestrator_max_actions_per_run": int(
+                row.portfolio_orchestrator_max_actions_per_run
+            ),
+            "portfolio_orchestrator_require_production_ready": bool(
+                row.portfolio_orchestrator_require_production_ready
+            ),
+            "portfolio_orchestrator_skip_buy_if_sell_candidate": bool(
+                row.portfolio_orchestrator_skip_buy_if_sell_candidate
+            ),
+            "portfolio_orchestrator_skip_buy_if_sync_required": bool(
+                row.portfolio_orchestrator_skip_buy_if_sync_required
+            ),
+            "portfolio_orchestrator_skip_buy_if_exit_critical": bool(
+                row.portfolio_orchestrator_skip_buy_if_exit_critical
+            ),
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -567,6 +599,11 @@ class RuntimeSettingService:
         settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["position_management_scheduler_dry_run_only"] = True
         settings["position_management_scheduler_allow_live_orders"] = False
+        settings["portfolio_orchestrator_positions_first"] = True
+        settings["portfolio_orchestrator_max_actions_per_run"] = 1
+        settings["portfolio_orchestrator_require_production_ready"] = True
+        settings["portfolio_orchestrator_skip_buy_if_sync_required"] = True
+        settings["portfolio_orchestrator_skip_buy_if_exit_critical"] = True
         settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_exit_allowed_profiles")
         )
@@ -1739,6 +1776,8 @@ class RuntimeSettingService:
                 "position_management_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "portfolio_orchestrator_enabled": False,
+                "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1773,6 +1812,8 @@ class RuntimeSettingService:
                 "position_management_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "portfolio_orchestrator_enabled": False,
+                "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
                 "kis_limited_auto_sell_stop_loss_enabled": False,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1803,6 +1844,8 @@ class RuntimeSettingService:
                 "position_management_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "portfolio_orchestrator_enabled": False,
+                "portfolio_orchestrator_allow_live_orders": False,
             }
         if preset == "kis_sell_only_automation":
             return {
@@ -1832,6 +1875,8 @@ class RuntimeSettingService:
                 "position_management_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "portfolio_orchestrator_enabled": False,
+                "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": True,
                 "kis_limited_auto_sell_stop_loss_enabled": True,
                 "kis_limited_auto_take_profit_enabled": False,
@@ -1862,6 +1907,8 @@ class RuntimeSettingService:
                     "position_management_scheduler_enabled": False,
                     "position_management_scheduler_dry_run_only": True,
                     "position_management_scheduler_allow_live_orders": False,
+                    "portfolio_orchestrator_enabled": False,
+                    "portfolio_orchestrator_allow_live_orders": False,
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
@@ -1882,6 +1929,16 @@ class RuntimeSettingService:
             payload["position_management_scheduler_dry_run_only"] = True
         if "position_management_scheduler_allow_live_orders" in payload:
             payload["position_management_scheduler_allow_live_orders"] = False
+        if "portfolio_orchestrator_positions_first" in payload:
+            payload["portfolio_orchestrator_positions_first"] = True
+        if "portfolio_orchestrator_max_actions_per_run" in payload:
+            payload["portfolio_orchestrator_max_actions_per_run"] = 1
+        if "portfolio_orchestrator_require_production_ready" in payload:
+            payload["portfolio_orchestrator_require_production_ready"] = True
+        if "portfolio_orchestrator_skip_buy_if_sync_required" in payload:
+            payload["portfolio_orchestrator_skip_buy_if_sync_required"] = True
+        if "portfolio_orchestrator_skip_buy_if_exit_critical" in payload:
+            payload["portfolio_orchestrator_skip_buy_if_exit_critical"] = True
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -2011,6 +2068,14 @@ class RuntimeSettingService:
             "position_management_scheduler_enabled",
             "position_management_scheduler_dry_run_only",
             "position_management_scheduler_allow_live_orders",
+            "portfolio_orchestrator_enabled",
+            "portfolio_orchestrator_allow_live_orders",
+            "portfolio_orchestrator_positions_first",
+            "portfolio_orchestrator_max_actions_per_run",
+            "portfolio_orchestrator_require_production_ready",
+            "portfolio_orchestrator_skip_buy_if_sell_candidate",
+            "portfolio_orchestrator_skip_buy_if_sync_required",
+            "portfolio_orchestrator_skip_buy_if_exit_critical",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -2046,12 +2111,27 @@ class RuntimeSettingService:
                 value = True
             if key == "position_management_scheduler_allow_live_orders":
                 value = False
+            if key == "portfolio_orchestrator_positions_first":
+                value = True
+            if key == "portfolio_orchestrator_max_actions_per_run":
+                value = 1
+            if key == "portfolio_orchestrator_require_production_ready":
+                value = True
+            if key == "portfolio_orchestrator_skip_buy_if_sync_required":
+                value = True
+            if key == "portfolio_orchestrator_skip_buy_if_exit_critical":
+                value = True
             setattr(row, key, value)
 
         row.strategy_auto_buy_scheduler_dry_run_only = True
         row.strategy_auto_buy_scheduler_allow_live_orders = False
         row.position_management_scheduler_dry_run_only = True
         row.position_management_scheduler_allow_live_orders = False
+        row.portfolio_orchestrator_positions_first = True
+        row.portfolio_orchestrator_max_actions_per_run = 1
+        row.portfolio_orchestrator_require_production_ready = True
+        row.portfolio_orchestrator_skip_buy_if_sync_required = True
+        row.portfolio_orchestrator_skip_buy_if_exit_critical = True
         db.commit()
         db.refresh(row)
         return self.get_settings(db)
@@ -2349,6 +2429,8 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_enabled",
         "position_management_scheduler_allow_live_orders",
+        "portfolio_orchestrator_enabled",
+        "portfolio_orchestrator_allow_live_orders",
     )
 
 
@@ -2384,6 +2466,8 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_allow_live_orders",
+        "portfolio_orchestrator_enabled",
+        "portfolio_orchestrator_allow_live_orders",
     }
 
 

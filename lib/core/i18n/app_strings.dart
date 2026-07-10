@@ -147,6 +147,47 @@ class AppStrings {
       isKorean ? '자동매수 프로모션 검토 목록' : 'Auto Buy Promotion Queue';
   String get autoBuyPhase1 => isKorean ? '자동매수 1단계' : 'Auto Buy Phase 1';
   String get autoSellPhase1 => isKorean ? '자동매도 1단계' : 'Auto Sell Phase 1';
+  String get portfolioOrchestrator =>
+      isKorean ? '포트폴리오 자동 운영' : 'Portfolio Orchestrator';
+  String get unifiedAutomationLoop =>
+      isKorean ? '통합 자동화 루프' : 'Unified Automation Loop';
+  String get checkPositionsFirst =>
+      isKorean ? '보유 종목 점검 먼저' : 'Check Positions First';
+  String get autoSellFirst => isKorean ? '자동매도 우선' : 'Auto Sell First';
+  String get autoBuySecond => isKorean ? '자동매수 후순위' : 'Auto Buy Second';
+  String get dailyActionLimit =>
+      isKorean ? '하루 최대 실행 제한' : 'Daily Action Limit';
+  String get blockedWhenSyncRequired =>
+      isKorean ? '동기화 필요 시 차단' : 'Blocked When Sync Required';
+  String get runResult => isKorean ? '실행 결과' : 'Run Result';
+  String get actionTaken => isKorean ? '실행된 동작' : 'Action Taken';
+  String get sellSubmitted => isKorean ? '매도 실행됨' : 'Sell Submitted';
+  String get buySubmitted => isKorean ? '매수 실행됨' : 'Buy Submitted';
+  String get noActionTaken => isKorean ? '실행 없음' : 'No Action';
+  String get refreshPortfolioOrchestratorStatus =>
+      isKorean ? '포트폴리오 자동 운영 상태 새로고침' : 'Refresh Orchestrator Status';
+  String get runPortfolioOrchestratorOnce =>
+      isKorean ? '포트폴리오 자동 운영 1회 실행' : 'Run Orchestrator Once';
+  String get expandOrchestratorDetails =>
+      isKorean ? '상세 펼치기' : 'Expand Details';
+  String get collapseOrchestratorDetails =>
+      isKorean ? '상세 접기' : 'Collapse Details';
+  String get latestPositionManagementResult =>
+      isKorean ? '최근 포지션 관리 결과' : 'Latest Position Management Result';
+  String get orchestratorAutoSellResult =>
+      isKorean ? '자동매도 결과' : 'Auto Sell Result';
+  String get orchestratorAutoBuyResult =>
+      isKorean ? '자동매수 결과' : 'Auto Buy Result';
+  String get skippedBuyReason =>
+      isKorean ? '자동매수 건너뜀 사유' : 'Buy Skipped Reason';
+  String get skippedSellReason =>
+      isKorean ? '자동매도 건너뜀 사유' : 'Sell Skipped Reason';
+  String get pendingOrderConflicts =>
+      isKorean ? '대기 주문 충돌' : 'Pending Order Conflicts';
+  String get syncRequiredCount =>
+      isKorean ? '동기화 필요 건수' : 'Sync Required Count';
+  String get criticalExitCandidateCount =>
+      isKorean ? '중요 청산 후보' : 'Critical Exit Candidates';
   String get limitedLiveAutoBuy =>
       isKorean ? '제한된 실자동매수' : 'Limited Live Auto Buy';
   String get limitedLiveAutoSell =>
@@ -171,6 +212,8 @@ class AppStrings {
       isKorean ? '실주문 제출됨' : 'Live Order Submitted';
   String get noAutoRetryTitle => isKorean ? '자동 재시도 없음' : 'No Auto Retry';
   String get noBrokerSubmitTitle => isKorean ? '브로커 제출 없음' : 'No Broker Submit';
+  String get brokerSubmitCalledTitle =>
+      isKorean ? '브로커 제출 호출됨' : 'Broker Submit Called';
   String get refreshAutoBuyPhase1Status =>
       isKorean ? '자동매수 1단계 상태 새로고침' : 'Refresh Phase 1 Status';
   String get refreshAutoSellPhase1Status =>
@@ -203,6 +246,24 @@ class AppStrings {
       : 'Auto Sell Phase 1 blocked: $reason.';
   String get autoSellPhase1Submitted =>
       isKorean ? '자동매도 1단계 주문이 제출되었습니다.' : 'Auto Sell Phase 1 order submitted.';
+  String get portfolioOrchestratorAlreadyLoading => isKorean
+      ? '포트폴리오 자동 운영 상태를 이미 불러오는 중입니다.'
+      : 'Portfolio Orchestrator status is already loading.';
+  String portfolioOrchestratorRefreshed(String status) => isKorean
+      ? '포트폴리오 자동 운영 상태 새로고침 완료: $status.'
+      : 'Portfolio Orchestrator refreshed: $status.';
+  String portfolioOrchestratorCompleted(String status) => isKorean
+      ? '포트폴리오 자동 운영 1회 실행 완료: $status.'
+      : 'Portfolio Orchestrator run completed: $status.';
+  String portfolioOrchestratorBlocked(String reason) => isKorean
+      ? '포트폴리오 자동 운영 차단: $reason.'
+      : 'Portfolio Orchestrator blocked: $reason.';
+  String get portfolioOrchestratorSellSubmitted => isKorean
+      ? '포트폴리오 자동 운영에서 매도 주문이 제출되었습니다.'
+      : 'Portfolio Orchestrator submitted a sell order.';
+  String get portfolioOrchestratorBuySubmitted => isKorean
+      ? '포트폴리오 자동 운영에서 매수 주문이 제출되었습니다.'
+      : 'Portfolio Orchestrator submitted a buy order.';
   String get selectedPromotion => isKorean ? '선택된 프로모션' : 'Selected Promotion';
   String get selectedExitCandidate =>
       isKorean ? '선택된 청산 후보' : 'Selected Exit Candidate';
@@ -810,6 +871,12 @@ class AppStrings {
         noAutoRetryTitle,
       ];
 
+  List<String> get portfolioOrchestratorBadges => [
+        positionsFirst,
+        disabledByDefault,
+        noAutoRetryTitle,
+      ];
+
   String brokerName(String value) {
     return brokerFullDisplayName(value);
   }
@@ -915,6 +982,12 @@ class AppStrings {
       'ready_for_operator_confirm': '운영자 확인 준비',
       'submitted_today': '오늘 제출됨',
       'dry_run_simulated': '드라이런 시뮬레이션',
+      'completed_no_action': '실행 없음으로 완료',
+      'dry_run_completed': '드라이런 완료',
+      'sell_submitted': '매도 실행됨',
+      'buy_submitted': '매수 실행됨',
+      'auto_sell_phase1': '자동매도 1단계',
+      'auto_buy_phase1': '자동매수 1단계',
       'none': '없음',
       'buy': '매수',
       'sell': '매도',

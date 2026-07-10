@@ -55,6 +55,29 @@ void main() {
     expect(en.autoExitCandidateTypeLabel('sync_required'), 'Sync Required');
     expect(en.positionManagementDryRun, 'Position Management Dry-Run');
     expect(en.positionsFirst, 'Positions First');
+    expect(ko.portfolioOrchestrator, '포트폴리오 자동 운영');
+    expect(ko.unifiedAutomationLoop, '통합 자동화 루프');
+    expect(ko.checkPositionsFirst, '보유 종목 점검 먼저');
+    expect(ko.autoSellFirst, '자동매도 우선');
+    expect(ko.autoBuySecond, '자동매수 후순위');
+    expect(ko.blockedWhenSyncRequired, '동기화 필요 시 차단');
+    expect(en.portfolioOrchestrator, 'Portfolio Orchestrator');
+    expect(en.unifiedAutomationLoop, 'Unified Automation Loop');
+    expect(en.checkPositionsFirst, 'Check Positions First');
+    expect(en.autoSellFirst, 'Auto Sell First');
+    expect(en.autoBuySecond, 'Auto Buy Second');
+    expect(en.dailyActionLimit, 'Daily Action Limit');
+    expect(en.blockedWhenSyncRequired, 'Blocked When Sync Required');
+    expect(en.runResult, 'Run Result');
+    expect(en.actionTaken, 'Action Taken');
+    expect(en.sellSubmitted, 'Sell Submitted');
+    expect(en.buySubmitted, 'Buy Submitted');
+    expect(en.noActionTaken, 'No Action');
+    expect(
+        en.refreshPortfolioOrchestratorStatus, 'Refresh Orchestrator Status');
+    expect(en.runPortfolioOrchestratorOnce, 'Run Orchestrator Once');
+    expect(en.portfolioOrchestratorBadges, contains(en.positionsFirst));
+    expect(en.portfolioOrchestratorBadges, contains(en.noAutoRetryTitle));
     expect(en.autoBuyPhase1, 'Auto Buy Phase 1');
     expect(en.limitedLiveAutoBuy, 'Limited Live Auto Buy');
     expect(en.autoSellPhase1, 'Auto Sell Phase 1');
@@ -116,5 +139,6 @@ void main() {
     expect(ko.positionMonitoring, isNotEmpty);
     expect(ko.positionManagementDryRun, isNotEmpty);
     expect(ko.positionsFirst, isNotEmpty);
+    expect(ko.portfolioOrchestrator, isNotEmpty);
   });
 }

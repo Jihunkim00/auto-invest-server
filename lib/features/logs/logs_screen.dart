@@ -23,6 +23,7 @@ import 'widgets/operator_alerts_panel.dart';
 import 'widgets/position_lifecycle_panel.dart';
 import 'widgets/position_exit_review_panel.dart';
 import 'widgets/position_management_dry_run_panel.dart';
+import 'widgets/portfolio_orchestrator_panel.dart';
 import 'widgets/production_readiness_panel.dart';
 
 class LogsScreen extends StatefulWidget {
@@ -69,6 +70,7 @@ class _LogsScreenState extends State<LogsScreen> {
       await widget.controller.refreshOperatorAlerts(silent: true);
       await widget.controller.refreshDailyOpsSummary(silent: true);
       await widget.controller.refreshOpsProductionReadiness(silent: true);
+      await widget.controller.refreshPortfolioOrchestrator(silent: true);
       await widget.controller.refreshStrategyAutoBuyOperations(silent: true);
       await widget.controller.refreshAutoBuyLivePhase1(silent: true);
       await widget.controller.refreshAutoSellLivePhase1(silent: true);
@@ -148,13 +150,15 @@ class _LogsScreenState extends State<LogsScreen> {
             const SizedBox(height: 14),
             AutoBuyOperationsPanel(controller: widget.controller),
             const SizedBox(height: 14),
-            AutoBuyLivePhase1Panel(controller: widget.controller),
+            PortfolioOrchestratorPanel(controller: widget.controller),
             const SizedBox(height: 14),
-            AutoSellLivePhase1Panel(controller: widget.controller),
+            PositionManagementDryRunPanel(controller: widget.controller),
             const SizedBox(height: 14),
             AutoExitCandidatesPanel(controller: widget.controller),
             const SizedBox(height: 14),
-            PositionManagementDryRunPanel(controller: widget.controller),
+            AutoSellLivePhase1Panel(controller: widget.controller),
+            const SizedBox(height: 14),
+            AutoBuyLivePhase1Panel(controller: widget.controller),
             const SizedBox(height: 14),
             PositionExitReviewPanel(controller: widget.controller),
             const SizedBox(height: 14),

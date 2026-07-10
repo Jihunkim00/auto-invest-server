@@ -31,7 +31,7 @@ import 'operator_alerts_model_test.dart';
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
       (tester) async {
-    tester.view.physicalSize = const Size(1200, 10000);
+    tester.view.physicalSize = const Size(1200, 16000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -938,7 +938,7 @@ Future<void> _pumpLogs(
   WidgetTester tester,
   DashboardController controller,
 ) async {
-  tester.view.physicalSize = const Size(1200, 10000);
+  tester.view.physicalSize = const Size(1200, 16000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);

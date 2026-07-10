@@ -131,6 +131,18 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_scheduler_max_live_orders_per_day: int | None = Field(default=None, ge=0, le=20)
     kis_scheduler_live_requires_dry_run_false: bool | None = None
     kis_scheduler_live_respect_kill_switch: bool | None = None
+    portfolio_orchestrator_enabled: bool | None = None
+    portfolio_orchestrator_allow_live_orders: bool | None = None
+    portfolio_orchestrator_positions_first: bool | None = None
+    portfolio_orchestrator_max_actions_per_run: int | None = Field(
+        default=None,
+        ge=1,
+        le=1,
+    )
+    portfolio_orchestrator_require_production_ready: bool | None = None
+    portfolio_orchestrator_skip_buy_if_sell_candidate: bool | None = None
+    portfolio_orchestrator_skip_buy_if_sync_required: bool | None = None
+    portfolio_orchestrator_skip_buy_if_exit_critical: bool | None = None
 
 
 class ApplyPresetRequest(BaseModel):
