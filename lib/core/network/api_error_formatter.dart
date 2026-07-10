@@ -46,6 +46,8 @@ class ApiErrorFormatter {
       if (value is String && value.trim().isNotEmpty) {
         return value.trim();
       }
+    } else if (detail is String && detail.trim().isNotEmpty) {
+      return detail.trim();
     }
     return null;
   }

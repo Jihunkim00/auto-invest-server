@@ -14,6 +14,7 @@ import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
+import '../../models/automation_mode_control.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_sell_live_phase1.dart';
@@ -1049,6 +1050,47 @@ class ApiClient {
       },
     );
     return PortfolioOrchestratorResult.fromJson(payload);
+  }
+
+  Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {
+    final payload = await _getJsonNoCache('/automation/mode/status');
+    return AutomationModeControlStatus.fromJson(payload);
+  }
+
+  Future<AutomationModeControlStatus> setAutomationMode({
+    required String automationMode,
+    String? reason,
+    bool operatorAcknowledgedRisks = false,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/mode/set',
+      {
+        'automation_mode': automationMode,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        'operator_acknowledged_risks': operatorAcknowledgedRisks,
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return AutomationModeControlStatus.fromJson(payload);
+  }
+
+  Future<AutomationModeControlStatus> turnOffAutomationMode({
+    String? reason,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/mode/off',
+      {
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return AutomationModeControlStatus.fromJson(payload);
   }
 
   Future<StrategyAutoBuyPromotions> fetchStrategyAutoBuyPromotions({

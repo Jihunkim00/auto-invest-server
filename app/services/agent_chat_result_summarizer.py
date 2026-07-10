@@ -285,9 +285,10 @@ class AgentChatResultSummarizer:
         dry_run = self._on_off(settings.get("dry_run"))
         kill_switch = self._on_off(settings.get("kill_switch"))
         scheduler = self._on_off(settings.get("scheduler_enabled"))
+        automation_mode = str(settings.get("automation_mode") or "off")
         return AgentChatAnswer(
             text=(
-                f"\ud604\uc7ac dry-run\uc740 {dry_run}, kill switch\ub294 {kill_switch}, "
+                f"\ud604\uc7ac automation mode\ub294 {automation_mode}, dry-run\uc740 {dry_run}, kill switch\ub294 {kill_switch}, "
                 f"scheduler\ub294 {scheduler}\uc785\ub2c8\ub2e4. "
                 "이 상태 정보는 조회만 수행했으며 설정을 변경하지 않았습니다."
             ),

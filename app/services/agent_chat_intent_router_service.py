@@ -1715,6 +1715,18 @@ class AgentChatIntentRouterService:
 
     def _is_dangerous_setting_request(self, text: str) -> bool:
         lowered = text.lower()
+        if any(
+            token in lowered
+            for token in (
+                "automation mode",
+                "phase1 live ready",
+                "phase 1 live ready",
+            )
+        ):
+            return any(
+                token in lowered
+                for token in ("off", "on", "set", "switch", "change", "enable", "disable")
+            )
         dangerous = (
             "dry run" in lowered
             or "kill switch" in lowered
@@ -1731,6 +1743,10 @@ class AgentChatIntentRouterService:
         return dangerous and mutate
 
     def _is_settings_status_query(self, text: str, lowered: str) -> bool:
+        if "automation mode" in lowered and any(
+            token in lowered for token in ("status", "current", "enabled", "state")
+        ):
+            return True
         mentions_setting = (
             "dry run" in lowered
             or "dry-run" in lowered

@@ -19,6 +19,7 @@ import '../../models/agent_operations.dart';
 import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
+import '../../models/automation_mode_control.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_exit_candidate.dart';
@@ -364,6 +365,9 @@ class DashboardController extends ChangeNotifier {
   PortfolioOrchestratorResult? portfolioOrchestratorResult;
   bool portfolioOrchestratorLoading = false;
   String? portfolioOrchestratorError;
+  AutomationModeControlStatus? automationModeStatus;
+  bool automationModeLoading = false;
+  String? automationModeError;
   List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
   bool strategyAutoBuyPromotionsLoading = false;
   String? strategyAutoBuyPromotionsError;
@@ -2717,6 +2721,138 @@ class DashboardController extends ChangeNotifier {
     } finally {
       portfolioOrchestratorLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshAutomationModeStatus({
+    bool silent = false,
+  }) async {
+    if (automationModeLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationModeStatusAlreadyLoading,
+      );
+    }
+    automationModeLoading = true;
+    automationModeError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchAutomationModeStatus();
+      automationModeStatus = result;
+      return ActionResult(
+        success: true,
+        message: strings.automationModeStatusRefreshed(
+          strings.automationControlLabel(result.effectiveStatus),
+        ),
+      );
+    } catch (e) {
+      automationModeError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationModeError!),
+      );
+    } finally {
+      automationModeLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> setAutomationMode({
+    required String automationMode,
+    String? reason,
+    bool operatorAcknowledgedRisks = false,
+  }) async {
+    if (automationModeLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationModeStatusAlreadyLoading,
+      );
+    }
+    automationModeLoading = true;
+    automationModeError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.setAutomationMode(
+        automationMode: automationMode,
+        reason: reason,
+        operatorAcknowledgedRisks: operatorAcknowledgedRisks,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationModeStatus = result;
+      await _refreshAutomationModeDependents();
+      return ActionResult(
+        success: true,
+        message: strings.automationModeChanged(result.modeLabel),
+      );
+    } catch (e) {
+      automationModeError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationModeError!),
+      );
+    } finally {
+      automationModeLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> turnOffAutomationMode({String? reason}) async {
+    if (automationModeLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationModeStatusAlreadyLoading,
+      );
+    }
+    automationModeLoading = true;
+    automationModeError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.turnOffAutomationMode(
+        reason: reason,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationModeStatus = result;
+      await _refreshAutomationModeDependents();
+      return ActionResult(
+        success: true,
+        message: strings.automationModeTurnedOff,
+      );
+    } catch (e) {
+      automationModeError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationModeError!),
+      );
+    } finally {
+      automationModeLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _refreshAutomationModeDependents() async {
+    try {
+      settings = await apiClient.getOpsSettings();
+      kisSafetyStatus = kisSafetyStatusFromSettings();
+    } catch (_) {
+      // The mode endpoint response remains authoritative for this panel.
+    }
+    try {
+      schedulerStatus = await apiClient.fetchSchedulerStatus();
+      schedulerStatusLoaded = true;
+      schedulerStatusError = null;
+    } catch (_) {
+      // Keep the current scheduler snapshot if the read-only refresh fails.
+    }
+    try {
+      portfolioOrchestratorStatus =
+          await apiClient.fetchPortfolioOrchestratorLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Avoid turning a successful mode change into a failed UI action.
     }
   }
 

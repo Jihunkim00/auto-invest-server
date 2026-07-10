@@ -276,6 +276,8 @@ class AgentChatAnswerService:
         dry_run = self._on_off(settings.get("dry_run"))
         kill_switch = self._on_off(settings.get("kill_switch"))
         scheduler = self._on_off(settings.get("scheduler_enabled"))
+        automation_mode = str(settings.get("automation_mode") or "off")
+        scheduler = f"{scheduler} / automation mode {automation_mode}"
         return AgentChatAnswer(
             text=(
                 f"현재 dry-run은 {dry_run}, kill switch는 {kill_switch}, scheduler는 {scheduler}입니다. "
