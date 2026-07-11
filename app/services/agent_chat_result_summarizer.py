@@ -57,6 +57,8 @@ class AgentChatResultSummarizer:
                 return self._operator_alerts_answer(primary)
             if primary.result_type == "production_readiness":
                 return self._production_readiness_answer(primary)
+            if primary.result_type == "broker_sync_watchdog":
+                return self._broker_sync_watchdog_answer(primary)
             if primary.result_type in {"strategy_profile", "strategy_profiles"}:
                 return self._strategy_profile_answer(intent, primary)
             if primary.result_type == "strategy_monthly_progress":
@@ -144,6 +146,8 @@ class AgentChatResultSummarizer:
                 card = self._operator_alerts_card(result)
             elif result.result_type == "production_readiness":
                 card = self._production_readiness_card(result)
+            elif result.result_type == "broker_sync_watchdog":
+                card = self._broker_sync_watchdog_card(result)
             elif result.result_type in {"orders", "runs", "signals"}:
                 card = self._count_card(result)
             elif result.result_type in {
@@ -371,6 +375,30 @@ class AgentChatResultSummarizer:
             f"Primary blockers: {blocker_text}. "
             f"Next safe action: {action_text} "
             "This was a read-only readiness summary only."
+        )
+        return AgentChatAnswer(
+            text=text,
+            answer_type="read_only_result",
+        )
+
+    def _broker_sync_watchdog_answer(
+        self,
+        result: AgentChatToolResult,
+    ) -> AgentChatAnswer:
+        data = result.data
+        blockers = (
+            data.get("blocking_reasons")
+            if isinstance(data.get("blocking_reasons"), list)
+            else []
+        )
+        blocker_text = ", ".join(str(item) for item in blockers[:3]) or "none"
+        text = (
+            f"Broker sync watchdog is {data.get('sync_health') or 'unknown'}. "
+            f"Issues: {len(data.get('issues') or [])}; "
+            f"automation blocked by sync: {bool(data.get('automation_blocked_by_sync'))}. "
+            f"Primary blockers: {blocker_text}. "
+            f"Next safe action: {data.get('next_safe_action') or 'manual_review'}. "
+            "This lookup used the latest saved watchdog status only and did not run sync, submit orders, change settings, or run automation."
         )
         return AgentChatAnswer(
             text=text,
@@ -934,6 +962,44 @@ class AgentChatResultSummarizer:
                 "summary": summary,
                 "blocking_reasons": data.get("blocking_reasons") or [],
                 "next_safe_actions": data.get("next_safe_actions") or [],
+            },
+        )
+
+    def _broker_sync_watchdog_card(self, result: AgentChatToolResult) -> AgentChatResultCard:
+        data = result.data
+        issues = data.get("issues") if isinstance(data.get("issues"), list) else []
+        blockers = (
+            data.get("blocking_reasons")
+            if isinstance(data.get("blocking_reasons"), list)
+            else []
+        )
+        return AgentChatResultCard(
+            card_type="broker_sync_watchdog",
+            title="Broker Sync Watchdog",
+            subtitle=f"{str(data.get('provider') or 'kis').upper()} / {data.get('market') or 'KR'}",
+            primary_value=str(data.get("sync_health") or "unknown").upper(),
+            badges=[
+                "READ ONLY",
+                "NO LIVE ORDERS",
+                "NO ORDER CHANGE",
+                "NO BROKER SUBMIT",
+                "NO SETTINGS CHANGE",
+            ],
+            rows=[
+                {"label": "Automation blocked", "value": bool(data.get("automation_blocked_by_sync"))},
+                {"label": "Issues", "value": len(issues)},
+                {"label": "Stale orders", "value": data.get("stale_local_order_count", 0)},
+                {"label": "Pending sync", "value": data.get("pending_sync_order_count", 0)},
+                {"label": "Missing KIS ODNO", "value": data.get("missing_kis_odno_count", 0)},
+                {"label": "Position mismatch", "value": data.get("position_mismatch_count", 0)},
+                {"label": "Primary reason", "value": blockers[0] if blockers else "-"},
+                {"label": "Next safe action", "value": data.get("next_safe_action") or "-"},
+            ],
+            data={
+                "sync_health": data.get("sync_health"),
+                "automation_blocked_by_sync": data.get("automation_blocked_by_sync"),
+                "blocking_reasons": blockers,
+                "next_safe_action": data.get("next_safe_action"),
             },
         )
 

@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
@@ -14,6 +15,7 @@ from app.services.kis_scheduler_simulation_service import KisSchedulerSimulation
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
 from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.position_management_dry_run_service import (
     PositionManagementDryRunService,
 )
@@ -66,6 +68,11 @@ class SchedulerService:
             ("strategy_auto_buy_dry_run_open_phase", 9, 10),
             ("strategy_auto_buy_dry_run_midday", 10, 30),
             ("strategy_auto_buy_dry_run_before_close", 14, 30),
+        ]
+        self._broker_sync_watchdog_slots = [
+            ("broker_sync_watchdog_open_phase", 9, 2),
+            ("broker_sync_watchdog_midday", 11, 25),
+            ("broker_sync_watchdog_before_close", 14, 20),
         ]
 
     def start(self):
@@ -122,6 +129,13 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_strategy_auto_buy_dry_run_scheduled_once(slot_name)
+
+            for slot_name, hour, minute in self._broker_sync_watchdog_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:broker_sync_watchdog:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_broker_sync_watchdog_scheduled_once(slot_name)
 
             time.sleep(20)
 
@@ -443,6 +457,32 @@ class SchedulerService:
                     "scheduler_slot": slot_name,
                 },
                 require_enabled=True,
+            )
+        finally:
+            db.close()
+
+    def _run_broker_sync_watchdog_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            settings = self.runtime_settings.get_settings_read_only(db)
+            if not bool(settings.get("broker_sync_watchdog_enabled", False)):
+                return self._create_scheduler_skip_log(
+                    db,
+                    slot_name=slot_name,
+                    reason="broker_sync_watchdog_disabled",
+                    market="KR",
+                    provider="kis",
+                )
+            settings_obj = get_settings()
+            kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+            return BrokerSyncWatchdogService(
+                runtime_settings=self.runtime_settings,
+                broker_factory=lambda session: KisBroker(kis_client),
+            ).run_once(
+                db,
+                provider="kis",
+                market="KR",
+                trigger_source=slot_name,
             )
         finally:
             db.close()

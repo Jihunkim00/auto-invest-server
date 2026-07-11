@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
@@ -64,10 +65,15 @@ class AutomationModeControlService:
         *,
         runtime_settings: RuntimeSettingService | None = None,
         readiness_service: OpsProductionReadinessService | None = None,
+        broker_sync_watchdog_service: BrokerSyncWatchdogService | None = None,
     ) -> None:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.readiness_service = readiness_service or OpsProductionReadinessService(
             runtime_settings=self.runtime_settings
+        )
+        self.broker_sync_watchdog_service = (
+            broker_sync_watchdog_service
+            or BrokerSyncWatchdogService(runtime_settings=self.runtime_settings)
         )
 
     def status(
@@ -86,6 +92,14 @@ class AutomationModeControlService:
         )
         production_status = self._production_readiness_status(db, now_utc=now_utc)
         blockers = self._pending_order_blockers(db, now_utc=now_utc)
+        broker_sync = self._broker_sync_status(db, now_utc=now_utc)
+        broker_sync_health = str(broker_sync.get("sync_health") or "unknown")
+        broker_sync_blocking_reasons = _string_list(
+            broker_sync.get("blocking_reasons")
+        )
+        broker_sync_issue_count = len(
+            broker_sync.get("issues") if isinstance(broker_sync.get("issues"), list) else []
+        )
         sync_required_count = len(
             [item for item in blockers if item.get("sync_required") is True]
         )
@@ -124,6 +138,11 @@ class AutomationModeControlService:
                 production_status=production_status,
                 pending_order_blocker_count=len(blockers),
                 sync_required_count=sync_required_count,
+                broker_sync_should_block=bool(
+                    broker_sync.get("should_block_orchestrator")
+                    or broker_sync.get("should_block_auto_buy")
+                    or broker_sync.get("should_block_auto_sell")
+                ),
                 daily_trade_limit_remaining=daily_remaining,
             )
             blocking_reasons.extend(live_gate_reasons)
@@ -139,6 +158,8 @@ class AutomationModeControlService:
             warning_reasons.append("kis_real_orders_are_separate")
         if production_status not in {"ready", "warning"} and mode != "off":
             warning_reasons.append("production_readiness_needs_review")
+        if broker_sync_health in {"unsafe", "unknown"} and mode != "off":
+            warning_reasons.append("broker_sync_needs_review")
 
         blocking_reasons = _dedupe(blocking_reasons)
         warning_reasons = _dedupe(warning_reasons)
@@ -163,6 +184,10 @@ class AutomationModeControlService:
             "kis_enabled": kis_enabled,
             "kis_real_order_enabled": kis_real_order_enabled,
             "production_readiness_status": production_status,
+            "broker_sync_health": broker_sync_health,
+            "broker_sync_blocking_reasons": broker_sync_blocking_reasons,
+            "broker_sync_issue_count": broker_sync_issue_count,
+            "broker_sync_watchdog": broker_sync,
             "portfolio_orchestrator_enabled": bool(
                 settings.get("portfolio_orchestrator_enabled")
             ),
@@ -442,6 +467,7 @@ class AutomationModeControlService:
         production_status: str,
         pending_order_blocker_count: int,
         sync_required_count: int,
+        broker_sync_should_block: bool,
         daily_trade_limit_remaining: int,
     ) -> list[str]:
         checks = [
@@ -476,9 +502,45 @@ class AutomationModeControlService:
             ),
             (pending_order_blocker_count == 0, "pending_order_blocker_exists"),
             (sync_required_count == 0, "sync_required_order_exists"),
+            (not broker_sync_should_block, "broker_sync_watchdog_blocked"),
             (daily_trade_limit_remaining > 0, "daily_trade_limit_reached"),
         ]
         return [reason for ok, reason in checks if not ok]
+
+    def _broker_sync_status(
+        self,
+        db: Session,
+        *,
+        now_utc: datetime,
+    ) -> dict[str, Any]:
+        try:
+            return self.broker_sync_watchdog_service.status(
+                db,
+                provider=PROVIDER,
+                market=MARKET,
+                persist=False,
+                now=now_utc,
+                trigger_source="automation_mode_status",
+            )
+        except Exception as exc:
+            return {
+                "sync_health": "unknown",
+                "should_block_auto_buy": True,
+                "should_block_auto_sell": True,
+                "should_block_orchestrator": True,
+                "issues": [],
+                "blocking_reasons": [
+                    f"broker_sync_watchdog_failed:{exc.__class__.__name__}"
+                ],
+                "next_safe_action": "manual_review",
+                "safety_flags": {
+                    "read_only": True,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "order_cancel_called": False,
+                },
+            }
 
     def _modules(self, settings: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -577,6 +639,7 @@ def _next_safe_action(
         "production_readiness_not_ready": "review_production_readiness",
         "pending_order_blocker_exists": "review_pending_orders",
         "sync_required_order_exists": "reconcile_orders_before_live_automation",
+        "broker_sync_watchdog_blocked": "review_broker_sync_watchdog",
         "daily_trade_limit_reached": "wait_for_next_trading_day",
     }
     return mapping.get(first, "review_blocking_reasons")
@@ -615,6 +678,14 @@ def _iso(value: Any) -> str | None:
 def _text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def _int(value: Any, default: int = 0) -> int:

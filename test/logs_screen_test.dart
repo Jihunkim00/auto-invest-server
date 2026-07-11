@@ -9,6 +9,7 @@ import 'package:auto_invest_dashboard/models/automation_mode_control.dart';
 import 'package:auto_invest_dashboard/models/auto_buy_live_phase1.dart';
 import 'package:auto_invest_dashboard/models/auto_exit_candidate.dart';
 import 'package:auto_invest_dashboard/models/auto_sell_live_phase1.dart';
+import 'package:auto_invest_dashboard/models/broker_sync_watchdog.dart';
 import 'package:auto_invest_dashboard/models/daily_ops_summary.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_simulation.dart';
@@ -29,6 +30,7 @@ import 'auto_buy_scheduler_model_test.dart';
 import 'daily_ops_summary_model_test.dart';
 import 'operator_alerts_model_test.dart';
 import 'automation_mode_control_model_test.dart';
+import 'broker_sync_watchdog_model_test.dart';
 
 void main() {
   testWidgets('Logs screen shows backend activity source and safety labels',
@@ -1139,11 +1141,21 @@ class _FakeLogsApiClient extends ApiClient {
   KisManualOrderSafetyStatus manualSafetyStatus;
   int fetchRecentRunsCalls = 0;
   int fetchAutomationModeStatusCalls = 0;
+  int fetchBrokerSyncWatchdogStatusCalls = 0;
 
   @override
   Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {
     fetchAutomationModeStatusCalls += 1;
     return AutomationModeControlStatus.fromJson(automationModeStatusJson());
+  }
+
+  @override
+  Future<BrokerSyncWatchdogResult> fetchBrokerSyncWatchdogStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    fetchBrokerSyncWatchdogStatusCalls += 1;
+    return BrokerSyncWatchdogResult.fromJson(brokerSyncWatchdogJson());
   }
 
   @override

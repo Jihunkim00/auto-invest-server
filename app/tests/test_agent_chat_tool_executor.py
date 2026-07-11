@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from app.db.models import TradeRunLog
 from app.schemas.agent_chat_orchestrator import AgentChatIntent, AgentChatIntentCategory
 from app.schemas.agent_chat_tool import AgentChatToolCall
 from app.services.agent_chat_tool_executor import AgentChatToolExecutor
@@ -86,6 +87,52 @@ def test_executor_ops_settings_lookup_is_read_only(db_session):
     assert result.status == "success"
     assert result.result_type == "settings"
     assert "dry_run" in result.data["settings"]
+    assert result.safety.setting_changed is False
+
+
+def test_executor_broker_sync_watchdog_lookup_is_read_only(db_session):
+    db_session.add(
+        TradeRunLog(
+            run_key="broker_sync_watchdog_test",
+            trigger_source="manual_watchdog_run_once",
+            symbol="BROKER_SYNC",
+            mode="broker_sync_watchdog",
+            stage="done",
+            result="unsafe",
+            response_payload=(
+                '{"sync_health":"unsafe","automation_blocked_by_sync":true,'
+                '"issues":[{"issue_type":"pending_sync_order"}],'
+                '"blocking_reasons":["pending_sync_order"],'
+                '"next_safe_action":"run_sync",'
+                '"safety_flags":{"read_only":true,'
+                '"broker_submit_called":false,'
+                '"manual_submit_called":false,'
+                '"real_order_submitted":false}}'
+            ),
+        )
+    )
+    db_session.commit()
+    executor = AgentChatToolExecutor(
+        kis_client_factory=lambda db: _FakeKisClient(),
+        alpaca_client_factory=lambda: _FakeAlpacaClient(),
+    )
+
+    result = executor.execute(
+        db_session,
+        call=AgentChatToolCall(tool_name="broker_sync_watchdog_status_lookup"),
+        intent=AgentChatIntent(
+            category=AgentChatIntentCategory.READ_ONLY_BROKER_SYNC_WATCHDOG_QUERY,
+            provider="kis",
+            market="KR",
+        ),
+    )
+
+    assert result.status == "success"
+    assert result.result_type == "broker_sync_watchdog"
+    assert result.data["sync_health"] == "unsafe"
+    assert result.safety.read_only is True
+    assert result.safety.real_order_submitted is False
+    assert result.safety.broker_submit_called is False
     assert result.safety.setting_changed is False
 
 

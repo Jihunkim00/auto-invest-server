@@ -141,6 +141,11 @@ class _StatusSummary extends StatelessWidget {
               valueColor: color,
             ),
             _Metric(
+              label: strings.orderPositionSyncHealth,
+              value: strings.brokerSyncHealthLabel(status.brokerSyncHealth),
+              valueColor: _syncColor(status.brokerSyncHealth),
+            ),
+            _Metric(
               label: strings.blockingReasons,
               value: '${status.blockingReasons.length}',
               valueColor: status.blockingReasons.isEmpty
@@ -162,6 +167,14 @@ class _StatusSummary extends StatelessWidget {
           value: strings.automationControlLabel(status.nextSafeAction),
           color: Colors.lightBlueAccent,
         ),
+        if (status.brokerSyncBlockingReasons.isNotEmpty)
+          _Line(
+            label: strings.primaryBlockingReasons,
+            value: status.brokerSyncBlockingReasons
+                .map(strings.automationControlLabel)
+                .join(' | '),
+            color: Colors.orangeAccent,
+          ),
         const SizedBox(height: 8),
         _Line(
           label: strings.dryRunIsSeparate,
@@ -355,5 +368,19 @@ class _Line extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+Color _syncColor(String health) {
+  switch (health.trim().toLowerCase()) {
+    case 'healthy':
+      return Colors.greenAccent;
+    case 'warning':
+      return Colors.amberAccent;
+    case 'unsafe':
+      return Colors.orangeAccent;
+    case 'unknown':
+    default:
+      return Colors.white54;
   }
 }

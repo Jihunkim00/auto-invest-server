@@ -35,6 +35,7 @@ Rules:
 - Strategy live auto-exit questions must use read-only readiness/recent/candidate tools and must never execute run-once from chat.
 - Position management dry-run questions must use latest read-only dry-run lookup and must never execute run-once from chat.
 - Daily operations summary and broker reconciliation questions must use the read-only daily_ops_summary_lookup tool; never sync broker orders from chat.
+- Broker sync watchdog status questions must use the read-only broker_sync_watchdog_status_lookup tool; never run the watchdog, sync, submit, or change settings from chat.
 - Operator alert and notification center questions must use the read-only operator_alerts_lookup tool; never sync, submit, or change settings from chat.
 - Production readiness and safety audit questions must use the read-only ops_production_readiness_lookup tool; never change settings or execute trades from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
@@ -152,6 +153,14 @@ class AgentChatIntentRouterService:
                 AgentChatIntentCategory.READ_ONLY_DAILY_OPS_SUMMARY_QUERY,
                 confidence=0.9,
                 reason="User is asking for daily operations summary or broker reconciliation.",
+                **base,
+            )
+
+        if self._is_broker_sync_watchdog_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.READ_ONLY_BROKER_SYNC_WATCHDOG_QUERY,
+                confidence=0.92,
+                reason="User is asking for broker sync watchdog status.",
                 **base,
             )
 
@@ -1375,6 +1384,17 @@ class AgentChatIntentRouterService:
                     "User asked for daily operations summary and broker reconciliation.",
                 )
             ]
+        if category == AgentChatIntentCategory.READ_ONLY_BROKER_SYNC_WATCHDOG_QUERY:
+            return [
+                self._tool_call(
+                    "broker_sync_watchdog_status_lookup",
+                    {
+                        "provider": intent.provider,
+                        "market": intent.market,
+                    },
+                    "User asked for latest broker sync watchdog status.",
+                )
+            ]
         if category == AgentChatIntentCategory.READ_ONLY_OPERATOR_ALERTS_QUERY:
             return [
                 self._tool_call(
@@ -1788,6 +1808,19 @@ class AgentChatIntentRouterService:
             or (
                 "reconcile" in lowered
                 and any(token in lowered for token in ["broker", "order", "orders"])
+            )
+        )
+
+    def _is_broker_sync_watchdog_query(self, text: str, lowered: str) -> bool:
+        return (
+            "broker sync watchdog" in lowered
+            or "sync watchdog" in lowered
+            or "broker sync health" in lowered
+            or "broker/local sync" in lowered
+            or "broker local sync" in lowered
+            or (
+                "watchdog" in lowered
+                and any(token in lowered for token in ["broker", "sync", "order"])
             )
         )
 

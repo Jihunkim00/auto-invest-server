@@ -71,6 +71,10 @@ class AutomationModeStatusResponse(BaseModel):
     kis_enabled: bool
     kis_real_order_enabled: bool
     production_readiness_status: str
+    broker_sync_health: str = "unknown"
+    broker_sync_blocking_reasons: list[str] = Field(default_factory=list)
+    broker_sync_issue_count: int = 0
+    broker_sync_watchdog: dict[str, Any] | None = None
     portfolio_orchestrator_enabled: bool
     portfolio_orchestrator_allow_live_orders: bool
     position_management_scheduler_enabled: bool

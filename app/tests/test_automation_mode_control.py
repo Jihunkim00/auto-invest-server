@@ -26,13 +26,35 @@ class FakeReadinessService:
         return {"overall_status": self.status}
 
 
-def control_service(*, readiness: str = "ready", kis_ready: bool = False):
+class FakeWatchdog:
+    def __init__(self, status: dict | None = None) -> None:
+        self.status_payload = status or {
+            "sync_health": "healthy",
+            "should_block_orchestrator": False,
+            "should_block_auto_buy": False,
+            "should_block_auto_sell": False,
+            "issues": [],
+            "blocking_reasons": [],
+            "next_safe_action": "continue_monitoring",
+        }
+
+    def status(self, db, **kwargs):
+        return dict(self.status_payload)
+
+
+def control_service(
+    *,
+    readiness: str = "ready",
+    kis_ready: bool = False,
+    watchdog: FakeWatchdog | None = None,
+):
     runtime = RuntimeSettingService()
     runtime.settings.kis_enabled = kis_ready
     runtime.settings.kis_real_order_enabled = kis_ready
     return AutomationModeControlService(
         runtime_settings=runtime,
         readiness_service=FakeReadinessService(readiness),
+        broker_sync_watchdog_service=watchdog or FakeWatchdog(),
     )
 
 
@@ -77,6 +99,7 @@ def test_setting_off_disables_automation_layer_flags_only(db_session):
     status = AutomationModeControlService(
         runtime_settings=runtime,
         readiness_service=FakeReadinessService(),
+        broker_sync_watchdog_service=FakeWatchdog(),
     ).turn_off(db_session, reason="test")
 
     settings = runtime.get_settings(db_session)
@@ -224,6 +247,39 @@ def test_phase1_live_ready_blocks_pending_or_sync_required_orders(db_session):
     assert status["sync_required_count"] == 1
     assert "pending_order_blocker_exists" in status["blocking_reasons"]
     assert "sync_required_order_exists" in status["blocking_reasons"]
+
+
+def test_phase1_live_ready_blocks_unsafe_broker_sync_watchdog(db_session):
+    service = control_service(
+        kis_ready=True,
+        watchdog=FakeWatchdog(
+            {
+                "sync_health": "unsafe",
+                "should_block_orchestrator": True,
+                "should_block_auto_buy": True,
+                "should_block_auto_sell": True,
+                "issues": [{"issue_type": "broker_order_missing_local_record"}],
+                "blocking_reasons": ["broker_order_missing_local_record"],
+                "next_safe_action": "manual_review",
+            }
+        ),
+    )
+    service.runtime_settings.update_settings(
+        db_session,
+        {"dry_run": False, "kill_switch": False},
+    )
+    service.set_mode(
+        db_session,
+        automation_mode="phase1_live_ready",
+        operator_acknowledged_risks=True,
+    )
+
+    status = service.status(db_session)
+
+    assert status["effective_status"] == "live_ready_blocked"
+    assert status["broker_sync_health"] == "unsafe"
+    assert status["broker_sync_issue_count"] == 1
+    assert "broker_sync_watchdog_blocked" in status["blocking_reasons"]
 
 
 def test_mode_off_endpoint_does_not_create_or_submit_orders(db_session):

@@ -5,6 +5,10 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_broker import KisBroker
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 from app.db.database import get_db
 from app.routes.strategy_auto_buy_scheduler import get_auto_buy_live_phase1_service
 from app.routes.strategy_positions import (
@@ -26,6 +30,7 @@ from app.services.automation_mode_control_service import (
 )
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
 from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.ops_production_readiness_service import OpsProductionReadinessService
 from app.services.portfolio_orchestrator_service import PortfolioOrchestratorService
 from app.services.position_management_dry_run_service import PositionManagementDryRunService
@@ -44,6 +49,7 @@ mode_router = APIRouter(
 
 
 def get_portfolio_orchestrator_service(
+    db: Session = Depends(get_db),
     position_management_service: PositionManagementDryRunService = Depends(
         get_position_management_dry_run_service
     ),
@@ -55,6 +61,11 @@ def get_portfolio_orchestrator_service(
     ),
 ) -> PortfolioOrchestratorService:
     runtime_settings = RuntimeSettingService()
+
+    def broker_factory(session: Session):
+        settings = get_settings()
+        return KisBroker(KisClient(settings, KisAuthManager(settings, session)))
+
     return PortfolioOrchestratorService(
         runtime_settings=runtime_settings,
         readiness_service=OpsProductionReadinessService(
@@ -63,15 +74,30 @@ def get_portfolio_orchestrator_service(
         position_management_service=position_management_service,
         auto_sell_service=auto_sell_service,
         auto_buy_service=auto_buy_service,
+        broker_sync_watchdog_service=BrokerSyncWatchdogService(
+            runtime_settings=runtime_settings,
+            broker_factory=broker_factory,
+        ),
     )
 
 
-def get_automation_mode_control_service() -> AutomationModeControlService:
+def get_automation_mode_control_service(
+    db: Session = Depends(get_db),
+) -> AutomationModeControlService:
     runtime_settings = RuntimeSettingService()
+
+    def broker_factory(session: Session):
+        settings = get_settings()
+        return KisBroker(KisClient(settings, KisAuthManager(settings, session)))
+
     return AutomationModeControlService(
         runtime_settings=runtime_settings,
         readiness_service=OpsProductionReadinessService(
             runtime_settings=runtime_settings
+        ),
+        broker_sync_watchdog_service=BrokerSyncWatchdogService(
+            runtime_settings=runtime_settings,
+            broker_factory=broker_factory,
         ),
     )
 

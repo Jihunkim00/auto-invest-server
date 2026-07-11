@@ -159,8 +159,34 @@ void main() {
     expect(en.automationModeLabel('phase1_live_ready'), 'Phase 1 Live Ready');
     expect(en.automationControlLabel('dry_run_is_separate'),
         'Dry-run is separate');
+    expect(en.brokerSyncWatchdog, 'Broker Sync Watchdog');
+    expect(en.orderPositionSyncHealth, 'Order / Position Sync Health');
+    expect(en.automationBlocked, 'Automation Blocked');
+    expect(en.automationAllowed, 'Automation Allowed');
+    expect(en.brokerSyncHealthLabel('healthy'), 'Sync Healthy');
+    expect(en.brokerSyncHealthLabel('warning'), 'Sync Warning');
+    expect(en.brokerSyncHealthLabel('unsafe'), 'Sync Unsafe');
+    expect(en.brokerSyncHealthLabel('unknown'), 'Sync Unknown');
+    expect(en.staleOrders, 'Stale Orders');
+    expect(en.pendingSyncOrders, 'Pending Sync Orders');
+    expect(en.missingBrokerId, 'Missing Broker ID');
+    expect(en.missingKisOdno, 'Missing KIS ODNO');
+    expect(en.brokerUnmatchedOrders, 'Broker Unmatched Orders');
+    expect(en.localUnmatchedOrders, 'Local Unmatched Orders');
+    expect(en.positionQuantityMismatch, 'Position Quantity Mismatch');
+    expect(en.cashSnapshotStale, 'Cash Snapshot Stale');
+    expect(en.primaryBlockingReasons, 'Primary Blocking Reasons');
+    expect(en.noOrderCancel, 'No Order Cancel');
+    expect(en.runWatchdogOnce, 'Run Watchdog Once');
+    expect(en.refreshWatchdogStatus, 'Refresh Watchdog Status');
+    expect(
+      en.automationControlLabel('broker_sync_watchdog_blocked'),
+      'Broker Sync Watchdog blocked',
+    );
     expect(ko.readinessStatusLabel('blocked'), ko.readinessBlocked);
     expect(ko.automationModeControl, isNotEmpty);
+    expect(ko.brokerSyncWatchdog, isNotEmpty);
+    expect(ko.runWatchdogOnce, isNotEmpty);
     expect(ko.automationControlLabel('automation_mode_off'), isNotEmpty);
     expect(ko.operatorAlertCenter, isNotEmpty);
     expect(ko.riskAlerts, isNotEmpty);

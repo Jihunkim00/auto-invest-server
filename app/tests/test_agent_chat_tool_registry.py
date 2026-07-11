@@ -9,6 +9,7 @@ def test_tool_registry_exposes_only_safe_auto_executable_tools():
 
     assert "kis_price_lookup" in auto_names
     assert "ops_settings_lookup" in auto_names
+    assert "broker_sync_watchdog_status_lookup" in auto_names
     assert "live_order_request_blocker" in all_names
     assert "settings_change_blocker" in all_names
     assert "live_order_request_blocker" not in auto_names

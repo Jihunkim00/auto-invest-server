@@ -143,6 +143,14 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     portfolio_orchestrator_skip_buy_if_sell_candidate: bool | None = None
     portfolio_orchestrator_skip_buy_if_sync_required: bool | None = None
     portfolio_orchestrator_skip_buy_if_exit_critical: bool | None = None
+    broker_sync_watchdog_enabled: bool | None = None
+    broker_sync_watchdog_block_automation_on_unsafe: bool | None = None
+    broker_sync_watchdog_stale_order_minutes: int | None = Field(default=None, ge=1, le=240)
+    broker_sync_watchdog_stale_position_minutes: int | None = Field(default=None, ge=1, le=240)
+    broker_sync_watchdog_allow_broker_reads: bool | None = None
+    broker_sync_watchdog_allow_local_status_updates: bool | None = None
+    broker_sync_watchdog_allow_order_submit: bool | None = None
+    broker_sync_watchdog_allow_order_cancel: bool | None = None
 
 
 class ApplyPresetRequest(BaseModel):

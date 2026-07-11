@@ -84,6 +84,10 @@ class PortfolioOrchestratorResponse(BaseModel):
     sync_required_count: int = 0
     critical_exit_candidate_count: int = 0
     pending_order_conflict_count: int = 0
+    broker_sync_health: str = "unknown"
+    broker_sync_blocking_reasons: list[str] = Field(default_factory=list)
+    broker_sync_issue_count: int = 0
+    broker_sync_watchdog: dict[str, Any] | None = None
     production_readiness_status: str | None = None
     risk_flags: list[str] = Field(default_factory=list)
     gating_notes: list[str] = Field(default_factory=list)

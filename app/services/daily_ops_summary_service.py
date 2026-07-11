@@ -19,6 +19,7 @@ from app.db.models import (
     StrategyProfile,
     TradeRunLog,
 )
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
@@ -159,10 +160,17 @@ class DailyOpsSummaryService:
             settings=settings,
             promotion_summary=promotion_summary,
         )
+        broker_sync = self._latest_watchdog_summary(
+            db,
+            provider=normalized_provider,
+            market=normalized_market,
+            generated_at=generated_at,
+        )
         reconciliation = self._reconciliation(
             orders_today=orders_today,
             order_summary=order_summary,
             pnl_summary=pnl_summary,
+            broker_sync=broker_sync,
         )
         risk_summary = self._risk_summary(
             orders_today=orders_today,
@@ -201,6 +209,7 @@ class DailyOpsSummaryService:
             "promotion_summary": promotion_summary,
             "scheduler_summary": scheduler_summary,
             "reconciliation": reconciliation,
+            "broker_sync_watchdog": broker_sync,
             "risk_summary": risk_summary,
             "details": details,
             "safety": self._safety(),
@@ -527,6 +536,7 @@ class DailyOpsSummaryService:
         orders_today: list[OrderLog],
         order_summary: dict[str, Any],
         pnl_summary: dict[str, Any],
+        broker_sync: dict[str, Any],
     ) -> dict[str, Any]:
         missing_kis_odno = len(
             [
@@ -562,6 +572,11 @@ class DailyOpsSummaryService:
             warnings.append("live_order_missing_broker_identifier")
         if pnl_summary.get("incomplete_calculation_count"):
             warnings.append("pnl_calculation_incomplete")
+        broker_sync_health = str(broker_sync.get("sync_health") or "unknown")
+        if broker_sync_health in {"unsafe", "unknown"}:
+            warnings.append("broker_sync_watchdog_requires_review")
+        elif broker_sync_health == "warning":
+            warnings.append("broker_sync_watchdog_warning")
 
         attention_count = (
             sync_required_count
@@ -569,6 +584,11 @@ class DailyOpsSummaryService:
             + missing_kis_odno
             + missing_broker_order_id
             + stale_sync_count
+            + (
+                1
+                if broker_sync_health in {"unsafe", "unknown"}
+                else 0
+            )
         )
         status = "attention_required" if attention_count else "warning"
         next_safe_actions = [
@@ -589,9 +609,57 @@ class DailyOpsSummaryService:
             "missing_kis_odno_count": missing_kis_odno,
             "missing_broker_order_id_count": missing_broker_order_id,
             "stale_sync_count": stale_sync_count,
+            "broker_sync_health": broker_sync_health,
+            "broker_sync_issue_count": int(broker_sync.get("issue_count") or 0),
+            "broker_sync_blocking_reasons": list(
+                broker_sync.get("blocking_reasons") or []
+            ),
             "warnings": sorted(set(warnings)),
             "next_safe_actions": next_safe_actions,
         }
+
+    def _latest_watchdog_summary(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+        generated_at: datetime,
+    ) -> dict[str, Any]:
+        try:
+            payload = BrokerSyncWatchdogService(
+                runtime_settings=self.runtime_settings
+            ).latest(
+                db,
+                provider=provider,
+                market=market,
+                now=generated_at,
+            )
+            return {
+                "sync_health": payload.get("sync_health") or "unknown",
+                "automation_blocked_by_sync": bool(
+                    payload.get("automation_blocked_by_sync")
+                ),
+                "issue_count": len(payload.get("issues") or []),
+                "blocking_reasons": self._string_list(
+                    payload.get("blocking_reasons")
+                ),
+                "warning_reasons": self._string_list(
+                    payload.get("warning_reasons")
+                ),
+                "next_safe_action": payload.get("next_safe_action"),
+                "last_watchdog_run_at": payload.get("last_watchdog_run_at"),
+            }
+        except Exception as exc:
+            return {
+                "sync_health": "unknown",
+                "automation_blocked_by_sync": True,
+                "issue_count": 0,
+                "blocking_reasons": ["broker_sync_watchdog_unavailable"],
+                "warning_reasons": [],
+                "next_safe_action": "manual_review",
+                "error": self._safe_error(exc),
+            }
 
     def _risk_summary(
         self,
@@ -1214,3 +1282,16 @@ class DailyOpsSummaryService:
             return float(str(value).replace(",", ""))
         except Exception:
             return None
+
+    def _string_list(self, value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    def _safe_error(self, exc: Exception) -> str:
+        text = str(exc).strip() or exc.__class__.__name__
+        if len(text) > 220:
+            return f"{exc.__class__.__name__}: {text[:220]}..."
+        return text

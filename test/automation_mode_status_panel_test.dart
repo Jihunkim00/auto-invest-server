@@ -29,6 +29,8 @@ void main() {
     expect(find.text('Live Order Eligibility'), findsOneWidget);
     expect(find.text('Current Mode'), findsOneWidget);
     expect(find.text('Effective Status'), findsOneWidget);
+    expect(find.text('Order / Position Sync Health'), findsOneWidget);
+    expect(find.text('Sync Healthy'), findsOneWidget);
     expect(find.text('No Broker Submit'), findsOneWidget);
     expect(find.text('Change with Risk Acknowledgement'), findsNothing);
     expect(find.text('Turn Off Automation'), findsNothing);

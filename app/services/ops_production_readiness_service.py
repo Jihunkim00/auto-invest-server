@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, RuntimeSetting, StrategyProfile, TradeRunLog
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.operator_alerts_service import OperatorAlertsService
 from app.services.position_lifecycle_audit_service import PositionLifecycleAuditService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -124,6 +125,12 @@ class OpsProductionReadinessService:
             provider=safe_provider,
             market=safe_market,
         )
+        broker_sync = self._broker_sync_metrics(
+            db,
+            provider=safe_provider,
+            market=safe_market,
+            now=now_utc,
+        )
         alerts = self._alert_metrics(
             db,
             provider=safe_provider,
@@ -141,13 +148,20 @@ class OpsProductionReadinessService:
             active_profile=active_profile,
             orders=orders,
             positions=positions,
+            broker_sync=broker_sync,
             alerts=alerts,
             database=database,
             recent=recent,
             agent_chat=agent_chat,
             guarded=guarded,
         )
-        summary = _summary(checklist, guarded=guarded, alerts=alerts, orders=orders)
+        summary = _summary(
+            checklist,
+            guarded=guarded,
+            alerts=alerts,
+            orders=orders,
+            broker_sync=broker_sync,
+        )
         overall_status = _overall_status(summary)
         score = _readiness_score(checklist)
         blocking_reasons = _blocking_reasons(checklist)
@@ -177,6 +191,7 @@ class OpsProductionReadinessService:
             "runtime": _runtime_details(runtime, app_flags, active_profile),
             "orders": orders,
             "positions": positions,
+            "broker_sync": broker_sync,
             "alerts": alerts,
             "database": database,
             "agent_chat": agent_chat,
@@ -320,6 +335,47 @@ class OpsProductionReadinessService:
                 "error": _safe_error(exc),
             }
 
+    def _broker_sync_metrics(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        try:
+            payload = BrokerSyncWatchdogService(
+                runtime_settings=self.runtime_settings
+            ).latest(
+                db,
+                provider=provider,
+                market=market,
+                now=now,
+            )
+            return {
+                "available": True,
+                "sync_health": str(payload.get("sync_health") or "unknown"),
+                "automation_blocked_by_sync": bool(
+                    payload.get("automation_blocked_by_sync")
+                ),
+                "issue_count": len(payload.get("issues") or []),
+                "blocking_reasons": _string_list(payload.get("blocking_reasons")),
+                "warning_reasons": _string_list(payload.get("warning_reasons")),
+                "next_safe_action": payload.get("next_safe_action"),
+                "last_watchdog_run_at": payload.get("last_watchdog_run_at"),
+            }
+        except Exception as exc:
+            return {
+                "available": False,
+                "sync_health": "unknown",
+                "automation_blocked_by_sync": True,
+                "issue_count": 0,
+                "blocking_reasons": ["broker_sync_watchdog_unavailable"],
+                "warning_reasons": [],
+                "next_safe_action": "manual_review",
+                "error": _safe_error(exc),
+            }
+
 
 def _build_checklist(
     *,
@@ -330,6 +386,7 @@ def _build_checklist(
     active_profile: dict[str, Any],
     orders: dict[str, Any],
     positions: dict[str, Any],
+    broker_sync: dict[str, Any],
     alerts: dict[str, Any],
     database: dict[str, Any],
     recent: dict[str, Any],
@@ -504,6 +561,7 @@ def _build_checklist(
         _count_check("missing_broker_order_id_count", "orders", "Missing broker order IDs", orders, "missing_broker_order_id_count"),
         _count_check("missing_kis_odno_count", "orders", "Missing KIS order numbers", orders, "missing_kis_odno_count"),
         _count_check("duplicate_open_order_risk_count", "orders", "Duplicate open-order risk", orders, "duplicate_open_order_risk_count", blocking=True),
+        _broker_sync_check(broker_sync),
         _check(
             "open_position_count",
             "positions",
@@ -616,6 +674,7 @@ def _summary(
     guarded: dict[str, Any],
     alerts: dict[str, Any],
     orders: dict[str, Any],
+    broker_sync: dict[str, Any],
 ) -> dict[str, Any]:
     counts = Counter(item["status"] for item in checklist)
     critical_blocks = sum(
@@ -641,6 +700,8 @@ def _summary(
         "pending_sync_count": _int(orders.get("pending_sync_count")),
         "rejected_order_count": _int(orders.get("rejected_order_count")),
         "stale_order_count": _int(orders.get("stale_order_count")),
+        "broker_sync_health": broker_sync.get("sync_health") or "unknown",
+        "broker_sync_issue_count": _int(broker_sync.get("issue_count")),
     }
 
 
@@ -777,6 +838,37 @@ def _count_check(
         blocking=blocking and count > 0,
         severity="warning" if count else "info",
         next_safe_action="Review the affected local records before live operation.",
+    )
+
+
+def _broker_sync_check(metrics: dict[str, Any]) -> dict[str, Any]:
+    health = str(metrics.get("sync_health") or "unknown").lower()
+    issue_count = _int(metrics.get("issue_count"))
+    if health == "healthy":
+        status = "pass"
+        blocking = False
+        severity = "info"
+    elif health == "warning":
+        status = "warn"
+        blocking = False
+        severity = "warning"
+    elif health == "unsafe":
+        status = "fail"
+        blocking = True
+        severity = "critical"
+    else:
+        status = "unknown"
+        blocking = True
+        severity = "critical"
+    return _check(
+        "broker_sync_watchdog_health",
+        "broker_sync",
+        status,
+        "Broker sync watchdog",
+        f"Broker sync health is {health}; issue count is {issue_count}.",
+        blocking=blocking,
+        severity=severity,
+        next_safe_action=str(metrics.get("next_safe_action") or "manual_review"),
     )
 
 
