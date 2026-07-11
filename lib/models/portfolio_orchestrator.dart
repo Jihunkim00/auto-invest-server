@@ -113,6 +113,10 @@ class PortfolioOrchestratorResult {
     required this.syncRequiredCount,
     required this.criticalExitCandidateCount,
     required this.pendingOrderConflictCount,
+    required this.brokerSyncHealth,
+    required this.brokerSyncBlockingReasons,
+    required this.brokerSyncIssueCount,
+    required this.brokerSyncWatchdog,
     required this.riskFlags,
     required this.gatingNotes,
     required this.checklist,
@@ -159,6 +163,10 @@ class PortfolioOrchestratorResult {
   final int syncRequiredCount;
   final int criticalExitCandidateCount;
   final int pendingOrderConflictCount;
+  final String brokerSyncHealth;
+  final List<String> brokerSyncBlockingReasons;
+  final int brokerSyncIssueCount;
+  final Map<String, dynamic> brokerSyncWatchdog;
   final String? productionReadinessStatus;
   final List<String> riskFlags;
   final List<String> gatingNotes;
@@ -223,6 +231,12 @@ class PortfolioOrchestratorResult {
       syncRequiredCount: _int(json['sync_required_count']),
       criticalExitCandidateCount: _int(json['critical_exit_candidate_count']),
       pendingOrderConflictCount: _int(json['pending_order_conflict_count']),
+      brokerSyncHealth: _string(json['broker_sync_health'], 'unknown'),
+      brokerSyncBlockingReasons: _strings(
+        json['broker_sync_blocking_reasons'],
+      ),
+      brokerSyncIssueCount: _int(json['broker_sync_issue_count']),
+      brokerSyncWatchdog: _map(json['broker_sync_watchdog']),
       productionReadinessStatus:
           _nullableString(json['production_readiness_status']),
       riskFlags: _strings(json['risk_flags']),

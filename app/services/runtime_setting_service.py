@@ -193,6 +193,14 @@ class RuntimeSettingService:
             "portfolio_orchestrator_skip_buy_if_sell_candidate": True,
             "portfolio_orchestrator_skip_buy_if_sync_required": True,
             "portfolio_orchestrator_skip_buy_if_exit_critical": True,
+            "broker_sync_watchdog_enabled": False,
+            "broker_sync_watchdog_block_automation_on_unsafe": True,
+            "broker_sync_watchdog_stale_order_minutes": 10,
+            "broker_sync_watchdog_stale_position_minutes": 10,
+            "broker_sync_watchdog_allow_broker_reads": True,
+            "broker_sync_watchdog_allow_local_status_updates": False,
+            "broker_sync_watchdog_allow_order_submit": False,
+            "broker_sync_watchdog_allow_order_cancel": False,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -579,6 +587,24 @@ class RuntimeSettingService:
             "portfolio_orchestrator_skip_buy_if_exit_critical": bool(
                 row.portfolio_orchestrator_skip_buy_if_exit_critical
             ),
+            "broker_sync_watchdog_enabled": bool(
+                getattr(row, "broker_sync_watchdog_enabled", False)
+            ),
+            "broker_sync_watchdog_block_automation_on_unsafe": bool(
+                getattr(row, "broker_sync_watchdog_block_automation_on_unsafe", True)
+            ),
+            "broker_sync_watchdog_stale_order_minutes": int(
+                getattr(row, "broker_sync_watchdog_stale_order_minutes", 10)
+            ),
+            "broker_sync_watchdog_stale_position_minutes": int(
+                getattr(row, "broker_sync_watchdog_stale_position_minutes", 10)
+            ),
+            "broker_sync_watchdog_allow_broker_reads": bool(
+                getattr(row, "broker_sync_watchdog_allow_broker_reads", True)
+            ),
+            "broker_sync_watchdog_allow_local_status_updates": False,
+            "broker_sync_watchdog_allow_order_submit": False,
+            "broker_sync_watchdog_allow_order_cancel": False,
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -624,6 +650,18 @@ class RuntimeSettingService:
         settings["portfolio_orchestrator_require_production_ready"] = True
         settings["portfolio_orchestrator_skip_buy_if_sync_required"] = True
         settings["portfolio_orchestrator_skip_buy_if_exit_critical"] = True
+        settings["broker_sync_watchdog_block_automation_on_unsafe"] = True
+        settings["broker_sync_watchdog_stale_order_minutes"] = max(
+            1,
+            int(settings.get("broker_sync_watchdog_stale_order_minutes") or 10),
+        )
+        settings["broker_sync_watchdog_stale_position_minutes"] = max(
+            1,
+            int(settings.get("broker_sync_watchdog_stale_position_minutes") or 10),
+        )
+        settings["broker_sync_watchdog_allow_local_status_updates"] = False
+        settings["broker_sync_watchdog_allow_order_submit"] = False
+        settings["broker_sync_watchdog_allow_order_cancel"] = False
         settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_exit_allowed_profiles")
         )
@@ -1959,6 +1997,14 @@ class RuntimeSettingService:
             payload["portfolio_orchestrator_skip_buy_if_sync_required"] = True
         if "portfolio_orchestrator_skip_buy_if_exit_critical" in payload:
             payload["portfolio_orchestrator_skip_buy_if_exit_critical"] = True
+        if "broker_sync_watchdog_block_automation_on_unsafe" in payload:
+            payload["broker_sync_watchdog_block_automation_on_unsafe"] = True
+        if "broker_sync_watchdog_allow_local_status_updates" in payload:
+            payload["broker_sync_watchdog_allow_local_status_updates"] = False
+        if "broker_sync_watchdog_allow_order_submit" in payload:
+            payload["broker_sync_watchdog_allow_order_submit"] = False
+        if "broker_sync_watchdog_allow_order_cancel" in payload:
+            payload["broker_sync_watchdog_allow_order_cancel"] = False
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -2101,6 +2147,14 @@ class RuntimeSettingService:
             "portfolio_orchestrator_skip_buy_if_sell_candidate",
             "portfolio_orchestrator_skip_buy_if_sync_required",
             "portfolio_orchestrator_skip_buy_if_exit_critical",
+            "broker_sync_watchdog_enabled",
+            "broker_sync_watchdog_block_automation_on_unsafe",
+            "broker_sync_watchdog_stale_order_minutes",
+            "broker_sync_watchdog_stale_position_minutes",
+            "broker_sync_watchdog_allow_broker_reads",
+            "broker_sync_watchdog_allow_local_status_updates",
+            "broker_sync_watchdog_allow_order_submit",
+            "broker_sync_watchdog_allow_order_cancel",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -2146,6 +2200,14 @@ class RuntimeSettingService:
                 value = True
             if key == "portfolio_orchestrator_skip_buy_if_exit_critical":
                 value = True
+            if key == "broker_sync_watchdog_block_automation_on_unsafe":
+                value = True
+            if key in {
+                "broker_sync_watchdog_allow_local_status_updates",
+                "broker_sync_watchdog_allow_order_submit",
+                "broker_sync_watchdog_allow_order_cancel",
+            }:
+                value = False
             setattr(row, key, value)
 
         row.strategy_auto_buy_scheduler_dry_run_only = True
@@ -2157,6 +2219,10 @@ class RuntimeSettingService:
         row.portfolio_orchestrator_require_production_ready = True
         row.portfolio_orchestrator_skip_buy_if_sync_required = True
         row.portfolio_orchestrator_skip_buy_if_exit_critical = True
+        row.broker_sync_watchdog_block_automation_on_unsafe = True
+        row.broker_sync_watchdog_allow_local_status_updates = False
+        row.broker_sync_watchdog_allow_order_submit = False
+        row.broker_sync_watchdog_allow_order_cancel = False
         db.commit()
         db.refresh(row)
         return self.get_settings(db)
@@ -2456,6 +2522,8 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "position_management_scheduler_allow_live_orders",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
+        "broker_sync_watchdog_enabled",
+        "broker_sync_watchdog_allow_broker_reads",
     )
 
 

@@ -140,6 +140,16 @@ _DEFAULT_TOOLS = [
         description="Read-only production readiness and safety checklist lookup from local state.",
     ),
     AgentChatToolDefinition(
+        tool_name="broker_sync_watchdog_status_lookup",
+        display_name="Broker Sync Watchdog Status",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only latest broker sync watchdog status lookup. It does not start broker checks, submit orders, change settings, or run automation.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_profiles_lookup",
         display_name="Strategy Profiles Lookup",
         mode="read_only",

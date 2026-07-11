@@ -15,6 +15,7 @@ from app.db.models import OrderLog, TradeRunLog
 from app.schemas.portfolio_orchestrator import PortfolioOrchestratorRunRequest
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
 from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.ops_production_readiness_service import OpsProductionReadinessService
 from app.services.position_management_dry_run_service import PositionManagementDryRunService
@@ -77,6 +78,7 @@ class PortfolioOrchestratorService:
         position_management_service: PositionManagementDryRunService | None = None,
         auto_sell_service: AutoSellLivePhase1Service | None = None,
         auto_buy_service: AutoBuyLivePhase1Service | None = None,
+        broker_sync_watchdog_service: BrokerSyncWatchdogService | None = None,
     ) -> None:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.readiness_service = readiness_service or OpsProductionReadinessService(
@@ -85,6 +87,10 @@ class PortfolioOrchestratorService:
         self.position_management_service = position_management_service
         self.auto_sell_service = auto_sell_service
         self.auto_buy_service = auto_buy_service
+        self.broker_sync_watchdog_service = (
+            broker_sync_watchdog_service
+            or BrokerSyncWatchdogService(runtime_settings=self.runtime_settings)
+        )
 
     def run_once(
         self,
@@ -189,6 +195,43 @@ class PortfolioOrchestratorService:
                 "disabled",
                 reason="portfolio_orchestrator_disabled",
                 next_safe_action="enable_portfolio_orchestrator_explicitly",
+            )
+
+        watchdog_status = self._broker_sync_watchdog_status(
+            db,
+            payload=payload,
+            now_utc=now_utc,
+        )
+        state["broker_sync_health"] = str(
+            watchdog_status.get("sync_health") or "unknown"
+        )
+        state["broker_sync_blocking_reasons"] = _strings(
+            watchdog_status.get("blocking_reasons")
+        )
+        watchdog_issues = watchdog_status.get("issues")
+        state["broker_sync_issue_count"] = len(
+            watchdog_issues if isinstance(watchdog_issues, list) else []
+        )
+        state["broker_sync_watchdog"] = watchdog_status
+        if not check(
+            "broker_sync_watchdog_safe",
+            not bool(watchdog_status.get("should_block_orchestrator")),
+            "broker_sync_watchdog_blocked",
+            "Broker/local sync watchdog must be healthy before portfolio orchestration.",
+        ):
+            reason = (
+                state["broker_sync_blocking_reasons"][0]
+                if state["broker_sync_blocking_reasons"]
+                else "broker_sync_watchdog_blocked"
+            )
+            state["skipped_sell_reason"] = reason
+            state["skipped_buy_reason"] = reason
+            return finish(
+                "blocked",
+                reason=reason,
+                next_safe_action=str(
+                    watchdog_status.get("next_safe_action") or "manual_review"
+                ),
             )
 
         if not check(
@@ -723,6 +766,10 @@ class PortfolioOrchestratorService:
             "sync_required_count": 0,
             "critical_exit_candidate_count": 0,
             "pending_order_conflict_count": 0,
+            "broker_sync_health": "unknown",
+            "broker_sync_blocking_reasons": [],
+            "broker_sync_issue_count": 0,
+            "broker_sync_watchdog": None,
             "production_readiness_status": None,
             "risk_flags": [],
             "gating_notes": [
@@ -740,6 +787,40 @@ class PortfolioOrchestratorService:
             "kis_odno": None,
             "safety": {},
         }
+
+    def _broker_sync_watchdog_status(
+        self,
+        db: Session,
+        *,
+        payload: PortfolioOrchestratorRunRequest,
+        now_utc: datetime,
+    ) -> dict[str, Any]:
+        try:
+            return self.broker_sync_watchdog_service.status(
+                db,
+                provider=payload.provider,
+                market=payload.market,
+                persist=False,
+                now=now_utc,
+                trigger_source="portfolio_orchestrator_precheck",
+            )
+        except Exception as exc:
+            return {
+                "sync_health": "unknown",
+                "should_block_orchestrator": True,
+                "issues": [],
+                "blocking_reasons": [
+                    f"broker_sync_watchdog_failed:{exc.__class__.__name__}"
+                ],
+                "next_safe_action": "manual_review",
+                "safety_flags": {
+                    "read_only": True,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "order_cancel_called": False,
+                },
+            }
 
     def _kis_runtime_flags(self) -> tuple[bool, bool]:
         app_settings = getattr(self.runtime_settings, "settings", None)

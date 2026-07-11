@@ -24,6 +24,7 @@ import '../../models/automation_runtime_monitor.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_sell_live_phase1.dart';
+import '../../models/broker_sync_watchdog.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/kis_auto_readiness.dart';
@@ -365,6 +366,10 @@ class DashboardController extends ChangeNotifier {
   PortfolioOrchestratorResult? portfolioOrchestratorResult;
   bool portfolioOrchestratorLoading = false;
   String? portfolioOrchestratorError;
+  BrokerSyncWatchdogResult? brokerSyncWatchdogStatus;
+  BrokerSyncWatchdogResult? brokerSyncWatchdogResult;
+  bool brokerSyncWatchdogLoading = false;
+  String? brokerSyncWatchdogError;
   AutomationModeControlStatus? automationModeStatus;
   bool automationModeLoading = false;
   String? automationModeError;
@@ -2724,6 +2729,44 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshBrokerSyncWatchdog({
+    bool silent = false,
+  }) async {
+    if (brokerSyncWatchdogLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.brokerSyncWatchdogAlreadyLoading,
+      );
+    }
+    brokerSyncWatchdogLoading = true;
+    brokerSyncWatchdogError = null;
+    if (!silent) notifyListeners();
+    try {
+      brokerSyncWatchdogStatus =
+          await apiClient.fetchBrokerSyncWatchdogStatus(
+        provider: 'kis',
+        market: 'KR',
+      );
+      return ActionResult(
+        success: true,
+        message: strings.brokerSyncWatchdogRefreshed(
+          strings.brokerSyncHealthLabel(
+            brokerSyncWatchdogStatus!.syncHealth,
+          ),
+        ),
+      );
+    } catch (e) {
+      brokerSyncWatchdogError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(brokerSyncWatchdogError!),
+      );
+    } finally {
+      brokerSyncWatchdogLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshAutomationModeStatus({
     bool silent = false,
   }) async {
@@ -2854,6 +2897,15 @@ class DashboardController extends ChangeNotifier {
     } catch (_) {
       // Avoid turning a successful mode change into a failed UI action.
     }
+    try {
+      brokerSyncWatchdogStatus =
+          await apiClient.fetchBrokerSyncWatchdogLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Keep mode status authoritative if the compact sync badge cannot load.
+    }
   }
 
   /// Runs only the orchestrator endpoint in monitoring mode. It does not
@@ -2901,6 +2953,47 @@ class DashboardController extends ChangeNotifier {
       );
     } finally {
       portfolioOrchestratorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runBrokerSyncWatchdogOnce() async {
+    if (brokerSyncWatchdogLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.brokerSyncWatchdogAlreadyLoading,
+      );
+    }
+    brokerSyncWatchdogLoading = true;
+    brokerSyncWatchdogError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runBrokerSyncWatchdogOnce(
+        provider: 'kis',
+        market: 'KR',
+      );
+      brokerSyncWatchdogResult = result;
+      brokerSyncWatchdogStatus = result;
+      return ActionResult(
+        success: !result.automationBlockedBySync,
+        message: result.automationBlockedBySync
+            ? strings.brokerSyncWatchdogBlocked(
+                result.blockingReasons.isNotEmpty
+                    ? result.blockingReasons.first
+                    : result.syncHealth,
+              )
+            : strings.brokerSyncWatchdogCompleted(
+                strings.brokerSyncHealthLabel(result.syncHealth),
+              ),
+      );
+    } catch (e) {
+      brokerSyncWatchdogError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(brokerSyncWatchdogError!),
+      );
+    } finally {
+      brokerSyncWatchdogLoading = false;
       notifyListeners();
     }
   }

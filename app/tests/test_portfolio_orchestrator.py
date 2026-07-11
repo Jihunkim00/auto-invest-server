@@ -54,6 +54,24 @@ class FakeReadiness:
         return {"overall_status": self.status}
 
 
+class FakeWatchdog:
+    def __init__(self, status: dict[str, Any] | None = None) -> None:
+        self.status_payload = status or {
+            "sync_health": "healthy",
+            "should_block_orchestrator": False,
+            "should_block_auto_buy": False,
+            "should_block_auto_sell": False,
+            "issues": [],
+            "blocking_reasons": [],
+            "next_safe_action": "continue_monitoring",
+        }
+        self.calls = 0
+
+    def status(self, db, **kwargs):
+        self.calls += 1
+        return dict(self.status_payload)
+
+
 class FakePositionManagement:
     def __init__(self, result: dict[str, Any] | None = None, events=None) -> None:
         self.result = result or position_result()
@@ -154,6 +172,7 @@ def make_service(
     positions: FakePositionManagement | None = None,
     sell: FakePhase | None = None,
     buy: FakePhase | None = None,
+    watchdog: FakeWatchdog | None = None,
 ) -> PortfolioOrchestratorService:
     return PortfolioOrchestratorService(
         runtime_settings=runtime or FakeRuntimeSettings(),
@@ -161,6 +180,7 @@ def make_service(
         position_management_service=positions or FakePositionManagement(),
         auto_sell_service=sell or FakePhase("sell", phase_result()),
         auto_buy_service=buy or FakePhase("buy", phase_result()),
+        broker_sync_watchdog_service=watchdog or FakeWatchdog(),
     )
 
 
@@ -197,6 +217,36 @@ def test_production_readiness_blocked_stops_cycle(db_session):
 
     assert result["primary_block_reason"] == "production_readiness_not_ready"
     assert positions.calls == 0
+
+
+def test_broker_sync_watchdog_blocks_before_position_management(db_session):
+    positions = FakePositionManagement()
+    sell = FakePhase("sell", phase_result())
+    buy = FakePhase("buy", phase_result())
+    watchdog = FakeWatchdog(
+        {
+            "sync_health": "unsafe",
+            "should_block_orchestrator": True,
+            "should_block_auto_buy": True,
+            "should_block_auto_sell": True,
+            "issues": [{"issue_type": "pending_sync_order"}],
+            "blocking_reasons": ["pending_sync_order"],
+            "next_safe_action": "run_sync",
+        }
+    )
+
+    result = make_service(
+        positions=positions,
+        sell=sell,
+        buy=buy,
+        watchdog=watchdog,
+    ).run_once(db_session)
+
+    assert result["result_status"] == "blocked"
+    assert result["broker_sync_health"] == "unsafe"
+    assert result["broker_sync_issue_count"] == 1
+    assert result["primary_block_reason"] == "pending_sync_order"
+    assert positions.calls == sell.calls == buy.calls == 0
 
 
 def test_monitoring_allows_only_live_execution_readiness_blockers(db_session):

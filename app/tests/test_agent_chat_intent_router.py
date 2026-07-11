@@ -87,6 +87,16 @@ def test_dangerous_and_unsupported_patterns():
     assert unsupported.supported is False
 
 
+def test_broker_sync_watchdog_query_routes_to_read_only_tool():
+    intent = _service().route(
+        message="show broker sync watchdog status",
+        context=_context(),
+    )
+
+    assert intent.category == AgentChatIntentCategory.READ_ONLY_BROKER_SYNC_WATCHDOG_QUERY
+    assert intent.selected_tools[0].tool_name == "broker_sync_watchdog_status_lookup"
+
+
 class _BadResponses:
     def create(self, **kwargs):
         return SimpleNamespace(output_text="not json")

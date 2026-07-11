@@ -20,6 +20,9 @@ void main() {
     expect(result.realOrderSubmitted, isFalse);
     expect(result.brokerSubmitCalled, isFalse);
     expect(result.manualSubmitCalled, isFalse);
+    expect(result.brokerSyncHealth, 'healthy');
+    expect(result.brokerSyncIssueCount, 0);
+    expect(result.brokerSyncBlockingReasons, isEmpty);
     expect(result.maxActionsPerRun, 1);
     expect(result.checklist.single.failed, isTrue);
   });
@@ -74,6 +77,8 @@ Map<String, dynamic> portfolioOrchestratorJson({
   bool brokerSubmitCalled = false,
   String? skippedBuyReason,
   String? skippedSellReason,
+  String brokerSyncHealth = 'healthy',
+  int brokerSyncIssueCount = 0,
 }) {
   final submitted = realOrderSubmitted && action != 'none';
   final selling = action == 'auto_sell_phase1';
@@ -128,6 +133,15 @@ Map<String, dynamic> portfolioOrchestratorJson({
     'sync_required_count': 0,
     'critical_exit_candidate_count': selling ? 1 : 0,
     'pending_order_conflict_count': 0,
+    'broker_sync_health': brokerSyncHealth,
+    'broker_sync_blocking_reasons': brokerSyncIssueCount > 0
+        ? const ['broker_sync_watchdog_blocked']
+        : const [],
+    'broker_sync_issue_count': brokerSyncIssueCount,
+    'broker_sync_watchdog': {
+      'sync_health': brokerSyncHealth,
+      'issue_count': brokerSyncIssueCount,
+    },
     'production_readiness_status': enabled ? 'ready' : 'blocked',
     'risk_flags': enabled ? const ['positions_first'] : const [],
     'gating_notes': const ['No automatic retry is attempted.'],

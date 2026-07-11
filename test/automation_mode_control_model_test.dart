@@ -16,6 +16,8 @@ void main() {
     expect(status.killSwitch, isFalse);
     expect(status.kisRealOrderEnabled, isFalse);
     expect(status.blockingReasons, contains('automation_mode_off'));
+    expect(status.brokerSyncHealth, 'healthy');
+    expect(status.brokerSyncIssueCount, 0);
     expect(status.safetyFlags['broker_submit_called'], isFalse);
     expect(status.safetyFlags['real_order_submitted'], isFalse);
   });
@@ -31,6 +33,9 @@ void main() {
           'sync_required_order_exists'
         ],
         warningReasons: const ['dry_run_is_separate'],
+        brokerSyncHealth: 'unsafe',
+        brokerSyncBlockingReasons: const ['broker_sync_watchdog_blocked'],
+        brokerSyncIssueCount: 1,
         pendingOrderBlockers: const [
           {
             'order_id': 42,
@@ -45,6 +50,10 @@ void main() {
     );
 
     expect(status.liveBlocked, isTrue);
+    expect(status.brokerSyncHealth, 'unsafe');
+    expect(status.brokerSyncBlockingReasons,
+        contains('broker_sync_watchdog_blocked'));
+    expect(status.brokerSyncIssueCount, 1);
     expect(status.pendingOrderBlockers.single.orderId, 42);
     expect(status.pendingOrderBlockers.single.syncRequired, isTrue);
     expect(status.warningReasons, contains('dry_run_is_separate'));
@@ -62,6 +71,9 @@ Map<String, dynamic> automationModeStatusJson({
   bool dryRun = true,
   bool killSwitch = false,
   bool kisRealOrderEnabled = false,
+  String brokerSyncHealth = 'healthy',
+  List<String> brokerSyncBlockingReasons = const [],
+  int brokerSyncIssueCount = 0,
 }) {
   return {
     'generated_at': '2026-07-10T00:00:00Z',
@@ -82,6 +94,13 @@ Map<String, dynamic> automationModeStatusJson({
     'kis_enabled': kisRealOrderEnabled,
     'kis_real_order_enabled': kisRealOrderEnabled,
     'production_readiness_status': 'blocked',
+    'broker_sync_health': brokerSyncHealth,
+    'broker_sync_blocking_reasons': brokerSyncBlockingReasons,
+    'broker_sync_issue_count': brokerSyncIssueCount,
+    'broker_sync_watchdog': {
+      'sync_health': brokerSyncHealth,
+      'issue_count': brokerSyncIssueCount,
+    },
     'portfolio_orchestrator_enabled': mode != 'off',
     'portfolio_orchestrator_allow_live_orders': mode == 'phase1_live_ready',
     'position_management_scheduler_enabled':

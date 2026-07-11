@@ -16,6 +16,7 @@ from app.db.models import (
     StrategyLiveAutoBuyAttempt,
     StrategyLiveAutoExitAttempt,
 )
+from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.runtime_setting_service import RuntimeSettingService
 
@@ -168,6 +169,14 @@ class OperatorAlertsService:
         alerts.extend(
             self._daily_summary_alerts(
                 daily_summary,
+                provider=normalized_provider,
+                market=normalized_market,
+                generated_at=generated_at,
+            )
+        )
+        alerts.extend(
+            self._broker_sync_watchdog_alerts(
+                db,
                 provider=normalized_provider,
                 market=normalized_market,
                 generated_at=generated_at,
@@ -651,6 +660,61 @@ class OperatorAlertsService:
             )
         return alerts
 
+    def _broker_sync_watchdog_alerts(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+        generated_at: datetime,
+    ) -> list[dict[str, Any]]:
+        try:
+            payload = BrokerSyncWatchdogService(
+                runtime_settings=self.runtime_settings
+            ).latest(
+                db,
+                provider=provider,
+                market=market,
+                now=generated_at,
+            )
+        except Exception:
+            return []
+        issues = payload.get("issues") if isinstance(payload.get("issues"), list) else []
+        alerts: list[dict[str, Any]] = []
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            severity = str(issue.get("severity") or "info").lower()
+            if severity not in {"critical", "warning"}:
+                continue
+            issue_type = str(issue.get("issue_type") or "unknown")
+            alerts.append(
+                self._alert(
+                    severity=severity,
+                    category="broker_reconciliation",
+                    title="Broker sync watchdog issue",
+                    message=f"Watchdog detected {issue_type}.",
+                    provider=provider,
+                    market=market,
+                    symbol=issue.get("symbol"),
+                    related_type="broker_sync_watchdog",
+                    related_id=issue.get("issue_id"),
+                    created_at=issue.get("detected_at") or generated_at,
+                    updated_at=issue.get("detected_at") or generated_at,
+                    source="broker_sync_watchdog",
+                    reason_code=issue_type,
+                    risk_flags=[issue_type],
+                    gating_notes=[issue.get("reason")],
+                    next_safe_action=str(
+                        issue.get("recommended_action")
+                        or payload.get("next_safe_action")
+                        or "manual_review"
+                    ),
+                    action_type="open_broker_sync_watchdog",
+                )
+            )
+        return alerts
+
     def _alert(
         self,
         *,
@@ -719,6 +783,7 @@ class OperatorAlertsService:
             "blocked_attempt_count": len([item for item in alerts if str(item.get("reason_code") or "").startswith("guarded_")]),
             "stale_promotion_count": len([item for item in alerts if item.get("reason_code") == "stale_promotion"]),
             "incomplete_pl_count": len([item for item in alerts if item.get("reason_code") == "incomplete_pl_calculation"]),
+            "broker_sync_watchdog_count": len([item for item in alerts if item.get("source") == "broker_sync_watchdog"]),
             "runtime_warning_count": len(
                 [
                     item

@@ -18,6 +18,7 @@ import '../../models/automation_mode_control.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_sell_live_phase1.dart';
+import '../../models/broker_sync_watchdog.dart';
 import '../../models/candidate.dart';
 import '../../models/daily_ops_summary.dart';
 import '../../models/agent_live_prefill.dart';
@@ -1050,6 +1051,53 @@ class ApiClient {
       },
     );
     return PortfolioOrchestratorResult.fromJson(payload);
+  }
+
+  Future<BrokerSyncWatchdogResult> fetchBrokerSyncWatchdogStatus({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/broker-sync/watchdog/status',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return BrokerSyncWatchdogResult.fromJson(payload);
+  }
+
+  Future<BrokerSyncWatchdogResult> fetchBrokerSyncWatchdogLatest({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _getJsonNoCache(
+      Uri(
+        path: '/broker-sync/watchdog/latest',
+        queryParameters: {
+          'provider': provider,
+          'market': market,
+        },
+      ).toString(),
+    );
+    return BrokerSyncWatchdogResult.fromJson(payload);
+  }
+
+  Future<BrokerSyncWatchdogResult> runBrokerSyncWatchdogOnce({
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final path = Uri(
+      path: '/broker-sync/watchdog/run-once',
+      queryParameters: {
+        'provider': provider,
+        'market': market,
+      },
+    ).toString();
+    final payload = await _postJsonBody(path, const <String, dynamic>{});
+    return BrokerSyncWatchdogResult.fromJson(payload);
   }
 
   Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {

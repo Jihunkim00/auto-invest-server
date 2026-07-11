@@ -363,6 +363,26 @@ class _Details extends StatelessWidget {
               : strings.statusLabel(value.productionReadinessStatus!),
         ),
         _DetailLine(
+          label: strings.orderPositionSyncHealth,
+          value: strings.brokerSyncHealthLabel(value.brokerSyncHealth),
+          valueColor: _brokerSyncColor(value.brokerSyncHealth),
+        ),
+        _DetailLine(
+          label: strings.issueDetails,
+          value: value.brokerSyncIssueCount.toString(),
+          valueColor: value.brokerSyncIssueCount > 0
+              ? Colors.orangeAccent
+              : Colors.greenAccent,
+        ),
+        if (value.brokerSyncBlockingReasons.isNotEmpty)
+          _DetailLine(
+            label: strings.primaryBlockingReasons,
+            value: value.brokerSyncBlockingReasons
+                .map(strings.automationControlLabel)
+                .join(' | '),
+            valueColor: Colors.orangeAccent,
+          ),
+        _DetailLine(
           label: strings.pendingOrderConflicts,
           value: value.pendingOrderConflictCount.toString(),
         ),
@@ -634,4 +654,18 @@ String _stepStatus(
   if (result == null) return '-';
   final status = result.resultStatus ?? result.reason;
   return status == null ? '-' : strings.statusLabel(status);
+}
+
+Color _brokerSyncColor(String health) {
+  switch (health.trim().toLowerCase()) {
+    case 'healthy':
+      return Colors.greenAccent;
+    case 'warning':
+      return Colors.amberAccent;
+    case 'unsafe':
+      return Colors.orangeAccent;
+    case 'unknown':
+    default:
+      return Colors.white54;
+  }
 }

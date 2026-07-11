@@ -365,6 +365,90 @@ class AppStrings {
   String get noBrokerSubmitModeControl =>
       isKorean ? '브로커 제출 없음' : 'No Broker Submit';
   String get modeUpdated => isKorean ? '모드 변경 시각' : 'Mode Updated';
+  String get brokerSyncWatchdog =>
+      isKorean ? '釉뚮줈而??숆린??媛먯떆' : 'Broker Sync Watchdog';
+  String get orderPositionSyncHealth =>
+      isKorean ? '二쇰Ц/?ъ????숆린???곹깭' : 'Order / Position Sync Health';
+  String get automationBlocked =>
+      isKorean ? '?먮룞??李⑤떒??' : 'Automation Blocked';
+  String get automationAllowed =>
+      isKorean ? '?먮룞??媛??' : 'Automation Allowed';
+  String get syncHealthy => isKorean ? '?숆린???뺤긽' : 'Sync Healthy';
+  String get syncWarning => isKorean ? '?숆린??寃쎄퀬' : 'Sync Warning';
+  String get syncUnsafe => isKorean ? '?숆린???꾪뿕' : 'Sync Unsafe';
+  String get syncUnknown => isKorean ? '?숆린???????놁쓬' : 'Sync Unknown';
+  String get staleOrders => isKorean ? 'stale 二쇰Ц' : 'Stale Orders';
+  String get pendingSyncOrders =>
+      isKorean ? '?숆린???꾩슂 二쇰Ц' : 'Pending Sync Orders';
+  String get missingBrokerId =>
+      isKorean ? '釉뚮줈而?ID ?꾨씫' : 'Missing Broker ID';
+  String get missingKisOdno =>
+      isKorean ? '?쒓뎅?ъ옄 二쇰Ц踰덊샇 ?꾨씫' : 'Missing KIS ODNO';
+  String get brokerUnmatchedOrders =>
+      isKorean ? '釉뚮줈而?誘몃ℓ移?二쇰Ц' : 'Broker Unmatched Orders';
+  String get localUnmatchedOrders =>
+      isKorean ? '濡쒖뺄 誘몃ℓ移?二쇰Ц' : 'Local Unmatched Orders';
+  String get positionQuantityMismatch =>
+      isKorean ? '?ъ????섎웾 遺덉씪移?' : 'Position Quantity Mismatch';
+  String get stalePositionSnapshots =>
+      isKorean ? '?ъ????ㅻ깄???ㅻ옒??' : 'Stale Position Snapshots';
+  String get cashSnapshotStale =>
+      isKorean ? '?꾧툑 ?ㅻ깄???ㅻ옒??' : 'Cash Snapshot Stale';
+  String get primaryBlockingReasons =>
+      isKorean ? '二쇱슂 李⑤떒 ?ъ쑀' : 'Primary Blocking Reasons';
+  String get noOrderCancel =>
+      isKorean ? '二쇰Ц 痍⑥냼 ?놁쓬' : 'No Order Cancel';
+  String get runWatchdogOnce =>
+      isKorean ? '媛먯떆 1???ㅽ뻾' : 'Run Watchdog Once';
+  String get refreshWatchdogStatus =>
+      isKorean ? '媛먯떆 ?곹깭 ?덈줈怨좎묠' : 'Refresh Watchdog Status';
+  String get issueDetails => isKorean ? '?댁뒋 ?곸꽭' : 'Issue Details';
+  String get expandIssueDetails =>
+      isKorean ? '?댁뒋 ?곸꽭 ?쇱튂湲?' : 'Expand Issue Details';
+  String get collapseIssueDetails =>
+      isKorean ? '?댁뒋 ?곸꽭 ?묎린' : 'Collapse Issue Details';
+  String get noSyncIssues =>
+      isKorean ? '?숆린???댁뒋 ?놁쓬' : 'No sync issues.';
+  String get issueType => isKorean ? '?댁뒋 ?좏삎' : 'Issue Type';
+  String get severity => isKorean ? '?ш컖??' : 'Severity';
+  String get recommendedAction =>
+      isKorean ? '沅뚯옣 ?덉쟾 議곗튂' : 'Recommended Action';
+  String get sanitizedContext =>
+      isKorean ? '?덉쟾 而⑦뀓?ㅽ듃' : 'Sanitized Context';
+  String get localOpenOrders =>
+      isKorean ? '濡쒖뺄 ?댄뵂 二쇰Ц' : 'Local Open Orders';
+  String get brokerOpenOrders =>
+      isKorean ? '釉뚮줈而??댄뵂 二쇰Ц' : 'Broker Open Orders';
+  String get lastWatchdogRun =>
+      isKorean ? '理쒓렐 媛먯떆 ?ㅽ뻾' : 'Last Watchdog Run';
+  String get lastSuccessfulSync =>
+      isKorean ? '理쒓렐 ?깃났 ?숆린??' : 'Last Successful Sync';
+  String get brokerSyncWatchdogAlreadyLoading => isKorean
+      ? '釉뚮줈而??숆린??媛먯떆 ?곹깭瑜??대? 遺덈윭?ㅻ뒗 以묒엯?덈떎.'
+      : 'Broker Sync Watchdog status is already loading.';
+  String brokerSyncWatchdogRefreshed(String status) => isKorean
+      ? '釉뚮줈而??숆린??媛먯떆 ?곹깭 ?덈줈怨좎묠 ?꾨즺: $status.'
+      : 'Broker Sync Watchdog refreshed: $status.';
+  String brokerSyncWatchdogCompleted(String status) => isKorean
+      ? '釉뚮줈而??숆린??媛먯떆 1???ㅽ뻾 ?꾨즺: $status.'
+      : 'Broker Sync Watchdog run completed: $status.';
+  String brokerSyncWatchdogBlocked(String reason) => isKorean
+      ? '釉뚮줈而??숆린??媛먯떆 李⑤떒: $reason.'
+      : 'Broker Sync Watchdog blocked automation: $reason.';
+  String brokerSyncHealthLabel(String value) {
+    switch (value.trim().toLowerCase()) {
+      case 'healthy':
+        return syncHealthy;
+      case 'warning':
+        return syncWarning;
+      case 'unsafe':
+        return syncUnsafe;
+      case 'unknown':
+      default:
+        return syncUnknown;
+    }
+  }
+
   String automationModeLabel(String mode) {
     switch (mode.trim().toLowerCase()) {
       case 'monitor_only':
@@ -451,6 +535,7 @@ class AppStrings {
           'Auto sell Phase 1 real orders disabled',
       'pending_order_blocker_exists': 'Pending order blocker exists',
       'sync_required_order_exists': 'Sync-required order exists',
+      'broker_sync_watchdog_blocked': 'Broker Sync Watchdog blocked',
       'daily_trade_limit_reached': 'Daily trade limit reached',
       'dry_run_is_separate': dryRunIsSeparate,
       'kill_switch_is_separate': killSwitchIsSeparate,
@@ -470,6 +555,7 @@ class AppStrings {
           'Review broker real-order setting separately',
       'review_production_readiness': 'Review production readiness',
       'review_pending_orders': 'Review pending orders',
+      'review_broker_sync_watchdog': 'Review Broker Sync Watchdog',
       'reconcile_orders_before_live_automation':
           'Reconcile orders before live automation',
       'wait_for_next_trading_day': 'Wait for next trading day',

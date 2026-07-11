@@ -52,6 +52,10 @@ class AutomationModeControlStatus {
     required this.kisEnabled,
     required this.kisRealOrderEnabled,
     required this.productionReadinessStatus,
+    required this.brokerSyncHealth,
+    required this.brokerSyncBlockingReasons,
+    required this.brokerSyncIssueCount,
+    required this.brokerSyncWatchdog,
     required this.portfolioOrchestratorEnabled,
     required this.portfolioOrchestratorAllowLiveOrders,
     required this.positionManagementSchedulerEnabled,
@@ -90,6 +94,10 @@ class AutomationModeControlStatus {
   final bool kisEnabled;
   final bool kisRealOrderEnabled;
   final String productionReadinessStatus;
+  final String brokerSyncHealth;
+  final List<String> brokerSyncBlockingReasons;
+  final int brokerSyncIssueCount;
+  final Map<String, dynamic> brokerSyncWatchdog;
   final bool portfolioOrchestratorEnabled;
   final bool portfolioOrchestratorAllowLiveOrders;
   final bool positionManagementSchedulerEnabled;
@@ -134,6 +142,12 @@ class AutomationModeControlStatus {
       kisRealOrderEnabled: _bool(json['kis_real_order_enabled']) ?? false,
       productionReadinessStatus:
           _string(json['production_readiness_status'], 'unknown'),
+      brokerSyncHealth: _string(json['broker_sync_health'], 'unknown'),
+      brokerSyncBlockingReasons: _strings(
+        json['broker_sync_blocking_reasons'],
+      ),
+      brokerSyncIssueCount: _int(json['broker_sync_issue_count']),
+      brokerSyncWatchdog: _map(json['broker_sync_watchdog']),
       portfolioOrchestratorEnabled:
           _bool(json['portfolio_orchestrator_enabled']) ?? false,
       portfolioOrchestratorAllowLiveOrders:
