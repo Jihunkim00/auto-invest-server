@@ -241,6 +241,13 @@ class DailyOpsSummaryService:
             "scheduler_real_orders_allowed": allow_live_orders is True,
             "bot_enabled": bool(settings.get("bot_enabled", True)),
             "active_profile": active_profile.profile_name if active_profile else None,
+            "automation_soak_enabled": bool(settings.get("automation_soak_enabled", False)),
+            "automation_soak_kill_latch_active": bool(
+                settings.get("automation_soak_kill_latch_active", False)
+            ),
+            "automation_soak_kill_latch_reason": settings.get(
+                "automation_soak_kill_latch_reason"
+            ),
         }
 
     def _trade_activity(

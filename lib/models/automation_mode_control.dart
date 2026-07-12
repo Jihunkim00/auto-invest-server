@@ -47,6 +47,7 @@ class AutomationModeControlStatus {
     required this.canRunDryRun,
     required this.canAttemptPhase1Live,
     required this.canSubmitLiveOrder,
+    required this.soakKillLatchActive,
     required this.killSwitch,
     required this.dryRun,
     required this.kisEnabled,
@@ -74,6 +75,8 @@ class AutomationModeControlStatus {
     this.modeUpdatedAt,
     this.modeUpdatedBy,
     this.modeReason,
+    this.soakKillLatchReason,
+    this.soakKillLatchTriggeredAt,
   });
 
   final DateTime generatedAt;
@@ -89,6 +92,9 @@ class AutomationModeControlStatus {
   final bool canRunDryRun;
   final bool canAttemptPhase1Live;
   final bool canSubmitLiveOrder;
+  final bool soakKillLatchActive;
+  final String? soakKillLatchReason;
+  final DateTime? soakKillLatchTriggeredAt;
   final bool killSwitch;
   final bool dryRun;
   final bool kisEnabled;
@@ -118,7 +124,9 @@ class AutomationModeControlStatus {
   bool get hasWarnings => warningReasons.isNotEmpty;
   bool get liveEligible => canSubmitLiveOrder;
   bool get liveBlocked =>
-      automationMode == 'phase1_live_ready' && !liveEligible;
+      soakKillLatchActive ||
+      effectiveStatus == 'kill_latched' ||
+      (automationMode == 'phase1_live_ready' && !liveEligible);
 
   factory AutomationModeControlStatus.fromJson(Map<String, dynamic> json) {
     return AutomationModeControlStatus(
@@ -136,6 +144,11 @@ class AutomationModeControlStatus {
       canRunDryRun: _bool(json['can_run_dry_run']) ?? false,
       canAttemptPhase1Live: _bool(json['can_attempt_phase1_live']) ?? false,
       canSubmitLiveOrder: _bool(json['can_submit_live_order']) ?? false,
+      soakKillLatchActive: _bool(json['soak_kill_latch_active']) ?? false,
+      soakKillLatchReason: _nullableString(json['soak_kill_latch_reason']),
+      soakKillLatchTriggeredAt: _dateTime(
+        json['soak_kill_latch_triggered_at'],
+      ),
       killSwitch: _bool(json['kill_switch']) ?? false,
       dryRun: _bool(json['dry_run']) ?? true,
       kisEnabled: _bool(json['kis_enabled']) ?? false,

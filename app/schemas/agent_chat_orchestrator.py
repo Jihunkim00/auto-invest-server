@@ -32,6 +32,7 @@ class AgentChatIntentCategory(str, Enum):
     READ_ONLY_BROKER_SYNC_WATCHDOG_QUERY = (
         "read_only_broker_sync_watchdog_query"
     )
+    READ_ONLY_AUTOMATION_SOAK_QUERY = "read_only_automation_soak_query"
     ANALYSIS_REQUEST = "analysis_request"
     WATCHLIST_PREVIEW_REQUEST = "watchlist_preview_request"
     EXIT_REVIEW_REQUEST = "exit_review_request"

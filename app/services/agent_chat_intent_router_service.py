@@ -36,6 +36,7 @@ Rules:
 - Position management dry-run questions must use latest read-only dry-run lookup and must never execute run-once from chat.
 - Daily operations summary and broker reconciliation questions must use the read-only daily_ops_summary_lookup tool; never sync broker orders from chat.
 - Broker sync watchdog status questions must use the read-only broker_sync_watchdog_status_lookup tool; never run the watchdog, sync, submit, or change settings from chat.
+- Automation soak-test and kill-rule questions must use the read-only automation_soak_status_lookup tool; never run soak, reset the latch, run live automation, or change settings from chat.
 - Operator alert and notification center questions must use the read-only operator_alerts_lookup tool; never sync, submit, or change settings from chat.
 - Production readiness and safety audit questions must use the read-only ops_production_readiness_lookup tool; never change settings or execute trades from chat.
 - Strategy profile change requests must only prepare confirmation; never mutate active settings from a chat message alone.
@@ -139,6 +140,25 @@ class AgentChatIntentRouterService:
         strategy_intent = self._strategy_intent(text, lowered, base)
         if strategy_intent is not None:
             return strategy_intent
+
+        if self._is_automation_soak_mutation_request(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.DANGEROUS_SETTING_REQUEST,
+                confidence=0.92,
+                reason="User requested a soak-test or kill-latch mutation from chat.",
+                supported=True,
+                requires_auth=True,
+                requires_manual_confirmation=True,
+                **base,
+            )
+
+        if self._is_automation_soak_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.READ_ONLY_AUTOMATION_SOAK_QUERY,
+                confidence=0.92,
+                reason="User is asking for automation soak or kill-rule status.",
+                **base,
+            )
 
         if self._is_settings_status_query(text, lowered):
             return self._intent(
@@ -1395,6 +1415,17 @@ class AgentChatIntentRouterService:
                     "User asked for latest broker sync watchdog status.",
                 )
             ]
+        if category == AgentChatIntentCategory.READ_ONLY_AUTOMATION_SOAK_QUERY:
+            return [
+                self._tool_call(
+                    "automation_soak_status_lookup",
+                    {
+                        "provider": intent.provider,
+                        "market": intent.market,
+                    },
+                    "User asked for read-only automation soak and kill-rule status.",
+                )
+            ]
         if category == AgentChatIntentCategory.READ_ONLY_OPERATOR_ALERTS_QUERY:
             return [
                 self._tool_call(
@@ -1821,6 +1852,62 @@ class AgentChatIntentRouterService:
             or (
                 "watchdog" in lowered
                 and any(token in lowered for token in ["broker", "sync", "order"])
+            )
+        )
+
+    def _is_automation_soak_query(self, text: str, lowered: str) -> bool:
+        return (
+            "automation soak" in lowered
+            or "soak test" in lowered
+            or "soak status" in lowered
+            or "kill rule" in lowered
+            or "kill-rule" in lowered
+            or "kill latch" in lowered
+            or "long-run stability" in lowered
+            or (
+                "automation" in lowered
+                and any(token in lowered for token in ["soak", "kill rules", "kill latch"])
+            )
+        )
+
+    def _is_automation_soak_mutation_request(self, text: str, lowered: str) -> bool:
+        mentions_soak = self._is_automation_soak_query(text, lowered)
+        if not mentions_soak:
+            return False
+        if any(
+            token in lowered
+            for token in (
+                "run soak",
+                "run the soak",
+                "run automation soak",
+                "run the automation soak",
+                "run soak once",
+                "run soak cycle",
+                "start soak",
+                "stop soak",
+                "enable soak",
+                "disable soak",
+                "turn on soak",
+                "turn off soak",
+                "reset kill latch",
+                "clear kill latch",
+                "reset latch",
+                "live phase1 soak",
+                "live phase 1 soak",
+            )
+        ):
+            return True
+        return any(
+            token in lowered
+            for token in (
+                "start",
+                "stop",
+                "enable",
+                "disable",
+                "turn on",
+                "turn off",
+                "reset",
+                "clear",
             )
         )
 

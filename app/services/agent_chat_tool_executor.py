@@ -13,6 +13,7 @@ from app.db.models import OrderLog, SignalLog, TradeRunLog
 from app.schemas.agent_chat_orchestrator import AgentChatIntent
 from app.schemas.agent_chat_tool import AgentChatToolCall, AgentChatToolResult, AgentChatToolSafety
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
+from app.services.automation_soak_test_service import AutomationSoakTestService
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
@@ -174,6 +175,8 @@ class AgentChatToolExecutor:
                 return self._production_readiness(db, call, intent)
             if tool.tool_name == "broker_sync_watchdog_status_lookup":
                 return self._broker_sync_watchdog_status(db, call, intent)
+            if tool.tool_name == "automation_soak_status_lookup":
+                return self._automation_soak_status(db, call, intent)
             if tool.tool_name == "strategy_profiles_lookup":
                 return self._strategy_profiles(db)
             if tool.tool_name == "active_strategy_profile_lookup":
@@ -426,6 +429,29 @@ class AgentChatToolExecutor:
             (
                 "Latest broker sync watchdog status loaded. Chat did not start a "
                 "watchdog run, submit orders, change settings, or run automation."
+            ),
+        )
+
+    def _automation_soak_status(
+        self,
+        db: Session,
+        call: AgentChatToolCall,
+        intent: AgentChatIntent,
+    ) -> AgentChatToolResult:
+        data = AutomationSoakTestService(
+            runtime_settings=self.runtime_setting_service,
+        ).status(
+            db,
+            provider=str(call.arguments.get("provider") or intent.provider or "kis"),
+            market=str(call.arguments.get("market") or intent.market or "KR"),
+        )
+        return self._success(
+            "automation_soak_status_lookup",
+            "automation_soak_status",
+            data,
+            (
+                "Read-only automation soak and kill-rule status loaded. Chat did "
+                "not run soak, reset the latch, change settings, or submit orders."
             ),
         )
 
@@ -923,6 +949,7 @@ class AgentChatToolExecutor:
             "daily_ops_summary_lookup": "daily_ops_summary",
             "operator_alerts_lookup": "operator_alerts",
             "broker_sync_watchdog_status_lookup": "broker_sync_watchdog",
+            "automation_soak_status_lookup": "automation_soak_status",
             "strategy_profiles_lookup": "strategy_profiles",
             "active_strategy_profile_lookup": "strategy_profile",
             "strategy_monthly_progress_lookup": "strategy_monthly_progress",

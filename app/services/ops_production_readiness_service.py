@@ -420,6 +420,22 @@ def _build_checklist(
             severity="critical" if kill_switch is not False else "info",
             next_safe_action="Review existing safety controls before any live flow.",
         ),
+        _check(
+            "automation_soak_kill_latch_clear",
+            "runtime",
+            "pass"
+            if not bool(runtime.get("automation_soak_kill_latch_active"))
+            else "fail",
+            "Automation soak kill latch clear",
+            "Automation soak kill latch is clear."
+            if not bool(runtime.get("automation_soak_kill_latch_active"))
+            else "Automation soak kill latch is active, so automation is blocked until operator review.",
+            blocking=bool(runtime.get("automation_soak_kill_latch_active")),
+            severity="critical"
+            if bool(runtime.get("automation_soak_kill_latch_active"))
+            else "info",
+            next_safe_action="Review soak kill-rule reason before resetting the latch.",
+        ),
         _known_bool_check("dry_run_state_known", "runtime", "Dry-run state known", dry_run),
         _check(
             "dry_run_blocks_live_submit",
@@ -1241,6 +1257,9 @@ def _runtime_details(
         "strategy_auto_buy_scheduler_allow_live_orders",
         "strategy_live_auto_buy_enabled",
         "strategy_live_auto_exit_enabled",
+        "automation_soak_enabled",
+        "automation_soak_kill_latch_active",
+        "automation_soak_kill_latch_reason",
     ]
     safe = {key: runtime.get(key) for key in keys if key in runtime}
     safe["app_flags"] = {

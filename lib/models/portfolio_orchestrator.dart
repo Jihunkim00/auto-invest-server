@@ -117,6 +117,8 @@ class PortfolioOrchestratorResult {
     required this.brokerSyncBlockingReasons,
     required this.brokerSyncIssueCount,
     required this.brokerSyncWatchdog,
+    required this.soakKillLatchActive,
+    required this.killRulesTriggered,
     required this.riskFlags,
     required this.gatingNotes,
     required this.checklist,
@@ -129,6 +131,7 @@ class PortfolioOrchestratorResult {
     this.skippedBuyReason,
     this.skippedSellReason,
     this.productionReadinessStatus,
+    this.soakKillLatchReason,
     this.primaryBlockReason,
     this.selectedSymbol,
     this.selectedCandidateId,
@@ -167,6 +170,9 @@ class PortfolioOrchestratorResult {
   final List<String> brokerSyncBlockingReasons;
   final int brokerSyncIssueCount;
   final Map<String, dynamic> brokerSyncWatchdog;
+  final bool soakKillLatchActive;
+  final String? soakKillLatchReason;
+  final List<String> killRulesTriggered;
   final String? productionReadinessStatus;
   final List<String> riskFlags;
   final List<String> gatingNotes;
@@ -237,6 +243,9 @@ class PortfolioOrchestratorResult {
       ),
       brokerSyncIssueCount: _int(json['broker_sync_issue_count']),
       brokerSyncWatchdog: _map(json['broker_sync_watchdog']),
+      soakKillLatchActive: _bool(json['soak_kill_latch_active']) ?? false,
+      soakKillLatchReason: _nullableString(json['soak_kill_latch_reason']),
+      killRulesTriggered: _strings(json['kill_rules_triggered']),
       productionReadinessStatus:
           _nullableString(json['production_readiness_status']),
       riskFlags: _strings(json['risk_flags']),

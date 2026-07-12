@@ -19,6 +19,7 @@ AutomationEffectiveStatus = Literal[
     "live_ready_blocked",
     "live_ready",
     "blocked",
+    "kill_latched",
 ]
 
 
@@ -85,6 +86,9 @@ class AutomationModeStatusResponse(BaseModel):
     sync_required_count: int = 0
     critical_exit_candidate_count: int = 0
     daily_trade_limit_remaining: int = 0
+    soak_kill_latch_active: bool = False
+    soak_kill_latch_reason: str | None = None
+    soak_kill_latch_triggered_at: str | None = None
     blocking_reasons: list[str] = Field(default_factory=list)
     warning_reasons: list[str] = Field(default_factory=list)
     next_safe_action: str

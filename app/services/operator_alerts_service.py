@@ -248,6 +248,35 @@ class OperatorAlertsService:
                     action_type="review_only",
                 )
             )
+        if settings.get("automation_soak_kill_latch_active"):
+            alerts.append(
+                self._alert(
+                    severity="critical",
+                    category="runtime",
+                    title="Automation soak kill latch active",
+                    message=(
+                        "PR99 soak-test kill latch is active. Automation remains "
+                        "blocked until operator acknowledgement resets the latch."
+                    ),
+                    provider=provider,
+                    market=market,
+                    related_type="runtime_setting",
+                    related_id="automation_soak_kill_latch_active",
+                    created_at=settings.get("automation_soak_kill_latch_triggered_at")
+                    or generated_at,
+                    updated_at=settings.get("automation_soak_kill_latch_triggered_at")
+                    or generated_at,
+                    source="runtime_settings",
+                    reason_code="automation_soak_kill_latch_active",
+                    risk_flags=["automation_soak_kill_latch_active"],
+                    gating_notes=[
+                        settings.get("automation_soak_kill_latch_reason")
+                        or "kill_rule_triggered"
+                    ],
+                    next_safe_action="Review soak status and reset only after risk acknowledgement.",
+                    action_type="review_only",
+                )
+            )
         if settings.get("dry_run", True):
             alerts.append(
                 self._alert(

@@ -159,9 +159,24 @@ class _StatusSummary extends StatelessWidget {
                   ? Colors.greenAccent
                   : Colors.amberAccent,
             ),
+            _Metric(
+              label: strings.killLatch,
+              value: status.soakKillLatchActive
+                  ? strings.killLatchActive
+                  : strings.statusLabel('none'),
+              valueColor: status.soakKillLatchActive
+                  ? Colors.orangeAccent
+                  : Colors.greenAccent,
+            ),
           ],
         ),
         const SizedBox(height: 10),
+        if (status.soakKillLatchReason != null)
+          _Line(
+            label: strings.killLatch,
+            value: status.soakKillLatchReason!,
+            color: Colors.orangeAccent,
+          ),
         _Line(
           label: strings.nextSafeAction,
           value: strings.automationControlLabel(status.nextSafeAction),
