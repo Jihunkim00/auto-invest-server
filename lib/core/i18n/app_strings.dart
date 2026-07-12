@@ -435,6 +435,45 @@ class AppStrings {
   String brokerSyncWatchdogBlocked(String reason) => isKorean
       ? '釉뚮줈而??숆린??媛먯떆 李⑤떒: $reason.'
       : 'Broker Sync Watchdog blocked automation: $reason.';
+  String get automationSoakTest => 'Automation Soak Test';
+  String get longRunStabilityCheck => 'Long-Run Stability Check';
+  String get killRules => 'Kill Rules';
+  String get killLatch => 'Kill Latch';
+  String get killLatchActive => 'Kill Latch Active';
+  String get dryRunCheck => 'Dry-Run Check';
+  String get phase1LiveCheck => 'Phase 1 Live Check';
+  String get repeatedRunStability => 'Repeated Run Stability';
+  String get consecutiveFailures => 'Consecutive Failures';
+  String get dailyLossLimit => 'Daily Loss Limit';
+  String get duplicateOrders => 'Duplicate Orders';
+  String get positionMismatch => 'Position Mismatch';
+  String get brokerMismatch => 'Broker Mismatch';
+  String get unexpectedBrokerSubmit => 'Unexpected Broker Submit';
+  String get runSoakOnce => 'Run Soak Once';
+  String get refreshAutomationSoakStatus => 'Refresh Soak Status';
+  String get resetKillLatch => 'Reset Kill Latch';
+  String get resetWithRiskAcknowledgement =>
+      'Reset with Risk Acknowledgement';
+  String get soakMode => 'Soak Mode';
+  String get cyclesToday => 'Cycles Today';
+  String get actionsToday => 'Actions Today';
+  String get dailyLossStatusLabel => 'Daily Loss Status';
+  String get triggeredRules => 'Triggered Rules';
+  String get rulesEvaluated => 'Rules Evaluated';
+  String get safetyFlags => 'Safety Flags';
+  String get expandKillRules => 'Expand Kill Rules';
+  String get collapseKillRules => 'Collapse Kill Rules';
+  String get automationSoakAlreadyLoading =>
+      'Automation Soak Test status is already loading.';
+  String automationSoakRefreshed(String status) =>
+      'Automation Soak Test refreshed: $status.';
+  String automationSoakCompleted(String status) =>
+      'Automation Soak Test completed: $status.';
+  String automationSoakBlocked(String reason) =>
+      'Automation Soak Test blocked: $reason.';
+  String get killLatchReset => 'Kill Latch reset.';
+  String get resetKillLatchRequiresAck =>
+      'Reset Kill Latch requires risk acknowledgement.';
   String brokerSyncHealthLabel(String value) {
     switch (value.trim().toLowerCase()) {
       case 'healthy':
@@ -536,6 +575,35 @@ class AppStrings {
       'pending_order_blocker_exists': 'Pending order blocker exists',
       'sync_required_order_exists': 'Sync-required order exists',
       'broker_sync_watchdog_blocked': 'Broker Sync Watchdog blocked',
+      'kill_latched': 'Kill Latch Active',
+      'live_phase1_blocked': 'Phase 1 Live Blocked',
+      'live_phase1_ready': 'Phase 1 Live Ready',
+      'dry_run_monitoring': 'Dry-Run Check',
+      'live_phase1_controlled': 'Phase 1 Live Check',
+      'broker_sync_unsafe': 'Sync Unsafe',
+      'broker_sync_unknown_in_live_mode': 'Broker Sync Unknown',
+      'pending_sync_order_present': 'Pending Sync Orders',
+      'stale_order_present': 'Stale Orders',
+      'duplicate_open_order_present': 'Duplicate Orders',
+      'broker_unmatched_order_present': 'Broker Mismatch',
+      'local_unmatched_order_present': 'Local Mismatch',
+      'position_quantity_mismatch': 'Position Mismatch',
+      'production_readiness_blocked': 'Production Readiness Blocked',
+      'automation_mode_not_ready': 'Automation Mode Not Ready',
+      'kill_switch_on': 'Kill switch enabled',
+      'dry_run_on_for_live_mode': 'Dry-run enabled',
+      'kis_real_orders_disabled_for_live_mode': 'KIS real orders disabled',
+      'daily_trade_limit_exhausted': 'Daily trade limit reached',
+      'daily_loss_limit_breached': 'Daily Loss Limit',
+      'consecutive_failures_exceeded': 'Consecutive Failures',
+      'unexpected_broker_submit_flag': 'Unexpected Broker Submit',
+      'unexpected_manual_submit_flag': 'Unexpected Manual Submit',
+      'unexpected_order_cancel_flag': 'Unexpected Order Cancel',
+      'orchestrator_unexpected_error': 'Orchestrator Error',
+      'phase_service_unexpected_error': 'Phase Service Error',
+      'stale_account_snapshot': 'Stale Account Snapshot',
+      'automation_soak_kill_latch_active': 'Kill Latch Active',
+      'review_automation_soak_status': 'Review Automation Soak Test',
       'daily_trade_limit_reached': 'Daily trade limit reached',
       'dry_run_is_separate': dryRunIsSeparate,
       'kill_switch_is_separate': killSwitchIsSeparate,
@@ -1132,6 +1200,13 @@ class AppStrings {
         positionsFirst,
         disabledByDefault,
         noAutoRetryTitle,
+      ];
+
+  List<String> get automationSoakBadges => [
+        operatorReadOnly,
+        operatorNoLiveOrders,
+        noOrderCancel,
+        noBrokerSubmitDisplay,
       ];
 
   String brokerName(String value) {

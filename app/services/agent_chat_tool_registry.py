@@ -150,6 +150,16 @@ _DEFAULT_TOOLS = [
         description="Read-only latest broker sync watchdog status lookup. It does not start broker checks, submit orders, change settings, or run automation.",
     ),
     AgentChatToolDefinition(
+        tool_name="automation_soak_status_lookup",
+        display_name="Automation Soak Status",
+        mode="read_only",
+        risk_level="low",
+        allowed_auto_execute=True,
+        provider="kis",
+        market="KR",
+        description="Read-only PR99 automation soak and kill-rule status lookup. It never runs the orchestrator, resets the latch, submits orders, or changes settings.",
+    ),
+    AgentChatToolDefinition(
         tool_name="strategy_profiles_lookup",
         display_name="Strategy Profiles Lookup",
         mode="read_only",

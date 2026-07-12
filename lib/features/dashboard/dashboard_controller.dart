@@ -21,6 +21,7 @@ import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
 import '../../models/automation_runtime_monitor.dart';
+import '../../models/automation_soak_test.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_sell_live_phase1.dart';
@@ -370,6 +371,10 @@ class DashboardController extends ChangeNotifier {
   BrokerSyncWatchdogResult? brokerSyncWatchdogResult;
   bool brokerSyncWatchdogLoading = false;
   String? brokerSyncWatchdogError;
+  AutomationSoakStatus? automationSoakStatus;
+  AutomationSoakRunResult? automationSoakRunResult;
+  bool automationSoakLoading = false;
+  String? automationSoakError;
   AutomationModeControlStatus? automationModeStatus;
   bool automationModeLoading = false;
   String? automationModeError;
@@ -2767,6 +2772,39 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshAutomationSoak({
+    bool silent = false,
+  }) async {
+    if (automationSoakLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationSoakAlreadyLoading,
+      );
+    }
+    automationSoakLoading = true;
+    automationSoakError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchAutomationSoakStatus();
+      automationSoakStatus = result;
+      return ActionResult(
+        success: true,
+        message: strings.automationSoakRefreshed(
+          strings.automationControlLabel(result.effectiveStatus),
+        ),
+      );
+    } catch (e) {
+      automationSoakError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationSoakError!),
+      );
+    } finally {
+      automationSoakLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<ActionResult> refreshAutomationModeStatus({
     bool silent = false,
   }) async {
@@ -2797,6 +2835,143 @@ class DashboardController extends ChangeNotifier {
     } finally {
       automationModeLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutomationSoakOnce() async {
+    if (automationSoakLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationSoakAlreadyLoading,
+      );
+    }
+    automationSoakLoading = true;
+    automationSoakError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runAutomationSoakOnce(
+        provider: 'kis',
+        market: 'KR',
+        mode: 'dry_run_monitoring',
+        triggerSource: 'manual_soak_test',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationSoakRunResult = result;
+      await _refreshAutomationSoakDependents();
+      return ActionResult(
+        success: result.completed,
+        message: result.completed
+            ? strings.automationSoakCompleted(
+                strings.statusLabel(result.resultStatus),
+              )
+            : strings.automationSoakBlocked(
+                result.blockingReasons.isNotEmpty
+                    ? result.blockingReasons.first
+                    : result.resultStatus,
+              ),
+      );
+    } catch (e) {
+      automationSoakError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationSoakError!),
+      );
+    } finally {
+      automationSoakLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> resetAutomationSoakKillLatch({
+    required bool operatorAcknowledgedRisks,
+    String? reason,
+  }) async {
+    if (!operatorAcknowledgedRisks) {
+      return ActionResult(
+        success: false,
+        message: strings.resetKillLatchRequiresAck,
+      );
+    }
+    if (automationSoakLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationSoakAlreadyLoading,
+      );
+    }
+    automationSoakLoading = true;
+    automationSoakError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.resetAutomationSoakKillLatch(
+        operatorAcknowledgedRisks: operatorAcknowledgedRisks,
+        reason: reason,
+      );
+      automationSoakStatus = result;
+      await _refreshAutomationSoakDependents(refreshSoakStatus: false);
+      return ActionResult(
+        success: true,
+        message: strings.killLatchReset,
+      );
+    } catch (e) {
+      automationSoakError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationSoakError!),
+      );
+    } finally {
+      automationSoakLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _refreshAutomationSoakDependents({
+    bool refreshSoakStatus = true,
+  }) async {
+    if (refreshSoakStatus) {
+      try {
+        automationSoakStatus = await apiClient.fetchAutomationSoakStatus();
+      } catch (_) {
+        // Keep the run result as the authoritative response for this action.
+      }
+    }
+    try {
+      automationModeStatus = await apiClient.fetchAutomationModeStatus();
+    } catch (_) {
+      // Related status panels can refresh independently.
+    }
+    try {
+      brokerSyncWatchdogStatus = await apiClient.fetchBrokerSyncWatchdogLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Keep the existing sync snapshot if the compact refresh fails.
+    }
+    try {
+      portfolioOrchestratorStatus =
+          await apiClient.fetchPortfolioOrchestratorLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Avoid turning a completed soak action into a failed UI action.
+    }
+    try {
+      latestOpsProductionReadiness =
+          await apiClient.fetchOpsProductionReadiness();
+    } catch (_) {
+      // Production readiness remains available from its own panel refresh.
+    }
+    try {
+      dailyOpsSummary = await apiClient.fetchDailyOpsSummary();
+    } catch (_) {
+      // Daily summary remains available from its own panel refresh.
+    }
+    try {
+      operatorAlerts = await apiClient.fetchOperatorAlerts();
+    } catch (_) {
+      // Alerts can refresh independently.
     }
   }
 

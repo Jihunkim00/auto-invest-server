@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/core/utils/timestamp_formatter.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
 import 'package:auto_invest_dashboard/models/automation_mode_control.dart';
+import 'package:auto_invest_dashboard/models/automation_soak_test.dart';
 import 'package:auto_invest_dashboard/models/auto_buy_live_phase1.dart';
 import 'package:auto_invest_dashboard/models/auto_exit_candidate.dart';
 import 'package:auto_invest_dashboard/models/auto_sell_live_phase1.dart';
@@ -30,6 +31,7 @@ import 'auto_buy_scheduler_model_test.dart';
 import 'daily_ops_summary_model_test.dart';
 import 'operator_alerts_model_test.dart';
 import 'automation_mode_control_model_test.dart';
+import 'automation_soak_test_model_test.dart';
 import 'broker_sync_watchdog_model_test.dart';
 
 void main() {
@@ -1141,12 +1143,19 @@ class _FakeLogsApiClient extends ApiClient {
   KisManualOrderSafetyStatus manualSafetyStatus;
   int fetchRecentRunsCalls = 0;
   int fetchAutomationModeStatusCalls = 0;
+  int fetchAutomationSoakStatusCalls = 0;
   int fetchBrokerSyncWatchdogStatusCalls = 0;
 
   @override
   Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {
     fetchAutomationModeStatusCalls += 1;
     return AutomationModeControlStatus.fromJson(automationModeStatusJson());
+  }
+
+  @override
+  Future<AutomationSoakStatus> fetchAutomationSoakStatus() async {
+    fetchAutomationSoakStatusCalls += 1;
+    return AutomationSoakStatus.fromJson(automationSoakStatusJson());
   }
 
   @override

@@ -154,6 +154,13 @@ class AutomationModeControlService:
             warning_reasons.append("dry_run_is_separate")
         if settings.get("kill_switch") is True and mode != "off":
             warning_reasons.append("kill_switch_is_separate")
+        soak_latch_active = bool(settings.get("automation_soak_kill_latch_active"))
+        if soak_latch_active:
+            blocking_reasons.append("automation_soak_kill_latch_active")
+            effective_status = "kill_latched"
+            can_attempt_phase1_live = False
+            can_submit_live_order = False
+            can_run_dry_run = False
         if not kis_real_order_enabled and mode != "off":
             warning_reasons.append("kis_real_orders_are_separate")
         if production_status not in {"ready", "warning"} and mode != "off":
@@ -208,6 +215,13 @@ class AutomationModeControlService:
             "sync_required_count": sync_required_count,
             "critical_exit_candidate_count": critical_exit_count,
             "daily_trade_limit_remaining": daily_remaining,
+            "soak_kill_latch_active": soak_latch_active,
+            "soak_kill_latch_reason": _text(
+                settings.get("automation_soak_kill_latch_reason")
+            ),
+            "soak_kill_latch_triggered_at": _iso(
+                settings.get("automation_soak_kill_latch_triggered_at")
+            ),
             "blocking_reasons": blocking_reasons,
             "warning_reasons": warning_reasons,
             "next_safe_action": _next_safe_action(
@@ -585,6 +599,7 @@ class AutomationModeControlService:
             "kill_switch_changed": False,
             "kis_real_order_enabled_changed": False,
             "agent_chat_can_change_mode": False,
+            "soak_kill_latch_blocks_automation": True,
         }
 
 

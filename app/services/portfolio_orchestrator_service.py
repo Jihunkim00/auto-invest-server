@@ -186,6 +186,25 @@ class PortfolioOrchestratorService:
             )
 
         if not check(
+            "automation_soak_kill_latch_clear",
+            not bool(settings.get("automation_soak_kill_latch_active", False)),
+            "automation_soak_kill_latch_active",
+            "PR99 automation soak kill latch must be clear before portfolio orchestration.",
+        ):
+            state["soak_kill_latch_active"] = True
+            state["soak_kill_latch_reason"] = _text(
+                settings.get("automation_soak_kill_latch_reason")
+            )
+            state["kill_rules_triggered"] = [
+                state["soak_kill_latch_reason"] or "automation_soak_kill_latch_active"
+            ]
+            return finish(
+                "blocked",
+                reason="automation_soak_kill_latch_active",
+                next_safe_action="operator_review_then_reset_soak_kill_latch",
+            )
+
+        if not check(
             "portfolio_orchestrator_enabled",
             enabled,
             "portfolio_orchestrator_disabled",
@@ -785,6 +804,9 @@ class PortfolioOrchestratorService:
             "order_id": None,
             "broker_order_id": None,
             "kis_odno": None,
+            "soak_kill_latch_active": False,
+            "soak_kill_latch_reason": None,
+            "kill_rules_triggered": [],
             "safety": {},
         }
 

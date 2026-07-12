@@ -15,6 +15,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
+import '../../models/automation_soak_test.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_buy_live_phase1.dart';
 import '../../models/auto_sell_live_phase1.dart';
@@ -1098,6 +1099,49 @@ class ApiClient {
     ).toString();
     final payload = await _postJsonBody(path, const <String, dynamic>{});
     return BrokerSyncWatchdogResult.fromJson(payload);
+  }
+
+  Future<AutomationSoakStatus> fetchAutomationSoakStatus() async {
+    final payload = await _getJsonNoCache('/automation/soak/status');
+    return AutomationSoakStatus.fromJson(payload);
+  }
+
+  Future<AutomationSoakRunResult> runAutomationSoakOnce({
+    String provider = 'kis',
+    String market = 'KR',
+    String mode = 'dry_run_monitoring',
+    String triggerSource = 'manual_soak_test',
+    String language = 'ko',
+    String locale = 'ko-KR',
+    bool operatorAcknowledgedRisks = false,
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/soak/run-once',
+      {
+        'provider': provider,
+        'market': market,
+        'mode': mode,
+        'trigger_source': triggerSource,
+        'language': language,
+        'locale': locale,
+        'operator_acknowledged_risks': operatorAcknowledgedRisks,
+      },
+    );
+    return AutomationSoakRunResult.fromJson(payload);
+  }
+
+  Future<AutomationSoakStatus> resetAutomationSoakKillLatch({
+    required bool operatorAcknowledgedRisks,
+    String? reason,
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/soak/reset-kill-latch',
+      {
+        'operator_acknowledged_risks': operatorAcknowledgedRisks,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+    return AutomationSoakStatus.fromJson(payload);
   }
 
   Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {

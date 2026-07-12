@@ -201,6 +201,25 @@ class RuntimeSettingService:
             "broker_sync_watchdog_allow_local_status_updates": False,
             "broker_sync_watchdog_allow_order_submit": False,
             "broker_sync_watchdog_allow_order_cancel": False,
+            "automation_soak_enabled": False,
+            "automation_soak_mode": "dry_run_monitoring",
+            "automation_soak_allow_live_phase1": False,
+            "automation_soak_max_cycles_per_day": 3,
+            "automation_soak_max_actions_per_day": 1,
+            "automation_soak_require_broker_sync_healthy": True,
+            "automation_soak_require_production_ready": True,
+            "automation_soak_stop_on_any_critical": True,
+            "automation_soak_kill_latch_active": False,
+            "automation_soak_kill_latch_reason": None,
+            "automation_soak_kill_latch_triggered_at": None,
+            "automation_soak_last_successful_cycle_at": None,
+            "automation_soak_consecutive_failure_count": 0,
+            "automation_soak_max_consecutive_failures": 2,
+            "automation_soak_max_daily_loss_pct": 0.02,
+            "automation_soak_max_daily_loss_amount": None,
+            "automation_soak_max_unmatched_order_count": 0,
+            "automation_soak_max_pending_sync_count": 0,
+            "automation_soak_max_stale_order_count": 0,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -605,6 +624,72 @@ class RuntimeSettingService:
             "broker_sync_watchdog_allow_local_status_updates": False,
             "broker_sync_watchdog_allow_order_submit": False,
             "broker_sync_watchdog_allow_order_cancel": False,
+            "automation_soak_enabled": bool(
+                getattr(row, "automation_soak_enabled", False)
+            ),
+            "automation_soak_mode": str(
+                getattr(row, "automation_soak_mode", "dry_run_monitoring")
+                or "dry_run_monitoring"
+            ),
+            "automation_soak_allow_live_phase1": bool(
+                getattr(row, "automation_soak_allow_live_phase1", False)
+            ),
+            "automation_soak_max_cycles_per_day": int(
+                getattr(row, "automation_soak_max_cycles_per_day", 3)
+            ),
+            "automation_soak_max_actions_per_day": int(
+                getattr(row, "automation_soak_max_actions_per_day", 1)
+            ),
+            "automation_soak_require_broker_sync_healthy": bool(
+                getattr(row, "automation_soak_require_broker_sync_healthy", True)
+            ),
+            "automation_soak_require_production_ready": bool(
+                getattr(row, "automation_soak_require_production_ready", True)
+            ),
+            "automation_soak_stop_on_any_critical": bool(
+                getattr(row, "automation_soak_stop_on_any_critical", True)
+            ),
+            "automation_soak_kill_latch_active": bool(
+                getattr(row, "automation_soak_kill_latch_active", False)
+            ),
+            "automation_soak_kill_latch_reason": getattr(
+                row,
+                "automation_soak_kill_latch_reason",
+                None,
+            ),
+            "automation_soak_kill_latch_triggered_at": getattr(
+                row,
+                "automation_soak_kill_latch_triggered_at",
+                None,
+            ),
+            "automation_soak_last_successful_cycle_at": getattr(
+                row,
+                "automation_soak_last_successful_cycle_at",
+                None,
+            ),
+            "automation_soak_consecutive_failure_count": int(
+                getattr(row, "automation_soak_consecutive_failure_count", 0)
+            ),
+            "automation_soak_max_consecutive_failures": int(
+                getattr(row, "automation_soak_max_consecutive_failures", 2)
+            ),
+            "automation_soak_max_daily_loss_pct": float(
+                getattr(row, "automation_soak_max_daily_loss_pct", 0.02)
+            ),
+            "automation_soak_max_daily_loss_amount": getattr(
+                row,
+                "automation_soak_max_daily_loss_amount",
+                None,
+            ),
+            "automation_soak_max_unmatched_order_count": int(
+                getattr(row, "automation_soak_max_unmatched_order_count", 0)
+            ),
+            "automation_soak_max_pending_sync_count": int(
+                getattr(row, "automation_soak_max_pending_sync_count", 0)
+            ),
+            "automation_soak_max_stale_order_count": int(
+                getattr(row, "automation_soak_max_stale_order_count", 0)
+            ),
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -662,6 +747,46 @@ class RuntimeSettingService:
         settings["broker_sync_watchdog_allow_local_status_updates"] = False
         settings["broker_sync_watchdog_allow_order_submit"] = False
         settings["broker_sync_watchdog_allow_order_cancel"] = False
+        if settings.get("automation_soak_mode") not in {
+            "dry_run_monitoring",
+            "live_phase1_controlled",
+        }:
+            settings["automation_soak_mode"] = "dry_run_monitoring"
+        settings["automation_soak_max_cycles_per_day"] = max(
+            0,
+            int(settings.get("automation_soak_max_cycles_per_day") or 3),
+        )
+        settings["automation_soak_max_actions_per_day"] = max(
+            0,
+            int(settings.get("automation_soak_max_actions_per_day") or 1),
+        )
+        settings["automation_soak_require_broker_sync_healthy"] = True
+        settings["automation_soak_require_production_ready"] = True
+        settings["automation_soak_stop_on_any_critical"] = True
+        settings["automation_soak_consecutive_failure_count"] = max(
+            0,
+            int(settings.get("automation_soak_consecutive_failure_count") or 0),
+        )
+        settings["automation_soak_max_consecutive_failures"] = max(
+            1,
+            int(settings.get("automation_soak_max_consecutive_failures") or 2),
+        )
+        settings["automation_soak_max_daily_loss_pct"] = max(
+            0.0,
+            float(settings.get("automation_soak_max_daily_loss_pct") or 0.02),
+        )
+        settings["automation_soak_max_unmatched_order_count"] = max(
+            0,
+            int(settings.get("automation_soak_max_unmatched_order_count") or 0),
+        )
+        settings["automation_soak_max_pending_sync_count"] = max(
+            0,
+            int(settings.get("automation_soak_max_pending_sync_count") or 0),
+        )
+        settings["automation_soak_max_stale_order_count"] = max(
+            0,
+            int(settings.get("automation_soak_max_stale_order_count") or 0),
+        )
         settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_exit_allowed_profiles")
         )
@@ -2005,6 +2130,19 @@ class RuntimeSettingService:
             payload["broker_sync_watchdog_allow_order_submit"] = False
         if "broker_sync_watchdog_allow_order_cancel" in payload:
             payload["broker_sync_watchdog_allow_order_cancel"] = False
+        if "automation_soak_mode" in payload:
+            mode = str(payload.get("automation_soak_mode") or "").strip().lower()
+            payload["automation_soak_mode"] = (
+                mode
+                if mode in {"dry_run_monitoring", "live_phase1_controlled"}
+                else "dry_run_monitoring"
+            )
+        if "automation_soak_require_broker_sync_healthy" in payload:
+            payload["automation_soak_require_broker_sync_healthy"] = True
+        if "automation_soak_require_production_ready" in payload:
+            payload["automation_soak_require_production_ready"] = True
+        if "automation_soak_stop_on_any_critical" in payload:
+            payload["automation_soak_stop_on_any_critical"] = True
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -2155,6 +2293,25 @@ class RuntimeSettingService:
             "broker_sync_watchdog_allow_local_status_updates",
             "broker_sync_watchdog_allow_order_submit",
             "broker_sync_watchdog_allow_order_cancel",
+            "automation_soak_enabled",
+            "automation_soak_mode",
+            "automation_soak_allow_live_phase1",
+            "automation_soak_max_cycles_per_day",
+            "automation_soak_max_actions_per_day",
+            "automation_soak_require_broker_sync_healthy",
+            "automation_soak_require_production_ready",
+            "automation_soak_stop_on_any_critical",
+            "automation_soak_kill_latch_active",
+            "automation_soak_kill_latch_reason",
+            "automation_soak_kill_latch_triggered_at",
+            "automation_soak_last_successful_cycle_at",
+            "automation_soak_consecutive_failure_count",
+            "automation_soak_max_consecutive_failures",
+            "automation_soak_max_daily_loss_pct",
+            "automation_soak_max_daily_loss_amount",
+            "automation_soak_max_unmatched_order_count",
+            "automation_soak_max_pending_sync_count",
+            "automation_soak_max_stale_order_count",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -2208,6 +2365,19 @@ class RuntimeSettingService:
                 "broker_sync_watchdog_allow_order_cancel",
             }:
                 value = False
+            if key in {
+                "automation_soak_require_broker_sync_healthy",
+                "automation_soak_require_production_ready",
+                "automation_soak_stop_on_any_critical",
+            }:
+                value = True
+            if key == "automation_soak_mode":
+                text = str(value or "").strip().lower()
+                value = (
+                    text
+                    if text in {"dry_run_monitoring", "live_phase1_controlled"}
+                    else "dry_run_monitoring"
+                )
             setattr(row, key, value)
 
         row.strategy_auto_buy_scheduler_dry_run_only = True
@@ -2223,6 +2393,9 @@ class RuntimeSettingService:
         row.broker_sync_watchdog_allow_local_status_updates = False
         row.broker_sync_watchdog_allow_order_submit = False
         row.broker_sync_watchdog_allow_order_cancel = False
+        row.automation_soak_require_broker_sync_healthy = True
+        row.automation_soak_require_production_ready = True
+        row.automation_soak_stop_on_any_critical = True
         db.commit()
         db.refresh(row)
         return self.get_settings(db)
@@ -2524,6 +2697,14 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "portfolio_orchestrator_allow_live_orders",
         "broker_sync_watchdog_enabled",
         "broker_sync_watchdog_allow_broker_reads",
+        "automation_soak_enabled",
+        "automation_soak_mode",
+        "automation_soak_allow_live_phase1",
+        "automation_soak_max_cycles_per_day",
+        "automation_soak_max_actions_per_day",
+        "automation_soak_kill_latch_active",
+        "automation_soak_max_consecutive_failures",
+        "automation_soak_max_daily_loss_pct",
     )
 
 
@@ -2561,6 +2742,8 @@ def _dangerous_runtime_keys() -> set[str]:
         "position_management_scheduler_allow_live_orders",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
+        "automation_soak_enabled",
+        "automation_soak_allow_live_phase1",
     }
 
 

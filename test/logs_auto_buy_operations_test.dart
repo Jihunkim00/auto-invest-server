@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/logs/logs_screen.dart';
+import 'package:auto_invest_dashboard/models/automation_soak_test.dart';
 import 'package:auto_invest_dashboard/models/auto_exit_candidate.dart';
 import 'package:auto_invest_dashboard/models/daily_ops_summary.dart';
 import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart';
@@ -24,6 +25,7 @@ import 'auto_sell_live_phase1_model_test.dart';
 import 'auto_buy_operations_model_test.dart';
 import 'auto_buy_promotion_model_test.dart';
 import 'auto_buy_scheduler_model_test.dart';
+import 'automation_soak_test_model_test.dart';
 import 'daily_ops_summary_model_test.dart';
 import 'operator_alerts_model_test.dart';
 
@@ -97,6 +99,10 @@ class _LogsAutoBuyOpsApiClient extends ApiClient {
   @override
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async =>
       KisManualOrderSafetyStatus.safeDefault;
+
+  @override
+  Future<AutomationSoakStatus> fetchAutomationSoakStatus() async =>
+      AutomationSoakStatus.fromJson(automationSoakStatusJson());
 
   @override
   Future<StrategyAutoBuyOperationsStatus> fetchStrategyAutoBuyOperationsStatus({

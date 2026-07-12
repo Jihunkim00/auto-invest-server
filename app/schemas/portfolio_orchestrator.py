@@ -100,4 +100,7 @@ class PortfolioOrchestratorResponse(BaseModel):
     order_id: int | None = None
     broker_order_id: str | None = None
     kis_odno: str | None = None
+    soak_kill_latch_active: bool = False
+    soak_kill_latch_reason: str | None = None
+    kill_rules_triggered: list[str] = Field(default_factory=list)
     safety: dict[str, Any] = Field(default_factory=dict)
