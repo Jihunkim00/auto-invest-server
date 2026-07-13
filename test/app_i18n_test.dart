@@ -159,6 +159,36 @@ void main() {
     expect(en.automationModeLabel('phase1_live_ready'), 'Phase 1 Live Ready');
     expect(en.automationControlLabel('dry_run_is_separate'),
         'Dry-run is separate');
+    expect(en.controlledFullAutomationRelease,
+        'Controlled Full Automation Release');
+    expect(en.automationRelease, 'Automation Release');
+    expect(en.releaseDisabled, 'Release Disabled');
+    expect(en.releasePreflightRequired, 'Release Preflight Required');
+    expect(en.monitoringReady, 'Monitoring Ready');
+    expect(en.dryRunReadyRelease, 'Dry-Run Ready');
+    expect(en.phase1LiveReadyRelease, 'Phase 1 Live Ready');
+    expect(en.liveOrderEligibility, 'Live Order Eligibility');
+    expect(en.releasePreflight, 'Release Preflight');
+    expect(en.armRelease, 'Arm Release');
+    expect(en.disarmRelease, 'Disarm Release');
+    expect(en.armWithRiskAcknowledgement, 'Arm with Risk Acknowledgement');
+    expect(en.checklist, 'Checklist');
+    expect(en.blockingReasons, 'Blocking Reasons');
+    expect(en.warningReasons, 'Warning Reasons');
+    expect(en.nextSafeAction, 'Next Safe Action');
+    expect(en.brokerSyncRequired, 'Broker Sync Required');
+    expect(en.soakTestRequired, 'Soak Test Required');
+    expect(en.noLiveOrders, 'NO LIVE ORDERS');
+    expect(en.noBrokerSubmitRelease, 'No Broker Submit');
+    expect(en.noOrderCancelRelease, 'No Order Cancel');
+    expect(ko.controlledFullAutomationRelease, '제한형 완전 자동화 릴리스');
+    expect(ko.automationRelease, '자동화 릴리스');
+    expect(ko.brokerSyncRequired, '브로커 동기화 필요');
+    expect(ko.soakTestRequired, '소크 테스트 필요');
+    expect(ko.noBrokerSubmitRelease, '브로커 제출 없음');
+    expect(ko.noOrderCancelRelease, '주문 취소 없음');
+    expect(ko.kisBroker, '한국투자증권');
+    expect(ko.alpacaBroker, '알파카');
     expect(en.brokerSyncWatchdog, 'Broker Sync Watchdog');
     expect(en.orderPositionSyncHealth, 'Order / Position Sync Health');
     expect(en.automationBlocked, 'Automation Blocked');

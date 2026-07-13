@@ -24,6 +24,13 @@ from app.schemas.automation_mode_control import (
     AutomationModeSetRequest,
     AutomationModeStatusResponse,
 )
+from app.schemas.automation_release import (
+    AutomationReleaseArmRequest,
+    AutomationReleaseCycleResponse,
+    AutomationReleaseDisarmRequest,
+    AutomationReleaseRunCycleRequest,
+    AutomationReleaseStatusResponse,
+)
 from app.schemas.automation_soak_test import (
     AutomationSoakResetKillLatchRequest,
     AutomationSoakRunOnceRequest,
@@ -35,6 +42,10 @@ from app.schemas.automation_soak_test import (
 from app.services.automation_mode_control_service import (
     AutomationModeAcknowledgementRequired,
     AutomationModeControlService,
+)
+from app.services.automation_release_service import (
+    AutomationReleaseAcknowledgementRequired,
+    AutomationReleaseService,
 )
 from app.services.automation_soak_test_service import (
     AutomationSoakAcknowledgementRequired,
@@ -61,6 +72,10 @@ mode_router = APIRouter(
 soak_router = APIRouter(
     prefix="/automation/soak",
     tags=["automation-soak"],
+)
+release_router = APIRouter(
+    prefix="/automation/release",
+    tags=["automation-release"],
 )
 
 
@@ -147,6 +162,93 @@ def get_automation_soak_test_service(
         automation_mode_service=automation_mode,
         portfolio_orchestrator_service=portfolio_orchestrator_service,
     )
+
+
+def get_automation_release_service(
+    db: Session = Depends(get_db),
+    automation_mode_service: AutomationModeControlService = Depends(
+        get_automation_mode_control_service
+    ),
+    portfolio_orchestrator_service: PortfolioOrchestratorService = Depends(
+        get_portfolio_orchestrator_service
+    ),
+    soak_test_service: AutomationSoakTestService = Depends(
+        get_automation_soak_test_service
+    ),
+) -> AutomationReleaseService:
+    runtime_settings = RuntimeSettingService()
+
+    def broker_factory(session: Session):
+        settings = get_settings()
+        return KisBroker(KisClient(settings, KisAuthManager(settings, session)))
+
+    watchdog = BrokerSyncWatchdogService(
+        runtime_settings=runtime_settings,
+        broker_factory=broker_factory,
+    )
+    readiness = OpsProductionReadinessService(runtime_settings=runtime_settings)
+    return AutomationReleaseService(
+        runtime_settings=runtime_settings,
+        automation_mode_service=automation_mode_service,
+        broker_sync_watchdog_service=watchdog,
+        readiness_service=readiness,
+        soak_test_service=soak_test_service,
+        portfolio_orchestrator_service=portfolio_orchestrator_service,
+    )
+
+
+@release_router.get("/status", response_model=AutomationReleaseStatusResponse)
+def get_automation_release_status(
+    db: Session = Depends(get_db),
+    service: AutomationReleaseService = Depends(get_automation_release_service),
+):
+    return service.status(db)
+
+
+@release_router.post("/preflight", response_model=AutomationReleaseStatusResponse)
+def run_automation_release_preflight(
+    db: Session = Depends(get_db),
+    service: AutomationReleaseService = Depends(get_automation_release_service),
+):
+    return service.preflight(db)
+
+
+@release_router.post("/arm", response_model=AutomationReleaseStatusResponse)
+def arm_automation_release(
+    payload: AutomationReleaseArmRequest,
+    db: Session = Depends(get_db),
+    service: AutomationReleaseService = Depends(get_automation_release_service),
+):
+    try:
+        return service.arm(
+            db,
+            operator_acknowledged_risks=payload.operator_acknowledged_risks,
+            reason=payload.reason,
+            release_mode=payload.release_mode,
+            armed_by="api",
+        )
+    except AutomationReleaseAcknowledgementRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@release_router.post("/disarm", response_model=AutomationReleaseStatusResponse)
+def disarm_automation_release(
+    payload: AutomationReleaseDisarmRequest | None = None,
+    db: Session = Depends(get_db),
+    service: AutomationReleaseService = Depends(get_automation_release_service),
+):
+    return service.disarm(db, reason=(payload.reason if payload else None))
+
+
+@release_router.post("/run-cycle-once", response_model=AutomationReleaseCycleResponse)
+def run_automation_release_cycle_once(
+    payload: AutomationReleaseRunCycleRequest,
+    db: Session = Depends(get_db),
+    service: AutomationReleaseService = Depends(get_automation_release_service),
+):
+    return service.run_cycle_once(db, payload.model_dump())
 
 
 @mode_router.get("/status", response_model=AutomationModeStatusResponse)
@@ -284,3 +386,4 @@ def get_latest_portfolio_orchestrator_run(
 router.include_router(mode_router)
 router.include_router(soak_router)
 router.include_router(portfolio_router)
+router.include_router(release_router)

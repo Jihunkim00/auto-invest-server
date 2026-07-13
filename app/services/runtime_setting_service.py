@@ -220,6 +220,22 @@ class RuntimeSettingService:
             "automation_soak_max_unmatched_order_count": 0,
             "automation_soak_max_pending_sync_count": 0,
             "automation_soak_max_stale_order_count": 0,
+            "automation_release_enabled": False,
+            "automation_release_mode": "controlled_phase1",
+            "automation_release_armed_at": None,
+            "automation_release_armed_by": None,
+            "automation_release_disarmed_at": None,
+            "automation_release_reason": None,
+            "automation_release_require_soak_pass": True,
+            "automation_release_require_watchdog_healthy": True,
+            "automation_release_require_production_ready": True,
+            "automation_release_require_kill_latch_clear": True,
+            "automation_release_max_actions_per_cycle": 1,
+            "automation_release_max_daily_auto_actions": 2,
+            "automation_release_max_daily_auto_buys": 1,
+            "automation_release_max_daily_auto_sells": 1,
+            "automation_release_allow_live_phase1": False,
+            "automation_release_scheduler_enabled": False,
             "kis_scheduler_enabled": False,
             "kis_scheduler_dry_run": True,
             "kis_scheduler_live_enabled": False,
@@ -690,6 +706,63 @@ class RuntimeSettingService:
             "automation_soak_max_stale_order_count": int(
                 getattr(row, "automation_soak_max_stale_order_count", 0)
             ),
+            "automation_release_enabled": bool(
+                getattr(row, "automation_release_enabled", False)
+            ),
+            "automation_release_mode": str(
+                getattr(row, "automation_release_mode", "controlled_phase1")
+                or "controlled_phase1"
+            ),
+            "automation_release_armed_at": getattr(
+                row,
+                "automation_release_armed_at",
+                None,
+            ),
+            "automation_release_armed_by": getattr(
+                row,
+                "automation_release_armed_by",
+                None,
+            ),
+            "automation_release_disarmed_at": getattr(
+                row,
+                "automation_release_disarmed_at",
+                None,
+            ),
+            "automation_release_reason": getattr(
+                row,
+                "automation_release_reason",
+                None,
+            ),
+            "automation_release_require_soak_pass": bool(
+                getattr(row, "automation_release_require_soak_pass", True)
+            ),
+            "automation_release_require_watchdog_healthy": bool(
+                getattr(row, "automation_release_require_watchdog_healthy", True)
+            ),
+            "automation_release_require_production_ready": bool(
+                getattr(row, "automation_release_require_production_ready", True)
+            ),
+            "automation_release_require_kill_latch_clear": bool(
+                getattr(row, "automation_release_require_kill_latch_clear", True)
+            ),
+            "automation_release_max_actions_per_cycle": int(
+                getattr(row, "automation_release_max_actions_per_cycle", 1)
+            ),
+            "automation_release_max_daily_auto_actions": int(
+                getattr(row, "automation_release_max_daily_auto_actions", 2)
+            ),
+            "automation_release_max_daily_auto_buys": int(
+                getattr(row, "automation_release_max_daily_auto_buys", 1)
+            ),
+            "automation_release_max_daily_auto_sells": int(
+                getattr(row, "automation_release_max_daily_auto_sells", 1)
+            ),
+            "automation_release_allow_live_phase1": bool(
+                getattr(row, "automation_release_allow_live_phase1", False)
+            ),
+            "automation_release_scheduler_enabled": bool(
+                getattr(row, "automation_release_scheduler_enabled", False)
+            ),
             "kis_scheduler_enabled": bool(row.kis_scheduler_enabled),
             "kis_scheduler_dry_run": bool(row.kis_scheduler_dry_run),
             "kis_scheduler_live_enabled": bool(row.kis_scheduler_live_enabled),
@@ -786,6 +859,25 @@ class RuntimeSettingService:
         settings["automation_soak_max_stale_order_count"] = max(
             0,
             int(settings.get("automation_soak_max_stale_order_count") or 0),
+        )
+        if settings.get("automation_release_mode") != "controlled_phase1":
+            settings["automation_release_mode"] = "controlled_phase1"
+        settings["automation_release_require_soak_pass"] = True
+        settings["automation_release_require_watchdog_healthy"] = True
+        settings["automation_release_require_production_ready"] = True
+        settings["automation_release_require_kill_latch_clear"] = True
+        settings["automation_release_max_actions_per_cycle"] = 1
+        settings["automation_release_max_daily_auto_actions"] = min(
+            2,
+            max(0, int(settings.get("automation_release_max_daily_auto_actions") or 2)),
+        )
+        settings["automation_release_max_daily_auto_buys"] = min(
+            1,
+            max(0, int(settings.get("automation_release_max_daily_auto_buys") or 1)),
+        )
+        settings["automation_release_max_daily_auto_sells"] = min(
+            1,
+            max(0, int(settings.get("automation_release_max_daily_auto_sells") or 1)),
         )
         settings["strategy_live_auto_exit_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_exit_allowed_profiles")
@@ -2143,6 +2235,33 @@ class RuntimeSettingService:
             payload["automation_soak_require_production_ready"] = True
         if "automation_soak_stop_on_any_critical" in payload:
             payload["automation_soak_stop_on_any_critical"] = True
+        if "automation_release_mode" in payload:
+            payload["automation_release_mode"] = "controlled_phase1"
+        for key in {
+            "automation_release_require_soak_pass",
+            "automation_release_require_watchdog_healthy",
+            "automation_release_require_production_ready",
+            "automation_release_require_kill_latch_clear",
+        }:
+            if key in payload:
+                payload[key] = True
+        if "automation_release_max_actions_per_cycle" in payload:
+            payload["automation_release_max_actions_per_cycle"] = 1
+        if "automation_release_max_daily_auto_actions" in payload:
+            payload["automation_release_max_daily_auto_actions"] = min(
+                2,
+                max(0, int(payload.get("automation_release_max_daily_auto_actions") or 2)),
+            )
+        if "automation_release_max_daily_auto_buys" in payload:
+            payload["automation_release_max_daily_auto_buys"] = min(
+                1,
+                max(0, int(payload.get("automation_release_max_daily_auto_buys") or 1)),
+            )
+        if "automation_release_max_daily_auto_sells" in payload:
+            payload["automation_release_max_daily_auto_sells"] = min(
+                1,
+                max(0, int(payload.get("automation_release_max_daily_auto_sells") or 1)),
+            )
         row = self.get_or_create(db)
         _sync_bool_alias(
             payload,
@@ -2312,6 +2431,22 @@ class RuntimeSettingService:
             "automation_soak_max_unmatched_order_count",
             "automation_soak_max_pending_sync_count",
             "automation_soak_max_stale_order_count",
+            "automation_release_enabled",
+            "automation_release_mode",
+            "automation_release_armed_at",
+            "automation_release_armed_by",
+            "automation_release_disarmed_at",
+            "automation_release_reason",
+            "automation_release_require_soak_pass",
+            "automation_release_require_watchdog_healthy",
+            "automation_release_require_production_ready",
+            "automation_release_require_kill_latch_clear",
+            "automation_release_max_actions_per_cycle",
+            "automation_release_max_daily_auto_actions",
+            "automation_release_max_daily_auto_buys",
+            "automation_release_max_daily_auto_sells",
+            "automation_release_allow_live_phase1",
+            "automation_release_scheduler_enabled",
             "kis_scheduler_enabled",
             "kis_scheduler_dry_run",
             "kis_scheduler_live_enabled",
@@ -2378,6 +2513,23 @@ class RuntimeSettingService:
                     if text in {"dry_run_monitoring", "live_phase1_controlled"}
                     else "dry_run_monitoring"
                 )
+            if key == "automation_release_mode":
+                value = "controlled_phase1"
+            if key in {
+                "automation_release_require_soak_pass",
+                "automation_release_require_watchdog_healthy",
+                "automation_release_require_production_ready",
+                "automation_release_require_kill_latch_clear",
+            }:
+                value = True
+            if key == "automation_release_max_actions_per_cycle":
+                value = 1
+            if key == "automation_release_max_daily_auto_actions":
+                value = min(2, max(0, int(value or 2)))
+            if key == "automation_release_max_daily_auto_buys":
+                value = min(1, max(0, int(value or 1)))
+            if key == "automation_release_max_daily_auto_sells":
+                value = min(1, max(0, int(value or 1)))
             setattr(row, key, value)
 
         row.strategy_auto_buy_scheduler_dry_run_only = True
@@ -2396,6 +2548,24 @@ class RuntimeSettingService:
         row.automation_soak_require_broker_sync_healthy = True
         row.automation_soak_require_production_ready = True
         row.automation_soak_stop_on_any_critical = True
+        row.automation_release_mode = "controlled_phase1"
+        row.automation_release_require_soak_pass = True
+        row.automation_release_require_watchdog_healthy = True
+        row.automation_release_require_production_ready = True
+        row.automation_release_require_kill_latch_clear = True
+        row.automation_release_max_actions_per_cycle = 1
+        row.automation_release_max_daily_auto_actions = min(
+            2,
+            max(0, int(row.automation_release_max_daily_auto_actions or 2)),
+        )
+        row.automation_release_max_daily_auto_buys = min(
+            1,
+            max(0, int(row.automation_release_max_daily_auto_buys or 1)),
+        )
+        row.automation_release_max_daily_auto_sells = min(
+            1,
+            max(0, int(row.automation_release_max_daily_auto_sells or 1)),
+        )
         db.commit()
         db.refresh(row)
         return self.get_settings(db)
@@ -2705,6 +2875,18 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "automation_soak_kill_latch_active",
         "automation_soak_max_consecutive_failures",
         "automation_soak_max_daily_loss_pct",
+        "automation_release_enabled",
+        "automation_release_mode",
+        "automation_release_require_soak_pass",
+        "automation_release_require_watchdog_healthy",
+        "automation_release_require_production_ready",
+        "automation_release_require_kill_latch_clear",
+        "automation_release_max_actions_per_cycle",
+        "automation_release_max_daily_auto_actions",
+        "automation_release_max_daily_auto_buys",
+        "automation_release_max_daily_auto_sells",
+        "automation_release_allow_live_phase1",
+        "automation_release_scheduler_enabled",
     )
 
 
@@ -2744,6 +2926,9 @@ def _dangerous_runtime_keys() -> set[str]:
         "portfolio_orchestrator_allow_live_orders",
         "automation_soak_enabled",
         "automation_soak_allow_live_phase1",
+        "automation_release_enabled",
+        "automation_release_allow_live_phase1",
+        "automation_release_scheduler_enabled",
     }
 
 

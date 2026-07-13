@@ -584,6 +584,18 @@ class AutomationModeControlService:
             "scheduler": {
                 "enabled": bool(settings.get("scheduler_enabled")),
             },
+            "automation_release": {
+                "enabled": bool(settings.get("automation_release_enabled")),
+                "mode": str(
+                    settings.get("automation_release_mode") or "controlled_phase1"
+                ),
+                "allow_live_phase1": bool(
+                    settings.get("automation_release_allow_live_phase1")
+                ),
+                "scheduler_enabled": bool(
+                    settings.get("automation_release_scheduler_enabled")
+                ),
+            },
         }
 
     def _safety_flags(self) -> dict[str, Any]:

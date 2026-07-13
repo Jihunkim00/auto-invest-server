@@ -15,6 +15,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
+import '../../models/automation_release.dart';
 import '../../models/automation_soak_test.dart';
 import '../../models/auto_exit_candidate.dart';
 import '../../models/auto_buy_live_phase1.dart';
@@ -1142,6 +1143,79 @@ class ApiClient {
       },
     );
     return AutomationSoakStatus.fromJson(payload);
+  }
+
+  Future<AutomationReleaseStatus> fetchAutomationReleaseStatus() async {
+    final payload = await _getJsonNoCache('/automation/release/status');
+    return AutomationReleaseStatus.fromJson(payload);
+  }
+
+  Future<AutomationReleaseStatus> runAutomationReleasePreflight() async {
+    final payload = await _postJsonBody(
+      '/automation/release/preflight',
+      const <String, dynamic>{},
+    );
+    return AutomationReleaseStatus.fromJson(payload);
+  }
+
+  Future<AutomationReleaseStatus> armAutomationRelease({
+    required bool operatorAcknowledgedRisks,
+    String? reason,
+    String releaseMode = 'controlled_phase1',
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/release/arm',
+      {
+        'operator_acknowledged_risks': operatorAcknowledgedRisks,
+        'release_mode': releaseMode,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return AutomationReleaseStatus.fromJson(payload);
+  }
+
+  Future<AutomationReleaseStatus> disarmAutomationRelease({
+    String? reason,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/release/disarm',
+      {
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return AutomationReleaseStatus.fromJson(payload);
+  }
+
+  Future<AutomationReleaseCycleResult> runAutomationReleaseCycleOnce({
+    String mode = 'monitoring',
+    bool operatorAcknowledgedRisks = false,
+    String triggerSource = 'manual_release_cycle',
+    String provider = 'kis',
+    String market = 'KR',
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody(
+      '/automation/release/run-cycle-once',
+      {
+        'mode': mode,
+        'operator_acknowledged_risks': operatorAcknowledgedRisks,
+        'trigger_source': triggerSource,
+        'provider': provider,
+        'market': market,
+        'language': language,
+        'locale': locale,
+      },
+    );
+    return AutomationReleaseCycleResult.fromJson(payload);
   }
 
   Future<AutomationModeControlStatus> fetchAutomationModeStatus() async {

@@ -21,6 +21,7 @@ from app.services.position_management_dry_run_service import (
 )
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
+from app.services.automation_release_service import AutomationReleaseService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_auto_buy_scheduler_service import (
     StrategyAutoBuySchedulerService,
@@ -73,6 +74,11 @@ class SchedulerService:
             ("broker_sync_watchdog_open_phase", 9, 2),
             ("broker_sync_watchdog_midday", 11, 25),
             ("broker_sync_watchdog_before_close", 14, 20),
+        ]
+        self._automation_release_slots = [
+            ("automation_release_open_phase", 9, 15),
+            ("automation_release_midday", 11, 35),
+            ("automation_release_before_close", 14, 35),
         ]
 
     def start(self):
@@ -136,6 +142,13 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_broker_sync_watchdog_scheduled_once(slot_name)
+
+            for slot_name, hour, minute in self._automation_release_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:automation_release:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_automation_release_scheduled_once(slot_name)
 
             time.sleep(20)
 
@@ -483,6 +496,48 @@ class SchedulerService:
                 provider="kis",
                 market="KR",
                 trigger_source=slot_name,
+            )
+        finally:
+            db.close()
+
+    def _run_automation_release_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            settings = self.runtime_settings.get_settings_read_only(db)
+            if not bool(settings.get("automation_release_scheduler_enabled", False)):
+                return self._create_scheduler_skip_log(
+                    db,
+                    slot_name=slot_name,
+                    reason="automation_release_scheduler_disabled",
+                    market="KR",
+                    provider="kis",
+                )
+            if not bool(settings.get("automation_release_enabled", False)):
+                return self._create_scheduler_skip_log(
+                    db,
+                    slot_name=slot_name,
+                    reason="automation_release_disabled",
+                    market="KR",
+                    provider="kis",
+                )
+            release_service = AutomationReleaseService(
+                runtime_settings=self.runtime_settings,
+            )
+            status = release_service.status(db)
+            cycle_mode = (
+                "dry_run"
+                if bool(status.get("can_run_dry_run_cycle"))
+                else "monitoring"
+            )
+            return release_service.run_cycle_once(
+                db,
+                {
+                    "mode": cycle_mode,
+                    "operator_acknowledged_risks": False,
+                    "trigger_source": "scheduler_release_cycle",
+                    "provider": "kis",
+                    "market": "KR",
+                },
             )
         finally:
             db.close()
