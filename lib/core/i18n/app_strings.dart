@@ -371,8 +371,7 @@ class AppStrings {
       isKorean ? '二쇰Ц/?ъ????숆린???곹깭' : 'Order / Position Sync Health';
   String get automationBlocked =>
       isKorean ? '?먮룞??李⑤떒??' : 'Automation Blocked';
-  String get automationAllowed =>
-      isKorean ? '?먮룞??媛??' : 'Automation Allowed';
+  String get automationAllowed => isKorean ? '?먮룞??媛??' : 'Automation Allowed';
   String get syncHealthy => isKorean ? '?숆린???뺤긽' : 'Sync Healthy';
   String get syncWarning => isKorean ? '?숆린??寃쎄퀬' : 'Sync Warning';
   String get syncUnsafe => isKorean ? '?숆린???꾪뿕' : 'Sync Unsafe';
@@ -380,8 +379,7 @@ class AppStrings {
   String get staleOrders => isKorean ? 'stale 二쇰Ц' : 'Stale Orders';
   String get pendingSyncOrders =>
       isKorean ? '?숆린???꾩슂 二쇰Ц' : 'Pending Sync Orders';
-  String get missingBrokerId =>
-      isKorean ? '釉뚮줈而?ID ?꾨씫' : 'Missing Broker ID';
+  String get missingBrokerId => isKorean ? '釉뚮줈而?ID ?꾨씫' : 'Missing Broker ID';
   String get missingKisOdno =>
       isKorean ? '?쒓뎅?ъ옄 二쇰Ц踰덊샇 ?꾨씫' : 'Missing KIS ODNO';
   String get brokerUnmatchedOrders =>
@@ -396,10 +394,8 @@ class AppStrings {
       isKorean ? '?꾧툑 ?ㅻ깄???ㅻ옒??' : 'Cash Snapshot Stale';
   String get primaryBlockingReasons =>
       isKorean ? '二쇱슂 李⑤떒 ?ъ쑀' : 'Primary Blocking Reasons';
-  String get noOrderCancel =>
-      isKorean ? '二쇰Ц 痍⑥냼 ?놁쓬' : 'No Order Cancel';
-  String get runWatchdogOnce =>
-      isKorean ? '媛먯떆 1???ㅽ뻾' : 'Run Watchdog Once';
+  String get noOrderCancel => isKorean ? '二쇰Ц 痍⑥냼 ?놁쓬' : 'No Order Cancel';
+  String get runWatchdogOnce => isKorean ? '媛먯떆 1???ㅽ뻾' : 'Run Watchdog Once';
   String get refreshWatchdogStatus =>
       isKorean ? '媛먯떆 ?곹깭 ?덈줈怨좎묠' : 'Refresh Watchdog Status';
   String get issueDetails => isKorean ? '?댁뒋 ?곸꽭' : 'Issue Details';
@@ -407,20 +403,16 @@ class AppStrings {
       isKorean ? '?댁뒋 ?곸꽭 ?쇱튂湲?' : 'Expand Issue Details';
   String get collapseIssueDetails =>
       isKorean ? '?댁뒋 ?곸꽭 ?묎린' : 'Collapse Issue Details';
-  String get noSyncIssues =>
-      isKorean ? '?숆린???댁뒋 ?놁쓬' : 'No sync issues.';
+  String get noSyncIssues => isKorean ? '?숆린???댁뒋 ?놁쓬' : 'No sync issues.';
   String get issueType => isKorean ? '?댁뒋 ?좏삎' : 'Issue Type';
   String get severity => isKorean ? '?ш컖??' : 'Severity';
   String get recommendedAction =>
       isKorean ? '沅뚯옣 ?덉쟾 議곗튂' : 'Recommended Action';
-  String get sanitizedContext =>
-      isKorean ? '?덉쟾 而⑦뀓?ㅽ듃' : 'Sanitized Context';
-  String get localOpenOrders =>
-      isKorean ? '濡쒖뺄 ?댄뵂 二쇰Ц' : 'Local Open Orders';
+  String get sanitizedContext => isKorean ? '?덉쟾 而⑦뀓?ㅽ듃' : 'Sanitized Context';
+  String get localOpenOrders => isKorean ? '濡쒖뺄 ?댄뵂 二쇰Ц' : 'Local Open Orders';
   String get brokerOpenOrders =>
       isKorean ? '釉뚮줈而??댄뵂 二쇰Ц' : 'Broker Open Orders';
-  String get lastWatchdogRun =>
-      isKorean ? '理쒓렐 媛먯떆 ?ㅽ뻾' : 'Last Watchdog Run';
+  String get lastWatchdogRun => isKorean ? '理쒓렐 媛먯떆 ?ㅽ뻾' : 'Last Watchdog Run';
   String get lastSuccessfulSync =>
       isKorean ? '理쒓렐 ?깃났 ?숆린??' : 'Last Successful Sync';
   String get brokerSyncWatchdogAlreadyLoading => isKorean
@@ -452,8 +444,88 @@ class AppStrings {
   String get runSoakOnce => 'Run Soak Once';
   String get refreshAutomationSoakStatus => 'Refresh Soak Status';
   String get resetKillLatch => 'Reset Kill Latch';
-  String get resetWithRiskAcknowledgement =>
-      'Reset with Risk Acknowledgement';
+  String get resetWithRiskAcknowledgement => 'Reset with Risk Acknowledgement';
+  String get controlledFullAutomationRelease =>
+      isKorean ? '제한형 완전 자동화 릴리스' : 'Controlled Full Automation Release';
+  String get automationRelease => isKorean ? '자동화 릴리스' : 'Automation Release';
+  String get releaseDisabled => isKorean ? '릴리스 비활성화' : 'Release Disabled';
+  String get releasePreflightRequired =>
+      isKorean ? '릴리스 사전 점검 필요' : 'Release Preflight Required';
+  String get monitoringReady => isKorean ? '모니터링 실행 가능' : 'Monitoring Ready';
+  String get dryRunReadyRelease => isKorean ? '드라이런 실행 가능' : 'Dry-Run Ready';
+  String get phase1LiveReadyRelease =>
+      isKorean ? '1단계 실거래 가능' : 'Phase 1 Live Ready';
+  String get releasePreflight => isKorean ? '릴리스 사전 점검' : 'Release Preflight';
+  String get armRelease => isKorean ? '릴리스 활성화' : 'Arm Release';
+  String get disarmRelease => isKorean ? '릴리스 비활성화' : 'Disarm Release';
+  String get armWithRiskAcknowledgement =>
+      isKorean ? '위험 확인 후 활성화' : 'Arm with Risk Acknowledgement';
+  String get brokerSyncRequired =>
+      isKorean ? '브로커 동기화 필요' : 'Broker Sync Required';
+  String get soakTestRequired => isKorean ? '소크 테스트 필요' : 'Soak Test Required';
+  String get noBrokerSubmitRelease =>
+      isKorean ? '브로커 제출 없음' : 'No Broker Submit';
+  String get noOrderCancelRelease => isKorean ? '주문 취소 없음' : 'No Order Cancel';
+  String get releaseArmDoesNotChangeDryRun => isKorean
+      ? '릴리스 활성화는 드라이런을 끄지 않습니다.'
+      : 'Release arm does not turn off dry-run.';
+  String get releaseArmDoesNotChangeKillSwitch => isKorean
+      ? '릴리스 활성화는 킬 스위치를 해제하지 않습니다.'
+      : 'Release arm does not disable the kill switch.';
+  String get releaseArmDoesNotEnableRealOrders => isKorean
+      ? '릴리스 활성화는 KIS 실주문을 켜지 않습니다.'
+      : 'Release arm does not enable KIS real orders.';
+  String get refreshAutomationReleaseStatus =>
+      isKorean ? '릴리스 상태 새로고침' : 'Refresh release status';
+  String get runReleasePreflight =>
+      isKorean ? '릴리스 사전 점검 실행' : 'Run release preflight';
+  String get runReleaseMonitoringCycle =>
+      isKorean ? '모니터링 사이클 실행' : 'Run monitoring cycle';
+  String get runReleaseDryRunCycle =>
+      isKorean ? '드라이런 사이클 실행' : 'Run dry-run cycle';
+  String get automationReleaseAlreadyLoading => isKorean
+      ? '릴리스 상태를 이미 불러오는 중입니다.'
+      : 'Automation Release status is already loading.';
+  String automationReleaseRefreshed(String status) => isKorean
+      ? '릴리스 상태 새로고침 완료: $status.'
+      : 'Automation Release refreshed: $status.';
+  String automationReleasePreflightCompleted(String status) => isKorean
+      ? '릴리스 사전 점검 완료: $status.'
+      : 'Release preflight completed: $status.';
+  String get automationReleaseArmed =>
+      isKorean ? '자동화 릴리스가 활성화되었습니다.' : 'Automation Release armed.';
+  String get automationReleaseDisarmed =>
+      isKorean ? '자동화 릴리스가 비활성화되었습니다.' : 'Automation Release disarmed.';
+  String get armReleaseRequiresAck => isKorean
+      ? '릴리스 활성화에는 위험 확인이 필요합니다.'
+      : 'Release arm requires risk acknowledgement.';
+  String automationReleaseCycleCompleted(String status) =>
+      isKorean ? '릴리스 사이클 완료: $status.' : 'Release cycle completed: $status.';
+  String automationReleaseCycleBlocked(String reason) =>
+      isKorean ? '릴리스 사이클 차단: $reason.' : 'Release cycle blocked: $reason.';
+  String releaseStatusLabel(String status) {
+    switch (status.trim().toLowerCase()) {
+      case 'disabled':
+        return releaseDisabled;
+      case 'preflight_required':
+        return releasePreflightRequired;
+      case 'monitoring_ready':
+        return monitoringReady;
+      case 'dry_run_ready':
+        return dryRunReadyRelease;
+      case 'live_ready':
+        return phase1LiveReadyRelease;
+      case 'live_ready_blocked':
+        return isKorean ? '1단계 실거래 차단' : 'Phase 1 Live Blocked';
+      case 'kill_latched':
+        return killLatchActive;
+      case 'unsafe':
+        return isKorean ? '위험' : 'Unsafe';
+      default:
+        return automationControlLabel(status);
+    }
+  }
+
   String get soakMode => 'Soak Mode';
   String get cyclesToday => 'Cycles Today';
   String get actionsToday => 'Actions Today';
@@ -1207,6 +1279,14 @@ class AppStrings {
         operatorNoLiveOrders,
         noOrderCancel,
         noBrokerSubmitDisplay,
+      ];
+
+  List<String> get automationReleaseBadges => [
+        operatorNoLiveOrders,
+        noBrokerSubmitRelease,
+        noOrderCancelRelease,
+        brokerSyncRequired,
+        soakTestRequired,
       ];
 
   String brokerName(String value) {

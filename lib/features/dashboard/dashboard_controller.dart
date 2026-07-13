@@ -20,6 +20,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
+import '../../models/automation_release.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/automation_soak_test.dart';
 import '../../models/auto_buy_live_phase1.dart';
@@ -378,6 +379,10 @@ class DashboardController extends ChangeNotifier {
   AutomationModeControlStatus? automationModeStatus;
   bool automationModeLoading = false;
   String? automationModeError;
+  AutomationReleaseStatus? automationReleaseStatus;
+  AutomationReleaseCycleResult? automationReleaseCycleResult;
+  bool automationReleaseLoading = false;
+  String? automationReleaseError;
   List<StrategyAutoBuyPromotion> strategyAutoBuyPromotions = const [];
   bool strategyAutoBuyPromotionsLoading = false;
   String? strategyAutoBuyPromotionsError;
@@ -2747,8 +2752,7 @@ class DashboardController extends ChangeNotifier {
     brokerSyncWatchdogError = null;
     if (!silent) notifyListeners();
     try {
-      brokerSyncWatchdogStatus =
-          await apiClient.fetchBrokerSyncWatchdogStatus(
+      brokerSyncWatchdogStatus = await apiClient.fetchBrokerSyncWatchdogStatus(
         provider: 'kis',
         market: 'KR',
       );
@@ -2925,6 +2929,202 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
+  Future<ActionResult> refreshAutomationReleaseStatus({
+    bool silent = false,
+  }) async {
+    if (automationReleaseLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationReleaseAlreadyLoading,
+      );
+    }
+    automationReleaseLoading = true;
+    automationReleaseError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchAutomationReleaseStatus();
+      automationReleaseStatus = result;
+      return ActionResult(
+        success: true,
+        message: strings.automationReleaseRefreshed(
+          strings.automationControlLabel(result.effectiveStatus),
+        ),
+      );
+    } catch (e) {
+      automationReleaseError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationReleaseError!),
+      );
+    } finally {
+      automationReleaseLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutomationReleasePreflight() async {
+    if (automationReleaseLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationReleaseAlreadyLoading,
+      );
+    }
+    automationReleaseLoading = true;
+    automationReleaseError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runAutomationReleasePreflight();
+      automationReleaseStatus = result;
+      await _refreshAutomationReleaseDependents(refreshReleaseStatus: false);
+      return ActionResult(
+        success: result.blockingReasons.isEmpty,
+        message: strings.automationReleasePreflightCompleted(
+          strings.automationControlLabel(result.effectiveStatus),
+        ),
+      );
+    } catch (e) {
+      automationReleaseError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationReleaseError!),
+      );
+    } finally {
+      automationReleaseLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> armAutomationRelease({
+    required bool operatorAcknowledgedRisks,
+    String? reason,
+  }) async {
+    if (!operatorAcknowledgedRisks) {
+      return ActionResult(
+        success: false,
+        message: strings.armReleaseRequiresAck,
+      );
+    }
+    if (automationReleaseLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationReleaseAlreadyLoading,
+      );
+    }
+    automationReleaseLoading = true;
+    automationReleaseError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.armAutomationRelease(
+        operatorAcknowledgedRisks: operatorAcknowledgedRisks,
+        reason: reason,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationReleaseStatus = result;
+      await _refreshAutomationReleaseDependents(refreshReleaseStatus: false);
+      return ActionResult(
+        success: true,
+        message: strings.automationReleaseArmed,
+      );
+    } catch (e) {
+      automationReleaseError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationReleaseError!),
+      );
+    } finally {
+      automationReleaseLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> disarmAutomationRelease({String? reason}) async {
+    if (automationReleaseLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationReleaseAlreadyLoading,
+      );
+    }
+    automationReleaseLoading = true;
+    automationReleaseError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.disarmAutomationRelease(
+        reason: reason,
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationReleaseStatus = result;
+      await _refreshAutomationReleaseDependents(refreshReleaseStatus: false);
+      return ActionResult(
+        success: true,
+        message: strings.automationReleaseDisarmed,
+      );
+    } catch (e) {
+      automationReleaseError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationReleaseError!),
+      );
+    } finally {
+      automationReleaseLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> runAutomationReleaseCycleOnce({
+    required String mode,
+    bool operatorAcknowledgedRisks = false,
+  }) async {
+    if (mode == 'live_phase1' && !operatorAcknowledgedRisks) {
+      return ActionResult(
+        success: false,
+        message: strings.armReleaseRequiresAck,
+      );
+    }
+    if (automationReleaseLoading) {
+      return ActionResult(
+        success: false,
+        message: strings.automationReleaseAlreadyLoading,
+      );
+    }
+    automationReleaseLoading = true;
+    automationReleaseError = null;
+    notifyListeners();
+    try {
+      final result = await apiClient.runAutomationReleaseCycleOnce(
+        mode: mode,
+        operatorAcknowledgedRisks: operatorAcknowledgedRisks,
+        triggerSource: 'manual_release_cycle',
+        language: appLanguage.code,
+        locale: appLanguage.localeCode,
+      );
+      automationReleaseCycleResult = result;
+      await _refreshAutomationReleaseDependents();
+      return ActionResult(
+        success: result.completed,
+        message: result.completed
+            ? strings.automationReleaseCycleCompleted(
+                strings.statusLabel(result.resultStatus),
+              )
+            : strings.automationReleaseCycleBlocked(
+                result.blockingReasons.isNotEmpty
+                    ? result.blockingReasons.first
+                    : result.resultStatus,
+              ),
+      );
+    } catch (e) {
+      automationReleaseError = ApiErrorFormatter.format(e.toString());
+      return ActionResult(
+        success: false,
+        message: _primaryMessage(automationReleaseError!),
+      );
+    } finally {
+      automationReleaseLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> _refreshAutomationSoakDependents({
     bool refreshSoakStatus = true,
   }) async {
@@ -2939,6 +3139,11 @@ class DashboardController extends ChangeNotifier {
       automationModeStatus = await apiClient.fetchAutomationModeStatus();
     } catch (_) {
       // Related status panels can refresh independently.
+    }
+    try {
+      automationReleaseStatus = await apiClient.fetchAutomationReleaseStatus();
+    } catch (_) {
+      // Release status can refresh independently.
     }
     try {
       brokerSyncWatchdogStatus = await apiClient.fetchBrokerSyncWatchdogLatest(
@@ -2972,6 +3177,68 @@ class DashboardController extends ChangeNotifier {
       operatorAlerts = await apiClient.fetchOperatorAlerts();
     } catch (_) {
       // Alerts can refresh independently.
+    }
+  }
+
+  Future<void> _refreshAutomationReleaseDependents({
+    bool refreshReleaseStatus = true,
+  }) async {
+    if (refreshReleaseStatus) {
+      try {
+        automationReleaseStatus =
+            await apiClient.fetchAutomationReleaseStatus();
+      } catch (_) {
+        // Keep the release cycle result visible if status refresh fails.
+      }
+    }
+    try {
+      automationModeStatus = await apiClient.fetchAutomationModeStatus();
+    } catch (_) {
+      // Related panels can refresh independently.
+    }
+    try {
+      automationSoakStatus = await apiClient.fetchAutomationSoakStatus();
+    } catch (_) {
+      // Keep the current soak snapshot.
+    }
+    try {
+      brokerSyncWatchdogStatus = await apiClient.fetchBrokerSyncWatchdogLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Keep the current watchdog snapshot.
+    }
+    try {
+      portfolioOrchestratorStatus =
+          await apiClient.fetchPortfolioOrchestratorLatest(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Keep the current orchestrator snapshot.
+    }
+    try {
+      autoBuyLivePhase1Status = await apiClient.fetchAutoBuyLivePhase1Status(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Phase panels refresh independently.
+    }
+    try {
+      autoSellLivePhase1Status = await apiClient.fetchAutoSellLivePhase1Status(
+        provider: 'kis',
+        market: 'KR',
+      );
+    } catch (_) {
+      // Phase panels refresh independently.
+    }
+    try {
+      latestOpsProductionReadiness =
+          await apiClient.fetchOpsProductionReadiness();
+    } catch (_) {
+      // Readiness panel refreshes independently.
     }
   }
 
@@ -3073,13 +3340,17 @@ class DashboardController extends ChangeNotifier {
       // Avoid turning a successful mode change into a failed UI action.
     }
     try {
-      brokerSyncWatchdogStatus =
-          await apiClient.fetchBrokerSyncWatchdogLatest(
+      brokerSyncWatchdogStatus = await apiClient.fetchBrokerSyncWatchdogLatest(
         provider: 'kis',
         market: 'KR',
       );
     } catch (_) {
       // Keep mode status authoritative if the compact sync badge cannot load.
+    }
+    try {
+      automationReleaseStatus = await apiClient.fetchAutomationReleaseStatus();
+    } catch (_) {
+      // Release status can refresh independently.
     }
   }
 

@@ -6,6 +6,7 @@ import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import 'widgets/automation_mode_control_panel.dart';
+import 'widgets/automation_release_control_panel.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -47,6 +48,8 @@ class SettingsScreen extends StatelessWidget {
               _OperationModeCard(controller: controller),
               const SizedBox(height: 12),
               AutomationModeControlPanel(controller: controller),
+              const SizedBox(height: 12),
+              AutomationReleaseControlPanel(controller: controller),
               const SizedBox(height: 12),
               _AlpacaUsTradingCard(controller: controller),
               const SizedBox(height: 12),
