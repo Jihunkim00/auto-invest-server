@@ -1,0 +1,538 @@
+{
+  "endpoint_count": 28,
+  "endpoints": {
+    "GET /agent/chat/conversations": {
+      "method": "get",
+      "operation_id": "list_agent_chat_conversations_agent_chat_conversations_get",
+      "parameters": [
+        "status",
+        "limit"
+      ],
+      "path": "/agent/chat/conversations",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "GET /agent/chat/conversations/{conversation_key}/messages": {
+      "method": "get",
+      "operation_id": "list_agent_chat_messages_agent_chat_conversations__conversation_key__messages_get",
+      "parameters": [
+        "conversation_key",
+        "limit",
+        "before_id"
+      ],
+      "path": "/agent/chat/conversations/{conversation_key}/messages",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "GET /agent/chat/live-orders/readiness": {
+      "method": "get",
+      "operation_id": "get_agent_chat_live_order_readiness_agent_chat_live_orders_readiness_get",
+      "parameters": [],
+      "path": "/agent/chat/live-orders/readiness",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "GET /agent/operations/summary": {
+      "method": "get",
+      "operation_id": "get_agent_operations_summary_agent_operations_summary_get",
+      "parameters": [],
+      "path": "/agent/operations/summary",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-operations"
+      ]
+    },
+    "GET /automation/mode/status": {
+      "method": "get",
+      "operation_id": "get_automation_mode_status_automation_mode_status_get",
+      "parameters": [],
+      "path": "/automation/mode/status",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [
+        "auto_buy_live_phase1_enabled",
+        "auto_sell_live_phase1_enabled",
+        "automation_mode",
+        "blocking_reasons",
+        "broker_sync_blocking_reasons",
+        "broker_sync_health",
+        "broker_sync_issue_count",
+        "broker_sync_watchdog",
+        "can_attempt_phase1_live",
+        "can_run_dry_run",
+        "can_run_monitoring",
+        "can_submit_live_order",
+        "critical_exit_candidate_count",
+        "daily_trade_limit_remaining",
+        "dry_run",
+        "effective_status",
+        "generated_at",
+        "kill_switch",
+        "kis_enabled",
+        "kis_real_order_enabled",
+        "mode_description",
+        "mode_label",
+        "mode_reason",
+        "mode_requires_manual_review",
+        "mode_updated_at",
+        "mode_updated_by",
+        "modules",
+        "next_safe_action",
+        "pending_order_blockers",
+        "portfolio_orchestrator_allow_live_orders",
+        "portfolio_orchestrator_enabled",
+        "position_management_scheduler_enabled",
+        "production_readiness_status",
+        "safety_flags",
+        "scheduler_enabled",
+        "soak_kill_latch_active",
+        "soak_kill_latch_reason",
+        "soak_kill_latch_triggered_at",
+        "sync_required_count",
+        "warning_reasons"
+      ],
+      "response_schema_ref": "#/components/schemas/AutomationModeStatusResponse",
+      "tags": [
+        "automation",
+        "automation-mode"
+      ]
+    },
+    "GET /automation/portfolio/latest": {
+      "method": "get",
+      "operation_id": "get_latest_portfolio_orchestrator_run_automation_portfolio_latest_get",
+      "parameters": [
+        "provider",
+        "market"
+      ],
+      "path": "/automation/portfolio/latest",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [
+        "action_taken",
+        "allow_live_orders",
+        "auto_buy_phase1_result",
+        "auto_sell_phase1_result",
+        "broker_order_id",
+        "broker_submit_called",
+        "broker_sync_blocking_reasons",
+        "broker_sync_health",
+        "broker_sync_issue_count",
+        "broker_sync_watchdog",
+        "checklist",
+        "critical_exit_candidate_count",
+        "daily_trade_limit_remaining",
+        "daily_trade_limit_used",
+        "gating_notes",
+        "generated_at",
+        "kill_rules_triggered",
+        "kis_odno",
+        "manual_submit_called",
+        "market",
+        "max_actions_per_run",
+        "mode",
+        "next_safe_action",
+        "orchestrator_enabled",
+        "order_id",
+        "pending_order_conflict_count",
+        "position_management_result",
+        "positions_first",
+        "primary_block_reason",
+        "production_readiness_status",
+        "provider",
+        "real_order_submitted",
+        "result_status",
+        "risk_flags",
+        "run_id",
+        "safety",
+        "selected_candidate_id",
+        "selected_promotion_id",
+        "selected_symbol",
+        "skipped_buy_reason",
+        "skipped_sell_reason",
+        "soak_kill_latch_active",
+        "soak_kill_latch_reason",
+        "sync_required_count",
+        "trigger_source"
+      ],
+      "response_schema_ref": "#/components/schemas/PortfolioOrchestratorResponse",
+      "tags": [
+        "automation",
+        "portfolio-automation"
+      ]
+    },
+    "GET /automation/release/status": {
+      "method": "get",
+      "operation_id": "get_automation_release_status_automation_release_status_get",
+      "parameters": [],
+      "path": "/automation/release/status",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [
+        "auto_buy_phase1_status",
+        "auto_sell_phase1_status",
+        "automation_mode_status",
+        "blocking_reasons",
+        "broker_sync_status",
+        "can_run_dry_run_cycle",
+        "can_run_live_phase1_cycle",
+        "can_run_monitoring_cycle",
+        "can_submit_live_order",
+        "checklist",
+        "daily_auto_buy_remaining",
+        "daily_auto_sell_remaining",
+        "daily_trade_limit_remaining",
+        "effective_status",
+        "generated_at",
+        "kill_latch_active",
+        "next_safe_action",
+        "orchestrator_status",
+        "production_readiness_status",
+        "release_armed",
+        "release_armed_at",
+        "release_enabled",
+        "release_mode",
+        "release_reason",
+        "safety_flags",
+        "soak_status",
+        "warning_reasons"
+      ],
+      "response_schema_ref": "#/components/schemas/AutomationReleaseStatusResponse",
+      "tags": [
+        "automation",
+        "automation-release"
+      ]
+    },
+    "GET /kis/account/balance": {
+      "method": "get",
+      "operation_id": "get_kis_account_balance_kis_account_balance_get",
+      "parameters": [],
+      "path": "/kis/account/balance",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "GET /kis/account/open-orders": {
+      "method": "get",
+      "operation_id": "list_kis_open_orders_kis_account_open_orders_get",
+      "parameters": [],
+      "path": "/kis/account/open-orders",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "GET /kis/account/positions": {
+      "method": "get",
+      "operation_id": "list_kis_positions_kis_account_positions_get",
+      "parameters": [],
+      "path": "/kis/account/positions",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "GET /kis/scheduler/status": {
+      "method": "get",
+      "operation_id": "get_kis_scheduler_status_kis_scheduler_status_get",
+      "parameters": [],
+      "path": "/kis/scheduler/status",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "GET /logs/summary": {
+      "method": "get",
+      "operation_id": "get_logs_summary_logs_summary_get",
+      "parameters": [],
+      "path": "/logs/summary",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "history"
+      ]
+    },
+    "GET /ops/settings": {
+      "method": "get",
+      "operation_id": "get_settings_ops_settings_get",
+      "parameters": [],
+      "path": "/ops/settings",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "ops"
+      ]
+    },
+    "GET /orders/recent": {
+      "method": "get",
+      "operation_id": "get_recent_orders_orders_recent_get",
+      "parameters": [
+        "limit",
+        "symbol"
+      ],
+      "path": "/orders/recent",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "history"
+      ]
+    },
+    "GET /portfolio/summary": {
+      "method": "get",
+      "operation_id": "get_portfolio_summary_portfolio_summary_get",
+      "parameters": [],
+      "path": "/portfolio/summary",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "portfolio"
+      ]
+    },
+    "GET /runs/recent": {
+      "method": "get",
+      "operation_id": "get_recent_runs_runs_recent_get",
+      "parameters": [
+        "limit",
+        "symbol",
+        "trigger_source"
+      ],
+      "path": "/runs/recent",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "history"
+      ]
+    },
+    "GET /scheduler/status": {
+      "method": "get",
+      "operation_id": "get_scheduler_status_scheduler_status_get",
+      "parameters": [],
+      "path": "/scheduler/status",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "scheduler"
+      ]
+    },
+    "GET /signals/recent": {
+      "method": "get",
+      "operation_id": "get_recent_signals_signals_recent_get",
+      "parameters": [
+        "limit",
+        "symbol"
+      ],
+      "path": "/signals/recent",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "history"
+      ]
+    },
+    "POST /agent/chat/live-orders/{action_id}/cancel": {
+      "method": "post",
+      "operation_id": "cancel_agent_chat_live_order_agent_chat_live_orders__action_id__cancel_post",
+      "parameters": [
+        "action_id"
+      ],
+      "path": "/agent/chat/live-orders/{action_id}/cancel",
+      "request_body_schema_ref": "#/components/schemas/AgentChatLiveOrderCancelRequest",
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "POST /agent/chat/live-orders/{action_id}/confirm": {
+      "method": "post",
+      "operation_id": "confirm_agent_chat_live_order_agent_chat_live_orders__action_id__confirm_post",
+      "parameters": [
+        "action_id"
+      ],
+      "path": "/agent/chat/live-orders/{action_id}/confirm",
+      "request_body_schema_ref": "#/components/schemas/AgentChatLiveOrderConfirmRequest",
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "POST /agent/chat/send": {
+      "method": "post",
+      "operation_id": "send_agent_chat_message_agent_chat_send_post",
+      "parameters": [],
+      "path": "/agent/chat/send",
+      "request_body_schema_ref": "#/components/schemas/AgentChatSendRequest",
+      "request_required_fields": [
+        "message"
+      ],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "agent-chat"
+      ]
+    },
+    "POST /kis/orders/manual-submit": {
+      "method": "post",
+      "operation_id": "submit_manual_kis_order_kis_orders_manual_submit_post",
+      "parameters": [],
+      "path": "/kis/orders/manual-submit",
+      "request_body_schema_ref": "#/components/schemas/KisManualOrderSubmitRequest",
+      "request_required_fields": [
+        "symbol",
+        "side",
+        "qty"
+      ],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "POST /kis/orders/sync-open": {
+      "method": "post",
+      "operation_id": "sync_open_kis_orders_kis_orders_sync_open_post",
+      "parameters": [],
+      "path": "/kis/orders/sync-open",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "POST /kis/orders/validate": {
+      "method": "post",
+      "operation_id": "validate_kis_order_kis_orders_validate_post",
+      "parameters": [],
+      "path": "/kis/orders/validate",
+      "request_body_schema_ref": "#/components/schemas/KisOrderValidationRequest",
+      "request_required_fields": [
+        "symbol",
+        "side",
+        "qty"
+      ],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "POST /kis/trading/run-once": {
+      "method": "post",
+      "operation_id": "run_kis_single_symbol_trading_once_kis_trading_run_once_post",
+      "parameters": [],
+      "path": "/kis/trading/run-once",
+      "request_body_schema_ref": "#/components/schemas/KisSingleSymbolTradingRequest",
+      "request_required_fields": [
+        "symbol"
+      ],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "kis"
+      ]
+    },
+    "POST /market-analysis/run": {
+      "method": "post",
+      "operation_id": "run_market_analysis_market_analysis_run_post",
+      "parameters": [
+        "symbol",
+        "gate_level",
+        "market"
+      ],
+      "path": "/market-analysis/run",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "market-analysis"
+      ]
+    },
+    "POST /market-analysis/watchlist": {
+      "method": "post",
+      "operation_id": "analyze_watchlist_market_analysis_watchlist_post",
+      "parameters": [
+        "gate_level"
+      ],
+      "path": "/market-analysis/watchlist",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "market-analysis"
+      ]
+    },
+    "POST /trading/run-watchlist-once": {
+      "method": "post",
+      "operation_id": "run_watchlist_once_trading_run_watchlist_once_post",
+      "parameters": [
+        "gate_level"
+      ],
+      "path": "/trading/run-watchlist-once",
+      "request_body_schema_ref": null,
+      "request_required_fields": [],
+      "response_fields": [],
+      "response_schema_ref": null,
+      "tags": [
+        "trading"
+      ]
+    }
+  },
+  "generated_at": "2026-07-21T20:40:13+09:00",
+  "git": {
+    "branch": "main",
+    "commit_sha": "26ab08fbba17fbf6000b939705f348a0b4fde904"
+  },
+  "schema_version": 1,
+  "source": "filtered FastAPI OpenAPI schema"
+}

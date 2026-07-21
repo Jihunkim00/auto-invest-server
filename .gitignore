@@ -8,6 +8,7 @@ auto_invest.db
 *.db
 data/
 logs/
+artifacts/
 .tmp_pytest*/
 tmp_pytest*/
 __pycache__/
