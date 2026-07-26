@@ -12,6 +12,7 @@ from app.routes.agent_live import router as agent_live_router
 from app.routes.agent_operations import router as agent_operations_router
 from app.routes.agent_plans import router as agent_plans_router
 from app.routes.agent_schedules import router as agent_schedules_router
+from app.routes.app_facade import router as app_facade_router
 from app.routes.brokers import router as brokers_router
 from app.routes.broker_sync_watchdog import router as broker_sync_watchdog_router
 from app.routes.health import router as health_router
@@ -86,6 +87,7 @@ app.include_router(agent_chat_router)
 app.include_router(agent_plans_router)
 app.include_router(agent_execution_router)
 app.include_router(agent_schedules_router)
+app.include_router(app_facade_router)
 app.include_router(agent_live_router)
 app.include_router(agent_operations_router)
 app.include_router(brokers_router)

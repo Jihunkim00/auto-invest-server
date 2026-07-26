@@ -198,6 +198,10 @@ class RuntimeSetting(Base):
     automation_mode_updated_by = Column(String(80), nullable=True)
     automation_mode_reason = Column(Text, nullable=True)
     automation_mode_requires_manual_review = Column(Boolean, nullable=False, default=True)
+    operation_mode_requested = Column(String(20), nullable=False, default="paper")
+    operation_mode_changed_at = Column(DateTime(timezone=True), nullable=True)
+    operation_mode_changed_by = Column(String(80), nullable=True)
+    operation_mode_reason = Column(Text, nullable=True)
     default_symbol = Column(String(20), nullable=False, default="AAPL")
     default_gate_level = Column(Integer, nullable=False, default=2)
     max_trades_per_day = Column(Integer, nullable=False, default=3)
@@ -743,6 +747,26 @@ class AgentChatLiveOrderSettingsAudit(Base):
     after_snapshot_json = Column(Text, nullable=False)
     request_payload_json = Column(Text, nullable=False)
     safety_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class OperationModeAudit(Base):
+    __tablename__ = "operation_mode_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    previous_mode = Column(String(20), nullable=False, index=True)
+    requested_mode = Column(String(20), nullable=False, index=True)
+    effective_mode = Column(String(20), nullable=False, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    changed_by = Column(String(80), nullable=False, default="api", index=True)
+    reason = Column(Text, nullable=True)
+    acknowledged = Column(Boolean, nullable=False, default=False)
+    provider = Column(String(20), nullable=True, index=True)
+    market = Column(String(10), nullable=True, index=True)
+    blocking_reasons_json = Column(Text, nullable=False, default="[]")
+    warnings_json = Column(Text, nullable=False, default="[]")
+    before_state_json = Column(Text, nullable=False)
+    after_state_json = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 

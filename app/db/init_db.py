@@ -139,6 +139,10 @@ def _create_runtime_settings_table_if_missing():
                     automation_mode_updated_by VARCHAR(80),
                     automation_mode_reason TEXT,
                     automation_mode_requires_manual_review BOOLEAN NOT NULL DEFAULT 1,
+                    operation_mode_requested VARCHAR(20) NOT NULL DEFAULT 'paper',
+                    operation_mode_changed_at DATETIME,
+                    operation_mode_changed_by VARCHAR(80),
+                    operation_mode_reason TEXT,
                     default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
                     default_gate_level INTEGER NOT NULL DEFAULT 2,
                     max_trades_per_day INTEGER NOT NULL DEFAULT 3,
@@ -1327,6 +1331,49 @@ def _create_agent_chat_live_order_settings_audits_table_if_missing():
             )
 
 
+def _create_operation_mode_audits_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_mode_audits (
+                    id INTEGER PRIMARY KEY,
+                    previous_mode VARCHAR(20) NOT NULL,
+                    requested_mode VARCHAR(20) NOT NULL,
+                    effective_mode VARCHAR(20) NOT NULL,
+                    status VARCHAR(30) NOT NULL,
+                    changed_by VARCHAR(80) NOT NULL DEFAULT 'api',
+                    reason TEXT,
+                    acknowledged BOOLEAN NOT NULL DEFAULT 0,
+                    provider VARCHAR(20),
+                    market VARCHAR(10),
+                    blocking_reasons_json TEXT NOT NULL DEFAULT '[]',
+                    warnings_json TEXT NOT NULL DEFAULT '[]',
+                    before_state_json TEXT NOT NULL,
+                    after_state_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "previous_mode": "previous_mode",
+            "requested_mode": "requested_mode",
+            "effective_mode": "effective_mode",
+            "status": "status",
+            "changed_by": "changed_by",
+            "provider": "provider",
+            "market": "market",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_operation_mode_audits_{name} "
+                    f"ON operation_mode_audits ({column})"
+                )
+            )
+
+
 def _create_agent_execution_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1491,6 +1538,7 @@ def init_db():
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()
     _create_agent_chat_live_order_settings_audits_table_if_missing()
+    _create_operation_mode_audits_table_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
     _create_agent_review_queue_state_table_if_missing()
@@ -1542,6 +1590,10 @@ def init_db():
         "automation_mode_updated_by": "VARCHAR(80)",
         "automation_mode_reason": "TEXT",
         "automation_mode_requires_manual_review": "BOOLEAN DEFAULT 1",
+        "operation_mode_requested": "VARCHAR(20) DEFAULT 'paper'",
+        "operation_mode_changed_at": "DATETIME",
+        "operation_mode_changed_by": "VARCHAR(80)",
+        "operation_mode_reason": "TEXT",
         "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",
         "default_gate_level": "INTEGER DEFAULT 2",
         "max_trades_per_day": "INTEGER DEFAULT 3",

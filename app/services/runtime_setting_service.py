@@ -64,6 +64,10 @@ class RuntimeSettingService:
             "automation_mode_updated_by": None,
             "automation_mode_reason": None,
             "automation_mode_requires_manual_review": True,
+            "operation_mode_requested": "paper",
+            "operation_mode_changed_at": None,
+            "operation_mode_changed_by": None,
+            "operation_mode_reason": None,
             "default_symbol": self.settings.default_symbol.upper(),
             "default_gate_level": DEFAULT_GATE_LEVEL,
             "max_trades_per_day": MAX_TRADES_PER_DAY,
@@ -296,6 +300,20 @@ class RuntimeSettingService:
             "automation_mode_requires_manual_review": bool(
                 getattr(row, "automation_mode_requires_manual_review", True)
             ),
+            "operation_mode_requested": str(
+                getattr(row, "operation_mode_requested", None) or "paper"
+            ),
+            "operation_mode_changed_at": getattr(
+                row,
+                "operation_mode_changed_at",
+                None,
+            ),
+            "operation_mode_changed_by": getattr(
+                row,
+                "operation_mode_changed_by",
+                None,
+            ),
+            "operation_mode_reason": getattr(row, "operation_mode_reason", None),
             "default_symbol": row.default_symbol,
             "default_gate_level": int(row.default_gate_level),
             "max_trades_per_day": int(row.max_trades_per_day),
