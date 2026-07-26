@@ -366,66 +366,62 @@ class AppStrings {
       isKorean ? '브로커 제출 없음' : 'No Broker Submit';
   String get modeUpdated => isKorean ? '모드 변경 시각' : 'Mode Updated';
   String get brokerSyncWatchdog =>
-      isKorean ? '釉뚮줈而??숆린??媛먯떆' : 'Broker Sync Watchdog';
+      isKorean ? '브로커 동기화 감시' : 'Broker Sync Watchdog';
   String get orderPositionSyncHealth =>
-      isKorean ? '二쇰Ц/?ъ????숆린???곹깭' : 'Order / Position Sync Health';
-  String get automationBlocked =>
-      isKorean ? '?먮룞??李⑤떒??' : 'Automation Blocked';
-  String get automationAllowed => isKorean ? '?먮룞??媛??' : 'Automation Allowed';
-  String get syncHealthy => isKorean ? '?숆린???뺤긽' : 'Sync Healthy';
-  String get syncWarning => isKorean ? '?숆린??寃쎄퀬' : 'Sync Warning';
-  String get syncUnsafe => isKorean ? '?숆린???꾪뿕' : 'Sync Unsafe';
-  String get syncUnknown => isKorean ? '?숆린???????놁쓬' : 'Sync Unknown';
+      isKorean ? '주문/포지션 동기화 상태' : 'Order / Position Sync Health';
+  String get automationBlocked => isKorean ? '자동화 차단됨' : 'Automation Blocked';
+  String get automationAllowed => isKorean ? '자동화 가능' : 'Automation Allowed';
+  String get syncHealthy => isKorean ? '동기화 정상' : 'Sync Healthy';
+  String get syncWarning => isKorean ? '동기화 경고' : 'Sync Warning';
+  String get syncUnsafe => isKorean ? '동기화 위험' : 'Sync Unsafe';
+  String get syncUnknown => isKorean ? '동기화 상태 알 수 없음' : 'Sync Unknown';
   String get staleOrders => isKorean ? 'stale 二쇰Ц' : 'Stale Orders';
   String get pendingSyncOrders =>
-      isKorean ? '?숆린???꾩슂 二쇰Ц' : 'Pending Sync Orders';
-  String get missingBrokerId => isKorean ? '釉뚮줈而?ID ?꾨씫' : 'Missing Broker ID';
-  String get missingKisOdno =>
-      isKorean ? '?쒓뎅?ъ옄 二쇰Ц踰덊샇 ?꾨씫' : 'Missing KIS ODNO';
+      isKorean ? '동기화 필요 주문' : 'Pending Sync Orders';
+  String get missingBrokerId => isKorean ? '브로커 ID 누락' : 'Missing Broker ID';
+  String get missingKisOdno => isKorean ? '한국투자 주문번호 누락' : 'Missing KIS ODNO';
   String get brokerUnmatchedOrders =>
-      isKorean ? '釉뚮줈而?誘몃ℓ移?二쇰Ц' : 'Broker Unmatched Orders';
+      isKorean ? '브로커 미일치 주문' : 'Broker Unmatched Orders';
   String get localUnmatchedOrders =>
-      isKorean ? '濡쒖뺄 誘몃ℓ移?二쇰Ц' : 'Local Unmatched Orders';
+      isKorean ? '로컬 미일치 주문' : 'Local Unmatched Orders';
   String get positionQuantityMismatch =>
-      isKorean ? '?ъ????섎웾 遺덉씪移?' : 'Position Quantity Mismatch';
+      isKorean ? '포지션 수량 불일치' : 'Position Quantity Mismatch';
   String get stalePositionSnapshots =>
-      isKorean ? '?ъ????ㅻ깄???ㅻ옒??' : 'Stale Position Snapshots';
+      isKorean ? '포지션 스냅샷 오래됨' : 'Stale Position Snapshots';
   String get cashSnapshotStale =>
-      isKorean ? '?꾧툑 ?ㅻ깄???ㅻ옒??' : 'Cash Snapshot Stale';
+      isKorean ? '현금 스냅샷 오래됨' : 'Cash Snapshot Stale';
   String get primaryBlockingReasons =>
-      isKorean ? '二쇱슂 李⑤떒 ?ъ쑀' : 'Primary Blocking Reasons';
-  String get noOrderCancel => isKorean ? '二쇰Ц 痍⑥냼 ?놁쓬' : 'No Order Cancel';
-  String get runWatchdogOnce => isKorean ? '媛먯떆 1???ㅽ뻾' : 'Run Watchdog Once';
+      isKorean ? '주요 차단 사유' : 'Primary Blocking Reasons';
+  String get noOrderCancel => isKorean ? '주문 취소 없음' : 'No Order Cancel';
+  String get runWatchdogOnce => isKorean ? '감시 1회 실행' : 'Run Watchdog Once';
   String get refreshWatchdogStatus =>
-      isKorean ? '媛먯떆 ?곹깭 ?덈줈怨좎묠' : 'Refresh Watchdog Status';
-  String get issueDetails => isKorean ? '?댁뒋 ?곸꽭' : 'Issue Details';
+      isKorean ? '감시 상태 새로고침' : 'Refresh Watchdog Status';
+  String get issueDetails => isKorean ? '이슈 상세' : 'Issue Details';
   String get expandIssueDetails =>
-      isKorean ? '?댁뒋 ?곸꽭 ?쇱튂湲?' : 'Expand Issue Details';
+      isKorean ? '이슈 상세 펼치기' : 'Expand Issue Details';
   String get collapseIssueDetails =>
-      isKorean ? '?댁뒋 ?곸꽭 ?묎린' : 'Collapse Issue Details';
-  String get noSyncIssues => isKorean ? '?숆린???댁뒋 ?놁쓬' : 'No sync issues.';
-  String get issueType => isKorean ? '?댁뒋 ?좏삎' : 'Issue Type';
-  String get severity => isKorean ? '?ш컖??' : 'Severity';
-  String get recommendedAction =>
-      isKorean ? '沅뚯옣 ?덉쟾 議곗튂' : 'Recommended Action';
-  String get sanitizedContext => isKorean ? '?덉쟾 而⑦뀓?ㅽ듃' : 'Sanitized Context';
-  String get localOpenOrders => isKorean ? '濡쒖뺄 ?댄뵂 二쇰Ц' : 'Local Open Orders';
-  String get brokerOpenOrders =>
-      isKorean ? '釉뚮줈而??댄뵂 二쇰Ц' : 'Broker Open Orders';
-  String get lastWatchdogRun => isKorean ? '理쒓렐 媛먯떆 ?ㅽ뻾' : 'Last Watchdog Run';
+      isKorean ? '이슈 상세 접기' : 'Collapse Issue Details';
+  String get noSyncIssues => isKorean ? '동기화 이슈 없음' : 'No sync issues.';
+  String get issueType => isKorean ? '이슈 유형' : 'Issue Type';
+  String get severity => isKorean ? '심각도' : 'Severity';
+  String get recommendedAction => isKorean ? '권장 안전 조치' : 'Recommended Action';
+  String get sanitizedContext => isKorean ? '안전 컨텍스트' : 'Sanitized Context';
+  String get localOpenOrders => isKorean ? '로컬 열린 주문' : 'Local Open Orders';
+  String get brokerOpenOrders => isKorean ? '브로커 열린 주문' : 'Broker Open Orders';
+  String get lastWatchdogRun => isKorean ? '최근 감시 실행' : 'Last Watchdog Run';
   String get lastSuccessfulSync =>
-      isKorean ? '理쒓렐 ?깃났 ?숆린??' : 'Last Successful Sync';
+      isKorean ? '최근 성공 동기화' : 'Last Successful Sync';
   String get brokerSyncWatchdogAlreadyLoading => isKorean
-      ? '釉뚮줈而??숆린??媛먯떆 ?곹깭瑜??대? 遺덈윭?ㅻ뒗 以묒엯?덈떎.'
+      ? '브로커 동기화 감시 상태를 이미 불러오는 중입니다.'
       : 'Broker Sync Watchdog status is already loading.';
   String brokerSyncWatchdogRefreshed(String status) => isKorean
-      ? '釉뚮줈而??숆린??媛먯떆 ?곹깭 ?덈줈怨좎묠 ?꾨즺: $status.'
+      ? '브로커 동기화 감시 상태 새로고침 완료: $status.'
       : 'Broker Sync Watchdog refreshed: $status.';
   String brokerSyncWatchdogCompleted(String status) => isKorean
-      ? '釉뚮줈而??숆린??媛먯떆 1???ㅽ뻾 ?꾨즺: $status.'
+      ? '브로커 동기화 감시 1회 실행 완료: $status.'
       : 'Broker Sync Watchdog run completed: $status.';
   String brokerSyncWatchdogBlocked(String reason) => isKorean
-      ? '釉뚮줈而??숆린??媛먯떆 李⑤떒: $reason.'
+      ? '브로커 동기화 감시 차단: $reason.'
       : 'Broker Sync Watchdog blocked automation: $reason.';
   String get automationSoakTest => 'Automation Soak Test';
   String get longRunStabilityCheck => 'Long-Run Stability Check';
@@ -1033,28 +1029,26 @@ class AppStrings {
       ? '사전 점검 결과 전환이 차단되었습니다: $reason.'
       : 'Preflight blocks conversion: $reason.';
 
-  String get positionLifecycle =>
-      isKorean ? '?ъ????앹븷二쇨린' : 'Position Lifecycle';
-  String get tradeFlowAudit => isKorean ? '嫄곕옒 ?먮쫫 媛먯궗' : 'Trade Flow Audit';
-  String get lifecycleOpen => isKorean ? '蹂댁쑀 以?' : 'Open';
-  String get lifecycleClosed => isKorean ? '醫낅즺??' : 'Closed';
-  String get entryLabel => isKorean ? '吏꾩엯' : 'Entry';
-  String get exitLabel => isKorean ? '泥?궛' : 'Exit';
-  String get realizedPl => isKorean ? '?ㅽ쁽?먯씡' : 'Realized P/L';
-  String get averageExitPrice => isKorean ? '?됯퇏 留ㅻ룄媛' : 'Average Exit Price';
-  String get holdingPeriod => isKorean ? '蹂댁쑀 湲곌컙' : 'Holding Period';
-  String get relatedPromotion => isKorean ? '愿???꾨낫' : 'Related Promotion';
-  String get relatedOrder => isKorean ? '愿??二쇰Ц' : 'Related Order';
+  String get positionLifecycle => isKorean ? '포지션 생애주기' : 'Position Lifecycle';
+  String get tradeFlowAudit => isKorean ? '거래 흐름 감사' : 'Trade Flow Audit';
+  String get lifecycleOpen => isKorean ? '보유 중' : 'Open';
+  String get lifecycleClosed => isKorean ? '종료됨' : 'Closed';
+  String get entryLabel => isKorean ? '진입' : 'Entry';
+  String get exitLabel => isKorean ? '청산' : 'Exit';
+  String get realizedPl => isKorean ? '실현 손익' : 'Realized P/L';
+  String get averageExitPrice => isKorean ? '평균 청산가' : 'Average Exit Price';
+  String get holdingPeriod => isKorean ? '보유 기간' : 'Holding Period';
+  String get relatedPromotion => isKorean ? '관련 후보' : 'Related Promotion';
+  String get relatedOrder => isKorean ? '관련 주문' : 'Related Order';
   String get calculationIncomplete =>
-      isKorean ? '怨꾩궛 遺덉셿??' : 'Calculation Incomplete';
-  String get insufficientData => isKorean ? '?곗씠??遺議?' : 'Insufficient Data';
+      isKorean ? '계산 미완료' : 'Calculation Incomplete';
+  String get insufficientData => isKorean ? '데이터 부족' : 'Insufficient Data';
   String get refreshLifecycle =>
-      isKorean ? '?ъ????앹븷二쇨린 ?덈줈怨좎묠' : 'Refresh Lifecycle';
-  String get noLifecycleItems => isKorean
-      ? '?쒖떆?????ъ????앹븷二쇨린媛 ?놁뒿?덈떎.'
-      : 'No position lifecycle records.';
+      isKorean ? '포지션 생애주기 새로고침' : 'Refresh Lifecycle';
+  String get noLifecycleItems =>
+      isKorean ? '표시할 포지션 생애주기 기록이 없습니다.' : 'No position lifecycle records.';
   String positionLifecycleRefreshed(int count) => isKorean
-      ? '?ъ????앹븷二쇨린 ?덈줈怨좎묠 ?꾨즺: $count.'
+      ? '포지션 생애주기 새로고침 완료: $count.'
       : 'Position lifecycle refreshed: $count.';
 
   String get positionExitReview =>
@@ -1101,16 +1095,16 @@ class AppStrings {
   }
 
   String get executeGuardedLiveSell =>
-      isKorean ? '蹂댄샇???ㅻℓ???ㅽ뻾' : 'Execute Guarded Live Sell';
+      isKorean ? '보호된 실전 매도 실행' : 'Execute Guarded Live Sell';
   String get liveSellExecutionResult =>
-      isKorean ? '?ㅻℓ???ㅽ뻾 寃곌낵' : 'Live Sell Execution Result';
+      isKorean ? '실전 매도 실행 결과' : 'Live Sell Execution Result';
   String get guardedLiveSellConfirmTitle =>
-      isKorean ? '蹂댄샇???ㅻℓ???뺤씤' : 'Confirm Guarded Live Sell';
+      isKorean ? '보호된 실전 매도 확인' : 'Confirm Guarded Live Sell';
   String get guardedLiveSellLiveWarning => isKorean
-      ? 'dry_run=false이고 寃뚯씠?몄씠 ?덉슜?섎㈃ ?ㅼ＜臾몄쑝濡??쒖텧?⑸땲??'
+      ? 'dry_run=false이고 게이트가 허용하면 실전 주문으로 제출됩니다.'
       : 'This is a live sell order if dry_run=false and backend gates allow it.';
   String get guardedLiveSellDryRunWarning => isKorean
-      ? 'dry_run=true ?곹깭?먯꽌??釉뚮줈而??쒖텧???놁뒿?덈떎.'
+      ? 'dry_run=true 상태에서는 브로커 제출이 없습니다.'
       : 'Dry-run is on, so no live sell will be submitted.';
   String guardedLiveSellConfirmBody({
     required String symbol,
@@ -1120,42 +1114,42 @@ class AppStrings {
     required bool dryRun,
   }) {
     if (isKorean) {
-      return '醫낅ぉ: $symbol\n留ㅻ룄 ?섎웾: $quantity\n?덉긽 留ㅻ룄 湲덉븸: $notional\n?됯??먯씡: $unrealizedPl\n?먮룞 ?ъ떆?????놁뒿?덈떎.\n${dryRun ? guardedLiveSellDryRunWarning : guardedLiveSellLiveWarning}';
+      return '종목: $symbol\n매도 수량: $quantity\n예상 매도 금액: $notional\n평가 손익: $unrealizedPl\n자동 재시도는 없습니다.\n${dryRun ? guardedLiveSellDryRunWarning : guardedLiveSellLiveWarning}';
     }
     return 'Symbol: $symbol\nSell quantity: $quantity\nEstimated sell notional: $notional\nUnrealized P/L: $unrealizedPl\nNo auto retry.\n${dryRun ? guardedLiveSellDryRunWarning : guardedLiveSellLiveWarning}';
   }
 
-  String get sellQuantity => isKorean ? '留ㅻ룄 ?섎웾' : 'Sell Quantity';
+  String get sellQuantity => isKorean ? '매도 수량' : 'Sell Quantity';
   String get guardedLiveSellAlreadyRunning => isKorean
-      ? '蹂댄샇???ㅻℓ???대? ?ㅽ뻾 以묒엯?덈떎.'
+      ? '보호된 실전 매도 실행이 이미 진행 중입니다.'
       : 'Guarded live sell is already running.';
   String get guardedLiveSellResultUnavailable =>
-      isKorean ? '?ㅻℓ???ㅽ뻾 寃곌낵媛 ?놁뒿?덈떎.' : 'Live sell result is unavailable.';
+      isKorean ? '실전 매도 실행 결과가 없습니다.' : 'Live sell result is unavailable.';
   String get refreshGuardedLiveSellResult =>
-      isKorean ? '寃곌낵 ?덈줈怨좎묠' : 'Refresh Result';
+      isKorean ? '결과 새로고침' : 'Refresh Result';
 
   String guardedLiveSellCompletedMessage(String status, String? reason) {
     final label = statusLabel(status);
     if (reason == null || reason.trim().isEmpty) {
       return isKorean
-          ? '?ㅻℓ???ㅽ뻾 寃곌낵: $label.'
+          ? '실전 매도 실행 결과: $label.'
           : 'Live sell execution result: $label.';
     }
     return isKorean
-        ? '?ㅻℓ???ㅽ뻾 寃곌낵: $label / $reason.'
+        ? '실전 매도 실행 결과: $label / $reason.'
         : 'Live sell execution result: $label / $reason.';
   }
 
   String guardedLiveSellResultRefreshed(String status) => isKorean
-      ? '?ㅻℓ???ㅽ뻾 寃곌낵 ?덈줈怨좎묠 ?꾨즺: ${statusLabel(status)}.'
+      ? '실전 매도 실행 결과 새로고침 완료: ${statusLabel(status)}.'
       : 'Live sell result refreshed: ${statusLabel(status)}.';
 
   String guardedLiveSellResultSynced(String status) => isKorean
-      ? '二쇰Ц ?곹깭 ?숆린???꾨즺: ${statusLabel(status)}.'
+      ? '주문 상태 동기화 완료: ${statusLabel(status)}.'
       : 'Order status synced: ${statusLabel(status)}.';
 
   String preflightBlocksGuardedSell(String reason) => isKorean
-      ? '留ㅻ룄 ?ъ쟾 ?먭? 寃곌낵 ?ㅽ뻾??李⑤떒?섏뿀?듬땲?? $reason.'
+      ? '매도 사전 점검 결과 실행이 차단되었습니다. $reason.'
       : 'Sell preflight blocks execution: $reason.';
 
   String preflightChecklistLabel(String key) {
@@ -1170,7 +1164,7 @@ class AppStrings {
       'review_completed_or_allowed': '검토 완료 또는 허용',
       'final_confirmation_required': '최종 확인 필요',
       'kill_switch_off': '킬 스위치 꺼짐',
-      'dry_run_off_for_live_submit': '실주문 전 dry_run 꺼짐',
+      'dry_run_off_for_live_submit': '실주문용 dry_run 꺼짐',
       'kis_real_orders_enabled': '한국투자증권 실주문 허용',
       'market_session_allowed': '시장 세션 허용',
       'no_new_entry_window_allowed': '신규 진입 시간 허용',
@@ -1179,7 +1173,7 @@ class AppStrings {
       'risk_gate_passed': '리스크 기준 통과',
       'duplicate_order_block': '중복 주문 차단 확인',
       'daily_limit_check': '일일 한도 확인',
-      'live_auto_buy_enabled': '보호된 실매수 활성',
+      'live_auto_buy_enabled': '보호된 실전 매수 활성',
       'scheduler_live_disabled': '스케줄러 실주문 비활성',
       'active_profile_allowed': '활성 프로필 허용',
       'max_positions': '최대 보유 종목 확인',
@@ -1197,10 +1191,10 @@ class AppStrings {
       'account_snapshot': '계좌 조회',
     };
     final guardedSellKo = <String, String>{
-      'final_confirmation_received': '理쒖쥌 ?뺤씤 ?꾨즺',
-      'dry_run_allows_live_submit': 'dry_run ?ㅼ＜臾??덉슜',
-      'broker_submit_ready': '釉뚮줈而??쒖텧 以鍮?',
-      'manual_review_complete': '?섎룞 寃???꾨즺',
+      'final_confirmation_received': '최종 확인 완료',
+      'dry_run_allows_live_submit': 'dry_run 실주문 허용',
+      'broker_submit_ready': '브로커 제출 준비',
+      'manual_review_complete': '수동 검토 완료',
     };
     if (isKorean) {
       return guardedSellKo[normalized] ??
@@ -1328,19 +1322,19 @@ class AppStrings {
   String lifecycleEventLabel(String value) {
     final normalized = value.trim().toLowerCase();
     final ko = <String, String>{
-      'promotion_created': '?꾨낫 ?앹꽦',
-      'promotion_reviewed': '?꾨낫 寃??',
-      'buy_preflight': '留ㅼ닔 ?ъ쟾 ?먭?',
-      'guarded_buy_submitted': '吏꾩엯 二쇰Ц ?쒖텧',
-      'buy_filled': '吏꾩엯 泥닿껐',
-      'position_opened': '蹂댁쑀 ?쒖옉',
-      'sell_preflight': '留ㅻ룄 ?ъ쟾 ?먭?',
-      'guarded_sell_submitted': '泥?궛 二쇰Ц ?쒖텧',
-      'sell_filled': '泥?궛 泥닿껐',
-      'position_closed': '蹂댁쑀 醫낅즺',
-      'sync_update': '?숆린??媛깆떊',
-      'blocked': '李⑤떒??',
-      'unknown': '?뚯씤 遺덇?',
+      'promotion_created': '후보 생성',
+      'promotion_reviewed': '후보 검토',
+      'buy_preflight': '매수 사전 점검',
+      'guarded_buy_submitted': '보호된 매수 주문 제출',
+      'buy_filled': '매수 체결',
+      'position_opened': '보유 시작',
+      'sell_preflight': '매도 사전 점검',
+      'guarded_sell_submitted': '보호된 매도 주문 제출',
+      'sell_filled': '매도 체결',
+      'position_closed': '보유 종료',
+      'sync_update': '동기화 업데이트',
+      'blocked': '차단됨',
+      'unknown': '알 수 없음',
     };
     final en = <String, String>{
       'promotion_created': 'Promotion Created',

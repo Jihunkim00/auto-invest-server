@@ -54,6 +54,7 @@ import '../../models/order_validation_result.dart';
 import '../../models/operator_alerts.dart';
 import '../../models/ops_production_readiness.dart';
 import '../../models/ops_settings.dart';
+import '../../models/operation_mode.dart';
 import '../../models/portfolio_orchestrator.dart';
 import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
@@ -120,8 +121,8 @@ class ApiClient {
 
   Future<Map<String, dynamic>> _getJson(String path) async {
     final r = await _client.get(Uri.parse('${AppConfig.baseUrl}$path'));
-    if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
-    return jsonDecode(r.body) as Map<String, dynamic>;
+    if (r.statusCode >= 400) throw _apiRequestExceptionFromResponse(r);
+    return _decodeJsonMapResponse(r);
   }
 
   Future<Map<String, dynamic>> _getJsonNoCache(String path) async {
@@ -136,17 +137,13 @@ class ApiClient {
     if (r.statusCode >= 400) {
       throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid backend response.');
-    }
-    return Map<String, dynamic>.from(decoded);
+    return _decodeJsonMapResponse(r);
   }
 
   Future<Map<String, dynamic>> _postJson(String path) async {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
-    if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
-    return jsonDecode(r.body) as Map<String, dynamic>;
+    if (r.statusCode >= 400) throw _apiRequestExceptionFromResponse(r);
+    return _decodeJsonMapResponse(r);
   }
 
   Future<Map<String, dynamic>> _postJsonBody(
@@ -157,13 +154,9 @@ class ApiClient {
       body: jsonEncode(body),
     );
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid backend response.');
-    }
-    return Map<String, dynamic>.from(decoded);
+    return _decodeJsonMapResponse(r);
   }
 
   Future<Map<String, dynamic>> _putJsonBody(
@@ -174,18 +167,14 @@ class ApiClient {
       body: jsonEncode(body),
     );
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid backend response.');
-    }
-    return Map<String, dynamic>.from(decoded);
+    return _decodeJsonMapResponse(r);
   }
 
   Future<void> _post(String path) async {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
-    if (r.statusCode >= 400) throw Exception('HTTP ${r.statusCode}: ${r.body}');
+    if (r.statusCode >= 400) throw _apiRequestExceptionFromResponse(r);
   }
 
   Future<PortfolioSummary> fetchPortfolioSummary() async {
@@ -204,15 +193,14 @@ class ApiClient {
         return PortfolioSummary.empty();
       }
       if (r.statusCode >= 400) {
-        throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+        throw _apiRequestExceptionFromResponse(r);
       }
 
-      final decoded = jsonDecode(r.body);
-      if (decoded is! Map) {
-        throw const ApiRequestException('Invalid portfolio summary response.');
-      }
-
-      return PortfolioSummary.fromJson(Map<String, dynamic>.from(decoded));
+      final decoded = _decodeJsonMapResponse(
+        r,
+        invalidMessage: 'Invalid portfolio summary response.',
+      );
+      return PortfolioSummary.fromJson(decoded);
     } on http.ClientException {
       return PortfolioSummary.empty();
     }
@@ -1835,12 +1823,12 @@ class ApiClient {
       'Pragma': 'no-cache',
     });
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid KIS orders response.');
-    }
+    final decoded = _decodeJsonMapResponse(
+      r,
+      invalidMessage: 'Invalid KIS orders response.',
+    );
     final rawOrders = decoded['orders'] as List<dynamic>? ?? const [];
     return rawOrders
         .whereType<Map>()
@@ -1861,10 +1849,9 @@ class ApiClient {
     );
     final r = await _client.get(uri);
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    return KisManualOrderResult.fromJson(
-        Map<String, dynamic>.from(jsonDecode(r.body) as Map));
+    return KisManualOrderResult.fromJson(_decodeJsonMapResponse(r));
   }
 
   Future<WatchlistRunResult> runKisWatchlistPreview({
@@ -1879,13 +1866,9 @@ class ApiClient {
       body: jsonEncode(const {}),
     );
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid backend response.');
-    }
-    final payload = Map<String, dynamic>.from(decoded);
+    final payload = _decodeJsonMapResponse(r);
     return WatchlistRunResult.fromJson(payload);
   }
 
@@ -1909,13 +1892,9 @@ class ApiClient {
       body: jsonEncode(const {}),
     );
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid backend response.');
-    }
-    return KisAutoSimulatorResult.fromJson(Map<String, dynamic>.from(decoded));
+    return KisAutoSimulatorResult.fromJson(_decodeJsonMapResponse(r));
   }
 
   Future<KisSchedulerSimulationStatus> fetchKisSchedulerStatus() async {
@@ -2055,13 +2034,14 @@ class ApiClient {
       'Pragma': 'no-cache',
     });
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+      throw _apiRequestExceptionFromResponse(r);
     }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException('Invalid KIS shadow review response.');
-    }
-    return KisShadowExitReview.fromJson(Map<String, dynamic>.from(decoded));
+    return KisShadowExitReview.fromJson(
+      _decodeJsonMapResponse(
+        r,
+        invalidMessage: 'Invalid KIS shadow review response.',
+      ),
+    );
   }
 
   Future<KisShadowExitReviewQueue> fetchKisShadowExitReviewQueue({
@@ -2079,15 +2059,14 @@ class ApiClient {
       'Pragma': 'no-cache',
     });
     if (r.statusCode >= 400) {
-      throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
-    }
-    final decoded = jsonDecode(r.body);
-    if (decoded is! Map) {
-      throw const ApiRequestException(
-          'Invalid KIS shadow review queue response.');
+      throw _apiRequestExceptionFromResponse(r);
     }
     return KisShadowExitReviewQueue.fromJson(
-        Map<String, dynamic>.from(decoded));
+      _decodeJsonMapResponse(
+        r,
+        invalidMessage: 'Invalid KIS shadow review queue response.',
+      ),
+    );
   }
 
   Future<KisShadowExitReviewQueueAction> markKisShadowExitQueueItemReviewed(
@@ -2500,6 +2479,24 @@ class ApiClient {
     await _putJsonBody('/ops/settings', values);
   }
 
+  Future<OperationModeStatus> fetchOperationMode() async {
+    final payload = await _getJsonNoCache('/app/operation-mode');
+    return OperationModeStatus.fromJson(payload);
+  }
+
+  Future<OperationModeChangeResult> updateOperationMode({
+    required String mode,
+    required bool acknowledged,
+    String? reason,
+  }) async {
+    final payload = await _putJsonBody('/app/operation-mode', {
+      'mode': OperationModeStatus.normalizeMode(mode),
+      'acknowledged': acknowledged,
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    });
+    return OperationModeChangeResult.fromJson(payload);
+  }
+
   Future<Map<String, dynamic>> applyOpsSettingsPreset({
     required String preset,
     bool confirmDangerous = false,
@@ -2539,15 +2536,13 @@ class ApiClient {
       });
       if (r.statusCode == 404 || r.statusCode == 204) return null;
       if (r.statusCode >= 400) {
-        throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+        throw _apiRequestExceptionFromResponse(r);
       }
 
-      final decoded = jsonDecode(r.body);
-      if (decoded is! Map) {
-        throw const ApiRequestException('Invalid latest run response.');
-      }
-
-      final body = Map<String, dynamic>.from(decoded);
+      final body = _decodeJsonMapResponse(
+        r,
+        invalidMessage: 'Invalid latest run response.',
+      );
       final rawItem = body.containsKey('item') ? body['item'] : body;
       if (body['has_data'] == false || rawItem == null) return null;
       if (rawItem is! Map) {
@@ -2586,13 +2581,19 @@ class ApiClient {
             'Manual trading endpoint is not available on this backend.');
       }
       if (r.statusCode == 422) {
-        throw ApiRequestException('Validation failed: ${r.body}');
+        final body = _decodeUtf8Body(r);
+        throw ApiRequestException(
+          'Validation failed: $body',
+          statusCode: r.statusCode,
+          detail: _apiErrorDetailFromBody(body),
+        );
       }
       if (r.statusCode >= 400) {
-        throw ApiRequestException('HTTP ${r.statusCode}: ${r.body}');
+        throw _apiRequestExceptionFromResponse(r);
       }
       return ManualTradingRunResult.fromJson(
-          jsonDecode(r.body) as Map<String, dynamic>);
+        _decodeJsonMapResponse(r),
+      );
     } on ApiRequestException {
       rethrow;
     } on FormatException catch (e) {
@@ -2827,10 +2828,26 @@ class _KrPortfolioAuthDetails {
   final bool tokenExpired;
 }
 
+String _decodeUtf8Body(http.Response response) {
+  return utf8.decode(response.bodyBytes, allowMalformed: false);
+}
+
+Map<String, dynamic> _decodeJsonMapResponse(
+  http.Response response, {
+  String invalidMessage = 'Invalid backend response.',
+}) {
+  final decoded = jsonDecode(_decodeUtf8Body(response));
+  if (decoded is! Map) {
+    throw ApiRequestException(invalidMessage);
+  }
+  return Map<String, dynamic>.from(decoded);
+}
+
 ApiRequestException _apiRequestExceptionFromResponse(http.Response response) {
-  final detail = _apiErrorDetailFromBody(response.body);
+  final body = _decodeUtf8Body(response);
+  final detail = _apiErrorDetailFromBody(body);
   return ApiRequestException(
-    'HTTP ${response.statusCode}: ${response.body}',
+    'HTTP ${response.statusCode}: $body',
     statusCode: response.statusCode,
     detail: detail,
   );

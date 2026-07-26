@@ -20,11 +20,11 @@ void main() {
 
     expect(find.byKey(const ValueKey('broker-sync-watchdog-panel')),
         findsOneWidget);
-    expect(find.text('釉뚮줈而??숆린??媛먯떆'), findsOneWidget);
-    expect(find.text('二쇰Ц/?ъ????숆린???곹깭'), findsOneWidget);
-    expect(find.text('?숆린???뺤긽'), findsOneWidget);
-    expect(find.text('二쇰Ц 痍⑥냼 ?놁쓬'), findsOneWidget);
-    expect(find.text('媛먯떆 1???ㅽ뻾'), findsOneWidget);
+    expect(find.text('브로커 동기화 감시'), findsOneWidget);
+    expect(find.text('주문/포지션 동기화 상태'), findsOneWidget);
+    expect(find.text('동기화 정상'), findsOneWidget);
+    expect(find.text('주문 취소 없음'), findsOneWidget);
+    expect(find.text('감시 1회 실행'), findsOneWidget);
 
     controller.dispose();
   });

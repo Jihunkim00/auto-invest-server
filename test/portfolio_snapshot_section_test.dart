@@ -688,7 +688,7 @@ const _krPositionsOnlySummary = PortfolioSummary(
   positions: [
     PositionSummary(
       symbol: '005930',
-      name: '??깃쉐?袁⑹쁽',
+      name: '삼성전자',
       side: 'long',
       qty: 2,
       avgEntryPrice: 500000,
