@@ -65,8 +65,10 @@ class WatchlistSection extends StatelessWidget {
     }
 
     return SectionCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
           const Icon(Icons.manage_search_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
@@ -245,7 +247,7 @@ class WatchlistSection extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 12),
-        ExpansionTile(
+        Material(type: MaterialType.transparency, child: ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
           title: const Text('Watchlist Symbols'),
@@ -255,8 +257,9 @@ class WatchlistSection extends StatelessWidget {
             else
               _WatchlistSymbols(watchlist: watchlist, isKr: isKr),
           ],
-        ),
-      ]),
+        )),
+        ]),
+      ),
     );
   }
 }
@@ -306,8 +309,10 @@ class _KosdaqUpdateResultSummary extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
           const Icon(Icons.playlist_add_check, size: 18),
           const SizedBox(width: 8),
           Expanded(
@@ -346,7 +351,7 @@ class _KosdaqUpdateResultSummary extends StatelessWidget {
             text: '50개 제한으로 일부 기존 종목이 제외되었습니다.',
             color: Colors.amberAccent,
           ),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Excluded Symbols',
@@ -364,9 +369,9 @@ class _KosdaqUpdateResultSummary extends StatelessWidget {
                 ),
               ),
             ],
-          ),
+          )),
         ],
-        ExpansionTile(
+        Material(type: MaterialType.transparency, child: ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
           title: const Text('Developer Raw Payload',
@@ -389,8 +394,9 @@ class _KosdaqUpdateResultSummary extends StatelessWidget {
               ),
             ),
           ],
-        ),
-      ]),
+        )),
+        ]),
+      ),
     );
   }
 }
@@ -846,7 +852,7 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
     final candidates =
         _candidatePreviewList(runResult).take(5).toList(growable: false);
     final top = candidates.isEmpty ? null : candidates.first;
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: const Text('Analysis Details'),
@@ -921,7 +927,7 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
           threshold: runResult.minEntryScore,
           onAnalyzeInTrading: onAnalyzeInTrading,
         ),
-        ExpansionTile(
+        Material(type: MaterialType.transparency, child: ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
           title: const Text('Developer Raw Payload'),
@@ -939,9 +945,9 @@ class _WatchlistAdvancedDetails extends StatelessWidget {
                   'final_ranked_candidates=${runResult.finalRankedCandidates}',
             ),
           ],
-        ),
+        )),
       ],
-    );
+    ));
   }
 }
 
@@ -988,7 +994,7 @@ class _AdvancedCandidateList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: Text(title),
@@ -1008,7 +1014,7 @@ class _AdvancedCandidateList extends StatelessWidget {
               ),
             ),
       ],
-    );
+    ));
   }
 }
 
@@ -1045,7 +1051,7 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
 
     return Container(
       decoration: _panelDecoration(),
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         title: Text(
@@ -1215,7 +1221,7 @@ class _ExpandableWatchlistCandidateCard extends StatelessWidget {
             ],
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -1637,14 +1643,14 @@ class _KisSingleSymbolAnalyzeBuyCard extends StatelessWidget {
         _StateLine(text: 'Why no buy: ${_singleSymbolNoBuyReason(result)}'),
         if (result != null) ...[
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -1794,7 +1800,7 @@ class _ManagedPositionTile extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: _panelDecoration(),
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         title: Text(
@@ -1871,7 +1877,7 @@ class _ManagedPositionTile extends StatelessWidget {
             label: const Text('Prepare Manual Sell'),
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -2045,7 +2051,7 @@ class _KisAdvancedDetailsSectionState
       key: const Key('kis_advanced_details_section'),
       width: double.infinity,
       decoration: _panelDecoration(),
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         initiallyExpanded: widget.initiallyExpanded,
         onExpansionChanged: (value) => setState(() => _expanded = value),
         tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2124,7 +2130,7 @@ class _KisAdvancedDetailsSectionState
                 ),
               ]
             : const <Widget>[],
-      ),
+      )),
     );
   }
 }
@@ -2252,14 +2258,14 @@ class _OperationsReadinessCardBody extends StatelessWidget {
           const SizedBox(height: 12),
           _OperationsIssuesAndActions(result: result),
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -3957,14 +3963,14 @@ class _KisLimitedAutoSellResultPanel extends StatelessWidget {
           ),
       ],
       const SizedBox(height: 4),
-      ExpansionTile(
+      Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: const Text('Developer Raw Payload'),
         children: [
           _StateLine(text: _prettyJson(result.rawPayload)),
         ],
-      ),
+      )),
     ]);
   }
 }
@@ -4380,14 +4386,14 @@ class _KisLimitedAutoBuyReviewCard extends StatelessWidget {
             _KisLimitedAutoBuyReviewDecisionCard(decision: decision),
             const SizedBox(height: 8),
           ],
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(review.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -4618,14 +4624,14 @@ class _KisLimitedAutoBuyExecutionReviewCard extends StatelessWidget {
               const SizedBox(height: 8),
             ],
           ],
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(review.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -4947,14 +4953,14 @@ class _KisLimitedAutoBuyResultPanel extends StatelessWidget {
           ),
       ],
       const SizedBox(height: 4),
-      ExpansionTile(
+      Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: const Text('Developer Raw Payload'),
         children: [
           _StateLine(text: _prettyJson(result.rawPayload)),
         ],
-      ),
+      )),
     ]);
   }
 }
@@ -5181,14 +5187,14 @@ class _KisSchedulerReadinessCard extends StatelessWidget {
           const SizedBox(height: 12),
           _KisSchedulerRecentRuns(runs: result.recentRuns),
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -5560,14 +5566,14 @@ class _KisSchedulerDryRunOrchestrationCard extends StatelessWidget {
           const SizedBox(height: 12),
           _KisSchedulerDryRunSafety(result: result),
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -5852,14 +5858,14 @@ class _KisSchedulerDryRunReviewCard extends StatelessWidget {
           const SizedBox(height: 12),
           _KisSchedulerDryRunReviewSafety(result: result),
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );
@@ -6571,14 +6577,14 @@ class _KisSchedulerGuardedSellResultPanel extends StatelessWidget {
         _StateLine(text: 'block reasons: ${_joinList(result.blockReasons)}'),
       ],
       const SizedBox(height: 4),
-      ExpansionTile(
+      Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: const Text('Developer Raw Payload'),
         children: [
           _StateLine(text: _prettyJson(result.rawPayload)),
         ],
-      ),
+      )),
     ]);
   }
 }
@@ -6918,14 +6924,14 @@ class _KisSchedulerGuardedBuyResultPanel extends StatelessWidget {
         _StateLine(text: 'block reasons: ${_joinList(result.blockReasons)}'),
       ],
       const SizedBox(height: 4),
-      ExpansionTile(
+      Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: const Text('Developer Raw Payload'),
         children: [
           _StateLine(text: _prettyJson(result.rawPayload)),
         ],
-      ),
+      )),
     ]);
   }
 }
@@ -7041,14 +7047,14 @@ class _KisSchedulerGuardedSellReviewCard extends StatelessWidget {
             violations: result.safetyViolations,
           ),
           const SizedBox(height: 4),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
             title: const Text('Developer Raw Payload'),
             children: [
               _StateLine(text: _prettyJson(result.rawPayload)),
             ],
-          ),
+          )),
         ],
       ]),
     );

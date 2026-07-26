@@ -257,7 +257,7 @@ class _KrOrderTicket extends StatelessWidget {
       if (controller.orderValidationResult != null)
         _ValidationResultCard(result: controller.orderValidationResult!),
       const SizedBox(height: 12),
-      CheckboxListTile(
+      Material(type: MaterialType.transparency, child: CheckboxListTile(
         contentPadding: EdgeInsets.zero,
         controlAffinity: ListTileControlAffinity.leading,
         value: controller.kisLiveConfirmation,
@@ -270,7 +270,7 @@ class _KrOrderTicket extends StatelessWidget {
         subtitle: const Text(
           'Manual-only lane; final confirmation is still required before submit.',
         ),
-      ),
+      )),
       const SizedBox(height: 8),
       _PreSubmitChecklist(controller: controller),
       const SizedBox(height: 8),
@@ -627,12 +627,12 @@ class _RawErrorSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _StateLine(text: primary, color: Colors.redAccent),
-      ExpansionTile(
+      Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
         title: Text(title),
         children: [_StateLine(text: raw)],
-      ),
+      )),
     ]);
   }
 }
@@ -789,7 +789,7 @@ class _KisOrderStatusPanel extends StatelessWidget {
               child: _RecentKisOrderRow(order: order, controller: controller),
             ),
           if (olderHistory.isNotEmpty)
-            ExpansionTile(
+            Material(type: MaterialType.transparency, child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               title: Text('Older order history (${olderHistory.length})'),
@@ -801,7 +801,7 @@ class _KisOrderStatusPanel extends StatelessWidget {
                         order: order, controller: controller),
                   ),
               ],
-            ),
+            )),
         ],
       ]),
     );
@@ -1177,14 +1177,14 @@ class _ValidationDetailSection extends StatelessWidget {
       'Payload preview: ${jsonEncode(result.orderPreview.payloadPreview)}',
     ];
 
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: const Text('Raw validation details'),
       children: [
         _StateLine(text: lines.join('\n')),
       ],
-    );
+    ));
   }
 }
 

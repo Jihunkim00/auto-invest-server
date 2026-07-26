@@ -17,14 +17,17 @@ class SectionCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(20),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-        child: Container(
-          padding: padding,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
+        child: Material(
+          color: Colors.white.withValues(alpha: 0.05),
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
           ),
-          child: child,
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: padding,
+            child: child,
+          ),
         ),
       ),
     );

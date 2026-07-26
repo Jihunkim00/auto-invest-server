@@ -520,7 +520,7 @@ class _Diagnostics extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: const Text('Diagnostics',
@@ -544,7 +544,7 @@ class _Diagnostics extends StatelessWidget {
           ),
         ),
       ],
-    );
+    ));
   }
 }
 

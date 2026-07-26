@@ -803,7 +803,7 @@ class _AdvancedFlagsCard extends StatelessWidget {
     ];
     return SectionCard(
       padding: EdgeInsets.zero,
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         initiallyExpanded: false,
         leading: const Icon(Icons.bug_report_outlined),
         title: const Text('Advanced Flags / Diagnostics'),
@@ -838,7 +838,7 @@ class _AdvancedFlagsCard extends StatelessWidget {
             scope: 'KIS / KR',
           ),
         ],
-      ),
+      )),
     );
   }
 }
@@ -1024,7 +1024,7 @@ class _ScopedSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
+    return Material(type: MaterialType.transparency, child: SwitchListTile(
       contentPadding: EdgeInsets.zero,
       title: Wrap(
         spacing: 8,
@@ -1038,7 +1038,7 @@ class _ScopedSwitchTile extends StatelessWidget {
       subtitle: subtitle == null ? null : Text(subtitle!),
       value: value,
       onChanged: onChanged,
-    );
+    ));
   }
 }
 
