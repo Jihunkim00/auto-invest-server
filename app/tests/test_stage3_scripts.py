@@ -37,7 +37,7 @@ def test_trend_builder_uses_double_notional_limit():
 
     max_notional = script.calculate_max_notional(
         configured_max_notional_krw=55000,
-        configured_max_notional_pct=0.93,
+        configured_max_notional_pct=0.94,
         equity=100000,
         cash=90000,
     )
