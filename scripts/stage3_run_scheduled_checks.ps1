@@ -51,6 +51,43 @@ function Get-PowerShellExe {
   throw "PowerShell executable was not found."
 }
 
+function Normalize-ScheduleTimes {
+  param(
+    [string[]]$RawTimes
+  )
+
+  $normalizedTimes = @()
+  $trimChars = [char[]]@(
+    [char]0x20,
+    [char]0x09,
+    [char]0x0D,
+    [char]0x0A,
+    [char]0x27,
+    [char]0x22
+  )
+
+  foreach ($rawTime in $RawTimes) {
+    foreach ($timePart in ([string]$rawTime).Split(",")) {
+      $timeText = $timePart.Trim($trimChars)
+      $parsedTime = [DateTime]::MinValue
+
+      if (-not [DateTime]::TryParseExact(
+          $timeText,
+          "HH:mm",
+          [System.Globalization.CultureInfo]::InvariantCulture,
+          [System.Globalization.DateTimeStyles]::None,
+          [ref]$parsedTime
+        )) {
+        throw "Invalid schedule time: '$timeText'. Expected HH:mm."
+      }
+
+      $normalizedTimes += $timeText
+    }
+  }
+
+  return $normalizedTimes
+}
+
 $checkScript = Join-Path $Root "scripts\stage3_scheduled_check.ps1"
 if (-not (Test-Path $checkScript)) {
   throw "Check script not found: $checkScript"
@@ -59,8 +96,9 @@ if (-not (Test-Path $checkScript)) {
 $koreaTz = Get-KoreaTimeZone
 $powerShellExe = Get-PowerShellExe
 $runDateText = $RunDate.ToString("yyyy-MM-dd")
+$scheduleTimes = Normalize-ScheduleTimes -RawTimes $Times
 
-foreach ($timeText in $Times) {
+foreach ($timeText in $scheduleTimes) {
   $targetText = "$runDateText $timeText"
   $targetKst = [DateTime]::ParseExact(
     $targetText,
