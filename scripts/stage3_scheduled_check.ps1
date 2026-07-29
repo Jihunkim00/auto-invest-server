@@ -15,7 +15,7 @@ if ($null -eq $MaxNotionalKrw) {
     $MaxNotionalKrw = [Double]$env:STAGE3_MAX_NOTIONAL_KRW
   }
   else {
-    $MaxNotionalKrw = 50000.0
+    $MaxNotionalKrw = 55000.0
   }
 }
 
@@ -201,7 +201,7 @@ $SafeSettings = @{
   kis_live_auto_sell_enabled = $false
   kis_limited_auto_sell_enabled = $false
   kis_limited_auto_buy_max_notional_pct = 0.80
-  kis_limited_auto_buy_max_notional_krw = 55000.0
+  kis_limited_auto_buy_max_notional_krw = 50000.0
 }
 
 $PreflightSettings = $SafeSettings.Clone()
@@ -217,6 +217,7 @@ $PreflightSettings["kis_limited_auto_buy_min_confidence"] = 0.70
 $PreflightSettings["kis_limited_auto_buy_max_orders_per_day"] = 1
 $PreflightSettings["kis_limited_auto_buy_max_positions"] = 1
 $PreflightSettings["kis_limited_auto_buy_max_notional_pct"] = [Double]$MaxNotionalPct
+$PreflightSettings["kis_limited_auto_buy_max_notional_krw"] = [Double]$MaxNotionalKrw
 $PreflightSettings["kis_limited_auto_buy_min_cash_buffer_krw"] = 0
 $PreflightSettings["kis_limited_auto_buy_block_if_position_exists"] = $true
 $PreflightSettings["kis_limited_auto_buy_block_if_open_order_exists"] = $true

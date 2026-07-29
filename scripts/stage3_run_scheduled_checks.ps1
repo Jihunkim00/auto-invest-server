@@ -15,7 +15,7 @@ if ($null -eq $MaxNotionalKrw) {
     $MaxNotionalKrw = [Double]$env:STAGE3_MAX_NOTIONAL_KRW
   }
   else {
-    $MaxNotionalKrw = 50000.0
+    $MaxNotionalKrw = 55000.0
   }
 }
 

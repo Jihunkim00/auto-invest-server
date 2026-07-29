@@ -318,9 +318,25 @@ def test_scheduled_check_holds_on_report_parse_failure_and_restores_safe(tmp_pat
     assert "preflight_executed=false" in log_text
     assert "HOLD: technical report unavailable" in log_text
     assert "safe settings restored" in log_text
+    assert "max_notional_krw=55000" in log_text
     assert not any(path.startswith("/kis/watchlist/preview") for path, _ in calls)
     assert not any(path.startswith("/kis/limited-auto-buy/preflight-once") for path, _ in calls)
     assert calls[-1][0] == "/ops/settings"
     restored = json.loads(calls[-1][1])
     assert restored["dry_run"] is True
     assert restored["kill_switch"] is True
+    assert restored["kis_limited_auto_buy_max_notional_krw"] == 50000.0
+    assert restored["kis_limited_auto_buy_max_notional_pct"] == 0.80
+
+
+def test_scheduled_check_separates_live_test_cap_from_safe_restore():
+    text = (ROOT / "scripts" / "stage3_scheduled_check.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$MaxNotionalKrw = 55000.0" in text
+    assert "kis_limited_auto_buy_max_notional_krw = 50000.0" in text
+    assert (
+        '$PreflightSettings["kis_limited_auto_buy_max_notional_krw"] = '
+        "[Double]$MaxNotionalKrw"
+    ) in text

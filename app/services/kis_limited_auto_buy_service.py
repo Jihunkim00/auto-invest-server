@@ -50,6 +50,10 @@ RUN_TRIGGER_SOURCE = "limited_auto_buy_run_once"
 REVIEWED_TRIGGER_SOURCE = "limited_auto_buy_execute_reviewed_once"
 REVIEW_CONFIRMATION_PHRASE = "TEST3 LIVE BUY 1 SHARE"
 REVIEW_TOKEN_TTL = timedelta(minutes=5)
+REVIEW_TOKEN_STATUS_ISSUED = "issued"
+REVIEW_TOKEN_STATUS_EXECUTING = "executing"
+REVIEW_TOKEN_STATUS_COMPLETED = "completed"
+REVIEW_TOKEN_STATUS_FAILED_AFTER_SUBMIT_ATTEMPT = "failed_after_submit_attempt"
 DEFAULT_MAX_NOTIONAL_KRW = 55_000.0
 KR_TZ = ZoneInfo("Asia/Seoul")
 
@@ -63,6 +67,7 @@ SAFE_RESTORE_SETTINGS = {
     "kis_scheduler_allow_real_orders": False,
     "kis_scheduler_buy_enabled": False,
     "kis_limited_auto_buy_max_notional_pct": 0.80,
+    "kis_limited_auto_buy_max_notional_krw": 50_000.0,
 }
 
 LIVE_BUY_STATUSES = {
@@ -234,6 +239,9 @@ class KisLimitedAutoBuyService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         now_utc = _utc_now(now)
+        token_row: TradeRunLog | None = None
+        token_payload: dict[str, Any] | None = None
+        restore_safe_settings = False
         try:
             if scheduler_context:
                 return self._blocked_reviewed_execute(
@@ -254,7 +262,7 @@ class KisLimitedAutoBuyService:
                     reason="confirmation_mismatch",
                 )
 
-            token_row, token_payload, token_error = _find_review_token(
+            token_row, token_payload, token_error = _claim_review_token(
                 db,
                 review_token=review_token,
                 now_utc=now_utc,
@@ -264,6 +272,10 @@ class KisLimitedAutoBuyService:
                     db,
                     now_utc=now_utc,
                     reason=token_error,
+                    token_payload=token_payload,
+                    order_reconciliation_required=(
+                        token_error == "review_token_submit_attempted"
+                    ),
                 )
             if token_row is None or token_payload is None:
                 return self._blocked_reviewed_execute(
@@ -271,6 +283,7 @@ class KisLimitedAutoBuyService:
                     now_utc=now_utc,
                     reason="review_token_invalid",
                 )
+            restore_safe_settings = True
 
             context = self._context(
                 db,
@@ -350,6 +363,13 @@ class KisLimitedAutoBuyService:
 
             block_reasons = _dedupe(_normalize_block_reasons(block_reasons))
             if block_reasons:
+                _restore_review_token_issued(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    reason=block_reasons[0],
+                )
                 return self._blocked_reviewed_execute(
                     db,
                     now_utc=now_utc,
@@ -369,6 +389,13 @@ class KisLimitedAutoBuyService:
                 daily_limit=daily_limit,
             )
             if validation_status != "passed":
+                _restore_review_token_issued(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    reason="validation_failed",
+                )
                 return self._blocked_reviewed_execute(
                     db,
                     now_utc=now_utc,
@@ -387,6 +414,7 @@ class KisLimitedAutoBuyService:
                 account_state=account_state,
                 daily_limit=daily_limit,
                 token_payload=token_payload,
+                token_row=token_row,
                 validation_summary=validation_summary,
             )
             if response.get("real_order_submitted") is True:
@@ -399,21 +427,85 @@ class KisLimitedAutoBuyService:
                         response.get("order_id") or response.get("order_log_id")
                     ),
                 )
+                response["review_token_status"] = REVIEW_TOKEN_STATUS_COMPLETED
+                response["review_token_reusable"] = False
+                response["execution_request_id"] = token_payload.get(
+                    "execution_request_id"
+                )
+                response["idempotency_key"] = _review_token_idempotency_key(
+                    token_payload
+                )
                 response = self._sync_submitted_order(db, response=response)
+            elif _review_token_submit_attempted(token_payload):
+                _mark_review_token_failed_after_submit_attempt(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    response=response,
+                    reason=str(response.get("reason") or "broker_submit_ambiguous"),
+                )
+                response = _submit_attempt_reconciliation_response(
+                    response,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                )
+            else:
+                _restore_review_token_issued(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    reason=str(response.get("reason") or "manual_submit_failed"),
+                )
             return _sanitize_limited_buy_payload(response)
         except Exception as exc:
+            if token_row is not None and token_payload is not None:
+                if _review_token_submit_attempted(token_payload):
+                    _mark_review_token_failed_after_submit_attempt(
+                        db,
+                        token_row=token_row,
+                        token_payload=token_payload,
+                        now_utc=now_utc,
+                        response=None,
+                        reason="reviewed_execute_failed",
+                        error=_safe_error(exc),
+                    )
+                    return self._blocked_reviewed_execute(
+                        db,
+                        now_utc=now_utc,
+                        reason="review_token_submit_attempted",
+                        block_reasons=[
+                            "review_token_submit_attempted",
+                            "order_sync_reconciliation_required",
+                        ],
+                        token_payload=token_payload,
+                        error=_safe_error(exc),
+                        broker_submit_called=True,
+                        manual_submit_called=True,
+                        order_reconciliation_required=True,
+                    )
+                _restore_review_token_issued(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    reason="reviewed_execute_failed",
+                )
             return self._blocked_reviewed_execute(
                 db,
                 now_utc=now_utc,
                 reason="reviewed_execute_failed",
                 block_reasons=["reviewed_execute_failed"],
+                token_payload=token_payload,
                 error=_safe_error(exc),
             )
         finally:
-            try:
-                self.runtime_settings.update_settings(db, SAFE_RESTORE_SETTINGS)
-            except Exception:
-                pass
+            if restore_safe_settings:
+                try:
+                    self.runtime_settings.update_settings(db, SAFE_RESTORE_SETTINGS)
+                except Exception:
+                    pass
 
     def _readiness_once(
         self,
@@ -1049,8 +1141,10 @@ class KisLimitedAutoBuyService:
         account_state: dict[str, Any],
         daily_limit: dict[str, Any],
         token_payload: dict[str, Any],
+        token_row: TradeRunLog,
         validation_summary: dict[str, Any] | None,
     ) -> dict[str, Any]:
+        idempotency_key = _review_token_idempotency_key(token_payload)
         metadata = _source_metadata(
             context=context,
             mode=REVIEWED_EXECUTION_MODE,
@@ -1071,6 +1165,10 @@ class KisLimitedAutoBuyService:
                 "review_token": token_payload.get("review_token"),
                 "review_token_created_at": token_payload.get("created_at"),
                 "review_token_expires_at": token_payload.get("expires_at"),
+                "review_token_status": token_payload.get("status"),
+                "execution_request_id": token_payload.get("execution_request_id"),
+                "idempotency_id": idempotency_key,
+                "idempotency_key": idempotency_key,
                 "operator_confirmation_phrase": REVIEW_CONFIRMATION_PHRASE,
                 "source_endpoint": "/kis/limited-auto-buy/execute-reviewed-once",
             }
@@ -1109,6 +1207,13 @@ class KisLimitedAutoBuyService:
                 self.client,
                 session_service=self.session_service,
                 runtime_settings=self.runtime_settings,
+                before_broker_submit=lambda order: _mark_review_token_submit_attempted(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=_utc_now(),
+                    order_id=order.id,
+                ),
             ).submit_manual(db, request, now=context.now_utc)
         except Exception as exc:
             response = {
@@ -1129,9 +1234,12 @@ class KisLimitedAutoBuyService:
                 "validation_called": True,
             }
         response = _sanitize_limited_buy_payload(response)
+        broker_order_confirmed = bool(
+            response.get("broker_order_id") or response.get("kis_odno")
+        )
         submitted = bool(
             status_code == 200
-            and (response.get("broker_order_id") or response.get("kis_odno"))
+            and (response.get("real_order_submitted") is True or broker_order_confirmed)
         )
         response.update(
             {
@@ -1146,6 +1254,14 @@ class KisLimitedAutoBuyService:
                 "limited_auto_buy_broker_submit_called": submitted,
                 "limited_auto_buy_manual_submit_called": True,
                 "review_token_used": submitted,
+                "review_token_status": (
+                    REVIEW_TOKEN_STATUS_COMPLETED
+                    if submitted
+                    else token_payload.get("status")
+                ),
+                "review_token_reusable": False if submitted else None,
+                "execution_request_id": token_payload.get("execution_request_id"),
+                "idempotency_key": idempotency_key,
                 "validation_called": True,
                 "qty": _safe_int(response.get("qty")) or 1,
             }
@@ -1232,8 +1348,21 @@ class KisLimitedAutoBuyService:
         account_state: dict[str, Any] | None = None,
         validation_summary: dict[str, Any] | None = None,
         error: str | None = None,
+        broker_submit_called: bool = False,
+        manual_submit_called: bool = False,
+        order_reconciliation_required: bool = False,
     ) -> dict[str, Any]:
         reasons = _dedupe(block_reasons or [reason])
+        token_status = _review_token_status(token_payload) if token_payload else None
+        token_reusable = (
+            token_status == REVIEW_TOKEN_STATUS_ISSUED
+            and reason
+            not in {
+                "review_token_expired",
+                "review_token_invalid",
+                "review_token_missing",
+            }
+        )
         payload = {
             "status": "ok",
             "provider": PROVIDER,
@@ -1251,11 +1380,25 @@ class KisLimitedAutoBuyService:
             "symbol": candidate.symbol if candidate else token_payload.get("symbol") if token_payload else None,
             "qty": candidate.suggested_quantity if candidate else token_payload.get("qty") if token_payload else None,
             "review_token_used": False,
+            "review_token_status": token_status,
+            "review_token_reusable": token_reusable,
+            "execution_request_id": (
+                token_payload.get("execution_request_id") if token_payload else None
+            ),
+            "idempotency_key": (
+                _review_token_idempotency_key(token_payload) if token_payload else None
+            ),
             "real_order_submitted": False,
-            "broker_submit_called": False,
-            "manual_submit_called": False,
+            "broker_submit_called": broker_submit_called,
+            "manual_submit_called": manual_submit_called,
             "validation_called": validation_summary is not None,
             "validation_summary": validation_summary,
+            "order_reconciliation_required": order_reconciliation_required,
+            "next_required_action": (
+                "sync_or_reconcile_broker_order"
+                if order_reconciliation_required
+                else None
+            ),
             "final_candidate": _candidate_payload(candidate) if candidate else None,
             "account_state": (
                 _account_state_summary(account_state)
@@ -1267,6 +1410,12 @@ class KisLimitedAutoBuyService:
         if token_payload:
             payload["review_token_created_at"] = token_payload.get("created_at")
             payload["review_token_expires_at"] = token_payload.get("expires_at")
+            payload["review_token_submit_attempted_at"] = token_payload.get(
+                "submit_attempted_at"
+            )
+            payload["prior_broker_submit_attempted"] = bool(
+                token_payload.get("submit_attempted_at")
+            )
         if error:
             payload["error"] = error
         return _sanitize_limited_buy_payload(payload)
@@ -1755,8 +1904,10 @@ def _new_review_token_payload(
         "review_token_created_at": created_at.isoformat(),
         "review_token_expires_at": expires_at.isoformat(),
         "review_token_ttl_seconds": int(REVIEW_TOKEN_TTL.total_seconds()),
+        "review_token_status": REVIEW_TOKEN_STATUS_ISSUED,
         "review": {
             "review_token": token,
+            "status": REVIEW_TOKEN_STATUS_ISSUED,
             "symbol": candidate.symbol,
             "qty": candidate.suggested_quantity,
             "reference_price": candidate.current_price,
@@ -1796,15 +1947,276 @@ def _find_review_token(
             continue
         if str(review.get("review_token") or "") != token:
             continue
-        if review.get("used_at"):
-            return row, review, "review_token_already_used"
-        expires_at = _parse_datetime(review.get("expires_at"))
-        if expires_at is None:
-            return row, review, "review_token_invalid"
-        if now_utc > expires_at:
-            return row, review, "review_token_expired"
-        return row, review, None
+        return row, review, _review_token_unavailable_reason(review, now_utc=now_utc)
     return None, None, "review_token_invalid"
+
+
+def _claim_review_token(
+    db: Session,
+    *,
+    review_token: str,
+    now_utc: datetime,
+) -> tuple[TradeRunLog | None, dict[str, Any] | None, str | None]:
+    token = str(review_token or "").strip()
+    if not token:
+        return None, None, "review_token_missing"
+    rows = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.mode == PREFLIGHT_MODE)
+        .filter(TradeRunLog.trigger_source == PREFLIGHT_TRIGGER_SOURCE)
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .limit(200)
+        .all()
+    )
+    for row in rows:
+        original_payload = row.response_payload
+        payload = _load_json_dict(original_payload)
+        review = payload.get("review")
+        if not isinstance(review, dict):
+            continue
+        if str(review.get("review_token") or "") != token:
+            continue
+
+        reason = _review_token_unavailable_reason(review, now_utc=now_utc)
+        if reason:
+            return row, review, reason
+
+        claimed = dict(review)
+        execution_request_id = uuid.uuid4().hex
+        claimed["status"] = REVIEW_TOKEN_STATUS_EXECUTING
+        claimed["executing_at"] = now_utc.isoformat()
+        claimed["execution_request_id"] = execution_request_id
+        payload["review"] = claimed
+        payload["review_token_status"] = REVIEW_TOKEN_STATUS_EXECUTING
+        payload["review_token_executing_at"] = now_utc.isoformat()
+        payload["review_token_execution_request_id"] = execution_request_id
+        new_payload = _json_limited_buy_payload(payload)
+        updated = (
+            db.query(TradeRunLog)
+            .filter(TradeRunLog.id == row.id)
+            .filter(TradeRunLog.response_payload == original_payload)
+            .update(
+                {TradeRunLog.response_payload: new_payload},
+                synchronize_session=False,
+            )
+        )
+        if updated == 1:
+            db.commit()
+            row.response_payload = new_payload
+            claimed["execution_request_id"] = execution_request_id
+            return row, claimed, None
+
+        db.rollback()
+        refreshed = db.get(TradeRunLog, row.id)
+        if refreshed is not None:
+            db.refresh(refreshed)
+        refreshed_payload = _load_json_dict(
+            refreshed.response_payload if refreshed is not None else None
+        )
+        refreshed_review = refreshed_payload.get("review")
+        if isinstance(refreshed_review, dict):
+            return (
+                refreshed or row,
+                refreshed_review,
+                _review_token_unavailable_reason(
+                    refreshed_review,
+                    now_utc=now_utc,
+                )
+                or "review_token_execution_in_progress",
+            )
+        return row, review, "review_token_invalid"
+    return None, None, "review_token_invalid"
+
+
+def _review_token_status(token_payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(token_payload, dict):
+        return None
+    status = str(token_payload.get("status") or "").strip()
+    if status:
+        return status
+    if token_payload.get("used_at"):
+        return REVIEW_TOKEN_STATUS_COMPLETED
+    return REVIEW_TOKEN_STATUS_ISSUED
+
+
+def _review_token_unavailable_reason(
+    token_payload: dict[str, Any],
+    *,
+    now_utc: datetime,
+) -> str | None:
+    status = _review_token_status(token_payload)
+    if status == REVIEW_TOKEN_STATUS_EXECUTING:
+        return "review_token_execution_in_progress"
+    if status == REVIEW_TOKEN_STATUS_COMPLETED or token_payload.get("used_at"):
+        return "review_token_already_used"
+    if status == REVIEW_TOKEN_STATUS_FAILED_AFTER_SUBMIT_ATTEMPT:
+        return "review_token_submit_attempted"
+    if status != REVIEW_TOKEN_STATUS_ISSUED:
+        return "review_token_invalid"
+    expires_at = _parse_datetime(token_payload.get("expires_at"))
+    if expires_at is None:
+        return "review_token_invalid"
+    if now_utc > expires_at:
+        return "review_token_expired"
+    return None
+
+
+def _review_token_idempotency_key(token_payload: dict[str, Any]) -> str:
+    execution_request_id = str(token_payload.get("execution_request_id") or "").strip()
+    if execution_request_id:
+        return execution_request_id
+    return str(token_payload.get("review_token") or "").strip()
+
+
+def _review_token_submit_attempted(token_payload: dict[str, Any]) -> bool:
+    return bool(token_payload.get("submit_attempted_at"))
+
+
+def _restore_review_token_issued(
+    db: Session,
+    *,
+    token_row: TradeRunLog,
+    token_payload: dict[str, Any],
+    now_utc: datetime,
+    reason: str,
+) -> None:
+    row = db.get(TradeRunLog, token_row.id) or token_row
+    db.refresh(row)
+    original_payload = row.response_payload
+    payload = _load_json_dict(original_payload)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        db.rollback()
+        return
+    if str(review.get("review_token") or "") != str(
+        token_payload.get("review_token") or ""
+    ):
+        db.rollback()
+        return
+    if review.get("execution_request_id") != token_payload.get("execution_request_id"):
+        db.rollback()
+        return
+    if _review_token_status(review) != REVIEW_TOKEN_STATUS_EXECUTING:
+        db.rollback()
+        return
+    if review.get("submit_attempted_at"):
+        db.rollback()
+        return
+
+    last_executing_at = review.pop("executing_at", None)
+    last_execution_request_id = review.pop("execution_request_id", None)
+    review["status"] = REVIEW_TOKEN_STATUS_ISSUED
+    review["last_execution_failed_at"] = now_utc.isoformat()
+    review["last_execution_failure_reason"] = str(reason or "blocked")
+    if last_executing_at:
+        review["last_executing_at"] = last_executing_at
+    if last_execution_request_id:
+        review["last_execution_request_id"] = last_execution_request_id
+    payload["review"] = review
+    payload["review_token_status"] = REVIEW_TOKEN_STATUS_ISSUED
+    payload.pop("review_token_executing_at", None)
+    payload.pop("review_token_execution_request_id", None)
+    payload["review_token_last_execution_failed_at"] = now_utc.isoformat()
+    payload["review_token_last_execution_failure_reason"] = str(reason or "blocked")
+
+    updated = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.id == row.id)
+        .filter(TradeRunLog.response_payload == original_payload)
+        .update(
+            {TradeRunLog.response_payload: _json_limited_buy_payload(payload)},
+            synchronize_session=False,
+        )
+    )
+    if updated == 1:
+        db.commit()
+        token_payload.clear()
+        token_payload.update(review)
+        return
+    db.rollback()
+
+
+def _mark_review_token_submit_attempted(
+    db: Session,
+    *,
+    token_row: TradeRunLog,
+    token_payload: dict[str, Any],
+    now_utc: datetime,
+    order_id: int | None,
+) -> None:
+    row = db.get(TradeRunLog, token_row.id) or token_row
+    original_payload = row.response_payload
+    payload = _load_json_dict(original_payload)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        raise RuntimeError("review_token_payload_missing")
+    if str(review.get("review_token") or "") != str(
+        token_payload.get("review_token") or ""
+    ):
+        raise RuntimeError("review_token_mismatch")
+    if review.get("execution_request_id") != token_payload.get("execution_request_id"):
+        raise RuntimeError("review_token_execution_mismatch")
+    if _review_token_status(review) != REVIEW_TOKEN_STATUS_EXECUTING:
+        raise RuntimeError("review_token_not_executing")
+
+    review["submit_attempted_at"] = now_utc.isoformat()
+    review["submit_attempt_order_id"] = order_id
+    payload["review"] = review
+    payload["review_token_status"] = REVIEW_TOKEN_STATUS_EXECUTING
+    payload["review_token_submit_attempted_at"] = now_utc.isoformat()
+    payload["review_token_submit_attempt_order_id"] = order_id
+    updated = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.id == row.id)
+        .filter(TradeRunLog.response_payload == original_payload)
+        .update(
+            {TradeRunLog.response_payload: _json_limited_buy_payload(payload)},
+            synchronize_session=False,
+        )
+    )
+    if updated != 1:
+        db.rollback()
+        raise RuntimeError("review_token_submit_attempt_record_failed")
+    db.commit()
+    token_payload.clear()
+    token_payload.update(review)
+
+
+def _mark_review_token_failed_after_submit_attempt(
+    db: Session,
+    *,
+    token_row: TradeRunLog,
+    token_payload: dict[str, Any],
+    now_utc: datetime,
+    response: dict[str, Any] | None,
+    reason: str,
+    error: str | None = None,
+) -> None:
+    row = db.get(TradeRunLog, token_row.id) or token_row
+    original_payload = row.response_payload
+    payload = _load_json_dict(original_payload)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        review = dict(token_payload)
+    review["status"] = REVIEW_TOKEN_STATUS_FAILED_AFTER_SUBMIT_ATTEMPT
+    review["failed_after_submit_attempt_at"] = now_utc.isoformat()
+    review["failure_reason"] = str(reason or "broker_submit_ambiguous")
+    if error:
+        review["failure_error"] = error
+    if isinstance(response, dict):
+        review["order_id"] = _safe_int(
+            response.get("order_id") or response.get("order_log_id")
+        )
+        review["broker_order_id"] = response.get("broker_order_id")
+        review["kis_odno"] = response.get("kis_odno")
+    payload["review"] = review
+    payload["review_token_status"] = REVIEW_TOKEN_STATUS_FAILED_AFTER_SUBMIT_ATTEMPT
+    payload["review_token_failed_after_submit_attempt_at"] = now_utc.isoformat()
+    payload["review_token_failure_reason"] = str(reason or "broker_submit_ambiguous")
+    row.response_payload = _json_limited_buy_payload(payload)
+    db.commit()
+    token_payload.clear()
+    token_payload.update(review)
 
 
 def _mark_review_token_used(
@@ -1815,17 +2227,70 @@ def _mark_review_token_used(
     now_utc: datetime,
     order_id: int | None,
 ) -> None:
-    payload = _load_json_dict(token_row.response_payload)
+    row = db.get(TradeRunLog, token_row.id) or token_row
+    db.refresh(row)
+    payload = _load_json_dict(row.response_payload)
     review = payload.get("review")
     if not isinstance(review, dict):
         review = token_payload
+    review["status"] = REVIEW_TOKEN_STATUS_COMPLETED
     review["used_at"] = now_utc.isoformat()
+    review["completed_at"] = now_utc.isoformat()
     review["order_id"] = order_id
     payload["review"] = review
+    payload["review_token_status"] = REVIEW_TOKEN_STATUS_COMPLETED
     payload["review_token_used_at"] = now_utc.isoformat()
+    payload["review_token_completed_at"] = now_utc.isoformat()
     payload["review_token_order_id"] = order_id
-    token_row.response_payload = _json_limited_buy_payload(payload)
+    row.response_payload = _json_limited_buy_payload(payload)
     db.commit()
+    token_payload.clear()
+    token_payload.update(review)
+
+
+def _submit_attempt_reconciliation_response(
+    response: dict[str, Any],
+    *,
+    token_payload: dict[str, Any],
+    now_utc: datetime,
+) -> dict[str, Any]:
+    reasons = _dedupe(
+        [
+            "review_token_submit_attempted",
+            "order_sync_reconciliation_required",
+            *_string_list(response.get("block_reasons")),
+            *_string_list(response.get("primary_block_reason")),
+            *_string_list(response.get("reason")),
+        ]
+    )
+    response.update(
+        {
+            "result": "blocked",
+            "action": "blocked_buy",
+            "reason": "review_token_submit_attempted",
+            "primary_block_reason": "review_token_submit_attempted",
+            "block_reasons": reasons,
+            "failed_checks": reasons,
+            "real_order_submitted": False,
+            "broker_submit_called": True,
+            "manual_submit_called": True,
+            "limited_auto_buy_real_order_submitted": False,
+            "limited_auto_buy_broker_submit_called": True,
+            "limited_auto_buy_manual_submit_called": True,
+            "review_token_used": False,
+            "review_token_status": REVIEW_TOKEN_STATUS_FAILED_AFTER_SUBMIT_ATTEMPT,
+            "review_token_reusable": False,
+            "review_token_submit_attempted_at": token_payload.get(
+                "submit_attempted_at"
+            ),
+            "execution_request_id": token_payload.get("execution_request_id"),
+            "idempotency_key": _review_token_idempotency_key(token_payload),
+            "order_reconciliation_required": True,
+            "next_required_action": "sync_or_reconcile_broker_order",
+            "created_at": response.get("created_at") or now_utc.isoformat(),
+        }
+    )
+    return response
 
 
 def _review_candidate_mismatch_reasons(
@@ -2784,6 +3249,19 @@ def _sanitize_limited_buy_payload(value: Any) -> Any:
         "review_token_used",
         "review_token_used_at",
         "review_token_order_id",
+        "review_token_status",
+        "review_token_executing_at",
+        "review_token_execution_request_id",
+        "review_token_submit_attempted_at",
+        "review_token_submit_attempt_order_id",
+        "review_token_completed_at",
+        "review_token_failed_after_submit_attempt_at",
+        "review_token_failure_reason",
+        "review_token_last_execution_failed_at",
+        "review_token_last_execution_failure_reason",
+        "review_token_reusable",
+        "execution_request_id",
+        "idempotency_key",
     ):
         if key in value:
             sanitized[key] = value[key]
@@ -2795,6 +3273,7 @@ def _sanitize_limited_buy_payload(value: Any) -> Any:
             sanitized_review = {}
         for key in (
             "review_token",
+            "status",
             "symbol",
             "qty",
             "reference_price",
@@ -2805,8 +3284,22 @@ def _sanitize_limited_buy_payload(value: Any) -> Any:
             "gate_level",
             "created_at",
             "expires_at",
+            "executing_at",
+            "execution_request_id",
+            "submit_attempted_at",
+            "submit_attempt_order_id",
             "used_at",
+            "completed_at",
+            "failed_after_submit_attempt_at",
+            "failure_reason",
+            "failure_error",
             "order_id",
+            "broker_order_id",
+            "kis_odno",
+            "last_execution_failed_at",
+            "last_execution_failure_reason",
+            "last_executing_at",
+            "last_execution_request_id",
         ):
             if key in review:
                 sanitized_review[key] = review[key]

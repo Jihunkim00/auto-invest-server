@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.enums import InternalOrderStatus
-from app.db.database import get_db
+from app.db.database import Base, get_db
 from app.db.models import OrderLog, RuntimeSetting, SignalLog, TradeRunLog
 from app.main import app
 from app.services.kis_limited_auto_buy_service import (
@@ -66,6 +69,12 @@ class _FakeClient:
 
     def inquire_daily_order_executions(self, **kwargs):
         return {"rt_cd": "0", "output1": [], "output2": []}
+
+
+class _TimeoutAfterAcceptClient(_FakeClient):
+    def submit_domestic_cash_order(self, **kwargs):
+        self.submit_calls.append(kwargs)
+        raise TimeoutError("broker timed out after accepting order")
 
 
 class _FakeShadowService:
@@ -273,6 +282,8 @@ def test_preflight_good_candidate_returns_buy_ready_readiness_only(db_session):
     assert result["real_order_submitted"] is False
     assert result["broker_submit_called"] is False
     assert result["review_token"]
+    assert result["review_token_status"] == "issued"
+    assert result["review"]["status"] == "issued"
     assert result["review"]["qty"] == 1
     assert result["review"]["estimated_notional"] == pytest.approx(52_000)
     candidate = result["final_candidate"]
@@ -556,10 +567,19 @@ def test_reviewed_execute_success_submits_one_share_and_syncs(monkeypatch, db_se
         InternalOrderStatus.FILLED.value,
     }
     assert result["review_token_used"] is True
+    assert result["review_token_status"] == "completed"
+    assert result["review_token_reusable"] is False
+    assert result["execution_request_id"]
+    assert result["idempotency_key"] == result["execution_request_id"]
+    request_payload = json.loads(order.request_payload)
+    assert request_payload["source_metadata"]["execution_request_id"] == result["execution_request_id"]
+    assert request_payload["source_metadata"]["idempotency_id"] == result["execution_request_id"]
     runtime = db_session.query(RuntimeSetting).first()
     assert runtime.dry_run is True
     assert runtime.kill_switch is True
     assert runtime.kis_limited_auto_buy_enabled is False
+    assert runtime.kis_limited_auto_buy_max_notional_krw == pytest.approx(50_000)
+    assert runtime.kis_limited_auto_buy_max_notional_pct == pytest.approx(0.80)
 
 
 def test_reviewed_execute_blocks_expired_token(db_session):
@@ -627,6 +647,138 @@ def test_reviewed_execute_blocks_token_reuse(monkeypatch, db_session):
     assert second["result"] == "blocked"
     assert second["primary_block_reason"] == "review_token_already_used"
     assert len(client.submit_calls) == 1
+
+
+def test_reviewed_execute_concurrent_same_token_submits_once(monkeypatch, tmp_path):
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'review-token-concurrency.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+    Base.metadata.create_all(bind=engine)
+    client = _FakeClient()
+    service = _service(client=client)
+    validation_started = threading.Event()
+    release_validation = threading.Event()
+    validation_lock = threading.Lock()
+    validation_calls = 0
+    results = {}
+
+    def fake_validate(self, request, **kwargs):
+        nonlocal validation_calls
+        with validation_lock:
+            validation_calls += 1
+            is_first = validation_calls == 1
+        if is_first:
+            validation_started.set()
+            assert release_validation.wait(timeout=5)
+        return _FakeValidationResult(qty=request.qty)
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+
+    try:
+        setup = SessionLocal()
+        _enable_runtime(
+            setup,
+            dry_run=False,
+            kis_live_auto_buy_enabled=True,
+            kis_limited_auto_buy_enabled=True,
+            kis_limited_auto_buy_max_notional_pct=0.94,
+        )
+        preflight = service.preflight_once(setup)
+        setup.close()
+
+        def execute(name):
+            session = SessionLocal()
+            try:
+                results[name] = service.execute_reviewed_once(
+                    session,
+                    review_token=preflight["review_token"],
+                    confirm_live=True,
+                    confirmation="TEST3 LIVE BUY 1 SHARE",
+                )
+            finally:
+                session.close()
+
+        first = threading.Thread(target=execute, args=("first",))
+        second = threading.Thread(target=execute, args=("second",))
+        first.start()
+        assert validation_started.wait(timeout=5)
+        second.start()
+        second.join(timeout=5)
+        release_validation.set()
+        first.join(timeout=5)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert len(client.submit_calls) == 1
+        submitted = [item for item in results.values() if item["result"] == "submitted"]
+        blocked = [item for item in results.values() if item["result"] == "blocked"]
+        assert len(submitted) == 1
+        assert len(blocked) == 1
+        assert blocked[0]["primary_block_reason"] == "review_token_execution_in_progress"
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_reviewed_execute_ambiguous_broker_timeout_blocks_token_reuse(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    client = _TimeoutAfterAcceptClient()
+    service = _service(client=client)
+    preflight = service.preflight_once(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda self, request, **kwargs: _FakeValidationResult(qty=request.qty),
+    )
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+    submit_count_after_first = len(client.submit_calls)
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    retry = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    assert submit_count_after_first == 1
+    assert len(client.submit_calls) == 1
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "review_token_submit_attempted"
+    assert result["broker_submit_called"] is True
+    assert result["order_reconciliation_required"] is True
+    assert result["review_token_status"] == "failed_after_submit_attempt"
+    assert result["review_token_reusable"] is False
+    assert retry["result"] == "blocked"
+    assert retry["primary_block_reason"] == "review_token_submit_attempted"
+    assert retry["broker_submit_called"] is False
+    assert retry["order_reconciliation_required"] is True
+    assert retry["review_token_status"] == "failed_after_submit_attempt"
 
 
 @pytest.mark.parametrize(
@@ -788,6 +940,8 @@ def test_reviewed_execute_restores_safe_settings_on_exception(monkeypatch, db_se
     assert runtime.dry_run is True
     assert runtime.kill_switch is True
     assert runtime.kis_live_auto_buy_enabled is False
+    assert runtime.kis_limited_auto_buy_max_notional_krw == pytest.approx(50_000)
+    assert runtime.kis_limited_auto_buy_max_notional_pct == pytest.approx(0.80)
 
 
 def test_kill_switch_blocks_without_candidate_source(db_session):
