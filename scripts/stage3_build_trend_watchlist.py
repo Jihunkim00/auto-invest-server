@@ -48,6 +48,7 @@ class TrendBuildConfig:
     source_watchlist: Path
     target_watchlist: Path
     report_dir: Path
+    report_path: Path | None
     max_notional_krw: float
     max_notional_pct: float
     max_candidates: int
@@ -263,9 +264,30 @@ def trend_strength(
     )
 
 
+def sanitize_json_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: sanitize_json_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [sanitize_json_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [sanitize_json_value(item) for item in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
+        json.dumps(
+            sanitize_json_value(payload),
+            allow_nan=False,
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -483,8 +505,11 @@ def build_trend_watchlist(config: TrendBuildConfig) -> int:
     )
 
     selected = passed[: config.max_candidates]
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    report_path = config.report_dir / f"trend_watchlist_report_{timestamp}.json"
+    if config.report_path is not None:
+        report_path = config.report_path
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = config.report_dir / f"trend_watchlist_report_{timestamp}.json"
     top_candidate = selected[0] if selected else None
 
     report = {
@@ -600,6 +625,12 @@ def parse_args(argv: list[str] | None = None) -> TrendBuildConfig:
         default=ROOT / "stage3_logs",
     )
     parser.add_argument(
+        "--report-path",
+        type=Path,
+        default=None,
+        help="Write the technical report to this exact path.",
+    )
+    parser.add_argument(
         "--max-notional-krw",
         type=positive_float,
         default=env_float("STAGE3_MAX_NOTIONAL_KRW", DEFAULT_MAX_NOTIONAL_KRW),
@@ -636,6 +667,7 @@ def parse_args(argv: list[str] | None = None) -> TrendBuildConfig:
         source_watchlist=args.source_watchlist,
         target_watchlist=args.target_watchlist,
         report_dir=args.report_dir,
+        report_path=args.report_path,
         max_notional_krw=float(args.max_notional_krw),
         max_notional_pct=float(args.max_notional_pct),
         max_candidates=int(args.max_candidates),

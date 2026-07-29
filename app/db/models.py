@@ -246,6 +246,7 @@ class RuntimeSetting(Base):
     kis_limited_auto_buy_requires_shadow_review = Column(Boolean, nullable=False, default=True)
     kis_limited_auto_buy_max_orders_per_day = Column(Integer, nullable=False, default=1)
     kis_limited_auto_buy_max_notional_pct = Column(Float, nullable=False, default=0.03)
+    kis_limited_auto_buy_max_notional_krw = Column(Float, nullable=False, default=55000)
     kis_limited_auto_buy_min_cash_buffer_krw = Column(Float, nullable=False, default=0)
     kis_limited_auto_buy_requires_existing_sell_guards = Column(Boolean, nullable=False, default=True)
     kis_limited_auto_buy_min_final_score = Column(Float, nullable=False, default=75)

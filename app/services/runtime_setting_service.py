@@ -112,6 +112,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review": True,
             "kis_limited_auto_buy_max_orders_per_day": 1,
             "kis_limited_auto_buy_max_notional_pct": 0.03,
+            "kis_limited_auto_buy_max_notional_krw": 55000.0,
             "kis_limited_auto_buy_min_cash_buffer_krw": 0.0,
             "kis_limited_auto_buy_requires_existing_sell_guards": True,
             "kis_limited_auto_buy_min_final_score": 75.0,
@@ -419,6 +420,9 @@ class RuntimeSettingService:
             ),
             "kis_limited_auto_buy_max_notional_pct": float(
                 row.kis_limited_auto_buy_max_notional_pct
+            ),
+            "kis_limited_auto_buy_max_notional_krw": float(
+                row.kis_limited_auto_buy_max_notional_krw
             ),
             "kis_limited_auto_buy_min_cash_buffer_krw": float(
                 row.kis_limited_auto_buy_min_cash_buffer_krw
@@ -1896,6 +1900,22 @@ class RuntimeSettingService:
                 affects=["KIS/KR live order notional cap"],
             ),
             _catalog_item(
+                "kis_limited_auto_buy_max_notional_krw",
+                "KIS limited buy max KRW",
+                "Absolute KRW cap for reviewed one-share KIS limited auto-buy.",
+                "risk_limits",
+                "float",
+                settings["kis_limited_auto_buy_max_notional_krw"],
+                defaults["kis_limited_auto_buy_max_notional_krw"],
+                minimum=0.0,
+                unit="KRW",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS reviewed limited auto-buy"],
+            ),
+            _catalog_item(
                 "daily_max_loss_pct",
                 "Daily max loss %",
                 "Displayed for UI consistency; no runtime executor currently consumes it.",
@@ -2205,6 +2225,7 @@ class RuntimeSettingService:
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+                    "kis_limited_auto_buy_max_notional_krw": 55000.0,
                     "kis_limited_auto_buy_max_positions": 3,
                 }
             )
@@ -2346,6 +2367,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review",
             "kis_limited_auto_buy_max_orders_per_day",
             "kis_limited_auto_buy_max_notional_pct",
+            "kis_limited_auto_buy_max_notional_krw",
             "kis_limited_auto_buy_min_cash_buffer_krw",
             "kis_limited_auto_buy_requires_existing_sell_guards",
             "kis_limited_auto_buy_min_final_score",

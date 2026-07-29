@@ -38,14 +38,32 @@ from app.services.runtime_setting_service import RuntimeSettingService
 STATUS_MODE = "kis_limited_auto_buy_status"
 PREFLIGHT_MODE = "kis_limited_auto_buy_preflight"
 RUN_MODE = "kis_limited_auto_buy_run"
+REVIEWED_EXECUTION_MODE = "kis_limited_auto_buy_execute_reviewed"
 MODE = RUN_MODE
 SOURCE = "kis_limited_auto_buy"
 SOURCE_TYPE = "buy_readiness_only"
 GUARDED_SOURCE_TYPE = "guarded_limited_auto_buy"
+REVIEWED_SOURCE_TYPE = "operator_reviewed_limited_auto_buy"
 STATUS_TRIGGER_SOURCE = "limited_auto_buy_status"
 PREFLIGHT_TRIGGER_SOURCE = "limited_auto_buy_preflight"
 RUN_TRIGGER_SOURCE = "limited_auto_buy_run_once"
+REVIEWED_TRIGGER_SOURCE = "limited_auto_buy_execute_reviewed_once"
+REVIEW_CONFIRMATION_PHRASE = "TEST3 LIVE BUY 1 SHARE"
+REVIEW_TOKEN_TTL = timedelta(minutes=5)
+DEFAULT_MAX_NOTIONAL_KRW = 55_000.0
 KR_TZ = ZoneInfo("Asia/Seoul")
+
+SAFE_RESTORE_SETTINGS = {
+    "dry_run": True,
+    "kill_switch": True,
+    "scheduler_enabled": False,
+    "kis_live_auto_buy_enabled": False,
+    "kis_limited_auto_buy_enabled": False,
+    "kis_scheduler_enabled": False,
+    "kis_scheduler_allow_real_orders": False,
+    "kis_scheduler_buy_enabled": False,
+    "kis_limited_auto_buy_max_notional_pct": 0.80,
+}
 
 LIVE_BUY_STATUSES = {
     InternalOrderStatus.REQUESTED.value,
@@ -168,7 +186,7 @@ class KisLimitedAutoBuyService:
             daily_limit=daily_limit,
             block_reasons=block_reasons,
         )
-        return sanitize_kis_payload(payload)
+        return _sanitize_limited_buy_payload(payload)
 
     def preflight_once(
         self,
@@ -204,6 +222,198 @@ class KisLimitedAutoBuyService:
             record=True,
             scheduler_context=scheduler_context,
         )
+
+    def execute_reviewed_once(
+        self,
+        db: Session,
+        *,
+        review_token: str,
+        confirm_live: bool,
+        confirmation: str,
+        scheduler_context: bool = False,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        now_utc = _utc_now(now)
+        try:
+            if scheduler_context:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason="scheduler_context_blocked",
+                )
+            if confirm_live is not True:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason="confirm_live_required",
+                )
+            if confirmation != REVIEW_CONFIRMATION_PHRASE:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason="confirmation_mismatch",
+                )
+
+            token_row, token_payload, token_error = _find_review_token(
+                db,
+                review_token=review_token,
+                now_utc=now_utc,
+            )
+            if token_error:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason=token_error,
+                )
+            if token_row is None or token_payload is None:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason="review_token_invalid",
+                )
+
+            context = self._context(
+                db,
+                now=now_utc,
+                gate_level=int(token_payload.get("gate_level") or DEFAULT_GATE_LEVEL),
+                scheduler_context=False,
+            )
+            account_state = self._fetch_account_state(db)
+            daily_limit = self._daily_limit_state(
+                db,
+                context=context,
+                symbol=str(token_payload.get("symbol") or ""),
+            )
+            block_reasons = _readiness_preliminary_blocks(
+                context,
+                account_state=account_state,
+                daily_limit=daily_limit,
+            )
+            block_reasons.extend(_execution_block_reasons(context))
+
+            shadow_result = self._shadow_decision(
+                db,
+                gate_level=context.gate_level,
+                now_utc=context.now_utc,
+            )
+            candidate_raw = _select_shadow_candidate(shadow_result)
+            candidate = (
+                self._evaluate_candidate(
+                    db,
+                    raw=candidate_raw,
+                    context=context,
+                    account_state=account_state,
+                    daily_limit=daily_limit,
+                )
+                if candidate_raw
+                else None
+            )
+            if candidate is None:
+                block_reasons.append("no_candidate")
+            else:
+                daily_limit = self._daily_limit_state(
+                    db,
+                    context=context,
+                    symbol=candidate.symbol,
+                )
+                candidate = self._evaluate_candidate(
+                    db,
+                    raw=candidate_raw or {},
+                    context=context,
+                    account_state=account_state,
+                    daily_limit=daily_limit,
+                )
+                block_reasons.extend(
+                    _review_candidate_mismatch_reasons(
+                        token_payload,
+                        candidate=candidate,
+                    )
+                )
+
+                current_price, price_payload, price_error = self._current_market_price(
+                    candidate.symbol
+                )
+                if price_error:
+                    block_reasons.append(price_error)
+                else:
+                    block_reasons.extend(
+                        _review_current_price_reasons(
+                            token_payload,
+                            candidate=candidate,
+                            current_price=current_price,
+                            account_state=account_state,
+                            context=context,
+                        )
+                    )
+
+                block_reasons.extend(candidate.block_reasons)
+
+            block_reasons = _dedupe(_normalize_block_reasons(block_reasons))
+            if block_reasons:
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason=block_reasons[0],
+                    block_reasons=block_reasons,
+                    token_payload=token_payload,
+                    candidate=candidate,
+                    account_state=account_state,
+                )
+
+            assert candidate is not None
+            validation_status, validation_summary = self._validate_candidate(
+                db,
+                context=context,
+                candidate=candidate,
+                account_state=account_state,
+                daily_limit=daily_limit,
+            )
+            if validation_status != "passed":
+                return self._blocked_reviewed_execute(
+                    db,
+                    now_utc=now_utc,
+                    reason="validation_failed",
+                    block_reasons=["validation_failed"],
+                    token_payload=token_payload,
+                    candidate=candidate,
+                    account_state=account_state,
+                    validation_summary=validation_summary,
+                )
+
+            response = self._submit_reviewed_candidate(
+                db,
+                context=context,
+                candidate=candidate,
+                account_state=account_state,
+                daily_limit=daily_limit,
+                token_payload=token_payload,
+                validation_summary=validation_summary,
+            )
+            if response.get("real_order_submitted") is True:
+                _mark_review_token_used(
+                    db,
+                    token_row=token_row,
+                    token_payload=token_payload,
+                    now_utc=now_utc,
+                    order_id=_safe_int(
+                        response.get("order_id") or response.get("order_log_id")
+                    ),
+                )
+                response = self._sync_submitted_order(db, response=response)
+            return _sanitize_limited_buy_payload(response)
+        except Exception as exc:
+            return self._blocked_reviewed_execute(
+                db,
+                now_utc=now_utc,
+                reason="reviewed_execute_failed",
+                block_reasons=["reviewed_execute_failed"],
+                error=_safe_error(exc),
+            )
+        finally:
+            try:
+                self.runtime_settings.update_settings(db, SAFE_RESTORE_SETTINGS)
+            except Exception:
+                pass
 
     def _readiness_once(
         self,
@@ -293,77 +503,12 @@ class KisLimitedAutoBuyService:
             result = "ready"
             reason = "buy_readiness_only"
             primary_block_reason = execution_blocks[0] if execution_blocks else None
-        elif mode == RUN_MODE and readiness_ready and not execution_blocks:
-            validation_called = True
-            validation_status, validation_summary = self._validate_candidate(
-                db,
-                context=context,
-                candidate=candidate,
-                account_state=account_state,
-                daily_limit=daily_limit,
-            )
-            if validation_status != "passed":
-                action = "blocked_buy"
-                result = "blocked"
-                reason = "validation_failed"
-                primary_block_reason = "validation_failed"
-                block_reasons = _dedupe(["validation_failed"] + block_reasons)
-            else:
-                (
-                    manual_submit_called,
-                    manual_submit_response,
-                ) = self._submit_validated_candidate(
-                    db,
-                    context=context,
-                    candidate=candidate,
-                    account_state=account_state,
-                    daily_limit=daily_limit,
-                    validation_summary=validation_summary,
-                )
-                real_order_submitted = bool(
-                    manual_submit_response
-                    and manual_submit_response.get("real_order_submitted") is True
-                )
-                broker_submit_called = bool(
-                    manual_submit_response
-                    and manual_submit_response.get("broker_submit_called") is True
-                )
-                if real_order_submitted:
-                    action = BUY
-                    result = "submitted"
-                    reason = "guarded_limited_auto_buy_submitted"
-                    primary_block_reason = None
-                    order_id = (
-                        manual_submit_response.get("order_id")
-                        or manual_submit_response.get("order_log_id")
-                    )
-                    broker_order_id = manual_submit_response.get("broker_order_id")
-                    kis_odno = manual_submit_response.get("kis_odno")
-                    block_reasons = []
-                else:
-                    action = "blocked_buy"
-                    result = "blocked"
-                    reason = "manual_submit_failed"
-                    primary_block_reason = _nullable_string(
-                        manual_submit_response.get("primary_block_reason")
-                        if manual_submit_response
-                        else None
-                    ) or "manual_submit_failed"
-                    block_reasons = _dedupe(
-                        _string_list(
-                            manual_submit_response.get("block_reasons")
-                            if manual_submit_response
-                            else None
-                        )
-                        + [primary_block_reason]
-                        + block_reasons
-                    )
-                    order_id = (
-                        manual_submit_response.get("order_id")
-                        or manual_submit_response.get("order_log_id")
-                        if manual_submit_response
-                        else None
-                    )
+        elif mode == RUN_MODE and readiness_ready:
+            action = "blocked_buy"
+            result = "blocked"
+            reason = execution_blocks[0] if execution_blocks else "operator_review_token_required"
+            primary_block_reason = reason
+            block_reasons = _dedupe([reason] + block_reasons)
         else:
             action = "blocked_buy" if mode == RUN_MODE else HOLD
             result = "blocked"
@@ -396,6 +541,8 @@ class KisLimitedAutoBuyService:
             broker_order_id=broker_order_id,
             kis_odno=kis_odno,
         )
+        if mode == PREFLIGHT_MODE and readiness_ready and candidate is not None:
+            payload.update(_new_review_token_payload(context, candidate))
         if record:
             signal = self._record_signal(
                 db,
@@ -414,7 +561,7 @@ class KisLimitedAutoBuyService:
             )
             payload["signal_id"] = signal.id
             payload["run"] = _serialize_run(run)
-        return sanitize_kis_payload(payload)
+        return _sanitize_limited_buy_payload(payload)
 
     def _context(
         self,
@@ -609,10 +756,12 @@ class KisLimitedAutoBuyService:
             context.runtime.get("kis_limited_auto_buy_max_notional_pct", 0.03)
             or 0.03
         )
+        max_notional_krw = _max_notional_krw(context.runtime)
         estimated_max_notional = _estimated_max_notional(
             cash=cash,
             equity=equity,
             pct=max_notional_pct,
+            max_notional_krw=max_notional_krw,
             cash_buffer=cash_buffer,
         )
         current_price = _score(raw, "current_price", "price")
@@ -891,6 +1040,237 @@ class KisLimitedAutoBuyService:
             }
         return True, sanitize_kis_payload(response)
 
+    def _submit_reviewed_candidate(
+        self,
+        db: Session,
+        *,
+        context: _Context,
+        candidate: _BuyCandidate,
+        account_state: dict[str, Any],
+        daily_limit: dict[str, Any],
+        token_payload: dict[str, Any],
+        validation_summary: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        metadata = _source_metadata(
+            context=context,
+            mode=REVIEWED_EXECUTION_MODE,
+            trigger_source=REVIEWED_TRIGGER_SOURCE,
+            candidate=candidate,
+            block_reasons=[],
+            account_state=account_state,
+            daily_limit=daily_limit,
+            source_type=REVIEWED_SOURCE_TYPE,
+            validation_summary=validation_summary,
+            real_order_submitted=False,
+            broker_submit_called=False,
+            manual_submit_called=True,
+            validation_called=True,
+        )
+        metadata.update(
+            {
+                "review_token": token_payload.get("review_token"),
+                "review_token_created_at": token_payload.get("created_at"),
+                "review_token_expires_at": token_payload.get("expires_at"),
+                "operator_confirmation_phrase": REVIEW_CONFIRMATION_PHRASE,
+                "source_endpoint": "/kis/limited-auto-buy/execute-reviewed-once",
+            }
+        )
+        submit_metadata = dict(metadata)
+        for key in (
+            "real_order_submitted",
+            "broker_submit_called",
+            "manual_submit_called",
+        ):
+            submit_metadata.pop(key, None)
+        confirmation_phrase = str(
+            getattr(
+                context.settings,
+                "kis_confirmation_phrase",
+                KIS_MANUAL_CONFIRMATION_PHRASE,
+            )
+            or KIS_MANUAL_CONFIRMATION_PHRASE
+        )
+        request = KisManualOrderSubmitRequest(
+            market=MARKET,
+            symbol=candidate.symbol,
+            side=BUY,
+            qty=1,
+            order_type="market",
+            dry_run=False,
+            confirm_live=True,
+            confirmation=confirmation_phrase,
+            reason="operator reviewed limited auto buy",
+            source_context="operator_reviewed_limited_auto_buy",
+            source_metadata=submit_metadata,
+        )
+        status_code = None
+        try:
+            status_code, response = KisManualOrderService(
+                self.client,
+                session_service=self.session_service,
+                runtime_settings=self.runtime_settings,
+            ).submit_manual(db, request, now=context.now_utc)
+        except Exception as exc:
+            response = {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "mode": REVIEWED_EXECUTION_MODE,
+                "source": SOURCE,
+                "source_type": REVIEWED_SOURCE_TYPE,
+                "result": "blocked",
+                "action": "blocked_buy",
+                "reason": "manual_submit_failed",
+                "primary_block_reason": "manual_submit_failed",
+                "block_reasons": ["manual_submit_failed"],
+                "error": _safe_error(exc),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": True,
+                "validation_called": True,
+            }
+        response = _sanitize_limited_buy_payload(response)
+        submitted = bool(
+            status_code == 200
+            and (response.get("broker_order_id") or response.get("kis_odno"))
+        )
+        response.update(
+            {
+                "mode": REVIEWED_EXECUTION_MODE,
+                "source": SOURCE,
+                "source_type": REVIEWED_SOURCE_TYPE,
+                "trigger_source": REVIEWED_TRIGGER_SOURCE,
+                "real_order_submitted": submitted,
+                "broker_submit_called": submitted,
+                "manual_submit_called": True,
+                "limited_auto_buy_real_order_submitted": submitted,
+                "limited_auto_buy_broker_submit_called": submitted,
+                "limited_auto_buy_manual_submit_called": True,
+                "review_token_used": submitted,
+                "validation_called": True,
+                "qty": _safe_int(response.get("qty")) or 1,
+            }
+        )
+        if submitted:
+            response["result"] = "submitted"
+            response["action"] = BUY
+            response["reason"] = "operator_reviewed_limited_auto_buy_submitted"
+            response["primary_block_reason"] = None
+        else:
+            response.setdefault("result", "blocked")
+            response.setdefault("action", "blocked_buy")
+            response.setdefault("reason", "manual_submit_failed")
+            response.setdefault("primary_block_reason", response.get("reason"))
+        return _sanitize_limited_buy_payload(response)
+
+    def _sync_submitted_order(
+        self,
+        db: Session,
+        *,
+        response: dict[str, Any],
+    ) -> dict[str, Any]:
+        order_id = _safe_int(response.get("order_id") or response.get("order_log_id"))
+        if order_id is None:
+            response["order_sync_attempted"] = False
+            response["order_sync_error"] = "order_id_missing"
+            return response
+        response["order_sync_attempted"] = True
+        try:
+            order = KisOrderSyncService(self.client).sync_order(db, order_id)
+        except Exception as exc:
+            order = db.get(OrderLog, order_id)
+            response["order_sync_error"] = _safe_error(exc)
+        if order is not None:
+            if order.internal_status != InternalOrderStatus.FILLED.value:
+                if order.internal_status in {
+                    InternalOrderStatus.REQUESTED.value,
+                    InternalOrderStatus.SUBMITTED.value,
+                    InternalOrderStatus.ACCEPTED.value,
+                    InternalOrderStatus.UNKNOWN_STALE.value,
+                    InternalOrderStatus.SYNC_FAILED.value,
+                }:
+                    order.internal_status = InternalOrderStatus.PENDING.value
+                    order.broker_status = order.broker_status or "pending"
+                    order.broker_order_status = order.broker_order_status or "pending"
+                    db.commit()
+                    db.refresh(order)
+            response["order"] = serialize_kis_order(order)
+            response["internal_status"] = order.internal_status
+            response["broker_order_id"] = response.get("broker_order_id") or order.broker_order_id
+            response["kis_odno"] = response.get("kis_odno") or order.kis_odno
+        return _sanitize_limited_buy_payload(response)
+
+    def _current_market_price(
+        self,
+        symbol: str,
+    ) -> tuple[float | None, dict[str, Any], str | None]:
+        try:
+            payload = self.client.get_domestic_stock_price(symbol)
+        except Exception as exc:
+            return None, {}, f"current_price_unavailable:{exc.__class__.__name__}"
+        if not isinstance(payload, dict):
+            return None, {}, "current_price_unavailable"
+        price = _first_float(
+            payload,
+            "current_price",
+            "price",
+            "stck_prpr",
+            "last",
+        )
+        if price is None or price <= 0:
+            return None, sanitize_kis_payload(payload), "current_price_unavailable"
+        return price, sanitize_kis_payload(payload), None
+
+    def _blocked_reviewed_execute(
+        self,
+        db: Session,
+        *,
+        now_utc: datetime,
+        reason: str,
+        block_reasons: list[str] | None = None,
+        token_payload: dict[str, Any] | None = None,
+        candidate: _BuyCandidate | None = None,
+        account_state: dict[str, Any] | None = None,
+        validation_summary: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        reasons = _dedupe(block_reasons or [reason])
+        payload = {
+            "status": "ok",
+            "provider": PROVIDER,
+            "market": MARKET,
+            "mode": REVIEWED_EXECUTION_MODE,
+            "source": SOURCE,
+            "source_type": REVIEWED_SOURCE_TYPE,
+            "trigger_source": REVIEWED_TRIGGER_SOURCE,
+            "result": "blocked",
+            "action": "blocked_buy",
+            "reason": reason,
+            "primary_block_reason": reason,
+            "block_reasons": reasons,
+            "failed_checks": reasons,
+            "symbol": candidate.symbol if candidate else token_payload.get("symbol") if token_payload else None,
+            "qty": candidate.suggested_quantity if candidate else token_payload.get("qty") if token_payload else None,
+            "review_token_used": False,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+            "manual_submit_called": False,
+            "validation_called": validation_summary is not None,
+            "validation_summary": validation_summary,
+            "final_candidate": _candidate_payload(candidate) if candidate else None,
+            "account_state": (
+                _account_state_summary(account_state)
+                if account_state is not None
+                else None
+            ),
+            "created_at": now_utc.isoformat(),
+        }
+        if token_payload:
+            payload["review_token_created_at"] = token_payload.get("created_at")
+            payload["review_token_expires_at"] = token_payload.get("expires_at")
+        if error:
+            payload["error"] = error
+        return _sanitize_limited_buy_payload(payload)
+
     def _record_signal(
         self,
         db: Session,
@@ -974,7 +1354,7 @@ class KisLimitedAutoBuyService:
                     ),
                 }
             ),
-            response_payload=_json(payload),
+            response_payload=_json_limited_buy_payload(payload),
         )
         db.add(run)
         db.commit()
@@ -994,10 +1374,12 @@ def _status_payload(
     max_notional_pct = float(
         context.runtime.get("kis_limited_auto_buy_max_notional_pct", 0.03) or 0.03
     )
+    max_notional_krw = _max_notional_krw(context.runtime)
     estimated_max_notional = _estimated_max_notional(
         cash=cash,
         equity=equity,
         pct=max_notional_pct,
+        max_notional_krw=max_notional_krw,
         cash_buffer=float(
             context.runtime.get("kis_limited_auto_buy_min_cash_buffer_krw", 0) or 0
         ),
@@ -1043,6 +1425,7 @@ def _status_payload(
         "daily_buy_limit": daily_limit["daily_buy_limit"],
         "daily_buy_limit_remaining": daily_limit["daily_buy_limit_remaining"],
         "max_notional_pct": max_notional_pct,
+        "max_notional_krw": max_notional_krw,
         "estimated_max_notional": estimated_max_notional,
         "auto_order_ready": False,
         "real_order_submit_allowed": real_order_submit_allowed,
@@ -1110,9 +1493,7 @@ def _decision_payload(
     broker_order_id: Any,
     kis_odno: Any,
 ) -> dict[str, Any]:
-    real_order_submit_allowed = bool(
-        execution_enabled and candidate is not None and candidate.entry_ready
-    )
+    real_order_submit_allowed = bool(real_order_submitted)
     readiness_only = source_type == SOURCE_TYPE
     candidate_payload = (
         _candidate_payload(
@@ -1361,6 +1742,142 @@ def _candidate_payload(
     )
 
 
+def _new_review_token_payload(
+    context: _Context,
+    candidate: _BuyCandidate,
+) -> dict[str, Any]:
+    created_at = context.now_utc
+    expires_at = created_at + REVIEW_TOKEN_TTL
+    token = uuid.uuid4().hex
+    return {
+        "review_token": token,
+        "review_token_required": True,
+        "review_token_created_at": created_at.isoformat(),
+        "review_token_expires_at": expires_at.isoformat(),
+        "review_token_ttl_seconds": int(REVIEW_TOKEN_TTL.total_seconds()),
+        "review": {
+            "review_token": token,
+            "symbol": candidate.symbol,
+            "qty": candidate.suggested_quantity,
+            "reference_price": candidate.current_price,
+            "estimated_notional": candidate.estimated_notional,
+            "quant_buy_score": candidate.quant_buy_score,
+            "final_buy_score": candidate.final_buy_score,
+            "confidence": candidate.confidence,
+            "gate_level": context.gate_level,
+            "created_at": created_at.isoformat(),
+            "expires_at": expires_at.isoformat(),
+            "used_at": None,
+        },
+    }
+
+
+def _find_review_token(
+    db: Session,
+    *,
+    review_token: str,
+    now_utc: datetime,
+) -> tuple[TradeRunLog | None, dict[str, Any] | None, str | None]:
+    token = str(review_token or "").strip()
+    if not token:
+        return None, None, "review_token_missing"
+    rows = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.mode == PREFLIGHT_MODE)
+        .filter(TradeRunLog.trigger_source == PREFLIGHT_TRIGGER_SOURCE)
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .limit(200)
+        .all()
+    )
+    for row in rows:
+        payload = _load_json_dict(row.response_payload)
+        review = payload.get("review")
+        if not isinstance(review, dict):
+            continue
+        if str(review.get("review_token") or "") != token:
+            continue
+        if review.get("used_at"):
+            return row, review, "review_token_already_used"
+        expires_at = _parse_datetime(review.get("expires_at"))
+        if expires_at is None:
+            return row, review, "review_token_invalid"
+        if now_utc > expires_at:
+            return row, review, "review_token_expired"
+        return row, review, None
+    return None, None, "review_token_invalid"
+
+
+def _mark_review_token_used(
+    db: Session,
+    *,
+    token_row: TradeRunLog,
+    token_payload: dict[str, Any],
+    now_utc: datetime,
+    order_id: int | None,
+) -> None:
+    payload = _load_json_dict(token_row.response_payload)
+    review = payload.get("review")
+    if not isinstance(review, dict):
+        review = token_payload
+    review["used_at"] = now_utc.isoformat()
+    review["order_id"] = order_id
+    payload["review"] = review
+    payload["review_token_used_at"] = now_utc.isoformat()
+    payload["review_token_order_id"] = order_id
+    token_row.response_payload = _json_limited_buy_payload(payload)
+    db.commit()
+
+
+def _review_candidate_mismatch_reasons(
+    token_payload: dict[str, Any],
+    *,
+    candidate: _BuyCandidate,
+) -> list[str]:
+    reasons: list[str] = []
+    if str(token_payload.get("symbol") or "") != candidate.symbol:
+        reasons.append("review_token_symbol_mismatch")
+    if int(token_payload.get("qty") or 0) != candidate.suggested_quantity:
+        reasons.append("review_token_qty_mismatch")
+    if candidate.suggested_quantity != 1:
+        reasons.append("quantity_must_be_one")
+    return reasons
+
+
+def _review_current_price_reasons(
+    token_payload: dict[str, Any],
+    *,
+    candidate: _BuyCandidate,
+    current_price: float | None,
+    account_state: dict[str, Any],
+    context: _Context,
+) -> list[str]:
+    reasons: list[str] = []
+    reference_price = _safe_float_or_none(token_payload.get("reference_price"))
+    qty = int(token_payload.get("qty") or 0)
+    if current_price is None or current_price <= 0:
+        return ["current_price_unavailable"]
+    if reference_price is None or round(current_price, 2) != round(reference_price, 2):
+        reasons.append("review_token_price_mismatch")
+    if qty != 1:
+        reasons.append("quantity_must_be_one")
+    estimated_notional = round(float(current_price) * float(qty), 2)
+    max_notional_krw = _max_notional_krw(context.runtime)
+    equity = _account_equity(account_state)
+    cash = _account_cash(account_state)
+    if max_notional_krw is None or estimated_notional > max_notional_krw:
+        reasons.append("max_notional_krw_exceeded")
+    if equity is None or estimated_notional > float(equity) * 0.94:
+        reasons.append("max_notional_pct_exceeded")
+    if cash is None or estimated_notional > float(cash):
+        reasons.append("insufficient_cash")
+    if candidate.estimated_notional is None or round(
+        float(candidate.estimated_notional),
+        2,
+    ) != estimated_notional:
+        reasons.append("estimated_notional_changed")
+    return reasons
+
+
 def _source_metadata(
     *,
     context: _Context,
@@ -1404,6 +1921,7 @@ def _source_metadata(
                     or 0.03
                 )
             ),
+            "max_notional_krw": _max_notional_krw(context.runtime),
             "final_buy_score": candidate.final_buy_score if candidate else None,
             "final_sell_score": candidate.final_sell_score if candidate else None,
             "required_buy_score": candidate.required_buy_score if candidate else None,
@@ -1477,6 +1995,7 @@ def _safety_payload(
             context.runtime.get("kis_limited_auto_buy_max_notional_pct", 0.03)
             or 0.03
         ),
+        "max_notional_krw": _max_notional_krw(context.runtime),
         "min_cash_buffer_krw": float(
             context.runtime.get("kis_limited_auto_buy_min_cash_buffer_krw", 0) or 0
         ),
@@ -1569,8 +2088,24 @@ def _readiness_preliminary_blocks(
         and not context.sell_guards_ready
     ):
         reasons.append("existing_sell_guards_not_ready")
+    take_profit_enabled = bool(
+        runtime.get(
+            "kis_limited_auto_take_profit_enabled",
+            runtime.get("kis_limited_auto_sell_take_profit_enabled", False),
+        )
+    )
+    if take_profit_enabled or bool(runtime.get("take_profit_enabled", False)):
+        reasons.append("take_profit_must_be_disabled")
     if bool(account_state) and account_state.get("fetch_success") is False:
         reasons.append("account_state_unavailable")
+    max_positions = max(
+        0,
+        int(runtime.get("kis_limited_auto_buy_max_positions", 1) or 0),
+    )
+    if max_positions <= 0:
+        reasons.append("max_positions_invalid")
+    elif len(_dict_list(account_state.get("positions"))) >= max_positions:
+        reasons.append("max_positions_reached")
     if int(daily_limit.get("daily_buy_limit_remaining") or 0) <= 0:
         reasons.append("daily_auto_buy_limit_reached")
     return _dedupe(reasons)
@@ -1676,10 +2211,16 @@ def _candidate_block_reasons(
     )
     if confidence is None or confidence < min_confidence:
         reasons.append("confidence_threshold_not_met")
+    quant_buy_score = _score(raw, "quant_buy_score", "quant_score")
+    if quant_buy_score is None or quant_buy_score < 75:
+        reasons.append("quant_score_threshold_not_met")
+    indicator_status = str(raw.get("indicator_status") or "").strip().lower()
+    if indicator_status != "ok":
+        reasons.append("indicator_status_not_ok")
     if current_price is None or current_price <= 0:
         reasons.append("current_price_unavailable")
-    if suggested_quantity <= 0:
-        reasons.append("invalid_quantity")
+    if suggested_quantity != 1:
+        reasons.append("quantity_must_be_one")
     if estimated_notional is None or estimated_notional <= 0:
         reasons.append("insufficient_cash")
     if not cash_sufficient:
@@ -1687,6 +2228,13 @@ def _candidate_block_reasons(
     if estimated_max_notional is not None and estimated_notional is not None:
         if estimated_notional > estimated_max_notional and cash_sufficient:
             reasons.append("max_notional_exceeded")
+    max_notional_krw = _max_notional_krw(context.runtime)
+    if (
+        max_notional_krw is not None
+        and estimated_notional is not None
+        and estimated_notional > max_notional_krw
+    ):
+        reasons.append("max_notional_krw_exceeded")
     if duplicate_position:
         reasons.append("duplicate_position")
     if duplicate_open_order:
@@ -1812,14 +2360,26 @@ def _existing_sell_guards_ready(runtime: dict[str, Any]) -> bool:
     return limited_sell and (stop_loss or take_profit or take_profit_readiness)
 
 
+def _max_notional_krw(runtime: dict[str, Any]) -> float | None:
+    value = _safe_float_or_none(
+        runtime.get("kis_limited_auto_buy_max_notional_krw")
+    )
+    if value is None or value <= 0:
+        return DEFAULT_MAX_NOTIONAL_KRW
+    return value
+
+
 def _estimated_max_notional(
     *,
     cash: float | None,
     equity: float | None,
     pct: float,
+    max_notional_krw: float | None,
     cash_buffer: float,
 ) -> float | None:
     values: list[float] = []
+    if max_notional_krw is not None and max_notional_krw > 0:
+        values.append(float(max_notional_krw))
     if equity is not None and equity > 0:
         values.append(float(equity) * float(pct))
     if cash is not None and cash > 0:
@@ -1956,6 +2516,7 @@ def _runtime_snapshot(context: _Context) -> dict[str, Any]:
         "kis_limited_auto_buy_max_notional_pct": float(
             runtime.get("kis_limited_auto_buy_max_notional_pct", 0.03) or 0.03
         ),
+        "kis_limited_auto_buy_max_notional_krw": _max_notional_krw(runtime),
         "kis_limited_auto_buy_min_cash_buffer_krw": float(
             runtime.get("kis_limited_auto_buy_min_cash_buffer_krw", 0) or 0
         ),
@@ -2203,6 +2764,77 @@ def _naive_utc(value: datetime) -> datetime:
 
 def _json(value: Any) -> str:
     return json.dumps(sanitize_kis_payload(value), ensure_ascii=False, default=str)
+
+
+def _json_limited_buy_payload(value: Any) -> str:
+    return json.dumps(_sanitize_limited_buy_payload(value), ensure_ascii=False, default=str)
+
+
+def _sanitize_limited_buy_payload(value: Any) -> Any:
+    sanitized = sanitize_kis_payload(value)
+    if not isinstance(value, dict) or not isinstance(sanitized, dict):
+        return sanitized
+
+    for key in (
+        "review_token",
+        "review_token_required",
+        "review_token_created_at",
+        "review_token_expires_at",
+        "review_token_ttl_seconds",
+        "review_token_used",
+        "review_token_used_at",
+        "review_token_order_id",
+    ):
+        if key in value:
+            sanitized[key] = value[key]
+
+    review = value.get("review")
+    if isinstance(review, dict):
+        sanitized_review = sanitized.get("review")
+        if not isinstance(sanitized_review, dict):
+            sanitized_review = {}
+        for key in (
+            "review_token",
+            "symbol",
+            "qty",
+            "reference_price",
+            "estimated_notional",
+            "quant_buy_score",
+            "final_buy_score",
+            "confidence",
+            "gate_level",
+            "created_at",
+            "expires_at",
+            "used_at",
+            "order_id",
+        ):
+            if key in review:
+                sanitized_review[key] = review[key]
+        sanitized["review"] = sanitized_review
+
+    return sanitized
+
+
+def _load_json_dict(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return _utc_now(datetime.fromisoformat(text))
+    except Exception:
+        return None
 
 
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:

@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
@@ -116,6 +116,15 @@ class KisSchedulerGuardedBuyRequest(BaseModel):
     include_raw: bool = False
     trigger_source: str = "scheduler_manual_test"
     gate_level: int = DEFAULT_GATE_LEVEL
+
+
+class KisLimitedAutoBuyReviewedExecutionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    review_token: str
+    confirm_live: bool
+    confirmation: str
+    scheduler_context: bool = False
 
 
 @router.get("/manual-order/status")
@@ -786,6 +795,22 @@ def run_kis_limited_auto_buy_preflight_once(
     client = _client(db)
     service = KisLimitedAutoBuyService(client)
     return service.preflight_once(db, gate_level=gate_level)
+
+
+@router.post("/limited-auto-buy/execute-reviewed-once")
+def execute_reviewed_kis_limited_auto_buy_once(
+    payload: KisLimitedAutoBuyReviewedExecutionRequest,
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    service = KisLimitedAutoBuyService(client)
+    return service.execute_reviewed_once(
+        db,
+        review_token=payload.review_token,
+        confirm_live=payload.confirm_live,
+        confirmation=payload.confirmation,
+        scheduler_context=payload.scheduler_context,
+    )
 
 
 @router.post("/scheduler/run-live-once")

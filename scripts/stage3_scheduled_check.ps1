@@ -61,6 +61,7 @@ $safeSlot = ($Slot -replace "[^0-9A-Za-z_.-]", "_")
 $logPath = Join-Path $LogDir "scheduled_check_${timestamp}_${safeSlot}.log"
 $previewPath = Join-Path $LogDir "scheduled_preview_${timestamp}_${safeSlot}.json"
 $preflightPath = Join-Path $LogDir "scheduled_preflight_${timestamp}_${safeSlot}.json"
+$reportPath = Join-Path $LogDir "trend_watchlist_report_${timestamp}_${safeSlot}.json"
 $lockPath = Join-Path $LogDir "stage3_scheduled_check_${safeSlot}.lock"
 $lockStream = $null
 
@@ -140,6 +141,42 @@ function Write-JsonFile {
     Set-Content -Path $Path -Encoding UTF8
 }
 
+function Read-TechnicalReport {
+  param([string]$Path)
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    Write-Log "technical_report_parse_failed=true"
+    Write-Log "technical report error=file_not_found"
+    Write-Log "preflight_executed=false"
+    Write-Log "HOLD: technical report unavailable"
+    return $null
+  }
+
+  $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+  if ([string]::IsNullOrWhiteSpace($content)) {
+    Write-Log "technical_report_parse_failed=true"
+    Write-Log "technical report error=empty_file"
+    Write-Log "preflight_executed=false"
+    Write-Log "HOLD: technical report unavailable"
+    return $null
+  }
+
+  try {
+    return $content | ConvertFrom-Json -ErrorAction Stop
+  }
+  catch {
+    $message = $_.Exception.Message
+    if ($message.Length -gt 180) {
+      $message = $message.Substring(0, 180) + "..."
+    }
+    Write-Log "technical_report_parse_failed=true"
+    Write-Log "technical report error=json_parse_failed: $message"
+    Write-Log "preflight_executed=false"
+    Write-Log "HOLD: technical report unavailable"
+    return $null
+  }
+}
+
 $SafeSettings = @{
   dry_run = $true
   kill_switch = $true
@@ -164,6 +201,7 @@ $SafeSettings = @{
   kis_live_auto_sell_enabled = $false
   kis_limited_auto_sell_enabled = $false
   kis_limited_auto_buy_max_notional_pct = 0.80
+  kis_limited_auto_buy_max_notional_krw = 55000.0
 }
 
 $PreflightSettings = $SafeSettings.Clone()
@@ -265,6 +303,8 @@ function Invoke-Stage3Check {
       ([string][Double]$MaxNotionalKrw),
       "--max-notional-pct",
       ([string][Double]$MaxNotionalPct),
+      "--report-path",
+      $reportPath,
       "--require-source-count",
       "100"
     )
@@ -285,17 +325,18 @@ function Invoke-Stage3Check {
       throw "Trend builder failed: exit=$builderExitCode"
     }
 
-    $reports = Get-ChildItem -Path $LogDir -Filter "trend_watchlist_report_*.json" |
-      Sort-Object LastWriteTime -Descending
-    if ($reports.Count -gt 0) {
-      $trendReport = Get-Content -Raw $reports[0].FullName | ConvertFrom-Json
-      Write-Log "technical pass count=$($trendReport.technical_pass_count)"
-      if ($null -ne $trendReport.top_candidate) {
-        Write-Log "top candidate=$($trendReport.top_candidate.symbol)"
-      }
-      else {
-        Write-Log "top candidate=none"
-      }
+    $trendReport = Read-TechnicalReport -Path $reportPath
+    if ($null -eq $trendReport) {
+      return 0
+    }
+    Write-Log "technical_report_parse_failed=false"
+    Write-Log "technical report path=$reportPath"
+    Write-Log "technical pass count=$($trendReport.technical_pass_count)"
+    if ($null -ne $trendReport.top_candidate) {
+      Write-Log "top candidate=$($trendReport.top_candidate.symbol)"
+    }
+    else {
+      Write-Log "top candidate=none"
     }
 
     Invoke-ApiJson -Method Put -Path "/ops/settings" -Body $PreflightSettings |
@@ -345,10 +386,7 @@ function Invoke-Stage3Check {
           $quant = Get-Number $_ @("quant_buy_score", "quant_score")
           $final = Get-Number $_ @("final_buy_score", "final_score", "score")
           $confidence = Get-Number $_ @("confidence", "gpt_confidence")
-          $indicatorOk = (
-            $null -eq $_.indicator_status -or
-            $_.indicator_status -eq "ok"
-          )
+          $indicatorOk = $_.indicator_status -eq "ok"
           $indicatorOk -and
             $null -ne $quant -and $quant -ge 75 -and
             $null -ne $final -and $final -ge 75 -and
