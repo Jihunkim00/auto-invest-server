@@ -1,0 +1,11 @@
+{
+  "technical_pass_count": 1,
+  "top_candidate": {
+    "symbol": "005930",
+    "current_price": null
+  },
+  "selected_symbols": [
+    "005930"
+  ],
+  "report_path": "D:\\auto-invest-server\\.local_test_tmp\\pytest_20260730_191924\\test_trend_summary_sanitizes_n0\\report.json"
+}
