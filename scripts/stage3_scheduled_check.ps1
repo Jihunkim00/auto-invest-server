@@ -62,6 +62,7 @@ $logPath = Join-Path $LogDir "scheduled_check_${timestamp}_${safeSlot}.log"
 $previewPath = Join-Path $LogDir "scheduled_preview_${timestamp}_${safeSlot}.json"
 $preflightPath = Join-Path $LogDir "scheduled_preflight_${timestamp}_${safeSlot}.json"
 $reportPath = Join-Path $LogDir "trend_watchlist_report_${timestamp}_${safeSlot}.json"
+$summaryPath = Join-Path $LogDir "trend_watchlist_summary_${timestamp}_${safeSlot}.json"
 $lockPath = Join-Path $LogDir "stage3_scheduled_check_${safeSlot}.lock"
 $lockStream = $null
 
@@ -141,23 +142,23 @@ function Write-JsonFile {
     Set-Content -Path $Path -Encoding UTF8
 }
 
-function Read-TechnicalReport {
+function Read-TechnicalSummary {
   param([string]$Path)
 
   if (-not (Test-Path -LiteralPath $Path)) {
-    Write-Log "technical_report_parse_failed=true"
-    Write-Log "technical report error=file_not_found"
+    Write-Log "technical_summary_parse_failed=true"
+    Write-Log "technical summary error=file_not_found"
     Write-Log "preflight_executed=false"
-    Write-Log "HOLD: technical report unavailable"
+    Write-Log "HOLD: technical summary unavailable"
     return $null
   }
 
   $content = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
   if ([string]::IsNullOrWhiteSpace($content)) {
-    Write-Log "technical_report_parse_failed=true"
-    Write-Log "technical report error=empty_file"
+    Write-Log "technical_summary_parse_failed=true"
+    Write-Log "technical summary error=empty_file"
     Write-Log "preflight_executed=false"
-    Write-Log "HOLD: technical report unavailable"
+    Write-Log "HOLD: technical summary unavailable"
     return $null
   }
 
@@ -169,10 +170,10 @@ function Read-TechnicalReport {
     if ($message.Length -gt 180) {
       $message = $message.Substring(0, 180) + "..."
     }
-    Write-Log "technical_report_parse_failed=true"
-    Write-Log "technical report error=json_parse_failed: $message"
+    Write-Log "technical_summary_parse_failed=true"
+    Write-Log "technical summary error=json_parse_failed: $message"
     Write-Log "preflight_executed=false"
-    Write-Log "HOLD: technical report unavailable"
+    Write-Log "HOLD: technical summary unavailable"
     return $null
   }
 }
@@ -306,6 +307,8 @@ function Invoke-Stage3Check {
       ([string][Double]$MaxNotionalPct),
       "--report-path",
       $reportPath,
+      "--summary-path",
+      $summaryPath,
       "--require-source-count",
       "100"
     )
@@ -326,15 +329,16 @@ function Invoke-Stage3Check {
       throw "Trend builder failed: exit=$builderExitCode"
     }
 
-    $trendReport = Read-TechnicalReport -Path $reportPath
-    if ($null -eq $trendReport) {
+    $trendSummary = Read-TechnicalSummary -Path $summaryPath
+    if ($null -eq $trendSummary) {
       return 0
     }
-    Write-Log "technical_report_parse_failed=false"
+    Write-Log "technical_summary_parse_failed=false"
+    Write-Log "technical summary path=$summaryPath"
     Write-Log "technical report path=$reportPath"
-    Write-Log "technical pass count=$($trendReport.technical_pass_count)"
-    if ($null -ne $trendReport.top_candidate) {
-      Write-Log "top candidate=$($trendReport.top_candidate.symbol)"
+    Write-Log "technical pass count=$($trendSummary.technical_pass_count)"
+    if ($null -ne $trendSummary.top_candidate) {
+      Write-Log "top candidate=$($trendSummary.top_candidate.symbol)"
     }
     else {
       Write-Log "top candidate=none"

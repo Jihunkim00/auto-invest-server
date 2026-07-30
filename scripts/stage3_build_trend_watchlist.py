@@ -54,6 +54,7 @@ class TrendBuildConfig:
     max_candidates: int
     required_source_count: int
     check_source_only: bool
+    summary_path: Path | None = None
 
 
 def finite_number(value: Any) -> float | None:
@@ -290,6 +291,28 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def build_trend_summary(
+    *,
+    technical_pass_count: int,
+    top_candidate: dict[str, Any] | None,
+    selected: list[dict[str, Any]],
+    report_path: Path,
+) -> dict[str, Any]:
+    top_candidate_summary = None
+    if top_candidate is not None:
+        top_candidate_summary = {
+            "symbol": top_candidate.get("symbol"),
+            "current_price": top_candidate.get("current_price"),
+        }
+
+    return {
+        "technical_pass_count": technical_pass_count,
+        "top_candidate": top_candidate_summary,
+        "selected_symbols": [item.get("symbol") for item in selected],
+        "report_path": str(report_path),
+    }
 
 
 def build_trend_watchlist(config: TrendBuildConfig) -> int:
@@ -543,10 +566,22 @@ def build_trend_watchlist(config: TrendBuildConfig) -> int:
     }
 
     write_json(report_path, report)
+    if config.summary_path is not None:
+        write_json(
+            config.summary_path,
+            build_trend_summary(
+                technical_pass_count=len(passed),
+                top_candidate=top_candidate,
+                selected=selected,
+                report_path=report_path,
+            ),
+        )
 
     print()
     print(f"Passed technical filter: {len(passed)}")
     print(f"Report: {report_path}")
+    if config.summary_path is not None:
+        print(f"Summary: {config.summary_path}")
     if top_candidate:
         print(
             "Top technical candidate: "
@@ -631,6 +666,12 @@ def parse_args(argv: list[str] | None = None) -> TrendBuildConfig:
         help="Write the technical report to this exact path.",
     )
     parser.add_argument(
+        "--summary-path",
+        type=Path,
+        default=None,
+        help="Write the small PowerShell-compatible summary to this exact path.",
+    )
+    parser.add_argument(
         "--max-notional-krw",
         type=positive_float,
         default=env_float("STAGE3_MAX_NOTIONAL_KRW", DEFAULT_MAX_NOTIONAL_KRW),
@@ -673,6 +714,7 @@ def parse_args(argv: list[str] | None = None) -> TrendBuildConfig:
         max_candidates=int(args.max_candidates),
         required_source_count=int(args.require_source_count),
         check_source_only=bool(args.check_source_only),
+        summary_path=args.summary_path,
     )
 
 
