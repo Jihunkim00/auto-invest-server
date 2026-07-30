@@ -70,6 +70,7 @@ from app.services.kis_single_symbol_trading_service import (
     KisSingleSymbolTradingService,
 )
 from app.services.kis_position_management_service import KisPositionManagementService
+from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_manual_cancel_service import KisManualCancelService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
@@ -125,6 +126,14 @@ class KisLimitedAutoBuyReviewedExecutionRequest(BaseModel):
     confirm_live: bool
     confirmation: str
     scheduler_context: bool = False
+
+
+class KisPositionManagementRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    trigger_source: str = "manual_position_management"
+    scheduler_slot: str | None = None
+    include_raw: bool = False
 
 
 @router.get("/manual-order/status")
@@ -810,6 +819,48 @@ def execute_reviewed_kis_limited_auto_buy_once(
         confirm_live=payload.confirm_live,
         confirmation=payload.confirmation,
         scheduler_context=payload.scheduler_context,
+    )
+
+
+@router.get("/position-management/status")
+def get_kis_position_management_status(db: Session = Depends(get_db)):
+    client = _client(db)
+    service = KisPositionLifecycleService(client)
+    return service.status(db)
+
+
+@router.post("/position-management/preflight-once")
+def run_kis_position_management_preflight_once(
+    payload: KisPositionManagementRunRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    request = payload or KisPositionManagementRunRequest(
+        trigger_source="manual_position_management_preflight"
+    )
+    client = _client(db)
+    service = KisPositionLifecycleService(client)
+    return service.preflight_once(
+        db,
+        trigger_source=request.trigger_source,
+        scheduler_slot=request.scheduler_slot,
+    )
+
+
+@router.post("/position-management/run-once")
+def run_kis_position_management_once(
+    payload: KisPositionManagementRunRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    request = payload or KisPositionManagementRunRequest(
+        trigger_source="manual_position_management_run"
+    )
+    client = _client(db)
+    service = KisPositionLifecycleService(client)
+    return service.run_once(
+        db,
+        trigger_source=request.trigger_source,
+        scheduler_slot=request.scheduler_slot,
+        include_raw=request.include_raw,
     )
 
 

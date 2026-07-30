@@ -11,6 +11,7 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
+from app.db.models import PositionLifecycle
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
@@ -18,6 +19,9 @@ from app.services.auto_sell_live_phase1_service import AutoSellLivePhase1Service
 from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.position_management_dry_run_service import (
     PositionManagementDryRunService,
+)
+from app.services.kis_position_lifecycle_service import (
+    KisPositionLifecycleService,
 )
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
@@ -51,6 +55,11 @@ class SchedulerService:
             ("position_management_dry_run_open_phase", 9, 0),
             ("position_management_dry_run_midday", 10, 25),
             ("position_management_dry_run_before_close", 14, 25),
+        ]
+        self.position_lifecycle_management_slots = [
+            ("position_management_open_phase", 10, 0),
+            ("position_management_midday", 12, 0),
+            ("position_management_before_close", 14, 30),
         ]
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -128,6 +137,13 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_position_management_dry_run_scheduled_once(slot_name)
+
+            for slot_name, hour, minute in self.position_lifecycle_management_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:position_management:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_position_lifecycle_management_scheduled_once(slot_name)
 
             for slot_name, hour, minute in self._strategy_auto_buy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
@@ -268,6 +284,16 @@ class SchedulerService:
     def _run_strategy_auto_buy_dry_run_scheduled_once(self, slot_name: str):
         db = SessionLocal()
         try:
+            if self._position_lifecycle_management_should_preempt_buy(db):
+                self._disable_kis_buy_scheduler_flags(db)
+                return self._create_scheduler_skip_log(
+                    db,
+                    slot_name=slot_name,
+                    reason="position_management_priority_buy_skipped",
+                    market="KR",
+                    provider="kis",
+                )
+
             buy_phase1_requested = self._phase1_scheduler_hook_requested(db)
             sell_phase1_requested = self._auto_sell_phase1_scheduler_hook_requested(db)
             phase1_requested = buy_phase1_requested or sell_phase1_requested
@@ -473,6 +499,61 @@ class SchedulerService:
             )
         finally:
             db.close()
+
+    def _run_position_lifecycle_management_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            return self._run_position_lifecycle_management_with_db(
+                db,
+                slot_name=slot_name,
+                trigger_source="position_management_scheduler",
+            )
+        finally:
+            db.close()
+
+    def _run_position_lifecycle_management_with_db(
+        self,
+        db,
+        *,
+        slot_name: str,
+        trigger_source: str,
+    ):
+        settings_obj = get_settings()
+        kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        service = KisPositionLifecycleService(
+            kis_client,
+            runtime_settings=self.runtime_settings,
+        )
+        if not service.has_manageable_position(db):
+            return None
+        self._disable_kis_buy_scheduler_flags(db)
+        return service.run_once(
+            db,
+            trigger_source=trigger_source,
+            scheduler_slot=slot_name,
+        )
+
+    def _position_lifecycle_management_should_preempt_buy(self, db) -> bool:
+        return bool(
+            db.query(PositionLifecycle)
+            .filter(PositionLifecycle.status.in_(["open", "closing"]))
+            .count()
+        )
+
+    def _disable_kis_buy_scheduler_flags(self, db) -> None:
+        self.runtime_settings.update_settings(
+            db,
+            {
+                "kis_live_auto_buy_enabled": False,
+                "kis_limited_auto_buy_enabled": False,
+                "kis_scheduler_buy_enabled": False,
+                "kis_scheduler_allow_limited_auto_buy": False,
+                "strategy_auto_buy_scheduler_enabled": False,
+                "strategy_live_auto_buy_scheduler_enabled": False,
+                "auto_buy_live_phase1_enabled": False,
+                "auto_buy_live_phase1_allow_real_orders": False,
+            },
+        )
 
     def _run_broker_sync_watchdog_scheduled_once(self, slot_name: str):
         db = SessionLocal()

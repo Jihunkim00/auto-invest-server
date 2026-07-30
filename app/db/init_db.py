@@ -799,6 +799,62 @@ def _create_kis_shadow_exit_review_queue_state_table_if_missing():
         )
 
 
+def _create_position_lifecycles_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS position_lifecycles (
+                    id INTEGER PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    entry_order_id INTEGER NOT NULL UNIQUE,
+                    entry_price FLOAT NOT NULL,
+                    cost_basis FLOAT NOT NULL,
+                    quantity FLOAT NOT NULL DEFAULT 1.0,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    opened_at DATETIME NOT NULL,
+                    last_price FLOAT,
+                    unrealized_pl FLOAT,
+                    unrealized_pl_pct FLOAT,
+                    max_price_since_entry FLOAT,
+                    stop_loss_threshold_pct FLOAT,
+                    take_profit_threshold_pct FLOAT,
+                    exit_reason TEXT,
+                    exit_order_id INTEGER,
+                    last_evaluated_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_symbol "
+                "ON position_lifecycles (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_position_lifecycles_entry_order_id "
+                "ON position_lifecycles (entry_order_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_status "
+                "ON position_lifecycles (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_exit_order_id "
+                "ON position_lifecycles (exit_order_id)"
+            )
+        )
+
+
 def _create_broker_auth_tokens_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1533,6 +1589,7 @@ def init_db():
     _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
+    _create_position_lifecycles_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()

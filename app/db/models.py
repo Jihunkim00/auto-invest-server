@@ -593,6 +593,30 @@ class KisShadowExitReviewQueueState(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class PositionLifecycle(Base):
+    __tablename__ = "position_lifecycles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    entry_order_id = Column(Integer, nullable=False, unique=True, index=True)
+    entry_price = Column(Float, nullable=False)
+    cost_basis = Column(Float, nullable=False)
+    quantity = Column(Float, nullable=False, default=1.0)
+    status = Column(String(20), nullable=False, default="open", index=True)
+    opened_at = Column(DateTime(timezone=True), nullable=False)
+    last_price = Column(Float, nullable=True)
+    unrealized_pl = Column(Float, nullable=True)
+    unrealized_pl_pct = Column(Float, nullable=True)
+    max_price_since_entry = Column(Float, nullable=True)
+    stop_loss_threshold_pct = Column(Float, nullable=True)
+    take_profit_threshold_pct = Column(Float, nullable=True)
+    exit_reason = Column(Text, nullable=True)
+    exit_order_id = Column(Integer, nullable=True, index=True)
+    last_evaluated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class TradeRunLog(Base):
     __tablename__ = "trade_run_logs"
 
