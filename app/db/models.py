@@ -313,6 +313,7 @@ class RuntimeSetting(Base):
     strategy_live_auto_exit_requires_cost_basis = Column(Boolean, nullable=False, default=True)
     strategy_live_auto_exit_min_quantity = Column(Integer, nullable=False, default=1)
     position_management_scheduler_enabled = Column(Boolean, nullable=False, default=False)
+    kis_position_lifecycle_scheduler_enabled = Column(Boolean, nullable=False, default=False)
     position_management_scheduler_dry_run_only = Column(Boolean, nullable=False, default=True)
     position_management_scheduler_allow_live_orders = Column(Boolean, nullable=False, default=False)
     portfolio_orchestrator_enabled = Column(Boolean, nullable=False, default=False)

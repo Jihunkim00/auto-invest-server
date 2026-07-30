@@ -28,6 +28,14 @@ PREFLIGHT_MODE = "kis_position_management_preflight"
 RUN_MODE = "kis_position_management_run"
 TRIGGER_SOURCE = "kis_position_management"
 SCHEDULER_TRIGGER_SOURCE = "position_management_scheduler"
+POSITION_LIFECYCLE_SCHEDULER_GATE_FLAGS = (
+    ("scheduler_enabled", "scheduler_enabled_false"),
+    ("kis_scheduler_enabled", "kis_scheduler_enabled_false"),
+    (
+        "kis_position_lifecycle_scheduler_enabled",
+        "kis_position_lifecycle_scheduler_enabled_false",
+    ),
+)
 BUY = "buy"
 HOLD = "HOLD"
 SELL_READY = "SELL_READY"
@@ -73,6 +81,7 @@ class KisPositionLifecycleService:
 
     def status(self, db: Session) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
+        scheduler_gate = position_lifecycle_scheduler_gate(runtime)
         lifecycles = (
             db.query(PositionLifecycle)
             .order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc())
@@ -85,6 +94,15 @@ class KisPositionLifecycleService:
                 "market": MARKET,
                 "mode": MODE,
                 "status": "ok",
+                "scheduler_enabled": scheduler_gate["scheduler_enabled"],
+                "kis_scheduler_enabled": scheduler_gate["kis_scheduler_enabled"],
+                "kis_position_lifecycle_scheduler_enabled": scheduler_gate[
+                    "kis_position_lifecycle_scheduler_enabled"
+                ],
+                "scheduler_execution_allowed": scheduler_gate[
+                    "scheduler_execution_allowed"
+                ],
+                "blocking_reasons": scheduler_gate["blocking_reasons"],
                 "active_lifecycle_count": len(active),
                 "lifecycles": [_serialize_lifecycle(row) for row in lifecycles],
                 "scheduler": {
@@ -93,6 +111,19 @@ class KisPositionLifecycleService:
                     "buy_scheduler_enabled": False,
                     "position_management_priority": "before_new_buy_candidates",
                     "runs_only_when_position_exists": True,
+                    "scheduler_enabled": scheduler_gate["scheduler_enabled"],
+                    "kis_scheduler_enabled": scheduler_gate[
+                        "kis_scheduler_enabled"
+                    ],
+                    "kis_position_lifecycle_scheduler_enabled": (
+                        scheduler_gate[
+                            "kis_position_lifecycle_scheduler_enabled"
+                        ]
+                    ),
+                    "scheduler_execution_allowed": scheduler_gate[
+                        "scheduler_execution_allowed"
+                    ],
+                    "blocking_reasons": scheduler_gate["blocking_reasons"],
                 },
                 "runtime": _buy_sell_runtime_snapshot(runtime),
                 "real_order_submitted": False,
@@ -1026,6 +1057,30 @@ def _take_profit_triggered(
     return current_price >= threshold
 
 
+def position_lifecycle_scheduler_gate(runtime: dict[str, Any]) -> dict[str, Any]:
+    gate = {
+        key: bool(runtime.get(key, False))
+        for key, _reason in POSITION_LIFECYCLE_SCHEDULER_GATE_FLAGS
+    }
+    blocking_reasons = [
+        reason
+        for key, reason in POSITION_LIFECYCLE_SCHEDULER_GATE_FLAGS
+        if not gate[key]
+    ]
+    return {
+        **gate,
+        "scheduler_execution_allowed": not blocking_reasons,
+        "blocking_reasons": blocking_reasons,
+    }
+
+
+def position_lifecycle_scheduler_block_reason(gate: dict[str, Any]) -> str:
+    reasons = gate.get("blocking_reasons") or []
+    if not reasons:
+        return "position_lifecycle_scheduler_allowed"
+    return ",".join(str(reason) for reason in reasons)
+
+
 def _held_positions(items: Any) -> list[dict[str, Any]]:
     if not isinstance(items, list):
         return []
@@ -1234,6 +1289,9 @@ def _buy_sell_runtime_snapshot(runtime: dict[str, Any]) -> dict[str, Any]:
     return {
         "dry_run": bool(runtime.get("dry_run", True)),
         "kill_switch": bool(runtime.get("kill_switch", False)),
+        "kis_position_lifecycle_scheduler_enabled": bool(
+            runtime.get("kis_position_lifecycle_scheduler_enabled", False)
+        ),
         "kis_live_auto_buy_enabled": bool(runtime.get("kis_live_auto_buy_enabled", False)),
         "kis_limited_auto_buy_enabled": bool(runtime.get("kis_limited_auto_buy_enabled", False)),
         "kis_scheduler_buy_enabled": bool(runtime.get("kis_scheduler_buy_enabled", False)),

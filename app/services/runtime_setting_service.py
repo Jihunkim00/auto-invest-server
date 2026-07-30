@@ -188,6 +188,7 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis": True,
             "strategy_live_auto_exit_min_quantity": 1,
             "position_management_scheduler_enabled": False,
+            "kis_position_lifecycle_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
             "position_management_scheduler_allow_live_orders": False,
             "portfolio_orchestrator_enabled": False,
@@ -616,6 +617,9 @@ class RuntimeSettingService:
             "position_management_scheduler_enabled": bool(
                 row.position_management_scheduler_enabled
             ),
+            "kis_position_lifecycle_scheduler_enabled": bool(
+                row.kis_position_lifecycle_scheduler_enabled
+            ),
             "position_management_scheduler_dry_run_only": bool(
                 row.position_management_scheduler_dry_run_only
             ),
@@ -825,6 +829,9 @@ class RuntimeSettingService:
         settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["position_management_scheduler_dry_run_only"] = True
         settings["position_management_scheduler_allow_live_orders"] = False
+        settings["kis_position_lifecycle_scheduler_enabled"] = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         settings["portfolio_orchestrator_positions_first"] = True
         settings["portfolio_orchestrator_max_actions_per_run"] = 1
         settings["portfolio_orchestrator_require_production_ready"] = True
@@ -1036,6 +1043,9 @@ class RuntimeSettingService:
         )
         scheduler_enabled = bool(settings["scheduler_enabled"])
         kis_scheduler_enabled = bool(settings["kis_scheduler_enabled"])
+        kis_position_lifecycle_scheduler_enabled = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         kis_scheduler_dry_run = bool(settings["kis_scheduler_dry_run"])
         kis_scheduler_allow_real_orders = bool(
             settings["kis_scheduler_allow_real_orders"]
@@ -1080,6 +1090,9 @@ class RuntimeSettingService:
         return {
             "scheduler_enabled": scheduler_enabled,
             "kis_scheduler_enabled": kis_scheduler_enabled,
+            "kis_position_lifecycle_scheduler_enabled": (
+                kis_position_lifecycle_scheduler_enabled
+            ),
             "kis_scheduler_dry_run": kis_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kis_scheduler_allow_real_orders,
             "kis_scheduler_configured_allow_real_orders": (
@@ -2087,6 +2100,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2123,6 +2137,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2155,6 +2170,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2186,6 +2202,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2218,6 +2235,7 @@ class RuntimeSettingService:
                     "strategy_live_auto_exit_enabled": False,
                     "strategy_live_auto_exit_scheduler_enabled": False,
                     "position_management_scheduler_enabled": False,
+                    "kis_position_lifecycle_scheduler_enabled": False,
                     "position_management_scheduler_dry_run_only": True,
                     "position_management_scheduler_allow_live_orders": False,
                     "portfolio_orchestrator_enabled": False,
@@ -2434,6 +2452,7 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis",
             "strategy_live_auto_exit_min_quantity",
             "position_management_scheduler_enabled",
+            "kis_position_lifecycle_scheduler_enabled",
             "position_management_scheduler_dry_run_only",
             "position_management_scheduler_allow_live_orders",
             "portfolio_orchestrator_enabled",
@@ -2688,6 +2707,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
             }
@@ -2715,6 +2735,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
             }
@@ -2902,6 +2923,7 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_enabled",
+        "kis_position_lifecycle_scheduler_enabled",
         "position_management_scheduler_allow_live_orders",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
@@ -2962,6 +2984,7 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_allow_live_orders",
+        "kis_position_lifecycle_scheduler_enabled",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
         "automation_soak_enabled",

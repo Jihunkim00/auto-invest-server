@@ -824,8 +824,7 @@ def execute_reviewed_kis_limited_auto_buy_once(
 
 @router.get("/position-management/status")
 def get_kis_position_management_status(db: Session = Depends(get_db)):
-    client = _client(db)
-    service = KisPositionLifecycleService(client)
+    service = KisPositionLifecycleService()
     return service.status(db)
 
 

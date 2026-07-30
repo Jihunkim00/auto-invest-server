@@ -22,6 +22,8 @@ from app.services.position_management_dry_run_service import (
 )
 from app.services.kis_position_lifecycle_service import (
     KisPositionLifecycleService,
+    position_lifecycle_scheduler_block_reason,
+    position_lifecycle_scheduler_gate,
 )
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
@@ -178,7 +180,25 @@ class SchedulerService:
         reason: str,
         market: str = "US",
         provider: str = "alpaca",
+        blocking_reasons: list[str] | None = None,
     ):
+        request_payload = {
+            "scheduler_slot": slot_name,
+            "source": "scheduler",
+            "market": market,
+            "provider": provider,
+        }
+        response_payload = {
+            "scheduler_slot": slot_name,
+            "reason": reason,
+            "market": market,
+            "provider": provider,
+        }
+        if blocking_reasons is not None:
+            reasons = list(blocking_reasons)
+            request_payload["blocking_reasons"] = reasons
+            response_payload["blocking_reasons"] = reasons
+
         run_log = self.orchestrator._create_run_log(
             db,
             run_key=f"scheduler_{datetime.now(NY_TZ).strftime('%Y%m%d_%H%M%S')}_{slot_name}",
@@ -189,12 +209,7 @@ class SchedulerService:
             stage="orchestration",
             result="pending",
             reason=reason,
-            request_payload={
-                "scheduler_slot": slot_name,
-                "source": "scheduler",
-                "market": market,
-                "provider": provider,
-            },
+            request_payload=request_payload,
         )
         self.orchestrator._finish(
             db,
@@ -202,12 +217,7 @@ class SchedulerService:
             stage="done",
             result="skipped",
             reason=reason,
-            response_payload={
-                "scheduler_slot": slot_name,
-                "reason": reason,
-                "market": market,
-                "provider": provider,
-            },
+            response_payload=response_payload,
         )
         return run_log
 
@@ -518,6 +528,18 @@ class SchedulerService:
         slot_name: str,
         trigger_source: str,
     ):
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        scheduler_gate = position_lifecycle_scheduler_gate(runtime)
+        if not scheduler_gate["scheduler_execution_allowed"]:
+            return self._create_scheduler_skip_log(
+                db,
+                slot_name=slot_name,
+                reason=position_lifecycle_scheduler_block_reason(scheduler_gate),
+                market="KR",
+                provider="kis",
+                blocking_reasons=scheduler_gate["blocking_reasons"],
+            )
+
         settings_obj = get_settings()
         kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
         service = KisPositionLifecycleService(

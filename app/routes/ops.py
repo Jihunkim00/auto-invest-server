@@ -120,6 +120,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     strategy_live_auto_exit_requires_cost_basis: bool | None = None
     strategy_live_auto_exit_min_quantity: int | None = Field(default=None, ge=1)
     kis_scheduler_enabled: bool | None = None
+    kis_position_lifecycle_scheduler_enabled: bool | None = None
     kis_scheduler_dry_run: bool | None = None
     kis_scheduler_live_enabled: bool | None = None
     kis_scheduler_allow_real_orders: bool | None = None

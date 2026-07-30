@@ -33,6 +33,10 @@ class FakeClient:
     ):
         self.positions = positions or []
         self.open_orders = open_orders or []
+        self.list_positions_calls = 0
+        self.list_open_orders_calls = 0
+        self.submit_order_calls = []
+        self.submit_domestic_cash_order_calls = []
         self.settings = SimpleNamespace(
             kis_enabled=True,
             kis_real_order_enabled=True,
@@ -40,10 +44,20 @@ class FakeClient:
         )
 
     def list_positions(self):
+        self.list_positions_calls += 1
         return self.positions
 
     def list_open_orders(self):
+        self.list_open_orders_calls += 1
         return self.open_orders
+
+    def submit_order(self, *args, **kwargs):
+        self.submit_order_calls.append({"args": args, "kwargs": kwargs})
+        raise AssertionError("position lifecycle must not submit orders directly")
+
+    def submit_domestic_cash_order(self, **kwargs):
+        self.submit_domestic_cash_order_calls.append(dict(kwargs))
+        raise AssertionError("position lifecycle must not submit orders directly")
 
 
 class FakeSellService:
@@ -147,6 +161,39 @@ def test_non_reviewed_filled_buy_does_not_create_lifecycle(db_session):
     assert db_session.query(PositionLifecycle).count() == 0
 
 
+def test_position_management_status_exposes_scheduler_gate(db_session):
+    service = KisPositionLifecycleService()
+
+    default_status = service.status(db_session)
+
+    assert default_status["scheduler_enabled"] is False
+    assert default_status["kis_scheduler_enabled"] is False
+    assert default_status["kis_position_lifecycle_scheduler_enabled"] is False
+    assert default_status["scheduler_execution_allowed"] is False
+    assert default_status["blocking_reasons"] == [
+        "scheduler_enabled_false",
+        "kis_scheduler_enabled_false",
+        "kis_position_lifecycle_scheduler_enabled_false",
+    ]
+
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "kis_scheduler_enabled": True,
+            "kis_position_lifecycle_scheduler_enabled": True,
+        },
+    )
+
+    enabled_status = service.status(db_session)
+
+    assert enabled_status["scheduler_enabled"] is True
+    assert enabled_status["kis_scheduler_enabled"] is True
+    assert enabled_status["kis_position_lifecycle_scheduler_enabled"] is True
+    assert enabled_status["scheduler_execution_allowed"] is True
+    assert enabled_status["blocking_reasons"] == []
+    assert enabled_status["scheduler"]["scheduler_execution_allowed"] is True
+
 def test_position_missing_closes_lifecycle(db_session):
     lifecycle = _open_lifecycle(db_session)
 
@@ -160,6 +207,23 @@ def test_position_missing_closes_lifecycle(db_session):
     assert item["result"] == "closed"
     assert item["reason"] == "broker_position_not_found"
 
+
+def test_position_missing_does_not_submit_to_broker(db_session):
+    _open_lifecycle(db_session)
+    client = FakeClient(positions=[])
+    sell_service = FakeSellService({"real_order_submitted": True})
+
+    result = KisPositionLifecycleService(
+        client,
+        limited_auto_sell_service=sell_service,
+    ).run_once(db_session, now=NOW)
+
+    item = result["items"][0]
+    assert item["reason"] == "broker_position_not_found"
+    assert item["real_order_submitted"] is False
+    assert sell_service.calls == 0
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
 
 def test_normal_held_position_records_hold_log(db_session):
     _open_lifecycle(db_session)
@@ -264,8 +328,9 @@ def test_stop_loss_sell_submit_exactly_once(db_session):
             "reason": "stop_loss_auto_sell_submitted",
         }
     )
+    client = FakeClient(positions=[_position(current_price=97.0)])
     service = KisPositionLifecycleService(
-        FakeClient(positions=[_position(current_price=97.0)]),
+        client,
         limited_auto_sell_service=sell_service,
     )
 
@@ -278,6 +343,8 @@ def test_stop_loss_sell_submit_exactly_once(db_session):
     assert lifecycle.status == "closing"
     assert lifecycle.exit_order_id == 77
     assert sell_service.calls == 1
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
 
 
 def test_broker_timeout_after_order_locks_lifecycle_against_duplicate_sell(db_session):
@@ -299,6 +366,152 @@ def test_broker_timeout_after_order_locks_lifecycle_against_duplicate_sell(db_se
     assert lifecycle.exit_order_id is not None
     assert sell_service.calls == 1
 
+
+
+def test_lifecycle_scheduler_global_gate_false_skips_client_and_service(
+    monkeypatch,
+    db_session,
+):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "scheduler_enabled": False,
+            "kis_scheduler_enabled": True,
+            "kis_position_lifecycle_scheduler_enabled": True,
+        },
+    )
+    calls = {"client": 0, "service": 0}
+
+    def fake_client(*args, **kwargs):
+        calls["client"] += 1
+        raise AssertionError("KIS client must not be created when gate is blocked")
+
+    def fake_service(*args, **kwargs):
+        calls["service"] += 1
+        raise AssertionError("lifecycle service must not be created when gate is blocked")
+
+    monkeypatch.setattr("app.services.scheduler_service.KisClient", fake_client)
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisPositionLifecycleService",
+        fake_service,
+    )
+
+    result = SchedulerService()._run_position_lifecycle_management_with_db(
+        db_session,
+        slot_name="position_management_midday",
+        trigger_source="position_management_scheduler",
+    )
+
+    payload = json.loads(result.response_payload)
+    assert result.result == "skipped"
+    assert result.reason == "scheduler_enabled_false"
+    assert payload["blocking_reasons"] == ["scheduler_enabled_false"]
+    assert calls == {"client": 0, "service": 0}
+
+
+def test_lifecycle_scheduler_flag_false_skips_client_and_service(
+    monkeypatch,
+    db_session,
+):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "kis_scheduler_enabled": True,
+            "kis_position_lifecycle_scheduler_enabled": False,
+        },
+    )
+    calls = {"client": 0, "service": 0}
+
+    def fake_client(*args, **kwargs):
+        calls["client"] += 1
+        raise AssertionError("KIS client must not be created when gate is blocked")
+
+    def fake_service(*args, **kwargs):
+        calls["service"] += 1
+        raise AssertionError("lifecycle service must not be created when gate is blocked")
+
+    monkeypatch.setattr("app.services.scheduler_service.KisClient", fake_client)
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisPositionLifecycleService",
+        fake_service,
+    )
+
+    result = SchedulerService()._run_position_lifecycle_management_with_db(
+        db_session,
+        slot_name="position_management_midday",
+        trigger_source="position_management_scheduler",
+    )
+
+    payload = json.loads(result.response_payload)
+    assert result.result == "skipped"
+    assert result.reason == "kis_position_lifecycle_scheduler_enabled_false"
+    assert payload["blocking_reasons"] == [
+        "kis_position_lifecycle_scheduler_enabled_false"
+    ]
+    assert calls == {"client": 0, "service": 0}
+
+
+def test_lifecycle_scheduler_all_gates_true_open_lifecycle_runs_service_once(
+    monkeypatch,
+    db_session,
+):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "kis_scheduler_enabled": True,
+            "kis_position_lifecycle_scheduler_enabled": True,
+        },
+    )
+    _open_lifecycle(db_session)
+    calls = {"client": 0, "service": 0, "has_manageable_position": 0, "run_once": 0}
+
+    def fake_client(*args, **kwargs):
+        calls["client"] += 1
+        return object()
+
+    class FakeLifecycleManagementService:
+        def __init__(self, client, *, runtime_settings):
+            calls["service"] += 1
+            self.client = client
+            self.runtime_settings = runtime_settings
+
+        def has_manageable_position(self, db):
+            calls["has_manageable_position"] += 1
+            return bool(
+                db.query(PositionLifecycle)
+                .filter(PositionLifecycle.status.in_(["open", "closing"]))
+                .count()
+            )
+
+        def run_once(self, db, **kwargs):
+            calls["run_once"] += 1
+            return {"mode": "kis_position_management_run", "kwargs": kwargs}
+
+    monkeypatch.setattr("app.services.scheduler_service.KisClient", fake_client)
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisPositionLifecycleService",
+        FakeLifecycleManagementService,
+    )
+
+    result = SchedulerService()._run_position_lifecycle_management_with_db(
+        db_session,
+        slot_name="position_management_midday",
+        trigger_source="position_management_scheduler",
+    )
+
+    assert result["mode"] == "kis_position_management_run"
+    assert result["kwargs"] == {
+        "trigger_source": "position_management_scheduler",
+        "scheduler_slot": "position_management_midday",
+    }
+    assert calls == {
+        "client": 1,
+        "service": 1,
+        "has_manageable_position": 1,
+        "run_once": 1,
+    }
 
 def test_scheduler_position_management_slots_and_buy_preemption(
     monkeypatch,
