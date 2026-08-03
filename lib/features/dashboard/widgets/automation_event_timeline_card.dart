@@ -90,8 +90,10 @@ class _AutomationEventRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withValues(alpha: 0.28)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Wrap(
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Wrap(
             spacing: 8,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -133,7 +135,8 @@ class _AutomationEventRow extends StatelessWidget {
         ]),
         const SizedBox(height: 4),
         _DeveloperDetails(event: event),
-      ]),
+        ]),
+      ),
     );
   }
 }
@@ -145,7 +148,7 @@ class _DeveloperDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: const Text(
@@ -188,7 +191,7 @@ class _DeveloperDetails extends StatelessWidget {
           ),
         ),
       ],
-    );
+    ));
   }
 }
 

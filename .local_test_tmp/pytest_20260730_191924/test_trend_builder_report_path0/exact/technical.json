@@ -1,0 +1,89 @@
+{
+  "created_at": "2026-07-30T19:20:05.144164",
+  "source_watchlist": "D:\\auto-invest-server\\.local_test_tmp\\pytest_20260730_191924\\test_trend_builder_report_path0\\source.yaml",
+  "target_watchlist": "D:\\auto-invest-server\\.local_test_tmp\\pytest_20260730_191924\\test_trend_builder_report_path0\\target.yaml",
+  "source_symbol_count": 1,
+  "account_equity": 100000.0,
+  "available_cash": 100000.0,
+  "configured_max_notional_krw": 55000,
+  "configured_max_notional_pct": 0.94,
+  "max_notional": 55000.0,
+  "filters": {
+    "expected_qty": 1,
+    "price_within_max_notional": true,
+    "estimated_notional_within_cash": true,
+    "price_above_ema20": true,
+    "ema20_above_ema50": true,
+    "price_above_ema50": true,
+    "price_above_vwap": true,
+    "short_momentum_gt_zero": true
+  },
+  "technical_pass_count": 1,
+  "passed_count": 1,
+  "selected_count": 1,
+  "top_candidate": {
+    "symbol": "005930",
+    "name": "Samsung",
+    "market": "KR",
+    "current_price": 52000.0,
+    "ema20": 50000.0,
+    "ema50": 49000.0,
+    "vwap": 51000.0,
+    "short_momentum": 0.01,
+    "volume_ratio": null,
+    "rsi": 55.0,
+    "expected_qty": 1,
+    "estimated_notional": 52000.0,
+    "trend_strength": 9.0016006402561
+  },
+  "selected": [
+    {
+      "symbol": "005930",
+      "name": "Samsung",
+      "market": "KR",
+      "current_price": 52000.0,
+      "ema20": 50000.0,
+      "ema50": 49000.0,
+      "vwap": 51000.0,
+      "short_momentum": 0.01,
+      "volume_ratio": null,
+      "rsi": 55.0,
+      "expected_qty": 1,
+      "estimated_notional": 52000.0,
+      "trend_strength": 9.0016006402561
+    }
+  ],
+  "all_results": [
+    {
+      "symbol": "005930",
+      "name": "Samsung",
+      "market": "KR",
+      "passed": true,
+      "failed_checks": [],
+      "bar_count": 60,
+      "current_price": 52000.0,
+      "ema20": 50000.0,
+      "ema50": 49000.0,
+      "vwap": 51000.0,
+      "short_momentum": 0.01,
+      "volume_ratio": null,
+      "rsi": 55.0,
+      "checks": {
+        "price_positive": true,
+        "price_within_max_notional": true,
+        "estimated_notional_within_cash": true,
+        "one_share_quantity": true,
+        "price_above_ema20": true,
+        "ema20_above_ema50": true,
+        "price_above_ema50": true,
+        "price_above_vwap": true,
+        "positive_momentum": true
+      },
+      "expected_qty": 1,
+      "estimated_notional": 52000.0,
+      "trend_strength": 9.0016006402561
+    }
+  ],
+  "real_order_submitted": false,
+  "broker_submit_called": false
+}

@@ -346,16 +346,18 @@ class _PositionTile extends StatelessWidget {
         managementItem.triggerStatus != TriggerStatus.hold &&
         managementItem.triggerStatus != TriggerStatus.noData;
 
-    return Container(
+    return SizedBox(
       width: double.infinity,
-      decoration: BoxDecoration(
+      child: Material(
         color: Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
-      ),
-      child: Theme(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
+        child: Material(type: MaterialType.transparency, child: ExpansionTile(
           key: ValueKey('portfolio-position-card-${position.symbol}'),
           tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -483,6 +485,7 @@ class _PositionTile extends StatelessWidget {
               ),
             ],
           ],
+        )),
         ),
       ),
     );
@@ -1036,7 +1039,7 @@ class _DeveloperPayload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
       title: const Text('Developer Raw Payload',
@@ -1060,7 +1063,7 @@ class _DeveloperPayload extends StatelessWidget {
           ),
         ),
       ],
-    );
+    ));
   }
 }
 

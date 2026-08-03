@@ -5,6 +5,7 @@ import '../../core/widgets/confirm_action_dialog.dart';
 import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
+import '../../models/operation_mode.dart';
 import 'widgets/automation_mode_control_panel.dart';
 import 'widgets/automation_release_control_panel.dart';
 
@@ -127,14 +128,21 @@ class _OperationModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final status = controller.operationModeStatus;
     final mode = _currentMode(controller);
-    final loading = controller.kisAutomationSettingsLoading;
+    final selectedOption = _operationModeOptions.firstWhere(
+      (option) => option.value == mode,
+      orElse: () => _operationModeOptions.first,
+    );
+    final modeLoading =
+        controller.operationModeLoading || controller.operationModeUpdating;
+    final settingsLoading = controller.kisAutomationSettingsLoading;
     return SectionCard(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _CardHeader(
           icon: Icons.power_settings_new,
           title: 'Global Safety',
-          trailing: loading
+          trailing: modeLoading || settingsLoading
               ? const SizedBox(
                   width: 18,
                   height: 18,
@@ -151,6 +159,20 @@ class _OperationModeCard extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         _PresetScopeDetails(mode: mode),
+        if (status.modeDriftDetected) ...[
+          const SizedBox(height: 6),
+          const Text(
+            'Requested and effective mode differ. Backend safety gates are taking precedence.',
+            style: TextStyle(color: Colors.amberAccent),
+          ),
+        ],
+        if (controller.operationModeError != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            controller.operationModeError!,
+            style: const TextStyle(color: Colors.redAccent),
+          ),
+        ],
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           key: ValueKey('operation-mode-$mode'),
@@ -163,38 +185,48 @@ class _OperationModeCard extends StatelessWidget {
             for (final option in _operationModeOptions)
               DropdownMenuItem<String>(
                 value: option.value,
+                enabled: option.value == mode || status.canEnter(option.value),
                 child: Text(option.label),
               ),
           ],
-          onChanged: loading
+          onChanged: modeLoading
               ? null
               : (value) {
                   if (value == null || value == mode) return;
-                  _applyMode(context, controller, value);
+                  _setOperationMode(context, controller, value);
                 },
         ),
+        if (selectedOption.description != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            selectedOption.description!,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ],
         const SizedBox(height: 8),
         _ScopedSwitchTile(
           scope: 'GLOBAL',
           title: 'Dry-run',
           subtitle: 'Applies to manual and scheduler live order guards.',
           value: controller.settings.dryRun,
-          onChanged: loading ? null : (value) => controller.setDryRun(value),
+          onChanged:
+              settingsLoading ? null : (value) => controller.setDryRun(value),
         ),
         _ScopedSwitchTile(
           scope: 'GLOBAL',
           title: 'Kill switch',
           subtitle: 'Blocks manual and scheduler order paths.',
           value: controller.settings.killSwitch,
-          onChanged:
-              loading ? null : (value) => controller.toggleKillSwitch(value),
+          onChanged: settingsLoading
+              ? null
+              : (value) => controller.toggleKillSwitch(value),
         ),
         _ScopedSwitchTile(
           scope: 'GLOBAL',
           title: 'Global scheduler',
           subtitle: 'Required before Alpaca or KIS scheduler checks can run.',
           value: controller.settings.schedulerEnabled,
-          onChanged: loading
+          onChanged: settingsLoading
               ? null
               : (value) => _saveSettings(
                     context,
@@ -203,10 +235,10 @@ class _OperationModeCard extends StatelessWidget {
                     'Global scheduler',
                   ),
         ),
-        if (mode == 'full_live_test_mode') ...[
+        if (mode == 'live') ...[
           const SizedBox(height: 6),
           const Text(
-            'KIS/KR live buy and live sell automation. Red confirmation required.',
+            'Live mode can allow real orders only when backend gates pass. Confirmation is required.',
             style: TextStyle(color: Colors.redAccent),
           ),
         ],
@@ -803,42 +835,44 @@ class _AdvancedFlagsCard extends StatelessWidget {
     ];
     return SectionCard(
       padding: EdgeInsets.zero,
-      child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: const Icon(Icons.bug_report_outlined),
-        title: const Text('Advanced Flags / Diagnostics'),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        children: [
-          _InfoRow(
-            label: 'kr_no_new_entry_after',
-            value: '${settings.krNoNewEntryAfter} KST',
-            scope: 'KIS / KR',
-          ),
-          _InfoRow(
-            label: 'no_new_entry_after',
-            value: '${settings.noNewEntryAfter} (deprecated alias)',
-            scope: 'KIS / KR',
-          ),
-          for (final flag in flags) _FlagLine(flag: flag),
-          if (risk.riskyFlags.isNotEmpty)
-            _InfoRow(
-              label: 'risky_flags',
-              value: risk.riskyFlags.join(', '),
-              scope: 'KIS / KR',
-            ),
-          if (risk.blockingFlags.isNotEmpty)
-            _InfoRow(
-              label: 'blocking_flags',
-              value: risk.blockingFlags.join(', '),
-              scope: 'KIS / KR',
-            ),
-          _InfoRow(
-            label: 'warning_level',
-            value: risk.warningLevel,
-            scope: 'KIS / KR',
-          ),
-        ],
-      ),
+      child: Material(
+          type: MaterialType.transparency,
+          child: ExpansionTile(
+            initiallyExpanded: false,
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Advanced Flags / Diagnostics'),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              _InfoRow(
+                label: 'kr_no_new_entry_after',
+                value: '${settings.krNoNewEntryAfter} KST',
+                scope: 'KIS / KR',
+              ),
+              _InfoRow(
+                label: 'no_new_entry_after',
+                value: '${settings.noNewEntryAfter} (deprecated alias)',
+                scope: 'KIS / KR',
+              ),
+              for (final flag in flags) _FlagLine(flag: flag),
+              if (risk.riskyFlags.isNotEmpty)
+                _InfoRow(
+                  label: 'risky_flags',
+                  value: risk.riskyFlags.join(', '),
+                  scope: 'KIS / KR',
+                ),
+              if (risk.blockingFlags.isNotEmpty)
+                _InfoRow(
+                  label: 'blocking_flags',
+                  value: risk.blockingFlags.join(', '),
+                  scope: 'KIS / KR',
+                ),
+              _InfoRow(
+                label: 'warning_level',
+                value: risk.warningLevel,
+                scope: 'KIS / KR',
+              ),
+            ],
+          )),
     );
   }
 }
@@ -851,8 +885,13 @@ class _StatusBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = controller.schedulerStatus;
+    final operationModeStatus = controller.operationModeStatus;
     final risk = status.riskSummary;
-    final warning = risk.warningLevel;
+    final warning = operationModeStatus.effectiveMode == 'live'
+        ? 'dangerous_mixed'
+        : operationModeStatus.effectiveMode == 'paused'
+            ? 'blocked'
+            : risk.warningLevel;
     final color = warning == 'dangerous_mixed'
         ? Colors.redAccent
         : warning == 'armed_sell_only'
@@ -874,9 +913,15 @@ class _StatusBanner extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(
-          _modeLabel(_currentMode(controller)),
+          _modeLabel(operationModeStatus.effectiveMode),
           style: TextStyle(color: color, fontWeight: FontWeight.w900),
         ),
+        if (operationModeStatus.displayLabel.isNotEmpty &&
+            operationModeStatus.displayLabel !=
+                _modeLabel(operationModeStatus.effectiveMode)) ...[
+          const SizedBox(height: 6),
+          Text(operationModeStatus.displayLabel),
+        ],
         if (status.userFriendlySummary.isNotEmpty) ...[
           const SizedBox(height: 6),
           Text(status.userFriendlySummary),
@@ -904,9 +949,9 @@ class _StatusBanner extends StatelessWidget {
             color: color,
           ),
           _StatusChip(
-            label: 'FULL LIVE TEST MODE',
-            value: _currentMode(controller) == 'full_live_test_mode',
-            alert: _currentMode(controller) == 'full_live_test_mode',
+            label: 'LIVE MODE',
+            value: operationModeStatus.effectiveMode == 'live',
+            alert: operationModeStatus.effectiveMode == 'live',
           ),
         ]),
       ]),
@@ -1024,21 +1069,23 @@ class _ScopedSwitchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Wrap(
-        spacing: 8,
-        runSpacing: 4,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          _ScopeChip(label: scope),
-          Text(title),
-        ],
-      ),
-      subtitle: subtitle == null ? null : Text(subtitle!),
-      value: value,
-      onChanged: onChanged,
-    );
+    return Material(
+        type: MaterialType.transparency,
+        child: SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _ScopeChip(label: scope),
+              Text(title),
+            ],
+          ),
+          subtitle: subtitle == null ? null : Text(subtitle!),
+          value: value,
+          onChanged: onChanged,
+        ));
   }
 }
 
@@ -1170,7 +1217,9 @@ class _PresetScopeDetails extends StatelessWidget {
         ? Colors.redAccent
         : warning == 'armed_sell_only'
             ? Colors.orangeAccent
-            : Colors.greenAccent;
+            : warning == 'blocked'
+                ? Colors.amberAccent
+                : Colors.greenAccent;
     return Wrap(spacing: 8, runSpacing: 8, children: [
       _TextChip(label: 'Scope: $scope', color: color),
       _TextChip(label: 'Affects: $affects', color: color),
@@ -1217,35 +1266,44 @@ class _OperationModeOption {
 }
 
 const _operationModeOptions = [
-  _OperationModeOption('safe_mode', 'Safe Mode'),
-  _OperationModeOption('dry_run_simulation', 'Dry-run Simulation'),
-  _OperationModeOption('manual_live_trading', 'Manual Live Trading'),
-  _OperationModeOption('kis_sell_only_automation', 'KIS Sell-only Automation'),
   _OperationModeOption(
-    'full_live_test_mode',
-    'Full Live Test Mode',
-    'This enables live buy and live sell automation.',
+    'paper',
+    'Paper',
+    'Simulation and read-only operation. No live orders are submitted.',
+  ),
+  _OperationModeOption(
+    'live',
+    'Live',
+    'Real orders remain gated by backend safety checks and operator acknowledgement.',
+  ),
+  _OperationModeOption(
+    'paused',
+    'Paused',
+    'Automation is stopped until another mode is selected.',
   ),
 ];
 
-Future<void> _applyMode(
+Future<void> _setOperationMode(
   BuildContext context,
   DashboardController controller,
-  String preset,
+  String mode,
 ) async {
-  var confirmDangerous = false;
-  if (preset == 'full_live_test_mode') {
+  final normalizedMode = OperationModeStatus.normalizeMode(mode);
+  var acknowledged = false;
+  if (normalizedMode == 'live') {
     final confirmed = await showConfirmActionDialog(
       context,
-      title: 'Full Live Test Mode',
-      description: 'This enables live buy and live sell automation.',
+      title: 'Live Mode',
+      description:
+          'Live mode can submit real orders after backend safety gates pass.',
     );
     if (!confirmed) return;
-    confirmDangerous = true;
+    acknowledged = true;
   }
-  final result = await controller.applyOperationModePreset(
-    preset,
-    confirmDangerous: confirmDangerous,
+  final result = await controller.setOperationMode(
+    normalizedMode,
+    acknowledged: acknowledged,
+    reason: 'settings_ui',
   );
   if (!context.mounted) return;
   _showResult(context, result);
@@ -1273,12 +1331,22 @@ void _showResult(BuildContext context, ActionResult result) {
 }
 
 String _currentMode(DashboardController controller) {
-  final statusMode = controller.schedulerStatus.currentOperationMode.trim();
-  if (statusMode.isNotEmpty) return statusMode;
-  return controller.settings.currentOperationMode;
+  final facadeMode = controller.operationModeStatus.effectiveMode.trim();
+  if (facadeMode.isNotEmpty) {
+    return OperationModeStatus.normalizeMode(facadeMode);
+  }
+  return _legacyPresetToFacadeMode(controller.settings.currentOperationMode);
 }
 
 String _modeLabel(String mode) {
+  switch (OperationModeStatus.normalizeMode(mode)) {
+    case 'paper':
+      return 'Paper';
+    case 'live':
+      return 'Live';
+    case 'paused':
+      return 'Paused';
+  }
   switch (mode) {
     case 'safe_mode':
       return 'Safe Mode';
@@ -1295,36 +1363,43 @@ String _modeLabel(String mode) {
 }
 
 String _presetScope(String mode) {
-  switch (mode) {
-    case 'kis_sell_only_automation':
-    case 'full_live_test_mode':
-      return 'KIS / KR';
-    default:
-      return 'Global';
-  }
+  return 'Global';
 }
 
 String _presetAffects(String mode) {
-  switch (mode) {
-    case 'kis_sell_only_automation':
-      return 'KIS scheduler sell only';
-    case 'full_live_test_mode':
-      return 'KIS scheduler live buy + sell';
-    case 'manual_live_trading':
-      return 'Manual trading; scheduler live orders off';
-    default:
-      return 'Alpaca + KIS';
+  switch (OperationModeStatus.normalizeMode(mode)) {
+    case 'live':
+      return 'Backend-gated live orders';
+    case 'paused':
+      return 'Automation stopped';
+    case 'paper':
+      return 'Simulation and read-only flows';
   }
+  return 'Simulation and read-only flows';
 }
 
 String _presetWarningLevel(String mode) {
-  switch (mode) {
-    case 'kis_sell_only_automation':
-      return 'armed_sell_only';
-    case 'full_live_test_mode':
+  switch (OperationModeStatus.normalizeMode(mode)) {
+    case 'live':
       return 'dangerous_mixed';
-    default:
+    case 'paused':
+      return 'blocked';
+    case 'paper':
       return 'safe';
+  }
+  return 'safe';
+}
+
+String _legacyPresetToFacadeMode(String mode) {
+  switch (mode.trim()) {
+    case 'full_live_test_mode':
+    case 'kis_sell_only_automation':
+    case 'manual_live_trading':
+      return 'live';
+    case 'safe_mode':
+    case 'dry_run_simulation':
+    default:
+      return 'paper';
   }
 }
 

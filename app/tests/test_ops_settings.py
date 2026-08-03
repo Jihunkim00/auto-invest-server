@@ -50,6 +50,7 @@ def test_ops_settings_defaults_remain_safe(db_session):
     assert settings["dry_run"] is True
     assert settings["kill_switch"] is False
     assert settings["kis_scheduler_enabled"] is False
+    assert settings["kis_position_lifecycle_scheduler_enabled"] is False
     assert settings["kis_scheduler_dry_run"] is True
     assert settings["kis_scheduler_live_enabled"] is False
     assert settings["kis_scheduler_allow_real_orders"] is False

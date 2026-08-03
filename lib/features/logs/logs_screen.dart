@@ -1204,7 +1204,7 @@ class _RunHistoryCard extends StatelessWidget {
                 ),
               ),
             const SizedBox(height: 4),
-            ExpansionTile(
+            Material(type: MaterialType.transparency, child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               initiallyExpanded: false,
@@ -1287,7 +1287,7 @@ class _RunHistoryCard extends StatelessWidget {
                   _DetailRow(
                       label: 'Gates', value: _compactText(run.gatingNotes)),
               ],
-            ),
+            )),
           ],
         ),
       ),
@@ -1487,7 +1487,7 @@ class _OrderHistoryCard extends StatelessWidget {
               _LiveOrderAuditSection(order: order),
             ],
             const SizedBox(height: 4),
-            ExpansionTile(
+            Material(type: MaterialType.transparency, child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               initiallyExpanded: false,
@@ -1574,7 +1574,7 @@ class _OrderHistoryCard extends StatelessWidget {
                   _DetailRow(
                       label: 'Gates', value: _compactText(order.gatingNotes)),
               ],
-            ),
+            )),
           ],
         ),
       ),
@@ -1665,7 +1665,7 @@ class _LiveOrderAuditSection extends StatelessWidget {
           label: 'Real order',
           value: _auditBoolLabel(audit.realOrderSubmitted),
         ),
-        ExpansionTile(
+        Material(type: MaterialType.transparency, child: ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
           title: const Text('Audit Details'),
@@ -1721,7 +1721,7 @@ class _LiveOrderAuditSection extends StatelessWidget {
             if (audit.rawPreview.isNotEmpty)
               _DetailRow(label: 'Raw audit', value: audit.rawPreview),
           ],
-        ),
+        )),
       ],
     );
   }
@@ -1761,7 +1761,7 @@ class _SignalHistoryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            ExpansionTile(
+            Material(type: MaterialType.transparency, child: ExpansionTile(
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
               initiallyExpanded: false,
@@ -1802,7 +1802,7 @@ class _SignalHistoryCard extends StatelessWidget {
                   _DetailRow(
                       label: 'Gates', value: _compactText(signal.gatingNotes)),
               ],
-            ),
+            )),
           ],
         ),
       ),

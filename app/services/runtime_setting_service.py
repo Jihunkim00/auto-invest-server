@@ -64,6 +64,10 @@ class RuntimeSettingService:
             "automation_mode_updated_by": None,
             "automation_mode_reason": None,
             "automation_mode_requires_manual_review": True,
+            "operation_mode_requested": "paper",
+            "operation_mode_changed_at": None,
+            "operation_mode_changed_by": None,
+            "operation_mode_reason": None,
             "default_symbol": self.settings.default_symbol.upper(),
             "default_gate_level": DEFAULT_GATE_LEVEL,
             "max_trades_per_day": MAX_TRADES_PER_DAY,
@@ -108,6 +112,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review": True,
             "kis_limited_auto_buy_max_orders_per_day": 1,
             "kis_limited_auto_buy_max_notional_pct": 0.03,
+            "kis_limited_auto_buy_max_notional_krw": 55000.0,
             "kis_limited_auto_buy_min_cash_buffer_krw": 0.0,
             "kis_limited_auto_buy_requires_existing_sell_guards": True,
             "kis_limited_auto_buy_min_final_score": 75.0,
@@ -183,6 +188,7 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis": True,
             "strategy_live_auto_exit_min_quantity": 1,
             "position_management_scheduler_enabled": False,
+            "kis_position_lifecycle_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
             "position_management_scheduler_allow_live_orders": False,
             "portfolio_orchestrator_enabled": False,
@@ -296,6 +302,20 @@ class RuntimeSettingService:
             "automation_mode_requires_manual_review": bool(
                 getattr(row, "automation_mode_requires_manual_review", True)
             ),
+            "operation_mode_requested": str(
+                getattr(row, "operation_mode_requested", None) or "paper"
+            ),
+            "operation_mode_changed_at": getattr(
+                row,
+                "operation_mode_changed_at",
+                None,
+            ),
+            "operation_mode_changed_by": getattr(
+                row,
+                "operation_mode_changed_by",
+                None,
+            ),
+            "operation_mode_reason": getattr(row, "operation_mode_reason", None),
             "default_symbol": row.default_symbol,
             "default_gate_level": int(row.default_gate_level),
             "max_trades_per_day": int(row.max_trades_per_day),
@@ -401,6 +421,9 @@ class RuntimeSettingService:
             ),
             "kis_limited_auto_buy_max_notional_pct": float(
                 row.kis_limited_auto_buy_max_notional_pct
+            ),
+            "kis_limited_auto_buy_max_notional_krw": float(
+                row.kis_limited_auto_buy_max_notional_krw
             ),
             "kis_limited_auto_buy_min_cash_buffer_krw": float(
                 row.kis_limited_auto_buy_min_cash_buffer_krw
@@ -593,6 +616,9 @@ class RuntimeSettingService:
             ),
             "position_management_scheduler_enabled": bool(
                 row.position_management_scheduler_enabled
+            ),
+            "kis_position_lifecycle_scheduler_enabled": bool(
+                row.kis_position_lifecycle_scheduler_enabled
             ),
             "position_management_scheduler_dry_run_only": bool(
                 row.position_management_scheduler_dry_run_only
@@ -803,6 +829,9 @@ class RuntimeSettingService:
         settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["position_management_scheduler_dry_run_only"] = True
         settings["position_management_scheduler_allow_live_orders"] = False
+        settings["kis_position_lifecycle_scheduler_enabled"] = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         settings["portfolio_orchestrator_positions_first"] = True
         settings["portfolio_orchestrator_max_actions_per_run"] = 1
         settings["portfolio_orchestrator_require_production_ready"] = True
@@ -1014,6 +1043,9 @@ class RuntimeSettingService:
         )
         scheduler_enabled = bool(settings["scheduler_enabled"])
         kis_scheduler_enabled = bool(settings["kis_scheduler_enabled"])
+        kis_position_lifecycle_scheduler_enabled = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         kis_scheduler_dry_run = bool(settings["kis_scheduler_dry_run"])
         kis_scheduler_allow_real_orders = bool(
             settings["kis_scheduler_allow_real_orders"]
@@ -1058,6 +1090,9 @@ class RuntimeSettingService:
         return {
             "scheduler_enabled": scheduler_enabled,
             "kis_scheduler_enabled": kis_scheduler_enabled,
+            "kis_position_lifecycle_scheduler_enabled": (
+                kis_position_lifecycle_scheduler_enabled
+            ),
             "kis_scheduler_dry_run": kis_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kis_scheduler_allow_real_orders,
             "kis_scheduler_configured_allow_real_orders": (
@@ -1878,6 +1913,22 @@ class RuntimeSettingService:
                 affects=["KIS/KR live order notional cap"],
             ),
             _catalog_item(
+                "kis_limited_auto_buy_max_notional_krw",
+                "KIS limited buy max KRW",
+                "Absolute KRW cap for reviewed one-share KIS limited auto-buy.",
+                "risk_limits",
+                "float",
+                settings["kis_limited_auto_buy_max_notional_krw"],
+                defaults["kis_limited_auto_buy_max_notional_krw"],
+                minimum=0.0,
+                unit="KRW",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS reviewed limited auto-buy"],
+            ),
+            _catalog_item(
                 "daily_max_loss_pct",
                 "Daily max loss %",
                 "Displayed for UI consistency; no runtime executor currently consumes it.",
@@ -2049,6 +2100,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2085,6 +2137,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2117,6 +2170,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2148,6 +2202,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
                 "portfolio_orchestrator_enabled": False,
@@ -2180,6 +2235,7 @@ class RuntimeSettingService:
                     "strategy_live_auto_exit_enabled": False,
                     "strategy_live_auto_exit_scheduler_enabled": False,
                     "position_management_scheduler_enabled": False,
+                    "kis_position_lifecycle_scheduler_enabled": False,
                     "position_management_scheduler_dry_run_only": True,
                     "position_management_scheduler_allow_live_orders": False,
                     "portfolio_orchestrator_enabled": False,
@@ -2187,6 +2243,7 @@ class RuntimeSettingService:
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+                    "kis_limited_auto_buy_max_notional_krw": 55000.0,
                     "kis_limited_auto_buy_max_positions": 3,
                 }
             )
@@ -2328,6 +2385,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review",
             "kis_limited_auto_buy_max_orders_per_day",
             "kis_limited_auto_buy_max_notional_pct",
+            "kis_limited_auto_buy_max_notional_krw",
             "kis_limited_auto_buy_min_cash_buffer_krw",
             "kis_limited_auto_buy_requires_existing_sell_guards",
             "kis_limited_auto_buy_min_final_score",
@@ -2394,6 +2452,7 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis",
             "strategy_live_auto_exit_min_quantity",
             "position_management_scheduler_enabled",
+            "kis_position_lifecycle_scheduler_enabled",
             "position_management_scheduler_dry_run_only",
             "position_management_scheduler_allow_live_orders",
             "portfolio_orchestrator_enabled",
@@ -2648,6 +2707,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
             }
@@ -2675,6 +2735,7 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
             }
@@ -2862,6 +2923,7 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_enabled",
+        "kis_position_lifecycle_scheduler_enabled",
         "position_management_scheduler_allow_live_orders",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
@@ -2922,6 +2984,7 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_allow_live_orders",
+        "kis_position_lifecycle_scheduler_enabled",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
         "automation_soak_enabled",

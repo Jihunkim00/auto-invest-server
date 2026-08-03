@@ -24,6 +24,7 @@ import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/managed_position.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/operation_mode.dart';
 import 'package:auto_invest_dashboard/models/order_validation_result.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
@@ -1487,6 +1488,10 @@ class _FakeApiClient extends ApiClient {
           'HTTP 500: {"message":"settings failed"}');
     }
   }
+
+  @override
+  Future<OperationModeStatus> fetchOperationMode() async =>
+      OperationModeStatus.safeDefault;
 
   @override
   Future<SchedulerStatus> fetchSchedulerStatus() async => const SchedulerStatus(

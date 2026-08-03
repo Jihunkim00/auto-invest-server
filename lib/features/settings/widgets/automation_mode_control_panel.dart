@@ -154,7 +154,7 @@ class _AutomationModeControlPanelState
               ),
               if (ackRequired) ...[
                 const SizedBox(height: 8),
-                CheckboxListTile(
+                Material(type: MaterialType.transparency, child: CheckboxListTile(
                   key: const ValueKey('automation-mode-risk-ack-checkbox'),
                   contentPadding: EdgeInsets.zero,
                   value: _acknowledged,
@@ -166,7 +166,7 @@ class _AutomationModeControlPanelState
                         },
                   title: Text(strings.operatorRiskAcknowledgement),
                   subtitle: Text(strings.acknowledgementRequiredForMode),
-                ),
+                )),
               ],
               const SizedBox(height: 12),
               Wrap(

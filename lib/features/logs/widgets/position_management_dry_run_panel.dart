@@ -28,9 +28,11 @@ class PositionManagementDryRunPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -119,7 +121,7 @@ class PositionManagementDryRunPanel extends StatelessWidget {
                 if (payload.candidates.isEmpty)
                   _EmptyLine(text: strings.none)
                 else
-                  ExpansionTile(
+                  Material(type: MaterialType.transparency, child: ExpansionTile(
                     key: const ValueKey(
                       'position-management-dry-run-candidates-expansion',
                     ),
@@ -138,9 +140,10 @@ class PositionManagementDryRunPanel extends StatelessWidget {
                         const SizedBox(height: 8),
                       ],
                     ],
-                  ),
+                  )),
               ],
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -220,7 +223,7 @@ class _LatestRun extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       key: const ValueKey('position-management-dry-run-details-expansion'),
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
@@ -256,7 +259,7 @@ class _LatestRun extends StatelessWidget {
               '${strings.sellPreflight}: ${payload.simulatedSellPreflightCount} / ${strings.blocked}: ${payload.blockedPreflightCount}',
         ),
       ],
-    );
+    ));
   }
 }
 

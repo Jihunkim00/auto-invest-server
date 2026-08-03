@@ -28,9 +28,11 @@ class AutoExitCandidatesPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -109,7 +111,8 @@ class AutoExitCandidatesPanel extends StatelessWidget {
                     const SizedBox(height: 8),
                   ],
               ],
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -219,9 +222,11 @@ class _CandidateTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: severityColor.withValues(alpha: 0.30)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -285,7 +290,7 @@ class _CandidateTile extends StatelessWidget {
               ),
             ],
           ),
-          ExpansionTile(
+          Material(type: MaterialType.transparency, child: ExpansionTile(
             key: ValueKey('auto-exit-candidate-details-${candidate.symbol}'),
             tilePadding: EdgeInsets.zero,
             childrenPadding: EdgeInsets.zero,
@@ -313,8 +318,9 @@ class _CandidateTile extends StatelessWidget {
                     'buy=${candidate.relatedBuyOrderId ?? '-'} / lifecycle=${candidate.relatedLifecycleId ?? '-'}',
               ),
             ],
-          ),
-        ],
+          )),
+          ],
+        ),
       ),
     );
   }

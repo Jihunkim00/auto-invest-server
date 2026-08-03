@@ -573,13 +573,13 @@ class _ResultExpansion extends StatelessWidget {
   Widget build(BuildContext context) {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: 8),
         initiallyExpanded: initiallyExpanded,
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
         children: [child],
-      ),
+      )),
     );
   }
 }

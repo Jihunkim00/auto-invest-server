@@ -139,6 +139,10 @@ def _create_runtime_settings_table_if_missing():
                     automation_mode_updated_by VARCHAR(80),
                     automation_mode_reason TEXT,
                     automation_mode_requires_manual_review BOOLEAN NOT NULL DEFAULT 1,
+                    operation_mode_requested VARCHAR(20) NOT NULL DEFAULT 'paper',
+                    operation_mode_changed_at DATETIME,
+                    operation_mode_changed_by VARCHAR(80),
+                    operation_mode_reason TEXT,
                     default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
                     default_gate_level INTEGER NOT NULL DEFAULT 2,
                     max_trades_per_day INTEGER NOT NULL DEFAULT 3,
@@ -183,6 +187,7 @@ def _create_runtime_settings_table_if_missing():
                     kis_limited_auto_buy_requires_shadow_review BOOLEAN NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    kis_limited_auto_buy_max_notional_krw FLOAT NOT NULL DEFAULT 55000,
                     kis_limited_auto_buy_min_cash_buffer_krw FLOAT NOT NULL DEFAULT 0,
                     kis_limited_auto_buy_requires_existing_sell_guards BOOLEAN NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_min_final_score FLOAT NOT NULL DEFAULT 75,
@@ -249,6 +254,7 @@ def _create_runtime_settings_table_if_missing():
                     strategy_live_auto_exit_requires_cost_basis BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_exit_min_quantity INTEGER NOT NULL DEFAULT 1,
                     position_management_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_position_lifecycle_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     position_management_scheduler_dry_run_only BOOLEAN NOT NULL DEFAULT 1,
                     position_management_scheduler_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -794,6 +800,62 @@ def _create_kis_shadow_exit_review_queue_state_table_if_missing():
         )
 
 
+def _create_position_lifecycles_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS position_lifecycles (
+                    id INTEGER PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    entry_order_id INTEGER NOT NULL UNIQUE,
+                    entry_price FLOAT NOT NULL,
+                    cost_basis FLOAT NOT NULL,
+                    quantity FLOAT NOT NULL DEFAULT 1.0,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    opened_at DATETIME NOT NULL,
+                    last_price FLOAT,
+                    unrealized_pl FLOAT,
+                    unrealized_pl_pct FLOAT,
+                    max_price_since_entry FLOAT,
+                    stop_loss_threshold_pct FLOAT,
+                    take_profit_threshold_pct FLOAT,
+                    exit_reason TEXT,
+                    exit_order_id INTEGER,
+                    last_evaluated_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_symbol "
+                "ON position_lifecycles (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_position_lifecycles_entry_order_id "
+                "ON position_lifecycles (entry_order_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_status "
+                "ON position_lifecycles (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_exit_order_id "
+                "ON position_lifecycles (exit_order_id)"
+            )
+        )
+
+
 def _create_broker_auth_tokens_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1327,6 +1389,49 @@ def _create_agent_chat_live_order_settings_audits_table_if_missing():
             )
 
 
+def _create_operation_mode_audits_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_mode_audits (
+                    id INTEGER PRIMARY KEY,
+                    previous_mode VARCHAR(20) NOT NULL,
+                    requested_mode VARCHAR(20) NOT NULL,
+                    effective_mode VARCHAR(20) NOT NULL,
+                    status VARCHAR(30) NOT NULL,
+                    changed_by VARCHAR(80) NOT NULL DEFAULT 'api',
+                    reason TEXT,
+                    acknowledged BOOLEAN NOT NULL DEFAULT 0,
+                    provider VARCHAR(20),
+                    market VARCHAR(10),
+                    blocking_reasons_json TEXT NOT NULL DEFAULT '[]',
+                    warnings_json TEXT NOT NULL DEFAULT '[]',
+                    before_state_json TEXT NOT NULL,
+                    after_state_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "previous_mode": "previous_mode",
+            "requested_mode": "requested_mode",
+            "effective_mode": "effective_mode",
+            "status": "status",
+            "changed_by": "changed_by",
+            "provider": "provider",
+            "market": "market",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_operation_mode_audits_{name} "
+                    f"ON operation_mode_audits ({column})"
+                )
+            )
+
+
 def _create_agent_execution_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1485,12 +1590,14 @@ def init_db():
     _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
+    _create_position_lifecycles_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()
     _create_agent_chat_live_order_settings_audits_table_if_missing()
+    _create_operation_mode_audits_table_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
     _create_agent_review_queue_state_table_if_missing()
@@ -1542,6 +1649,10 @@ def init_db():
         "automation_mode_updated_by": "VARCHAR(80)",
         "automation_mode_reason": "TEXT",
         "automation_mode_requires_manual_review": "BOOLEAN DEFAULT 1",
+        "operation_mode_requested": "VARCHAR(20) DEFAULT 'paper'",
+        "operation_mode_changed_at": "DATETIME",
+        "operation_mode_changed_by": "VARCHAR(80)",
+        "operation_mode_reason": "TEXT",
         "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",
         "default_gate_level": "INTEGER DEFAULT 2",
         "max_trades_per_day": "INTEGER DEFAULT 3",
@@ -1586,6 +1697,7 @@ def init_db():
         "kis_limited_auto_buy_requires_shadow_review": "BOOLEAN DEFAULT 1",
         "kis_limited_auto_buy_max_orders_per_day": "INTEGER DEFAULT 1",
         "kis_limited_auto_buy_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "kis_limited_auto_buy_max_notional_krw": "FLOAT DEFAULT 55000",
         "kis_limited_auto_buy_min_cash_buffer_krw": "FLOAT DEFAULT 0",
         "kis_limited_auto_buy_requires_existing_sell_guards": "BOOLEAN DEFAULT 1",
         "kis_limited_auto_buy_min_final_score": "FLOAT DEFAULT 75",
@@ -1652,6 +1764,7 @@ def init_db():
         "strategy_live_auto_exit_requires_cost_basis": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_exit_min_quantity": "INTEGER DEFAULT 1",
         "position_management_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "kis_position_lifecycle_scheduler_enabled": "BOOLEAN DEFAULT 0",
         "position_management_scheduler_dry_run_only": "BOOLEAN DEFAULT 1",
         "position_management_scheduler_allow_live_orders": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_enabled": "BOOLEAN DEFAULT 0",

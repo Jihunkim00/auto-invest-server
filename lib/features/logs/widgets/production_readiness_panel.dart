@@ -27,9 +27,11 @@ class ProductionReadinessPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -108,7 +110,8 @@ class ProductionReadinessPanel extends StatelessWidget {
                 const SizedBox(height: 12),
                 _ChecklistGroups(readiness: readiness, strings: strings),
               ],
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -289,7 +292,7 @@ class _ChecklistGroups extends StatelessWidget {
         key: const ValueKey('production-readiness-checklist-groups'),
         children: [
           for (final key in orderedKeys)
-            ExpansionTile(
+            Material(type: MaterialType.transparency, child: ExpansionTile(
               key: ValueKey('production-readiness-group-$key'),
               tilePadding: EdgeInsets.zero,
               childrenPadding: EdgeInsets.zero,
@@ -302,7 +305,7 @@ class _ChecklistGroups extends StatelessWidget {
                 for (final item in grouped[key]!)
                   _ChecklistRow(item: item, strings: strings),
               ],
-            ),
+            )),
         ],
       ),
     );

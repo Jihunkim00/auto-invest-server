@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -76,12 +77,14 @@ class KisManualOrderService:
         profile_service: MarketProfileService | None = None,
         session_service: MarketSessionService | None = None,
         runtime_settings: RuntimeSettingService | None = None,
+        before_broker_submit: Callable[[OrderLog], None] | None = None,
     ):
         self.client = client
         self.broker = broker or KisBroker(client)
         self.profile_service = profile_service or MarketProfileService()
         self.session_service = session_service or MarketSessionService()
         self.runtime_settings = runtime_settings or RuntimeSettingService()
+        self.before_broker_submit = before_broker_submit
 
     def submit_manual(
         self,
@@ -441,6 +444,8 @@ class KisManualOrderService:
         )
 
         try:
+            if self.before_broker_submit is not None:
+                self.before_broker_submit(order)
             if normalized_side == "buy":
                 broker_response = self.broker.submit_market_buy(
                     symbol=normalized_symbol,
@@ -845,6 +850,11 @@ class KisManualOrderService:
             "validation_age_seconds": validation_age,
             "validation_stale": validation_stale,
             "submit_allowed": not failed_checks,
+            "forced_test_entry": bool(
+                source_metadata.get("forced_test_entry")
+                if isinstance(source_metadata, dict)
+                else False
+            ),
             "confirm_live": request.confirm_live,
             "warning_level": warning_level,
             "risk_flags": risk_flags,

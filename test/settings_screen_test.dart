@@ -9,6 +9,7 @@ import 'package:auto_invest_dashboard/models/kis_manual_order_safety_status.dart
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_buy.dart';
 import 'package:auto_invest_dashboard/models/kis_scheduler_guarded_sell.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/operation_mode.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 
 void main() {
@@ -21,7 +22,7 @@ void main() {
     expect(find.text('Operation Mode'), findsOneWidget);
     expect(find.byType(DropdownButtonFormField<String>), findsOneWidget);
     expect(find.text('Scope: Global'), findsOneWidget);
-    expect(find.text('Affects: Alpaca + KIS'), findsOneWidget);
+    expect(find.text('Affects: Simulation and read-only flows'), findsOneWidget);
 
     final dropdown = find.byType(DropdownButtonFormField<String>);
     await tester.ensureVisible(dropdown);
@@ -29,11 +30,10 @@ void main() {
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
 
-    expect(find.text('Safe Mode'), findsWidgets);
-    expect(find.text('Dry-run Simulation'), findsWidgets);
-    expect(find.text('Manual Live Trading'), findsWidgets);
-    expect(find.text('KIS Sell-only Automation'), findsWidgets);
-    expect(find.text('Full Live Test Mode'), findsWidgets);
+    expect(find.text('Paper'), findsWidgets);
+    expect(find.text('Live'), findsWidgets);
+    expect(find.text('Paused'), findsWidgets);
+    expect(find.text('Full Live Test Mode'), findsNothing);
 
     controller.dispose();
   });
@@ -77,95 +77,99 @@ void main() {
     controller.dispose();
   });
 
-  testWidgets('selecting Safe Mode calls apply preset and updates UI',
+  testWidgets('selecting Paper calls operation mode facade and updates UI',
       (tester) async {
     final api = _SettingsFakeApiClient(
-      initialSettings: _opsSettingsForPreset('kis_sell_only_automation'),
+      initialOperationMode: 'live',
+      initialSettings: _opsSettings(currentOperationMode: 'live'),
     );
     final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
 
-    await _selectOperationMode(tester, 'Safe Mode');
+    await _selectOperationMode(tester, 'Paper');
 
-    expect(api.applyPresetCalls, 1);
-    expect(api.lastPreset, 'safe_mode');
-    expect(controller.settings.currentOperationMode, 'safe_mode');
-    expect(find.text('Safe Mode applied.'), findsOneWidget);
+    expect(api.updateOperationModeCalls, 1);
+    expect(api.lastOperationMode, 'paper');
+    expect(api.lastOperationModeAcknowledged, isFalse);
+    expect(controller.operationModeStatus.effectiveMode, 'paper');
+    expect(controller.settings.currentOperationMode, 'paper');
+    expect(find.text('Paper mode applied.'), findsOneWidget);
 
     controller.dispose();
   });
 
   testWidgets(
-      'selecting KIS Sell-only Automation shows sell-only armed summary',
+      'selecting Paused updates facade status without live acknowledgement',
       (tester) async {
     final api = _SettingsFakeApiClient();
     final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
 
-    await _selectOperationMode(tester, 'KIS Sell-only Automation');
+    await _selectOperationMode(tester, 'Paused');
 
-    expect(api.lastPreset, 'kis_sell_only_automation');
+    expect(api.lastOperationMode, 'paused');
+    expect(api.lastOperationModeAcknowledged, isFalse);
+    expect(controller.operationModeStatus.effectiveMode, 'paused');
+    expect(find.text('Paused mode applied.'), findsOneWidget);
+    expect(find.text('LIVE MODE OFF'), findsOneWidget);
+
+    controller.dispose();
+  });
+
+  testWidgets('selecting Live opens danger confirmation dialog',
+      (tester) async {
+    final api = _SettingsFakeApiClient();
+    final controller = _controller(api);
+
+    await tester.pumpWidget(_wrap(controller));
+
+    await _selectOperationMode(tester, 'Live');
+
+    expect(find.text('Live Mode'), findsWidgets);
     expect(
-      find.text(
-          'KIS sell-only live automation is armed. Auto-buy is disabled.'),
-      findsOneWidget,
-    );
-    expect(find.text('LIVE SELL ARMED ON'), findsOneWidget);
-    expect(find.text('LIVE BUY ARMED OFF'), findsOneWidget);
-
-    controller.dispose();
-  });
-
-  testWidgets('selecting Full Live Test Mode opens danger confirmation dialog',
-      (tester) async {
-    final api = _SettingsFakeApiClient();
-    final controller = _controller(api);
-
-    await tester.pumpWidget(_wrap(controller));
-
-    await _selectOperationMode(tester, 'Full Live Test Mode');
-
-    expect(find.text('Full Live Test Mode'), findsWidgets);
-    expect(find.text('This enables live buy and live sell automation.'),
+        find.text(
+            'Live mode can submit real orders after backend safety gates pass.'),
         findsWidgets);
-    expect(api.applyPresetCalls, 0);
+    expect(api.updateOperationModeCalls, 0);
 
     controller.dispose();
   });
 
-  testWidgets('canceling Full Live Test Mode does not apply preset',
+  testWidgets('canceling Live does not call operation mode facade',
       (tester) async {
     final api = _SettingsFakeApiClient();
     final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
-    await _selectOperationMode(tester, 'Full Live Test Mode');
+    await _selectOperationMode(tester, 'Live');
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
 
-    expect(api.applyPresetCalls, 0);
-    expect(controller.settings.currentOperationMode, 'safe_mode');
+    expect(api.updateOperationModeCalls, 0);
+    expect(controller.operationModeStatus.effectiveMode, 'paper');
 
     controller.dispose();
   });
 
-  testWidgets('confirming Full Live Test Mode applies preset', (tester) async {
+  testWidgets('confirming Live sends acknowledged facade request',
+      (tester) async {
     final api = _SettingsFakeApiClient();
     final controller = _controller(api);
 
     await tester.pumpWidget(_wrap(controller));
-    await _selectOperationMode(tester, 'Full Live Test Mode');
+    await _selectOperationMode(tester, 'Live');
     await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
     await tester.pumpAndSettle();
 
-    expect(api.applyPresetCalls, 1);
-    expect(api.lastPreset, 'full_live_test_mode');
-    expect(api.lastConfirmDangerous, isTrue);
-    expect(controller.settings.currentOperationMode, 'full_live_test_mode');
-    expect(find.text('LIVE BUY ARMED ON'), findsOneWidget);
-    expect(find.text('LIVE SELL ARMED ON'), findsOneWidget);
+    expect(api.updateOperationModeCalls, 1);
+    expect(api.lastOperationMode, 'live');
+    expect(api.lastOperationModeAcknowledged, isTrue);
+    expect(api.lastOperationModeReason, 'settings_ui');
+    expect(controller.operationModeStatus.effectiveMode, 'live');
+    expect(controller.settings.currentOperationMode, 'live');
+    expect(find.text('LIVE MODE ON'), findsOneWidget);
 
     controller.dispose();
   });
@@ -270,6 +274,7 @@ void main() {
 
   testWidgets('dangerous_mixed renders red warning', (tester) async {
     final api = _SettingsFakeApiClient(
+      initialOperationMode: 'live',
       initialSettings: _opsSettingsForPreset('full_live_test_mode'),
     );
     final controller = _controller(api);
@@ -278,9 +283,9 @@ void main() {
 
     expect(find.byKey(const Key('settings-warning-dangerous_mixed')),
         findsOneWidget);
-    expect(find.text('FULL LIVE TEST MODE ON'), findsOneWidget);
+    expect(find.text('LIVE MODE ON'), findsOneWidget);
     expect(find.text('LIVE BUY ARMED ON'), findsOneWidget);
-    expect(find.text('Scope: KIS / KR'), findsOneWidget);
+    expect(find.text('Scope: Global'), findsOneWidget);
     expect(find.text('Warning: dangerous_mixed'), findsOneWidget);
 
     controller.dispose();
@@ -309,6 +314,7 @@ DashboardController _controller([_SettingsFakeApiClient? api]) {
   return DashboardController(fake, autoload: false)
     ..selectedProvider = SelectedProvider.kis
     ..settings = fake.currentSettings
+    ..operationModeStatus = fake.currentOperationModeStatus
     ..schedulerStatus = fake.currentStatus
     ..kisSafetyStatus = fake.safetyStatus;
 }
@@ -338,21 +344,31 @@ Future<void> _selectOperationMode(WidgetTester tester, String label) async {
 }
 
 class _SettingsFakeApiClient extends ApiClient {
-  _SettingsFakeApiClient({OpsSettings? initialSettings})
-      : currentSettings = initialSettings ?? _opsSettings() {
+  _SettingsFakeApiClient({
+    OpsSettings? initialSettings,
+    String initialOperationMode = 'paper',
+  })  : currentSettings = initialSettings ?? _opsSettings(),
+        currentOperationModeStatus =
+            _operationModeStatus(initialOperationMode) {
     currentStatus = _schedulerStatusForSettings(currentSettings);
   }
 
   OpsSettings currentSettings;
+  OperationModeStatus currentOperationModeStatus;
   late SchedulerStatus currentStatus;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
   int applyPresetCalls = 0;
+  int fetchOperationModeCalls = 0;
+  int updateOperationModeCalls = 0;
   int schedulerStatusCalls = 0;
   int guardedSellStatusCalls = 0;
   int guardedBuyStatusCalls = 0;
   String? lastPreset;
   bool? lastConfirmDangerous;
+  String? lastOperationMode;
+  bool? lastOperationModeAcknowledged;
+  String? lastOperationModeReason;
   Map<String, dynamic>? lastSettingsUpdate;
 
   KisManualOrderSafetyStatus get safetyStatus => KisManualOrderSafetyStatus(
@@ -377,6 +393,42 @@ class _SettingsFakeApiClient extends ApiClient {
     lastSettingsUpdate = Map<String, dynamic>.from(values);
     currentSettings = _settingsWithPayload(currentSettings, values);
     currentStatus = _schedulerStatusForSettings(currentSettings);
+  }
+
+  @override
+  Future<OperationModeStatus> fetchOperationMode() async {
+    fetchOperationModeCalls += 1;
+    return currentOperationModeStatus;
+  }
+
+  @override
+  Future<OperationModeChangeResult> updateOperationMode({
+    required String mode,
+    required bool acknowledged,
+    String? reason,
+  }) async {
+    updateOperationModeCalls += 1;
+    final normalized = OperationModeStatus.normalizeMode(mode);
+    lastOperationMode = normalized;
+    lastOperationModeAcknowledged = acknowledged;
+    lastOperationModeReason = reason;
+    final previousMode = currentOperationModeStatus.effectiveMode;
+    currentOperationModeStatus = _operationModeStatus(normalized);
+    currentSettings = currentSettings.copyWith(currentOperationMode: normalized);
+    currentStatus = _schedulerStatusForSettings(currentSettings);
+    return OperationModeChangeResult(
+      changed: previousMode != normalized,
+      previousMode: previousMode,
+      requestedMode: normalized,
+      effectiveMode: normalized,
+      status: 'active',
+      safetyStatus: normalized,
+      displayLabel: _facadeModeLabel(normalized),
+      message: '${_facadeModeLabel(normalized)} mode applied.',
+      blockingReasons: const [],
+      warnings: const [],
+      underlyingState: const {},
+    );
   }
 
   @override
@@ -553,6 +605,38 @@ OpsSettings _opsSettingsForPreset(String preset) {
     default:
       return _opsSettings(currentOperationMode: 'safe_mode');
   }
+}
+
+OperationModeStatus _operationModeStatus(String mode) {
+  final normalized = OperationModeStatus.normalizeMode(mode);
+  return OperationModeStatus(
+    requestedMode: normalized,
+    effectiveMode: normalized,
+    displayLabel: _facadeModeLabel(normalized),
+    status: 'active',
+    safetyStatus: normalized,
+    canChangeMode: true,
+    canEnterPaper: true,
+    canEnterLive: true,
+    canEnterPaused: true,
+    requiresAcknowledgement: const {'live': true},
+    modeDriftDetected: false,
+    blockingReasons: const [],
+    warnings: const [],
+    underlyingState: const {},
+  );
+}
+
+String _facadeModeLabel(String mode) {
+  switch (OperationModeStatus.normalizeMode(mode)) {
+    case 'live':
+      return 'Live';
+    case 'paused':
+      return 'Paused';
+    case 'paper':
+      return 'Paper';
+  }
+  return 'Paper';
 }
 
 OpsSettings _settingsWithPayload(

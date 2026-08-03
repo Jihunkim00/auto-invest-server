@@ -122,7 +122,7 @@ class _AutomationReleaseControlPanelState
                 ),
               ),
               const SizedBox(height: 8),
-              CheckboxListTile(
+              Material(type: MaterialType.transparency, child: CheckboxListTile(
                 key: const ValueKey('automation-release-risk-ack-checkbox'),
                 contentPadding: EdgeInsets.zero,
                 value: _acknowledged,
@@ -131,7 +131,7 @@ class _AutomationReleaseControlPanelState
                     ? null
                     : (value) => setState(() => _acknowledged = value ?? false),
                 title: Text(strings.armWithRiskAcknowledgement),
-              ),
+              )),
               const SizedBox(height: 10),
               Wrap(
                 spacing: 8,

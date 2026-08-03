@@ -394,8 +394,13 @@ def test_kis_current_price_matches_across_preview_endpoints(
         )
 
     monkeypatch.setattr("app.brokers.kis_client.requests.get", fake_get)
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: [],
+    )
 
-    market_response = client.get("/kis/market/price/005930")
+    preview_symbol = "005930"
+    market_response = client.get(f"/kis/market/price/{preview_symbol}")
     watchlist_response = client.post("/kis/watchlist/preview")
     scheduler_response = client.post("/kis/scheduler/run-preview-once")
 
@@ -406,15 +411,15 @@ def test_kis_current_price_matches_across_preview_endpoints(
     market_price = market_response.json()["current_price"]
     watchlist_body = watchlist_response.json()
     scheduler_body = scheduler_response.json()
-    watchlist_candidate = _find_candidate(watchlist_body, "005930")
-    scheduler_candidate = _find_candidate(scheduler_body, "005930")
+    watchlist_candidate = _find_candidate(watchlist_body, preview_symbol)
+    scheduler_candidate = _find_candidate(scheduler_body, preview_symbol)
 
     assert market_price == 220500.0
     assert watchlist_candidate["current_price"] == 220500.0
     assert scheduler_candidate["current_price"] == 220500.0
     assert watchlist_candidate["current_price"] != 1286000.0
     assert scheduler_candidate["current_price"] != 1286000.0
-    assert requested_symbols.count("005930") == 3
+    assert requested_symbols.count(preview_symbol) == 3
 
     for payload, candidate in (
         (watchlist_body, watchlist_candidate),
