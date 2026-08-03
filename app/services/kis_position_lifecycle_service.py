@@ -47,6 +47,10 @@ CLOSED = "closed"
 REVIEWED_BUY_SOURCE_TYPE = "operator_reviewed_limited_auto_buy"
 REVIEWED_BUY_ENDPOINT = "/kis/limited-auto-buy/execute-reviewed-once"
 REVIEWED_BUY_MODE = "kis_limited_auto_buy_execute_reviewed"
+FORCED_TEST_ENTRY_SOURCE_TYPE = "operator_forced_one_share_buy"
+FORCED_TEST_ENTRY_SOURCE_CONTEXT = "operator_forced_test_entry"
+FORCED_TEST_ENTRY_ENDPOINT = "/app/operation-test3/operator-forced-one-share-buy"
+FORCED_TEST_ENTRY_MODE = "operator_forced_one_share_buy"
 KR_TZ = ZoneInfo("Asia/Seoul")
 
 SUBMITTED_SELL_STATUSES = {
@@ -984,6 +988,14 @@ def _payload_has_reviewed_buy_marker(payload: dict[str, Any]) -> bool:
     if REVIEWED_BUY_SOURCE_TYPE in normalized:
         return True
     if REVIEWED_BUY_ENDPOINT in normalized or REVIEWED_BUY_MODE in normalized:
+        return True
+    if FORCED_TEST_ENTRY_SOURCE_TYPE in normalized:
+        return True
+    if FORCED_TEST_ENTRY_SOURCE_CONTEXT in normalized:
+        return True
+    if FORCED_TEST_ENTRY_ENDPOINT in normalized or FORCED_TEST_ENTRY_MODE in normalized:
+        return True
+    if payload.get("forced_test_entry") is True:
         return True
     reason = str(payload.get("reason") or "").strip().lower()
     if "operator reviewed limited auto buy" in reason:

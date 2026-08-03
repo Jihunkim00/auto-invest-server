@@ -850,6 +850,11 @@ class KisManualOrderService:
             "validation_age_seconds": validation_age,
             "validation_stale": validation_stale,
             "submit_allowed": not failed_checks,
+            "forced_test_entry": bool(
+                source_metadata.get("forced_test_entry")
+                if isinstance(source_metadata, dict)
+                else False
+            ),
             "confirm_live": request.confirm_live,
             "warning_level": warning_level,
             "risk_flags": risk_flags,
