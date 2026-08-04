@@ -130,6 +130,13 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_scheduler_allow_limited_auto_buy: bool | None = None
     kis_scheduler_allow_limited_auto_sell: bool | None = None
     kis_scheduler_max_live_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    operation_test3_enabled: bool | None = None
+    operation_test3_scheduler_enabled: bool | None = None
+    operation_test3_allow_real_orders: bool | None = None
+    operation_test3_position_management_enabled: bool | None = None
+    operation_test3_stop_loss_enabled: bool | None = None
+    operation_test3_take_profit_enabled: bool | None = None
+    operation_test3_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=20)
     kis_scheduler_live_requires_dry_run_false: bool | None = None
     kis_scheduler_live_respect_kill_switch: bool | None = None
     portfolio_orchestrator_enabled: bool | None = None
@@ -236,6 +243,14 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
     svc = RuntimeSettingService()
     payload_values = payload.model_dump(exclude_none=True)
     deprecation_warnings: list[dict[str, str]] = []
+    if payload_values.get("operation_test3_allow_real_orders") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test3_allow_real_orders requires the "
+                "/app/operation-test3/position-management/enable live confirmation endpoint."
+            ),
+        )
     if "no_new_entry_after" in payload_values:
         deprecation_warnings.append(
             {

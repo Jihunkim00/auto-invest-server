@@ -84,3 +84,14 @@ class OperationTest3EnableRequest(BaseModel):
     @classmethod
     def normalize_confirmation(cls, value: str) -> str:
         return str(value or "").strip()
+
+
+class OperationTest3MonitoringEnableRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    confirmation: str = Field(min_length=1, max_length=300)
+
+    @field_validator("confirmation")
+    @classmethod
+    def normalize_confirmation(cls, value: str) -> str:
+        return str(value or "").strip()

@@ -17,7 +17,10 @@ from app.services.operation_test3_position_management_service import (
     SELL_READY,
     TAKE_PROFIT_READY,
     BUY_FLAGS,
+    ENABLE_CONFIRMATION,
+    MONITORING_CONFIRMATION,
     OperationTest3PositionManagementService,
+    operation_test3_scheduler_gate,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
 
@@ -138,6 +141,109 @@ def test_default_runtime_flags_are_safe_and_read_only(db_session):
     assert settings["operation_test3_take_profit_enabled"] is False
     assert settings["operation_test3_max_sell_orders_per_day"] == 1
 
+
+def test_monitoring_enable_is_scheduler_active_without_live_orders_or_buy_flags(db_session, monkeypatch):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "dry_run": False,
+            "kill_switch": True,
+            "operation_test3_allow_real_orders": True,
+            "operation_test3_stop_loss_enabled": False,
+            **{key: True for key in BUY_FLAGS},
+        },
+    )
+    client = FakeClient(kis_enabled=True, kis_real_order_enabled=True)
+    sell = FakeSellService()
+    service = _service(client, sell)
+
+    def fail_run_once(*args, **kwargs):
+        raise AssertionError("monitoring enable must not call run_once")
+
+    monkeypatch.setattr(service, "run_once", fail_run_once)
+
+    result = service.enable_monitoring(db_session, confirmation=MONITORING_CONFIRMATION)
+    settings = RuntimeSettingService().get_settings(db_session)
+    gate = operation_test3_scheduler_gate(settings)
+
+    assert result["status"] == "monitoring_enabled"
+    assert result["enablement_mode"] == "monitoring"
+    assert result["immediate_order_execution"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert sell.calls == 0
+    assert client.list_positions_calls == 0
+    assert client.list_open_orders_calls == 0
+    assert client.settings.kis_enabled is True
+    assert client.settings.kis_real_order_enabled is True
+    assert settings["operation_test3_enabled"] is True
+    assert settings["operation_test3_scheduler_enabled"] is True
+    assert settings["operation_test3_position_management_enabled"] is True
+    assert settings["operation_test3_allow_real_orders"] is False
+    assert settings["operation_test3_stop_loss_enabled"] is True
+    assert settings["operation_test3_take_profit_enabled"] is False
+    assert settings["dry_run"] is False
+    assert settings["kill_switch"] is True
+    assert all(settings[key] is False for key in BUY_FLAGS)
+    assert gate["scheduler_execution_allowed"] is True
+
+
+def test_live_enable_requires_confirmation_and_marks_live(db_session):
+    service = _service(FakeClient(), FakeSellService())
+
+    blocked = service.enable(
+        db_session,
+        confirm_live=False,
+        confirmation=ENABLE_CONFIRMATION,
+    )
+    blocked_settings = RuntimeSettingService().get_settings(db_session)
+
+    assert blocked["status"] == "blocked"
+    assert blocked["enablement_mode"] == "live"
+    assert blocked["immediate_order_execution"] is False
+    assert blocked["real_order_submitted"] is False
+    assert blocked_settings["operation_test3_allow_real_orders"] is False
+
+    enabled = service.enable(
+        db_session,
+        confirm_live=True,
+        confirmation=ENABLE_CONFIRMATION,
+    )
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert enabled["status"] == "live_enabled"
+    assert enabled["enablement_mode"] == "live"
+    assert enabled["immediate_order_execution"] is False
+    assert enabled["real_order_submitted"] is False
+    assert enabled["broker_submit_called"] is False
+    assert settings["operation_test3_allow_real_orders"] is True
+    assert all(settings[key] is False for key in BUY_FLAGS)
+
+
+def test_disable_restores_all_test3_activation_flags_false(db_session):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "operation_test3_enabled": True,
+            "operation_test3_scheduler_enabled": True,
+            "operation_test3_allow_real_orders": True,
+            "operation_test3_position_management_enabled": True,
+            "operation_test3_stop_loss_enabled": True,
+            "operation_test3_take_profit_enabled": True,
+        },
+    )
+
+    result = _service(FakeClient(), FakeSellService()).disable(db_session)
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert result["status"] == "disabled"
+    assert settings["operation_test3_enabled"] is False
+    assert settings["operation_test3_scheduler_enabled"] is False
+    assert settings["operation_test3_allow_real_orders"] is False
+    assert settings["operation_test3_position_management_enabled"] is False
+    assert settings["operation_test3_stop_loss_enabled"] is False
+    assert settings["operation_test3_take_profit_enabled"] is False
 
 def test_no_active_lifecycle_skips_without_broker_submit(db_session):
     sell = FakeSellService()
@@ -489,9 +595,21 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
         calls.append(("run", {"slot_label": slot_label, **kwargs}))
         return {"mode": "operation_test3_position_management_run", "broker_submit_called": False}
 
+    def fake_monitoring(self, db, *, confirmation):
+        calls.append(("enable_monitoring", {"confirmation": confirmation}))
+        return {
+            "status": "monitoring_enabled",
+            "immediate_order_execution": False,
+            "broker_submit_called": False,
+        }
+
     def fake_enable(self, db, *, confirm_live, confirmation):
         calls.append(("enable", {"confirm_live": confirm_live, "confirmation": confirmation}))
-        return {"status": "enabled", "immediate_order_execution": False, "broker_submit_called": False}
+        return {
+            "status": "live_enabled",
+            "immediate_order_execution": False,
+            "broker_submit_called": False,
+        }
 
     def fake_disable(self, db):
         calls.append(("disable", {}))
@@ -500,6 +618,11 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     monkeypatch.setattr(OperationTest3PositionManagementService, "status", fake_status)
     monkeypatch.setattr(OperationTest3PositionManagementService, "preflight_once", fake_preflight)
     monkeypatch.setattr(OperationTest3PositionManagementService, "run_once", fake_run)
+    monkeypatch.setattr(
+        OperationTest3PositionManagementService,
+        "enable_monitoring",
+        fake_monitoring,
+    )
     monkeypatch.setattr(OperationTest3PositionManagementService, "enable", fake_enable)
     monkeypatch.setattr(OperationTest3PositionManagementService, "disable", fake_disable)
     app.dependency_overrides[get_db] = override_get_db
@@ -513,6 +636,10 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
             run = http.post(
                 "/app/operation-test3/position-management/run-once",
                 json={"slot_label": "14:30", "include_raw": True},
+            )
+            monitoring = http.post(
+                "/app/operation-test3/position-management/enable-monitoring",
+                json={"confirmation": "ENABLE TEST3 MONITORING"},
             )
             enable = http.post(
                 "/app/operation-test3/position-management/enable",
@@ -528,6 +655,8 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     assert status.status_code == 200
     assert preflight.status_code == 200
     assert run.status_code == 200
+    assert monitoring.status_code == 200
+    assert monitoring.json()["immediate_order_execution"] is False
     assert enable.status_code == 200
     assert enable.json()["immediate_order_execution"] is False
     assert disable.status_code == 200
@@ -535,6 +664,12 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
         ("status", {}),
         ("preflight", {"slot_label": "10:00"}),
         ("run", {"slot_label": "14:30", "include_raw": True}),
+        (
+            "enable_monitoring",
+            {
+                "confirmation": "ENABLE TEST3 MONITORING",
+            },
+        ),
         (
             "enable",
             {

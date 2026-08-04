@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.operation_test import (
     OperationTest3EnableRequest,
+    OperationTest3MonitoringEnableRequest,
     OperationTest3PositionManagementRunRequest,
     OperatorForcedOneShareBuyRequest,
     OperatorForcedOneShareBuyResponse,
@@ -140,8 +141,21 @@ def operation_test3_position_management_run(
     )
 
 
+@router.post("/operation-test3/position-management/enable-monitoring")
+def enable_monitoring_operation_test3_position_management(
+    payload: OperationTest3MonitoringEnableRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    result = service.enable_monitoring(db, confirmation=payload.confirmation)
+    status_code = 200 if result.get("status") == "monitoring_enabled" else 409
+    return JSONResponse(status_code=status_code, content=result)
+
+
 @router.post("/operation-test3/position-management/enable")
-def enable_operation_test3_position_management(
+def enable_live_operation_test3_position_management(
     payload: OperationTest3EnableRequest,
     db: Session = Depends(get_db),
     service: OperationTest3PositionManagementService = Depends(
@@ -155,7 +169,7 @@ def enable_operation_test3_position_management(
             "confirmation": payload.confirmation,
         },
     )
-    status_code = 200 if result.get("status") == "enabled" else 409
+    status_code = 200 if result.get("status") == "live_enabled" else 409
     return JSONResponse(status_code=status_code, content=result)
 
 

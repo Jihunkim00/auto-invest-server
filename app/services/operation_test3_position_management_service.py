@@ -30,6 +30,7 @@ MANUAL_PREFLIGHT_TRIGGER_SOURCE = "operation_test3_preflight_once"
 MANUAL_RUN_TRIGGER_SOURCE = "operation_test3_run_once"
 SCHEDULER_TRIGGER_SOURCE = "operation_test3_scheduler"
 ENABLE_CONFIRMATION = "ENABLE TEST3 POSITION MANAGEMENT"
+MONITORING_CONFIRMATION = "ENABLE TEST3 MONITORING"
 OPEN = "open"
 CLOSING = "closing"
 CLOSED = "closed"
@@ -157,6 +158,54 @@ class OperationTest3PositionManagementService:
             include_raw=include_raw,
         )
 
+    def enable_monitoring(
+        self,
+        db: Session,
+        *,
+        confirmation: str | None,
+    ) -> dict[str, Any]:
+        if str(confirmation or "").strip() != MONITORING_CONFIRMATION:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "enablement_mode": "monitoring",
+                    "reason": "operator_confirmation_required",
+                    "required_confirmation": MONITORING_CONFIRMATION,
+                    "immediate_order_execution": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+        settings = self.runtime_settings.update_settings(
+            db,
+            {
+                "operation_test3_enabled": True,
+                "operation_test3_scheduler_enabled": True,
+                "operation_test3_position_management_enabled": True,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                **{key: False for key in BUY_FLAGS},
+            },
+        )
+        return sanitize_kis_payload(
+            {
+                "status": "monitoring_enabled",
+                "operation_test": OPERATION_TEST,
+                "operation_test3_phase": PHASE,
+                "enablement_mode": "monitoring",
+                "runtime": _runtime_snapshot(settings, self._settings()),
+                "confirmation_accepted": True,
+                "immediate_order_execution": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+            }
+        )
+
     def enable(
         self,
         db: Session,
@@ -169,8 +218,11 @@ class OperationTest3PositionManagementService:
                 {
                     "status": "blocked",
                     "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "enablement_mode": "live",
                     "reason": "operator_confirmation_required",
                     "required_confirmation": ENABLE_CONFIRMATION,
+                    "immediate_order_execution": False,
                     "real_order_submitted": False,
                     "broker_submit_called": False,
                     "manual_submit_called": False,
@@ -191,9 +243,10 @@ class OperationTest3PositionManagementService:
         )
         return sanitize_kis_payload(
             {
-                "status": "enabled",
+                "status": "live_enabled",
                 "operation_test": OPERATION_TEST,
                 "operation_test3_phase": PHASE,
+                "enablement_mode": "live",
                 "runtime": _runtime_snapshot(settings, self._settings()),
                 "confirmation_accepted": True,
                 "immediate_order_execution": False,
@@ -211,6 +264,7 @@ class OperationTest3PositionManagementService:
                 "operation_test3_scheduler_enabled": False,
                 "operation_test3_allow_real_orders": False,
                 "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": False,
                 "operation_test3_take_profit_enabled": False,
             },
         )
