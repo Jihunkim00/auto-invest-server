@@ -25,6 +25,11 @@ from app.services.kis_position_lifecycle_service import (
     position_lifecycle_scheduler_block_reason,
     position_lifecycle_scheduler_gate,
 )
+from app.services.operation_test3_position_management_service import (
+    OperationTest3PositionManagementService,
+    SCHEDULER_TRIGGER_SOURCE as OPERATION_TEST3_SCHEDULER_TRIGGER_SOURCE,
+    operation_test3_scheduler_gate,
+)
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.automation_release_service import AutomationReleaseService
@@ -62,6 +67,11 @@ class SchedulerService:
             ("position_management_open_phase", 10, 0),
             ("position_management_midday", 12, 0),
             ("position_management_before_close", 14, 30),
+        ]
+        self.operation_test3_position_management_slots = [
+            ("10:00", 10, 0),
+            ("12:00", 12, 0),
+            ("14:30", 14, 30),
         ]
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -147,6 +157,12 @@ class SchedulerService:
                         self._slot_runs.add(run_key)
                         self._run_position_lifecycle_management_scheduled_once(slot_name)
 
+            for slot_name, hour, minute in self.operation_test3_position_management_slots:
+                if now_kr.hour == hour and now_kr.minute == minute:
+                    run_key = f"{kr_day_key}:KR:operation_test3:{slot_name}"
+                    if run_key not in self._slot_runs:
+                        self._slot_runs.add(run_key)
+                        self._run_operation_test3_position_management_scheduled_once(slot_name)
             for slot_name, hour, minute in self._strategy_auto_buy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:strategy_auto_buy_dry_run:{slot_name}"
@@ -577,6 +593,39 @@ class SchedulerService:
             },
         )
 
+    def _run_operation_test3_position_management_scheduled_once(self, slot_name: str):
+        db = SessionLocal()
+        try:
+            return self._run_operation_test3_position_management_with_db(
+                db,
+                slot_name=slot_name,
+            )
+        finally:
+            db.close()
+
+    def _run_operation_test3_position_management_with_db(self, db, *, slot_name: str):
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        scheduler_gate = operation_test3_scheduler_gate(runtime)
+        if not scheduler_gate["scheduler_execution_allowed"]:
+            return None
+        has_lifecycle = bool(
+            db.query(PositionLifecycle)
+            .filter(PositionLifecycle.status.in_(["open", "closing"]))
+            .count()
+        )
+        if not has_lifecycle:
+            return None
+
+        settings_obj = get_settings()
+        kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        return OperationTest3PositionManagementService(
+            kis_client,
+            runtime_settings=self.runtime_settings,
+        ).run_once(
+            db,
+            slot_label=slot_name,
+            trigger_source=OPERATION_TEST3_SCHEDULER_TRIGGER_SOURCE,
+        )
     def _run_broker_sync_watchdog_scheduled_once(self, slot_name: str):
         db = SessionLocal()
         try:

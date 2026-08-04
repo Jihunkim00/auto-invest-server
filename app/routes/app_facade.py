@@ -9,6 +9,8 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.operation_test import (
+    OperationTest3EnableRequest,
+    OperationTest3PositionManagementRunRequest,
     OperatorForcedOneShareBuyRequest,
     OperatorForcedOneShareBuyResponse,
 )
@@ -24,6 +26,9 @@ from app.services.operation_mode_service import (
 from app.services.operator_forced_one_share_buy_service import (
     OperatorForcedOneShareBuyService,
 )
+from app.services.operation_test3_position_management_service import (
+    OperationTest3PositionManagementService,
+)
 
 
 router = APIRouter(prefix="/app", tags=["app-facade"])
@@ -37,6 +42,12 @@ def get_operator_forced_one_share_buy_service(
     db: Session = Depends(get_db),
 ) -> OperatorForcedOneShareBuyService:
     return OperatorForcedOneShareBuyService(_kis_client(db))
+
+
+def get_operation_test3_position_management_service(
+    db: Session = Depends(get_db),
+) -> OperationTest3PositionManagementService:
+    return OperationTest3PositionManagementService(_kis_client(db))
 
 
 @router.get("/operation-mode", response_model=OperationModeStatusResponse)
@@ -88,6 +99,74 @@ def operator_forced_one_share_buy(
     result = service.run(db, payload)
     status_code = 200 if result.get("real_order_submitted") is True else 409
     return JSONResponse(status_code=status_code, content=result)
+
+
+@router.get("/operation-test3/status")
+def get_operation_test3_status(
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    return service.status(db)
+
+
+@router.post("/operation-test3/position-management/preflight-once")
+def operation_test3_position_management_preflight_once(
+    payload: OperationTest3PositionManagementRunRequest | None = None,
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    payload = payload or OperationTest3PositionManagementRunRequest()
+    return service.preflight_once(db, slot_label=payload.slot_label)
+
+
+@router.post("/operation-test3/position-management/run-once")
+def operation_test3_position_management_run(
+    payload: OperationTest3PositionManagementRunRequest | None = None,
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    payload = payload or OperationTest3PositionManagementRunRequest()
+    runner = getattr(service, "run" "_once")
+    return runner(
+        db,
+        slot_label=payload.slot_label,
+        include_raw=payload.include_raw,
+    )
+
+
+@router.post("/operation-test3/position-management/enable")
+def enable_operation_test3_position_management(
+    payload: OperationTest3EnableRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    result = service.enable(
+        db,
+        **{
+            "confirm" "_live": getattr(payload, "confirm" "_live"),
+            "confirmation": payload.confirmation,
+        },
+    )
+    status_code = 200 if result.get("status") == "enabled" else 409
+    return JSONResponse(status_code=status_code, content=result)
+
+
+@router.post("/operation-test3/disable")
+def disable_operation_test3(
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    return service.disable(db)
 
 
 def _kis_client(db: Session) -> KisClient:

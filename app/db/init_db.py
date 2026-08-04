@@ -257,6 +257,13 @@ def _create_runtime_settings_table_if_missing():
                     kis_position_lifecycle_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     position_management_scheduler_dry_run_only BOOLEAN NOT NULL DEFAULT 1,
                     position_management_scheduler_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_allow_real_orders BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_position_management_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test3_take_profit_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     portfolio_orchestrator_enabled BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_positions_first BOOLEAN NOT NULL DEFAULT 1,
@@ -822,6 +829,9 @@ def _create_position_lifecycles_table_if_missing():
                     take_profit_threshold_pct FLOAT,
                     exit_reason TEXT,
                     exit_order_id INTEGER,
+                    exit_order_status VARCHAR(40),
+                    manual_review_required BOOLEAN NOT NULL DEFAULT 0,
+                    closed_at DATETIME,
                     last_evaluated_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
@@ -1767,6 +1777,13 @@ def init_db():
         "kis_position_lifecycle_scheduler_enabled": "BOOLEAN DEFAULT 0",
         "position_management_scheduler_dry_run_only": "BOOLEAN DEFAULT 1",
         "position_management_scheduler_allow_live_orders": "BOOLEAN DEFAULT 0",
+        "operation_test3_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_allow_real_orders": "BOOLEAN DEFAULT 0",
+        "operation_test3_position_management_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_stop_loss_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test3_take_profit_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_max_sell_orders_per_day": "INTEGER DEFAULT 1",
         "portfolio_orchestrator_enabled": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_allow_live_orders": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_positions_first": "BOOLEAN DEFAULT 1",
@@ -1838,6 +1855,11 @@ def init_db():
         "symbol_role": "VARCHAR(30)",
     }
 
+    position_lifecycle_columns = {
+        "exit_order_status": "VARCHAR(40)",
+        "manual_review_required": "BOOLEAN DEFAULT 0",
+        "closed_at": "DATETIME",
+    }
     order_columns = {
         "market": "VARCHAR(10)",
         "kis_odno": "VARCHAR(100)",
@@ -1862,6 +1884,8 @@ def init_db():
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)
 
+    for name, ddl in position_lifecycle_columns.items():
+        _add_column_if_missing("position_lifecycles", name, ddl)
     for name, ddl in order_columns.items():
         _add_column_if_missing("orders", name, ddl)
 

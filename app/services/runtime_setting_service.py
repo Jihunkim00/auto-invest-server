@@ -191,6 +191,13 @@ class RuntimeSettingService:
             "kis_position_lifecycle_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
             "position_management_scheduler_allow_live_orders": False,
+            "operation_test3_enabled": False,
+            "operation_test3_scheduler_enabled": False,
+            "operation_test3_allow_real_orders": False,
+            "operation_test3_position_management_enabled": False,
+            "operation_test3_stop_loss_enabled": True,
+            "operation_test3_take_profit_enabled": False,
+            "operation_test3_max_sell_orders_per_day": 1,
             "portfolio_orchestrator_enabled": False,
             "portfolio_orchestrator_allow_live_orders": False,
             "portfolio_orchestrator_positions_first": True,
@@ -624,6 +631,17 @@ class RuntimeSettingService:
                 row.position_management_scheduler_dry_run_only
             ),
             "position_management_scheduler_allow_live_orders": False,
+            "operation_test3_enabled": bool(getattr(row, "operation_test3_enabled", False)),
+            "operation_test3_scheduler_enabled": bool(getattr(row, "operation_test3_scheduler_enabled", False)),
+            "operation_test3_allow_real_orders": bool(getattr(row, "operation_test3_allow_real_orders", False)),
+            "operation_test3_position_management_enabled": bool(
+                getattr(row, "operation_test3_position_management_enabled", False)
+            ),
+            "operation_test3_stop_loss_enabled": bool(getattr(row, "operation_test3_stop_loss_enabled", True)),
+            "operation_test3_take_profit_enabled": bool(getattr(row, "operation_test3_take_profit_enabled", False)),
+            "operation_test3_max_sell_orders_per_day": int(
+                getattr(row, "operation_test3_max_sell_orders_per_day", 1) or 1
+            ),
             "portfolio_orchestrator_enabled": bool(
                 row.portfolio_orchestrator_enabled
             ),
@@ -829,6 +847,28 @@ class RuntimeSettingService:
         settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["position_management_scheduler_dry_run_only"] = True
         settings["position_management_scheduler_allow_live_orders"] = False
+        settings["operation_test3_enabled"] = bool(
+            settings.get("operation_test3_enabled", False)
+        )
+        settings["operation_test3_scheduler_enabled"] = bool(
+            settings.get("operation_test3_scheduler_enabled", False)
+        )
+        settings["operation_test3_allow_real_orders"] = bool(
+            settings.get("operation_test3_allow_real_orders", False)
+        )
+        settings["operation_test3_position_management_enabled"] = bool(
+            settings.get("operation_test3_position_management_enabled", False)
+        )
+        settings["operation_test3_stop_loss_enabled"] = bool(
+            settings.get("operation_test3_stop_loss_enabled", True)
+        )
+        settings["operation_test3_take_profit_enabled"] = bool(
+            settings.get("operation_test3_take_profit_enabled", False)
+        )
+        settings["operation_test3_max_sell_orders_per_day"] = max(
+            0,
+            int(settings.get("operation_test3_max_sell_orders_per_day") or 1),
+        )
         settings["kis_position_lifecycle_scheduler_enabled"] = bool(
             settings.get("kis_position_lifecycle_scheduler_enabled", False)
         )
@@ -2103,6 +2143,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
@@ -2140,6 +2187,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
@@ -2173,6 +2227,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
             }
@@ -2205,6 +2266,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": True,
@@ -2238,6 +2306,13 @@ class RuntimeSettingService:
                     "kis_position_lifecycle_scheduler_enabled": False,
                     "position_management_scheduler_dry_run_only": True,
                     "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                     "portfolio_orchestrator_enabled": False,
                     "portfolio_orchestrator_allow_live_orders": False,
                     "kis_limited_auto_buy_requires_shadow_review": True,
@@ -2455,6 +2530,13 @@ class RuntimeSettingService:
             "kis_position_lifecycle_scheduler_enabled",
             "position_management_scheduler_dry_run_only",
             "position_management_scheduler_allow_live_orders",
+            "operation_test3_enabled",
+            "operation_test3_scheduler_enabled",
+            "operation_test3_allow_real_orders",
+            "operation_test3_position_management_enabled",
+            "operation_test3_stop_loss_enabled",
+            "operation_test3_take_profit_enabled",
+            "operation_test3_max_sell_orders_per_day",
             "portfolio_orchestrator_enabled",
             "portfolio_orchestrator_allow_live_orders",
             "portfolio_orchestrator_positions_first",
@@ -2587,6 +2669,8 @@ class RuntimeSettingService:
                 value = min(2, max(0, int(value or 2)))
             if key == "automation_release_max_daily_auto_buys":
                 value = min(1, max(0, int(value or 1)))
+            if key == "operation_test3_max_sell_orders_per_day":
+                value = max(0, int(value or 1))
             if key == "automation_release_max_daily_auto_sells":
                 value = min(1, max(0, int(value or 1)))
             setattr(row, key, value)
@@ -2710,6 +2794,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
             }
         if mode == "dry_run":
             return {
@@ -2738,6 +2829,13 @@ class RuntimeSettingService:
                 "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
             }
         if mode == "sell_only_live":
             return self._preset_payload("kis_sell_only_automation")
@@ -2846,7 +2944,7 @@ def _catalog_scope_metadata(
     automation_scope: str | None,
 ) -> dict[str, Any]:
     if scope is None:
-        if key.startswith(("kis_", "kr_")) or group == "kis_kr_trading":
+        if key.startswith(("kis_", "kr_", "operation_test3_")) or group == "kis_kr_trading":
             scope = "kis"
         elif key.startswith("us_") or group == "alpaca_us_trading":
             scope = "alpaca"
@@ -2925,6 +3023,13 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "position_management_scheduler_enabled",
         "kis_position_lifecycle_scheduler_enabled",
         "position_management_scheduler_allow_live_orders",
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+        "operation_test3_stop_loss_enabled",
+        "operation_test3_take_profit_enabled",
+        "operation_test3_max_sell_orders_per_day",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
         "broker_sync_watchdog_enabled",
@@ -2984,6 +3089,11 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_allow_live_orders",
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+        "operation_test3_take_profit_enabled",
         "kis_position_lifecycle_scheduler_enabled",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",

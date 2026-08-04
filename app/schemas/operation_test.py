@@ -59,3 +59,28 @@ class OperatorForcedOneShareBuyResponse(BaseModel):
     broker_order_id: str | None = None
     kis_odno: str | None = None
     audit_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperationTest3PositionManagementRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    slot_label: str | None = Field(default=None, max_length=80)
+    include_raw: bool = False
+
+    @field_validator("slot_label")
+    @classmethod
+    def normalize_slot_label(cls, value: str | None) -> str | None:
+        text = str(value or "").strip()
+        return text or None
+
+
+class OperationTest3EnableRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    confirm_live: bool = False
+    confirmation: str = Field(min_length=1, max_length=300)
+
+    @field_validator("confirmation")
+    @classmethod
+    def normalize_confirmation(cls, value: str) -> str:
+        return str(value or "").strip()
