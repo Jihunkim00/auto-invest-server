@@ -51,13 +51,17 @@ class FakeClient:
     def list_positions(self):
         self.list_positions_calls += 1
         if self.positions_sequence:
-            if len(self.positions_sequence) > 1:
-                return self.positions_sequence.pop(0)
-            return self.positions_sequence[0]
-        return self.positions
+            item = self.positions_sequence.pop(0) if len(self.positions_sequence) > 1 else self.positions_sequence[0]
+        else:
+            item = self.positions
+        if isinstance(item, BaseException):
+            raise item
+        return item
 
     def list_open_orders(self):
         self.list_open_orders_calls += 1
+        if isinstance(self.open_orders, BaseException):
+            raise self.open_orders
         return self.open_orders
 
 
@@ -500,6 +504,7 @@ def test_same_slot_duplicate_blocks_second_execution(db_session):
     assert second["reason"] == "scheduler_slot_already_ran"
     assert second["broker_submit_called"] is False
     assert sell.calls == 1
+    assert db_session.query(TradeRunLog).filter(TradeRunLog.mode == "op_test3_pm_run").count() == 1
 
 
 def test_submitted_sell_moves_lifecycle_to_closing(db_session):
@@ -565,6 +570,160 @@ def test_uncertain_response_locks_against_retry(db_session):
     assert sell.calls == 1
 
 
+def test_broker_position_read_retries_transient_exception_once(db_session):
+    _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+    client = FakeClient(positions_sequence=[TimeoutError("temporary outage"), [_position(99.0)]])
+    sleep_calls = []
+    sell = FakeSellService()
+
+    result = _service(
+        client,
+        sell,
+        sleeper=lambda seconds: sleep_calls.append(seconds),
+        retry_delay=1.0,
+    ).run_once(db_session, now=NOW)
+
+    assert result["result"] == "hold"
+    assert result["reason"] == "no_exit_condition"
+    assert result["broker_submit_called"] is False
+    assert sell.calls == 0
+    assert client.list_positions_calls == 2
+    assert client.list_open_orders_calls == 1
+    assert sleep_calls == [1.0]
+    diagnostics = result["broker_position_read"]
+    assert diagnostics["attempt_count"] == 2
+    assert diagnostics["retry_attempted"] is True
+    assert diagnostics["retry_succeeded"] is True
+    assert diagnostics["first_attempt_failed"] is True
+    assert diagnostics["final_status"] == "ok"
+    assert diagnostics["errors"]
+    run = db_session.query(TradeRunLog).one()
+    payload = json.loads(run.response_payload)
+    metadata = payload["metadata"]
+    assert metadata["broker_position_read_attempt_count"] == 2
+    assert metadata["broker_position_read_retry_attempted"] is True
+    assert metadata["broker_position_read_retry_succeeded"] is True
+    assert metadata["broker_position_read_final_status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    "first_payload",
+    [
+        None,
+        {"unexpected": "mapping"},
+        [object()],
+    ],
+)
+def test_broker_position_read_retries_unusable_payload_once(db_session, first_payload):
+    _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+    client = FakeClient(positions_sequence=[first_payload, [_position(99.0)]])
+    sell = FakeSellService()
+
+    result = _service(client, sell).run_once(db_session, now=NOW)
+
+    assert result["result"] == "hold"
+    assert result["broker_position_read"]["attempt_count"] == 2
+    assert result["broker_position_read"]["retry_attempted"] is True
+    assert result["broker_position_read"]["retry_succeeded"] is True
+    assert result["broker_position_read"]["final_status"] == "ok"
+    assert client.list_positions_calls == 2
+    assert sell.calls == 0
+
+
+def test_broker_position_read_double_failure_fails_closed_without_submit(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+    client = FakeClient(positions_sequence=[TimeoutError("temporary"), RuntimeError("still down")])
+    sell = FakeSellService()
+
+    result = _service(client, sell).run_once(db_session, now=NOW)
+
+    db_session.refresh(lifecycle)
+    assert result["action"] == REVIEW
+    assert result["result"] == "review"
+    assert result["reason"] == "broker_positions_unavailable"
+    assert result["manual_review_required"] is True
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+    assert sell.calls == 0
+    assert client.list_positions_calls == 2
+    assert result["broker_position_read"]["attempt_count"] == 2
+    assert result["broker_position_read"]["retry_attempted"] is True
+    assert result["broker_position_read"]["retry_succeeded"] is False
+    assert result["broker_position_read"]["final_status"] == "unavailable"
+    assert lifecycle.manual_review_required is True
+    assert lifecycle.exit_reason == "broker_positions_unavailable"
+
+
+def test_empty_broker_positions_do_not_retry(db_session):
+    _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+    client = FakeClient(positions=[])
+    sell = FakeSellService()
+
+    result = _service(client, sell).run_once(db_session, now=NOW)
+
+    assert result["action"] == REVIEW
+    assert result["reason"] == "broker_position_count_not_one"
+    assert result["broker_position_read"]["attempt_count"] == 1
+    assert result["broker_position_read"]["retry_attempted"] is False
+    assert result["broker_position_read"]["final_status"] == "empty"
+    assert client.list_positions_calls == 1
+    assert sell.calls == 0
+
+
+@pytest.mark.parametrize(
+    ("position_kwargs", "expected_reason"),
+    [
+        ({"symbol": "005930"}, "broker_position_symbol_mismatch"),
+        ({"qty": 2}, "broker_position_quantity_mismatch"),
+    ],
+)
+def test_broker_position_mismatches_do_not_retry(db_session, position_kwargs, expected_reason):
+    _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+    position = _position(99.0, **position_kwargs)
+    client = FakeClient(positions=[position])
+    sell = FakeSellService()
+
+    result = _service(client, sell).run_once(db_session, now=NOW)
+
+    assert result["action"] == REVIEW
+    assert expected_reason in result["block_reasons"]
+    assert result["broker_position_read"]["attempt_count"] == 1
+    assert result["broker_position_read"]["retry_attempted"] is False
+    assert result["broker_position_read"]["final_status"] == "ok"
+    assert client.list_positions_calls == 1
+    assert sell.calls == 0
+
+
+def test_transient_broker_position_review_auto_clears_after_clean_read(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _enable_live_settings(db_session)
+
+    first = _service(
+        FakeClient(positions_sequence=[TimeoutError("temporary"), RuntimeError("still down")]),
+        FakeSellService(),
+    ).run_once(db_session, now=NOW)
+    db_session.refresh(lifecycle)
+    assert first["reason"] == "broker_positions_unavailable"
+    assert lifecycle.manual_review_required is True
+    assert lifecycle.exit_reason == "broker_positions_unavailable"
+
+    second = _service(FakeClient(positions=[_position(99.0)]), FakeSellService()).run_once(
+        db_session,
+        now=NOW,
+    )
+
+    db_session.refresh(lifecycle)
+    assert second["result"] == "hold"
+    assert second["broker_position_read"]["final_status"] == "ok"
+    assert second["manual_review_required"] is False
+    assert lifecycle.manual_review_required is False
+    assert lifecycle.exit_reason is None
+
 def test_status_and_preflight_never_call_sell_path(db_session):
     _open_lifecycle(db_session)
     sell = FakeSellService()
@@ -586,6 +745,10 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     def fake_status(self, db):
         calls.append(("status", {}))
         return {"status": "ok", "broker_submit_called": False}
+
+    def fake_live_readiness(self, db, **kwargs):
+        calls.append(("live_readiness", kwargs))
+        return {"mode": "operation_test3_live_readiness", "read_only": True, "broker_submit_called": False}
 
     def fake_preflight(self, db, slot_label=None, **kwargs):
         calls.append(("preflight", {"slot_label": slot_label, **kwargs}))
@@ -616,6 +779,7 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
         return {"status": "disabled", "broker_submit_called": False}
 
     monkeypatch.setattr(OperationTest3PositionManagementService, "status", fake_status)
+    monkeypatch.setattr(OperationTest3PositionManagementService, "live_readiness", fake_live_readiness)
     monkeypatch.setattr(OperationTest3PositionManagementService, "preflight_once", fake_preflight)
     monkeypatch.setattr(OperationTest3PositionManagementService, "run_once", fake_run)
     monkeypatch.setattr(
@@ -629,6 +793,7 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     try:
         with TestClient(app) as http:
             status = http.get("/app/operation-test3/status")
+            live_readiness = http.get("/app/operation-test3/position-management/live-readiness")
             preflight = http.post(
                 "/app/operation-test3/position-management/preflight-once",
                 json={"slot_label": "10:00"},
@@ -653,6 +818,8 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
         app.dependency_overrides.clear()
 
     assert status.status_code == 200
+    assert live_readiness.status_code == 200
+    assert live_readiness.json()["read_only"] is True
     assert preflight.status_code == 200
     assert run.status_code == 200
     assert monitoring.status_code == 200
@@ -662,6 +829,7 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     assert disable.status_code == 200
     assert calls == [
         ("status", {}),
+        ("live_readiness", {}),
         ("preflight", {"slot_label": "10:00"}),
         ("run", {"slot_label": "14:30", "include_raw": True}),
         (
@@ -681,11 +849,20 @@ def test_facade_routes_delegate_and_enable_does_not_run(monkeypatch, db_session)
     ]
 
 
-def _service(client: FakeClient, sell: FakeSellService, *, session_service=None):
+def _service(
+    client: FakeClient,
+    sell: FakeSellService,
+    *,
+    session_service=None,
+    sleeper=None,
+    retry_delay=0.0,
+):
     return OperationTest3PositionManagementService(
         client,
         limited_auto_sell_service=sell,
         session_service=session_service or OpenSessionService(),
+        sleeper=sleeper or (lambda seconds: None),
+        broker_position_read_retry_delay_seconds=retry_delay,
     )
 
 
@@ -714,6 +891,8 @@ def _open_lifecycle(
     status="open",
     stop_loss_threshold_pct=2.0,
     take_profit_threshold_pct=2.0,
+    manual_review_required=False,
+    exit_reason=None,
 ) -> PositionLifecycle:
     order = OrderLog(
         broker="kis",
@@ -748,7 +927,8 @@ def _open_lifecycle(
         max_price_since_entry=entry_price,
         stop_loss_threshold_pct=stop_loss_threshold_pct,
         take_profit_threshold_pct=take_profit_threshold_pct,
-        manual_review_required=False,
+        manual_review_required=manual_review_required,
+        exit_reason=exit_reason,
     )
     db_session.add(lifecycle)
     db_session.commit()

@@ -112,6 +112,15 @@ def get_operation_test3_status(
     return service.status(db)
 
 
+@router.get("/operation-test3/position-management/live-readiness")
+def operation_test3_position_management_live_readiness(
+    db: Session = Depends(get_db),
+    service: OperationTest3PositionManagementService = Depends(
+        get_operation_test3_position_management_service
+    ),
+):
+    return service.live_readiness(db)
+
 @router.post("/operation-test3/position-management/preflight-once")
 def operation_test3_position_management_preflight_once(
     payload: OperationTest3PositionManagementRunRequest | None = None,

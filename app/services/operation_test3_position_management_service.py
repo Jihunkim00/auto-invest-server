@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time as time_module
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from typing import Any
@@ -26,6 +27,7 @@ PREFLIGHT_MODE = "operation_test3_position_management_preflight"
 RUN_MODE = "operation_test3_position_management_run"
 TRADE_RUN_PREFLIGHT_MODE = "op_test3_pm_preflight"
 TRADE_RUN_RUN_MODE = "op_test3_pm_run"
+LIVE_READINESS_MODE = "operation_test3_live_readiness"
 MANUAL_PREFLIGHT_TRIGGER_SOURCE = "operation_test3_preflight_once"
 MANUAL_RUN_TRIGGER_SOURCE = "operation_test3_run_once"
 SCHEDULER_TRIGGER_SOURCE = "operation_test3_scheduler"
@@ -40,6 +42,8 @@ TAKE_PROFIT_READY = "TAKE_PROFIT_READY"
 REVIEW = "REVIEW"
 SELL = "sell"
 SCHEDULER_SLOTS_KST = ["10:00", "12:00", "14:30"]
+BROKER_POSITION_READ_MAX_ATTEMPTS = 2
+BROKER_POSITION_READ_RETRY_DELAY_SECONDS = 1.0
 
 BUY_FLAGS = (
     "kis_live_auto_buy_enabled",
@@ -84,12 +88,16 @@ class OperationTest3PositionManagementService:
         limited_auto_sell_service: Any | None = None,
         session_service: MarketSessionService | None = None,
         now_provider: Any | None = None,
+        sleeper: Any | None = None,
+        broker_position_read_retry_delay_seconds: float = BROKER_POSITION_READ_RETRY_DELAY_SECONDS,
     ) -> None:
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.limited_auto_sell_service = limited_auto_sell_service
         self.session_service = session_service or MarketSessionService()
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+        self.sleeper = sleeper or time_module.sleep
+        self.broker_position_read_retry_delay_seconds = broker_position_read_retry_delay_seconds
 
     def status(self, db: Session) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -123,6 +131,260 @@ class OperationTest3PositionManagementService:
             }
         )
 
+    def live_readiness(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        settings = self._settings()
+        active = _active_lifecycles(db)
+        lifecycle = active[0] if len(active) == 1 else None
+
+        positions, broker_position_read = self._broker_positions_with_retry()
+        try:
+            open_orders = self._broker_open_orders()
+            open_orders_error = None
+        except Exception as exc:
+            open_orders = []
+            open_orders_error = _safe_error(exc)
+
+        held_positions = [_normalize_position(item) for item in positions]
+        held_positions = [item for item in held_positions if _safe_float(item.get("qty"), 0.0) > 0]
+        broker_position = held_positions[0] if len(held_positions) == 1 else None
+        local_pending = _local_pending_sell_order(db, lifecycle.symbol) if lifecycle is not None else None
+        broker_pending = (
+            _broker_open_sell_order(open_orders, lifecycle.symbol)
+            if lifecycle is not None
+            else None
+        )
+        daily = _daily_sell_state(db, runtime=runtime, now_utc=now_utc)
+        market_session = self._market_session(now_utc)
+        sell_session_allowed = _sell_session_allowed(market_session)
+        runtime_snapshot = _runtime_snapshot(runtime, settings)
+
+        checks: list[dict[str, Any]] = []
+        blocking_reasons: list[str] = []
+        review_reasons: list[str] = []
+
+        def add_check(
+            key: str,
+            passed: bool,
+            *,
+            reason: str | None = None,
+            category: str = "blocking",
+            blocking: bool = True,
+            detail: Any | None = None,
+        ) -> None:
+            checks.append(
+                {
+                    "key": key,
+                    "passed": bool(passed),
+                    "blocking": bool(blocking),
+                    "detail": detail,
+                }
+            )
+            if passed or not blocking or reason is None:
+                return
+            if category == "review":
+                review_reasons.append(reason)
+            else:
+                blocking_reasons.append(reason)
+
+        add_check(
+            "operation_test3_enabled",
+            bool(runtime.get("operation_test3_enabled", False)),
+            reason="operation_test3_disabled",
+        )
+        add_check(
+            "operation_test3_scheduler_enabled",
+            bool(runtime.get("operation_test3_scheduler_enabled", False)),
+            reason="operation_test3_scheduler_disabled",
+        )
+        add_check(
+            "operation_test3_position_management_enabled",
+            bool(runtime.get("operation_test3_position_management_enabled", False)),
+            reason="operation_test3_position_management_disabled",
+        )
+        add_check(
+            "operation_test3_allow_real_orders",
+            bool(runtime.get("operation_test3_allow_real_orders", False)),
+            reason="operation_test3_real_orders_disabled",
+        )
+        add_check("dry_run_false", not bool(runtime.get("dry_run", True)), reason="dry_run_true")
+        add_check("kill_switch_false", not bool(runtime.get("kill_switch", False)), reason="kill_switch_enabled")
+        add_check("kis_enabled", bool(getattr(settings, "kis_enabled", False)), reason="kis_disabled")
+        add_check(
+            "kis_real_order_enabled",
+            bool(getattr(settings, "kis_real_order_enabled", False)),
+            reason="kis_real_order_disabled",
+        )
+        enabled_buy_flags = [key for key in BUY_FLAGS if bool(runtime.get(key, False))]
+        add_check(
+            "all_buy_flags_false",
+            not enabled_buy_flags,
+            reason="buy_flags_enabled",
+            detail={"enabled_buy_flags": enabled_buy_flags},
+        )
+        add_check(
+            "stop_loss_enabled",
+            bool(runtime.get("operation_test3_stop_loss_enabled", True)),
+            reason="operation_test3_stop_loss_disabled",
+        )
+        if bool(runtime.get("operation_test3_take_profit_enabled", False)):
+            add_check("take_profit_enabled", True, blocking=False, detail="take_profit_exit_enabled")
+        else:
+            add_check("take_profit_disabled", True, blocking=False, detail="stop_loss_only")
+
+        active_lifecycle_exactly_one = len(active) == 1
+        add_check(
+            "active_lifecycle_exactly_one",
+            active_lifecycle_exactly_one,
+            reason="active_lifecycle_count_not_one",
+            category="review",
+            detail={"active_lifecycle_count": len(active)},
+        )
+        lifecycle_status_open = lifecycle is not None and str(lifecycle.status or "").lower() == OPEN
+        add_check(
+            "lifecycle_status_open",
+            lifecycle_status_open,
+            reason="lifecycle_status_not_open" if lifecycle is not None else None,
+            category="review",
+            detail=getattr(lifecycle, "status", None),
+        )
+        add_check(
+            "manual_review_not_required",
+            lifecycle is not None and not bool(getattr(lifecycle, "manual_review_required", False)),
+            reason="manual_review_required" if lifecycle is not None else None,
+            category="review",
+            detail={"exit_reason": getattr(lifecycle, "exit_reason", None)},
+        )
+
+        broker_positions_readable = broker_position_read.get("final_status") in {"ok", "empty"}
+        add_check(
+            "broker_positions_readable",
+            broker_positions_readable,
+            reason="broker_positions_unavailable",
+            category="review",
+            detail=broker_position_read.get("final_status"),
+        )
+        broker_position_exactly_one = len(held_positions) == 1
+        add_check(
+            "broker_position_exactly_one",
+            broker_position_exactly_one,
+            reason="broker_position_count_not_one" if broker_positions_readable else None,
+            category="review",
+            detail={"broker_position_count": len(held_positions)},
+        )
+
+        symbol_matches = (
+            lifecycle is not None
+            and broker_position is not None
+            and _symbol(broker_position) == _normalize_symbol(lifecycle.symbol)
+        )
+        add_check(
+            "lifecycle_broker_symbol_match",
+            symbol_matches,
+            reason=(
+                "broker_position_symbol_mismatch"
+                if lifecycle is not None and broker_position is not None
+                else None
+            ),
+            category="review",
+        )
+        quantity_matches = (
+            lifecycle is not None
+            and broker_position is not None
+            and _quantity_matches(broker_position, lifecycle)
+        )
+        add_check(
+            "lifecycle_broker_quantity_match",
+            quantity_matches,
+            reason=(
+                "broker_position_quantity_mismatch"
+                if lifecycle is not None and broker_position is not None
+                else None
+            ),
+            category="review",
+        )
+        add_check(
+            "valid_cost_basis",
+            lifecycle is not None and _valid_cost_basis(lifecycle),
+            reason="invalid_cost_basis" if lifecycle is not None else None,
+            category="review",
+        )
+        add_check(
+            "no_broker_open_sell_order",
+            open_orders_error is None and broker_pending is None,
+            reason=(
+                "broker_open_orders_unavailable"
+                if open_orders_error
+                else "broker_open_sell_order_exists"
+                if broker_pending is not None
+                else None
+            ),
+            category="review",
+            detail={"open_orders_error": open_orders_error},
+        )
+        add_check(
+            "no_local_pending_sell_order",
+            local_pending is None,
+            reason="local_pending_sell_order_exists" if local_pending is not None else None,
+            category="review",
+        )
+        add_check(
+            "daily_sell_limit_available",
+            not bool(daily.get("daily_limit_reached")),
+            reason="daily_sell_limit_reached",
+            detail=daily,
+        )
+        add_check(
+            "market_session_sell_allowed",
+            sell_session_allowed,
+            reason="sell_session_not_allowed",
+            detail=_public_market_session(market_session),
+        )
+
+        blocking_reasons = _dedupe(blocking_reasons)
+        review_reasons = _dedupe(review_reasons)
+        live_ready = not blocking_reasons and not review_reasons
+        status = "ready" if live_ready else "blocked" if blocking_reasons else "review_required"
+
+        return {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "mode": LIVE_READINESS_MODE,
+                "operation_test": OPERATION_TEST,
+                "operation_test3_phase": PHASE,
+                "read_only": True,
+                "status": status,
+                "live_ready": live_ready,
+                "symbol": lifecycle.symbol if lifecycle is not None else _symbol(broker_position),
+                "lifecycle_id": lifecycle.id if lifecycle is not None else None,
+                "entry_order_id": lifecycle.entry_order_id if lifecycle is not None else None,
+                "quantity": lifecycle.quantity if lifecycle is not None else None,
+                "checks": checks,
+                "blocking_reasons": blocking_reasons,
+                "review_reasons": review_reasons,
+                "broker_position_read": broker_position_read,
+                "runtime": runtime_snapshot,
+                "market_session": _public_market_session(market_session),
+                "daily_limit": daily,
+                "safety": {
+                    "read_only": True,
+                    "preflight_only": True,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "buy_service_called": False,
+                },
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+                "buy_service_called": False,
+        }
     def preflight_once(
         self,
         db: Session,
@@ -376,14 +638,13 @@ class OperationTest3PositionManagementService:
             payload["run"] = _serialize_run(run)
             return sanitize_kis_payload(payload)
 
+        positions, broker_position_read = self._broker_positions_with_retry()
         try:
-            positions = self._broker_positions()
             open_orders = self._broker_open_orders()
-            fetch_error = None
+            open_orders_error = None
         except Exception as exc:
-            positions = []
             open_orders = []
-            fetch_error = _safe_error(exc)
+            open_orders_error = _safe_error(exc)
 
         decision = self._evaluate_lifecycle(
             db,
@@ -395,7 +656,8 @@ class OperationTest3PositionManagementService:
             slot_label=slot_label,
             trigger_source=trigger_source,
             now_utc=now_utc,
-            fetch_error=fetch_error,
+            broker_position_read=broker_position_read,
+            open_orders_error=open_orders_error,
         )
         if execute and decision.get("execution_ready") is True:
             decision = self._execute_sell(
@@ -422,7 +684,8 @@ class OperationTest3PositionManagementService:
         slot_label: str | None,
         trigger_source: str,
         now_utc: datetime,
-        fetch_error: str | None,
+        broker_position_read: dict[str, Any],
+        open_orders_error: str | None,
     ) -> dict[str, Any]:
         settings = self._settings()
         held_positions = [_normalize_position(item) for item in positions]
@@ -431,8 +694,11 @@ class OperationTest3PositionManagementService:
 
         block_reasons: list[str] = []
         manual_review_required = False
-        if fetch_error:
+        if broker_position_read.get("final_status") in {"unavailable", "invalid"}:
             block_reasons.append("broker_positions_unavailable")
+            manual_review_required = True
+        if open_orders_error:
+            block_reasons.append("broker_open_orders_unavailable")
             manual_review_required = True
         if len(held_positions) != 1:
             block_reasons.append("broker_position_count_not_one")
@@ -475,6 +741,12 @@ class OperationTest3PositionManagementService:
             db.commit()
             db.refresh(lifecycle)
 
+        should_auto_clear_transient_broker_read_review = _should_auto_clear_transient_broker_read_review(
+            lifecycle,
+            broker_position_read=broker_position_read,
+            core_block_reasons=block_reasons,
+        )
+
         daily = _daily_sell_state(db, runtime=runtime, now_utc=now_utc)
         if daily["daily_limit_reached"]:
             block_reasons.append("daily_sell_limit_reached")
@@ -499,6 +771,7 @@ class OperationTest3PositionManagementService:
 
         structural = {
             "broker_positions_unavailable",
+            "broker_open_orders_unavailable",
             "broker_position_count_not_one",
             "broker_position_symbol_mismatch",
             "broker_position_quantity_mismatch",
@@ -545,6 +818,13 @@ class OperationTest3PositionManagementService:
             _mark_manual_review(lifecycle, reason=reason, now_utc=now_utc)
             db.commit()
             db.refresh(lifecycle)
+        elif should_auto_clear_transient_broker_read_review:
+            lifecycle.manual_review_required = False
+            lifecycle.exit_reason = None
+            lifecycle.last_evaluated_at = _naive_utc(now_utc)
+            db.commit()
+            db.refresh(lifecycle)
+        manual_review_required = bool(getattr(lifecycle, "manual_review_required", False))
         payload = self._payload_for_lifecycle(
             db,
             lifecycle,
@@ -569,6 +849,7 @@ class OperationTest3PositionManagementService:
             market_session=market_session,
             manual_review_required=manual_review_required,
             lifecycle_count=1,
+            broker_position_read=broker_position_read,
         )
         payload["execution_ready"] = bool(execute and trigger is not None and not gate_reasons)
         return payload
@@ -710,6 +991,7 @@ class OperationTest3PositionManagementService:
         market_session: dict[str, Any] | None = None,
         manual_review_required: bool = False,
         lifecycle_count: int = 1,
+        broker_position_read: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return sanitize_kis_payload(
             {
@@ -727,6 +1009,7 @@ class OperationTest3PositionManagementService:
                     lifecycle_count=lifecycle_count,
                     block_reasons=block_reasons,
                     manual_review_required=manual_review_required,
+                    broker_position_read=broker_position_read,
                 ),
                 "lifecycle_id": lifecycle.id,
                 "entry_order_id": lifecycle.entry_order_id,
@@ -782,13 +1065,75 @@ class OperationTest3PositionManagementService:
         return self.limited_auto_sell_service
 
     def _broker_positions(self) -> list[dict[str, Any]]:
-        if self.client is None:
-            return []
-        raw = self.client.list_positions()
-        if not isinstance(raw, list):
-            return []
-        return [item for item in raw if isinstance(item, dict)]
+        positions, _ = self._broker_positions_with_retry()
+        return positions
 
+    def _broker_positions_with_retry(self) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        positions: list[dict[str, Any]] = []
+        errors: list[str] = []
+        first_attempt_failed = False
+        retry_attempted = False
+        final_status = "unavailable"
+        attempt_count = 0
+
+        for attempt in range(1, BROKER_POSITION_READ_MAX_ATTEMPTS + 1):
+            attempt_count = attempt
+            try:
+                positions, final_status, error = self._broker_positions_once()
+            except Exception as exc:
+                positions = []
+                final_status = "unavailable"
+                error = _safe_error(exc)
+
+            if error:
+                errors.append(error)
+
+            if final_status in {"ok", "empty"}:
+                return positions, _broker_position_read_snapshot(
+                    {
+                        "attempt_count": attempt_count,
+                        "retry_attempted": retry_attempted,
+                        "retry_succeeded": bool(first_attempt_failed and retry_attempted),
+                        "first_attempt_failed": first_attempt_failed,
+                        "final_status": final_status,
+                        "errors": errors,
+                    }
+                )
+
+            first_attempt_failed = first_attempt_failed or attempt == 1
+            if attempt < BROKER_POSITION_READ_MAX_ATTEMPTS:
+                retry_attempted = True
+                delay = max(0.0, float(self.broker_position_read_retry_delay_seconds or 0.0))
+                if delay:
+                    self.sleeper(delay)
+
+        return positions, _broker_position_read_snapshot(
+            {
+                "attempt_count": attempt_count,
+                "retry_attempted": retry_attempted,
+                "retry_succeeded": False,
+                "first_attempt_failed": first_attempt_failed,
+                "final_status": final_status,
+                "errors": errors,
+            }
+        )
+
+    def _broker_positions_once(self) -> tuple[list[dict[str, Any]], str, str | None]:
+        if self.client is None:
+            return [], "empty", None
+        raw = self.client.list_positions()
+        if raw is None:
+            return [], "invalid", "list_positions_returned_none"
+        if not isinstance(raw, list):
+            return [], "invalid", "list_positions_returned_non_list"
+        positions: list[dict[str, Any]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                return [], "invalid", "list_positions_returned_invalid_item"
+            positions.append(item)
+        if not positions:
+            return [], "empty", None
+        return positions, "ok", None
     def _broker_open_orders(self) -> list[dict[str, Any]]:
         if self.client is None:
             return []
@@ -799,7 +1144,10 @@ class OperationTest3PositionManagementService:
 
     def _broker_position_zero(self, lifecycle: PositionLifecycle) -> bool:
         try:
-            positions = [_normalize_position(item) for item in self._broker_positions()]
+            positions, broker_position_read = self._broker_positions_with_retry()
+            if broker_position_read.get("final_status") in {"unavailable", "invalid"}:
+                return False
+            positions = [_normalize_position(item) for item in positions]
         except Exception:
             return False
         symbol = _normalize_symbol(lifecycle.symbol)
@@ -1003,6 +1351,7 @@ def _base_payload(
     lifecycle_count: int = 0,
     block_reasons: list[str] | None = None,
     manual_review_required: bool = False,
+    broker_position_read: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "provider": PROVIDER,
@@ -1025,6 +1374,7 @@ def _base_payload(
         "block_reasons": _dedupe(block_reasons or []),
         "manual_review_required": manual_review_required,
         "active_lifecycle_count": lifecycle_count,
+        "broker_position_read": _broker_position_read_snapshot(broker_position_read),
         "runtime": _runtime_snapshot(runtime or {}, settings),
         "evaluated_at": now_utc.isoformat(),
         "real_order_submitted": False,
@@ -1176,6 +1526,7 @@ def _latest_test3_run(db: Session) -> TradeRunLog | None:
 
 
 def _operation_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    broker_position_read = _broker_position_read_snapshot(payload.get("broker_position_read"))
     return {
         "operation_test": OPERATION_TEST,
         "operation_test3_auto": bool(payload.get("operation_test3_auto")),
@@ -1187,7 +1538,53 @@ def _operation_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         "lifecycle_id": payload.get("lifecycle_id"),
         "entry_order_id": payload.get("entry_order_id"),
         "symbol": payload.get("symbol"),
+        "broker_position_read_attempt_count": broker_position_read["attempt_count"],
+        "broker_position_read_retry_attempted": broker_position_read["retry_attempted"],
+        "broker_position_read_retry_succeeded": broker_position_read["retry_succeeded"],
+        "broker_position_read_final_status": broker_position_read["final_status"],
     }
+
+
+def _broker_position_read_snapshot(value: Any | None) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    attempt_count = _int_or_none(raw.get("attempt_count")) or 0
+    final_status = str(raw.get("final_status") or "empty").strip().lower()
+    if final_status not in {"ok", "unavailable", "empty", "invalid"}:
+        final_status = "unavailable"
+    errors = raw.get("errors") if isinstance(raw.get("errors"), list) else []
+    sanitized_errors = []
+    for error in errors:
+        text = str(error or "").strip()
+        if not text:
+            continue
+        if len(text) > 180:
+            text = f"{text[:180]}..."
+        sanitized_errors.append(text)
+    return {
+        "attempt_count": int(attempt_count),
+        "retry_attempted": bool(raw.get("retry_attempted", False)),
+        "retry_succeeded": bool(raw.get("retry_succeeded", False)),
+        "first_attempt_failed": bool(raw.get("first_attempt_failed", False)),
+        "final_status": final_status,
+        "errors": sanitized_errors,
+    }
+
+
+def _should_auto_clear_transient_broker_read_review(
+    lifecycle: PositionLifecycle,
+    *,
+    broker_position_read: dict[str, Any],
+    core_block_reasons: list[str],
+) -> bool:
+    if not bool(getattr(lifecycle, "manual_review_required", False)):
+        return False
+    if str(getattr(lifecycle, "exit_reason", None) or "") != "broker_positions_unavailable":
+        return False
+    if str(lifecycle.status or "").lower() != OPEN:
+        return False
+    if broker_position_read.get("final_status") != "ok":
+        return False
+    return not bool(core_block_reasons)
 
 
 def _update_lifecycle_price(lifecycle: PositionLifecycle, *, current_price: float, now_utc: datetime) -> None:
@@ -1203,7 +1600,6 @@ def _update_lifecycle_price(lifecycle: PositionLifecycle, *, current_price: floa
         float(current_price),
     )
     lifecycle.last_evaluated_at = _naive_utc(now_utc)
-    lifecycle.manual_review_required = False
 
 
 def _mark_manual_review(lifecycle: PositionLifecycle, *, reason: str, now_utc: datetime) -> None:

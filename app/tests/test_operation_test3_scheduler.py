@@ -148,6 +148,38 @@ def test_scheduler_slots_are_dedicated_kst_times():
     ]
 
 
+def test_scheduler_same_slot_retry_failure_creates_one_run_log(monkeypatch, db_session):
+    _open_lifecycle(db_session)
+    _enable_live_settings(db_session, operation_test3_scheduler_enabled=True)
+    fake_client = FakeClient(
+        positions_sequence=[TimeoutError("temporary"), RuntimeError("still down")]
+    )
+    monkeypatch.setattr(
+        "app.services.operation_test3_position_management_service.time_module.sleep",
+        lambda seconds: None,
+    )
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisClient",
+        lambda *args, **kwargs: fake_client,
+    )
+
+    first = SchedulerService()._run_operation_test3_position_management_with_db(
+        db_session,
+        slot_name="10:00",
+    )
+    second = SchedulerService()._run_operation_test3_position_management_with_db(
+        db_session,
+        slot_name="10:00",
+    )
+
+    runs = db_session.query(TradeRunLog).filter(TradeRunLog.mode == "op_test3_pm_run").all()
+    assert first["result"] == "review"
+    assert first["reason"] == "broker_positions_unavailable"
+    assert second["result"] == "skipped"
+    assert second["reason"] == "scheduler_slot_already_ran"
+    assert len(runs) == 1
+    assert fake_client.list_positions_calls == 2
+
 def test_scheduler_hold_result_records_trade_run_log(monkeypatch, db_session):
     _open_lifecycle(db_session)
     _enable_live_settings(db_session, operation_test3_scheduler_enabled=True)
