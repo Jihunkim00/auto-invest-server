@@ -60,12 +60,14 @@ def validate_quote(
     quote: dict[str, Any],
     *,
     price_cap_krw: float = DEFAULT_PRICE_CAP_KRW,
+    source_name: str | None = None,
 ) -> QuoteValidation:
     if not isinstance(quote, dict):
         return QuoteValidation(False, ("quote_invalid",), {})
 
     price = _first_number(quote, "current_price", "price", "stck_prpr", "last")
     name = _first_text(quote, "name", "prdt_name", "hts_kor_isnm")
+    source_name_text = str(source_name or "").strip()
     reasons: list[str] = []
     if price is None or price <= 0:
         reasons.append("invalid_quote_price")
@@ -102,8 +104,11 @@ def validate_quote(
         if marker in instrument_type:
             reasons.append(reason)
 
-    normalized_name = name.upper()
-    if normalized_name.endswith("우") or "우선주" in normalized_name:
+    normalized_names = (name.upper(), source_name_text.upper())
+    if any(
+        normalized_name.endswith("우") or "우선주" in normalized_name
+        for normalized_name in normalized_names
+    ):
         reasons.append("preferred_stock_excluded")
 
     snapshot = {
@@ -159,7 +164,11 @@ def build_operation_test4_watchlist(
                 {"symbol": symbol, "reasons": [f"quote_read_failed:{exc.__class__.__name__}"]}
             )
             continue
-        validation = validate_quote(quote, price_cap_krw=price_cap_krw)
+        validation = validate_quote(
+            quote,
+            price_cap_krw=price_cap_krw,
+            source_name=str(item.get("name") or ""),
+        )
         if not validation.eligible:
             exclusions.append(
                 {

@@ -66,6 +66,10 @@ def test_watchlist_quote_filters_price_and_instrument_types():
     assert validate_quote({"current_price": 10_000, "name": "Example우"}).reasons == (
         "preferred_stock_excluded",
     )
+    assert validate_quote(
+        {"current_price": 10_000},
+        source_name="Example우",
+    ).reasons == ("preferred_stock_excluded",)
     assert validate_quote({"current_price": 0}).reasons == ("invalid_quote_price",)
 
 
