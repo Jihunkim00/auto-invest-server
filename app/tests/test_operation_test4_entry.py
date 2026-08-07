@@ -214,6 +214,7 @@ def make_service(
     candidate=None,
     account_state=None,
     lifecycle_service=None,
+    possible_order=None,
 ):
     client = FakeClient()
     state = account_state or {
@@ -236,6 +237,18 @@ def make_service(
         manual_order_service=manual_service or FakeManualOrderService(),
         validation_service=FakeValidationService(),
         lifecycle_service=lifecycle_service,
+        possible_order_provider=possible_order or (
+            lambda **kwargs: {
+                "raw_status": "ok",
+                "symbol": kwargs["symbol"],
+                "order_type": "market",
+                "reference_price": kwargs["order_price"],
+                "orderable_cash": 1_000_000,
+                "orderable_quantity": 100,
+                "queried_at": NOW.isoformat(),
+                "error": None,
+            }
+        ),
         now_provider=lambda: NOW,
     )
     return service, client, state
@@ -270,7 +283,7 @@ def test_entry_holds_when_score_gate_is_not_met(db_session, tmp_path):
         now=NOW,
     )
 
-    assert result["reason"] == "candidate_gate_blocked"
+    assert result["reason"] == "final_score_gate_not_met"
     assert manual.calls == []
 
 

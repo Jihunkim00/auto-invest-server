@@ -58,6 +58,7 @@ REVIEW = "REVIEW"
 ENTRY_SLOTS = ("09:35",)
 POSITION_SLOTS = ("10:00", "12:00", "14:30")
 ALL_SLOTS = ENTRY_SLOTS + POSITION_SLOTS
+POSSIBLE_ORDER_MAX_AGE_SECONDS = 10.0
 ACTIVE_CYCLE_STATUSES = (
     "entry_ready",
     "entry_submitted",
@@ -150,6 +151,8 @@ class OperationTest4Service:
         order_sync_service: Any | None = None,
         account_state_provider: Callable[..., dict[str, Any]] | None = None,
         candidate_provider: Callable[..., dict[str, Any]] | None = None,
+        possible_order_provider: Callable[..., dict[str, Any]] | None = None,
+        price_provider: Callable[..., dict[str, Any]] | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.client = client
@@ -171,13 +174,15 @@ class OperationTest4Service:
         self.order_sync_service = order_sync_service
         self.account_state_provider = account_state_provider
         self.candidate_provider = candidate_provider
+        self.possible_order_provider = possible_order_provider
+        self.price_provider = price_provider
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
 
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
         active = self._active_cycle(db)
         account = self._read_account_state()
-        return sanitize_kis_payload(
+        payload = sanitize_kis_payload(
             {
                 "provider": PROVIDER,
                 "market": MARKET,
@@ -198,6 +203,7 @@ class OperationTest4Service:
                 "broker_submit_called": False,
             }
         )
+        return payload
 
     def readiness(
         self,
@@ -216,13 +222,8 @@ class OperationTest4Service:
             require_fresh=True,
             today_kst=now_utc.astimezone(KR_TZ).date(),
         )
-        preview, candidate = self._candidate_snapshot(
-            db,
-            account=account,
-            runtime=runtime,
-            now=now_utc,
-        )
-        entry_candidate = candidate.get("sizing") if candidate else None
+        preview: dict[str, Any] = {}
+        candidate: dict[str, Any] = {}
         checks: list[dict[str, Any]] = []
         blocking_reasons: list[str] = []
         review_reasons: list[str] = []
@@ -234,16 +235,18 @@ class OperationTest4Service:
             *,
             category: str = "blocking",
             detail: Any | None = None,
+            blocking: bool = True,
         ) -> None:
             checks.append(
                 {
                     "key": key,
+                    "check_name": key,
                     "passed": bool(passed),
-                    "blocking": True,
+                    "blocking": bool(blocking),
                     "detail": detail,
                 }
             )
-            if passed:
+            if passed or not blocking:
                 return
             if category == "review":
                 review_reasons.append(reason)
@@ -275,10 +278,11 @@ class OperationTest4Service:
                 "all_other_scheduler_live_flags_false",
                 not enabled_other_scheduler_flags,
                 "other_scheduler_live_flags_enabled",
+                    "blocking",
+                    {"enabled_flags": enabled_other_scheduler_flags},
             ),
             ("account_readable", account.get("fetch_success") is True, "account_state_unavailable", "review"),
             ("equity_positive", _number(account.get("equity")) > 0, "equity_unavailable", "review"),
-            ("orderable_cash_positive", _number(account.get("orderable_cash")) > 0, "orderable_cash_unavailable", "review"),
             ("position_count_zero", account.get("position_count") == 0, "position_exists"),
             ("active_lifecycle_zero", len(active_lifecycles) == 0, "active_lifecycle_exists"),
             ("open_order_count_zero", account.get("open_order_count") == 0, "open_order_exists"),
@@ -292,15 +296,34 @@ class OperationTest4Service:
                 watchlist.get("error") or "test4_watchlist_stale",
             ),
             ("watchlist_exact_count", watchlist.get("count") == DEFAULT_COUNT, "watchlist_count_not_50"),
-            ("watchlist_eligible_count", _eligible_count(preview, runtime) == DEFAULT_COUNT, "watchlist_eligible_count_below_50", "review"),
-            ("candidate_selected", bool(candidate), "no_candidate"),
-            ("candidate_score_gate", not candidate or not candidate.get("block_reasons"), "candidate_gate_blocked"),
-            ("sizing_ready", bool(entry_candidate and entry_candidate.get("status") == "ready"), "sizing_blocked"),
+            (
+                "watchlist_snapshot_selected_count",
+                watchlist.get("selected_count") == DEFAULT_COUNT,
+                "watchlist_selected_count_not_50",
+            ),
         ]
         for item in entry_conditions:
             key, passed, reason, *extra = item
-            category = extra[0] if extra else "blocking"
-            add(key, passed, reason, category=category)
+            category = extra[0] if extra and isinstance(extra[0], str) else "blocking"
+            detail = extra[1] if len(extra) > 1 and isinstance(extra[1], dict) else None
+            add(key, passed, reason, category=category, detail=detail)
+        add(
+            "orderable_cash_available_for_candidate",
+            account.get("orderable_cash") is not None,
+            "orderable_cash_unavailable",
+            detail={
+                "status": account.get("orderable_cash_status", "unavailable"),
+                "deferred_to": "entry_preflight",
+            },
+            blocking=False,
+        )
+        add(
+            "candidate_required",
+            False,
+            "candidate_required",
+            detail={"heavy_analysis": "entry_preflight_only"},
+            blocking=False,
+        )
 
         exit_checks = [
             ("operation_test4_enabled", runtime.get("operation_test4_enabled") is True, "operation_test4_disabled"),
@@ -328,22 +351,27 @@ class OperationTest4Service:
         else:
             exit_blocking = _dedupe(exit_blocking)
             exit_review = _dedupe(exit_review)
-        entry_ready = not entry_blocking and not entry_review
+        entry_base_ready = not entry_blocking and not entry_review
+        entry_ready = False
         exit_ready = bool(active_position) and not exit_blocking and not exit_review
-        live_ready = entry_ready or exit_ready
+        live_ready = exit_ready
         status = (
-            "ready"
+            "ready_for_preflight"
+            if entry_base_ready and not exit_ready
+            else "ready"
             if live_ready
             else "review_required"
             if entry_review or exit_review
             else "blocked"
         )
-        return sanitize_kis_payload(
+        payload = sanitize_kis_payload(
             {
                 "status": status,
                 "live_ready": live_ready,
                 "entry_ready": entry_ready,
                 "exit_ready": exit_ready,
+                "entry_base_ready": entry_base_ready,
+                "candidate_required": True,
                 "provider": PROVIDER,
                 "market": MARKET,
                 "operation_test": OPERATION_TEST,
@@ -351,7 +379,7 @@ class OperationTest4Service:
                 "account": self._account_summary(account),
                 "watchlist": {
                     "configured_count": watchlist.get("count", 0),
-                    "eligible_count": _eligible_count(preview, runtime),
+                    "eligible_count": watchlist.get("selected_count", 0),
                     "price_cap_krw": runtime.get("operation_test4_price_cap_krw", DEFAULT_PRICE_CAP_KRW),
                     "path": str(self.watchlist_path),
                 },
@@ -362,7 +390,15 @@ class OperationTest4Service:
                     "estimated_notional": None,
                     "effective_position_pct": None,
                 },
+                "orderable_cash_status": account.get(
+                    "orderable_cash_status", "unavailable"
+                ),
+                "heavy_analysis": {
+                    "performed": False,
+                    "deferred_to": "/app/operation-test4/entry/preflight-once",
+                },
                 "runtime": self._runtime_snapshot(runtime),
+                "conflicting_live_flags": enabled_other_scheduler_flags,
                 "market_session": _public_market_session(market_session),
                 "checks": checks,
                 "blocking_reasons": _dedupe(entry_blocking + exit_blocking),
@@ -379,6 +415,11 @@ class OperationTest4Service:
                 },
             }
         )
+        payload["checks"] = [
+            {**item, "key": item.get("check_name") or item.get("key")}
+            for item in checks
+        ]
+        return payload
 
     def rebuild_watchlist(
         self,
@@ -553,21 +594,80 @@ class OperationTest4Service:
         *,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        result = self.readiness(db, now=now)
-        result.update(
+        now_utc = _aware_utc(now or self.now_provider())
+        readiness = self.readiness(db, now=now_utc)
+        if readiness.get("entry_base_ready") is not True:
+            return sanitize_kis_payload(
+                {
+                    **readiness,
+                    "mode": "operation_test4_preflight",
+                    "preflight_only": True,
+                    "status": "blocked",
+                    "action": HOLD,
+                    "safety": _read_only_safety(),
+                }
+            )
+
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        account = self._read_account_state()
+        preview, candidate = self._candidate_snapshot(
+            db,
+            account=account,
+            runtime=runtime,
+            now=now_utc,
+        )
+        sizing = candidate.get("sizing") if candidate else None
+        preflight_account = dict(account)
+        if candidate:
+            preflight_account.update(
+                {
+                    "orderable_cash": candidate.get("orderable_cash"),
+                    "orderable_cash_status": "ok"
+                    if candidate.get("orderable_cash") is not None
+                    else "unavailable",
+                    "orderable_cash_source": (
+                        candidate.get("possible_order", {}).get("source")
+                    ),
+                }
+            )
+        blocking_reasons = list(candidate.get("block_reasons") or []) if candidate else ["no_candidate"]
+        action = "BUY_READY" if candidate and not blocking_reasons and sizing and sizing.get("status") == "ready" else HOLD
+        status = "ready" if action == "BUY_READY" else "hold" if candidate else "blocked"
+        return sanitize_kis_payload(
             {
+                "status": status,
+                "action": action,
+                "operation_test": OPERATION_TEST,
                 "mode": "operation_test4_preflight",
                 "preflight_only": True,
-                "safety": {
-                    "read_only": True,
-                    "preflight_only": True,
-                    "real_order_submitted": False,
-                    "broker_submit_called": False,
-                    "manual_submit_called": False,
+                "candidate_required": False,
+                "candidate": candidate or {
+                    "symbol": None,
+                    "current_price": None,
+                    "final_buy_score": None,
+                    "risk_flags": [],
                 },
+                "account": self._account_summary(preflight_account),
+                "sizing": sizing or {
+                    "quantity": 0,
+                    "estimated_notional": 0,
+                    "effective_position_pct": 0,
+                    "broker_orderable_quantity": None,
+                },
+                "possible_order": candidate.get("possible_order") if candidate else None,
+                "preview": {
+                    "configured_count": preview.get("configured_symbol_count"),
+                    "analyzed_count": preview.get("analyzed_symbol_count"),
+                    "final_ranked_count": len(preview.get("final_ranked_candidates") or []),
+                },
+                "blocking_reasons": _dedupe(blocking_reasons),
+                "review_reasons": [],
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+                "safety": _read_only_safety(),
             }
         )
-        return sanitize_kis_payload(result)
 
     def entry_run_once(
         self,
@@ -581,8 +681,13 @@ class OperationTest4Service:
         now_utc = _aware_utc(now or self.now_provider())
         if confirm_live is not True or str(confirmation or "").strip() != ENTRY_CONFIRMATION:
             return self._entry_blocked("operator_confirmation_required")
+        now_kst = now_utc.astimezone(KR_TZ)
+        if now_kst.time() < time(9, 0):
+            return self._entry_blocked("entry_before_09_00")
+        if now_kst.time() >= time(14, 0):
+            return self._entry_blocked("entry_after_14_00")
         readiness = self.readiness(db, now=now_utc)
-        if readiness.get("status") != "ready" or readiness.get("entry_ready") is not True:
+        if readiness.get("entry_base_ready") is not True:
             return sanitize_kis_payload(
                 {
                     "status": "blocked",
@@ -597,16 +702,88 @@ class OperationTest4Service:
                     "manual_submit_called": False,
                 }
             )
-        now_kst = now_utc.astimezone(KR_TZ)
-        if now_kst.time() < time(9, 0):
-            return self._entry_blocked("entry_before_09_00")
-        if now_kst.time() >= time(14, 0):
-            return self._entry_blocked("entry_after_14_00")
+        preflight = self.preflight_once(db, now=now_utc)
+        if preflight.get("status") != "ready" or preflight.get("action") != "BUY_READY":
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked" if preflight.get("status") == "blocked" else "ok",
+                    "operation_test": OPERATION_TEST,
+                    "result": HOLD,
+                    "reason": (preflight.get("blocking_reasons") or ["candidate_gate_blocked"])[0],
+                    "blocking_reasons": preflight.get("blocking_reasons", []),
+                    "review_reasons": preflight.get("review_reasons", []),
+                    "preflight": preflight,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
         if self._entry_used_today(db, now_utc):
             return self._entry_blocked("daily_entry_already_used")
 
-        candidate = readiness.get("candidate") or {}
-        sizing_payload = candidate.get("sizing") or {}
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        candidate = preflight.get("candidate") or {}
+        fresh_price = self._current_price(
+            symbol=str(candidate.get("symbol") or ""),
+            fallback=_number(candidate.get("current_price")),
+        )
+        if fresh_price is None or fresh_price <= 0:
+            return self._entry_blocked("current_price_unavailable")
+        if fresh_price >= float(runtime.get("operation_test4_price_cap_krw", DEFAULT_PRICE_CAP_KRW)):
+            return self._entry_blocked("price_cap_exceeded")
+        candidate = {**candidate, "current_price": fresh_price}
+        preflight_possible = candidate.get("possible_order") or {}
+        if not _possible_order_is_fresh(
+            preflight_possible,
+            now=now_utc,
+            max_age_seconds=POSSIBLE_ORDER_MAX_AGE_SECONDS,
+        ):
+            return self._entry_blocked("possible_order_snapshot_stale")
+        latest_possible = self._possible_order(
+            symbol=str(candidate.get("symbol") or ""),
+            current_price=fresh_price,
+        )
+        conservative_possible = _conservative_possible_order(
+            preflight_possible,
+            latest_possible,
+        )
+        if conservative_possible.get("raw_status") != "ok":
+            return self._entry_blocked(
+                str(conservative_possible.get("error") or "possible_order_unavailable")
+            )
+        latest_cash = _number_or_none(conservative_possible.get("orderable_cash"))
+        latest_quantity = _int_or_none(conservative_possible.get("orderable_quantity"))
+        if latest_cash is None or latest_quantity is None:
+            return self._entry_blocked("possible_order_unavailable")
+        sizing = calculate_operation_test4_sizing(
+            equity=_number(candidate.get("equity")),
+            orderable_cash=latest_cash,
+            current_price=_number(candidate.get("current_price")),
+            min_position_pct=float(runtime.get("operation_test4_min_position_pct", 10.0)),
+            max_position_pct=float(runtime.get("operation_test4_max_position_pct", 100.0)),
+            max_order_notional_krw=float(runtime.get("operation_test4_max_order_notional_krw", 1_000_000.0)),
+            price_cap_krw=float(runtime.get("operation_test4_price_cap_krw", 1_000_000.0)),
+            broker_orderable_qty=latest_quantity,
+            allow_single_share_budget_bump=bool(
+                runtime.get("operation_test4_allow_single_share_budget_bump", True)
+            ),
+        )
+        if not sizing.allowed:
+            return self._entry_blocked(str(sizing.reason or "sizing_blocked"))
+        candidate = {
+            **candidate,
+            "orderable_cash": latest_cash,
+            "orderable_quantity": latest_quantity,
+            "possible_order": conservative_possible,
+            "sizing": {
+                **sizing.as_dict(),
+                "min_position_pct": runtime.get("operation_test4_min_position_pct", 10.0),
+                "max_position_pct": runtime.get("operation_test4_max_position_pct", 100.0),
+                "price_cap_krw": runtime.get("operation_test4_price_cap_krw", 1_000_000.0),
+                "max_order_notional_krw": runtime.get("operation_test4_max_order_notional_krw", 1_000_000.0),
+            },
+        }
+        sizing_payload = candidate["sizing"]
         cycle = OperationTest4Cycle(
             cycle_key=f"operation_test4_{now_kst.strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}",
             operation_test=OPERATION_TEST,
@@ -1017,6 +1194,12 @@ class OperationTest4Service:
             or selected.get("price")
             or selected.get("stck_prpr")
         )
+        possible_order = self._possible_order(
+            symbol=symbol,
+            current_price=current_price,
+        )
+        possible_cash = _number_or_none(possible_order.get("orderable_cash"))
+        possible_quantity = _int_or_none(possible_order.get("orderable_quantity"))
         score = _number_or_none(
             selected.get("final_buy_score")
             or selected.get("final_entry_score")
@@ -1029,15 +1212,21 @@ class OperationTest4Service:
             score_gap=preview.get("final_score_gap"),
             min_score_gap=float(getattr(get_settings(), "watchlist_min_score_gap", 0)),
         )
+        if possible_order.get("raw_status") != "ok":
+            block_reasons.append("possible_order_unavailable")
+        if possible_cash is None:
+            block_reasons.append("orderable_cash_unavailable")
+        if possible_quantity is None or possible_quantity <= 0:
+            block_reasons.append("orderable_quantity_unavailable")
         sizing = calculate_operation_test4_sizing(
             equity=_number(account.get("equity")),
-            orderable_cash=_number(account.get("orderable_cash")),
+            orderable_cash=possible_cash or 0.0,
             current_price=current_price,
             min_position_pct=float(runtime.get("operation_test4_min_position_pct", 10.0)),
             max_position_pct=float(runtime.get("operation_test4_max_position_pct", 100.0)),
             max_order_notional_krw=float(runtime.get("operation_test4_max_order_notional_krw", 1_000_000.0)),
             price_cap_krw=float(runtime.get("operation_test4_price_cap_krw", 1_000_000.0)),
-            broker_orderable_qty=_number_or_none(selected.get("broker_orderable_qty")),
+            broker_orderable_qty=possible_quantity,
             allow_single_share_budget_bump=bool(
                 runtime.get("operation_test4_allow_single_share_budget_bump", True)
             ),
@@ -1052,7 +1241,13 @@ class OperationTest4Service:
                 "block_reasons": _dedupe(block_reasons),
                 "risk_flags": selected.get("risk_flags") or [],
                 "equity": account.get("equity"),
-                "orderable_cash": account.get("orderable_cash"),
+                "cash": account.get("cash"),
+                "withdrawable_cash": account.get("withdrawable_cash"),
+                "d1_cash": account.get("d1_cash"),
+                "d2_cash": account.get("d2_cash"),
+                "orderable_cash": possible_cash,
+                "orderable_quantity": possible_quantity,
+                "possible_order": possible_order,
                 "quantity": sizing.quantity,
                 "estimated_notional": sizing.estimated_notional,
                 "effective_position_pct": sizing.effective_position_pct,
@@ -1066,6 +1261,67 @@ class OperationTest4Service:
             }
         )
         return preview, selected
+
+    def _possible_order(
+        self,
+        *,
+        symbol: str,
+        current_price: float,
+    ) -> dict[str, Any]:
+        try:
+            if self.possible_order_provider is not None:
+                result = self.possible_order_provider(
+                    symbol=symbol,
+                    order_type="market",
+                    order_price=current_price,
+                    side="buy",
+                    market=MARKET,
+                )
+            else:
+                result = self.client.get_domestic_possible_order(
+                    symbol=symbol,
+                    order_type="market",
+                    order_price=current_price,
+                    side="buy",
+                    market=MARKET,
+                )
+        except Exception as exc:
+            return {
+                "raw_status": "error",
+                "symbol": symbol,
+                "order_type": "market",
+                "reference_price": current_price,
+                "orderable_cash": None,
+                "orderable_quantity": None,
+                "error": _safe_error(exc),
+            }
+        return result if isinstance(result, dict) else {
+            "raw_status": "error",
+            "symbol": symbol,
+            "reference_price": current_price,
+            "orderable_cash": None,
+            "orderable_quantity": None,
+            "error": "possible_order_invalid_response",
+        }
+
+    def _current_price(self, *, symbol: str, fallback: float) -> float | None:
+        try:
+            if self.price_provider is not None:
+                payload = self.price_provider(symbol=symbol)
+            else:
+                reader = getattr(self.client, "get_domestic_stock_price", None)
+                if not callable(reader):
+                    return fallback if fallback > 0 else None
+                payload = reader(symbol)
+            if not isinstance(payload, dict):
+                return None
+            return _number_or_none(
+                payload.get("current_price")
+                or payload.get("price")
+                or payload.get("stck_prpr")
+            )
+        except Exception:
+            return None
 
     def _validate_entry(
         self,
@@ -1361,25 +1617,25 @@ class OperationTest4Service:
                 open_orders = self.client.list_open_orders()
                 if not isinstance(balance, dict):
                     raise ValueError("account_balance_invalid")
-                orderable_cash = _first_number(
-                    balance,
-                    "orderable_cash",
-                    "orderable_amount",
-                    "ord_psbl_cash",
-                )
-                if orderable_cash is None:
-                    orderable_reader = getattr(self.client, "get_orderable_cash", None)
-                    if callable(orderable_reader):
-                        orderable_cash = _number_or_none(orderable_reader())
+                orderable_cash = _number_or_none(balance.get("orderable_cash"))
                 return _normalize_account_state(
                     {
-                        "fetch_success": orderable_cash is not None,
+                        "fetch_success": True,
                         "balance": balance,
                         "equity": _first_number(balance, "total_asset_value", "equity"),
+                        "cash": _number_or_none(balance.get("cash")),
+                        "withdrawable_cash": _number_or_none(balance.get("withdrawable_cash")),
+                        "d1_cash": _number_or_none(balance.get("d1_cash")),
+                        "d2_cash": _number_or_none(balance.get("d2_cash")),
                         "orderable_cash": orderable_cash,
+                        "orderable_cash_status": balance.get(
+                            "orderable_cash_status",
+                            "candidate_required" if orderable_cash is None else "ok",
+                        ),
+                        "orderable_cash_source": balance.get("orderable_cash_source"),
                         "positions": positions if isinstance(positions, list) else [],
                         "open_orders": open_orders if isinstance(open_orders, list) else [],
-                        "warnings": [] if orderable_cash is not None else ["orderable_cash_unavailable"],
+                        "warnings": [],
                     }
                 )
             except Exception as exc:
@@ -1449,7 +1705,13 @@ class OperationTest4Service:
     def _account_summary(self, account: dict[str, Any]) -> dict[str, Any]:
         return {
             "equity": account.get("equity", 0),
-            "orderable_cash": account.get("orderable_cash", 0),
+            "cash": account.get("cash"),
+            "withdrawable_cash": account.get("withdrawable_cash"),
+            "orderable_cash": account.get("orderable_cash"),
+            "orderable_cash_status": account.get("orderable_cash_status", "unavailable"),
+            "orderable_cash_source": account.get("orderable_cash_source"),
+            "d1_cash": account.get("d1_cash"),
+            "d2_cash": account.get("d2_cash"),
             "position_count": account.get("position_count", 0),
             "open_order_count": account.get("open_order_count", 0),
             "fetch_success": account.get("fetch_success") is True,
@@ -1577,7 +1839,24 @@ def _normalize_account_state(value: Any) -> dict[str, Any]:
         **payload,
         "fetch_success": payload.get("fetch_success", True) is True,
         "equity": equity or 0.0,
-        "orderable_cash": orderable_cash or 0.0,
+        "orderable_cash": orderable_cash,
+        "orderable_cash_status": payload.get(
+            "orderable_cash_status",
+            "candidate_required" if orderable_cash is None else "ok",
+        ),
+        "orderable_cash_source": payload.get("orderable_cash_source"),
+        "cash": _number_or_none(payload.get("cash"))
+        if payload.get("cash") is not None
+        else _number_or_none(balance.get("cash")),
+        "withdrawable_cash": _number_or_none(payload.get("withdrawable_cash"))
+        if payload.get("withdrawable_cash") is not None
+        else _number_or_none(balance.get("withdrawable_cash")),
+        "d1_cash": _number_or_none(payload.get("d1_cash"))
+        if payload.get("d1_cash") is not None
+        else _number_or_none(balance.get("d1_cash")),
+        "d2_cash": _number_or_none(payload.get("d2_cash"))
+        if payload.get("d2_cash") is not None
+        else _number_or_none(balance.get("d2_cash")),
         "positions": held_positions,
         "open_orders": [row for row in open_orders if isinstance(row, dict)],
         "position_count": len(held_positions),
@@ -1590,7 +1869,8 @@ def _account_error(exc: Exception) -> dict[str, Any]:
     return {
         "fetch_success": False,
         "equity": 0.0,
-        "orderable_cash": 0.0,
+        "orderable_cash": None,
+        "orderable_cash_status": "unavailable",
         "positions": [],
         "open_orders": [],
         "position_count": 0,
@@ -1759,3 +2039,70 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def _safe_error(exc: Exception) -> str:
     return f"{exc.__class__.__name__}: {_text_or_none(str(exc)) or exc.__class__.__name__}"[:300]
+
+
+def _read_only_safety() -> dict[str, Any]:
+    return {
+        "read_only": True,
+        "preflight_only": True,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+    }
+
+
+def _possible_order_is_fresh(
+    payload: dict[str, Any],
+    *,
+    now: datetime,
+    max_age_seconds: float,
+) -> bool:
+    if not isinstance(payload, dict) or payload.get("raw_status") != "ok":
+        return False
+    try:
+        queried_at = datetime.fromisoformat(str(payload.get("queried_at") or ""))
+    except ValueError:
+        return False
+    if queried_at.tzinfo is None:
+        queried_at = queried_at.replace(tzinfo=UTC)
+    age = (now - queried_at.astimezone(UTC)).total_seconds()
+    return 0 <= age <= float(max_age_seconds)
+
+
+def _conservative_possible_order(
+    preflight: dict[str, Any],
+    latest: dict[str, Any],
+) -> dict[str, Any]:
+    if preflight.get("raw_status") != "ok" or latest.get("raw_status") != "ok":
+        return {
+            "raw_status": "error",
+            "error": "possible_order_unavailable",
+            "orderable_cash": None,
+            "orderable_quantity": None,
+        }
+    cash_values = [
+        _number_or_none(preflight.get("orderable_cash")),
+        _number_or_none(latest.get("orderable_cash")),
+    ]
+    quantity_values = [
+        _int_or_none(preflight.get("orderable_quantity")),
+        _int_or_none(latest.get("orderable_quantity")),
+    ]
+    if any(value is None for value in cash_values + quantity_values):
+        return {
+            "raw_status": "error",
+            "error": "possible_order_unavailable",
+            "orderable_cash": None,
+            "orderable_quantity": None,
+        }
+    return {
+        **latest,
+        "raw_status": "ok",
+        "orderable_cash": min(value for value in cash_values if value is not None),
+        "orderable_quantity": min(
+            value for value in quantity_values if value is not None
+        ),
+        "conservative_snapshot": True,
+        "preflight_queried_at": preflight.get("queried_at"),
+        "latest_queried_at": latest.get("queried_at"),
+    }

@@ -51,27 +51,77 @@ def test_ready_requires_live_gates_and_candidate_score(db_session, tmp_path):
     arm_for_entry(db_session, service)
     ready = service.readiness(db_session, now=NOW)
 
-    assert ready["status"] == "ready"
-    assert ready["live_ready"] is True
-    assert ready["entry_ready"] is True
+    assert ready["status"] == "ready_for_preflight"
+    assert ready["live_ready"] is False
+    assert ready["entry_ready"] is False
+    assert ready["entry_base_ready"] is True
+    assert ready["candidate_required"] is True
     assert ready["exit_ready"] is False
     assert ready["watchlist"]["configured_count"] == 50
     assert ready["watchlist"]["eligible_count"] == 50
-    assert ready["candidate"]["quantity"] == 5
-    assert ready["candidate"]["estimated_notional"] == 100_000
-    assert ready["candidate"]["effective_position_pct"] == 10
+    assert ready["candidate"]["symbol"] is None
+    assert ready["orderable_cash_status"] == "ok"
+
+
+def test_readiness_skips_candidate_provider_and_preflight_runs_it(db_session, tmp_path):
+    calls = {"candidate": 0, "possible": 0}
+
+    def candidate(**kwargs):
+        calls["candidate"] += 1
+        return {
+            "final_ranked_candidates": [
+                {
+                    "symbol": "001450",
+                    "current_price": 38_650,
+                    "final_buy_score": 90,
+                    "block_reasons": [],
+                    "risk_flags": [],
+                }
+            ],
+            "watchlist": [],
+        }
+
+    def possible(**kwargs):
+        calls["possible"] += 1
+        return {
+            "raw_status": "ok",
+            "symbol": kwargs["symbol"],
+            "orderable_cash": 996_274,
+            "orderable_quantity": 25,
+            "queried_at": NOW.isoformat(),
+            "error": None,
+        }
+
+    service, _, _ = make_service(
+        tmp_path,
+        candidate=candidate,
+        possible_order=possible,
+    )
+    arm_for_entry(db_session, service)
+
+    readiness = service.readiness(db_session, now=NOW)
+    preflight = service.preflight_once(db_session, now=NOW)
+
+    assert readiness["candidate_required"] is True
+    assert readiness["heavy_analysis"]["performed"] is False
+    assert calls == {"candidate": 1, "possible": 1}
+    assert preflight["candidate"]["symbol"] == "001450"
+    assert preflight["possible_order"]["orderable_cash"] == 996_274
+    assert preflight["sizing"]["quantity"] == 3
+    assert preflight["real_order_submitted"] is False
 
 
 def test_readiness_fails_closed_when_orderable_cash_is_missing(db_session, tmp_path):
     service, _, state = make_service(tmp_path)
-    state["orderable_cash"] = 0
+    state["orderable_cash"] = None
     state["warnings"] = ["orderable_cash_unavailable"]
     arm_for_entry(db_session, service)
 
     result = service.readiness(db_session, now=NOW)
 
     assert result["entry_ready"] is False
-    assert "orderable_cash_unavailable" in result["review_reasons"]
+    assert result["orderable_cash_status"] == "candidate_required"
+    assert result["candidate_required"] is True
 
 
 def test_position_open_blocks_new_entry_readiness(db_session, tmp_path):
