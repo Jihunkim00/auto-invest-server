@@ -137,6 +137,24 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     operation_test3_stop_loss_enabled: bool | None = None
     operation_test3_take_profit_enabled: bool | None = None
     operation_test3_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    operation_test4_enabled: bool | None = None
+    operation_test4_scheduler_enabled: bool | None = None
+    operation_test4_allow_real_entry: bool | None = None
+    operation_test4_allow_real_exit: bool | None = None
+    operation_test4_entry_enabled: bool | None = None
+    operation_test4_position_management_enabled: bool | None = None
+    operation_test4_stop_loss_enabled: bool | None = None
+    operation_test4_take_profit_enabled: bool | None = None
+    operation_test4_min_position_pct: float | None = Field(default=None, ge=0, le=100)
+    operation_test4_max_position_pct: float | None = Field(default=None, ge=0, le=100)
+    operation_test4_max_order_notional_krw: float | None = Field(default=None, ge=0)
+    operation_test4_price_cap_krw: float | None = Field(default=None, gt=0)
+    operation_test4_max_buy_orders_per_day: int | None = Field(default=None, ge=0, le=1)
+    operation_test4_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=1)
+    operation_test4_max_open_positions: int | None = Field(default=None, ge=0, le=1)
+    operation_test4_allow_single_share_budget_bump: bool | None = None
+    operation_test4_cash_only: bool | None = None
+    operation_test4_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     kis_scheduler_live_requires_dry_run_false: bool | None = None
     kis_scheduler_live_respect_kill_switch: bool | None = None
     portfolio_orchestrator_enabled: bool | None = None
@@ -249,6 +267,22 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
             detail=(
                 "operation_test3_allow_real_orders requires the "
                 "/app/operation-test3/position-management/enable live confirmation endpoint."
+            ),
+        )
+    if payload_values.get("operation_test4_allow_real_entry") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test4_allow_real_entry requires the "
+                "/app/operation-test4/enable-live confirmation endpoint."
+            ),
+        )
+    if payload_values.get("operation_test4_allow_real_exit") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test4_allow_real_exit requires the "
+                "/app/operation-test4/enable-live confirmation endpoint."
             ),
         )
     if "no_new_entry_after" in payload_values:

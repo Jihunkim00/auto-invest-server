@@ -409,7 +409,7 @@ class KisWatchlistPreviewService:
     def _runtime_settings(self, db) -> dict[str, Any]:
         try:
             if db is not None:
-                return self.runtime_setting_service.get_settings(db)
+                return self.runtime_setting_service.get_settings_read_only(db)
         except Exception:
             pass
         return self.runtime_setting_service._defaults()

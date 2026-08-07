@@ -24,6 +24,7 @@ from app.routes.market_analysis import router as market_analysis_router
 from app.routes.market_profiles import router as market_profiles_router
 from app.routes.market_sessions import router as market_sessions_router
 from app.routes.ops import router as ops_router
+from app.routes.operation_test4 import router as operation_test4_router
 from app.routes.orders import router as orders_router
 from app.routes.positions import router as positions_router
 from app.routes.portfolio import router as portfolio_router
@@ -117,6 +118,7 @@ app.include_router(strategy_positions_router)
 app.include_router(strategy_risk_router)
 app.include_router(trading_router)
 app.include_router(ops_router)
+app.include_router(operation_test4_router)
 app.include_router(scheduler_router)
 
 

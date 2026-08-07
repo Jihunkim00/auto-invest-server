@@ -95,3 +95,22 @@ class OperationTest3MonitoringEnableRequest(BaseModel):
     @classmethod
     def normalize_confirmation(cls, value: str) -> str:
         return str(value or "").strip()
+
+
+class OperationTest4ConfirmationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    confirm_live: bool = False
+    confirmation: str = Field(min_length=1, max_length=300)
+
+    @field_validator("confirmation")
+    @classmethod
+    def normalize_confirmation(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
+class OperationTest4WatchlistRebuildRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    count: int = Field(default=50, ge=1, le=50)
+    price_cap_krw: float = Field(default=1_000_000.0, gt=0)

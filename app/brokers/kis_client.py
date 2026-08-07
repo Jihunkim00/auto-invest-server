@@ -212,6 +212,10 @@ class KisClient:
         summary = _first_dict(response.get("output2"))
 
         cash = first_float(summary, ["dnca_tot_amt", "nass_amt", "cash"])
+        orderable_cash = first_float(
+            summary,
+            ["ord_psbl_cash", "ord_psbl_amt", "ord_psbl_cash_amt"],
+        )
         stock_evaluation_amount = first_float(summary, ["scts_evlu_amt", "tot_evlu_amt"])
         total_asset_value = first_float(
             summary, ["tot_evlu_amt", "nass_amt", "tot_asst_amt"]
@@ -227,6 +231,7 @@ class KisClient:
             "environment": self.settings.kis_env,
             "currency": "KRW",
             "cash": cash,
+            "orderable_cash": orderable_cash,
             "total_asset_value": total_asset_value,
             "stock_evaluation_amount": stock_evaluation_amount,
             "purchase_amount": purchase_amount,

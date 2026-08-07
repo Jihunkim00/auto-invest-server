@@ -192,6 +192,8 @@ def disable_operation_test3(
     return service.disable(db)
 
 
+
+
 def _kis_client(db: Session) -> KisClient:
     settings = get_settings()
     return KisClient(settings, KisAuthManager(settings, db))

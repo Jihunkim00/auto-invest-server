@@ -264,6 +264,24 @@ def _create_runtime_settings_table_if_missing():
                     operation_test3_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 1,
                     operation_test3_take_profit_enabled BOOLEAN NOT NULL DEFAULT 0,
                     operation_test3_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_allow_real_entry BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_allow_real_exit BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_entry_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_position_management_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_take_profit_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_min_position_pct FLOAT NOT NULL DEFAULT 10.0,
+                    operation_test4_max_position_pct FLOAT NOT NULL DEFAULT 100.0,
+                    operation_test4_max_order_notional_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    operation_test4_price_cap_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    operation_test4_max_buy_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_max_open_positions INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_allow_single_share_budget_bump BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_cash_only BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_no_new_entry_after VARCHAR(5) NOT NULL DEFAULT '14:00',
                     portfolio_orchestrator_enabled BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_positions_first BOOLEAN NOT NULL DEFAULT 1,
@@ -862,6 +880,117 @@ def _create_position_lifecycles_table_if_missing():
             text(
                 "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_exit_order_id "
                 "ON position_lifecycles (exit_order_id)"
+            )
+        )
+
+
+def _create_operation_test_cycles_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_test_cycles (
+                    id INTEGER PRIMARY KEY,
+                    cycle_key VARCHAR(120) NOT NULL,
+                    operation_test VARCHAR(20) NOT NULL DEFAULT 'test4',
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    symbol VARCHAR(20) NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'idle',
+                    entry_trigger_source VARCHAR(80),
+                    min_position_pct FLOAT NOT NULL DEFAULT 10.0,
+                    max_position_pct FLOAT NOT NULL DEFAULT 100.0,
+                    price_cap_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    max_order_notional_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    equity_at_entry FLOAT,
+                    orderable_cash_at_entry FLOAT,
+                    estimated_entry_price FLOAT,
+                    requested_quantity INTEGER,
+                    estimated_notional FLOAT,
+                    effective_position_pct FLOAT,
+                    entry_order_id INTEGER,
+                    entry_broker_order_id VARCHAR(100),
+                    entry_filled_quantity FLOAT,
+                    entry_average_fill_price FLOAT,
+                    lifecycle_id INTEGER,
+                    exit_order_id INTEGER,
+                    exit_reason TEXT,
+                    manual_review_required BOOLEAN NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    started_at DATETIME,
+                    entry_submitted_at DATETIME,
+                    entry_filled_at DATETIME,
+                    completed_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        # Add missing columns before creating any index that references them.
+        cycle_columns = {
+            "operation_test": "VARCHAR(20) DEFAULT 'test4'",
+            "provider": "VARCHAR(20) DEFAULT 'kis'",
+            "market": "VARCHAR(10) DEFAULT 'KR'",
+            "symbol": "VARCHAR(20)",
+            "status": "VARCHAR(30) DEFAULT 'idle'",
+            "entry_trigger_source": "VARCHAR(80)",
+            "min_position_pct": "FLOAT DEFAULT 10.0",
+            "max_position_pct": "FLOAT DEFAULT 100.0",
+            "price_cap_krw": "FLOAT DEFAULT 1000000.0",
+            "max_order_notional_krw": "FLOAT DEFAULT 1000000.0",
+            "equity_at_entry": "FLOAT",
+            "orderable_cash_at_entry": "FLOAT",
+            "estimated_entry_price": "FLOAT",
+            "requested_quantity": "INTEGER",
+            "estimated_notional": "FLOAT",
+            "effective_position_pct": "FLOAT",
+            "entry_order_id": "INTEGER",
+            "entry_broker_order_id": "VARCHAR(100)",
+            "entry_filled_quantity": "FLOAT",
+            "entry_average_fill_price": "FLOAT",
+            "lifecycle_id": "INTEGER",
+            "exit_order_id": "INTEGER",
+            "exit_reason": "TEXT",
+            "manual_review_required": "BOOLEAN DEFAULT 0",
+            "last_error": "TEXT",
+            "started_at": "DATETIME",
+            "entry_submitted_at": "DATETIME",
+            "entry_filled_at": "DATETIME",
+            "completed_at": "DATETIME",
+            "created_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+        }
+        for column_name, column_sql in cycle_columns.items():
+            _add_column_if_missing("operation_test_cycles", column_name, column_sql)
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_operation_test_cycles_cycle_key "
+                "ON operation_test_cycles (cycle_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_status "
+                "ON operation_test_cycles (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_symbol "
+                "ON operation_test_cycles (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_entry_order_id "
+                "ON operation_test_cycles (entry_order_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_exit_order_id "
+                "ON operation_test_cycles (exit_order_id)"
             )
         )
 
@@ -1601,6 +1730,7 @@ def init_db():
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_position_lifecycles_table_if_missing()
+    _create_operation_test_cycles_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
@@ -1784,6 +1914,24 @@ def init_db():
         "operation_test3_stop_loss_enabled": "BOOLEAN DEFAULT 1",
         "operation_test3_take_profit_enabled": "BOOLEAN DEFAULT 0",
         "operation_test3_max_sell_orders_per_day": "INTEGER DEFAULT 1",
+        "operation_test4_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_allow_real_entry": "BOOLEAN DEFAULT 0",
+        "operation_test4_allow_real_exit": "BOOLEAN DEFAULT 0",
+        "operation_test4_entry_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_position_management_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_stop_loss_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test4_take_profit_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test4_min_position_pct": "FLOAT DEFAULT 10.0",
+        "operation_test4_max_position_pct": "FLOAT DEFAULT 100.0",
+        "operation_test4_max_order_notional_krw": "FLOAT DEFAULT 1000000.0",
+        "operation_test4_price_cap_krw": "FLOAT DEFAULT 1000000.0",
+        "operation_test4_max_buy_orders_per_day": "INTEGER DEFAULT 1",
+        "operation_test4_max_sell_orders_per_day": "INTEGER DEFAULT 1",
+        "operation_test4_max_open_positions": "INTEGER DEFAULT 1",
+        "operation_test4_allow_single_share_budget_bump": "BOOLEAN DEFAULT 1",
+        "operation_test4_cash_only": "BOOLEAN DEFAULT 1",
+        "operation_test4_no_new_entry_after": "VARCHAR(5) DEFAULT '14:00'",
         "portfolio_orchestrator_enabled": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_allow_live_orders": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_positions_first": "BOOLEAN DEFAULT 1",

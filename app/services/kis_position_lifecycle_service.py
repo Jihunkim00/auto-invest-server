@@ -51,6 +51,9 @@ FORCED_TEST_ENTRY_SOURCE_TYPE = "operator_forced_one_share_buy"
 FORCED_TEST_ENTRY_SOURCE_CONTEXT = "operator_forced_test_entry"
 FORCED_TEST_ENTRY_ENDPOINT = "/app/operation-test3/operator-forced-one-share-buy"
 FORCED_TEST_ENTRY_MODE = "operator_forced_one_share_buy"
+OPERATION_TEST4_ENTRY_SOURCE = "operation_test4_auto_entry"
+OPERATION_TEST4_ENTRY_ENDPOINT = "/app/operation-test4/entry/run-once"
+OPERATION_TEST4_ENTRY_MODE = "operation_test4_live"
 KR_TZ = ZoneInfo("Asia/Seoul")
 
 SUBMITTED_SELL_STATUSES = {
@@ -182,7 +185,13 @@ class KisPositionLifecycleService:
                 "order_id": row.id,
             }
 
-        quantity = 1.0
+        quantity = _safe_float_or_none(row.filled_qty) or _safe_float_or_none(row.qty) or 0.0
+        if quantity <= 0:
+            return {
+                "created": False,
+                "reason": "filled_quantity_unavailable",
+                "order_id": row.id,
+            }
         opened_at = _naive_utc(
             _aware_utc(
                 row.filled_at
@@ -994,6 +1003,10 @@ def _payload_has_reviewed_buy_marker(payload: dict[str, Any]) -> bool:
     if FORCED_TEST_ENTRY_SOURCE_CONTEXT in normalized:
         return True
     if FORCED_TEST_ENTRY_ENDPOINT in normalized or FORCED_TEST_ENTRY_MODE in normalized:
+        return True
+    if OPERATION_TEST4_ENTRY_SOURCE in normalized:
+        return True
+    if OPERATION_TEST4_ENTRY_ENDPOINT in normalized or OPERATION_TEST4_ENTRY_MODE in normalized:
         return True
     if payload.get("forced_test_entry") is True:
         return True
