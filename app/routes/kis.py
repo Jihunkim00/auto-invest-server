@@ -217,6 +217,32 @@ def get_kis_account_balance(db: Session = Depends(get_db)):
         )
 
 
+@router.get("/account/possible-order")
+def get_kis_possible_order(
+    symbol: str = Query(..., min_length=6, max_length=6),
+    order_type: str = Query(default="market", max_length=20),
+    price: float | None = Query(default=None, gt=0),
+    side: str = Query(default="buy", max_length=10),
+    db: Session = Depends(get_db),
+):
+    client = _client(db)
+    try:
+        return client.get_domestic_possible_order(
+            symbol=symbol,
+            order_type=order_type,
+            order_price=price,
+            side=side,
+        )
+    except (ValueError, KisConfigurationError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KisAuthError as exc:
+        raise HTTPException(status_code=502, detail={"message": str(exc)}) from exc
+    except KisApiError as exc:
+        raise HTTPException(
+            status_code=502, detail={"message": str(exc), "details": exc.details}
+        ) from exc
+
+
 @router.get("/account/positions")
 def list_kis_positions(db: Session = Depends(get_db)):
     client = _client(db)

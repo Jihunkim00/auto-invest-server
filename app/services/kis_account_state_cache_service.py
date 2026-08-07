@@ -11,6 +11,7 @@ from app.brokers.kis_client import (
     _first_dict,
     first_float,
     first_present,
+    optional_first_float,
 )
 from app.brokers.base import KisApiError
 
@@ -69,15 +70,18 @@ class KisAccountStateCacheService:
             raw_balance = self.client._request_balance()
             # parse balance summary
             summary = _first_dict(raw_balance.get("output2"))
-            cash = first_float(summary, ["dnca_tot_amt", "nass_amt", "cash"])
-            orderable_cash = first_float(
+            cash = optional_first_float(summary, ["dnca_tot_amt", "cash"])
+            withdrawable_cash = optional_first_float(summary, ["wdrw_psbl_tot_amt"])
+            d1_cash = optional_first_float(summary, ["nxdy_excc_amt"])
+            d2_cash = optional_first_float(summary, ["d2_cash", "d2_excc_amt"])
+            orderable_cash = optional_first_float(
                 summary,
                 ["ord_psbl_cash", "ord_psbl_amt", "ord_psbl_cash_amt"],
             )
-            stock_evaluation_amount = first_float(summary, ["scts_evlu_amt", "tot_evlu_amt"])
-            total_asset_value = first_float(summary, ["tot_evlu_amt", "nass_amt", "tot_asst_amt"])
-            purchase_amount = first_float(summary, ["pchs_amt_smtl_amt", "pchs_amt"])
-            unrealized_pl = first_float(summary, ["evlu_pfls_smtl_amt", "evlu_pfls_amt"])
+            stock_evaluation_amount = optional_first_float(summary, ["scts_evlu_amt"])
+            total_asset_value = optional_first_float(summary, ["tot_evlu_amt", "nass_amt", "tot_asst_amt"])
+            purchase_amount = optional_first_float(summary, ["pchs_amt_smtl_amt", "pchs_amt"])
+            unrealized_pl = optional_first_float(summary, ["evlu_pfls_smtl_amt", "evlu_pfls_amt"])
             unrealized_plpc = None
             try:
                 unrealized_plpc = float(first_present(summary, ["asst_icdc_erng_rt", "evlu_pfls_rt"]) or 0.0)
@@ -89,7 +93,13 @@ class KisAccountStateCacheService:
                 "environment": getattr(self.settings, "kis_env", None),
                 "currency": "KRW",
                 "cash": cash,
+                "cash_balance": cash,
+                "withdrawable_cash": withdrawable_cash,
+                "d1_cash": d1_cash,
+                "d2_cash": d2_cash,
                 "orderable_cash": orderable_cash,
+                "orderable_cash_source": "kis_balance" if orderable_cash is not None else None,
+                "orderable_cash_status": "ok" if orderable_cash is not None else "candidate_required",
                 "total_asset_value": total_asset_value,
                 "stock_evaluation_amount": stock_evaluation_amount,
                 "purchase_amount": purchase_amount,
@@ -150,6 +160,9 @@ class KisAccountStateCacheService:
                 "fetch_success": True,
                 "fetched_at": now,
                 "source": "fresh",
+                "equity": total_asset_value,
+                "orderable_cash": orderable_cash,
+                "orderable_cash_status": balance["orderable_cash_status"],
             }
 
             with self._lock:
