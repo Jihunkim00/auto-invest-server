@@ -46,6 +46,17 @@ function Write-Json {
     $Value | ConvertTo-Json -Depth 30
 }
 
+function Write-EntryTimingNotice {
+    $kstNow = [DateTimeOffset]::UtcNow.ToOffset([TimeSpan]::FromHours(9))
+    $minutes = ($kstNow.Hour * 60) + $kstNow.Minute
+    if ($minutes -ge 810) {
+        Write-Warning ("Current KST is {0}; today's Test4 live entry is not recommended after 13:30 KST." -f $kstNow.ToString("yyyy-MM-dd HH:mm:ss"))
+    }
+    if ($minutes -ge 840) {
+        Write-Warning "The Test4 entry endpoint is hard-blocked at or after 14:00 KST."
+    }
+}
+
 switch ($Action) {
     "Status" {
         Write-Json (Invoke-OperationTest4Json -Method Get -Path "/app/operation-test4/status")
@@ -66,6 +77,7 @@ switch ($Action) {
     }
 
     "Arm" {
+        Write-EntryTimingNotice
         $expected = "ENABLE TEST4 FULL CYCLE"
         $provided = Get-ExactConfirmation -Expected $expected
         if ($provided -ne $expected) {
@@ -92,6 +104,7 @@ switch ($Action) {
     }
 
     "RunEntryOnce" {
+        Write-EntryTimingNotice
         $preflight = Invoke-OperationTest4Json -Method Post -Path "/app/operation-test4/entry/preflight-once"
         Write-Output "candidate=$($preflight.candidate.symbol)"
         Write-Output "current_price=$($preflight.candidate.current_price)"

@@ -4,6 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -168,7 +169,23 @@ def make_watchlist(path: Path, count: int = 50) -> Path:
         f"- symbol: '{index:06d}'\n  name: Name {index}\n  market: KOSPI"
         for index in range(1, count + 1)
     )
-    path.write_text(f"market: KR\nsymbols:\n{rows}\n", encoding="utf-8")
+    generated_at = NOW.astimezone(ZoneInfo("Asia/Seoul")).isoformat()
+    path.write_text(
+        "market: KR\n"
+        "currency: KRW\n"
+        "timezone: Asia/Seoul\n"
+        "operation_test: test4\n"
+        f"generated_at: '{generated_at}'\n"
+        "source_universe_file: test-universe.yaml\n"
+        f"source_universe_count: {count}\n"
+        "price_cap_krw: 1000000\n"
+        f"selected_count: {count}\n"
+        f"quote_checked_count: {count}\n"
+        f"configured_count: {count}\n"
+        "symbols:\n"
+        f"{rows}\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -314,3 +331,59 @@ def test_entry_is_blocked_when_position_or_open_order_exists(db_session, tmp_pat
 
     assert result["reason"] == "position_exists"
     assert service.manual_order_service.calls == []
+
+
+def test_entry_after_14_00_kst_is_blocked_without_submit(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    arm_for_entry(db_session, service)
+    after_cutoff = datetime(2026, 8, 7, 5, 0, tzinfo=UTC)
+
+    result = service.entry_run_once(
+        db_session,
+        confirm_live=True,
+        confirmation=ENTRY_CONFIRMATION,
+        now=after_cutoff,
+    )
+
+    assert result["real_order_submitted"] is False
+    assert service.manual_order_service.calls == []
+
+
+def test_entry_skips_runtime_ineligible_top_candidate(db_session, tmp_path):
+    manual = FakeManualOrderService()
+
+    def candidates(**kwargs):
+        payload = candidate_provider()
+        payload["final_ranked_candidates"] = [
+            {
+                "symbol": "000001",
+                "current_price": 1_000_000,
+                "final_buy_score": 99,
+                "block_reasons": [],
+                "risk_flags": [],
+            },
+            {
+                "symbol": "000002",
+                "current_price": 20_000,
+                "final_buy_score": 90,
+                "block_reasons": [],
+                "risk_flags": [],
+            },
+        ]
+        return payload
+
+    service, _, _ = make_service(
+        tmp_path,
+        manual_service=manual,
+        candidate=candidates,
+    )
+    arm_for_entry(db_session, service)
+    result = service.entry_run_once(
+        db_session,
+        confirm_live=True,
+        confirmation=ENTRY_CONFIRMATION,
+        now=NOW,
+    )
+
+    assert result["reason"] == "entry_submitted"
+    assert manual.calls[0].symbol == "000002"

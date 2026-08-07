@@ -211,7 +211,11 @@ class OperationTest4Service:
         active_lifecycles = self._active_lifecycles(db)
         account = self._read_account_state()
         market_session = self._market_session(now_utc)
-        watchlist = self._load_watchlist()
+        watchlist = self._load_watchlist(
+            price_cap_krw=float(runtime.get("operation_test4_price_cap_krw", DEFAULT_PRICE_CAP_KRW)),
+            require_fresh=True,
+            today_kst=now_utc.astimezone(KR_TZ).date(),
+        )
         preview, candidate = self._candidate_snapshot(
             db,
             account=account,
@@ -282,6 +286,11 @@ class OperationTest4Service:
             ("daily_buy_count_zero", self._daily_order_count(db, side="buy", now_utc=now_utc) == 0, "daily_buy_already_used"),
             ("market_open", market_session.get("is_market_open") is True, "market_closed"),
             ("entry_time_allowed", time_allowed, "entry_time_outside_window"),
+            (
+                "watchlist_snapshot_fresh",
+                watchlist.get("fresh") is True,
+                watchlist.get("error") or "test4_watchlist_stale",
+            ),
             ("watchlist_exact_count", watchlist.get("count") == DEFAULT_COUNT, "watchlist_count_not_50"),
             ("watchlist_eligible_count", _eligible_count(preview, runtime) == DEFAULT_COUNT, "watchlist_eligible_count_below_50", "review"),
             ("candidate_selected", bool(candidate), "no_candidate"),
@@ -380,24 +389,52 @@ class OperationTest4Service:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         del db
-        result = build_operation_test4_watchlist(
-            root=Path(__file__).resolve().parents[2],
-            output_path=self.watchlist_path,
-            count=count,
-            price_cap_krw=price_cap_krw,
-            client=self.client,
-            now=now,
-        )
-        return sanitize_kis_payload(
-            {
-                "status": "rebuilt",
-                "operation_test": OPERATION_TEST,
-                "watchlist": result,
-                "safety": {
-                    "read_only_quotes_only": True,
+        try:
+            result = build_operation_test4_watchlist(
+                root=Path(__file__).resolve().parents[2],
+                output_path=self.watchlist_path,
+                count=count,
+                price_cap_krw=price_cap_krw,
+                client=self.client,
+                now=now,
+            )
+        except OperationTest4WatchlistError as exc:
+            details = dict(exc.details or {})
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "source_universe_count": details.get("source_universe_count", 0),
+                    "quote_checked_count": details.get("quote_checked_count", 0),
+                    "eligible_count": details.get("eligible_count", 0),
+                    "selected_count": details.get("selected_count", 0),
+                    "reserve_eligible_count": details.get("reserve_eligible_count", 0),
+                    "excluded_count": details.get("excluded_count", 0),
+                    "exclusion_reasons": details.get("exclusion_reasons", {}),
+                    "exclusion_symbols": details.get("exclusion_symbols", []),
+                    "output_file": str(self.watchlist_path),
+                    "read_only": True,
+                    "reason": str(exc),
                     "real_order_submitted": False,
                     "broker_submit_called": False,
-                },
+                }
+            )
+        return sanitize_kis_payload(
+            {
+                "status": "completed",
+                "operation_test": OPERATION_TEST,
+                "source_universe_count": result["source_universe_count"],
+                "quote_checked_count": result["quote_checked_count"],
+                "eligible_count": result["eligible_count"],
+                "selected_count": result["selected_count"],
+                "reserve_eligible_count": result["reserve_eligible_count"],
+                "excluded_count": result["excluded_count"],
+                "exclusion_reasons": result["exclusion_reasons"],
+                "selected_symbols": result["selected_symbols"],
+                "output_file": str(self.watchlist_path),
+                "read_only": True,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
             }
         )
 
@@ -955,14 +992,24 @@ class OperationTest4Service:
         if not isinstance(candidates, list):
             candidates = []
         selected: dict[str, Any] = {}
+        fallback: dict[str, Any] = {}
+        price_cap = _number(runtime.get("operation_test4_price_cap_krw") or DEFAULT_PRICE_CAP_KRW)
         for raw in candidates:
             if not isinstance(raw, dict):
                 continue
             symbol = str(raw.get("symbol") or "").strip()
             if not symbol:
                 continue
-            selected = dict(raw)
-            break
+            if not fallback:
+                fallback = dict(raw)
+            candidate_price = _number(
+                raw.get("current_price") or raw.get("price") or raw.get("stck_prpr")
+            )
+            if 0 < candidate_price < price_cap:
+                selected = dict(raw)
+                break
+        if not selected:
+            selected = fallback
         if not selected:
             return preview, {}
         current_price = _number(
@@ -1339,11 +1386,28 @@ class OperationTest4Service:
                 last_error = exc
         return _account_error(last_error or RuntimeError("account_state_unavailable"))
 
-    def _load_watchlist(self) -> dict[str, Any]:
+    def _load_watchlist(
+        self,
+        *,
+        price_cap_krw: float | None = None,
+        require_fresh: bool = False,
+        today_kst: date | None = None,
+    ) -> dict[str, Any]:
         try:
-            return load_operation_test4_watchlist(self.watchlist_path)
+            payload = load_operation_test4_watchlist(
+                self.watchlist_path,
+                price_cap_krw=price_cap_krw,
+                require_fresh=require_fresh,
+                today_kst=today_kst,
+            )
+            payload["fresh"] = bool(require_fresh)
+            return payload
         except OperationTest4WatchlistError as exc:
-            return {"count": 0, "error": _safe_error(exc)}
+            return {
+                "count": 0,
+                "fresh": False,
+                "error": str((exc.details or {}).get("reason") or "watchlist_invalid"),
+            }
 
     def _market_session(self, now: datetime) -> dict[str, Any]:
         try:

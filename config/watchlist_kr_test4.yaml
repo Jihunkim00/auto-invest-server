@@ -1,0 +1,331 @@
+market: KR
+currency: KRW
+timezone: Asia/Seoul
+operation_test: test4
+generated_at: '2026-08-07T03:45:30.762041+00:00'
+source:
+  source_universe_file: config/watchlist_kr_test4_universe.yaml
+  source_universe_count: 100
+  source_count: 100
+  source_priority: 1
+  source_counts:
+    local_watchlist_kr_base50: 50
+    historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6: 5
+    historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f: 3
+    historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e: 19
+    historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc: 7
+    historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30: 16
+source_universe_file: config/watchlist_kr_test4_universe.yaml
+source_universe_count: 100
+price_cap_krw: 1000000.0
+configured_count: 50
+quote_checked_count: 100
+eligible_count: 93
+selected_count: 50
+reserve_eligible_count: 43
+excluded_count: 7
+exclusion_reasons:
+  price_cap_exceeded: 6
+  preferred_stock_excluded: 1
+selected_symbols:
+- 005930
+- '402340'
+- 005380
+- '373220'
+- 032830
+- 028260
+- '329180'
+- '012330'
+- '105560'
+- '000270'
+- '034020'
+- '055550'
+- '066570'
+- '006400'
+- '034730'
+- '035420'
+- 068270
+- '267260'
+- '010120'
+- '042660'
+- 086790
+- 006800
+- 000810
+- 005490
+- '196170'
+- '247540'
+- 086520
+- '277810'
+- 036930
+- 058470
+- '000250'
+- 028300
+- '240810'
+- 039030
+- 087010
+- '298380'
+- '440110'
+- '141080'
+- '108490'
+- 095340
+- '403870'
+- '178320'
+- '214370'
+- '347850'
+- '251970'
+- 009240
+- '001450'
+- '316140'
+- 008930
+- '042700'
+symbols:
+- symbol: 005930
+  name: 삼성전자
+  source_name: 삼성전자
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '402340'
+  name: SK스퀘어
+  source_name: SK스퀘어
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 005380
+  name: 현대차
+  source_name: 현대차
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '373220'
+  name: LG에너지솔루션
+  source_name: LG에너지솔루션
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 032830
+  name: 삼성생명
+  source_name: 삼성생명
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 028260
+  name: 삼성물산
+  source_name: 삼성물산
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '329180'
+  name: HD현대중공업
+  source_name: HD현대중공업
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '012330'
+  name: 현대모비스
+  source_name: 현대모비스
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '105560'
+  name: KB금융
+  source_name: KB금융
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '000270'
+  name: 기아
+  source_name: 기아
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '034020'
+  name: 두산에너빌리티
+  source_name: 두산에너빌리티
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '055550'
+  name: 신한지주
+  source_name: 신한지주
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '066570'
+  name: LG전자
+  source_name: LG전자
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '006400'
+  name: 삼성SDI
+  source_name: 삼성SDI
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '034730'
+  name: SK
+  source_name: SK
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '035420'
+  name: NAVER
+  source_name: NAVER
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 068270
+  name: 셀트리온
+  source_name: 셀트리온
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '267260'
+  name: HD현대일렉트릭
+  source_name: HD현대일렉트릭
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '010120'
+  name: LS ELECTRIC
+  source_name: LS ELECTRIC
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '042660'
+  name: 한화오션
+  source_name: 한화오션
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 086790
+  name: 하나금융지주
+  source_name: 하나금융지주
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 006800
+  name: 미래에셋증권
+  source_name: 미래에셋증권
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 000810
+  name: 삼성화재
+  source_name: 삼성화재
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: 005490
+  name: POSCO홀딩스
+  source_name: POSCO홀딩스
+  source: local_watchlist_kr_base50
+  market: KOSPI
+- symbol: '196170'
+  name: 알테오젠
+  source_name: 알테오젠
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '247540'
+  name: 에코프로비엠
+  source_name: 에코프로비엠
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 086520
+  name: 에코프로
+  source_name: 에코프로
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '277810'
+  name: 레인보우로보틱스
+  source_name: 레인보우로보틱스
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 036930
+  name: 주성엔지니어링
+  source_name: 주성엔지니어링
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 058470
+  name: 리노공업
+  source_name: 리노공업
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '000250'
+  name: 삼천당제약
+  source_name: 삼천당제약
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 028300
+  name: HLB
+  source_name: HLB
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '240810'
+  name: 원익IPS
+  source_name: 원익IPS
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 039030
+  name: 이오테크닉스
+  source_name: 이오테크닉스
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 087010
+  name: 펩트론
+  source_name: 펩트론
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '298380'
+  name: 에이비엘바이오
+  source_name: 에이비엘바이오
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '440110'
+  name: 파두
+  source_name: 파두
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '141080'
+  name: 리가켐바이오
+  source_name: 리가켐바이오
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '108490'
+  name: 로보티즈
+  source_name: 로보티즈
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: 095340
+  name: ISC
+  source_name: ISC
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '403870'
+  name: HPSP
+  source_name: HPSP
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '178320'
+  name: 서진시스템
+  source_name: 서진시스템
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '214370'
+  name: 케어젠
+  source_name: 케어젠
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '347850'
+  name: 디앤디파마텍
+  source_name: 디앤디파마텍
+  source: local_watchlist_kr_base50
+  market: KOSDAQ
+- symbol: '251970'
+  name: 펌텍코리아
+  source_name: 펌텍코리아
+  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
+  market: KOSDAQ
+- symbol: 009240
+  name: 한샘
+  source_name: 한샘
+  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
+  market: KOSPI
+- symbol: '001450'
+  name: 현대해상
+  source_name: 현대해상
+  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
+  market: KOSPI
+- symbol: '316140'
+  name: 우리금융지주
+  source_name: 우리금융지주
+  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
+  market: KOSPI
+- symbol: 008930
+  name: 한미사이언스
+  source_name: 한미사이언스
+  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
+  market: KOSPI
+- symbol: '042700'
+  name: 한미반도체
+  source_name: 한미반도체
+  source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
+  market: KOSPI

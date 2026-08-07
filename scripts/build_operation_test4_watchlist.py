@@ -25,6 +25,11 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=ROOT / "config/watchlist_kr_test4.yaml",
     )
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=ROOT / "config/watchlist_kr_test4_universe.yaml",
+    )
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
     parser.add_argument("--price-cap-krw", type=float, default=DEFAULT_PRICE_CAP_KRW)
     return parser.parse_args()
@@ -36,18 +41,24 @@ def main() -> int:
         print("count and price cap must be positive", file=sys.stderr)
         return 2
     try:
+        source_path = args.source if args.source.is_absolute() else ROOT / args.source
+        output_path = args.output if args.output.is_absolute() else ROOT / args.output
         result = build_operation_test4_watchlist(
             root=ROOT,
-            output_path=args.output,
+            output_path=output_path,
             count=args.count,
             price_cap_krw=args.price_cap_krw,
             client=KisClient(get_settings()),
+            source_path=source_path,
         )
     except OperationTest4WatchlistError as exc:
         print(f"Operation Test 4 watchlist build failed: {exc}", file=sys.stderr)
+        if exc.details:
+            print(f"details={exc.details}", file=sys.stderr)
         return 1
     print(
-        f"built {result['configured_count']} symbols; "
+        f"built selected={result['selected_count']} eligible={result['eligible_count']} "
+        f"reserve={result['reserve_eligible_count']}; "
         f"excluded={result['excluded_count']}; output={result['output_path']}"
     )
     return 0

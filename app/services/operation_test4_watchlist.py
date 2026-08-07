@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import re
-import subprocess
-import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import yaml
+
+from app.services.operation_test4_universe import load_operation_test4_universe
 
 
 DEFAULT_COUNT = 50
 DEFAULT_PRICE_CAP_KRW = 1_000_000.0
-DEFAULT_SOURCE = Path("config/local-watchlists/watchlist_kr.base50.yaml")
+DEFAULT_SOURCE = Path("config/watchlist_kr_test4_universe.yaml")
+KR_TZ = ZoneInfo("Asia/Seoul")
 
 
 class OperationTest4WatchlistError(ValueError):
-    pass
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 @dataclass(frozen=True)
@@ -34,19 +38,32 @@ def load_source_symbols(
     source_path: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidates = [source_path] if source_path is not None else [root / DEFAULT_SOURCE]
-    if source_path is None:
-        candidates.extend(_git_watchlist_candidates(root))
-        candidates.append(root / "config/watchlist_kr.yaml")
 
     for path in candidates:
         if path is None or not path.exists():
             continue
+        if path.name == DEFAULT_SOURCE.name:
+            try:
+                universe = load_operation_test4_universe(path, minimum_count=count)
+            except ValueError as exc:
+                raise OperationTest4WatchlistError(
+                    f"invalid Test4 source universe: {exc}"
+                ) from exc
+            return universe["symbols"], {
+                "source_universe_file": str(path.relative_to(root)).replace("\\", "/")
+                if path.is_relative_to(root)
+                else str(path).replace("\\", "/"),
+                "source_universe_count": universe["count"],
+                "source_count": universe["count"],
+                "source_priority": 1,
+                "source_counts": universe.get("source_counts") or {},
+            }
         symbols = _read_symbols(path)
         if len(symbols) >= count:
             return symbols, {
-                "source_path": str(path.relative_to(root))
+                "source_path": str(path.relative_to(root)).replace("\\", "/")
                 if path.is_relative_to(root)
-                else str(path),
+                else str(path).replace("\\", "/"),
                 "source_count": len(symbols),
                 "source_priority": candidates.index(path) + 1,
             }
@@ -148,15 +165,17 @@ def build_operation_test4_watchlist(
         count=count,
         source_path=source_path,
     )
-    selected: list[dict[str, Any]] = []
+    eligible: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     seen: set[str] = set()
+    quote_checked_count = 0
     for item in source_symbols:
         symbol = str(item.get("symbol") or "").strip()
         if symbol in seen:
             exclusions.append({"symbol": symbol, "reasons": ["duplicate_symbol"]})
             continue
         seen.add(symbol)
+        quote_checked_count += 1
         try:
             quote = client.get_domestic_stock_price(symbol)
         except Exception as exc:
@@ -178,17 +197,19 @@ def build_operation_test4_watchlist(
                 }
             )
             continue
-        selected.append(
+        eligible.append(
             {
                 "symbol": symbol,
                 "name": str(item.get("name") or validation.snapshot.get("name") or ""),
+                "source_name": str(
+                    item.get("source_name") or item.get("name") or ""
+                ),
+                "source": str(item.get("source") or source_info.get("source_universe_file") or ""),
                 "market": str(item.get("market") or "KR"),
             }
         )
-        if len(selected) >= count:
-            break
 
-    if len(selected) != count:
+    if len(eligible) < count:
         reason_counts: dict[str, int] = {}
         for item in exclusions:
             for reason in item.get("reasons") or ["unknown_exclusion"]:
@@ -197,13 +218,30 @@ def build_operation_test4_watchlist(
             f"{reason}={total}"
             for reason, total in sorted(reason_counts.items())
         )
+        details = {
+            "source_universe_count": len(source_symbols),
+            "quote_checked_count": quote_checked_count,
+            "eligible_count": len(eligible),
+            "selected_count": 0,
+            "reserve_eligible_count": 0,
+            "excluded_count": len(exclusions),
+            "exclusion_reasons": reason_counts,
+            "exclusion_symbols": [item.get("symbol") for item in exclusions],
+        }
         raise OperationTest4WatchlistError(
             "eligible candidate count is below requested count: "
-            f"requested={count}, eligible={len(selected)}, "
-            f"excluded={len(exclusions)}, reasons={reason_summary}"
+            f"requested={count}, eligible={len(eligible)}, "
+            f"excluded={len(exclusions)}, reasons={reason_summary}",
+            details=details,
         )
 
+    selected = eligible[:count]
+    reserve_eligible_count = max(0, len(eligible) - count)
     generated_at = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
+    reason_counts: dict[str, int] = {}
+    for item in exclusions:
+        for reason in item.get("reasons") or ["unknown_exclusion"]:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
     payload = {
         "market": "KR",
         "currency": "KRW",
@@ -211,8 +249,17 @@ def build_operation_test4_watchlist(
         "operation_test": "test4",
         "generated_at": generated_at,
         "source": source_info,
+        "source_universe_file": source_info.get("source_universe_file"),
+        "source_universe_count": len(source_symbols),
         "price_cap_krw": float(price_cap_krw),
         "configured_count": len(selected),
+        "quote_checked_count": quote_checked_count,
+        "eligible_count": len(eligible),
+        "selected_count": len(selected),
+        "reserve_eligible_count": reserve_eligible_count,
+        "excluded_count": len(exclusions),
+        "exclusion_reasons": reason_counts,
+        "selected_symbols": [item["symbol"] for item in selected],
         "symbols": selected,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,9 +279,15 @@ def load_operation_test4_watchlist(
     path: Path,
     *,
     count: int = DEFAULT_COUNT,
+    price_cap_krw: float | None = None,
+    require_fresh: bool = False,
+    today_kst: date | None = None,
 ) -> dict[str, Any]:
     if not path.exists():
-        raise OperationTest4WatchlistError(f"watchlist is missing: {path}")
+        raise OperationTest4WatchlistError(
+            f"watchlist is missing: {path}",
+            details={"reason": "test4_watchlist_missing"},
+        )
     payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(payload, dict):
         raise OperationTest4WatchlistError("watchlist must be a mapping")
@@ -257,6 +310,34 @@ def load_operation_test4_watchlist(
         raise OperationTest4WatchlistError(
             f"watchlist count mismatch: expected={count}, actual={len(normalized)}"
         )
+    selected_count = payload.get("selected_count", payload.get("configured_count"))
+    if selected_count != count:
+        raise OperationTest4WatchlistError(
+            f"watchlist selected_count mismatch: expected={count}, actual={selected_count}",
+            details={"reason": "test4_watchlist_count_mismatch"},
+        )
+    if price_cap_krw is not None:
+        try:
+            metadata_cap = float(payload.get("price_cap_krw"))
+        except (TypeError, ValueError):
+            metadata_cap = None
+        if metadata_cap is None or abs(metadata_cap - float(price_cap_krw)) > 1e-9:
+            raise OperationTest4WatchlistError(
+                "watchlist price cap metadata mismatch",
+                details={"reason": "test4_watchlist_price_cap_mismatch"},
+            )
+    if require_fresh:
+        generated_at = str(payload.get("generated_at") or "").strip()
+        try:
+            generated_date = datetime.fromisoformat(generated_at).astimezone(KR_TZ).date()
+        except (TypeError, ValueError):
+            generated_date = None
+        expected_date = today_kst or datetime.now(KR_TZ).date()
+        if generated_date != expected_date:
+            raise OperationTest4WatchlistError(
+                "watchlist snapshot is stale",
+                details={"reason": "test4_watchlist_stale"},
+            )
     return {**payload, "symbols": normalized, "count": len(normalized)}
 
 
@@ -278,41 +359,6 @@ def _read_symbols(path: Path) -> list[dict[str, Any]]:
         seen.add(symbol)
         normalized.append({**row, "symbol": symbol})
     return normalized
-
-
-def _git_watchlist_candidates(root: Path) -> list[Path]:
-    try:
-        result = subprocess.run(
-            ["git", "log", "--format=%H", "-20", "--", "config/watchlist_kr.yaml"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    paths: list[Path] = []
-    temp_root = Path(tempfile.gettempdir()) / "auto-invest-test4-watchlist-sources"
-    temp_root.mkdir(parents=True, exist_ok=True)
-    for commit in result.stdout.splitlines():
-        commit = commit.strip()
-        if not commit:
-            continue
-        candidate = temp_root / f"watchlist_{commit}.yaml"
-        try:
-            content = subprocess.run(
-                ["git", "show", f"{commit}:config/watchlist_kr.yaml"],
-                cwd=root,
-                check=True,
-                capture_output=True,
-            ).stdout
-            candidate.parent.mkdir(parents=True, exist_ok=True)
-            candidate.write_bytes(content)
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if len(_read_symbols(candidate)) >= DEFAULT_COUNT:
-            paths.append(candidate)
-    return paths
 
 
 def _first_number(payload: dict[str, Any], *keys: str) -> float | None:
