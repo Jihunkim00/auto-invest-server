@@ -386,6 +386,8 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "internal_status": order.internal_status,
         "broker_order_status": order.broker_order_status or order.broker_status,
         "broker_status": order.broker_status,
+        "broker_status_raw": order.broker_status,
+        "broker_status_display": _display_status(internal_status),
         "broker_order_id": order.broker_order_id,
         "kis_odno": order.kis_odno or order.broker_order_id,
         "kis_orgn_odno": order.kis_orgn_odno,

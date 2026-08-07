@@ -84,6 +84,8 @@ class _Context:
     scheduler_limited_auto_sell_configured: bool
     live_auto_buy_configured: bool
     sell_session_allowed: bool
+    operation_test4_mode: bool = False
+    operation_test4_source_context: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,11 +134,15 @@ class KisLimitedAutoSellService:
         runtime_settings: RuntimeSettingService | None = None,
         session_service: MarketSessionService | None = None,
         allow_scheduler_guarded_sell: bool = False,
+        operation_test4_mode: bool = False,
+        operation_test4_source_context: str | None = None,
     ):
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.session_service = session_service or MarketSessionService()
         self.allow_scheduler_guarded_sell = allow_scheduler_guarded_sell
+        self.operation_test4_mode = bool(operation_test4_mode)
+        self.operation_test4_source_context = operation_test4_source_context
         self._unused_legacy_broker = broker
 
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
@@ -310,20 +316,39 @@ class KisLimitedAutoSellService:
         sell_session_allowed = (
             market_session.get("is_market_open") is True and not is_holiday
         )
+        operation_test4_mode = self.operation_test4_mode
         return _Context(
             runtime=runtime,
             settings=settings,
             market_session=market_session,
             now_utc=now_utc,
             created_at=now_utc.isoformat(),
-            live_auto_sell_enabled=bool(runtime.get("kis_live_auto_sell_enabled", False)),
-            stop_loss_enabled=_stop_loss_enabled(runtime),
-            take_profit_enabled=_take_profit_enabled(runtime),
-            take_profit_readiness_enabled=_take_profit_readiness_enabled(runtime),
+            live_auto_sell_enabled=(
+                bool(runtime.get("operation_test4_allow_real_exit", False))
+                if operation_test4_mode
+                else bool(runtime.get("kis_live_auto_sell_enabled", False))
+            ),
+            stop_loss_enabled=(
+                bool(runtime.get("operation_test4_stop_loss_enabled", True))
+                if operation_test4_mode
+                else _stop_loss_enabled(runtime)
+            ),
+            take_profit_enabled=(
+                bool(runtime.get("operation_test4_take_profit_enabled", True))
+                if operation_test4_mode
+                else _take_profit_enabled(runtime)
+            ),
+            take_profit_readiness_enabled=(
+                bool(runtime.get("operation_test4_take_profit_enabled", True))
+                if operation_test4_mode
+                else _take_profit_readiness_enabled(runtime)
+            ),
             scheduler_real_orders_configured=scheduler_real_orders_configured,
             scheduler_limited_auto_sell_configured=scheduler_limited_auto_sell_configured,
             live_auto_buy_configured=live_auto_buy_configured,
             sell_session_allowed=sell_session_allowed,
+            operation_test4_mode=operation_test4_mode,
+            operation_test4_source_context=self.operation_test4_source_context,
         )
 
     def _market_session(self, now_utc: datetime) -> dict[str, Any]:
@@ -1950,11 +1975,41 @@ def _source_metadata(
         mode = RUN_MODE
     else:
         mode = PREFLIGHT_MODE
+    operation_test4 = context.operation_test4_mode
+    if operation_test4:
+        is_test4_take_profit = bool(
+            candidate.take_profit_triggered and not candidate.stop_loss_triggered
+        )
+        source = (
+            "operation_test4_auto_take_profit"
+            if is_test4_take_profit
+            else "operation_test4_auto_stop_loss"
+        )
+        metadata_source_type = (
+            "operation_test4_auto_take_profit"
+            if is_test4_take_profit
+            else "operation_test4_auto_stop_loss"
+        )
+        mode = "operation_test4_live"
     validation_summary = _validation_summary(validation_payload)
     return {
         "source": source,
         "source_type": metadata_source_type,
         "mode": mode,
+        "operation_test": "test4" if operation_test4 else None,
+        "source_endpoint": (
+            "/app/operation-test4/position-management/run-once"
+            if operation_test4
+            else None
+        ),
+        "order_source": (
+            metadata_source_type if operation_test4 else None
+        ),
+        "audit_source_context": (
+            context.operation_test4_source_context
+            if operation_test4
+            else None
+        ),
         "limited_auto_sell_checked_at": context.created_at,
         "checked_at": context.created_at,
         "symbol": candidate.symbol,

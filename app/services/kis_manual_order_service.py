@@ -666,6 +666,9 @@ class KisManualOrderService:
 
         source_fields = kis_order_source_fields(source_metadata)
         audit_payload = sanitize_live_order_audit_payload(audit_metadata)
+        source_mode = str(
+            (source_metadata or {}).get("mode") or "manual_live"
+        )
         row = OrderLog(
             broker="kis",
             market=str(request.market or "KR").strip().upper() or "KR",
@@ -684,7 +687,7 @@ class KisManualOrderService:
                 {
                     "provider": "kis",
                     "market": request.market,
-                    "mode": "manual_live",
+                    "mode": source_mode,
                     "symbol": request.symbol,
                     "side": request.side,
                     "qty": request.qty,
@@ -791,17 +794,46 @@ class KisManualOrderService:
         )
 
         order_source = _first_text(
-            source_metadata.get("source") if isinstance(source_metadata, dict) else None,
+            source_metadata.get("order_source")
+            if isinstance(source_metadata, dict)
+            else None,
+            source_metadata.get("source")
+            if isinstance(source_metadata, dict)
+            else None,
             "manual_ticket",
+        )
+        source_endpoint = _first_text(
+            source_metadata.get("source_endpoint")
+            if isinstance(source_metadata, dict)
+            else None,
+            "/kis/orders/manual-submit",
+        )
+        audit_source_context = _first_text(
+            source_metadata.get("audit_source_context")
+            if isinstance(source_metadata, dict)
+            else None,
+            source_context,
         )
         daily_remaining = max(0, max_daily_trades - daily_count)
         payload = {
             "audit_version": "pr50_manual_kis_live_order_v1",
             "broker": "kis",
             "market": normalized_market or "KR",
-            "source_endpoint": "/kis/orders/manual-submit",
+            "source_endpoint": source_endpoint,
             "source_context": source_context,
+            "audit_source_context": audit_source_context,
             "order_source": order_source,
+            "operation_test": _first_text(
+                source_metadata.get("operation_test")
+                if isinstance(source_metadata, dict)
+                else None
+            ),
+            "mode": _first_text(
+                source_metadata.get("mode")
+                if isinstance(source_metadata, dict)
+                else None,
+                "manual_live",
+            ),
             "operator_action_source": _first_text(
                 source_metadata.get("operator_action_source")
                 if isinstance(source_metadata, dict)
@@ -916,7 +948,7 @@ class KisManualOrderService:
         response = {
             "provider": "kis",
             "market": normalized_market,
-            "mode": "manual_live",
+            "mode": str((source_metadata or {}).get("mode") or "manual_live"),
             "real_order_submitted": real_order_submitted,
             "broker_submit_called": real_order_submitted,
             "manual_submit_called": real_order_submitted,
@@ -926,6 +958,11 @@ class KisManualOrderService:
             "order_type": normalized_order_type or request.order_type,
             "broker_order_id": broker_order_id,
             "broker_status": broker_status,
+            "broker_status_raw": broker_status,
+            "broker_status_display": _display_broker_status(
+                internal_status,
+                broker_status,
+            ),
             "internal_status": internal_status,
             "safety_checks": safety_checks,
             "failed_checks": failed_checks,
@@ -1051,6 +1088,22 @@ def _safe_error(exc: Exception) -> str:
     if len(text) > 180:
         text = f"{text[:180]}..."
     return f"{exc.__class__.__name__}: {text}"
+
+
+def _display_broker_status(internal_status: str, raw_status: str | None) -> str:
+    normalized = str(internal_status or "").strip().upper()
+    labels = {
+        "FILLED": "Filled",
+        "PARTIALLY_FILLED": "Partially filled",
+        "SUBMITTED": "Submitted",
+        "ACCEPTED": "Submitted",
+        "PENDING": "Pending",
+        "CANCELED": "Canceled",
+        "CANCELLED": "Canceled",
+        "REJECTED": "Rejected",
+        "FAILED": "Failed",
+    }
+    return labels.get(normalized) or str(raw_status or "Unknown")
 
 
 def _extract_broker_order_id(response: dict[str, Any]) -> str | None:
