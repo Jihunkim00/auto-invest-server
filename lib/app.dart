@@ -8,6 +8,7 @@ import 'features/ai/ai_screen.dart';
 import 'features/assets/assets_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/home/home_screen.dart';
+import 'features/automation_profile/automation_profile_screen.dart';
 
 class AutoInvestApp extends StatefulWidget {
   const AutoInvestApp({
@@ -38,6 +39,14 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
     );
   }
 
+  void _openAutomationProfile(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AutomationProfileScreen(apiClient: _controller.apiClient),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -63,6 +72,7 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                   HomeScreen(
                     controller: _controller,
                     onOpenAdmin: () => _openAdmin(appContext),
+                    onOpenAutomationProfile: () => _openAutomationProfile(appContext),
                   ),
                   AiScreen(
                     controller: _controller,

@@ -434,6 +434,17 @@ class StrategyProfile(Base):
     consecutive_loss_reduce_threshold = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, nullable=False, default=False, index=True)
     is_builtin = Column(Boolean, nullable=False, default=True, index=True)
+    # PR108 custom automation profile fields. The legacy risk-profile fields
+    # above remain the source for the existing /strategy/profiles API; these
+    # nullable columns let the new configuration layer coexist without
+    # changing Test4 or the legacy presets.
+    profile_key = Column(String(80), nullable=True, unique=True, index=True)
+    custom_name = Column(String(120), nullable=True)
+    provider = Column(String(20), nullable=True)
+    market = Column(String(10), nullable=True)
+    enabled = Column(Boolean, nullable=True, default=False, index=True)
+    custom_status = Column(String(20), nullable=True, index=True)
+    settings_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

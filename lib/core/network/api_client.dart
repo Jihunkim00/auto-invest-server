@@ -63,6 +63,7 @@ import '../../models/position_lifecycle.dart';
 import '../../models/position_management_dry_run.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
+import '../../models/automation_strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
 import '../../models/strategy_auto_buy_promotion.dart';
 import '../../models/strategy_auto_buy_scheduler.dart';
@@ -166,6 +167,17 @@ class ApiClient {
       Uri.parse('${AppConfig.baseUrl}$path'),
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiRequestExceptionFromResponse(r);
+    }
+    return _decodeJsonMapResponse(r);
+  }
+
+  Future<Map<String, dynamic>> _deleteJson(String path) async {
+    final r = await _client.delete(
+      Uri.parse('${AppConfig.baseUrl}$path'),
+      headers: const {'Content-Type': 'application/json'},
     );
     if (r.statusCode >= 400) {
       throw _apiRequestExceptionFromResponse(r);
@@ -439,6 +451,86 @@ class ApiClient {
       },
     );
     return StrategyProfileApplyResult.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfileList> fetchAutomationProfiles() async {
+    final payload = await _getJsonNoCache('/strategy-profiles');
+    return AutomationStrategyProfileList.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfile> fetchAutomationProfile(int profileId) async {
+    final payload = await _getJsonNoCache('/strategy-profiles/$profileId');
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfile> createAutomationProfile(
+      Map<String, dynamic> body) async {
+    final payload = await _postJsonBody('/strategy-profiles', body);
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfile> updateAutomationProfile(
+      int profileId, Map<String, dynamic> body) async {
+    final payload = await _putJsonBody('/strategy-profiles/$profileId', body);
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfile> archiveAutomationProfile(int profileId) async {
+    final payload = await _deleteJson('/strategy-profiles/$profileId');
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
+  Future<Map<String, dynamic>> validateAutomationProfile(int profileId) {
+    return _postJson('/strategy-profiles/$profileId/validate');
+  }
+
+  Future<Map<String, dynamic>> activateAutomationProfile(int profileId,
+      {bool confirmOperatorAck = true}) {
+    return _postJsonBody('/strategy-profiles/$profileId/activate', {
+      'confirm_operator_ack': confirmOperatorAck,
+    });
+  }
+
+  Future<Map<String, dynamic>> pauseAutomationProfile(int profileId,
+      {bool confirmOperatorAck = true}) {
+    return _postJsonBody('/strategy-profiles/$profileId/pause', {
+      'confirm_operator_ack': confirmOperatorAck,
+    });
+  }
+
+  Future<Map<String, dynamic>> fetchAutomationProfileReadiness(int profileId) {
+    return _getJsonNoCache('/strategy-profiles/$profileId/readiness');
+  }
+
+  Future<Map<String, dynamic>> previewAutomationProfileSizing(
+      int profileId, Map<String, dynamic> body) {
+    return _postJsonBody('/strategy-profiles/$profileId/sizing-preview', body);
+  }
+
+  Future<Map<String, dynamic>> fetchAutomationProfileWatchlist(int profileId) {
+    return _getJsonNoCache('/strategy-profiles/$profileId/watchlist');
+  }
+
+  Future<Map<String, dynamic>> updateAutomationProfileWatchlist(
+      int profileId, Map<String, dynamic> body) {
+    return _putJsonBody('/strategy-profiles/$profileId/watchlist', body);
+  }
+
+  Future<List<Map<String, dynamic>>> searchSymbols(String query,
+      {String? market}) async {
+    final params = <String, String>{'q': query};
+    if (market != null && market.trim().isNotEmpty) params['market'] = market;
+    final uri = Uri.parse('${AppConfig.baseUrl}/symbols/search')
+        .replace(queryParameters: params);
+    final r = await _client.get(uri);
+    if (r.statusCode >= 400) throw _apiRequestExceptionFromResponse(r);
+    final payload = _decodeJsonMapResponse(r);
+    final items = payload['results'];
+    if (items is! List) return const [];
+    return [
+      for (final item in items)
+        if (item is Map) Map<String, dynamic>.from(item),
+    ];
   }
 
   Future<StrategyDailyPerformance> fetchStrategyDailyPerformance({

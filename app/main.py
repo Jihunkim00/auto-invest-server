@@ -5,6 +5,8 @@ from app.config import get_settings
 from app.db.init_db import init_db
 from app.routes.account import router as account_router
 from app.routes.automation import router as automation_router
+from app.routes.automation_profiles import router as automation_profiles_router
+from app.routes.automation_profiles import symbol_router as symbol_router
 from app.routes.agent import router as agent_router
 from app.routes.agent_chat import router as agent_chat_router
 from app.routes.agent_execution import router as agent_execution_router
@@ -96,6 +98,8 @@ app.include_router(broker_sync_watchdog_router)
 app.include_router(kis_router)
 app.include_router(account_router)
 app.include_router(automation_router)
+app.include_router(automation_profiles_router)
+app.include_router(symbol_router)
 app.include_router(positions_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)

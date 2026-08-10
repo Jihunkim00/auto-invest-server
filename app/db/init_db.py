@@ -382,6 +382,13 @@ def _create_strategy_tables_if_missing():
                     consecutive_loss_reduce_threshold INTEGER NOT NULL DEFAULT 1,
                     is_active BOOLEAN NOT NULL DEFAULT 0,
                     is_builtin BOOLEAN NOT NULL DEFAULT 1,
+                    profile_key VARCHAR(80) UNIQUE,
+                    custom_name VARCHAR(120),
+                    provider VARCHAR(20),
+                    market VARCHAR(10),
+                    enabled BOOLEAN DEFAULT 0,
+                    custom_status VARCHAR(20),
+                    settings_json TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -2028,6 +2035,16 @@ def init_db():
         "kis_scheduler_live_respect_kill_switch": "BOOLEAN DEFAULT 1",
     }
 
+    strategy_profile_columns = {
+        'profile_key': 'VARCHAR(80)',
+        'custom_name': 'VARCHAR(120)',
+        'provider': 'VARCHAR(20)',
+        'market': 'VARCHAR(10)',
+        'enabled': 'BOOLEAN DEFAULT 0',
+        'custom_status': 'VARCHAR(20)',
+        'settings_json': 'TEXT',
+    }
+
     trade_run_log_columns = {
         "mode": "VARCHAR(30) DEFAULT 'entry_scan'",
         "parent_run_key": "VARCHAR(64)",
@@ -2059,6 +2076,21 @@ def init_db():
 
     for name, ddl in runtime_setting_columns.items():
         _add_column_if_missing("runtime_settings", name, ddl)
+
+    for name, ddl in strategy_profile_columns.items():
+        _add_column_if_missing('strategy_profiles', name, ddl)
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    'CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_profiles_profile_key '
+                    'ON strategy_profiles (profile_key)'
+                )
+            )
+    except Exception:
+        # Existing installations may contain duplicate legacy/null custom
+        # keys; validation still rejects duplicates at the service boundary.
+        pass
 
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)

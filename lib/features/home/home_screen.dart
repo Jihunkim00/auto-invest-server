@@ -11,10 +11,12 @@ class HomeScreen extends StatelessWidget {
     super.key,
     required this.controller,
     this.onOpenAdmin,
+    this.onOpenAutomationProfile,
   });
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
+  final VoidCallback? onOpenAutomationProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -49,6 +51,8 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 14),
               _OperationModeCard(controller: controller),
               const SizedBox(height: 12),
+              _AutomationProfileCard(onOpen: onOpenAutomationProfile),
+              const SizedBox(height: 12),
               _PortfolioCard(controller: controller),
               const SizedBox(height: 12),
               _PositionsCard(controller: controller),
@@ -64,6 +68,36 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _AutomationProfileCard extends StatelessWidget {
+  const _AutomationProfileCard({this.onOpen});
+
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      key: const ValueKey('home-automation-profile-card'),
+      child: Row(
+        children: [
+          const Icon(Icons.tune_outlined, color: Colors.lightBlueAccent),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Automation profile'),
+                SizedBox(height: 3),
+                Text('Configure search, sizing, and monitoring separately from live safety.', style: TextStyle(color: Colors.white70)),
+              ],
+            ),
+          ),
+          OutlinedButton(key: const ValueKey('home-open-automation-profile'), onPressed: onOpen, child: const Text('Configure')),
+        ],
       ),
     );
   }
