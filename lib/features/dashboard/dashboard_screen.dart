@@ -38,6 +38,7 @@ class DashboardScreen extends StatelessWidget {
     this.onReviewPosition,
     this.onOpenLogs,
     this.onOpenSettings,
+    this.onOpenAdmin,
   });
 
   final DashboardController controller;
@@ -45,6 +46,7 @@ class DashboardScreen extends StatelessWidget {
   final VoidCallback? onReviewPosition;
   final VoidCallback? onOpenLogs;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenAdmin;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +76,12 @@ class DashboardScreen extends StatelessWidget {
                           ),
                         ),
                         GlobalBrokerSelector(controller: controller),
+                        IconButton(
+                          key: const ValueKey('home-open-admin'),
+                          tooltip: 'Advanced / Admin',
+                          onPressed: onOpenAdmin,
+                          icon: const Icon(Icons.admin_panel_settings_outlined),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
