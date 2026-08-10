@@ -109,6 +109,8 @@ def test_stop_loss_reuses_guarded_sell_service_and_completes_cycle(db_session, t
     assert settings["dry_run"] is True
     assert settings["kill_switch"] is True
     assert settings["operation_test4_enabled"] is False
+    assert settings["operation_test4_stop_loss_enabled"] is False
+    assert settings["operation_test4_take_profit_enabled"] is False
 
 
 def test_take_profit_uses_same_single_sell_path(db_session, tmp_path):
@@ -162,6 +164,22 @@ def test_pending_exit_is_only_synced_then_filled_closes_cycle(db_session, tmp_pa
     assert reconciled["cycle"]["status"] == "completed"
     assert sell_service.calls == 1
 
+
+def test_active_monitor_pending_exit_submits_sell_only_once_across_ticks(db_session, tmp_path):
+    service, _, sell_service = _prepare_position(
+        db_session,
+        tmp_path,
+        sell_status="PENDING",
+    )
+
+    first = service.run_active_cycle_once(db_session, now=NOW)
+    second = service.run_active_cycle_once(db_session, now=NOW)
+    cycle = db_session.query(OperationTest4Cycle).one()
+
+    assert first["close"]["reason"] == "exit_pending"
+    assert second["result"] == "reconciled"
+    assert sell_service.calls == 1
+    assert cycle.status == "exit_submitted"
 
 def test_operation_test4_scheduler_slots_are_exact():
     assert SchedulerService().operation_test4_slots == [
@@ -231,4 +249,127 @@ def test_enabled_operation_test4_scheduler_calls_only_test4_service(
     )
 
     assert result == {"slot_label": "09:35", "result": "hold"}
+    assert calls == {"client": 1, "service": 1, "run": 1}
+
+def test_active_cycle_monitor_reconciles_pending_without_entry_scan(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(
+        tmp_path,
+        manual_service=FakeManualOrderService(status="PENDING"),
+    )
+    service.order_sync_service = EchoOrderSync()
+    arm_for_entry(db_session, service)
+    entry = service.entry_run_once(
+        db_session,
+        confirm_live=True,
+        confirmation=ENTRY_CONFIRMATION,
+        now=NOW,
+    )
+    assert entry["reason"] == "entry_submitted"
+    calls_before = len(service.manual_order_service.calls)
+    service.candidate_provider = lambda **kwargs: (_ for _ in ()).throw(
+        AssertionError("active monitor must not run an entry scan")
+    )
+
+    result = service.run_active_cycle_once(db_session, now=NOW)
+
+    assert result["result"] == "reconciled"
+    assert len(service.manual_order_service.calls) == calls_before
+
+
+def test_active_cycle_monitor_holds_position_without_sell(db_session, tmp_path):
+    service, _, sell_service = _prepare_position(
+        db_session,
+        tmp_path,
+        current_price=20_000,
+    )
+
+    result = service.run_active_cycle_once(db_session, now=NOW)
+
+    assert result["reason"] == "HOLD"
+    assert sell_service.calls == 0
+
+
+def test_active_monitor_recovers_persisted_ready_claim_to_safe_mode(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    arm_for_entry(db_session, service)
+    cycle = OperationTest4Cycle(
+        cycle_key="test4-ready-claim",
+        operation_test="test4",
+        provider="kis",
+        market="KR",
+        symbol="000001",
+        status="entry_ready",
+        started_at=NOW.replace(tzinfo=None),
+    )
+    db_session.add(cycle)
+    db_session.commit()
+
+    result = service.run_active_cycle_once(db_session, now=NOW)
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert result["reason"] == "entry_ready_recovery_required"
+    assert cycle.status == "review_required"
+    assert cycle.manual_review_required is True
+    assert settings["dry_run"] is True
+    assert settings["kill_switch"] is True
+    assert settings["operation_test4_enabled"] is False
+    assert settings["operation_test4_stop_loss_enabled"] is False
+    assert settings["operation_test4_take_profit_enabled"] is False
+
+def test_disabled_operation_test4_active_monitor_does_not_create_client_or_service(
+    db_session,
+    monkeypatch,
+):
+    calls = {"client": 0, "service": 0}
+
+    def fail_client(*args, **kwargs):
+        calls["client"] += 1
+        raise AssertionError("disabled Test4 monitor must not create a client")
+
+    class FakeService:
+        def __init__(self, *args, **kwargs):
+            calls["service"] += 1
+
+    monkeypatch.setattr("app.services.scheduler_service.KisClient", fail_client)
+    monkeypatch.setattr("app.services.scheduler_service.OperationTest4Service", FakeService)
+
+    result = SchedulerService()._run_operation_test4_active_monitor_with_db(db_session)
+
+    assert result is None
+    assert calls == {"client": 0, "service": 0}
+
+
+def test_enabled_operation_test4_active_monitor_calls_active_cycle_service(
+    db_session,
+    monkeypatch,
+):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "operation_test4_scheduler_enabled": True,
+            "operation_test4_enabled": True,
+        },
+    )
+    calls = {"client": 0, "service": 0, "run": 0}
+
+    class FakeService:
+        def __init__(self, client, *, runtime_settings):
+            calls["service"] += 1
+
+        def run_active_cycle_once(self, db):
+            calls["run"] += 1
+            return {"result": "hold"}
+
+    monkeypatch.setattr(
+        "app.services.scheduler_service.KisClient",
+        lambda *args, **kwargs: calls.__setitem__("client", calls["client"] + 1) or object(),
+    )
+    monkeypatch.setattr("app.services.scheduler_service.OperationTest4Service", FakeService)
+
+    result = SchedulerService()._run_operation_test4_active_monitor_with_db(db_session)
+
+    assert result == {"result": "hold"}
     assert calls == {"client": 1, "service": 1, "run": 1}

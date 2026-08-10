@@ -684,6 +684,32 @@ class OperationTest4Cycle(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+
+class OperationTest4EntryReservation(Base):
+    """Durable per-KST-day claim for Test4's one allowed live BUY attempt."""
+
+    __tablename__ = "operation_test4_entry_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trade_date_kst = Column(String(10), nullable=False, unique=True, index=True)
+    reservation_token = Column(String(64), nullable=False, unique=True, index=True)
+    cycle_id = Column(Integer, nullable=True, index=True)
+    submission_attempted = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+class OperationTestLiveModeClaim(Base):
+    """One durable owner for mutually exclusive Test3/Test4 activation."""
+
+    __tablename__ = "operation_test_live_mode_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scope_key = Column(String(64), nullable=False, unique=True, index=True)
+    owner = Column(String(20), nullable=False, default="")
+    generation = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
 class TradeRunLog(Base):
     __tablename__ = "trade_run_logs"
 

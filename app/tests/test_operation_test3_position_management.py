@@ -225,6 +225,36 @@ def test_live_enable_requires_confirmation_and_marks_live(db_session):
     assert all(settings[key] is False for key in BUY_FLAGS)
 
 
+
+def test_test3_enable_paths_are_blocked_while_test4_is_active(db_session):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "operation_test4_enabled": True,
+            "operation_test4_scheduler_enabled": True,
+            "operation_test4_allow_real_entry": True,
+            "operation_test4_allow_real_exit": True,
+            "operation_test4_entry_enabled": True,
+            "operation_test4_position_management_enabled": True,
+        },
+    )
+    service = _service(FakeClient(), FakeSellService())
+
+    monitoring = service.enable_monitoring(
+        db_session,
+        confirmation=MONITORING_CONFIRMATION,
+    )
+    live = service.enable(
+        db_session,
+        confirm_live=True,
+        confirmation=ENABLE_CONFIRMATION,
+    )
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert monitoring["reason"] == "operation_test4_active"
+    assert live["reason"] == "operation_test4_active"
+    assert settings["operation_test3_enabled"] is False
+    assert settings["operation_test3_allow_real_orders"] is False
 def test_disable_restores_all_test3_activation_flags_false(db_session):
     RuntimeSettingService().update_settings(
         db_session,

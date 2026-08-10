@@ -68,6 +68,21 @@ def operation_test4_entry_preflight_once(
     return service.preflight_once(db)
 
 
+@router.post("/start")
+def start_operation_test4_full_cycle(
+    payload: OperationTest4ConfirmationRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest4Service = Depends(get_operation_test4_service),
+):
+    result = service.start_full_cycle(
+        db,
+        confirm_live=payload.confirm_live,
+        confirmation=payload.confirmation,
+    )
+    status_code = 409 if result.get("reason") == "operator_confirmation_required" else 200
+    return JSONResponse(status_code=status_code, content=result)
+
+
 @router.post("/enable-live")
 def enable_live_operation_test4(
     payload: OperationTest4ConfirmationRequest,
@@ -77,7 +92,7 @@ def enable_live_operation_test4(
     result = service.enable_live(
         db,
         **{
-            "confirm" "live": payload.confirm_live,
+            "confirm_live": payload.confirm_live,
             "confirmation": payload.confirmation,
         },
     )
@@ -94,7 +109,7 @@ def operation_test4_entry_run_once(
     result = service.entry_run_once(
         db,
         **{
-            "confirm" "live": payload.confirm_live,
+            "confirm_live": payload.confirm_live,
             "confirmation": payload.confirmation,
         },
     )

@@ -34,3 +34,5 @@ config/watchlist_kr.stage3.universe100.yaml
 # Keep Flutter Logs feature source tracked
 !lib/features/logs/
 !lib/features/logs/**
+.tmp/
+config/local-watchlists/

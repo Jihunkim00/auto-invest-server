@@ -2,12 +2,26 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from app.db.models import OperationTest4Cycle, OrderLog, RuntimeSetting, SignalLog, TradeRunLog
+from app.db.models import (
+    OperationTest4Cycle,
+    OperationTestLiveModeClaim,
+    OrderLog,
+    RuntimeSetting,
+    SignalLog,
+    TradeRunLog,
+)
 from app.db.database import get_db
 from app.main import app
+from app.routes.ops import RuntimeSettingsUpdateRequest, update_settings as update_ops_settings
 from app.services.operation_test4_service import ENABLE_CONFIRMATION
+from app.services.operation_test_live_mode_claim_service import (
+    OperationTestLiveModeClaimService,
+    OperationTestLiveModeConflict,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.tests.test_operation_test4_entry import (
     NOW,
@@ -247,3 +261,196 @@ def test_ops_settings_cannot_directly_enable_test4_real_gates(db_session):
         app.dependency_overrides.clear()
 
     assert response.status_code == 409
+
+def test_ops_settings_cannot_enable_test3_while_test4_is_active(db_session):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "operation_test4_enabled": True,
+            "operation_test4_scheduler_enabled": True,
+            "operation_test4_allow_real_entry": True,
+            "operation_test4_allow_real_exit": True,
+            "operation_test4_entry_enabled": True,
+            "operation_test4_position_management_enabled": True,
+        },
+    )
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = TestClient(app).put(
+            "/ops/settings",
+            json={"operation_test3_enabled": True},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+def test_ops_settings_cannot_enable_test3_and_test4_in_same_request(db_session):
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        response = TestClient(app).put(
+            "/ops/settings",
+            json={
+                "operation_test3_enabled": True,
+                "operation_test4_enabled": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    settings = RuntimeSettingService().get_settings(db_session)
+    assert response.status_code == 409
+    assert settings["operation_test3_enabled"] is False
+    assert settings["operation_test4_enabled"] is False
+def test_database_mode_claim_blocks_opposite_test4_arm(db_session, tmp_path):
+    claims = OperationTestLiveModeClaimService()
+    assert claims.acquire(db_session, owner="test3") is True
+
+    service, _, _ = make_service(tmp_path)
+    result = service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation=ENABLE_CONFIRMATION,
+        now=NOW,
+    )
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "operation_test3_active"
+    assert settings["operation_test4_enabled"] is False
+
+
+def test_ops_settings_database_mode_claim_blocks_opposite_activation(db_session):
+    claims = OperationTestLiveModeClaimService()
+    assert claims.acquire(db_session, owner="test4") is True
+
+    with pytest.raises(HTTPException) as error:
+        update_ops_settings(
+            RuntimeSettingsUpdateRequest(operation_test3_enabled=True),
+            db_session,
+        )
+
+    settings = RuntimeSettingService().get_settings(db_session)
+    assert error.value.status_code == 409
+    assert settings["operation_test3_enabled"] is False
+
+def test_mode_claim_and_runtime_flags_commit_together(db_session):
+    runtime = RuntimeSettingService()
+    test4_activation = {
+        "operation_test4_enabled": True,
+        "operation_test4_scheduler_enabled": True,
+        "operation_test4_allow_real_entry": True,
+        "operation_test4_allow_real_exit": True,
+        "operation_test4_entry_enabled": True,
+        "operation_test4_position_management_enabled": True,
+    }
+    runtime.update_settings(db_session, test4_activation)
+
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert claim.owner == "test4"
+
+    with pytest.raises(OperationTestLiveModeConflict):
+        runtime.update_settings(
+            db_session,
+            {
+                "operation_test3_enabled": True,
+                "operation_test3_scheduler_enabled": True,
+            },
+        )
+
+    db_session.expire_all()
+    after_conflict = runtime.get_settings(db_session)
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert after_conflict["operation_test4_enabled"] is True
+    assert after_conflict["operation_test3_enabled"] is False
+    assert claim.owner == "test4"
+
+    runtime.update_settings(
+        db_session,
+        {key: False for key in test4_activation},
+    )
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert claim.owner == ""
+
+    after_switch = runtime.update_settings(
+        db_session,
+        {
+            "operation_test3_enabled": True,
+            "operation_test3_scheduler_enabled": True,
+        },
+    )
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert after_switch["operation_test3_enabled"] is True
+    assert after_switch["operation_test4_enabled"] is False
+    assert claim.owner == "test3"
+
+
+def test_failed_mode_update_does_not_leave_a_stale_claim(db_session):
+    runtime = RuntimeSettingService()
+
+    with pytest.raises(ValueError):
+        runtime.update_settings(
+            db_session,
+            {
+                "operation_test3_enabled": True,
+                "us_no_new_entry_after": "15:40",
+            },
+        )
+
+    assert db_session.query(OperationTestLiveModeClaim).count() == 0
+    settings = runtime.update_settings(
+        db_session,
+        {"operation_test4_enabled": True},
+    )
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert settings["operation_test4_enabled"] is True
+    assert claim.owner == "test4"
+
+def test_normalized_mode_update_releases_live_mode_claim(db_session):
+    runtime = RuntimeSettingService()
+    runtime.update_settings(
+        db_session,
+        {
+            "operation_test4_enabled": True,
+            "operation_test4_scheduler_enabled": True,
+            "operation_test4_allow_real_entry": True,
+            "operation_test4_entry_enabled": True,
+        },
+    )
+
+    settings = runtime.update_settings(
+        db_session,
+        {"kr_scheduler_mode": "disabled"},
+    )
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert settings["operation_test4_enabled"] is False
+    assert claim.owner == ""
+
+
+def test_ambiguous_runtime_rows_fail_closed_for_mode_change(db_session):
+    runtime = RuntimeSettingService()
+    runtime.get_or_create(db_session)
+    db_session.add(RuntimeSetting(**runtime._defaults()))
+    db_session.commit()
+
+    with pytest.raises(OperationTestLiveModeConflict) as error:
+        runtime.update_settings(
+            db_session,
+            {"operation_test4_enabled": True},
+        )
+
+    assert error.value.active_owner == "runtime_settings_ambiguous"
+    rows = db_session.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).all()
+    claim = db_session.query(OperationTestLiveModeClaim).one()
+    assert len(rows) == 2
+    assert all(row.dry_run is True for row in rows)
+    assert all(row.kill_switch is True for row in rows)
+    assert all(row.operation_test3_enabled is False for row in rows)
+    assert all(row.operation_test4_enabled is False for row in rows)
+    assert claim.owner == ""

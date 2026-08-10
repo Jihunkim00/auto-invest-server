@@ -80,6 +80,7 @@ class SchedulerService:
             ("12:00", 12, 0),
             ("14:30", 14, 30),
         ]
+        self.operation_test4_active_monitor_interval_seconds = 60
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._slot_runs: set[str] = set()
@@ -176,6 +177,19 @@ class SchedulerService:
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._run_operation_test4_scheduled_once(slot_name)
+
+            current_test4_slot = f"{now_kr.hour:02d}:{now_kr.minute:02d}"
+            configured_test4_slots = {
+                f"{hour:02d}:{minute:02d}"
+                for _, hour, minute in self.operation_test4_slots
+            }
+            if current_test4_slot not in configured_test4_slots:
+                run_key = (
+                    f"{kr_day_key}:KR:operation_test4_monitor:{current_test4_slot}"
+                )
+                if run_key not in self._slot_runs:
+                    self._slot_runs.add(run_key)
+                    self._run_operation_test4_active_monitor_scheduled_once()
             for slot_name, hour, minute in self._strategy_auto_buy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:strategy_auto_buy_dry_run:{slot_name}"
@@ -657,6 +671,24 @@ class SchedulerService:
             kis_client,
             runtime_settings=self.runtime_settings,
         ).run_scheduler_once(db, slot_label=slot_name)
+
+    def _run_operation_test4_active_monitor_scheduled_once(self):
+        db = SessionLocal()
+        try:
+            return self._run_operation_test4_active_monitor_with_db(db)
+        finally:
+            db.close()
+
+    def _run_operation_test4_active_monitor_with_db(self, db):
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        if runtime.get("operation_test4_scheduler_enabled") is not True:
+            return None
+        settings_obj = get_settings()
+        kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        return OperationTest4Service(
+            kis_client,
+            runtime_settings=self.runtime_settings,
+        ).run_active_cycle_once(db)
 
     def _run_broker_sync_watchdog_scheduled_once(self, slot_name: str):
         db = SessionLocal()

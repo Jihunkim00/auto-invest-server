@@ -16,6 +16,9 @@ from app.services.ops_production_readiness_service import (
 )
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.operator_alerts_service import OperatorAlertsService
+from app.services.operation_test_live_mode_claim_service import (
+    OperationTestLiveModeConflict,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.trading_service import TradingService
@@ -261,6 +264,41 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
     svc = RuntimeSettingService()
     payload_values = payload.model_dump(exclude_none=True)
     deprecation_warnings: list[dict[str, str]] = []
+    test3_activation_keys = (
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+    )
+    test4_activation_keys = (
+        "operation_test4_enabled",
+        "operation_test4_scheduler_enabled",
+        "operation_test4_allow_real_entry",
+        "operation_test4_allow_real_exit",
+        "operation_test4_entry_enabled",
+        "operation_test4_position_management_enabled",
+    )
+    current_settings = svc.get_settings_read_only(db)
+    test3_requested = any(payload_values.get(key) is True for key in test3_activation_keys)
+    test4_requested = any(payload_values.get(key) is True for key in test4_activation_keys)
+    test3_active = any(current_settings.get(key) is True for key in test3_activation_keys)
+    test4_active = any(current_settings.get(key) is True for key in test4_activation_keys)
+    if test3_requested and test4_requested:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test3 and Operation Test4 cannot be enabled together.",
+        )
+    if test3_requested and test4_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test3 cannot be enabled while Operation Test4 is active.",
+        )
+    if test4_requested and test3_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test4 cannot be enabled while Operation Test3 is active.",
+        )
+
     if payload_values.get("operation_test3_allow_real_orders") is True:
         raise HTTPException(
             status_code=409,
@@ -298,6 +336,12 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
         )
     try:
         settings = svc.update_settings(db, payload_values)
+    except OperationTestLiveModeConflict as exc:
+        opposite = "Test4" if exc.active_owner == "test4" else "Test3"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Operation {opposite} is active in another session.",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     response: dict[str, Any] = {"result": "updated", "settings": settings}

@@ -995,6 +995,36 @@ def _create_operation_test_cycles_table_if_missing():
         )
 
 
+def _create_operation_test_live_mode_claims_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_test_live_mode_claims (
+                    id INTEGER PRIMARY KEY,
+                    scope_key VARCHAR(64) NOT NULL UNIQUE,
+                    owner VARCHAR(20) NOT NULL DEFAULT '',
+                    generation INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test_live_mode_claims_scope_key "
+                "ON operation_test_live_mode_claims (scope_key)"
+            )
+        )
+    _add_column_if_missing(
+        "operation_test_live_mode_claims",
+        "generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+
+
 def _create_broker_auth_tokens_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1731,6 +1761,7 @@ def init_db():
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_position_lifecycles_table_if_missing()
     _create_operation_test_cycles_table_if_missing()
+    _create_operation_test_live_mode_claims_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()

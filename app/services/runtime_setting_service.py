@@ -297,16 +297,24 @@ class RuntimeSettingService:
             "kis_scheduler_live_respect_kill_switch": True,
         }
 
-    def get_or_create(self, db: Session) -> RuntimeSetting:
-        row = db.query(RuntimeSetting).first()
+    def get_or_create(
+        self,
+        db: Session,
+        *,
+        commit: bool = True,
+    ) -> RuntimeSetting:
+        row = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
         if row:
             return row
 
         defaults = self._defaults()
         row = RuntimeSetting(**defaults)
         db.add(row)
-        db.commit()
-        db.refresh(row)
+        if commit:
+            db.commit()
+            db.refresh(row)
+        else:
+            db.flush()
         return row
 
     def get_settings(self, db: Session) -> dict[str, Any]:
@@ -314,7 +322,7 @@ class RuntimeSettingService:
         return self._settings_from_row(row)
 
     def get_settings_read_only(self, db: Session) -> dict[str, Any]:
-        row = db.query(RuntimeSetting).first()
+        row = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
         if row:
             return self._settings_from_row(row)
 
@@ -2476,9 +2484,27 @@ class RuntimeSettingService:
             return payload
         raise ValueError(f"unsupported operation mode preset: {preset}")
 
-    def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    def update_settings(
+        self,
+        db: Session,
+        payload: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
         payload = dict(payload)
         self._normalize_simplified_payload(payload)
+        if commit:
+            from app.services.operation_test_live_mode_claim_service import (
+                OPERATION_TEST_MODE_SETTING_KEYS,
+                OperationTestLiveModeClaimService,
+            )
+
+            if any(key in payload for key in OPERATION_TEST_MODE_SETTING_KEYS):
+                return OperationTestLiveModeClaimService().update_runtime_settings(
+                    db,
+                    runtime_settings=self,
+                    payload=payload,
+                )
         if "strategy_auto_buy_scheduler_dry_run_only" in payload:
             payload["strategy_auto_buy_scheduler_dry_run_only"] = True
         if "strategy_auto_buy_scheduler_allow_live_orders" in payload:
@@ -2545,7 +2571,7 @@ class RuntimeSettingService:
                 1,
                 max(0, int(payload.get("automation_release_max_daily_auto_sells") or 1)),
             )
-        row = self.get_or_create(db)
+        row = self.get_or_create(db, commit=commit)
         _sync_bool_alias(
             payload,
             "kis_limited_auto_stop_loss_enabled",
@@ -2887,9 +2913,12 @@ class RuntimeSettingService:
             1,
             max(0, int(row.automation_release_max_daily_auto_sells or 1)),
         )
-        db.commit()
-        db.refresh(row)
-        return self.get_settings(db)
+        if commit:
+            db.commit()
+            db.refresh(row)
+            return self.get_settings(db)
+        db.flush()
+        return self._settings_from_row(row)
 
     def _normalize_simplified_payload(self, payload: dict[str, Any]) -> None:
         if "us_no_new_entry_after" in payload:

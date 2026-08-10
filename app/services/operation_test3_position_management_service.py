@@ -16,6 +16,9 @@ from app.services.kis_dry_run_risk_service import MARKET, OPEN_ORDER_STATUSES, P
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
+from app.services.operation_test_live_mode_claim_service import (
+    OperationTestLiveModeConflict,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 
 KR_TZ = ZoneInfo("Asia/Seoul")
@@ -441,18 +444,52 @@ class OperationTest3PositionManagementService:
                     "manual_submit_called": False,
                 }
             )
-        settings = self.runtime_settings.update_settings(
-            db,
-            {
-                "operation_test3_enabled": True,
-                "operation_test3_scheduler_enabled": True,
-                "operation_test3_position_management_enabled": True,
-                "operation_test3_allow_real_orders": False,
-                "operation_test3_stop_loss_enabled": True,
-                "operation_test3_take_profit_enabled": False,
-                **{key: False for key in BUY_FLAGS},
-            },
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        test4_flags = (
+            "operation_test4_enabled",
+            "operation_test4_scheduler_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
         )
+        if any(runtime.get(key) is True for key in test4_flags):
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "reason": "operation_test4_active",
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+        try:
+            settings = self.runtime_settings.update_settings(
+                db,
+                {
+                    "operation_test3_enabled": True,
+                    "operation_test3_scheduler_enabled": True,
+                    "operation_test3_position_management_enabled": True,
+                    "operation_test3_allow_real_orders": False,
+                    "operation_test3_stop_loss_enabled": True,
+                    "operation_test3_take_profit_enabled": False,
+                    **{key: False for key in BUY_FLAGS},
+                },
+            )
+        except OperationTestLiveModeConflict:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "reason": "operation_test4_active",
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
         return sanitize_kis_payload(
             {
                 "status": "monitoring_enabled",
@@ -490,19 +527,53 @@ class OperationTest3PositionManagementService:
                     "manual_submit_called": False,
                 }
             )
-        settings = self.runtime_settings.update_settings(
-            db,
-            {
-                "operation_test3_enabled": True,
-                "operation_test3_scheduler_enabled": True,
-                "operation_test3_allow_real_orders": True,
-                "operation_test3_position_management_enabled": True,
-                "operation_test3_stop_loss_enabled": True,
-                "operation_test3_take_profit_enabled": False,
-                "operation_test3_max_sell_orders_per_day": 1,
-                **{key: False for key in BUY_FLAGS},
-            },
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        test4_flags = (
+            "operation_test4_enabled",
+            "operation_test4_scheduler_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
         )
+        if any(runtime.get(key) is True for key in test4_flags):
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "reason": "operation_test4_active",
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+        try:
+            settings = self.runtime_settings.update_settings(
+                db,
+                {
+                    "operation_test3_enabled": True,
+                    "operation_test3_scheduler_enabled": True,
+                    "operation_test3_allow_real_orders": True,
+                    "operation_test3_position_management_enabled": True,
+                    "operation_test3_stop_loss_enabled": True,
+                    "operation_test3_take_profit_enabled": False,
+                    "operation_test3_max_sell_orders_per_day": 1,
+                    **{key: False for key in BUY_FLAGS},
+                },
+            )
+        except OperationTestLiveModeConflict:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "operation_test3_phase": PHASE,
+                    "reason": "operation_test4_active",
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
         return sanitize_kis_payload(
             {
                 "status": "live_enabled",

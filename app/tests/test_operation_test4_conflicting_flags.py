@@ -18,7 +18,9 @@ def test_readiness_returns_names_of_conflicting_live_flags(db_session, tmp_path)
             "operation_test3_enabled": True,
             "operation_test3_scheduler_enabled": True,
         },
+        commit=False,
     )
+    db_session.commit()
 
     result = service.readiness(db_session, now=NOW)
     check = next(

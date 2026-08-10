@@ -306,7 +306,7 @@ def test_first_valid_entry_submits_once_and_second_call_is_blocked(db_session, t
     )
 
     assert first["reason"] == "entry_submitted"
-    assert second["reason"] in {"active_cycle_exists", "readiness_not_ready"}
+    assert second["reason"] in {"active_cycle_exists", "local_open_order_exists", "readiness_not_ready"}
     assert len(manual.calls) == 1
 
 

@@ -706,13 +706,7 @@ class OperationModeService:
         return "paper"
 
     def _get_or_create_row(self, db: Session) -> RuntimeSetting:
-        row = db.query(RuntimeSetting).first()
-        if row is not None:
-            return row
-        row = RuntimeSetting(**self.runtime_settings._defaults())
-        db.add(row)
-        db.flush()
-        return row
+        return self.runtime_settings.get_or_create(db, commit=False)
 
     def _apply_payload(self, row: RuntimeSetting, payload: dict[str, Any]) -> None:
         for key, value in payload.items():

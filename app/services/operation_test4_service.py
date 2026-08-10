@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -8,12 +9,18 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.enums import InternalOrderStatus
-from app.db.models import OperationTest4Cycle, OrderLog, PositionLifecycle
+from app.db.models import (
+    OperationTest4Cycle,
+    OperationTest4EntryReservation,
+    OrderLog,
+    PositionLifecycle,
+)
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_manual_order_service import (
     KIS_MANUAL_CONFIRMATION_PHRASE,
@@ -32,6 +39,9 @@ from app.services.kis_watchlist_preview_service import KisWatchlistPreviewServic
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.operation_test4_sizing import calculate_operation_test4_sizing
+from app.services.operation_test_live_mode_claim_service import (
+    OperationTestLiveModeConflict,
+)
 from app.services.operation_test4_watchlist import (
     DEFAULT_COUNT,
     DEFAULT_PRICE_CAP_KRW,
@@ -51,6 +61,7 @@ ENTRY_ENDPOINT = "/app/operation-test4/entry/run-once"
 EXIT_ENDPOINT = "/app/operation-test4/reconcile-once"
 ENTRY_CONFIRMATION = "RUN TEST4 LIVE ENTRY ONCE"
 ENABLE_CONFIRMATION = "ENABLE TEST4 FULL CYCLE"
+START_CONFIRMATION = "START TEST4 FULL CYCLE"
 HOLD = "HOLD"
 STOP_LOSS_READY = "STOP_LOSS_READY"
 TAKE_PROFIT_READY = "TAKE_PROFIT_READY"
@@ -77,6 +88,7 @@ OPEN_ORDER_STATUSES = {
     InternalOrderStatus.UNKNOWN_STALE.value,
     InternalOrderStatus.SYNC_FAILED.value,
 }
+_ENTRY_SUBMIT_LOCK = threading.RLock()
 SUBMITTED_STATUSES = OPEN_ORDER_STATUSES | {
     InternalOrderStatus.FILLED.value,
 }
@@ -106,6 +118,13 @@ OTHER_SCHEDULER_LIVE_FLAGS = BUY_FLAGS + (
     "operation_test3_scheduler_enabled",
     "operation_test3_allow_real_orders",
     "operation_test3_position_management_enabled",
+    "agent_chat_live_order_enabled",
+    "agent_chat_live_order_kis_enabled",
+    "agent_chat_live_order_buy_enabled",
+    "automation_release_enabled",
+    "automation_release_allow_live_phase1",
+    "automation_release_scheduler_enabled",
+    "portfolio_orchestrator_allow_live_orders",
 )
 
 
@@ -196,6 +215,7 @@ class OperationTest4Service:
                 "scheduler": {
                     "entry_slot_kst": "09:35",
                     "position_slots_kst": list(POSITION_SLOTS),
+                    "active_monitor_interval_seconds": 60,
                     "single_symbol": True,
                     "max_open_positions": 1,
                 },
@@ -263,6 +283,7 @@ class OperationTest4Service:
         now_kst = now_utc.astimezone(KR_TZ)
         time_allowed = time(9, 0) <= now_kst.time() < time(14, 0)
         active_position = active_cycle is not None and active_cycle.status == "position_open"
+        local_open_order_count = self._local_open_order_count(db)
         entry_conditions = [
             ("operation_test4_enabled", runtime.get("operation_test4_enabled") is True, "operation_test4_disabled"),
             ("operation_test4_scheduler_enabled", runtime.get("operation_test4_scheduler_enabled") is True, "operation_test4_scheduler_disabled"),
@@ -286,6 +307,7 @@ class OperationTest4Service:
             ("position_count_zero", account.get("position_count") == 0, "position_exists"),
             ("active_lifecycle_zero", len(active_lifecycles) == 0, "active_lifecycle_exists"),
             ("open_order_count_zero", account.get("open_order_count") == 0, "open_order_exists"),
+            ("local_open_order_count_zero", local_open_order_count == 0, "local_open_order_exists"),
             ("active_cycle_zero", active_cycle is None, "active_cycle_exists"),
             ("daily_buy_count_zero", self._daily_order_count(db, side="buy", now_utc=now_utc) == 0, "daily_buy_already_used"),
             ("market_open", market_session.get("is_market_open") is True, "market_closed"),
@@ -486,6 +508,8 @@ class OperationTest4Service:
         confirm_live: bool,
         confirmation: str | None,
         now: datetime | None = None,
+        activate_global_guards: bool = False,
+        allowed_cycle_id: int | None = None,
     ) -> dict[str, Any]:
         if confirm_live is not True or str(confirmation or "").strip() != ENABLE_CONFIRMATION:
             return self._blocked_enable("operator_confirmation_required")
@@ -494,6 +518,7 @@ class OperationTest4Service:
         account = self._read_account_state()
         active_cycle = self._active_cycle(db)
         active_lifecycle_count = len(self._active_lifecycles(db))
+        local_open_order_count = self._local_open_order_count(db)
         enabled_buy_flags = [key for key in BUY_FLAGS if runtime.get(key) is True]
         enabled_other_scheduler_flags = [
             key
@@ -516,8 +541,18 @@ class OperationTest4Service:
             blockers.append("active_lifecycle_exists")
         if account.get("open_order_count") != 0:
             blockers.append("open_order_exists")
-        if active_cycle is not None:
+        if local_open_order_count != 0:
+            blockers.append("local_open_order_exists")
+        if active_cycle is not None and active_cycle.id != allowed_cycle_id:
             blockers.append("active_cycle_exists")
+        test3_flags = (
+            "operation_test3_enabled",
+            "operation_test3_scheduler_enabled",
+            "operation_test3_allow_real_orders",
+            "operation_test3_position_management_enabled",
+        )
+        if any(runtime.get(key) is True for key in test3_flags):
+            blockers.append("operation_test3_live_flags_enabled")
         if self._daily_order_count(db, side="buy", now_utc=now_utc) != 0:
             blockers.append("daily_buy_already_used")
         if enabled_buy_flags:
@@ -536,9 +571,15 @@ class OperationTest4Service:
                     "broker_submit_called": False,
                 }
             )
-        settings_after = self.runtime_settings.update_settings(
-            db,
-            {
+        try:
+            settings_after = self.runtime_settings.update_settings(
+                db,
+                {
+                **(
+                    {"dry_run": False, "kill_switch": False}
+                    if activate_global_guards
+                    else {}
+                ),
                 "operation_test4_enabled": True,
                 "operation_test4_scheduler_enabled": True,
                 "operation_test4_allow_real_entry": True,
@@ -557,9 +598,22 @@ class OperationTest4Service:
                 "operation_test4_allow_single_share_budget_bump": True,
                 "operation_test4_cash_only": True,
                 "operation_test4_no_new_entry_after": "14:00",
-                **{key: False for key in BUY_FLAGS},
-            },
-        )
+                    **{key: False for key in BUY_FLAGS},
+                },
+            )
+        except OperationTestLiveModeConflict:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "reason": "operation_test3_active",
+                    "immediate_order_execution": False,
+                    "runtime": self._runtime_snapshot(
+                        self.runtime_settings.get_settings_read_only(db)
+                    ),
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
         return sanitize_kis_payload(
             {
                 "status": "live_enabled",
@@ -588,6 +642,161 @@ class OperationTest4Service:
             }
         )
 
+    def start_full_cycle(
+        self,
+        db: Session,
+        *,
+        confirm_live: bool,
+        confirmation: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        with _ENTRY_SUBMIT_LOCK:
+            return self._start_full_cycle(
+                db,
+                confirm_live=confirm_live,
+                confirmation=confirmation,
+                now=now,
+            )
+
+    def _start_full_cycle(
+        self,
+        db: Session,
+        *,
+        confirm_live: bool,
+        confirmation: str | None,
+        now: datetime | None,
+    ) -> dict[str, Any]:
+        if (
+            confirm_live is not True
+            or str(confirmation or "").strip() != START_CONFIRMATION
+        ):
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "action": HOLD,
+                    "reason": "operator_confirmation_required",
+                    "required_confirmation": START_CONFIRMATION,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        now_utc = _aware_utc(now or self.now_provider())
+        existing_blockers = self._start_idempotency_blockers(db, now=now_utc)
+        if existing_blockers:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "action": HOLD,
+                    "reason": existing_blockers[0],
+                    "blocking_reasons": existing_blockers,
+                    "runtime": self._runtime_snapshot(
+                        self.runtime_settings.get_settings_read_only(db)
+                    ),
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        rebuilt = self.rebuild_watchlist(db, now=now_utc)
+        if rebuilt.get("status") != "completed":
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "action": HOLD,
+                    "reason": rebuilt.get("reason") or "watchlist_rebuild_failed",
+                    "watchlist_rebuild": rebuilt,
+                    "runtime": self._runtime_snapshot(
+                        self.runtime_settings.get_settings_read_only(db)
+                    ),
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        preflight = self.preflight_once(db, now=now_utc)
+        if preflight.get("status") != "ready" or preflight.get("action") != "BUY_READY":
+            return sanitize_kis_payload(
+                {
+                    "status": "hold",
+                    "operation_test": OPERATION_TEST,
+                    "action": HOLD,
+                    "reason": (
+                        preflight.get("blocking_reasons")
+                        or preflight.get("review_reasons")
+                        or ["candidate_gate_blocked"]
+                    )[0],
+                    "watchlist_rebuild": rebuilt,
+                    "preflight": preflight,
+                    "runtime": self._runtime_snapshot(
+                        self.runtime_settings.get_settings_read_only(db)
+                    ),
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        arm_state = {"armed": False}
+        try:
+            entry = self.entry_run_once(
+                db,
+                confirm_live=True,
+                confirmation=ENTRY_CONFIRMATION,
+                now=now_utc,
+                trigger_source="operation_test4_start",
+                _preflight=preflight,
+                _arm_for_submit=True,
+                _arm_state=arm_state,
+            )
+        except Exception as exc:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if arm_state["armed"] is True:
+                runtime = self._disarm(db, reason="start_entry_exception")
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "action": HOLD,
+                    "reason": "start_entry_exception",
+                    "error": _safe_error(exc),
+                    "watchlist_rebuild": rebuilt,
+                    "preflight": preflight,
+                    "runtime": self._runtime_snapshot(runtime),
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        if arm_state["armed"] is True and entry.get("real_order_submitted") is not True:
+            self._disarm(db, reason="start_entry_not_submitted")
+        return sanitize_kis_payload(
+            {
+                "status": "entry_submitted"
+                if entry.get("real_order_submitted") is True
+                else "blocked",
+                "operation_test": OPERATION_TEST,
+                "action": "BUY_READY" if entry.get("real_order_submitted") is True else HOLD,
+                "reason": entry.get("reason"),
+                "watchlist_rebuild": rebuilt,
+                "preflight": preflight,
+                "entry": entry,
+                "runtime": self._runtime_snapshot(
+                    self.runtime_settings.get_settings_read_only(db)
+                ),
+                "real_order_submitted": entry.get("real_order_submitted") is True,
+                "broker_submit_called": entry.get("broker_submit_called") is True,
+                "manual_submit_called": entry.get("manual_submit_called") is True,
+            }
+        )
+
     def preflight_once(
         self,
         db: Session,
@@ -596,7 +805,27 @@ class OperationTest4Service:
     ) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         readiness = self.readiness(db, now=now_utc)
-        if readiness.get("entry_base_ready") is not True:
+
+        preflight_ignored_blockers = {
+            "operation_test4_disabled",
+            "operation_test4_scheduler_disabled",
+            "operation_test4_real_entry_disabled",
+            "operation_test4_entry_disabled",
+            "dry_run_true",
+            "kill_switch_enabled",
+        }
+
+        preflight_blocking_reasons = [
+            reason
+            for reason in readiness.get("entry_blocking_reasons", [])
+            if reason not in preflight_ignored_blockers
+        ]
+
+        preflight_review_reasons = list(
+            readiness.get("entry_review_reasons", [])
+        )
+
+        if preflight_blocking_reasons or preflight_review_reasons:
             return sanitize_kis_payload(
                 {
                     **readiness,
@@ -604,6 +833,8 @@ class OperationTest4Service:
                     "preflight_only": True,
                     "status": "blocked",
                     "action": HOLD,
+                    "blocking_reasons": preflight_blocking_reasons,
+                    "review_reasons": preflight_review_reasons,
                     "safety": _read_only_safety(),
                 }
             )
@@ -637,10 +868,16 @@ class OperationTest4Service:
             {
                 "status": status,
                 "action": action,
+                "provider": PROVIDER,
+                "market": MARKET,
                 "operation_test": OPERATION_TEST,
                 "mode": "operation_test4_preflight",
+                "analysis_mode": "operation_test4_heavy_preflight",
+                "execution_decision": action,
                 "preflight_only": True,
                 "candidate_required": False,
+                "watchlist": readiness.get("watchlist", {}),
+                "checks": readiness.get("checks", []),
                 "candidate": candidate or {
                     "symbol": None,
                     "current_price": None,
@@ -659,6 +896,10 @@ class OperationTest4Service:
                     "configured_count": preview.get("configured_symbol_count"),
                     "analyzed_count": preview.get("analyzed_symbol_count"),
                     "final_ranked_count": len(preview.get("final_ranked_candidates") or []),
+                    "preview_only": preview.get("preview_only"),
+                    "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                    "trading_enabled": preview.get("trading_enabled"),
+                    "next_manual_action_hint": preview.get("next_manual_action_hint"),
                 },
                 "blocking_reasons": _dedupe(blocking_reasons),
                 "review_reasons": [],
@@ -677,6 +918,33 @@ class OperationTest4Service:
         confirmation: str | None,
         now: datetime | None = None,
         trigger_source: str = "operation_test4_run_once",
+        _preflight: dict[str, Any] | None = None,
+        _arm_for_submit: bool = False,
+        _arm_state: dict[str, bool] | None = None,
+    ) -> dict[str, Any]:
+        with _ENTRY_SUBMIT_LOCK:
+            return self._entry_run_once(
+                db,
+                confirm_live=confirm_live,
+                confirmation=confirmation,
+                now=now,
+                trigger_source=trigger_source,
+                preflight=_preflight,
+                arm_for_submit=_arm_for_submit,
+                arm_state=_arm_state,
+            )
+
+    def _entry_run_once(
+        self,
+        db: Session,
+        *,
+        confirm_live: bool,
+        confirmation: str | None,
+        now: datetime | None,
+        trigger_source: str,
+        preflight: dict[str, Any] | None,
+        arm_for_submit: bool,
+        arm_state: dict[str, bool] | None,
     ) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         if confirm_live is not True or str(confirmation or "").strip() != ENTRY_CONFIRMATION:
@@ -686,23 +954,28 @@ class OperationTest4Service:
             return self._entry_blocked("entry_before_09_00")
         if now_kst.time() >= time(14, 0):
             return self._entry_blocked("entry_after_14_00")
-        readiness = self.readiness(db, now=now_utc)
-        if readiness.get("entry_base_ready") is not True:
-            return sanitize_kis_payload(
-                {
-                    "status": "blocked",
-                    "operation_test": OPERATION_TEST,
-                    "result": HOLD,
-                    "reason": (readiness.get("blocking_reasons") or readiness.get("review_reasons") or ["readiness_not_ready"])[0],
-                    "blocking_reasons": readiness.get("blocking_reasons", []),
-                    "review_reasons": readiness.get("review_reasons", []),
-                    "readiness": readiness,
-                    "real_order_submitted": False,
-                    "broker_submit_called": False,
-                    "manual_submit_called": False,
-                }
-            )
-        preflight = self.preflight_once(db, now=now_utc)
+        if preflight is None:
+            readiness = self.readiness(db, now=now_utc)
+            if readiness.get("entry_base_ready") is not True:
+                return sanitize_kis_payload(
+                    {
+                        "status": "blocked",
+                        "operation_test": OPERATION_TEST,
+                        "result": HOLD,
+                        "reason": (
+                            readiness.get("blocking_reasons")
+                            or readiness.get("review_reasons")
+                            or ["readiness_not_ready"]
+                        )[0],
+                        "blocking_reasons": readiness.get("blocking_reasons", []),
+                        "review_reasons": readiness.get("review_reasons", []),
+                        "readiness": readiness,
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                        "manual_submit_called": False,
+                    }
+                )
+            preflight = self.preflight_once(db, now=now_utc)
         if preflight.get("status") != "ready" or preflight.get("action") != "BUY_READY":
             return sanitize_kis_payload(
                 {
@@ -784,43 +1057,95 @@ class OperationTest4Service:
             },
         }
         sizing_payload = candidate["sizing"]
-        cycle = OperationTest4Cycle(
-            cycle_key=f"operation_test4_{now_kst.strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}",
-            operation_test=OPERATION_TEST,
-            provider=PROVIDER,
-            market=MARKET,
-            symbol=str(candidate.get("symbol") or ""),
-            status="entry_ready",
-            entry_trigger_source=trigger_source,
-            min_position_pct=float(sizing_payload.get("min_position_pct") or 10.0),
-            max_position_pct=float(sizing_payload.get("max_position_pct") or 100.0),
-            price_cap_krw=float(sizing_payload.get("price_cap_krw") or 1_000_000.0),
-            max_order_notional_krw=float(sizing_payload.get("max_order_notional_krw") or 1_000_000.0),
-            equity_at_entry=_number(candidate.get("equity")),
-            orderable_cash_at_entry=_number(candidate.get("orderable_cash")),
-            estimated_entry_price=_number(candidate.get("current_price")),
-            requested_quantity=int(sizing_payload.get("quantity") or 0),
-            estimated_notional=_number(sizing_payload.get("estimated_notional")),
-            effective_position_pct=_number(sizing_payload.get("effective_position_pct")),
-            started_at=_naive_utc(now_utc),
-        )
-        db.add(cycle)
-        db.commit()
-        db.refresh(cycle)
-
         validation = self._validate_entry(
             db,
-            symbol=cycle.symbol,
-            quantity=int(cycle.requested_quantity or 0),
+            symbol=str(candidate.get("symbol") or ""),
+            quantity=int(sizing_payload.get("quantity") or 0),
             now=now_utc,
             candidate=candidate,
         )
         if validation.get("valid") is not True:
-            cycle.status = "blocked"
-            cycle.last_error = str(validation.get("reason") or "validation_failed")
-            db.commit()
-            return self._entry_result(cycle, reason=cycle.last_error, validation=validation)
+            return self._entry_result(
+                None,
+                reason=str(validation.get("reason") or "validation_failed"),
+                validation=validation,
+            )
 
+        if arm_for_submit:
+            refreshed_candidate, refresh_reason = self._refresh_candidate_for_submit(
+                candidate,
+                runtime=runtime,
+            )
+            if refresh_reason is not None:
+                return self._entry_blocked(refresh_reason)
+            if int(refreshed_candidate["sizing"].get("quantity") or 0) != int(
+                sizing_payload.get("quantity") or 0
+            ):
+                return self._entry_blocked("submit_sizing_changed")
+            candidate = refreshed_candidate
+            sizing_payload = candidate["sizing"]
+
+        pre_arm_blockers = self._entry_submission_blockers(
+            db,
+            now=now_utc,
+            require_live=not arm_for_submit,
+        )
+        if pre_arm_blockers:
+            return self._entry_blocked(pre_arm_blockers[0])
+
+        reservation = self._reserve_entry_submission(db, now=now_utc)
+        if reservation is None:
+            return self._entry_blocked("daily_entry_reservation_exists")
+
+        cycle = self._create_entry_cycle(
+            db,
+            candidate=candidate,
+            sizing=sizing_payload,
+            now=now_utc,
+            trigger_source=trigger_source,
+        )
+        self._bind_entry_reservation(db, reservation=reservation, cycle=cycle)
+        # Persist the one-shot claim before any global live guard is lowered.
+        self._mark_entry_reservation_submission_attempted(db, reservation=reservation)
+
+        if arm_for_submit:
+            arm_result = self.enable_live(
+                db,
+                confirm_live=True,
+                confirmation=ENABLE_CONFIRMATION,
+                now=now_utc,
+                activate_global_guards=True,
+                allowed_cycle_id=cycle.id,
+            )
+            if arm_result.get("status") != "live_enabled":
+                self._review_and_disarm(
+                    db,
+                    cycle,
+                    str(arm_result.get("reason") or "live_arm_blocked"),
+                )
+                return self._entry_result(
+                    cycle,
+                    reason=str(arm_result.get("reason") or "live_arm_blocked"),
+                    validation=validation,
+                )
+            if arm_state is not None:
+                arm_state["armed"] = True
+
+        # This is the last safety read.  After it, the only operation is the
+        # existing guarded manual-order submit path.
+        final_submit_blockers = self._entry_submission_blockers(
+            db,
+            now=now_utc,
+            require_live=True,
+            allowed_cycle_id=cycle.id,
+        )
+        if final_submit_blockers:
+            self._review_and_disarm(db, cycle, final_submit_blockers[0])
+            return self._entry_result(
+                cycle,
+                reason=final_submit_blockers[0],
+                validation=validation,
+            )
         request = KisManualOrderSubmitRequest(
             market=MARKET,
             symbol=cycle.symbol,
@@ -1015,6 +1340,46 @@ class OperationTest4Service:
             }
         )
 
+    def run_active_cycle_once(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        now_utc = _aware_utc(now or self.now_provider())
+        cycle = self._active_cycle(db)
+        if cycle is None:
+            return sanitize_kis_payload(
+                {
+                    "status": "ok",
+                    "operation_test": OPERATION_TEST,
+                    "result": HOLD,
+                    "reason": "no_active_cycle",
+                    "cycle": {},
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
+        if cycle.status in {"entry_ready", "exit_ready"}:
+            recovery_reason = f"{cycle.status}_recovery_required"
+            self._review_and_disarm(db, cycle, recovery_reason)
+            return self._cycle_result(cycle, reason=recovery_reason)
+        if cycle.status in {"entry_submitted", "entry_pending", "exit_submitted"}:
+            return self.reconcile_once(db, now=now_utc)
+        if cycle.status == "position_open":
+            return self._manage_exit(db, cycle, now=now_utc)
+        return sanitize_kis_payload(
+            {
+                "status": "ok",
+                "operation_test": OPERATION_TEST,
+                "result": HOLD,
+                "reason": "no_action_for_active_cycle",
+                "cycle": _serialize_cycle(cycle),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        )
+
     def run_scheduler_once(
         self,
         db: Session,
@@ -1027,9 +1392,9 @@ class OperationTest4Service:
                 {"status": "blocked", "reason": "invalid_scheduler_slot", "slot_label": slot_label}
             )
         cycle = self._active_cycle(db)
-        if cycle is not None and cycle.status in {"entry_submitted", "entry_pending", "exit_submitted"}:
-            return self.reconcile_once(db, now=now)
-        if slot_label in ENTRY_SLOTS and cycle is None:
+        if cycle is not None:
+            return self.run_active_cycle_once(db, now=now)
+        if slot_label in ENTRY_SLOTS:
             return self.entry_run_once(
                 db,
                 confirm_live=True,
@@ -1037,8 +1402,6 @@ class OperationTest4Service:
                 now=now,
                 trigger_source="operation_test4_scheduler",
             )
-        if slot_label in POSITION_SLOTS and cycle is not None and cycle.status == "position_open":
-            return self._manage_exit(db, cycle, now=_aware_utc(now or self.now_provider()))
         return sanitize_kis_payload(
             {
                 "status": "ok",
@@ -1102,9 +1465,18 @@ class OperationTest4Service:
             runtime.get("operation_test4_max_sell_orders_per_day", 1) or 1
         ):
             return self._cycle_result(cycle, reason="daily_sell_already_used", current_price=current_price)
-        cycle.status = "exit_ready"
-        cycle.exit_reason = "stop_loss_triggered" if stop_triggered else "take_profit_triggered"
-        db.commit()
+        exit_reason = "stop_loss_triggered" if stop_triggered else "take_profit_triggered"
+        claim = self._claim_exit_submission(db, cycle=cycle, exit_reason=exit_reason)
+        if claim == "unavailable":
+            self._review_and_disarm(db, cycle, "exit_claim_unavailable")
+            return self._cycle_result(cycle, reason="exit_claim_unavailable")
+        if claim != "claimed":
+            db.refresh(cycle)
+            return self._cycle_result(
+                cycle,
+                reason="exit_claimed_elsewhere",
+                current_price=current_price,
+            )
         try:
             service = self._limited_sell_service()
             response = sanitize_kis_payload(service.run_once(db, now=now))
@@ -1189,11 +1561,17 @@ class OperationTest4Service:
             selected = fallback
         if not selected:
             return preview, {}
+
+        symbol = str(selected.get("symbol") or "").strip()
+        if not symbol:
+            return preview, {}
+
         current_price = _number(
             selected.get("current_price")
             or selected.get("price")
             or selected.get("stck_prpr")
         )
+
         possible_order = self._possible_order(
             symbol=symbol,
             current_price=current_price,
@@ -1233,12 +1611,29 @@ class OperationTest4Service:
         )
         if not sizing.allowed:
             block_reasons.append(str(sizing.reason or "sizing_blocked"))
+        block_reasons = _dedupe(block_reasons)
+        raw_preview_reasons = [
+            str(reason)
+            for reason in selected.get("block_reasons") or []
+            if str(reason) in {"preview_only", "kr_trading_disabled", "trading_disabled"}
+        ]
+        preview_display = {
+            "preview_only": bool(selected.get("preview_only")) or "preview_only" in raw_preview_reasons,
+            "kr_trading_disabled": bool(selected.get("kr_trading_disabled"))
+            or "kr_trading_disabled" in raw_preview_reasons,
+            "trading_enabled": selected.get("trading_enabled"),
+            "next_manual_action_hint": selected.get("next_manual_action_hint"),
+        }
         selected.update(
             {
                 "symbol": symbol,
                 "current_price": current_price or None,
                 "final_buy_score": score,
-                "block_reasons": _dedupe(block_reasons),
+                "block_reasons": block_reasons,
+                "test4_block_reasons": block_reasons,
+                "analysis_mode": "operation_test4_heavy_preflight",
+                "execution_decision": "BUY_READY" if not block_reasons else HOLD,
+                "preview_display": preview_display,
                 "risk_flags": selected.get("risk_flags") or [],
                 "equity": account.get("equity"),
                 "cash": account.get("cash"),
@@ -1470,6 +1865,280 @@ class OperationTest4Service:
         )
         return self.limited_auto_sell_service
 
+    def _claim_exit_submission(
+        self,
+        db: Session,
+        *,
+        cycle: OperationTest4Cycle,
+        exit_reason: str,
+    ) -> str:
+        """Atomically move one open cycle into the guarded sell-submit state."""
+        try:
+            claimed = (
+                db.query(OperationTest4Cycle)
+                .filter(OperationTest4Cycle.id == cycle.id)
+                .filter(OperationTest4Cycle.status == "position_open")
+                .update(
+                    {
+                        "status": "exit_ready",
+                        "exit_reason": exit_reason,
+                    },
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            return "unavailable"
+        if claimed != 1:
+            return "already_claimed"
+        db.refresh(cycle)
+        return "claimed"
+
+    def _create_entry_cycle(
+        self,
+        db: Session,
+        *,
+        candidate: dict[str, Any],
+        sizing: dict[str, Any],
+        now: datetime,
+        trigger_source: str,
+    ) -> OperationTest4Cycle:
+        now_kst = now.astimezone(KR_TZ)
+        cycle = OperationTest4Cycle(
+            cycle_key=f"operation_test4_{now_kst.strftime('%Y%m%d')}_{uuid.uuid4().hex[:12]}",
+            operation_test=OPERATION_TEST,
+            provider=PROVIDER,
+            market=MARKET,
+            symbol=str(candidate.get("symbol") or ""),
+            status="entry_ready",
+            entry_trigger_source=trigger_source,
+            min_position_pct=float(sizing.get("min_position_pct") or 10.0),
+            max_position_pct=float(sizing.get("max_position_pct") or 100.0),
+            price_cap_krw=float(sizing.get("price_cap_krw") or 1_000_000.0),
+            max_order_notional_krw=float(
+                sizing.get("max_order_notional_krw") or 1_000_000.0
+            ),
+            equity_at_entry=_number(candidate.get("equity")),
+            orderable_cash_at_entry=_number(candidate.get("orderable_cash")),
+            estimated_entry_price=_number(candidate.get("current_price")),
+            requested_quantity=int(sizing.get("quantity") or 0),
+            estimated_notional=_number(sizing.get("estimated_notional")),
+            effective_position_pct=_number(sizing.get("effective_position_pct")),
+            started_at=_naive_utc(now),
+        )
+        db.add(cycle)
+        db.commit()
+        db.refresh(cycle)
+        return cycle
+
+    def _reserve_entry_submission(
+        self,
+        db: Session,
+        *,
+        now: datetime,
+    ) -> OperationTest4EntryReservation | None:
+        reservation = OperationTest4EntryReservation(
+            trade_date_kst=now.astimezone(KR_TZ).date().isoformat(),
+            reservation_token=uuid.uuid4().hex,
+        )
+        db.add(reservation)
+        try:
+            db.commit()
+        except IntegrityError:
+            # A unique KST-day claim already exists (or persistence is unsafe).
+            # Either case is fail-closed: no second live BUY attempt is allowed.
+            db.rollback()
+            return None
+        db.refresh(reservation)
+        return reservation
+
+    def _bind_entry_reservation(
+        self,
+        db: Session,
+        *,
+        reservation: OperationTest4EntryReservation,
+        cycle: OperationTest4Cycle,
+    ) -> None:
+        reservation.cycle_id = cycle.id
+        db.commit()
+
+    def _mark_entry_reservation_submission_attempted(
+        self,
+        db: Session,
+        *,
+        reservation: OperationTest4EntryReservation,
+    ) -> None:
+        reservation.submission_attempted = True
+        db.commit()
+
+    def _start_idempotency_blockers(
+        self,
+        db: Session,
+        *,
+        now: datetime,
+    ) -> list[str]:
+        blockers: list[str] = []
+        if self._active_cycle(db) is not None:
+            blockers.append("active_cycle_exists")
+        if self._active_lifecycles(db):
+            blockers.append("active_lifecycle_exists")
+        account = self._read_account_state()
+        if account.get("fetch_success") is not True:
+            blockers.append("account_state_unavailable")
+        else:
+            if account.get("position_count") != 0:
+                blockers.append("position_exists")
+            if account.get("open_order_count") != 0:
+                blockers.append("open_order_exists")
+        if self._local_open_order_count(db) != 0:
+            blockers.append("local_open_order_exists")
+        if self._daily_order_count(db, side="buy", now_utc=now) != 0:
+            blockers.append("daily_buy_already_used")
+        return _dedupe(blockers)
+
+    def _entry_submission_blockers(
+        self,
+        db: Session,
+        *,
+        now: datetime,
+        require_live: bool,
+        allowed_cycle_id: int | None = None,
+    ) -> list[str]:
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        account = self._read_account_state()
+        market_session = self._market_session(now)
+        now_kst = now.astimezone(KR_TZ)
+        blockers: list[str] = []
+        settings = self.client.settings
+        if now_kst.time() < time(9, 0) or now_kst.time() >= time(14, 0):
+            blockers.append("entry_time_outside_window")
+        if market_session.get("is_market_open") is not True:
+            blockers.append("market_closed")
+        if market_session.get("is_entry_allowed_now") is not True:
+            blockers.append("market_entry_not_allowed")
+        if not _is_kis_prod(settings):
+            blockers.append("kis_prod_required")
+        if not bool(getattr(settings, "kis_enabled", False)):
+            blockers.append("kis_disabled")
+        if not bool(getattr(settings, "kis_real_order_enabled", False)):
+            blockers.append("kis_real_order_disabled")
+        if account.get("fetch_success") is not True:
+            blockers.append("account_state_unavailable")
+        if account.get("position_count") != 0:
+            blockers.append("position_exists")
+        if account.get("open_order_count") != 0:
+            blockers.append("open_order_exists")
+        if self._local_open_order_count(db) != 0:
+            blockers.append("local_open_order_exists")
+        if self._active_lifecycles(db):
+            blockers.append("active_lifecycle_exists")
+        active_cycles = (
+            db.query(OperationTest4Cycle)
+            .filter(OperationTest4Cycle.status.in_(ACTIVE_CYCLE_STATUSES))
+            .all()
+        )
+        if any(cycle.id != allowed_cycle_id for cycle in active_cycles):
+            blockers.append("active_cycle_exists")
+        if self._daily_order_count(db, side="buy", now_utc=now) != 0:
+            blockers.append("daily_buy_already_used")
+        enabled_buy_flags = [key for key in BUY_FLAGS if runtime.get(key) is True]
+        if enabled_buy_flags:
+            blockers.append("other_buy_flags_enabled")
+        test3_flags = (
+            "operation_test3_enabled",
+            "operation_test3_scheduler_enabled",
+            "operation_test3_allow_real_orders",
+            "operation_test3_position_management_enabled",
+        )
+        if any(runtime.get(key) is True for key in test3_flags):
+            blockers.append("operation_test3_live_flags_enabled")
+        enabled_other_scheduler_flags = [
+            key
+            for key in OTHER_SCHEDULER_LIVE_FLAGS
+            if runtime.get(key) is True
+        ]
+        if enabled_other_scheduler_flags:
+            blockers.append("other_scheduler_live_flags_enabled")
+        if require_live:
+            required_flags = (
+                "operation_test4_enabled",
+                "operation_test4_scheduler_enabled",
+                "operation_test4_allow_real_entry",
+                "operation_test4_entry_enabled",
+            )
+            if any(runtime.get(key) is not True for key in required_flags):
+                blockers.append("operation_test4_live_arm_incomplete")
+            if runtime.get("dry_run") is not False:
+                blockers.append("dry_run_true")
+            if runtime.get("kill_switch") is not False:
+                blockers.append("kill_switch_enabled")
+        return _dedupe(blockers)
+
+    def _refresh_candidate_for_submit(
+        self,
+        candidate: dict[str, Any],
+        *,
+        runtime: dict[str, Any],
+    ) -> tuple[dict[str, Any], str | None]:
+        symbol = str(candidate.get("symbol") or "").strip()
+        fresh_price = self._current_price(
+            symbol=symbol,
+            fallback=_number(candidate.get("current_price")),
+        )
+        if not symbol or fresh_price is None or fresh_price <= 0:
+            return candidate, "current_price_unavailable"
+        price_cap = float(
+            runtime.get("operation_test4_price_cap_krw", DEFAULT_PRICE_CAP_KRW)
+        )
+        if fresh_price >= price_cap:
+            return candidate, "price_cap_exceeded"
+        possible_order = self._possible_order(
+            symbol=symbol,
+            current_price=fresh_price,
+        )
+        if possible_order.get("raw_status") != "ok":
+            return candidate, str(
+                possible_order.get("error") or "possible_order_unavailable"
+            )
+        orderable_cash = _number_or_none(possible_order.get("orderable_cash"))
+        orderable_quantity = _int_or_none(possible_order.get("orderable_quantity"))
+        if orderable_cash is None or orderable_quantity is None:
+            return candidate, "possible_order_unavailable"
+        sizing = calculate_operation_test4_sizing(
+            equity=_number(candidate.get("equity")),
+            orderable_cash=orderable_cash,
+            current_price=fresh_price,
+            min_position_pct=float(runtime.get("operation_test4_min_position_pct", 10.0)),
+            max_position_pct=float(runtime.get("operation_test4_max_position_pct", 100.0)),
+            max_order_notional_krw=float(
+                runtime.get("operation_test4_max_order_notional_krw", 1_000_000.0)
+            ),
+            price_cap_krw=price_cap,
+            broker_orderable_qty=orderable_quantity,
+            allow_single_share_budget_bump=bool(
+                runtime.get("operation_test4_allow_single_share_budget_bump", True)
+            ),
+        )
+        if not sizing.allowed:
+            return candidate, str(sizing.reason or "sizing_blocked")
+        return {
+            **candidate,
+            "current_price": fresh_price,
+            "orderable_cash": orderable_cash,
+            "orderable_quantity": orderable_quantity,
+            "possible_order": possible_order,
+            "sizing": {
+                **sizing.as_dict(),
+                "min_position_pct": runtime.get("operation_test4_min_position_pct", 10.0),
+                "max_position_pct": runtime.get("operation_test4_max_position_pct", 100.0),
+                "price_cap_krw": runtime.get("operation_test4_price_cap_krw", 1_000_000.0),
+                "max_order_notional_krw": runtime.get(
+                    "operation_test4_max_order_notional_krw", 1_000_000.0
+                ),
+            },
+        }, None
+
     def _manual_submit(
         self,
         db: Session,
@@ -1517,7 +2186,7 @@ class OperationTest4Service:
         self._disarm(db, reason=reason)
 
     def _disarm(self, db: Session, *, reason: str) -> dict[str, Any]:
-        return self.runtime_settings.update_settings(
+        settings = self.runtime_settings.update_settings(
             db,
             {
                 "dry_run": True,
@@ -1528,11 +2197,12 @@ class OperationTest4Service:
                 "operation_test4_allow_real_exit": False,
                 "operation_test4_entry_enabled": False,
                 "operation_test4_position_management_enabled": False,
-                "operation_test4_stop_loss_enabled": True,
-                "operation_test4_take_profit_enabled": True,
+                "operation_test4_stop_loss_enabled": False,
+                "operation_test4_take_profit_enabled": False,
                 **{key: False for key in BUY_FLAGS},
             },
         )
+        return settings
 
     def _active_cycle(self, db: Session) -> OperationTest4Cycle | None:
         return (
@@ -1588,6 +2258,15 @@ class OperationTest4Service:
                 count += 1
         return count
 
+    def _local_open_order_count(self, db: Session) -> int:
+        return int(
+            db.query(OrderLog)
+            .filter(OrderLog.broker == PROVIDER)
+            .filter(OrderLog.internal_status.in_(sorted(OPEN_ORDER_STATUSES)))
+            .count()
+            or 0
+        )
+
     def _local_open_sell(self, db: Session, symbol: str) -> bool:
         return (
             db.query(OrderLog)
@@ -1615,8 +2294,12 @@ class OperationTest4Service:
                 balance = self.client.get_account_balance()
                 positions = self.client.list_positions()
                 open_orders = self.client.list_open_orders()
-                if not isinstance(balance, dict):
-                    raise ValueError("account_balance_invalid")
+                if (
+                    not isinstance(balance, dict)
+                    or not isinstance(positions, list)
+                    or not isinstance(open_orders, list)
+                ):
+                    raise ValueError("account_state_invalid")
                 orderable_cash = _number_or_none(balance.get("orderable_cash"))
                 return _normalize_account_state(
                     {
@@ -1633,8 +2316,8 @@ class OperationTest4Service:
                             "candidate_required" if orderable_cash is None else "ok",
                         ),
                         "orderable_cash_source": balance.get("orderable_cash_source"),
-                        "positions": positions if isinstance(positions, list) else [],
-                        "open_orders": open_orders if isinstance(open_orders, list) else [],
+                        "positions": positions,
+                        "open_orders": open_orders,
                         "warnings": [],
                     }
                 )
@@ -1820,10 +2503,22 @@ def _eligible_count(preview: dict[str, Any], runtime: dict[str, Any]) -> int:
 
 
 def _normalize_account_state(value: Any) -> dict[str, Any]:
-    payload = value if isinstance(value, dict) else {}
-    positions = payload.get("positions") or []
-    open_orders = payload.get("open_orders") or []
-    balance = payload.get("balance") or {}
+    if not isinstance(value, dict):
+        return _account_error(ValueError("account_state_invalid"))
+    payload = dict(value)
+    positions = payload.get("positions")
+    open_orders = payload.get("open_orders")
+    raw_balance = payload.get("balance")
+    if (
+        payload.get("fetch_success") is not True
+        or not isinstance(positions, list)
+        or not isinstance(open_orders, list)
+        or (raw_balance is not None and not isinstance(raw_balance, dict))
+        or not all(isinstance(row, dict) for row in positions)
+        or not all(isinstance(row, dict) for row in open_orders)
+    ):
+        return _account_error(ValueError("account_state_invalid"))
+    balance = raw_balance or {}
     equity = _first_number(payload, "equity")
     if equity is None:
         equity = _first_number(balance, "total_asset_value", "equity")
@@ -1833,11 +2528,11 @@ def _normalize_account_state(value: Any) -> dict[str, Any]:
     held_positions = [
         row
         for row in positions
-        if isinstance(row, dict) and _number(row.get("qty")) > 0
+        if _number(row.get("qty")) > 0
     ]
     return {
         **payload,
-        "fetch_success": payload.get("fetch_success", True) is True,
+        "fetch_success": True,
         "equity": equity or 0.0,
         "orderable_cash": orderable_cash,
         "orderable_cash_status": payload.get(
@@ -1858,12 +2553,11 @@ def _normalize_account_state(value: Any) -> dict[str, Any]:
         if payload.get("d2_cash") is not None
         else _number_or_none(balance.get("d2_cash")),
         "positions": held_positions,
-        "open_orders": [row for row in open_orders if isinstance(row, dict)],
+        "open_orders": open_orders,
         "position_count": len(held_positions),
-        "open_order_count": len([row for row in open_orders if isinstance(row, dict)]),
+        "open_order_count": len(open_orders),
         "warnings": payload.get("warnings") or [],
     }
-
 
 def _account_error(exc: Exception) -> dict[str, Any]:
     return {
