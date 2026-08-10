@@ -32,7 +32,8 @@ void main() {
 
     await tester.tap(find.text('AI'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('ai-shell-welcome-card')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-v2-welcome-card')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ai-quick-종목 분석')), findsOneWidget);
 
     await tester.tap(find.text('Assets'));
     await tester.pumpAndSettle();

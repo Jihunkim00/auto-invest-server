@@ -167,6 +167,7 @@ class AgentChatLiveOrderService:
         conversation_key: str,
         user_message_id: int | None,
         now: datetime | None = None,
+        preview_only: bool = False,
     ) -> dict[str, Any]:
         now_utc = _utc_now(now)
         safety = _base_safety(real_order_submitted=False)
@@ -183,7 +184,7 @@ class AgentChatLiveOrderService:
             now_utc=now_utc,
         )
 
-        if not self._prepare_flags_enabled(settings, provider=provider, side=side):
+        if not preview_only and not self._prepare_flags_enabled(settings, provider=provider, side=side):
             return {
                 "created": False,
                 "reason": "agent_chat_live_order_disabled",
@@ -263,6 +264,7 @@ class AgentChatLiveOrderService:
             "estimated_notional": estimated_notional,
             "safety": {
                 "prepare_only": True,
+                "preview_only": preview_only,
                 "validation_called": False,
                 "broker_submit_called": False,
                 "manual_submit_called": False,

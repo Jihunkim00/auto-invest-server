@@ -8,6 +8,7 @@ import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_live_order_readiness.dart';
 import '../../models/agent_chat_message.dart';
 import '../../models/agent_chat_send_response.dart';
+import '../../models/agent_chat_v2_response.dart';
 import '../../models/agent_chat_strategy_action.dart';
 import '../../models/agent_command.dart';
 import '../../models/agent_operations.dart';
@@ -393,6 +394,25 @@ class ApiClient {
       'locale': locale,
     });
     return AgentChatSendResponse.fromJson(payload);
+  }
+
+  Future<AgentChatV2Response> sendAgentChatV2Message({
+    required String message,
+    String? conversationKey,
+    Map<String, dynamic>? context,
+    bool autoCreateConversation = true,
+    String language = 'ko',
+    String locale = 'ko-KR',
+  }) async {
+    final payload = await _postJsonBody('/agent/chat/v2/message', {
+      'conversation_key': conversationKey,
+      'message': message,
+      'context': context ?? const <String, dynamic>{},
+      'auto_create_conversation': autoCreateConversation,
+      'language': language,
+      'locale': locale,
+    });
+    return AgentChatV2Response.fromJson(payload);
   }
 
   Future<StrategyProfileList> fetchStrategyProfiles() async {

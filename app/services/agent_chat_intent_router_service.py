@@ -514,6 +514,19 @@ class AgentChatIntentRouterService:
         return intent
 
     def _detect_symbol(self, text: str) -> dict[str, str] | None:
+        plain_aliases = {
+            "삼성전자": ("005930", "삼성전자", "KR", "kis"),
+            "삼전": ("005930", "삼성전자", "KR", "kis"),
+            "현대차": ("005380", "현대차", "KR", "kis"),
+            "현대자동차": ("005380", "현대자동차", "KR", "kis"),
+            "005380": ("005380", "현대차", "KR", "kis"),
+        }
+        compact_input = re.sub(r"\s+", "", str(text or ""))
+        if compact_input in {"삼성", "현대"}:
+            return None
+        for alias, (symbol, name, market, provider) in plain_aliases.items():
+            if alias in str(text or "") or alias in str(text or "").upper():
+                return {"symbol": symbol, "name": name, "market": market, "provider": provider}
         compact = re.sub(r"\s+", "", str(text or ""))
         upper_text = str(text or "").upper()
         aliases = {
@@ -1688,6 +1701,10 @@ class AgentChatIntentRouterService:
         return "unknown"
 
     def _detect_side(self, text: str) -> str:
+        if any(token in text for token in ("매도", "팔고", "팔아")) or "sell" in text.lower():
+            return "sell"
+        if any(token in text for token in ("매수", "사고", "사줘", "사는")) or "buy" in text.lower():
+            return "buy"
         lowered = text.lower()
         if any(token in text for token in ["매도", "팔", "전량"]) or "sell" in lowered:
             return "sell"
@@ -1696,6 +1713,13 @@ class AgentChatIntentRouterService:
         return "none"
 
     def _parse_amount(self, text: str) -> float | None:
+        plain = str(text or "").replace(",", "")
+        plain_man = re.search(r"(\d+(?:\.\d+)?)\s*만\s*원?", plain)
+        if plain_man:
+            return float(plain_man.group(1)) * 10000
+        plain_won = re.search(r"(\d+(?:\.\d+)?)\s*원", plain)
+        if plain_won:
+            return float(plain_won.group(1))
         compact = str(text or "").replace(",", "")
         man = re.search(r"(\d+(?:\.\d+)?)\s*만\s*원?", compact)
         if man:
@@ -1730,18 +1754,26 @@ class AgentChatIntentRouterService:
         return None
 
     def _is_price_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("가격", "현재가", "얼마")):
+            return True
         return any(token in text for token in ["가격", "현재가", "주가", "얼마"]) or "price" in lowered
 
     def _is_positions_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("포트폴리오", "보유 종목", "보유한 종목", "수익 중인 종목", "손실 큰 종목")):
+            return True
         return any(token in text for token in ["보유종목", "보유 종목", "포지션", "들고 있어", "보유 중", "가지고 있어"]) or "positions" in lowered
 
     def _is_balance_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("계좌", "현금", "예수금")):
+            return True
         return any(token in text for token in ["잔고", "현금", "계좌 상태", "예수금", "평가손익", "손익"]) or "balance" in lowered or "cash" in lowered
 
     def _is_orders_query(self, text: str) -> bool:
         return "주문" in text and any(token in text for token in ["기록", "내역", "최근", "오늘", "보여", "조회"])
 
     def _is_runs_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("왜 안 샀", "왜 안샀", "왜 매수 안", "오늘 왜 HOLD", "최근 자동매매 판단", "최근 판단", "자동매매 결과")):
+            return True
         return (
             any(token in text for token in ["실행 로그", "실행 기록", "런 기록"])
             or "run log" in lowered
@@ -1754,6 +1786,8 @@ class AgentChatIntentRouterService:
         return "신호" in text or "시그널" in text or "signals" in lowered
 
     def _is_analysis_request(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("분석", "살만해", "진입")):
+            return True
         return any(token in text for token in ["살만", "분석", "봐줘", "검토", "진입 괜찮"]) or "analysis" in lowered or "analyze" in lowered
 
     def _is_manual_ticket_request(self, text: str) -> bool:
@@ -1761,6 +1795,8 @@ class AgentChatIntentRouterService:
 
     def _is_live_order_request(self, text: str) -> bool:
         lowered = text.lower()
+        if any(token in text for token in ("사고 싶", "매수해", "팔고 싶", "매도해")):
+            return True
         direct_tokens = ["사줘", "매수해", "바로 매수", "팔아", "매도해", "전량 매도", "주문 넣어", "주문해"]
         return any(token in text for token in direct_tokens) or "buy now" in lowered or "sell now" in lowered
 
