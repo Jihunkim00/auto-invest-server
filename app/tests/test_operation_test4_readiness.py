@@ -55,6 +55,61 @@ def test_preflight_is_read_only_and_returns_required_shape(db_session, tmp_path)
     assert db_session.query(RuntimeSetting).count() == 0
 
 
+def test_status_exposes_disabled_scheduler_three_slots_and_daily_capacity(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+
+    result = service.status(db_session, now=NOW)
+
+    assert result["scheduler"]["scheduler_enabled"] is False
+    assert result["scheduler"]["entry_slots_kst"] == ["09:35", "11:30", "13:30"]
+    assert result["scheduler"]["next_automatic_entry_run"] is None
+    assert result["scheduler"]["automatic_entry_status"] == "disabled"
+    assert result["daily_buy_count"] == 0
+    assert result["daily_buy_limit"] == 3
+    assert result["remaining_buy_capacity"] == 3
+    assert result["daily_sell_limit"] == 3
+    assert result["remaining_sell_capacity"] == 3
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+
+
+def test_status_calculates_next_entry_slot_when_scheduler_is_enabled(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+
+    RuntimeSettingService().update_settings(
+        db_session,
+        {"operation_test4_scheduler_enabled": True},
+    )
+    result = service.status(db_session, now=NOW)
+
+    assert result["scheduler"]["scheduler_enabled"] is True
+    assert result["scheduler"]["next_entry_slot_kst"] == "11:30"
+    assert result["scheduler"]["next_automatic_entry_run"].endswith("T11:30:00+09:00")
+    assert result["scheduler"]["automatic_entry_status"] == "scheduled"
+
+
+def test_preflight_progress_finishes_after_success_and_exception(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+
+    service.preflight_once(db_session, now=NOW)
+    completed = service.status(db_session, now=NOW)
+    assert completed["preflight_running"] is False
+    assert completed["current_stage"] == "completed"
+    assert completed["preflight_started_at"] is not None
+    assert completed["preflight_finished_at"] is not None
+
+    def explode(**kwargs):
+        raise RuntimeError("candidate analysis failed")
+
+    service.candidate_provider = explode
+    with pytest.raises(RuntimeError, match="candidate analysis failed"):
+        service.preflight_once(db_session, now=NOW)
+    failed = service.status(db_session, now=NOW)
+    assert failed["preflight_running"] is False
+    assert failed["current_stage"] == "failed"
+    assert "candidate analysis failed" in failed["error"]
+
+
 def test_ready_requires_live_gates_and_candidate_score(db_session, tmp_path):
     service, _, _ = make_service(tmp_path)
 

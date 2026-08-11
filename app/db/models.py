@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -335,8 +335,8 @@ class RuntimeSetting(Base):
     operation_test4_max_position_pct = Column(Float, nullable=False, default=100.0)
     operation_test4_max_order_notional_krw = Column(Float, nullable=False, default=1_000_000.0)
     operation_test4_price_cap_krw = Column(Float, nullable=False, default=1_000_000.0)
-    operation_test4_max_buy_orders_per_day = Column(Integer, nullable=False, default=1)
-    operation_test4_max_sell_orders_per_day = Column(Integer, nullable=False, default=1)
+    operation_test4_max_buy_orders_per_day = Column(Integer, nullable=False, default=3)
+    operation_test4_max_sell_orders_per_day = Column(Integer, nullable=False, default=3)
     operation_test4_max_open_positions = Column(Integer, nullable=False, default=1)
     operation_test4_allow_single_share_budget_bump = Column(Boolean, nullable=False, default=True)
     operation_test4_cash_only = Column(Boolean, nullable=False, default=True)
@@ -697,17 +697,25 @@ class OperationTest4Cycle(Base):
 
 
 class OperationTest4EntryReservation(Base):
-    """Durable per-KST-day claim for Test4's one allowed live BUY attempt."""
+    """Durable exactly-once claim for one Test4 entry slot."""
 
     __tablename__ = "operation_test4_entry_reservations"
 
     id = Column(Integer, primary_key=True, index=True)
-    trade_date_kst = Column(String(10), nullable=False, unique=True, index=True)
+    trade_date_kst = Column(String(10), nullable=False, index=True)
+    entry_slot_kst = Column(String(5), nullable=False, default="09:35", index=True)
     reservation_token = Column(String(64), nullable=False, unique=True, index=True)
     cycle_id = Column(Integer, nullable=True, index=True)
     submission_attempted = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "trade_date_kst",
+            "entry_slot_kst",
+            name="uq_operation_test4_entry_reservation_slot",
+        ),
+    )
 
 class OperationTestLiveModeClaim(Base):
     """One durable owner for mutually exclusive Test3/Test4 activation."""

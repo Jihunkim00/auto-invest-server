@@ -50,8 +50,8 @@ OPERATION_TEST4_SAFE_SETTINGS = {
     "operation_test4_position_management_enabled": False,
     "operation_test4_stop_loss_enabled": True,
     "operation_test4_take_profit_enabled": True,
-    "operation_test4_max_buy_orders_per_day": 1,
-    "operation_test4_max_sell_orders_per_day": 1,
+    "operation_test4_max_buy_orders_per_day": 3,
+    "operation_test4_max_sell_orders_per_day": 3,
     "operation_test4_max_open_positions": 1,
     "operation_test4_allow_single_share_budget_bump": True,
     "operation_test4_cash_only": True,
@@ -226,8 +226,8 @@ class RuntimeSettingService:
             "operation_test4_max_position_pct": 100.0,
             "operation_test4_max_order_notional_krw": 1_000_000.0,
             "operation_test4_price_cap_krw": 1_000_000.0,
-            "operation_test4_max_buy_orders_per_day": 1,
-            "operation_test4_max_sell_orders_per_day": 1,
+            "operation_test4_max_buy_orders_per_day": 3,
+            "operation_test4_max_sell_orders_per_day": 3,
             "operation_test4_max_open_positions": 1,
             "operation_test4_allow_single_share_budget_bump": True,
             "operation_test4_cash_only": True,
@@ -721,10 +721,10 @@ class RuntimeSettingService:
                 or 1_000_000.0
             ),
             "operation_test4_max_buy_orders_per_day": int(
-                getattr(row, "operation_test4_max_buy_orders_per_day", 1) or 1
+                getattr(row, "operation_test4_max_buy_orders_per_day", 3) or 3
             ),
             "operation_test4_max_sell_orders_per_day": int(
-                getattr(row, "operation_test4_max_sell_orders_per_day", 1) or 1
+                getattr(row, "operation_test4_max_sell_orders_per_day", 3) or 3
             ),
             "operation_test4_max_open_positions": int(
                 getattr(row, "operation_test4_max_open_positions", 1) or 1
@@ -1009,11 +1009,11 @@ class RuntimeSettingService:
             float(settings.get("operation_test4_price_cap_krw") or 1_000_000.0),
         )
         settings["operation_test4_max_buy_orders_per_day"] = min(
-            1,
+            3,
             max(0, int(settings.get("operation_test4_max_buy_orders_per_day") or 1)),
         )
         settings["operation_test4_max_sell_orders_per_day"] = min(
-            1,
+            3,
             max(0, int(settings.get("operation_test4_max_sell_orders_per_day") or 1)),
         )
         settings["operation_test4_max_open_positions"] = min(
@@ -2870,7 +2870,7 @@ class RuntimeSettingService:
                 "operation_test4_max_buy_orders_per_day",
                 "operation_test4_max_sell_orders_per_day",
             }:
-                value = min(1, max(0, int(value or 1)))
+                value = min(3, max(0, int(value or 1)))
             if key == "operation_test4_max_open_positions":
                 value = min(1, max(0, int(value or 1)))
             if key == "operation_test4_cash_only":

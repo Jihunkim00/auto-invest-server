@@ -184,6 +184,8 @@ def test_active_monitor_pending_exit_submits_sell_only_once_across_ticks(db_sess
 def test_operation_test4_scheduler_slots_are_exact():
     assert SchedulerService().operation_test4_slots == [
         ("09:35", 9, 35),
+        ("11:30", 11, 30),
+        ("13:30", 13, 30),
         ("10:00", 10, 0),
         ("12:00", 12, 0),
         ("14:30", 14, 30),

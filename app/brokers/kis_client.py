@@ -810,7 +810,11 @@ class KisClient:
             # Detect KIS per-second rate limit (EGW00201) and map to structured reason
             msg_cd = str(response_data.get("msg_cd") or "").strip()
             msg1 = str(response_data.get("msg1") or "").strip()
-            if msg_cd == "EGW00201" or "초당 거래건수" in msg1 or "허용 가능한 초당 거래건수" in msg1:
+            if (
+                msg_cd in {"EGW00201", "EGW00215"}
+                or "초당 거래건수" in msg1
+                or "허용 가능한 초당 거래건수" in msg1
+            ):
                 retry_after = float(getattr(self.settings, "kis_read_only_rate_limit_retry_seconds", 1.2) or 1.2)
                 details.update(
                     {

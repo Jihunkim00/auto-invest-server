@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.core.enums import InternalOrderStatus
-from app.db.models import OrderLog
+from app.db.models import OperationTest4EntryReservation, OrderLog
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.operation_test4_service import (
     ENABLE_CONFIRMATION,
@@ -308,6 +308,45 @@ def test_first_valid_entry_submits_once_and_second_call_is_blocked(db_session, t
     assert first["reason"] == "entry_submitted"
     assert second["reason"] in {"active_cycle_exists", "local_open_order_exists", "readiness_not_ready"}
     assert len(manual.calls) == 1
+
+
+def test_test4_live_configuration_allows_three_buy_sell_orders_single_position(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(tmp_path)
+
+    arm_for_entry(db_session, service)
+    settings = RuntimeSettingService().get_settings(db_session)
+
+    assert settings["operation_test4_max_buy_orders_per_day"] == 3
+    assert settings["operation_test4_max_sell_orders_per_day"] == 3
+    assert settings["operation_test4_max_open_positions"] == 1
+
+
+def test_entry_reservation_is_exactly_once_per_slot_not_per_day(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+
+    first = service._reserve_entry_submission(
+        db_session,
+        now=NOW,
+        entry_slot_kst="09:35",
+    )
+    second = service._reserve_entry_submission(
+        db_session,
+        now=NOW,
+        entry_slot_kst="11:30",
+    )
+    duplicate = service._reserve_entry_submission(
+        db_session,
+        now=NOW,
+        entry_slot_kst="11:30",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert duplicate is None
+    assert db_session.query(OperationTest4EntryReservation).count() == 2
 
 
 def test_submit_exception_is_not_retried_and_disarms(db_session, tmp_path):

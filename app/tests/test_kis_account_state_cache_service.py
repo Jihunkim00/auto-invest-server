@@ -43,6 +43,28 @@ def test_egw00201_maps_to_kis_rate_limited(monkeypatch):
     assert details.get("kis_rate_limited") is True or details.get("reason") == "kis_rate_limited"
 
 
+def test_egw00215_maps_to_kis_rate_limited(monkeypatch):
+    client = KisClient()
+    monkeypatch.setattr(client, "build_headers", lambda *args, **kwargs: {})
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        return DummyResponse(
+            {"rt_cd": "1", "msg_cd": "EGW00215", "msg1": "rate limit"},
+            status_code=200,
+        )
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    with pytest.raises(KisApiError) as excinfo:
+        client.request_get(
+            "/uapi/domestic-stock/v1/trading/inquire-balance",
+            tr_id=client._balance_tr_id(),
+        )
+
+    details = getattr(excinfo.value, "details", {}) or {}
+    assert details.get("kis_rate_limited") is True
+
+
 def test_account_state_cache_hit_and_ttl_and_fallback(monkeypatch):
     # Create dummy client that counts calls
     class CountClient:

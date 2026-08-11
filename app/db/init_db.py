@@ -18,6 +18,84 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _migrate_strategy_profile_columns_if_needed():
+    """Bring legacy strategy_profiles tables up to the current ORM shape.
+
+    Base.metadata.create_all does not add columns to an existing SQLite table.
+    This migration therefore has to run before any service performs a full
+    StrategyProfile ORM query (notably the startup seed).
+    """
+    inspector = inspect(engine)
+    if "strategy_profiles" not in inspector.get_table_names():
+        return
+
+    strategy_profile_columns = {
+        "profile_key": "VARCHAR(80)",
+        "custom_name": "VARCHAR(120)",
+        "provider": "VARCHAR(20)",
+        "market": "VARCHAR(10)",
+        "enabled": "BOOLEAN DEFAULT 0",
+        "custom_status": "VARCHAR(20)",
+        "settings_json": "TEXT",
+        # SQLite cannot add CURRENT_TIMESTAMP as an ALTER TABLE default on all
+        # supported versions, so add these nullable and backfill them below.
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+
+    existing_columns = {col["name"] for col in inspector.get_columns("strategy_profiles")}
+    for column_name, column_sql in strategy_profile_columns.items():
+        if column_name not in existing_columns:
+            _add_column_if_missing("strategy_profiles", column_name, column_sql)
+            existing_columns.add(column_name)
+
+    # Preserve legacy rows and give the newly-added timestamp columns the same
+    # usable value that the current table definition provides for new rows.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE strategy_profiles "
+                "SET created_at = CURRENT_TIMESTAMP "
+                "WHERE created_at IS NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE strategy_profiles "
+                "SET updated_at = CURRENT_TIMESTAMP "
+                "WHERE updated_at IS NULL"
+            )
+        )
+
+    # All columns must exist before any index is created. A unique custom key
+    # index is best-effort for installations that already contain duplicate
+    # non-null keys; the service still validates key conflicts on writes.
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_profiles_profile_key "
+                    "ON strategy_profiles (profile_key)"
+                )
+            )
+    except Exception:
+        pass
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_enabled "
+                "ON strategy_profiles (enabled)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_custom_status "
+                "ON strategy_profiles (custom_status)"
+            )
+        )
+
+
 def _create_trade_run_logs_optional_indexes_if_possible():
     inspector = inspect(engine)
     if "trade_run_logs" not in inspector.get_table_names():
@@ -276,8 +354,8 @@ def _create_runtime_settings_table_if_missing():
                     operation_test4_max_position_pct FLOAT NOT NULL DEFAULT 100.0,
                     operation_test4_max_order_notional_krw FLOAT NOT NULL DEFAULT 1000000.0,
                     operation_test4_price_cap_krw FLOAT NOT NULL DEFAULT 1000000.0,
-                    operation_test4_max_buy_orders_per_day INTEGER NOT NULL DEFAULT 1,
-                    operation_test4_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_max_buy_orders_per_day INTEGER NOT NULL DEFAULT 3,
+                    operation_test4_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 3,
                     operation_test4_max_open_positions INTEGER NOT NULL DEFAULT 1,
                     operation_test4_allow_single_share_budget_bump BOOLEAN NOT NULL DEFAULT 1,
                     operation_test4_cash_only BOOLEAN NOT NULL DEFAULT 1,
@@ -349,6 +427,28 @@ def _create_runtime_settings_table_if_missing():
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
                 """
+            )
+        )
+
+
+def _migrate_operation_test4_limits_if_needed():
+    """Promote the old Test4 one-order defaults without touching live flags."""
+    inspector = inspect(engine)
+    if "runtime_settings" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE runtime_settings "
+                "SET operation_test4_max_buy_orders_per_day = 3 "
+                "WHERE operation_test4_max_buy_orders_per_day = 1"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE runtime_settings "
+                "SET operation_test4_max_sell_orders_per_day = 3 "
+                "WHERE operation_test4_max_sell_orders_per_day = 1"
             )
         )
 
@@ -1030,6 +1130,111 @@ def _create_operation_test_live_mode_claims_table_if_missing():
         "generation",
         "INTEGER NOT NULL DEFAULT 0",
     )
+
+
+def _create_operation_test4_entry_reservations_table_if_missing():
+    table_name = "operation_test4_entry_reservations"
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if table_name not in table_names:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS operation_test4_entry_reservations (
+                        id INTEGER PRIMARY KEY,
+                        trade_date_kst VARCHAR(10) NOT NULL,
+                        entry_slot_kst VARCHAR(5) NOT NULL DEFAULT '09:35',
+                        reservation_token VARCHAR(64) NOT NULL UNIQUE,
+                        cycle_id INTEGER,
+                        submission_attempted BOOLEAN NOT NULL DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        UNIQUE (trade_date_kst, entry_slot_kst)
+                    )
+                    """
+                )
+            )
+    else:
+        existing_columns = {
+            col["name"] for col in inspector.get_columns(table_name)
+        }
+        legacy_unique_trade_date = False
+        with engine.connect() as conn:
+            for index in conn.exec_driver_sql(
+                "PRAGMA index_list(operation_test4_entry_reservations)"
+            ).fetchall():
+                if not bool(index[2]):
+                    continue
+                index_columns = [
+                    row[2]
+                    for row in conn.exec_driver_sql(
+                        f"PRAGMA index_info({index[1]})"
+                    ).fetchall()
+                ]
+                if index_columns == ["trade_date_kst"]:
+                    legacy_unique_trade_date = True
+                    break
+
+        if "entry_slot_kst" not in existing_columns or legacy_unique_trade_date:
+            legacy_table_name = f"{table_name}_legacy_migration"
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE operation_test4_entry_reservations (
+                            id INTEGER PRIMARY KEY,
+                            trade_date_kst VARCHAR(10) NOT NULL,
+                            entry_slot_kst VARCHAR(5) NOT NULL DEFAULT '09:35',
+                            reservation_token VARCHAR(64) NOT NULL UNIQUE,
+                            cycle_id INTEGER,
+                            submission_attempted BOOLEAN NOT NULL DEFAULT 0,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            UNIQUE (trade_date_kst, entry_slot_kst)
+                        )
+                        """
+                    )
+                )
+                legacy_slot = (
+                    "entry_slot_kst"
+                    if "entry_slot_kst" in existing_columns
+                    else "'09:35'"
+                )
+                conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO {table_name} (
+                            id, trade_date_kst, entry_slot_kst,
+                            reservation_token, cycle_id, submission_attempted,
+                            created_at, updated_at
+                        )
+                        SELECT
+                            id, trade_date_kst, {legacy_slot},
+                            reservation_token, cycle_id, submission_attempted,
+                            created_at, updated_at
+                        FROM {legacy_table_name}
+                        """
+                    )
+                )
+                conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test4_entry_reservations_trade_date_kst "
+                "ON operation_test4_entry_reservations (trade_date_kst)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test4_entry_reservations_entry_slot_kst "
+                "ON operation_test4_entry_reservations (entry_slot_kst)"
+            )
+        )
 
 
 def _create_broker_auth_tokens_table_if_missing():
@@ -1758,7 +1963,11 @@ def init_db():
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _migrate_operation_test4_limits_if_needed()
     _create_strategy_tables_if_missing()
+    # This must precede the startup seed: the seed service queries every
+    # StrategyProfile column through the ORM.
+    _migrate_strategy_profile_columns_if_needed()
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()
@@ -1768,6 +1977,7 @@ def init_db():
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_position_lifecycles_table_if_missing()
     _create_operation_test_cycles_table_if_missing()
+    _create_operation_test4_entry_reservations_table_if_missing()
     _create_operation_test_live_mode_claims_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
@@ -1964,8 +2174,8 @@ def init_db():
         "operation_test4_max_position_pct": "FLOAT DEFAULT 100.0",
         "operation_test4_max_order_notional_krw": "FLOAT DEFAULT 1000000.0",
         "operation_test4_price_cap_krw": "FLOAT DEFAULT 1000000.0",
-        "operation_test4_max_buy_orders_per_day": "INTEGER DEFAULT 1",
-        "operation_test4_max_sell_orders_per_day": "INTEGER DEFAULT 1",
+        "operation_test4_max_buy_orders_per_day": "INTEGER DEFAULT 3",
+        "operation_test4_max_sell_orders_per_day": "INTEGER DEFAULT 3",
         "operation_test4_max_open_positions": "INTEGER DEFAULT 1",
         "operation_test4_allow_single_share_budget_bump": "BOOLEAN DEFAULT 1",
         "operation_test4_cash_only": "BOOLEAN DEFAULT 1",
@@ -2035,16 +2245,6 @@ def init_db():
         "kis_scheduler_live_respect_kill_switch": "BOOLEAN DEFAULT 1",
     }
 
-    strategy_profile_columns = {
-        'profile_key': 'VARCHAR(80)',
-        'custom_name': 'VARCHAR(120)',
-        'provider': 'VARCHAR(20)',
-        'market': 'VARCHAR(10)',
-        'enabled': 'BOOLEAN DEFAULT 0',
-        'custom_status': 'VARCHAR(20)',
-        'settings_json': 'TEXT',
-    }
-
     trade_run_log_columns = {
         "mode": "VARCHAR(30) DEFAULT 'entry_scan'",
         "parent_run_key": "VARCHAR(64)",
@@ -2076,21 +2276,6 @@ def init_db():
 
     for name, ddl in runtime_setting_columns.items():
         _add_column_if_missing("runtime_settings", name, ddl)
-
-    for name, ddl in strategy_profile_columns.items():
-        _add_column_if_missing('strategy_profiles', name, ddl)
-    try:
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    'CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_profiles_profile_key '
-                    'ON strategy_profiles (profile_key)'
-                )
-            )
-    except Exception:
-        # Existing installations may contain duplicate legacy/null custom
-        # keys; validation still rejects duplicates at the service boundary.
-        pass
 
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)

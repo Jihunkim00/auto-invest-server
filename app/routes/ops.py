@@ -152,8 +152,8 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     operation_test4_max_position_pct: float | None = Field(default=None, ge=0, le=100)
     operation_test4_max_order_notional_krw: float | None = Field(default=None, ge=0)
     operation_test4_price_cap_krw: float | None = Field(default=None, gt=0)
-    operation_test4_max_buy_orders_per_day: int | None = Field(default=None, ge=0, le=1)
-    operation_test4_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=1)
+    operation_test4_max_buy_orders_per_day: int | None = Field(default=None, ge=0, le=3)
+    operation_test4_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=3)
     operation_test4_max_open_positions: int | None = Field(default=None, ge=0, le=1)
     operation_test4_allow_single_share_budget_bump: bool | None = None
     operation_test4_cash_only: bool | None = None

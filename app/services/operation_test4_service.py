@@ -34,6 +34,7 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileService
@@ -66,7 +67,7 @@ HOLD = "HOLD"
 STOP_LOSS_READY = "STOP_LOSS_READY"
 TAKE_PROFIT_READY = "TAKE_PROFIT_READY"
 REVIEW = "REVIEW"
-ENTRY_SLOTS = ("09:35",)
+ENTRY_SLOTS = ("09:35", "11:30", "13:30")
 POSITION_SLOTS = ("10:00", "12:00", "14:30")
 ALL_SLOTS = ENTRY_SLOTS + POSITION_SLOTS
 POSSIBLE_ORDER_MAX_AGE_SECONDS = 10.0
@@ -89,6 +90,17 @@ OPEN_ORDER_STATUSES = {
     InternalOrderStatus.SYNC_FAILED.value,
 }
 _ENTRY_SUBMIT_LOCK = threading.RLock()
+_PREFLIGHT_PROGRESS_LOCK = threading.RLock()
+_PREFLIGHT_PROGRESS: dict[str, Any] = {
+    "preflight_running": False,
+    "preflight_started_at": None,
+    "preflight_finished_at": None,
+    "current_stage": None,
+    "last_progress_at": None,
+    "analyzed_count": 0,
+    "total_count": 0,
+    "error": None,
+}
 SUBMITTED_STATUSES = OPEN_ORDER_STATUSES | {
     InternalOrderStatus.FILLED.value,
 }
@@ -198,9 +210,27 @@ class OperationTest4Service:
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
 
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
+        now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
         active = self._active_cycle(db)
         account = self._read_account_state()
+        daily_buy_limit = int(runtime.get("operation_test4_max_buy_orders_per_day", 3) or 3)
+        daily_sell_limit = int(runtime.get("operation_test4_max_sell_orders_per_day", 3) or 3)
+        daily_buy_count = self._daily_order_count(db, side="buy", now_utc=now_utc)
+        daily_sell_count = self._daily_order_count(db, side="sell", now_utc=now_utc)
+        scheduler_enabled = runtime.get("operation_test4_scheduler_enabled") is True
+        next_slot = _next_entry_slot_info(now_utc, enabled=scheduler_enabled)
+        progress = _preflight_progress_snapshot()
+        automatic_entry_status = (
+            "disabled"
+            if not scheduler_enabled
+            else "position_management_only"
+            if active is not None
+            or self._active_lifecycles(db)
+            or account.get("position_count", 0) > 0
+            or account.get("open_order_count", 0) > 0
+            else "scheduled"
+        )
         payload = sanitize_kis_payload(
             {
                 "provider": PROVIDER,
@@ -213,12 +243,24 @@ class OperationTest4Service:
                 "account": self._account_summary(account),
                 "runtime": self._runtime_snapshot(runtime),
                 "scheduler": {
-                    "entry_slot_kst": "09:35",
+                    "entry_slot_kst": ENTRY_SLOTS[0],
+                    "entry_slots_kst": list(ENTRY_SLOTS),
                     "position_slots_kst": list(POSITION_SLOTS),
+                    "scheduler_enabled": scheduler_enabled,
+                    "next_entry_slot_kst": next_slot["next_entry_slot_kst"],
+                    "next_automatic_entry_run": next_slot["next_automatic_entry_run"],
+                    "automatic_entry_status": automatic_entry_status,
                     "active_monitor_interval_seconds": 60,
                     "single_symbol": True,
                     "max_open_positions": 1,
                 },
+                "daily_buy_count": daily_buy_count,
+                "daily_buy_limit": daily_buy_limit,
+                "remaining_buy_capacity": max(0, daily_buy_limit - daily_buy_count),
+                "daily_sell_count": daily_sell_count,
+                "daily_sell_limit": daily_sell_limit,
+                "remaining_sell_capacity": max(0, daily_sell_limit - daily_sell_count),
+                **progress,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
             }
@@ -284,6 +326,8 @@ class OperationTest4Service:
         time_allowed = time(9, 0) <= now_kst.time() < time(14, 0)
         active_position = active_cycle is not None and active_cycle.status == "position_open"
         local_open_order_count = self._local_open_order_count(db)
+        daily_buy_count = self._daily_order_count(db, side="buy", now_utc=now_utc)
+        daily_buy_limit = int(runtime.get("operation_test4_max_buy_orders_per_day", 3) or 3)
         entry_conditions = [
             ("operation_test4_enabled", runtime.get("operation_test4_enabled") is True, "operation_test4_disabled"),
             ("operation_test4_scheduler_enabled", runtime.get("operation_test4_scheduler_enabled") is True, "operation_test4_scheduler_disabled"),
@@ -309,7 +353,16 @@ class OperationTest4Service:
             ("open_order_count_zero", account.get("open_order_count") == 0, "open_order_exists"),
             ("local_open_order_count_zero", local_open_order_count == 0, "local_open_order_exists"),
             ("active_cycle_zero", active_cycle is None, "active_cycle_exists"),
-            ("daily_buy_count_zero", self._daily_order_count(db, side="buy", now_utc=now_utc) == 0, "daily_buy_already_used"),
+            (
+                "daily_buy_capacity_available",
+                daily_buy_count < daily_buy_limit,
+                "daily_buy_limit_reached",
+                "blocking",
+                {
+                    "daily_buy_count": daily_buy_count,
+                    "daily_buy_limit": daily_buy_limit,
+                },
+            ),
             ("market_open", market_session.get("is_market_open") is True, "market_closed"),
             ("entry_time_allowed", time_allowed, "entry_time_outside_window"),
             (
@@ -515,7 +568,7 @@ class OperationTest4Service:
             return self._blocked_enable("operator_confirmation_required")
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
         active_cycle = self._active_cycle(db)
         active_lifecycle_count = len(self._active_lifecycles(db))
         local_open_order_count = self._local_open_order_count(db)
@@ -553,8 +606,9 @@ class OperationTest4Service:
         )
         if any(runtime.get(key) is True for key in test3_flags):
             blockers.append("operation_test3_live_flags_enabled")
-        if self._daily_order_count(db, side="buy", now_utc=now_utc) != 0:
-            blockers.append("daily_buy_already_used")
+        daily_buy_limit = int(runtime.get("operation_test4_max_buy_orders_per_day", 3) or 3)
+        if self._daily_order_count(db, side="buy", now_utc=now_utc) >= daily_buy_limit:
+            blockers.append("daily_buy_limit_reached")
         if enabled_buy_flags:
             blockers.append("other_buy_flags_enabled")
         if enabled_other_scheduler_flags:
@@ -592,8 +646,8 @@ class OperationTest4Service:
                 "operation_test4_max_position_pct": 100.0,
                 "operation_test4_max_order_notional_krw": 1_000_000.0,
                 "operation_test4_price_cap_krw": 1_000_000.0,
-                "operation_test4_max_buy_orders_per_day": 1,
-                "operation_test4_max_sell_orders_per_day": 1,
+                "operation_test4_max_buy_orders_per_day": 3,
+                "operation_test4_max_sell_orders_per_day": 3,
                 "operation_test4_max_open_positions": 1,
                 "operation_test4_allow_single_share_budget_bump": True,
                 "operation_test4_cash_only": True,
@@ -702,8 +756,15 @@ class OperationTest4Service:
                 }
             )
 
+        _preflight_progress_start()
+        _preflight_progress_update(stage="watchlist_rebuild")
         rebuilt = self.rebuild_watchlist(db, now=now_utc)
         if rebuilt.get("status") != "completed":
+            _preflight_progress_update(
+                stage="failed",
+                error=str(rebuilt.get("reason") or "watchlist_rebuild_failed"),
+            )
+            _preflight_progress_finish(failed=True)
             return sanitize_kis_payload(
                 {
                     "status": "blocked",
@@ -803,7 +864,25 @@ class OperationTest4Service:
         *,
         now: datetime | None = None,
     ) -> dict[str, Any]:
+        _preflight_progress_start()
+        result: dict[str, Any] | None = None
+        try:
+            result = self._preflight_once(db, now=now)
+            return result
+        except Exception as exc:
+            _preflight_progress_update(stage="failed", error=_safe_error(exc))
+            raise
+        finally:
+            _preflight_progress_finish(failed=result is None)
+
+    def _preflight_once(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
+        _preflight_progress_update(stage="readiness")
         readiness = self.readiness(db, now=now_utc)
 
         preflight_ignored_blockers = {
@@ -840,12 +919,18 @@ class OperationTest4Service:
             )
 
         runtime = self.runtime_settings.get_settings_read_only(db)
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
+        _preflight_progress_update(stage="quant_analysis")
         preview, candidate = self._candidate_snapshot(
             db,
             account=account,
             runtime=runtime,
             now=now_utc,
+        )
+        _preflight_progress_update(
+            analyzed_count=_int_or_none(preview.get("analyzed_symbol_count")) or 0,
+            total_count=_int_or_none(preview.get("configured_symbol_count")) or 0,
+            stage="final_decision",
         )
         sizing = candidate.get("sizing") if candidate else None
         preflight_account = dict(account)
@@ -901,6 +986,25 @@ class OperationTest4Service:
                     "trading_enabled": preview.get("trading_enabled"),
                     "next_manual_action_hint": preview.get("next_manual_action_hint"),
                 },
+                "analysis": {
+                    "source_preview_fields": {
+                        "preview_only": preview.get("preview_only"),
+                        "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                        "trading_enabled": preview.get("trading_enabled"),
+                        "next_manual_action_hint": preview.get("next_manual_action_hint"),
+                    }
+                },
+                "execution": {
+                    "decision": action,
+                    "block_reasons": _dedupe(blocking_reasons),
+                    "trade_ready": action == "BUY_READY",
+                },
+                "preview_display": {
+                    "preview_only": preview.get("preview_only"),
+                    "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                    "trading_enabled": preview.get("trading_enabled"),
+                    "next_manual_action_hint": preview.get("next_manual_action_hint"),
+                },
                 "blocking_reasons": _dedupe(blocking_reasons),
                 "review_reasons": [],
                 "real_order_submitted": False,
@@ -918,6 +1022,7 @@ class OperationTest4Service:
         confirmation: str | None,
         now: datetime | None = None,
         trigger_source: str = "operation_test4_run_once",
+        entry_slot_kst: str | None = None,
         _preflight: dict[str, Any] | None = None,
         _arm_for_submit: bool = False,
         _arm_state: dict[str, bool] | None = None,
@@ -929,6 +1034,7 @@ class OperationTest4Service:
                 confirmation=confirmation,
                 now=now,
                 trigger_source=trigger_source,
+                entry_slot_kst=entry_slot_kst,
                 preflight=_preflight,
                 arm_for_submit=_arm_for_submit,
                 arm_state=_arm_state,
@@ -942,11 +1048,17 @@ class OperationTest4Service:
         confirmation: str | None,
         now: datetime | None,
         trigger_source: str,
+        entry_slot_kst: str | None,
         preflight: dict[str, Any] | None,
         arm_for_submit: bool,
         arm_state: dict[str, bool] | None,
     ) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
+        entry_slot = (
+            entry_slot_kst
+            if entry_slot_kst in ENTRY_SLOTS
+            else _entry_slot_for_time(now_utc)
+        )
         if confirm_live is not True or str(confirmation or "").strip() != ENTRY_CONFIRMATION:
             return self._entry_blocked("operator_confirmation_required")
         now_kst = now_utc.astimezone(KR_TZ)
@@ -991,8 +1103,14 @@ class OperationTest4Service:
                     "manual_submit_called": False,
                 }
             )
-        if self._entry_used_today(db, now_utc):
-            return self._entry_blocked("daily_entry_already_used")
+        daily_buy_limit = int(
+            self.runtime_settings.get_settings_read_only(db).get(
+                "operation_test4_max_buy_orders_per_day", 3
+            )
+            or 3
+        )
+        if self._daily_order_count(db, side="buy", now_utc=now_utc) >= daily_buy_limit:
+            return self._entry_blocked("daily_buy_limit_reached")
 
         runtime = self.runtime_settings.get_settings_read_only(db)
         candidate = preflight.get("candidate") or {}
@@ -1093,7 +1211,11 @@ class OperationTest4Service:
         if pre_arm_blockers:
             return self._entry_blocked(pre_arm_blockers[0])
 
-        reservation = self._reserve_entry_submission(db, now=now_utc)
+        reservation = self._reserve_entry_submission(
+            db,
+            now=now_utc,
+            entry_slot_kst=entry_slot,
+        )
         if reservation is None:
             return self._entry_blocked("daily_entry_reservation_exists")
 
@@ -1401,6 +1523,7 @@ class OperationTest4Service:
                 confirmation=ENTRY_CONFIRMATION,
                 now=now,
                 trigger_source="operation_test4_scheduler",
+                entry_slot_kst=slot_label,
             )
         return sanitize_kis_payload(
             {
@@ -1426,7 +1549,7 @@ class OperationTest4Service:
         if lifecycle is None or lifecycle.status not in {"open", "closing"}:
             self._review_and_disarm(db, cycle, "lifecycle_missing_or_closed")
             return self._cycle_result(cycle, reason="lifecycle_missing_or_closed")
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
         position = _find_position(account.get("positions") or [], lifecycle.symbol)
         if position is None:
             self._review_and_disarm(db, cycle, "broker_position_missing")
@@ -1462,9 +1585,9 @@ class OperationTest4Service:
             self._review_and_disarm(db, cycle, "duplicate_open_sell_order")
             return self._cycle_result(cycle, reason="duplicate_open_sell_order")
         if self._daily_order_count(db, side="sell", now_utc=now) >= int(
-            runtime.get("operation_test4_max_sell_orders_per_day", 1) or 1
+            runtime.get("operation_test4_max_sell_orders_per_day", 3) or 3
         ):
-            return self._cycle_result(cycle, reason="daily_sell_already_used", current_price=current_price)
+            return self._cycle_result(cycle, reason="daily_sell_limit_reached", current_price=current_price)
         exit_reason = "stop_loss_triggered" if stop_triggered else "take_profit_triggered"
         claim = self._claim_exit_submission(db, cycle=cycle, exit_reason=exit_reason)
         if claim == "unavailable":
@@ -1517,6 +1640,7 @@ class OperationTest4Service:
         runtime: dict[str, Any],
         now: datetime,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        _preflight_progress_update(stage="gpt_analysis")
         if self.candidate_provider is not None:
             preview = self.candidate_provider(db=db, now=now, read_only=True)
         else:
@@ -1540,6 +1664,7 @@ class OperationTest4Service:
         candidates = preview.get("final_ranked_candidates") or preview.get("top_quant_candidates") or []
         if not isinstance(candidates, list):
             candidates = []
+        _preflight_progress_update(stage="candidate_selection")
         selected: dict[str, Any] = {}
         fallback: dict[str, Any] = {}
         price_cap = _number(runtime.get("operation_test4_price_cap_krw") or DEFAULT_PRICE_CAP_KRW)
@@ -1572,6 +1697,7 @@ class OperationTest4Service:
             or selected.get("stck_prpr")
         )
 
+        _preflight_progress_update(stage="possible_order")
         possible_order = self._possible_order(
             symbol=symbol,
             current_price=current_price,
@@ -1654,6 +1780,11 @@ class OperationTest4Service:
                     "max_order_notional_krw": runtime.get("operation_test4_max_order_notional_krw", 1_000_000.0),
                 },
             }
+        )
+        _preflight_progress_update(
+            analyzed_count=_int_or_none(preview.get("analyzed_symbol_count")) or 0,
+            total_count=_int_or_none(preview.get("configured_symbol_count")) or 0,
+            stage="final_decision",
         )
         return preview, selected
 
@@ -1823,7 +1954,7 @@ class OperationTest4Service:
         *,
         now: datetime,
     ) -> dict[str, Any]:
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
         lifecycle = db.get(PositionLifecycle, cycle.lifecycle_id) if cycle.lifecycle_id else None
         if account.get("fetch_success") is not True:
             self._review_and_disarm(db, cycle, "post_exit_position_sync_unavailable")
@@ -1937,17 +2068,19 @@ class OperationTest4Service:
         db: Session,
         *,
         now: datetime,
+        entry_slot_kst: str,
     ) -> OperationTest4EntryReservation | None:
         reservation = OperationTest4EntryReservation(
             trade_date_kst=now.astimezone(KR_TZ).date().isoformat(),
+            entry_slot_kst=entry_slot_kst,
             reservation_token=uuid.uuid4().hex,
         )
         db.add(reservation)
         try:
             db.commit()
         except IntegrityError:
-            # A unique KST-day claim already exists (or persistence is unsafe).
-            # Either case is fail-closed: no second live BUY attempt is allowed.
+            # A unique KST-day/slot claim already exists (or persistence is
+            # unsafe). Either case is fail-closed for this entry slot.
             db.rollback()
             return None
         db.refresh(reservation)
@@ -1983,7 +2116,7 @@ class OperationTest4Service:
             blockers.append("active_cycle_exists")
         if self._active_lifecycles(db):
             blockers.append("active_lifecycle_exists")
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
         if account.get("fetch_success") is not True:
             blockers.append("account_state_unavailable")
         else:
@@ -1993,8 +2126,10 @@ class OperationTest4Service:
                 blockers.append("open_order_exists")
         if self._local_open_order_count(db) != 0:
             blockers.append("local_open_order_exists")
-        if self._daily_order_count(db, side="buy", now_utc=now) != 0:
-            blockers.append("daily_buy_already_used")
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        daily_buy_limit = int(runtime.get("operation_test4_max_buy_orders_per_day", 3) or 3)
+        if self._daily_order_count(db, side="buy", now_utc=now) >= daily_buy_limit:
+            blockers.append("daily_buy_limit_reached")
         return _dedupe(blockers)
 
     def _entry_submission_blockers(
@@ -2006,7 +2141,7 @@ class OperationTest4Service:
         allowed_cycle_id: int | None = None,
     ) -> list[str]:
         runtime = self.runtime_settings.get_settings_read_only(db)
-        account = self._read_account_state()
+        account = self._read_account_state(require_fresh=True)
         market_session = self._market_session(now)
         now_kst = now.astimezone(KR_TZ)
         blockers: list[str] = []
@@ -2040,8 +2175,9 @@ class OperationTest4Service:
         )
         if any(cycle.id != allowed_cycle_id for cycle in active_cycles):
             blockers.append("active_cycle_exists")
-        if self._daily_order_count(db, side="buy", now_utc=now) != 0:
-            blockers.append("daily_buy_already_used")
+        daily_buy_limit = int(runtime.get("operation_test4_max_buy_orders_per_day", 3) or 3)
+        if self._daily_order_count(db, side="buy", now_utc=now) >= daily_buy_limit:
+            blockers.append("daily_buy_limit_reached")
         enabled_buy_flags = [key for key in BUY_FLAGS if runtime.get(key) is True]
         if enabled_buy_flags:
             blockers.append("other_buy_flags_enabled")
@@ -2278,7 +2414,7 @@ class OperationTest4Service:
             is not None
         )
 
-    def _read_account_state(self) -> dict[str, Any]:
+    def _read_account_state(self, *, require_fresh: bool = False) -> dict[str, Any]:
         if self.account_state_provider is not None:
             try:
                 result = self.account_state_provider()
@@ -2288,42 +2424,18 @@ class OperationTest4Service:
                 return _normalize_account_state(result)
             except Exception as exc:
                 return _account_error(exc)
-        last_error: Exception | None = None
-        for _attempt in range(2):
-            try:
-                balance = self.client.get_account_balance()
-                positions = self.client.list_positions()
-                open_orders = self.client.list_open_orders()
-                if (
-                    not isinstance(balance, dict)
-                    or not isinstance(positions, list)
-                    or not isinstance(open_orders, list)
-                ):
-                    raise ValueError("account_state_invalid")
-                orderable_cash = _number_or_none(balance.get("orderable_cash"))
-                return _normalize_account_state(
-                    {
-                        "fetch_success": True,
-                        "balance": balance,
-                        "equity": _first_number(balance, "total_asset_value", "equity"),
-                        "cash": _number_or_none(balance.get("cash")),
-                        "withdrawable_cash": _number_or_none(balance.get("withdrawable_cash")),
-                        "d1_cash": _number_or_none(balance.get("d1_cash")),
-                        "d2_cash": _number_or_none(balance.get("d2_cash")),
-                        "orderable_cash": orderable_cash,
-                        "orderable_cash_status": balance.get(
-                            "orderable_cash_status",
-                            "candidate_required" if orderable_cash is None else "ok",
-                        ),
-                        "orderable_cash_source": balance.get("orderable_cash_source"),
-                        "positions": positions,
-                        "open_orders": open_orders,
-                        "warnings": [],
-                    }
-                )
-            except Exception as exc:
-                last_error = exc
-        return _account_error(last_error or RuntimeError("account_state_unavailable"))
+        cache = KisAccountStateCacheService.get_or_create(self.client)
+        state = cache.get_account_state(
+            read_only=True,
+            require_fresh=require_fresh,
+        )
+        if state.get("fetch_success") is not True:
+            fallback = _account_error(RuntimeError("account_state_unavailable"))
+            fallback["warnings"] = list(state.get("warnings") or [])
+            fallback["rate_limited"] = bool(state.get("rate_limited"))
+            fallback["error_details"] = state.get("error_details") or {}
+            return fallback
+        return _normalize_account_state(state)
 
     def _load_watchlist(
         self,
@@ -2464,6 +2576,96 @@ class OperationTest4Service:
                 "manual_submit_called": bool(response and response.get("manual_submit_called") is True),
             }
         )
+
+
+def _preflight_progress_start() -> None:
+    now = datetime.now(UTC).isoformat()
+    with _PREFLIGHT_PROGRESS_LOCK:
+        _PREFLIGHT_PROGRESS.update(
+            {
+                "preflight_running": True,
+                "preflight_started_at": now,
+                "preflight_finished_at": None,
+                "current_stage": "starting",
+                "last_progress_at": now,
+                "analyzed_count": 0,
+                "total_count": 0,
+                "error": None,
+            }
+        )
+
+
+def _preflight_progress_update(
+    *,
+    stage: str | None = None,
+    analyzed_count: int | None = None,
+    total_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    now = datetime.now(UTC).isoformat()
+    with _PREFLIGHT_PROGRESS_LOCK:
+        if stage is not None:
+            _PREFLIGHT_PROGRESS["current_stage"] = stage
+        if analyzed_count is not None:
+            _PREFLIGHT_PROGRESS["analyzed_count"] = max(0, int(analyzed_count))
+        if total_count is not None:
+            _PREFLIGHT_PROGRESS["total_count"] = max(0, int(total_count))
+        if error is not None:
+            _PREFLIGHT_PROGRESS["error"] = error
+        _PREFLIGHT_PROGRESS["last_progress_at"] = now
+
+
+def _preflight_progress_finish(*, failed: bool) -> None:
+    now = datetime.now(UTC).isoformat()
+    with _PREFLIGHT_PROGRESS_LOCK:
+        _PREFLIGHT_PROGRESS["preflight_running"] = False
+        _PREFLIGHT_PROGRESS["preflight_finished_at"] = now
+        _PREFLIGHT_PROGRESS["current_stage"] = "failed" if failed else "completed"
+        _PREFLIGHT_PROGRESS["last_progress_at"] = now
+
+
+def _preflight_progress_snapshot() -> dict[str, Any]:
+    with _PREFLIGHT_PROGRESS_LOCK:
+        snapshot = dict(_PREFLIGHT_PROGRESS)
+    total = int(snapshot.get("total_count") or 0)
+    analyzed = int(snapshot.get("analyzed_count") or 0)
+    snapshot["progress_pct"] = (
+        round(min(100.0, analyzed * 100.0 / total), 2)
+        if total > 0
+        else None
+    )
+    return snapshot
+
+
+def _next_entry_slot_info(now: datetime, *, enabled: bool) -> dict[str, str | None]:
+    if not enabled:
+        return {
+            "next_entry_slot_kst": None,
+            "next_automatic_entry_run": None,
+        }
+    local = now.astimezone(KR_TZ)
+    for slot in ENTRY_SLOTS:
+        hour, minute = (int(part) for part in slot.split(":"))
+        if (local.hour, local.minute) < (hour, minute):
+            run_at = local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            return {
+                "next_entry_slot_kst": slot,
+                "next_automatic_entry_run": run_at.isoformat(),
+            }
+    return {
+        "next_entry_slot_kst": None,
+        "next_automatic_entry_run": None,
+    }
+
+
+def _entry_slot_for_time(now: datetime) -> str:
+    local = now.astimezone(KR_TZ)
+    selected = ENTRY_SLOTS[0]
+    for slot in ENTRY_SLOTS:
+        hour, minute = (int(part) for part in slot.split(":"))
+        if (local.hour, local.minute) >= (hour, minute):
+            selected = slot
+    return selected
 
 
 def _candidate_block_reasons(
