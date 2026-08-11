@@ -21,13 +21,23 @@ class AgentChatV2Response {
     required this.safety,
     required this.diagnostics,
     this.conversationKey,
+    this.answer,
+    this.data = const {},
+    this.language = 'ko',
+    this.gptUsed = false,
+    this.fallbackUsed = false,
   });
 
   factory AgentChatV2Response.fromJson(Map<String, dynamic> json) {
     return AgentChatV2Response(
       intent: _readString(json['intent'], 'analyze'),
       status: _readString(json['status'], 'completed'),
-      message: _readString(json['message'], ''),
+      message: _readString(json['message'] ?? json['answer'], ''),
+      answer: _readNullableString(json['answer']),
+      language: _readString(json['language'], 'ko'),
+      data: _readMap(json['data']),
+      gptUsed: json['gpt_used'] == true,
+      fallbackUsed: json['fallback_used'] == true,
       conversationKey: _readNullableString(json['conversation_key']),
       symbol: _readNullableString(json['symbol']),
       symbolName: _readNullableString(json['symbol_name']),
@@ -54,6 +64,11 @@ class AgentChatV2Response {
   final String intent;
   final String status;
   final String message;
+  final String? answer;
+  final String language;
+  final Map<String, dynamic> data;
+  final bool gptUsed;
+  final bool fallbackUsed;
   final String? conversationKey;
   final String? symbol;
   final String? symbolName;
@@ -75,6 +90,7 @@ class AgentChatV2Response {
 
   bool get isError => status == 'error';
   bool get isBlocked => status == 'blocked';
+  String get displayAnswer => answer ?? message;
 
   static Map<String, dynamic> _readMap(Object? value) {
     if (value is Map) return Map<String, dynamic>.from(value);

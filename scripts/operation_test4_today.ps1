@@ -4,7 +4,7 @@ param(
     [string]$ApiBase,
 
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Status", "RebuildWatchlist", "Preflight", "Arm", "RunEntryOnce", "Reconcile", "Disarm")]
+    [ValidateSet("Status", "RebuildWatchlist", "Preflight", "Arm", "ArmNextSession", "RunEntryOnce", "Reconcile", "Disarm")]
     [string]$Action,
 
     [int]$Count = 50,
@@ -103,6 +103,20 @@ switch ($Action) {
         break
     }
 
+    "ArmNextSession" {
+        $expected = "ARM TEST4 NEXT SESSION"
+        $provided = Get-ExactConfirmation -Expected $expected
+        if ($provided -ne $expected) {
+            Write-Json @{ status = "blocked"; reason = "operator_confirmation_required"; immediate_order_execution = $false }
+            break
+        }
+        Write-Output "Today's new entry will not execute. The next valid KR trading session will be evaluated automatically from 09:35 KST."
+        Write-Json (Invoke-OperationTest4Json -Method Post -Path "/app/operation-test4/scheduler/arm-next-session" -Body @{
+                confirm = $true
+                confirmation = $provided
+            })
+        break
+    }
     "RunEntryOnce" {
         Write-EntryTimingNotice
         $preflight = Invoke-OperationTest4Json -Method Post -Path "/app/operation-test4/entry/preflight-once"

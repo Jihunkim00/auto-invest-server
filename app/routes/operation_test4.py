@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,7 @@ from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.operation_test import (
     OperationTest4ConfirmationRequest,
+    OperationTest4NextSessionArmRequest,
     OperationTest4WatchlistRebuildRequest,
 )
 from app.services.operation_test4_service import OperationTest4Service
@@ -81,6 +83,21 @@ def start_operation_test4_full_cycle(
     )
     status_code = 409 if result.get("reason") == "operator_confirmation_required" else 200
     return JSONResponse(status_code=status_code, content=result)
+
+
+@router.post("/scheduler/arm-next-session")
+def arm_operation_test4_next_session(
+    payload: OperationTest4NextSessionArmRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest4Service = Depends(get_operation_test4_service),
+):
+    result = service.arm_next_session(
+        db,
+        confirm=payload.confirm,
+        confirmation=payload.confirmation,
+    )
+    status_code = 200 if result.get("status") == "armed" else 409
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
 
 
 @router.post("/enable-live")

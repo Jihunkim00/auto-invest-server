@@ -18,6 +18,8 @@ class AgentChatIntentCategory(str, Enum):
     GENERAL_CHAT = "general_chat"
     CAPABILITY_QUESTION = "capability_question"
     READ_ONLY_PRICE_QUERY = "read_only_price_query"
+    AFFORDABILITY_QUERY = "affordability_query"
+    EXPLAIN_INDICATOR_QUERY = "explain_indicator_query"
     READ_ONLY_POSITIONS_QUERY = "read_only_positions_query"
     READ_ONLY_BALANCE_QUERY = "read_only_balance_query"
     READ_ONLY_ORDERS_QUERY = "read_only_orders_query"

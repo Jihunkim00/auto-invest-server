@@ -100,7 +100,14 @@ class AgentChatOrchestratorService:
             },
         )["message"]
 
-        intent = self.intent_router.route(message=request.message, context=context)
+        routed_payload = context.get("_v2_routed_intent")
+        if isinstance(routed_payload, dict):
+            try:
+                intent = AgentChatIntent.model_validate(routed_payload)
+            except Exception:
+                intent = self.intent_router.route(message=request.message, context=context)
+        else:
+            intent = self.intent_router.route(message=request.message, context=context)
         action = self._handle_intent(
             db,
             intent=intent,
@@ -253,6 +260,8 @@ class AgentChatOrchestratorService:
         self._merge_tool_safety(safety, tool_results)
         if category in {
             AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
+            AgentChatIntentCategory.AFFORDABILITY_QUERY,
+            AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY,
             AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
             AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
             AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY,
@@ -717,10 +726,14 @@ class AgentChatOrchestratorService:
         return action
 
     def _data_from_tool_results(self, tool_results: list[Any]) -> dict[str, Any]:
+        merged: dict[str, Any] = {}
         for result in tool_results:
             if getattr(result, "status", None) == "success":
                 data = getattr(result, "data", None)
-                return dict(data) if isinstance(data, dict) else {}
+                if isinstance(data, dict):
+                    merged.update(data)
+        if merged:
+            return merged
         for result in tool_results:
             data = getattr(result, "data", None)
             if isinstance(data, dict) and data:
@@ -751,6 +764,8 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.GENERAL_CHAT,
             AgentChatIntentCategory.CAPABILITY_QUESTION,
             AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
+            AgentChatIntentCategory.AFFORDABILITY_QUERY,
+            AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY,
             AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
             AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
             AgentChatIntentCategory.READ_ONLY_ORDERS_QUERY,

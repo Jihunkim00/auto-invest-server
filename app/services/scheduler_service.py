@@ -11,7 +11,7 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
-from app.db.models import PositionLifecycle
+from app.db.models import OperationTest4Cycle, PositionLifecycle
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
@@ -30,7 +30,7 @@ from app.services.operation_test3_position_management_service import (
     SCHEDULER_TRIGGER_SOURCE as OPERATION_TEST3_SCHEDULER_TRIGGER_SOURCE,
     operation_test3_scheduler_gate,
 )
-from app.services.operation_test4_service import OperationTest4Service
+from app.services.operation_test4_service import ACTIVE_CYCLE_STATUSES, OperationTest4Service
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.automation_release_service import AutomationReleaseService
@@ -685,6 +685,24 @@ class SchedulerService:
         runtime = self.runtime_settings.get_settings_read_only(db)
         if runtime.get("operation_test4_scheduler_enabled") is not True:
             return None
+        if runtime.get("operation_test4_scheduler_arm_mode") == "next_session":
+            has_active_cycle = (
+                db.query(OperationTest4Cycle)
+                .filter(OperationTest4Cycle.status.in_(ACTIVE_CYCLE_STATUSES))
+                .first()
+                is not None
+            )
+            if not has_active_cycle:
+                # Next-session reservation is read-only and must not run a broker
+                # position monitor during the overnight arm.
+                return {
+                    "status": "ok",
+                    "operation_test": "test4",
+                    "result": "HOLD",
+                    "reason": "next_session_scheduler_only",
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
         settings_obj = get_settings()
         kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
         return OperationTest4Service(

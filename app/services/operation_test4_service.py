@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -39,6 +39,13 @@ from app.services.kis_position_lifecycle_service import KisPositionLifecycleServ
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
+from app.services.operation_test4_next_session import (
+    is_entry_slot as is_next_session_entry_slot,
+    is_last_entry_slot as is_next_session_last_entry_slot,
+    next_entry_slot_for_session,
+    next_valid_kr_trading_date,
+    parse_trading_date,
+)
 from app.services.operation_test4_sizing import calculate_operation_test4_sizing
 from app.services.operation_test_live_mode_claim_service import (
     OperationTestLiveModeConflict,
@@ -209,6 +216,148 @@ class OperationTest4Service:
         self.price_provider = price_provider
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
 
+    def arm_next_session(
+        self,
+        db: Session,
+        *,
+        confirm: bool,
+        confirmation: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Reserve the next KR session without enabling live execution."""
+
+        if confirm is not True or str(confirmation or "").strip() != "ARM TEST4 NEXT SESSION":
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "arm_mode": "next_session",
+                    "reason": "operator_confirmation_required",
+                    "required_confirmation": "ARM TEST4 NEXT SESSION",
+                    "immediate_order_execution": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
+
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        live_test4_flags = (
+            "operation_test4_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
+        )
+        conflicts = [
+            key
+            for key in OTHER_SCHEDULER_LIVE_FLAGS
+            if runtime.get(key) is True
+        ]
+        if any(runtime.get(key) is True for key in live_test4_flags):
+            conflicts.append("operation_test4_live_mode_active")
+        if conflicts:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "arm_mode": "next_session",
+                    "reason": "other_scheduler_live_flags_enabled",
+                    "blocking_reasons": _dedupe(conflicts),
+                    "immediate_order_execution": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
+
+        try:
+            calendar_service = getattr(self.session_service, "calendar_service", None)
+            if calendar_service is None:
+                from app.services.market_calendar_service import MarketCalendarService
+
+                calendar_service = MarketCalendarService()
+            target_date = next_valid_kr_trading_date(
+                now_utc,
+                calendar_service=calendar_service,
+            )
+        except Exception as exc:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "arm_mode": "next_session",
+                    "reason": "trading_calendar_unavailable",
+                    "error": _safe_error(exc),
+                    "immediate_order_execution": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
+
+        try:
+            settings_after = self.runtime_settings.update_settings(
+                db,
+                {
+                    # Overnight reservation is always safe. The existing
+                    # live gates are lowered only by the JIT BUY_READY path.
+                    "dry_run": True,
+                    "kill_switch": True,
+                    "operation_test4_enabled": False,
+                    "operation_test4_scheduler_enabled": True,
+                    "operation_test4_allow_real_entry": False,
+                    "operation_test4_allow_real_exit": False,
+                    "operation_test4_entry_enabled": False,
+                    "operation_test4_position_management_enabled": False,
+                    "operation_test4_stop_loss_enabled": True,
+                    "operation_test4_take_profit_enabled": True,
+                    "operation_test4_scheduler_arm_mode": "next_session",
+                    "operation_test4_target_trading_date": target_date.isoformat(),
+                    "operation_test4_scheduler_armed_at": now_utc,
+                    "operation_test4_scheduler_last_error": None,
+                    "operation_test4_scheduler_last_stage": "armed",
+                    "operation_test4_scheduler_last_entry_decision": None,
+                    "operation_test4_scheduler_last_evaluated_trade_date": None,
+                    "operation_test4_scheduler_last_evaluated_slot_kst": None,
+                    **{key: False for key in BUY_FLAGS},
+                },
+            )
+        except OperationTestLiveModeConflict:
+            return sanitize_kis_payload(
+                {
+                    "status": "blocked",
+                    "operation_test": OPERATION_TEST,
+                    "arm_mode": "next_session",
+                    "reason": "operation_test3_active",
+                    "immediate_order_execution": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                }
+            )
+
+        next_slot = next_entry_slot_for_session(
+            now_utc,
+            target_trading_date=target_date,
+            enabled=True,
+        )
+        return sanitize_kis_payload(
+            {
+                "status": "armed",
+                "operation_test": OPERATION_TEST,
+                "confirmation_accepted": True,
+                "arm_mode": "next_session",
+                "test4_scheduler_armed": True,
+                "target_trading_date": target_date.isoformat(),
+                "entry_slots_kst": list(ENTRY_SLOTS),
+                "next_entry_slot_kst": next_slot["next_entry_slot_kst"],
+                "next_automatic_entry_run": next_slot["next_automatic_entry_run"],
+                "master_scheduler_enabled": settings_after.get("scheduler_enabled") is True,
+                "scheduler_effective": True,
+                "immediate_order_execution": False,
+                "runtime": self._runtime_snapshot(settings_after),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        )
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -219,18 +368,55 @@ class OperationTest4Service:
         daily_buy_count = self._daily_order_count(db, side="buy", now_utc=now_utc)
         daily_sell_count = self._daily_order_count(db, side="sell", now_utc=now_utc)
         scheduler_enabled = runtime.get("operation_test4_scheduler_enabled") is True
+        arm_mode = str(runtime.get("operation_test4_scheduler_arm_mode") or "disarmed")
+        target_trading_date = parse_trading_date(
+            runtime.get("operation_test4_target_trading_date")
+        )
         next_slot = _next_entry_slot_info(now_utc, enabled=scheduler_enabled)
-        progress = _preflight_progress_snapshot()
-        automatic_entry_status = (
-            "disabled"
-            if not scheduler_enabled
-            else "position_management_only"
-            if active is not None
-            or self._active_lifecycles(db)
+        active_lifecycles = self._active_lifecycles(db)
+        has_position_or_order = bool(
+            active is not None
+            or active_lifecycles
             or account.get("position_count", 0) > 0
             or account.get("open_order_count", 0) > 0
-            else "scheduled"
         )
+        test4_scheduler_armed = bool(
+            scheduler_enabled
+            and arm_mode == "next_session"
+            and target_trading_date is not None
+        )
+        if test4_scheduler_armed:
+            next_slot = next_entry_slot_for_session(
+                now_utc,
+                target_trading_date=target_trading_date,
+                enabled=True,
+            )
+            local_date = now_utc.astimezone(KR_TZ).date()
+            if target_trading_date < local_date:
+                automatic_entry_status = "blocked"
+            elif has_position_or_order:
+                automatic_entry_status = "position_management"
+            elif runtime.get("operation_test4_scheduler_last_entry_decision") == HOLD:
+                automatic_entry_status = (
+                    "holding_waiting_next_slot"
+                    if next_slot["next_entry_slot_kst"]
+                    else "session_complete"
+                )
+            elif target_trading_date > local_date:
+                automatic_entry_status = "armed_for_next_session"
+            else:
+                automatic_entry_status = "waiting_for_slot"
+        elif arm_mode == "session_complete":
+            automatic_entry_status = "session_complete"
+        else:
+            automatic_entry_status = (
+                "disabled"
+                if not scheduler_enabled
+                else "position_management_only"
+                if has_position_or_order
+                else "scheduled"
+            )
+        progress = _preflight_progress_snapshot()
         payload = sanitize_kis_payload(
             {
                 "provider": PROVIDER,
@@ -243,13 +429,36 @@ class OperationTest4Service:
                 "account": self._account_summary(account),
                 "runtime": self._runtime_snapshot(runtime),
                 "scheduler": {
-                    "entry_slot_kst": ENTRY_SLOTS[0],
-                    "entry_slots_kst": list(ENTRY_SLOTS),
                     "position_slots_kst": list(POSITION_SLOTS),
                     "scheduler_enabled": scheduler_enabled,
+                    "master_scheduler_enabled": runtime.get("scheduler_enabled") is True,
+                    "test4_scheduler_armed": test4_scheduler_armed,
+                    "scheduler_effective": test4_scheduler_armed or (
+                        scheduler_enabled
+                        and arm_mode in {"disarmed", "active_cycle"}
+                    ),
+                    "arm_mode": arm_mode,
+                    "target_trading_date": (
+                        target_trading_date.isoformat()
+                        if target_trading_date is not None
+                        else None
+                    ),
+                    "entry_slot_kst": ENTRY_SLOTS[0],
+                    "entry_slots_kst": list(ENTRY_SLOTS),
                     "next_entry_slot_kst": next_slot["next_entry_slot_kst"],
                     "next_automatic_entry_run": next_slot["next_automatic_entry_run"],
                     "automatic_entry_status": automatic_entry_status,
+                    "last_stage": runtime.get("operation_test4_scheduler_last_stage"),
+                    "last_error": runtime.get("operation_test4_scheduler_last_error"),
+                    "last_entry_decision": runtime.get(
+                        "operation_test4_scheduler_last_entry_decision"
+                    ),
+                    "last_evaluated_trade_date": runtime.get(
+                        "operation_test4_scheduler_last_evaluated_trade_date"
+                    ),
+                    "last_evaluated_slot_kst": runtime.get(
+                        "operation_test4_scheduler_last_evaluated_slot_kst"
+                    ),
                     "active_monitor_interval_seconds": 60,
                     "single_symbol": True,
                     "max_open_positions": 1,
@@ -1113,6 +1322,12 @@ class OperationTest4Service:
             return self._entry_blocked("daily_buy_limit_reached")
 
         runtime = self.runtime_settings.get_settings_read_only(db)
+        next_session_target = (
+            runtime.get("operation_test4_target_trading_date")
+            if arm_for_submit
+            and runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
+            else None
+        )
         candidate = preflight.get("candidate") or {}
         fresh_price = self._current_price(
             symbol=str(candidate.get("symbol") or ""),
@@ -1362,6 +1577,12 @@ class OperationTest4Service:
             cycle.status = "entry_pending"
             db.commit()
             promoted = {"promoted": False, "reason": "entry_pending"}
+        if next_session_target and cycle.status in {"entry_pending", "position_open"}:
+            self._activate_next_session_position_management(
+                db,
+                target_trading_date=str(next_session_target),
+                session_complete=is_next_session_last_entry_slot(entry_slot),
+            )
         return self._entry_result(
             cycle,
             reason="entry_submitted",
@@ -1502,6 +1723,465 @@ class OperationTest4Service:
             }
         )
 
+    def _run_next_session_scheduler_once(
+        self,
+        db: Session,
+        *,
+        slot_label: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate an armed slot and hand BUY_READY to the guarded entry path."""
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        target_date = parse_trading_date(
+            runtime.get("operation_test4_target_trading_date")
+        )
+        if target_date is None:
+            self._record_next_session_state(
+                db, stage="blocked", error="target_trading_date_unavailable"
+            )
+            self._disarm(db, reason="target_trading_date_unavailable")
+            return self._next_session_result(
+                status="blocked", reason="target_trading_date_unavailable", slot_label=slot_label
+            )
+
+        local_date = now_utc.astimezone(KR_TZ).date()
+        if local_date < target_date:
+            return self._next_session_result(
+                status="ok",
+                reason="waiting_for_target_trading_date",
+                slot_label=slot_label,
+                target_trading_date=target_date.isoformat(),
+            )
+        if local_date > target_date:
+            self._record_next_session_state(
+                db, stage="blocked", error="target_trading_date_expired"
+            )
+            self._disarm(db, reason="target_trading_date_expired")
+            return self._next_session_result(
+                status="blocked", reason="target_trading_date_expired", slot_label=slot_label
+            )
+
+        cycle = self._active_cycle(db)
+        if cycle is not None:
+            self._record_next_session_state(
+                db, stage="position_management", decision=HOLD, error="active_cycle_exists"
+            )
+            return self._next_session_result(
+                status="ok",
+                reason="position_management_only",
+                action=HOLD,
+                slot_label=slot_label,
+            )
+        if self._active_lifecycles(db):
+            self._record_next_session_state(
+                db,
+                stage="position_management",
+                decision=HOLD,
+                error="active_lifecycle_exists",
+            )
+            return self._next_session_result(
+                status="ok",
+                reason="position_management_only",
+                action=HOLD,
+                slot_label=slot_label,
+            )
+        if not is_next_session_entry_slot(slot_label):
+            return self._next_session_result(
+                status="ok", reason="no_action_for_scheduler_slot", slot_label=slot_label
+            )
+
+        if (
+            runtime.get("operation_test4_scheduler_last_evaluated_trade_date")
+            == local_date.isoformat()
+            and runtime.get("operation_test4_scheduler_last_evaluated_slot_kst")
+            == slot_label
+        ):
+            return self._next_session_result(
+                status="ok",
+                reason="duplicate_scheduler_tick",
+                action=runtime.get("operation_test4_scheduler_last_entry_decision"),
+                slot_label=slot_label,
+            )
+
+        self._record_next_session_state(
+            db,
+            stage="account_reconciliation",
+            evaluated_date=local_date.isoformat(),
+            evaluated_slot=slot_label,
+        )
+        account = self._read_account_state(require_fresh=True)
+        if account.get("fetch_success") is not True:
+            self._record_next_session_state(
+                db,
+                stage="blocked",
+                decision=HOLD,
+                error="account_state_unavailable",
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            return self._next_session_result(
+                status="blocked",
+                reason="account_state_unavailable",
+                action=HOLD,
+                slot_label=slot_label,
+            )
+        if account.get("position_count", 0) > 0:
+            reason = "position_exists"
+            self._record_next_session_state(
+                db,
+                stage="position_management",
+                decision=HOLD,
+                error=reason,
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            return self._next_session_result(
+                status="ok", reason=reason, action=HOLD, slot_label=slot_label
+            )
+        if account.get("open_order_count", 0) > 0 or self._local_open_order_count(db) > 0:
+            reason = "open_order_exists"
+            self._record_next_session_state(
+                db,
+                stage="blocked",
+                decision=HOLD,
+                error=reason,
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            return self._next_session_result(
+                status="blocked", reason=reason, action=HOLD, slot_label=slot_label
+            )
+
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        price_cap = float(
+            runtime.get("operation_test4_price_cap_krw", DEFAULT_PRICE_CAP_KRW)
+        )
+        self._record_next_session_state(
+            db,
+            stage="watchlist_preparation",
+            evaluated_date=local_date.isoformat(),
+            evaluated_slot=slot_label,
+        )
+        watchlist = self._load_watchlist(
+            price_cap_krw=price_cap,
+            require_fresh=True,
+            today_kst=local_date,
+        )
+        rebuilt = None
+        if not self._next_session_watchlist_ready(watchlist):
+            rebuilt = self.rebuild_watchlist(
+                db, count=DEFAULT_COUNT, price_cap_krw=price_cap, now=now_utc
+            )
+            if rebuilt.get("status") != "completed":
+                reason = str(rebuilt.get("reason") or "watchlist_rebuild_failed")
+                self._record_next_session_state(
+                    db,
+                    stage="blocked",
+                    decision=HOLD,
+                    error=reason,
+                    evaluated_date=local_date.isoformat(),
+                    evaluated_slot=slot_label,
+                )
+                return self._next_session_result(
+                    status="blocked",
+                    reason=reason,
+                    action=HOLD,
+                    slot_label=slot_label,
+                    watchlist=watchlist,
+                    watchlist_rebuild=rebuilt,
+                )
+            watchlist = self._load_watchlist(
+                price_cap_krw=price_cap,
+                require_fresh=True,
+                today_kst=local_date,
+            )
+            if not self._next_session_watchlist_ready(watchlist):
+                reason = "watchlist_rebuild_not_ready"
+                self._record_next_session_state(
+                    db,
+                    stage="blocked",
+                    decision=HOLD,
+                    error=reason,
+                    evaluated_date=local_date.isoformat(),
+                    evaluated_slot=slot_label,
+                )
+                return self._next_session_result(
+                    status="blocked",
+                    reason=reason,
+                    action=HOLD,
+                    slot_label=slot_label,
+                    watchlist=watchlist,
+                    watchlist_rebuild=rebuilt,
+                )
+
+        self._record_next_session_state(
+            db,
+            stage="heavy_preflight",
+            evaluated_date=local_date.isoformat(),
+            evaluated_slot=slot_label,
+        )
+        preflight = self.preflight_once(db, now=now_utc)
+        action = str(preflight.get("action") or HOLD)
+        if preflight.get("status") != "ready" or action != "BUY_READY":
+            reason = str(
+                (
+                    preflight.get("blocking_reasons")
+                    or preflight.get("review_reasons")
+                    or ["candidate_gate_blocked"]
+                )[0]
+            )
+            self._record_next_session_state(
+                db,
+                stage="holding_waiting_next_slot",
+                decision=HOLD,
+                error=reason if preflight.get("status") == "blocked" else None,
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            if is_next_session_last_entry_slot(slot_label):
+                completion = self._complete_next_session(
+                    db, target_date=target_date, reason="session_complete"
+                )
+                return self._next_session_result(
+                    status="ok",
+                    reason="session_complete",
+                    action=HOLD,
+                    slot_label=slot_label,
+                    preflight=preflight,
+                    watchlist=watchlist,
+                    watchlist_rebuild=rebuilt,
+                    session_completion=completion,
+                )
+            return self._next_session_result(
+                status="ok" if preflight.get("status") != "blocked" else "blocked",
+                reason=reason,
+                action=HOLD,
+                slot_label=slot_label,
+                preflight=preflight,
+                watchlist=watchlist,
+                watchlist_rebuild=rebuilt,
+            )
+
+        self._record_next_session_state(
+            db,
+            stage="buy_ready",
+            decision="BUY_READY",
+            evaluated_date=local_date.isoformat(),
+            evaluated_slot=slot_label,
+        )
+        try:
+            entry = self.entry_run_once(
+                db,
+                confirm_live=True,
+                confirmation=ENTRY_CONFIRMATION,
+                now=now_utc,
+                trigger_source="operation_test4_scheduler",
+                entry_slot_kst=slot_label,
+                _preflight=preflight,
+                _arm_for_submit=True,
+            )
+        except Exception as exc:
+            reason = "next_session_entry_exception"
+            self._record_next_session_state(
+                db,
+                stage="blocked",
+                decision=HOLD,
+                error=reason,
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            return self._next_session_result(
+                status="blocked",
+                reason=reason,
+                action=HOLD,
+                slot_label=slot_label,
+                preflight=preflight,
+                watchlist=watchlist,
+                watchlist_rebuild=rebuilt,
+                entry={"error": _safe_error(exc)},
+                submit_path="operation_test4_existing_guarded_entry",
+                live_execution_permission=False,
+            )
+
+        if entry.get("real_order_submitted") is True:
+            self._record_next_session_state(
+                db,
+                stage="session_complete" if is_next_session_last_entry_slot(slot_label) else "buy_submitted",
+                decision="BUY_READY",
+                evaluated_date=local_date.isoformat(),
+                evaluated_slot=slot_label,
+            )
+            return sanitize_kis_payload(
+                {
+                    **entry,
+                    "action": "BUY_READY",
+                    "slot_label": slot_label,
+                    "target_trading_date": target_date.isoformat(),
+                    "preflight": preflight,
+                    "watchlist": watchlist,
+                    "watchlist_rebuild": rebuilt,
+                    "entry": entry,
+                    "submit_path": "operation_test4_existing_guarded_entry",
+                    "live_execution_permission": True,
+                    "position_management_only_after_submit": True,
+                    "session_complete": is_next_session_last_entry_slot(slot_label),
+                }
+            )
+
+        reason = str(entry.get("reason") or "entry_submit_blocked")
+        self._record_next_session_state(
+            db,
+            stage="buy_submit_blocked",
+            decision=HOLD,
+            error=reason,
+            evaluated_date=local_date.isoformat(),
+            evaluated_slot=slot_label,
+        )
+        if is_next_session_last_entry_slot(slot_label):
+            completion = self._complete_next_session(
+                db, target_date=target_date, reason="session_complete"
+            )
+            return self._next_session_result(
+                status="blocked",
+                reason="session_complete",
+                action=HOLD,
+                slot_label=slot_label,
+                preflight=preflight,
+                watchlist=watchlist,
+                watchlist_rebuild=rebuilt,
+                entry=entry,
+                session_completion=completion,
+                submit_path="operation_test4_existing_guarded_entry",
+                live_execution_permission=False,
+            )
+        return self._next_session_result(
+            status="blocked",
+            reason=reason,
+            action=HOLD,
+            slot_label=slot_label,
+            preflight=preflight,
+            watchlist=watchlist,
+            watchlist_rebuild=rebuilt,
+            entry=entry,
+            submit_path="operation_test4_existing_guarded_entry",
+            live_execution_permission=False,
+        )
+
+    def _next_session_watchlist_ready(self, watchlist: dict[str, Any]) -> bool:
+        return bool(
+            watchlist.get("fresh") is True
+            and watchlist.get("count") == DEFAULT_COUNT
+            and watchlist.get("configured_count", DEFAULT_COUNT) == DEFAULT_COUNT
+            and watchlist.get("selected_count") == DEFAULT_COUNT
+        )
+
+    def _record_next_session_state(
+        self,
+        db: Session,
+        *,
+        stage: str | None = None,
+        decision: str | None = None,
+        error: str | None = None,
+        evaluated_date: str | None = None,
+        evaluated_slot: str | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {}
+        if stage is not None:
+            payload["operation_test4_scheduler_last_stage"] = stage
+        if decision is not None:
+            payload["operation_test4_scheduler_last_entry_decision"] = decision
+        if error is not None:
+            payload["operation_test4_scheduler_last_error"] = error
+        elif stage in {
+            "armed",
+            "account_reconciliation",
+            "watchlist_preparation",
+            "heavy_preflight",
+            "buy_ready",
+            "buy_submitted",
+            "holding_waiting_next_slot",
+            "position_management",
+        }:
+            payload["operation_test4_scheduler_last_error"] = None
+        if evaluated_date is not None:
+            payload["operation_test4_scheduler_last_evaluated_trade_date"] = evaluated_date
+        if evaluated_slot is not None:
+            payload["operation_test4_scheduler_last_evaluated_slot_kst"] = evaluated_slot
+        if payload:
+            self.runtime_settings.update_settings(db, payload)
+
+    def _activate_next_session_position_management(
+        self,
+        db: Session,
+        *,
+        target_trading_date: str,
+        session_complete: bool = False,
+    ) -> dict[str, Any]:
+        """Keep the armed session alive while the guarded cycle is managed."""
+        settings = self.runtime_settings.update_settings(
+            db,
+            {
+                "operation_test4_scheduler_enabled": True,
+                "operation_test4_scheduler_arm_mode": "active_cycle",
+                "operation_test4_target_trading_date": target_trading_date,
+                "operation_test4_scheduler_last_stage": "session_complete" if session_complete else "buy_submitted",
+                "operation_test4_scheduler_last_entry_decision": "BUY_READY",
+                "operation_test4_scheduler_last_error": None,
+            },
+        )
+        return self._runtime_snapshot(settings)
+    def _complete_next_session(
+        self,
+        db: Session,
+        *,
+        target_date: date,
+        reason: str,
+    ) -> dict[str, Any]:
+        settings = self.runtime_settings.update_settings(
+            db,
+            {
+                "dry_run": True,
+                "kill_switch": True,
+                "operation_test4_enabled": False,
+                "operation_test4_scheduler_enabled": False,
+                "operation_test4_allow_real_entry": False,
+                "operation_test4_allow_real_exit": False,
+                "operation_test4_entry_enabled": False,
+                "operation_test4_position_management_enabled": False,
+                "operation_test4_stop_loss_enabled": False,
+                "operation_test4_take_profit_enabled": False,
+                "operation_test4_scheduler_arm_mode": "session_complete",
+                "operation_test4_target_trading_date": target_date.isoformat(),
+                "operation_test4_scheduler_last_stage": reason,
+                "operation_test4_scheduler_last_error": None,
+            },
+        )
+        return self._runtime_snapshot(settings)
+
+    def _next_session_result(
+        self,
+        *,
+        status: str,
+        reason: str,
+        action: str | None = None,
+        slot_label: str | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        return sanitize_kis_payload(
+            {
+                "status": status,
+                "operation_test": OPERATION_TEST,
+                "result": action or reason,
+                "action": action,
+                "reason": reason,
+                "slot_label": slot_label,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                **extra,
+            }
+        )
+
     def run_scheduler_once(
         self,
         db: Session,
@@ -1512,6 +2192,17 @@ class OperationTest4Service:
         if slot_label not in ALL_SLOTS:
             return sanitize_kis_payload(
                 {"status": "blocked", "reason": "invalid_scheduler_slot", "slot_label": slot_label}
+            )
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        if (
+            runtime.get("operation_test4_scheduler_enabled") is True
+            and runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
+        ):
+            cycle = self._active_cycle(db)
+            if cycle is not None:
+                return self.run_active_cycle_once(db, now=now)
+            return self._run_next_session_scheduler_once(
+                db, slot_label=slot_label, now=now
             )
         cycle = self._active_cycle(db)
         if cycle is not None:
@@ -1978,10 +2669,32 @@ class OperationTest4Service:
         cycle.completed_at = _naive_utc(now)
         cycle.manual_review_required = False
         db.commit()
-        settings = self._disarm(db, reason="cycle_completed")
+        runtime_before_close = self.runtime_settings.get_settings_read_only(db)
+        target_date = parse_trading_date(
+            runtime_before_close.get("operation_test4_target_trading_date")
+        )
+        preserve_next_session = bool(
+            target_date is not None
+            and runtime_before_close.get("operation_test4_scheduler_arm_mode")
+            in {"next_session", "active_cycle"}
+        )
+        if preserve_next_session and runtime_before_close.get(
+            "operation_test4_scheduler_last_evaluated_slot_kst"
+        ) == "13:30":
+            settings = self._complete_next_session(
+                db, target_date=target_date, reason="session_complete"
+            )
+            close_reason = "session_complete"
+        else:
+            settings = self._disarm(
+                db,
+                reason="cycle_completed",
+                preserve_next_session=preserve_next_session,
+            )
+            close_reason = "cycle_completed"
         return {
             "closed": True,
-            "reason": "cycle_completed",
+            "reason": close_reason,
             "runtime": self._runtime_snapshot(settings),
         }
 
@@ -2321,25 +3034,44 @@ class OperationTest4Service:
         db.commit()
         self._disarm(db, reason=reason)
 
-    def _disarm(self, db: Session, *, reason: str) -> dict[str, Any]:
-        settings = self.runtime_settings.update_settings(
-            db,
-            {
-                "dry_run": True,
-                "kill_switch": True,
-                "operation_test4_enabled": False,
-                "operation_test4_scheduler_enabled": False,
-                "operation_test4_allow_real_entry": False,
-                "operation_test4_allow_real_exit": False,
-                "operation_test4_entry_enabled": False,
-                "operation_test4_position_management_enabled": False,
-                "operation_test4_stop_loss_enabled": False,
-                "operation_test4_take_profit_enabled": False,
-                **{key: False for key in BUY_FLAGS},
-            },
+    def _disarm(
+        self,
+        db: Session,
+        *,
+        reason: str,
+        preserve_next_session: bool = False,
+    ) -> dict[str, Any]:
+        before = self.runtime_settings.get_settings_read_only(db)
+        keep_next_session = bool(
+            preserve_next_session
+            and before.get("operation_test4_scheduler_arm_mode") in {"next_session", "active_cycle"}
+            and before.get("operation_test4_target_trading_date")
         )
-        return settings
-
+        payload: dict[str, Any] = {
+            "dry_run": True,
+            "kill_switch": True,
+            "operation_test4_enabled": False,
+            "operation_test4_scheduler_enabled": keep_next_session,
+            "operation_test4_allow_real_entry": False,
+            "operation_test4_allow_real_exit": False,
+            "operation_test4_entry_enabled": False,
+            "operation_test4_position_management_enabled": False,
+            "operation_test4_stop_loss_enabled": False,
+            "operation_test4_take_profit_enabled": False,
+            "operation_test4_scheduler_arm_mode": (
+                "next_session" if keep_next_session else "disarmed"
+            ),
+            "operation_test4_target_trading_date": (
+                before.get("operation_test4_target_trading_date")
+                if keep_next_session
+                else None
+            ),
+            "operation_test4_scheduler_last_stage": reason,
+            "operation_test4_scheduler_last_entry_decision": None if keep_next_session else before.get("operation_test4_scheduler_last_entry_decision"),
+            "operation_test4_scheduler_last_error": None if keep_next_session else reason,
+            **{key: False for key in BUY_FLAGS},
+        }
+        return self.runtime_settings.update_settings(db, payload)
     def _active_cycle(self, db: Session) -> OperationTest4Cycle | None:
         return (
             db.query(OperationTest4Cycle)
@@ -2494,6 +3226,14 @@ class OperationTest4Service:
                 "operation_test4_max_open_positions",
                 "operation_test4_cash_only",
                 "operation_test4_no_new_entry_after",
+                "operation_test4_scheduler_arm_mode",
+                "operation_test4_target_trading_date",
+                "operation_test4_scheduler_armed_at",
+                "operation_test4_scheduler_last_error",
+                "operation_test4_scheduler_last_stage",
+                "operation_test4_scheduler_last_entry_decision",
+                "operation_test4_scheduler_last_evaluated_trade_date",
+                "operation_test4_scheduler_last_evaluated_slot_kst",
             )
         }
 

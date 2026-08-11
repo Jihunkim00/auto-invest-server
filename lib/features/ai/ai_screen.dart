@@ -50,15 +50,15 @@ class _AiScreenState extends State<AiScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('AI Assistant',
+                        Text('AI 투자 도우미',
                             style: TextStyle(
                                 fontSize: 24, fontWeight: FontWeight.w900)),
-                        Text('분석과 설명, 주문 준비를 도와드립니다.',
+                        Text('현재가·종목 분석·내 자산을 안전하게 확인하세요.',
                             style: TextStyle(color: Colors.white70)),
                       ],
                     ),
                   ),
-                  _SafetyBadge('NO AUTO SUBMIT'),
+                  _SafetyBadge('자동 주문 없음'),
                   IconButton(
                     key: const ValueKey('ai-open-admin'),
                     tooltip: 'Advanced / Admin',
@@ -211,10 +211,11 @@ class _QuickActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const actions = <String, String>{
+      '현재가': '삼성전자 현재가 얼마야?',
       '종목 분석': '삼성전자 분석해줘',
       '포트폴리오': '내 포트폴리오 보여줘',
       '최근 판단': '최근 자동매매 판단 알려줘',
-      '왜 안 샀어?': '오늘 왜 매수 안 했어?',
+      '왜 안 샀어?': '왜 오늘 매수하지 않았어?',
     };
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -246,12 +247,12 @@ class _WelcomeCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('무엇을 도와드릴까요?',
+          Text('무엇을 확인해 볼까요?',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           SizedBox(height: 8),
           Text(
-            '종목 분석, 최근 HOLD 이유, 포트폴리오, 주문 준비를 요청할 수 있습니다. '
-            '실제 주문은 별도 확인과 기존 backend safety gate를 거칩니다.',
+            '삼성전자 현재가, 종목 분석, 보유 종목과 최근 판단을 물어보세요. '
+            '계좌·주문 정보는 조회 전용이며 실제 주문은 별도 확인이 필요합니다.',
             style: TextStyle(color: Colors.white70, height: 1.35),
           ),
         ],
@@ -310,17 +311,20 @@ class _EntryView extends StatelessWidget {
                           color: Colors.lightBlueAccent,
                           fontWeight: FontWeight.w800)),
                   const Spacer(),
-                  _SafetyBadge(response.status.replaceAll('_', ' ')),
+                  _SafetyBadge(_statusLabel(response.status)),
                 ],
               ),
               const SizedBox(height: 8),
-              Text(response.message,
+              Text(response.displayAnswer,
                   key: const ValueKey('ai-v2-response-message'),
                   style: const TextStyle(height: 1.35)),
             ],
           ),
         ),
-        if (response.intent == 'analyze') _AnalysisCard(response),
+        if (response.intent == 'quote') _QuoteCard(response),
+        if (response.intent == 'analyze' ||
+            response.intent == 'market_analysis')
+          _AnalysisCard(response),
         if (response.intent == 'explain') _DecisionCard(response),
         if (response.intent == 'portfolio') _PortfolioCard(response),
         if (action != null && response.requiresConfirmation)
@@ -334,21 +338,91 @@ class _EntryView extends StatelessWidget {
     );
   }
 
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'completed':
+        return '완료';
+      case 'confirmation_required':
+        return '확인 필요';
+      case 'blocked':
+        return '안전 차단';
+      case 'error':
+        return '조회 실패';
+      case 'needs_clarification':
+        return '확인 필요';
+      default:
+        return '안내';
+    }
+  }
+
   String _label(String intent) {
     switch (intent) {
       case 'analyze':
-        return 'Analysis';
+        return '분석';
+      case 'market_analysis':
+        return '분석';
+      case 'quote':
+        return '현재가';
+      case 'account':
+        return '계좌';
+      case 'affordability':
+        return '매수 가능 금액';
+      case 'explain_indicator':
+        return '지표 설명';
+      case 'recent_activity':
+        return '최근 활동';
+      case 'general_chat':
+        return '안내';
       case 'explain':
-        return 'Decision explanation';
+        return '판단 설명';
       case 'portfolio':
-        return 'Portfolio';
+        return '포트폴리오';
       case 'trade_prepare':
-        return 'Order preview';
+        return '주문 준비';
       case 'safety_block':
-        return 'Safety';
+        return '안전';
       default:
         return 'Agent';
     }
+  }
+}
+
+class _QuoteCard extends StatelessWidget {
+  const _QuoteCard(this.response);
+
+  final AgentChatV2Response response;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = response.data['price'] is Map
+        ? Map<String, dynamic>.from(response.data['price'] as Map)
+        : const <String, dynamic>{};
+    final value = data['price'] ?? data['current_price'];
+    final currency = data['currency']?.toString() ?? 'KRW';
+    final formatted = value == null
+        ? '조회 실패'
+        : currency == 'KRW'
+            ? '${_group(value)}원'
+            : '\$${value.toString()}';
+    return _DataCard(
+      key: const ValueKey('ai-v2-quote-card'),
+      title: '${response.symbolName ?? response.symbol ?? '종목'} 현재가',
+      primary: formatted,
+      rows: [
+        ('종목코드', response.symbol ?? '-'),
+        ('통화', currency),
+        if (data['timestamp'] != null) ('업데이트', data['timestamp'].toString()),
+      ],
+    );
+  }
+
+  String _group(Object value) {
+    final number = double.tryParse(value.toString().replaceAll(',', ''));
+    if (number == null) return value.toString();
+    return number.round().toString().replaceAllMapped(
+          RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+          (match) => '${match.group(1)},',
+        );
   }
 }
 
@@ -369,11 +443,11 @@ class _AnalysisCard extends StatelessWidget {
       primary: response.action ?? 'HOLD',
       rows: [
         (
-          'Final score',
+          '최종 점수',
           response.scores['final_score'] ?? response.scores['final_buy'] ?? '-'
         ),
-        ('Confidence', response.confidence ?? '-'),
-        ('Risk', risk),
+        ('신뢰도', response.confidence ?? '-'),
+        ('핵심 위험', risk),
       ],
     );
   }

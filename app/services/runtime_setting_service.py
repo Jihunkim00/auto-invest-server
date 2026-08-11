@@ -56,6 +56,14 @@ OPERATION_TEST4_SAFE_SETTINGS = {
     "operation_test4_allow_single_share_budget_bump": True,
     "operation_test4_cash_only": True,
     "operation_test4_no_new_entry_after": "14:00",
+    "operation_test4_scheduler_arm_mode": "disarmed",
+    "operation_test4_target_trading_date": None,
+    "operation_test4_scheduler_armed_at": None,
+    "operation_test4_scheduler_last_error": None,
+    "operation_test4_scheduler_last_stage": None,
+    "operation_test4_scheduler_last_entry_decision": None,
+    "operation_test4_scheduler_last_evaluated_trade_date": None,
+    "operation_test4_scheduler_last_evaluated_slot_kst": None,
 }
 KR_SCHEDULER_MODES = {
     "disabled",
@@ -232,6 +240,14 @@ class RuntimeSettingService:
             "operation_test4_allow_single_share_budget_bump": True,
             "operation_test4_cash_only": True,
             "operation_test4_no_new_entry_after": "14:00",
+            "operation_test4_scheduler_arm_mode": "disarmed",
+            "operation_test4_target_trading_date": None,
+            "operation_test4_scheduler_armed_at": None,
+            "operation_test4_scheduler_last_error": None,
+            "operation_test4_scheduler_last_stage": None,
+            "operation_test4_scheduler_last_entry_decision": None,
+            "operation_test4_scheduler_last_evaluated_trade_date": None,
+            "operation_test4_scheduler_last_evaluated_slot_kst": None,
             "portfolio_orchestrator_enabled": False,
             "portfolio_orchestrator_allow_live_orders": False,
             "portfolio_orchestrator_positions_first": True,
@@ -739,6 +755,31 @@ class RuntimeSettingService:
                 getattr(row, "operation_test4_no_new_entry_after", "14:00")
                 or "14:00"
             ),
+            "operation_test4_scheduler_arm_mode": str(
+                getattr(row, "operation_test4_scheduler_arm_mode", "disarmed")
+                or "disarmed"
+            ),
+            "operation_test4_target_trading_date": getattr(
+                row, "operation_test4_target_trading_date", None
+            ),
+            "operation_test4_scheduler_armed_at": getattr(
+                row, "operation_test4_scheduler_armed_at", None
+            ),
+            "operation_test4_scheduler_last_error": getattr(
+                row, "operation_test4_scheduler_last_error", None
+            ),
+            "operation_test4_scheduler_last_stage": getattr(
+                row, "operation_test4_scheduler_last_stage", None
+            ),
+            "operation_test4_scheduler_last_entry_decision": getattr(
+                row, "operation_test4_scheduler_last_entry_decision", None
+            ),
+            "operation_test4_scheduler_last_evaluated_trade_date": getattr(
+                row, "operation_test4_scheduler_last_evaluated_trade_date", None
+            ),
+            "operation_test4_scheduler_last_evaluated_slot_kst": getattr(
+                row, "operation_test4_scheduler_last_evaluated_slot_kst", None
+            ),
             "portfolio_orchestrator_enabled": bool(
                 row.portfolio_orchestrator_enabled
             ),
@@ -1026,6 +1067,39 @@ class RuntimeSettingService:
         settings["operation_test4_cash_only"] = True
         settings["operation_test4_no_new_entry_after"] = str(
             settings.get("operation_test4_no_new_entry_after") or "14:00"
+        )
+        settings["operation_test4_scheduler_arm_mode"] = str(
+            settings.get("operation_test4_scheduler_arm_mode") or "disarmed"
+        )
+        settings["operation_test4_target_trading_date"] = (
+            str(settings["operation_test4_target_trading_date"])
+            if settings.get("operation_test4_target_trading_date")
+            else None
+        )
+        settings["operation_test4_scheduler_last_error"] = (
+            str(settings["operation_test4_scheduler_last_error"])
+            if settings.get("operation_test4_scheduler_last_error")
+            else None
+        )
+        settings["operation_test4_scheduler_last_stage"] = (
+            str(settings["operation_test4_scheduler_last_stage"])
+            if settings.get("operation_test4_scheduler_last_stage")
+            else None
+        )
+        settings["operation_test4_scheduler_last_entry_decision"] = (
+            str(settings["operation_test4_scheduler_last_entry_decision"])
+            if settings.get("operation_test4_scheduler_last_entry_decision")
+            else None
+        )
+        settings["operation_test4_scheduler_last_evaluated_trade_date"] = (
+            str(settings["operation_test4_scheduler_last_evaluated_trade_date"])
+            if settings.get("operation_test4_scheduler_last_evaluated_trade_date")
+            else None
+        )
+        settings["operation_test4_scheduler_last_evaluated_slot_kst"] = (
+            str(settings["operation_test4_scheduler_last_evaluated_slot_kst"])
+            if settings.get("operation_test4_scheduler_last_evaluated_slot_kst")
+            else None
         )
         settings["kis_position_lifecycle_scheduler_enabled"] = bool(
             settings.get("kis_position_lifecycle_scheduler_enabled", False)
@@ -2732,6 +2806,14 @@ class RuntimeSettingService:
             "operation_test4_allow_single_share_budget_bump",
             "operation_test4_cash_only",
             "operation_test4_no_new_entry_after",
+            "operation_test4_scheduler_arm_mode",
+            "operation_test4_target_trading_date",
+            "operation_test4_scheduler_armed_at",
+            "operation_test4_scheduler_last_error",
+            "operation_test4_scheduler_last_stage",
+            "operation_test4_scheduler_last_entry_decision",
+            "operation_test4_scheduler_last_evaluated_trade_date",
+            "operation_test4_scheduler_last_evaluated_slot_kst",
             "portfolio_orchestrator_enabled",
             "portfolio_orchestrator_allow_live_orders",
             "portfolio_orchestrator_positions_first",

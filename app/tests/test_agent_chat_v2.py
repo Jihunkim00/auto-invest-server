@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.main import app
 from app.routes.agent_chat import get_agent_chat_v2_service
 from app.schemas.agent_chat_v2 import AgentChatV2MessageRequest
+from app.schemas.agent_chat_orchestrator import AgentChatIntent, AgentChatIntentCategory
 from app.services.agent_chat_intent_router_service import AgentChatIntentRouterService
 from app.services.agent_chat_v2_service import AgentChatV2Service
 
@@ -87,6 +88,45 @@ class _FakePreviewService:
         }
 
 
+class _FakeResponses:
+    def __init__(self, output_text: str):
+        self.output_text = output_text
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(output_text=self.output_text)
+
+
+class _FakeClient:
+    def __init__(self, output_text: str):
+        self.responses = _FakeResponses(output_text)
+
+
+class _FakeRouter:
+    def __init__(self, category: AgentChatIntentCategory, output_text: str):
+        self.category = category
+        self.client = _FakeClient(output_text)
+        self.model_name = "test-composer"
+        self.reasoning_effort = "low"
+
+    def _intent(self):
+        return AgentChatIntent(
+            category=self.category,
+            market="KR",
+            provider="kis",
+            symbol="005930",
+            symbol_name="삼성전자",
+            fallback_used=False,
+        )
+
+    def route(self, *, message, context):
+        return self._intent()
+
+    def fallback_route(self, message, context):
+        return self._intent()
+
+
 def test_v2_router_resolves_utf8_symbols_and_ambiguous_prefix():
     router = AgentChatIntentRouterService()
     samsung = router.fallback_route("삼성전자 분석해줘", {})
@@ -97,6 +137,202 @@ def test_v2_router_resolves_utf8_symbols_and_ambiguous_prefix():
     assert hyundai.symbol == "005380"
     assert ambiguous.symbol is None
     assert ambiguous.supported is False
+
+
+def test_v2_quote_returns_trusted_korean_current_price_without_hold(db_session):
+    router = AgentChatIntentRouterService(
+        settings=SimpleNamespace(
+            openai_api_key=None,
+            agent_chat_model="test-agent-router",
+            agent_chat_reasoning_effort="low",
+            agent_chat_temperature=None,
+            agent_chat_timeout_seconds=1.0,
+            agent_chat_fallback_enabled=True,
+        )
+    )
+    service = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(
+            _legacy(
+                category="read_only_price_query",
+                data={
+                    "price": {
+                        "symbol": "005930",
+                        "name": "삼성전자",
+                        "current_price": 72000,
+                        "currency": "KRW",
+                        "provider": "kis",
+                    }
+                },
+            )
+        ),
+    )
+    response = service.send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="삼성전자 주식 1주 가격 얼마야?"),
+    )
+
+    assert response["intent"] == "quote"
+    assert "72,000원" in response["answer"]
+    assert "HOLD" not in response["answer"]
+    assert response["data"]["price"]["current_price"] == 72000
+    assert response["safety"]["broker_submit_called"] is False
+    assert response["gpt_used"] is False
+
+
+def test_v2_quote_failure_never_invents_a_price(db_session):
+    router = AgentChatIntentRouterService(
+        settings=SimpleNamespace(
+            openai_api_key=None,
+            agent_chat_model="test-agent-router",
+            agent_chat_reasoning_effort="low",
+            agent_chat_temperature=None,
+            agent_chat_timeout_seconds=1.0,
+            agent_chat_fallback_enabled=True,
+        )
+    )
+    response = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(
+            _legacy(
+                category="read_only_price_query",
+                data={"price": {"symbol": "005930", "name": "삼성전자"}, "error": "retryable"},
+            )
+        ),
+    ).send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="005930 현재가 알려줘"),
+    )
+
+    assert response["intent"] == "quote"
+    assert "조회하지 못했습니다" in response["answer"]
+    assert "원" not in response["answer"]
+
+
+def test_v2_affordability_is_read_only_and_uses_whole_share_math(db_session):
+    router = AgentChatIntentRouterService(
+        settings=SimpleNamespace(
+            openai_api_key=None,
+            agent_chat_model="test-agent-router",
+            agent_chat_reasoning_effort="low",
+            agent_chat_temperature=None,
+            agent_chat_timeout_seconds=1.0,
+            agent_chat_fallback_enabled=True,
+        )
+    )
+    legacy = _legacy(
+        category="affordability_query",
+        data={
+            "price": {"symbol": "005930", "name": "삼성전자", "current_price": 72000, "currency": "KRW"},
+            "balance": {"available_cash": 150000, "currency": "KRW"},
+        },
+    )
+    legacy["intent"]["quantity"] = 2
+    response = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(legacy),
+    ).send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="삼성전자 2주 살 수 있어?"),
+    )
+
+    assert response["intent"] == "affordability"
+    assert "144,000원" in response["answer"]
+    assert "매수 가능한 범위" in response["answer"]
+    assert response["safety"]["real_order_submitted"] is False
+
+
+def test_v2_indicator_explanation_is_general_and_does_not_lookup_broker(db_session):
+    router = AgentChatIntentRouterService(
+        settings=SimpleNamespace(
+            openai_api_key=None,
+            agent_chat_model="test-agent-router",
+            agent_chat_reasoning_effort="low",
+            agent_chat_temperature=None,
+            agent_chat_timeout_seconds=1.0,
+            agent_chat_fallback_enabled=True,
+        )
+    )
+    response = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(_legacy(category="general_chat", data={})),
+    ).send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="RSI가 뭐야?"),
+    )
+
+    assert response["intent"] == "explain_indicator"
+    assert "RSI" in response["answer"]
+    assert response["diagnostics"]["tool_names"] == []
+
+
+def test_v2_gpt_composer_receives_public_projection_only(db_session):
+    router = _FakeRouter(
+        AgentChatIntentCategory.ANALYSIS_REQUEST,
+        "삼성전자 공개 시장 데이터 기준으로는 현재 판단 근거를 설명할 수 있습니다.",
+    )
+    legacy = _legacy(
+        category="analysis_request",
+        data={
+            "analysis": {
+                "symbol": "005930",
+                "action": "HOLD",
+                "final_score": 61,
+                "risk_flags": ["score_gate"],
+            },
+            "balance": {"cash": 100000, "account_number": "12345678"},
+            "positions": [{"symbol": "005930", "qty": 2, "average_cost": 65000}],
+            "appsecret": "hidden",
+        },
+    )
+    service = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(legacy),
+    )
+
+    response = service.send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="삼성전자 분석해줘"),
+    )
+
+    call_input = router.client.responses.calls[0]["input"]
+    assert response["intent"] == "analyze"
+    assert response["gpt_used"] is True
+    assert response["diagnostics"]["gpt_called"] is True
+    assert "공개 시장 데이터" in response["answer"]
+    assert "cash" not in call_input
+    assert "positions" not in call_input
+    assert "account_number" not in call_input
+    assert "appsecret" not in call_input
+    assert "12345678" not in call_input
+    assert "65000" not in call_input
+
+
+def test_v2_account_query_never_calls_gpt_even_when_client_exists(db_session):
+    router = _FakeRouter(
+        AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
+        "이 응답은 호출되면 안 됩니다.",
+    )
+    service = AgentChatV2Service(
+        intent_router=router,
+        orchestrator=_FakeOrchestrator(
+            _legacy(
+                category="read_only_balance_query",
+                data={"balance": {"cash": 100000, "orderable_cash": 90000}},
+                symbol=None,
+            )
+        ),
+    )
+
+    response = service.send(
+        db_session,
+        request=AgentChatV2MessageRequest(message="내 잔고 보여줘"),
+    )
+
+    assert response["intent"] == "account"
+    assert response["gpt_used"] is False
+    assert response["diagnostics"]["gpt_called"] is False
+    assert router.client.responses.calls == []
 
 
 def test_v2_analyze_returns_structured_scores_without_submit(db_session):
