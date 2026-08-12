@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     config_dir: str = DEFAULT_CONFIG_DIR
 
     openai_api_key: str | None = None
-    openai_model: str = "gpt-5.4-mini"
-    openai_reasoning_effort: str = "medium"
-    agent_chat_model: str = "gpt-5.4-mini"
+    openai_model: str = "gpt-5.6-luna"
+    openai_reasoning_effort: str = "xhigh"
+    agent_chat_model: str = "gpt-5.6-luna"
     agent_chat_reasoning_effort: str = "low"
     agent_chat_temperature: float | None = None
     agent_chat_timeout_seconds: float = 20.0
@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     kis_read_only_rate_limit_retry_seconds: float = 1.2
     kis_account_state_cache_ttl_seconds: float = 2.0
     kis_account_state_max_stale_seconds: float = 5.0
+    kis_account_state_max_attempts: int = 2
+    kis_account_state_retry_backoff_seconds: float = 0.2
     max_watchlist_size: int = 50
     watchlist_top_candidates_for_research: int = 5
     watchlist_min_entry_score: int = 65

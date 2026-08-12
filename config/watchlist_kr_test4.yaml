@@ -2,7 +2,7 @@ market: KR
 currency: KRW
 timezone: Asia/Seoul
 operation_test: test4
-generated_at: '2026-08-10T04:00:41.497376+00:00'
+generated_at: '2026-08-12T00:35:01.235602+00:00'
 source:
   source_universe_file: config/watchlist_kr_test4_universe.yaml
   source_universe_count: 100
@@ -20,16 +20,15 @@ source_universe_count: 100
 price_cap_krw: 1000000.0
 configured_count: 50
 quote_checked_count: 100
-eligible_count: 93
+eligible_count: 92
 selected_count: 50
-reserve_eligible_count: 43
-excluded_count: 7
+reserve_eligible_count: 42
+excluded_count: 8
 exclusion_reasons:
-  price_cap_exceeded: 6
+  price_cap_exceeded: 7
   preferred_stock_excluded: 1
 selected_symbols:
 - 005930
-- '402340'
 - 005380
 - '373220'
 - 032830
@@ -78,15 +77,11 @@ selected_symbols:
 - '316140'
 - 008930
 - '042700'
+- '319660'
 symbols:
 - symbol: 005930
   name: 삼성전자
   source_name: 삼성전자
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '402340'
-  name: SK스퀘어
-  source_name: SK스퀘어
   source: local_watchlist_kr_base50
   market: KOSPI
 - symbol: 005380
@@ -329,3 +324,8 @@ symbols:
   source_name: 한미반도체
   source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
   market: KOSPI
+- symbol: '319660'
+  name: 피에스케이
+  source_name: 피에스케이
+  source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
+  market: KOSDAQ
