@@ -17,10 +17,10 @@ def _settings(**values):
     return Settings(**base)
 
 
-def test_agent_chat_model_default_is_gpt_5_4_mini():
+def test_agent_chat_model_default_is_gpt_5_6_luna():
     settings = _settings()
 
-    assert settings.agent_chat_model == "gpt-5.4-mini"
+    assert settings.agent_chat_model == "gpt-5.6-luna"
     assert settings.agent_chat_reasoning_effort == "low"
     assert settings.agent_chat_temperature is None
     assert settings.agent_chat_timeout_seconds == 20
@@ -102,7 +102,7 @@ def test_default_agent_chat_temperature_is_omitted_from_openai_payload(db_sessio
     )
 
     assert response["parser_status"] == "gpt"
-    assert client.responses.kwargs["model"] == "gpt-5.4-mini"
+    assert client.responses.kwargs["model"] == "gpt-5.6-luna"
     assert "temperature" not in client.responses.kwargs
 
 

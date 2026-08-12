@@ -277,7 +277,12 @@ def test_v2_gpt_composer_receives_public_projection_only(db_session):
             "analysis": {
                 "symbol": "005930",
                 "action": "HOLD",
+                "current_price": 255500,
                 "final_score": 61,
+                "market_model": "gpt-5.6-luna",
+                "market_reasoning_effort": "xhigh",
+                "market_gpt_used": True,
+                "market_gpt_fallback_used": False,
                 "risk_flags": ["score_gate"],
             },
             "balance": {"cash": 100000, "account_number": "12345678"},
@@ -299,6 +304,12 @@ def test_v2_gpt_composer_receives_public_projection_only(db_session):
     assert response["intent"] == "analyze"
     assert response["gpt_used"] is True
     assert response["diagnostics"]["gpt_called"] is True
+    assert response["diagnostics"]["parser_status"] == "fallback"
+    assert response["diagnostics"]["intent_parser_status"] == "deterministic_fallback"
+    assert response["diagnostics"]["intent_parser_fallback_used"] is True
+    assert response["diagnostics"]["chat_gpt_fallback_used"] is False
+    assert response["diagnostics"]["market_gpt_fallback_used"] is False
+    assert response["diagnostics"]["market_model"] == "gpt-5.6-luna"
     assert "공개 시장 데이터" in response["answer"]
     assert "cash" not in call_input
     assert "positions" not in call_input
@@ -344,6 +355,7 @@ def test_v2_analyze_returns_structured_scores_without_submit(db_session):
                     "analysis": {
                         "symbol": "005930",
                         "action": "HOLD",
+                        "current_price": 255500,
                         "final_score": 61,
                         "required_score": 65,
                         "confidence": 0.67,
@@ -362,6 +374,8 @@ def test_v2_analyze_returns_structured_scores_without_submit(db_session):
     assert response["status"] == "completed"
     assert response["action"] == "HOLD"
     assert response["scores"]["final_score"] == 61
+    assert response["analysis"]["current_price"] == 255500
+    assert response["data"]["analysis"]["current_price"] == 255500
     assert response["requires_confirmation"] is False
     assert response["safety"]["real_order_submitted"] is False
 
