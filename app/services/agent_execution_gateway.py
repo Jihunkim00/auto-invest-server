@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
+
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 
 from app.db.models import AgentPlan, AgentPlanRun, MarketAnalysis, OrderLog, RuntimeSetting, SignalLog, TradeRunLog
 from app.schemas.agent_command import CommandType
@@ -12,6 +16,7 @@ from app.schemas.agent_execution import AgentExecutionSafetyFlags, AgentPlanRunR
 from app.services.agent_execution_policy_service import AgentExecutionPolicyService, SAFE_SCHEDULE_COMMANDS
 from app.services.agent_plan_run_service import AgentPlanRunService
 from app.services.agent_plan_service import AgentPlanNotFound
+from app.services.kis_single_symbol_analysis_service import KisSingleSymbolAnalysisService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
@@ -25,9 +30,15 @@ class AgentExecutionGateway:
         *,
         policy_service: AgentExecutionPolicyService | None = None,
         run_service: AgentPlanRunService | None = None,
+        kis_client_factory: Callable[[Session], KisClient] | None = None,
+        analysis_service_factory: Callable[[Session], KisSingleSymbolAnalysisService] | None = None,
     ) -> None:
         self.policy_service = policy_service or AgentExecutionPolicyService()
         self.run_service = run_service or AgentPlanRunService()
+        self.kis_client_factory = kis_client_factory or self._default_kis_client
+        self.analysis_service_factory = analysis_service_factory or (
+            lambda db: KisSingleSymbolAnalysisService(self.kis_client_factory(db))
+        )
 
     def run_plan(
         self,
@@ -264,17 +275,35 @@ class AgentExecutionGateway:
         command: dict[str, Any],
     ) -> dict[str, Any]:
         symbol = str(command.get("symbol") or plan.symbol or "").upper() or None
-        query = db.query(MarketAnalysis)
-        if symbol:
-            query = query.filter(MarketAnalysis.symbol == symbol)
-        latest = query.order_by(MarketAnalysis.created_at.desc(), MarketAnalysis.id.desc()).first()
+        market = str(command.get("market") or plan.market or "KR").upper()
+        try:
+            analysis = self.analysis_service_factory(db).analyze(
+                db,
+                symbol=symbol or "",
+                symbol_name=command.get("symbol_name"),
+                market=market,
+                gate_level=command.get("gate_level"),
+            )
+        except Exception as exc:
+            analysis = {
+                "result_type": "analysis_result",
+                "analysis_only": True,
+                "preview_only": True,
+                "symbol": symbol,
+                "action": "hold",
+                "reason": "market_data_unavailable",
+                "risk_flags": ["market_data_unavailable"],
+                "gating_notes": [f"{exc.__class__.__name__}: {str(exc)[:180]}"],
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+            }
         return {
+            **analysis,
             "result_type": "analysis_result",
             "analysis_only": True,
-            "symbol": symbol,
-            "latest_analysis": self._market_analysis_summary(latest) if latest else None,
-            "message": "Analysis plan completed in PR58 safe mode without trading actions.",
             "preview_only": True,
+            "message": "Read-only KIS/quant/market analysis completed. No trading action was called.",
         }
 
     def _watchlist_preview_result(self, db: Session, *, plan: AgentPlan) -> dict[str, Any]:
@@ -414,6 +443,10 @@ class AgentExecutionGateway:
             "result": result,
             "safety": safety.model_dump(mode="json"),
         }
+
+    def _default_kis_client(self, db: Session) -> KisClient:
+        settings = get_settings()
+        return KisClient(settings, KisAuthManager(settings, db))
 
     def _request_payload(self, request: AgentPlanRunRequest | dict[str, Any] | None) -> dict[str, Any]:
         if request is None:

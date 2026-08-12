@@ -58,8 +58,10 @@ class AgentChatOrchestratorService:
         self.result_summarizer = result_summarizer or AgentChatResultSummarizer()
         self.tool_registry = tool_registry or AgentChatToolRegistry()
         self.plan_service = plan_service or AgentPlanService()
-        self.execution_gateway = execution_gateway or AgentExecutionGateway()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
+        self.execution_gateway = execution_gateway or AgentExecutionGateway(
+            kis_client_factory=self.kis_client_factory,
+        )
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
         self.live_order_service = live_order_service or AgentChatLiveOrderService(
             kis_client_factory=self.kis_client_factory,
@@ -252,15 +254,29 @@ class AgentChatOrchestratorService:
                 user_message_id=user_message_id,
                 selected_tools=selected_tools,
             )
+        analysis_categories = {
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
+            AgentChatIntentCategory.EXIT_REVIEW_REQUEST,
+        }
         tool_results = self.tool_executor.execute_many(
             db,
             calls=selected_tools,
             intent=intent,
-        ) if selected_tools else []
+        ) if selected_tools and category not in analysis_categories else []
         self._merge_tool_safety(safety, tool_results)
+        if category in {
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
+            AgentChatIntentCategory.EXIT_REVIEW_REQUEST,
+        }:
+            return self._with_tool_audit(
+                self._analysis_action(db, intent=intent, conversation_key=conversation_key),
+                selected_tools=selected_tools,
+                tool_results=tool_results,
+            )
         if category in {
             AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
             AgentChatIntentCategory.AFFORDABILITY_QUERY,
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
             AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY,
             AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
             AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
@@ -512,7 +528,7 @@ class AgentChatOrchestratorService:
         conversation_key: str,
     ) -> dict[str, Any]:
         safety = self._base_safety(intent)
-        safety.read_only = False
+
         if not intent.symbol:
             return self._action(data={"error": "분석할 종목을 확인할 수 없습니다."}, safety=safety)
         command = self._analysis_command(intent)
@@ -533,12 +549,22 @@ class AgentChatOrchestratorService:
                     trigger_source="agent_chat_orchestrator",
                 ),
             )
+            analysis_result = run.get("result", {}) if isinstance(run, dict) else {}
             return self._action(
-                data={"analysis": run.get("result", {})},
+                data={"analysis": analysis_result},
                 command=command,
                 plan=plan,
                 run=run,
                 safety=safety,
+                result_cards=[
+                    {
+                        "card_type": "analysis",
+                        "title": "Safe Analysis",
+                        "primary_value": str(analysis_result.get("action") or "HOLD").upper(),
+                        "badges": ["SAFE ANALYSIS", "NO ORDER", "NO VALIDATION"],
+                        "data": analysis_result,
+                    }
+                ],
             )
         except Exception as exc:
             return self._action(data={"error": self._safe_error(exc)}, command=command, safety=safety)
@@ -636,6 +662,7 @@ class AgentChatOrchestratorService:
             "market": market,
             "provider": intent.provider or ("kis" if market == "KR" else "alpaca"),
             "symbol": intent.symbol,
+            "symbol_name": intent.symbol_name,
             "side": OrderSide.NONE.value,
             "user_visible_summary": f"{intent.symbol} 분석 plan입니다. 주문은 실행하지 않습니다.",
             "parser_confidence": intent.confidence,
@@ -765,6 +792,7 @@ class AgentChatOrchestratorService:
             AgentChatIntentCategory.CAPABILITY_QUESTION,
             AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
             AgentChatIntentCategory.AFFORDABILITY_QUERY,
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
             AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY,
             AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY,
             AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY,
@@ -817,6 +845,7 @@ class AgentChatOrchestratorService:
             "market": intent.market,
             "provider": intent.provider,
             "symbol": intent.symbol,
+            "symbol_name": intent.symbol_name,
             "side": intent.side,
             "parser_status": intent.parser_status,
             "model_name": intent.model_name,

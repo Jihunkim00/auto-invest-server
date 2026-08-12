@@ -23,6 +23,7 @@ GPT_RISK_CONTEXT_KEYS = (
     "allow_sell_or_exit",
     "gpt_buy_score",
     "gpt_sell_score",
+    "confidence",
     "affected_sectors",
     "risk_flags",
     "gating_notes",
@@ -71,7 +72,7 @@ def build_gpt_context(
             context[key] = _bool_value(payload.get(key), _BOOL_DEFAULTS[key])
         elif key == "entry_penalty":
             context[key] = _int_or_none(payload.get(key))
-        elif key in {"gpt_buy_score", "gpt_sell_score"}:
+        elif key in {"gpt_buy_score", "gpt_sell_score", "confidence"}:
             context[key] = _float_or_none(payload.get(key))
         else:
             context[key] = _string_or_none(payload.get(key))

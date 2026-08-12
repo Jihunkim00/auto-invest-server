@@ -234,9 +234,23 @@ class AgentChatV2Service:
             item.get("tool_name") if isinstance(item, dict) else getattr(item, "tool_name", None)
             for item in selected_tools
         ]
+        legacy_intent = legacy.get("intent") if isinstance(legacy.get("intent"), dict) else {}
+        parser_status = str(legacy_intent.get("parser_status") or getattr(routed, "parser_status", "unknown"))
+        intent_parser_fallback_used = bool(
+            legacy_intent.get("fallback_used")
+            or parser_status in {"fallback", "failed_fallback_used", "privacy_blocked_fallback"}
+        )
+        intent_parser_status = {
+            "fallback": "deterministic_fallback",
+            "failed_fallback_used": "deterministic_fallback_after_gpt_error",
+        }.get(parser_status, parser_status)
+        chat_gpt_fallback_used = bool(compose_diagnostics.get("fallback_used"))
+        market_gpt_fallback_used = bool(analysis.get("market_gpt_fallback_used", False))
         diagnostics = {
             "legacy_category": (legacy.get("intent") or {}).get("category"),
             "parser_status": (legacy.get("intent") or {}).get("parser_status"),
+            "intent_parser_status": intent_parser_status,
+            "intent_parser_fallback_used": intent_parser_fallback_used,
             "preview_created": bool(preview and preview.get("created") is True),
             "intent": intent_name,
             "symbol": symbol,
@@ -246,9 +260,20 @@ class AgentChatV2Service:
             "router_gpt_called": bool(getattr(routed, "router_gpt_called", False)),
             "router_provider": "openai" if getattr(routed, "router_gpt_called", False) else None,
             "router_model": routed.model_name,
+            "chat_model": getattr(self.intent_router, "model_name", None),
+            "chat_reasoning_effort": getattr(self.intent_router, "reasoning_effort", None),
+            "chat_gpt_used": bool(compose_diagnostics.get("gpt_used")),
+            "chat_gpt_fallback_used": chat_gpt_fallback_used,
+            "market_model": analysis.get("market_model"),
+            "market_reasoning_effort": analysis.get("market_reasoning_effort"),
+            "market_gpt_used": bool(analysis.get("market_gpt_used", analysis.get("gpt_used", False))),
+            "market_fallback_used": bool(analysis.get("fallback_used", False)),
+            "market_gpt_fallback_used": market_gpt_fallback_used,
             **compose_diagnostics,
         }
         fallback_used = bool(compose_diagnostics.get("fallback_used"))
+        market_gpt_used = bool(analysis.get("market_gpt_used", analysis.get("gpt_used", False)))
+        market_fallback_used = bool(analysis.get("fallback_used", False))
         return {
             "intent": intent_name,
             "status": status,
@@ -276,6 +301,10 @@ class AgentChatV2Service:
             "data": data,
             "gpt_used": bool(compose_diagnostics.get("gpt_used")),
             "fallback_used": fallback_used,
+            "market_gpt_used": market_gpt_used,
+            "market_fallback_used": market_fallback_used,
+            "chat_gpt_fallback_used": chat_gpt_fallback_used,
+            "market_gpt_fallback_used": market_gpt_fallback_used,
             "trade_action": order_preview if intent_name == "trade_prepare" else None,
             "diagnostics": diagnostics,
         }
@@ -553,22 +582,36 @@ class AgentChatV2Service:
         if not isinstance(raw, dict):
             run = legacy.get("run")
             raw = run.get("result") if isinstance(run, dict) and isinstance(run.get("result"), dict) else {}
-        scores = {
-            key: raw.get(key)
-            for key in ("quant_buy", "ai_buy", "final_buy", "final_score", "required_score")
-            if raw.get(key) is not None
+        raw = dict(raw)
+        intent_payload = legacy.get("intent") if isinstance(legacy.get("intent"), dict) else {}
+        symbol = raw.get("symbol") or intent_payload.get("symbol")
+        action = str(raw.get("action") or raw.get("decision") or "HOLD").upper()
+        score_sources = {
+            "quant_buy": ("quant_buy", "quant_buy_score"),
+            "quant_sell": ("quant_sell", "quant_sell_score"),
+            "ai_buy": ("ai_buy", "gpt_buy_score", "ai_buy_score"),
+            "ai_sell": ("ai_sell", "gpt_sell_score", "ai_sell_score"),
+            "final_buy": ("final_buy", "final_buy_score"),
+            "final_sell": ("final_sell", "final_sell_score"),
+            "final_score": ("final_score", "final_buy_score"),
+            "required_score": ("required_score",),
         }
+        scores: dict[str, Any] = {}
+        for output_key, source_keys in score_sources.items():
+            value = next((raw.get(key) for key in source_keys if raw.get(key) is not None), None)
+            if value is not None:
+                scores[output_key] = value
         risk_flags = raw.get("risk_flags") if isinstance(raw.get("risk_flags"), list) else []
         return {
-            "symbol": raw.get("symbol"),
-            "action": str(raw.get("action") or raw.get("decision") or "HOLD").upper(),
+            **raw,
+            "symbol": symbol,
+            "action": action,
             "scores": scores,
             "confidence": raw.get("confidence"),
             "positive_factors": list(raw.get("positive_factors") or raw.get("positives") or [])[:3],
-            "risk_flags": [str(item) for item in risk_flags[:3]],
-            "gating_notes": list(raw.get("gating_notes") or [])[:3],
+            "risk_flags": [str(item) for item in risk_flags[:5]],
+            "gating_notes": list(raw.get("gating_notes") or [])[:5],
         }
-
     def _risk_payload(self, data: dict[str, Any], legacy: dict[str, Any]) -> dict[str, Any]:
         raw = data.get("risk") if isinstance(data.get("risk"), dict) else {}
         if not raw and isinstance(data.get("readiness"), dict):
