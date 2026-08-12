@@ -154,3 +154,93 @@ def test_rate_limit_no_cache_blocks_live_sell(monkeypatch, db_session):
     # blocked due to rate limit
     assert result["result"] == "blocked"
     assert "kis_rate_limited" in result["block_reasons"] or result["reason"] == "kis_rate_limited"
+
+
+def test_account_bundle_transient_failure_retries_once_and_reports_component():
+    class Client:
+        def __init__(self):
+            self.settings = DummySettings(
+                kis_account_state_cache_ttl_seconds=0.0,
+                kis_account_state_max_attempts=2,
+                kis_account_state_retry_backoff_seconds=0.0,
+            )
+            self.balance_calls = 0
+
+        def _request_balance(self):
+            self.balance_calls += 1
+            if self.balance_calls == 1:
+                raise TimeoutError("temporary timeout")
+            return {
+                "output2": [{"dnca_tot_amt": "1000000", "tot_evlu_amt": "1000000"}],
+                "output1": [],
+            }
+
+        def list_open_orders(self):
+            return []
+
+    state = KisAccountStateCacheService.get_or_create(Client()).get_account_state(
+        require_fresh=True
+    )
+    assert state["fetch_success"] is True
+    assert state["account_state_status"] == "available"
+    assert state["account_state_component_attempts"]["account_aggregation"] == 2
+
+
+def test_open_orders_transient_failure_retries_without_using_partial_state():
+    class Client:
+        def __init__(self):
+            self.settings = DummySettings(
+                kis_account_state_cache_ttl_seconds=0.0,
+                kis_account_state_max_attempts=2,
+                kis_account_state_retry_backoff_seconds=0.0,
+            )
+            self.open_orders_calls = 0
+
+        def _request_balance(self):
+            return {
+                "output2": [{"dnca_tot_amt": "1000000", "tot_evlu_amt": "1000000"}],
+                "output1": [],
+            }
+
+        def list_open_orders(self):
+            self.open_orders_calls += 1
+            if self.open_orders_calls == 1:
+                raise ConnectionError("connection reset")
+            return []
+
+    client = Client()
+    state = KisAccountStateCacheService.get_or_create(client).get_account_state(
+        require_fresh=True
+    )
+    assert state["fetch_success"] is True
+    assert state["account_state_component_attempts"]["open_orders"] == 2
+    assert state["positions"] == []
+    assert state["open_orders"] == []
+
+
+def test_non_retryable_account_error_fails_closed_without_second_attempt():
+    class Client:
+        def __init__(self):
+            self.settings = DummySettings(
+                kis_account_state_cache_ttl_seconds=0.0,
+                kis_account_state_max_attempts=2,
+                kis_account_state_retry_backoff_seconds=0.0,
+            )
+            self.balance_calls = 0
+
+        def _request_balance(self):
+            self.balance_calls += 1
+            raise KisApiError("invalid credentials", details={"msg_cd": "AUTH_INVALID"})
+
+        def list_open_orders(self):
+            return []
+
+    client = Client()
+    state = KisAccountStateCacheService.get_or_create(client).get_account_state(
+        require_fresh=True
+    )
+    assert client.balance_calls == 1
+    assert state["fetch_success"] is False
+    assert state["account_state_status"] == "unavailable"
+    assert state["account_state_failed_component"] == "account_aggregation"
+    assert state["account_state_retryable"] is False

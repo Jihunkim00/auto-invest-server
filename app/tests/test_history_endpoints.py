@@ -500,3 +500,49 @@ def test_logs_summary_returns_latest_items_and_counts(client, db_session):
     assert body["latest_order"]["symbol"] == "AAPL"
     assert body["latest_signal"]["reason"] == "hold_signal"
     assert body["counts"] == {"runs": 1, "orders": 1, "signals": 1}
+
+
+def test_recent_runs_exposes_operation_test4_slot_history(client, db_session):
+    db_session.add(
+        TradeRunLog(
+            run_key="operation_test4_2026-08-13_1130",
+            trigger_source="operation_test4_scheduler",
+            symbol="005930",
+            mode="operation_test4_slot_decision",
+            stage="holding_waiting_next_slot",
+            result="hold",
+            reason="final_score_gate_not_met",
+            response_payload=json.dumps(
+                {
+                    "provider": "kis",
+                    "market": "KR",
+                    "operation_test": "test4",
+                    "slot_history": {
+                        "trade_date_kst": "2026-08-13",
+                        "slot_kst": "11:30",
+                        "candidate_symbol": "005930",
+                        "final_buy_score": 61.5,
+                        "required_entry_score": 65,
+                        "action": "HOLD",
+                        "reason": "final_score_gate_not_met",
+                        "account_state_status": "available",
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                    },
+                }
+            ),
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/runs/recent",
+        params={"trigger_source": "operation_test4_scheduler"},
+    )
+
+    assert response.status_code == 200
+    history = response.json()["items"][0]["slot_history"]
+    assert history["slot_kst"] == "11:30"
+    assert history["candidate_symbol"] == "005930"
+    assert history["final_buy_score"] == 61.5
+    assert history["account_state_status"] == "available"

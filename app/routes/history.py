@@ -173,6 +173,9 @@ def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     request_payload = _parse_json_object(row.request_payload)
     response_payload = _parse_json_object(row.response_payload)
+    slot_history = response_payload.get("slot_history")
+    if not isinstance(slot_history, dict):
+        slot_history = None
     candidate_payload = _payload_candidate(response_payload)
     audit_metadata = candidate_payload.get("audit_metadata")
     if not isinstance(audit_metadata, dict):
@@ -377,6 +380,7 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
             response_payload.get("entry_candidate"),
             request_payload.get("final_best_candidate"),
         ),
+        "slot_history": slot_history,
     }
 
 

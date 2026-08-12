@@ -20,6 +20,7 @@ from app.db.models import (
     OperationTest4EntryReservation,
     OrderLog,
     PositionLifecycle,
+    TradeRunLog,
 )
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_manual_order_service import (
@@ -1825,6 +1826,7 @@ class OperationTest4Service:
                 reason="account_state_unavailable",
                 action=HOLD,
                 slot_label=slot_label,
+                account=self._account_summary(account),
             )
         if account.get("position_count", 0) > 0:
             reason = "position_exists"
@@ -1837,7 +1839,11 @@ class OperationTest4Service:
                 evaluated_slot=slot_label,
             )
             return self._next_session_result(
-                status="ok", reason=reason, action=HOLD, slot_label=slot_label
+                status="ok",
+                reason=reason,
+                action=HOLD,
+                slot_label=slot_label,
+                account=self._account_summary(account),
             )
         if account.get("open_order_count", 0) > 0 or self._local_open_order_count(db) > 0:
             reason = "open_order_exists"
@@ -1850,7 +1856,11 @@ class OperationTest4Service:
                 evaluated_slot=slot_label,
             )
             return self._next_session_result(
-                status="blocked", reason=reason, action=HOLD, slot_label=slot_label
+                status="blocked",
+                reason=reason,
+                action=HOLD,
+                slot_label=slot_label,
+                account=self._account_summary(account),
             )
 
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -2076,6 +2086,171 @@ class OperationTest4Service:
             and watchlist.get("selected_count") == DEFAULT_COUNT
         )
 
+    def _persist_slot_decision_history(
+        self,
+        db: Session,
+        *,
+        result: dict[str, Any],
+        slot_label: str,
+        now: datetime | None,
+    ) -> dict[str, Any]:
+        if slot_label not in ENTRY_SLOTS:
+            return result
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        trade_date = str(
+            result.get("target_trading_date")
+            or runtime.get("operation_test4_target_trading_date")
+            or now_utc.astimezone(KR_TZ).date().isoformat()
+        )
+        history = self._build_slot_history_payload(
+            result=result,
+            trade_date=trade_date,
+            slot_label=slot_label,
+        )
+        run_key = f"operation_test4_{trade_date}_{slot_label.replace(':', '')}"
+        row = (
+            db.query(TradeRunLog)
+            .filter(TradeRunLog.run_key == run_key)
+            .filter(TradeRunLog.trigger_source == "operation_test4_scheduler")
+            .first()
+        )
+        candidate_symbol = str(history.get("candidate_symbol") or "WATCHLIST")
+        response_payload = sanitize_kis_payload(
+            {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "operation_test": OPERATION_TEST,
+                "mode": "operation_test4_slot_decision",
+                "trigger_source": "operation_test4_scheduler",
+                "action": history["action"],
+                "result": history["result"],
+                "reason": history["reason"],
+                "real_order_submitted": history["real_order_submitted"],
+                "broker_submit_called": history["broker_submit_called"],
+                "slot_history": history,
+            }
+        )
+        if row is None:
+            row = TradeRunLog(
+                run_key=run_key,
+                trigger_source="operation_test4_scheduler",
+                symbol=candidate_symbol,
+                mode="operation_test4_slot_decision",
+            )
+            db.add(row)
+        row.symbol = candidate_symbol
+        row.stage = str(history.get("stage") or "completed")[:20]
+        row.result = str(history["result"])[:40]
+        row.reason = str(history["reason"] or "")[:500]
+        row.request_payload = json.dumps(
+            {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "operation_test": OPERATION_TEST,
+                "trigger_source": "operation_test4_scheduler",
+                "trade_date_kst": trade_date,
+                "slot_kst": slot_label,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        row.response_payload = json.dumps(
+            response_payload,
+            ensure_ascii=False,
+            default=str,
+        )
+        db.commit()
+        db.refresh(row)
+        result = dict(result)
+        result["decision_history_id"] = row.id
+        result["decision_history_run_key"] = run_key
+        return result
+
+    def _build_slot_history_payload(
+        self,
+        *,
+        result: dict[str, Any],
+        trade_date: str,
+        slot_label: str,
+    ) -> dict[str, Any]:
+        preflight = result.get("preflight") if isinstance(result.get("preflight"), dict) else {}
+        candidate = preflight.get("candidate") if isinstance(preflight.get("candidate"), dict) else {}
+        account = preflight.get("account") if isinstance(preflight.get("account"), dict) else {}
+        if not account and isinstance(result.get("account"), dict):
+            account = result["account"]
+        action = str(result.get("action") or preflight.get("action") or HOLD)
+        reason = str(
+            result.get("reason")
+            or preflight.get("reason")
+            or (preflight.get("blocking_reasons") or ["candidate_gate_blocked"])[0]
+        )
+        submitted = result.get("real_order_submitted") is True
+        final_result = (
+            "blocked"
+            if result.get("status") == "blocked"
+            else "buy_ready"
+            if action == "BUY_READY"
+            else "hold"
+        )
+        execution = preflight.get("execution") if isinstance(preflight.get("execution"), dict) else {}
+        blocking = preflight.get("blocking_reasons") or []
+        gating_notes = list(candidate.get("gating_notes") or [])
+        gating_notes.extend(str(item) for item in blocking)
+        risk_flags = list(candidate.get("risk_flags") or [])
+        return {
+            "operation_test": OPERATION_TEST,
+            "provider": PROVIDER,
+            "market": MARKET,
+            "trade_date_kst": trade_date,
+            "slot_kst": slot_label,
+            "trigger_source": "operation_test4_scheduler",
+            "run_key": f"operation_test4_{trade_date}_{slot_label.replace(':', '')}",
+            "candidate_symbol": candidate.get("symbol"),
+            "candidate_rank": candidate.get("rank") or candidate.get("candidate_rank"),
+            "candidate_price": candidate.get("current_price") or candidate.get("price"),
+            "candidate_name": candidate.get("name"),
+            "quant_buy_score": candidate.get("quant_buy_score"),
+            "quant_sell_score": candidate.get("quant_sell_score"),
+            "ai_buy_score": candidate.get("ai_buy_score"),
+            "ai_sell_score": candidate.get("ai_sell_score"),
+            "gpt_buy_score": candidate.get("gpt_buy_score") or candidate.get("ai_buy_score"),
+            "gpt_sell_score": candidate.get("gpt_sell_score") or candidate.get("ai_sell_score"),
+            "confidence": candidate.get("confidence") or candidate.get("gpt_confidence"),
+            "final_buy_score": candidate.get("final_buy_score"),
+            "final_sell_score": candidate.get("final_sell_score"),
+            "effective_min_entry_score": candidate.get("effective_min_entry_score")
+            or getattr(get_settings(), "watchlist_min_entry_score", 65),
+            "required_entry_score": candidate.get("required_entry_score")
+            or getattr(get_settings(), "watchlist_min_entry_score", 65),
+            "final_score_gap": candidate.get("final_score_gap") or preflight.get("final_score_gap"),
+            "entry_ready": bool(execution.get("trade_ready") or action == "BUY_READY"),
+            "trade_allowed": bool(execution.get("trade_ready") or action == "BUY_READY"),
+            "should_trade": bool(execution.get("trade_ready") or action == "BUY_READY"),
+            "action": action,
+            "result": final_result,
+            "reason": reason,
+            "block_reason": reason if final_result == "blocked" or action == HOLD else None,
+            "risk_flags": _dedupe([str(item) for item in risk_flags]),
+            "gating_notes": _dedupe([str(item) for item in gating_notes]),
+            "hard_block": bool(candidate.get("hard_block") or candidate.get("hard_block_reason")),
+            "stage": result.get("stage") or result.get("last_stage") or (
+                "buy_submitted" if submitted else "blocked" if final_result == "blocked" else "holding_waiting_next_slot"
+            ),
+            "account_state_status": account.get("account_state_status", "unavailable"),
+            "account_state_failed_component": account.get("account_state_failed_component"),
+            "account_state_attempt_count": account.get("account_state_attempt_count", 0),
+            "account_state_retryable": account.get("account_state_retryable", False),
+            "account_state_error_category": account.get("account_state_error_category"),
+            "account_state_error_code": account.get("account_state_error_code"),
+            "account_state_http_status": account.get("account_state_http_status"),
+            "account_state_last_checked_at": account.get("account_state_last_checked_at"),
+            "real_order_submitted": submitted,
+            "broker_submit_called": result.get("broker_submit_called") is True,
+            "order_id": result.get("order_id"),
+            "broker_order_id": result.get("broker_order_id"),
+        }
+
     def _record_next_session_state(
         self,
         db: Session,
@@ -2201,9 +2376,16 @@ class OperationTest4Service:
             cycle = self._active_cycle(db)
             if cycle is not None:
                 return self.run_active_cycle_once(db, now=now)
-            return self._run_next_session_scheduler_once(
+            result = self._run_next_session_scheduler_once(
                 db, slot_label=slot_label, now=now
             )
+            with _ENTRY_SUBMIT_LOCK:
+                return self._persist_slot_decision_history(
+                    db,
+                    result=result,
+                    slot_label=slot_label,
+                    now=now,
+                )
         cycle = self._active_cycle(db)
         if cycle is not None:
             return self.run_active_cycle_once(db, now=now)
@@ -3150,12 +3332,32 @@ class OperationTest4Service:
         if self.account_state_provider is not None:
             try:
                 result = self.account_state_provider()
-                return _normalize_account_state(result)
+                normalized = _normalize_account_state(result)
             except TypeError:
                 result = self.account_state_provider(self.client)
-                return _normalize_account_state(result)
+                normalized = _normalize_account_state(result)
             except Exception as exc:
                 return _account_error(exc)
+            if require_fresh and normalized.get("account_state_live_verified") is not True:
+                blocked = _account_error(RuntimeError("account_state_stale_not_safe_for_live"))
+                blocked.update(
+                    {
+                        key: normalized.get(key)
+                        for key in (
+                            "account_state_status",
+                            "account_state_failed_component",
+                            "account_state_attempt_count",
+                            "account_state_retryable",
+                            "account_state_error_category",
+                            "account_state_error_code",
+                            "account_state_http_status",
+                            "account_state_last_checked_at",
+                            "account_state_component_attempts",
+                        )
+                    }
+                )
+                return blocked
+            return normalized
         cache = KisAccountStateCacheService.get_or_create(self.client)
         state = cache.get_account_state(
             read_only=True,
@@ -3166,8 +3368,44 @@ class OperationTest4Service:
             fallback["warnings"] = list(state.get("warnings") or [])
             fallback["rate_limited"] = bool(state.get("rate_limited"))
             fallback["error_details"] = state.get("error_details") or {}
+            fallback.update(
+                {
+                    key: state.get(key)
+                    for key in (
+                        "account_state_status",
+                        "account_state_failed_component",
+                        "account_state_attempt_count",
+                        "account_state_retryable",
+                        "account_state_error_category",
+                        "account_state_error_code",
+                        "account_state_http_status",
+                        "account_state_last_checked_at",
+                        "account_state_component_attempts",
+                    )
+                }
+            )
             return fallback
-        return _normalize_account_state(state)
+        normalized = _normalize_account_state(state)
+        if require_fresh and normalized.get("account_state_live_verified") is not True:
+            blocked = _account_error(RuntimeError("account_state_stale_not_safe_for_live"))
+            blocked.update(
+                {
+                    key: normalized.get(key)
+                    for key in (
+                        "account_state_status",
+                        "account_state_failed_component",
+                        "account_state_attempt_count",
+                        "account_state_retryable",
+                        "account_state_error_category",
+                        "account_state_error_code",
+                        "account_state_http_status",
+                        "account_state_last_checked_at",
+                        "account_state_component_attempts",
+                    )
+                }
+            )
+            return blocked
+        return normalized
 
     def _load_watchlist(
         self,
@@ -3251,6 +3489,16 @@ class OperationTest4Service:
             "open_order_count": account.get("open_order_count", 0),
             "fetch_success": account.get("fetch_success") is True,
             "warnings": account.get("warnings", []),
+            "account_state_status": account.get("account_state_status", "unavailable"),
+            "account_state_failed_component": account.get("account_state_failed_component"),
+            "account_state_attempt_count": account.get("account_state_attempt_count", 0),
+            "account_state_retryable": account.get("account_state_retryable", False),
+            "account_state_error_category": account.get("account_state_error_category"),
+            "account_state_error_code": account.get("account_state_error_code"),
+            "account_state_http_status": account.get("account_state_http_status"),
+            "account_state_last_checked_at": account.get("account_state_last_checked_at"),
+            "account_state_component_attempts": account.get("account_state_component_attempts") or {},
+            "account_state_live_verified": account.get("account_state_live_verified") is True,
         }
 
     def _blocked_enable(self, reason: str) -> dict[str, Any]:
@@ -3499,6 +3747,22 @@ def _normalize_account_state(value: Any) -> dict[str, Any]:
         "position_count": len(held_positions),
         "open_order_count": len(open_orders),
         "warnings": payload.get("warnings") or [],
+        "account_state_live_verified": payload.get(
+            "account_state_live_verified",
+            payload.get("fetch_success") is True,
+        ),
+        "account_state_status": payload.get(
+            "account_state_status",
+            "available" if payload.get("fetch_success") is True else "unavailable",
+        ),
+        "account_state_failed_component": payload.get("account_state_failed_component"),
+        "account_state_attempt_count": payload.get("account_state_attempt_count", 0),
+        "account_state_retryable": payload.get("account_state_retryable", False),
+        "account_state_error_category": payload.get("account_state_error_category"),
+        "account_state_error_code": payload.get("account_state_error_code"),
+        "account_state_http_status": payload.get("account_state_http_status"),
+        "account_state_last_checked_at": payload.get("account_state_last_checked_at"),
+        "account_state_component_attempts": payload.get("account_state_component_attempts") or {},
     }
 
 def _account_error(exc: Exception) -> dict[str, Any]:
@@ -3512,6 +3776,16 @@ def _account_error(exc: Exception) -> dict[str, Any]:
         "position_count": 0,
         "open_order_count": 0,
         "warnings": [f"account_state_unavailable:{exc.__class__.__name__}"],
+        "account_state_live_verified": False,
+        "account_state_status": "unavailable",
+        "account_state_failed_component": "unknown",
+        "account_state_attempt_count": 0,
+        "account_state_retryable": False,
+        "account_state_error_category": "unknown",
+        "account_state_error_code": exc.__class__.__name__,
+        "account_state_http_status": None,
+        "account_state_last_checked_at": datetime.now(UTC).isoformat(),
+        "account_state_component_attempts": {},
     }
 
 

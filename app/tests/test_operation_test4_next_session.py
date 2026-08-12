@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import json
 from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
@@ -10,7 +11,13 @@ from app.db.database import get_db
 from app.main import app
 from app.routes.operation_test4 import get_operation_test4_service
 from app.services.operation_test4_service import HOLD
-from app.db.models import OperationTest4Cycle, OperationTest4EntryReservation, OrderLog, PositionLifecycle
+from app.db.models import (
+    OperationTest4Cycle,
+    OperationTest4EntryReservation,
+    OrderLog,
+    PositionLifecycle,
+    TradeRunLog,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.tests.test_operation_test4_entry import FakeManualOrderService, NOW, candidate_provider, make_service
 
@@ -224,6 +231,53 @@ def test_next_session_duplicate_tick_does_not_submit_again(db_session, tmp_path)
     assert second["result"] == "reconciled"
     assert len(manual.calls) == 1
     assert db_session.query(OperationTest4EntryReservation).count() == 1
+
+
+def test_next_session_persists_each_slot_decision_for_history(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    service.arm_next_session(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 NEXT SESSION",
+        now=NOW,
+    )
+    service._load_watchlist = _fresh_watchlist
+    service.candidate_provider = lambda **kwargs: {
+        "final_ranked_candidates": [
+            {
+                "symbol": "000001",
+                "name": "Test",
+                "current_price": 20_000,
+                "final_buy_score": 50,
+                "block_reasons": [],
+                "risk_flags": ["weak_momentum"],
+            }
+        ],
+        "final_score_gap": 1,
+        "configured_symbol_count": 50,
+        "analyzed_symbol_count": 50,
+    }
+
+    for hour, minute in ((9, 35), (11, 30), (13, 30)):
+        result = service.run_scheduler_once(
+            db_session,
+            slot_label=f"{hour:02d}:{minute:02d}",
+            now=_target_now(hour, minute),
+        )
+        assert result["real_order_submitted"] is False
+
+    rows = (
+        db_session.query(TradeRunLog)
+        .filter(TradeRunLog.trigger_source == "operation_test4_scheduler")
+        .order_by(TradeRunLog.run_key.asc())
+        .all()
+    )
+    assert len(rows) == 3
+    histories = [json.loads(row.response_payload)["slot_history"] for row in rows]
+    assert [item["slot_kst"] for item in histories] == ["09:35", "11:30", "13:30"]
+    assert all(item["action"] == "HOLD" for item in histories)
+    assert all(item["candidate_symbol"] == "000001" for item in histories)
+    assert all(item["real_order_submitted"] is False for item in histories)
 
 
 def test_next_session_filled_buy_promotes_to_position_lifecycle(db_session, tmp_path):
