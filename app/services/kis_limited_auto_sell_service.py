@@ -193,6 +193,49 @@ class KisLimitedAutoSellService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         context = self._context(db, now=now)
+        pre_account_blocks = _run_pre_account_block_reasons(context)
+        if pre_account_blocks:
+            pre_account_mode = (
+                TAKE_PROFIT_RUN_MODE if context.take_profit_enabled else RUN_MODE
+            )
+            pre_account_source_type = (
+                TAKE_PROFIT_RUN_SOURCE_TYPE
+                if context.take_profit_enabled
+                else RUN_SOURCE_TYPE
+            )
+            payload = self._decision_payload(
+                db,
+                context=context,
+                mode=pre_account_mode,
+                source_type=pre_account_source_type,
+                result="blocked",
+                action="hold",
+                reason=pre_account_blocks[0],
+                account_state={},
+                candidates=[],
+                final_candidate=None,
+                block_reasons=pre_account_blocks,
+                read_only=False,
+            )
+            signal = self._record_signal(
+                db,
+                payload=payload,
+                candidate=None,
+                source_type=pre_account_source_type,
+            )
+            run = self._record_run(
+                db,
+                payload=payload,
+                candidate=None,
+                mode=pre_account_mode,
+                source_type=pre_account_source_type,
+                signal_id=signal.id,
+                order_id=None,
+            )
+            payload["signal_id"] = signal.id
+            payload["run"] = _serialize_run(run)
+            return sanitize_kis_payload(payload)
+
         # For live run, prefer fresh account state to avoid trading on stale data
         account_state = self._fetch_account_state(db, read_only=False)
         candidates = self._evaluate_candidates(
@@ -552,7 +595,13 @@ class KisLimitedAutoSellService:
         final_candidate: _AutoSellCandidate | None,
     ) -> list[str]:
         reasons: list[str] = []
-        if account_state.get("fetch_success") is not True:
+        account_state_is_live_verified = account_state.get("account_state_live_verified")
+        account_state_is_stale = account_state.get("account_state_status") == "stale"
+        if (
+            account_state.get("fetch_success") is not True
+            or account_state_is_live_verified is False
+            or account_state_is_stale
+        ):
             if account_state.get("rate_limited"):
                 reasons.append("kis_rate_limited")
             else:
@@ -1057,7 +1106,15 @@ class KisLimitedAutoSellService:
                 "validation_summary": _validation_summary(validation_payload),
             }
         validation_status = _validation_status(validation_payload, read_only=read_only)
-        payload_source = _payload_source(final_candidate)
+        payload_source = (
+            _payload_source(final_candidate)
+            if final_candidate is not None
+            else (
+                TAKE_PROFIT_SOURCE
+                if source_type == TAKE_PROFIT_RUN_SOURCE_TYPE
+                else SOURCE
+            )
+        )
         payload_source_type = _payload_source_type(source_type, final_candidate)
         payload: dict[str, Any] = {
             "status": "ok",
@@ -1633,7 +1690,15 @@ def _take_profit_candidate_actionable(
 
 
 def _run_pre_account_block_reasons(context: _Context) -> list[str]:
-    return _status_block_reasons(context)
+    # Stop-loss and take-profit have candidate-specific feature gates. Keep
+    # those checks after account-state evaluation so a disabled take-profit
+    # path does not mask a valid stop-loss candidate (or account-state error).
+    return _common_runtime_block_reasons(
+        context,
+        dry_run_reason=(
+            "dry_run_enabled" if context.take_profit_enabled else "dry_run_true"
+        ),
+    )
 
 
 def _daily_limit_block_reason(daily_limit: dict[str, Any]) -> str | None:

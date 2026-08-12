@@ -8,6 +8,7 @@ import pytest
 
 from app.brokers.kis_client import KisClient
 from app.brokers.base import KisApiError
+from app.db.models import RuntimeSetting
 from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 
 
@@ -134,7 +135,12 @@ def test_rate_limit_no_cache_blocks_live_sell(monkeypatch, db_session):
     # Client that always rate limits
     class RLClient:
         def __init__(self):
-            self.settings = DummySettings(kis_account_state_cache_ttl_seconds=2.0, kis_account_state_max_stale_seconds=5.0)
+            self.settings = DummySettings(
+                kis_account_state_cache_ttl_seconds=2.0,
+                kis_account_state_max_stale_seconds=5.0,
+                kis_enabled=True,
+                kis_real_order_enabled=True,
+            )
 
         def _request_balance(self):
             raise KisApiError("rate limited", details={"kis_rate_limited": True})
@@ -148,7 +154,31 @@ def test_rate_limit_no_cache_blocks_live_sell(monkeypatch, db_session):
     from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 
     client = RLClient()
-    service = KisLimitedAutoSellService(client, session_service=None)
+    db_session.add(
+        RuntimeSetting(
+            dry_run=False,
+            kill_switch=False,
+            kis_live_auto_sell_enabled=True,
+            kis_live_auto_buy_enabled=False,
+            kis_limited_auto_sell_stop_loss_enabled=True,
+        )
+    )
+    db_session.commit()
+
+    class OpenSessionService:
+        def get_session_status(self, market, **kwargs):
+            return {
+                "market": market,
+                "is_market_open": True,
+                "is_entry_allowed_now": True,
+                "is_holiday": False,
+                "closure_reason": None,
+            }
+
+    service = KisLimitedAutoSellService(
+        client,
+        session_service=OpenSessionService(),
+    )
     # run_once should handle rate limit and block
     result = service.run_once(db_session)
     # blocked due to rate limit

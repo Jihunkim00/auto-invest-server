@@ -73,13 +73,13 @@ class _FakeClient:
 
     def _request_balance(self):
         return {
-            "output2": {
+            "output2": [{
                 "dnca_tot_amt": self.balance.get("cash"),
                 "nass_amt": self.balance.get("total_asset_value"),
                 "tot_asst_amt": self.balance.get("total_asset_value"),
                 "cash": self.balance.get("cash"),
                 "scts_evlu_amt": self.balance.get("stock_evaluation_amount", 0),
-            },
+            }],
             "output1": [
                 {
                     "hldg_qty": pos.get("qty"),
@@ -385,6 +385,100 @@ def test_run_once_runtime_gates_block_without_submit(
     assert result["broker_submit_called"] is False
     assert result["manual_submit_called"] is False
     assert db_session.query(OrderLog).count() == 0
+
+
+def test_run_once_kill_switch_blocks_before_account_state_fetch(monkeypatch, db_session):
+    _enable_runtime(db_session, kill_switch=True)
+    fetch_calls = []
+
+    class FailIfFetched:
+        def get_account_state(self, **kwargs):
+            fetch_calls.append(kwargs)
+            pytest.fail("kill switch must block before account-state fetch")
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FailIfFetched(),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "kill_switch_enabled"
+    assert fetch_calls == []
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+
+
+def test_run_once_dry_run_blocks_before_account_state_fetch(monkeypatch, db_session):
+    _enable_runtime(db_session, dry_run=True)
+    fetch_calls = []
+
+    class FailIfFetched:
+        def get_account_state(self, **kwargs):
+            fetch_calls.append(kwargs)
+            pytest.fail("dry run must block before account-state fetch")
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: FailIfFetched(),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "dry_run_true"
+    assert fetch_calls == []
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
+
+
+def test_run_once_broker_account_state_unavailable_fails_closed(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(db_session)
+    fetch_calls = []
+    validation_calls = []
+    manual_submit_calls = []
+
+    class UnavailableAccountState:
+        def get_account_state(self, **kwargs):
+            fetch_calls.append(kwargs)
+            return {
+                "fetch_success": False,
+                "rate_limited": False,
+                "warnings": ["account_state_unavailable:account_aggregation"],
+                "positions": [],
+                "open_orders": [],
+            }
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisAccountStateCacheService.get_or_create",
+        lambda client: UnavailableAccountState(),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_sell_service.KisOrderValidationService.validate",
+        lambda *args, **kwargs: validation_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "app.services.kis_manual_order_service.KisManualOrderService.submit_manual",
+        lambda *args, **kwargs: manual_submit_calls.append((args, kwargs)),
+    )
+
+    result = _service().run_once(db_session)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "broker_account_state_unavailable"
+    assert "broker_account_state_unavailable" in result["block_reasons"]
+    assert len(fetch_calls) == 1
+    assert validation_calls == []
+    assert manual_submit_calls == []
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["manual_submit_called"] is False
 
 
 def test_run_once_kill_switch_blocks(db_session):
