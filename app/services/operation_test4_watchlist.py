@@ -9,13 +9,18 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-from app.services.operation_test4_universe import load_operation_test4_universe
+from app.services.operation_test4_universe import (
+    SUPPORTED_MARKETS,
+    load_operation_test4_universe,
+)
 
 
 DEFAULT_COUNT = 50
 DEFAULT_PRICE_CAP_KRW = 1_000_000.0
 DEFAULT_SOURCE = Path("config/watchlist_kr_test4_universe.yaml")
 KR_TZ = ZoneInfo("Asia/Seoul")
+DEFAULT_MARKET_QUOTAS = {"KOSPI": 40, "KOSDAQ": 10}
+MARKET_ORDER = ("KOSPI", "KOSDAQ")
 
 
 class OperationTest4WatchlistError(ValueError):
@@ -44,7 +49,12 @@ def load_source_symbols(
             continue
         if path.name == DEFAULT_SOURCE.name:
             try:
-                universe = load_operation_test4_universe(path, minimum_count=count)
+                universe = load_operation_test4_universe(
+                    path,
+                    minimum_count=count,
+                    maximum_count=200,
+                    expected_market_counts={"KOSPI": 150, "KOSDAQ": 50},
+                )
             except ValueError as exc:
                 raise OperationTest4WatchlistError(
                     f"invalid Test4 source universe: {exc}"
@@ -175,6 +185,10 @@ def build_operation_test4_watchlist(
             exclusions.append({"symbol": symbol, "reasons": ["duplicate_symbol"]})
             continue
         seen.add(symbol)
+        market = str(item.get("market") or "").strip().upper()
+        if market not in SUPPORTED_MARKETS:
+            exclusions.append({"symbol": symbol, "reasons": ["unsupported_market"]})
+            continue
         quote_checked_count += 1
         try:
             quote = client.get_domestic_stock_price(symbol)
@@ -205,7 +219,7 @@ def build_operation_test4_watchlist(
                     item.get("source_name") or item.get("name") or ""
                 ),
                 "source": str(item.get("source") or source_info.get("source_universe_file") or ""),
-                "market": str(item.get("market") or "KR"),
+                "market": market,
             }
         )
 
@@ -235,7 +249,29 @@ def build_operation_test4_watchlist(
             details=details,
         )
 
-    selected = eligible[:count]
+    market_quotas = _market_quotas(count)
+    selected, selected_market_counts, market_quota_fallback = _select_by_market(
+        eligible,
+        count=count,
+        market_quotas=market_quotas,
+    )
+    if len(selected) < count:
+        details = {
+            "source_universe_count": len(source_symbols),
+            "quote_checked_count": quote_checked_count,
+            "eligible_count": len(eligible),
+            "selected_count": 0,
+            "reserve_eligible_count": 0,
+            "excluded_count": len(exclusions),
+            "exclusion_reasons": {},
+            "exclusion_symbols": [item.get("symbol") for item in exclusions],
+            "eligible_market_counts": _market_counts(eligible),
+        }
+        raise OperationTest4WatchlistError(
+            "eligible candidate count is below requested market quota count: "
+            f"requested={count}, selected={len(selected)}",
+            details=details,
+        )
     reserve_eligible_count = max(0, len(eligible) - count)
     generated_at = (now or datetime.now(UTC)).astimezone(UTC).isoformat()
     reason_counts: dict[str, int] = {}
@@ -259,6 +295,10 @@ def build_operation_test4_watchlist(
         "reserve_eligible_count": reserve_eligible_count,
         "excluded_count": len(exclusions),
         "exclusion_reasons": reason_counts,
+        "market_quotas": market_quotas,
+        "eligible_market_counts": _market_counts(eligible),
+        "selected_market_counts": selected_market_counts,
+        "market_quota_fallback": market_quota_fallback,
         "selected_symbols": [item["symbol"] for item in selected],
         "symbols": selected,
     }
@@ -302,10 +342,15 @@ def load_operation_test4_watchlist(
         symbol = str(row.get("symbol") or "").strip()
         if not re.fullmatch(r"\d{6}", symbol):
             raise OperationTest4WatchlistError(f"invalid KR symbol: {symbol}")
+        market = str(row.get("market") or "").strip().upper()
+        if market not in SUPPORTED_MARKETS:
+            raise OperationTest4WatchlistError(
+                f"invalid Test4 market for {symbol}: {market or '<missing>'}"
+            )
         if symbol in seen:
             raise OperationTest4WatchlistError(f"duplicate KR symbol: {symbol}")
         seen.add(symbol)
-        normalized.append({**row, "symbol": symbol})
+        normalized.append({**row, "symbol": symbol, "market": market})
     if len(normalized) != count:
         raise OperationTest4WatchlistError(
             f"watchlist count mismatch: expected={count}, actual={len(normalized)}"
@@ -359,6 +404,58 @@ def _read_symbols(path: Path) -> list[dict[str, Any]]:
         seen.add(symbol)
         normalized.append({**row, "symbol": symbol})
     return normalized
+
+
+def _market_quotas(count: int) -> dict[str, int]:
+    """Keep the Test4 40/10 target while preserving custom-count callers."""
+    if count == DEFAULT_COUNT:
+        return dict(DEFAULT_MARKET_QUOTAS)
+    kospi = min(DEFAULT_MARKET_QUOTAS["KOSPI"], count)
+    kosdaq = min(DEFAULT_MARKET_QUOTAS["KOSDAQ"], max(0, count - kospi))
+    if kospi + kosdaq < count:
+        kospi += count - kospi - kosdaq
+    return {"KOSPI": kospi, "KOSDAQ": kosdaq}
+
+
+def _market_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        market: sum(str(row.get("market") or "").upper() == market for row in rows)
+        for market in MARKET_ORDER
+    }
+
+
+def _select_by_market(
+    eligible: list[dict[str, Any]],
+    *,
+    count: int,
+    market_quotas: dict[str, int],
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, int]]:
+    buckets = {market: [] for market in MARKET_ORDER}
+    for row in eligible:
+        buckets[row["market"]].append(row)
+
+    selected: list[dict[str, Any]] = []
+    taken = {market: 0 for market in MARKET_ORDER}
+    for market in MARKET_ORDER:
+        take = min(market_quotas[market], len(buckets[market]))
+        selected.extend(buckets[market][:take])
+        taken[market] = take
+
+    fallback: dict[str, int] = {}
+    shortage = count - len(selected)
+    if shortage > 0:
+        for market in MARKET_ORDER:
+            remaining = buckets[market][taken[market] :]
+            take = min(shortage, len(remaining))
+            if take:
+                selected.extend(remaining[:take])
+                taken[market] += take
+                fallback[market] = take
+                shortage -= take
+            if shortage == 0:
+                break
+
+    return selected, dict(taken), fallback
 
 
 def _first_number(payload: dict[str, Any], *keys: str) -> float | None:

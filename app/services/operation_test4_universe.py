@@ -9,11 +9,12 @@ from typing import Any
 import yaml
 
 
-DEFAULT_MINIMUM_COUNT = 70
-DEFAULT_MAXIMUM_COUNT = 100
+DEFAULT_MINIMUM_COUNT = 180
+DEFAULT_MAXIMUM_COUNT = 200
 UNIVERSE_MARKET = "KR"
 UNIVERSE_PROVIDER = "kis"
 UNIVERSE_PURPOSE = "operation_test4"
+SUPPORTED_MARKETS = frozenset({"KOSPI", "KOSDAQ"})
 
 
 class OperationTest4UniverseError(ValueError):
@@ -109,6 +110,7 @@ def load_operation_test4_universe(
     *,
     minimum_count: int = DEFAULT_MINIMUM_COUNT,
     maximum_count: int = DEFAULT_MAXIMUM_COUNT,
+    expected_market_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     if not path.exists():
         raise OperationTest4UniverseError(f"universe is missing: {path}")
@@ -126,8 +128,10 @@ def load_operation_test4_universe(
     seen: set[str] = set()
     for row in rows:
         normalized_row = _normalize_row(row, source_name=str(row.get("source") or "universe")) if isinstance(row, dict) else None
-        if normalized_row is None:
-            raise OperationTest4UniverseError("universe contains an invalid symbol")
+        if normalized_row is None or normalized_row["market"] not in SUPPORTED_MARKETS:
+            raise OperationTest4UniverseError(
+                "universe contains an invalid symbol or unsupported market"
+            )
         if normalized_row["symbol"] in seen:
             raise OperationTest4UniverseError(
                 f"universe contains duplicate symbol: {normalized_row['symbol']}"
@@ -138,6 +142,25 @@ def load_operation_test4_universe(
         raise OperationTest4UniverseError(
             f"universe count must be between {minimum_count} and {maximum_count}: {len(normalized)}"
         )
+    configured_count = payload.get("configured_count")
+    if configured_count is not None and configured_count != len(normalized):
+        raise OperationTest4UniverseError(
+            "universe configured_count does not match symbols count"
+        )
+    if expected_market_counts is not None:
+        actual_market_counts = {
+            market: sum(row["market"] == market for row in normalized)
+            for market in SUPPORTED_MARKETS
+        }
+        expected = {
+            market: int(expected_market_counts.get(market, 0))
+            for market in SUPPORTED_MARKETS
+        }
+        if actual_market_counts != expected:
+            raise OperationTest4UniverseError(
+                "universe market counts mismatch: "
+                f"expected={expected}, actual={actual_market_counts}"
+            )
     return {**payload, "symbols": normalized, "count": len(normalized)}
 
 
@@ -255,6 +278,9 @@ def _normalize_row(row: dict[str, Any], *, source_name: str) -> dict[str, Any] |
     if raw_symbol.isdigit():
         raw_symbol = raw_symbol.zfill(6)
     if not re.fullmatch(r"\d{6}", raw_symbol):
+        return None
+    market = str(row.get("market") or "").strip().upper()
+    if market not in SUPPORTED_MARKETS:
         return None
     name = str(row.get("name") or row.get("source_name") or "").strip()
     return {

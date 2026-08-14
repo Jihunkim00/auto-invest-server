@@ -20,6 +20,22 @@ class FakeQuoteClient:
         return self.quotes[symbol]
 
 
+def _market_source(path: Path, kospi_count: int, kosdaq_count: int) -> Path:
+    rows = []
+    index = 1
+    for market, total in (("KOSPI", kospi_count), ("KOSDAQ", kosdaq_count)):
+        for _ in range(total):
+            rows.append(
+                f"- symbol: '{index:06d}'\n  name: Name {index}\n  market: {market}"
+            )
+            index += 1
+    path.write_text(
+        "market: KR\nsymbols:\n" + "\n".join(rows) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _source(path: Path, count: int = 50) -> Path:
     rows = [
         f"- symbol: '{index:06d}'\n  name: Name {index}\n  market: KOSPI"
@@ -134,6 +150,51 @@ def test_watchlist_builder_reports_remaining_eligible_reserve(tmp_path):
     assert result["selected_count"] == 50
     assert result["reserve_eligible_count"] == 10
     assert result["selected_symbols"][-1] == "000050"
+
+
+def test_watchlist_builder_uses_40_kospi_10_kosdaq_quota_in_source_order(tmp_path):
+    source = _market_source(tmp_path / "universe.yaml", kospi_count=45, kosdaq_count=15)
+    quotes = {
+        f"{index:06d}": {"current_price": 10_000}
+        for index in range(1, 61)
+    }
+
+    result = build_operation_test4_watchlist(
+        root=tmp_path,
+        source_path=source,
+        output_path=tmp_path / "watchlist.yaml",
+        client=FakeQuoteClient(quotes),
+    )
+
+    assert result["market_quotas"] == {"KOSPI": 40, "KOSDAQ": 10}
+    assert result["eligible_market_counts"] == {"KOSPI": 45, "KOSDAQ": 15}
+    assert result["selected_market_counts"] == {"KOSPI": 40, "KOSDAQ": 10}
+    assert result["market_quota_fallback"] == {}
+    assert result["selected_symbols"] == [
+        *(f"{index:06d}" for index in range(1, 41)),
+        *(f"{index:06d}" for index in range(46, 56)),
+    ]
+
+
+def test_watchlist_builder_fills_market_shortage_from_other_market(tmp_path):
+    source = _market_source(tmp_path / "universe.yaml", kospi_count=42, kosdaq_count=8)
+    quotes = {
+        f"{index:06d}": {"current_price": 10_000}
+        for index in range(1, 51)
+    }
+
+    result = build_operation_test4_watchlist(
+        root=tmp_path,
+        source_path=source,
+        output_path=tmp_path / "watchlist.yaml",
+        client=FakeQuoteClient(quotes),
+    )
+
+    assert result["configured_count"] == 50
+    assert result["selected_market_counts"] == {"KOSPI": 42, "KOSDAQ": 8}
+    assert result["market_quota_fallback"] == {"KOSPI": 2}
+    assert len(result["selected_symbols"]) == 50
+    assert len(set(result["selected_symbols"])) == 50
 
 
 def test_watchlist_builder_fails_when_80_universe_has_only_44_eligible(tmp_path):

@@ -1,590 +1,1221 @@
 market: KR
 provider: kis
 purpose: operation_test4
-generated_at: '2026-08-07T03:35:21.231677+00:00'
-minimum_count: 70
-maximum_count: 100
-configured_count: 100
+generated_at: '2026-08-14T00:00:00+00:00'
+minimum_count: 180
+maximum_count: 200
+configured_count: 200
 source_counts:
-  local_watchlist_kr_base50: 50
-  historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6: 5
-  historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f: 3
-  historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e: 19
-  historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc: 7
-  historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30: 16
+  market_cap_kospi_top_150: 150
+  market_cap_kosdaq_top_50: 50
 source_candidate_counts:
-  local_watchlist_kr_base50: 50
-  historical_default_watchlist:5a4abc652878b0f4fcba5b50905a8754a77a437d: 50
-  historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6: 5
-  historical_default_watchlist:16d7349746c18ab17551f49e02af7cfe8a7c6338: 50
-  historical_default_watchlist:6ca19b52c02719c9e9ba747b15a8bdf7a245b8cf: 2
-  historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f: 50
-  historical_default_watchlist:c03aa52fa20868ccf255b206bbe98ff4363f4d16: 50
-  historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e: 50
-  historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc: 30
-  historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30: 50
+  market_cap_kospi_top_150: 150
+  market_cap_kosdaq_top_50: 50
 sources:
-- source: local_watchlist_kr_base50
+- source: market_cap_kospi_top_150
+  candidate_count: 150
+  contributed_count: 150
+- source: market_cap_kosdaq_top_50
   candidate_count: 50
   contributed_count: 50
-- source: historical_default_watchlist:5a4abc652878b0f4fcba5b50905a8754a77a437d
-  candidate_count: 50
-  contributed_count: 0
-- source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  candidate_count: 5
-  contributed_count: 5
-- source: historical_default_watchlist:16d7349746c18ab17551f49e02af7cfe8a7c6338
-  candidate_count: 50
-  contributed_count: 0
-- source: historical_default_watchlist:6ca19b52c02719c9e9ba747b15a8bdf7a245b8cf
-  candidate_count: 2
-  contributed_count: 0
-- source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
-  candidate_count: 50
-  contributed_count: 3
-- source: historical_default_watchlist:c03aa52fa20868ccf255b206bbe98ff4363f4d16
-  candidate_count: 50
-  contributed_count: 0
-- source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  candidate_count: 50
-  contributed_count: 19
-- source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
-  candidate_count: 30
-  contributed_count: 7
-- source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
-  candidate_count: 50
-  contributed_count: 16
-- source: historical_default_watchlist:6657afa16a67e8220b6e14c1eebd13c7548ff2e3
-  candidate_count: 0
-  contributed_count: 0
-- source: historical_default_watchlist:b28a6fcc45597de8aca84b791da8143fe919ee3d
-  candidate_count: 0
-  contributed_count: 0
-- source: historical_default_watchlist:1860fb59a0cf60e15b9d71b26b82899e619dd63b
-  candidate_count: 0
-  contributed_count: 0
-- source: historical_default_watchlist:6f4a06ee689db8322b15999bd43154772c34c833
-  candidate_count: 0
-  contributed_count: 0
-- source: historical_default_watchlist:6dad6378bcdf3b4eee7c3e675d8858a426223a12
-  candidate_count: 0
-  contributed_count: 0
-- source: operational_watchlist:watchlist_kr.operation-test.current.yaml
-  candidate_count: 0
-  contributed_count: 0
-- source: repository_watchlist:watchlist_kr.yaml
-  candidate_count: 0
-  contributed_count: 0
-- source: repository_watchlist:watchlist_kr.backup.20260522_181854.yaml
-  candidate_count: 0
-  contributed_count: 0
-- source: repository_watchlist:watchlist_kr.backup.20260605_122737.yaml
-  candidate_count: 0
-  contributed_count: 0
-- source: repository_watchlist:watchlist_kr.backup.20260612_153038.yaml
-  candidate_count: 0
-  contributed_count: 0
-- source: repository_watchlist:watchlist_kr.stage3.universe100.yaml
-  candidate_count: 0
-  contributed_count: 0
 symbols:
 - symbol: 005930
   name: 삼성전자
-  source_name: 삼성전자
-  source: local_watchlist_kr_base50
+  source_name: Samsung Electronics Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 1
 - symbol: '000660'
   name: SK하이닉스
-  source_name: SK하이닉스
-  source: local_watchlist_kr_base50
+  source_name: SK hynix Inc.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 005935
-  name: 삼성전자우
-  source_name: 삼성전자우
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 2
 - symbol: '402340'
   name: SK스퀘어
-  source_name: SK스퀘어
-  source: local_watchlist_kr_base50
+  source_name: SK Square Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 005380
-  name: 현대차
-  source_name: 현대차
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 3
 - symbol: 009150
   name: 삼성전기
-  source_name: 삼성전기
-  source: local_watchlist_kr_base50
+  source_name: Samsung Electro-Mechanics Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 4
+- symbol: 005380
+  name: 현대차
+  source_name: Hyundai Motor Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 5
 - symbol: '373220'
   name: LG에너지솔루션
-  source_name: LG에너지솔루션
-  source: local_watchlist_kr_base50
+  source_name: LG Energy Solution, Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 032830
-  name: 삼성생명
-  source_name: 삼성생명
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: 028260
-  name: 삼성물산
-  source_name: 삼성물산
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '329180'
-  name: HD현대중공업
-  source_name: HD현대중공업
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '012330'
-  name: 현대모비스
-  source_name: 현대모비스
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '105560'
-  name: KB금융
-  source_name: KB금융
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '000270'
-  name: 기아
-  source_name: 기아
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 6
 - symbol: '207940'
   name: 삼성바이오로직스
-  source_name: 삼성바이오로직스
-  source: local_watchlist_kr_base50
+  source_name: Samsung Biologics Co.,Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 7
+- symbol: '105560'
+  name: KB금융
+  source_name: KB Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 8
+- symbol: 028260
+  name: 삼성물산
+  source_name: Samsung C&T Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 9
+- symbol: '000270'
+  name: 기아
+  source_name: Kia Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 10
+- symbol: 032830
+  name: 삼성생명
+  source_name: Samsung Life Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 11
+- symbol: '329180'
+  name: HD현대중공업
+  source_name: HD Hyundai Heavy Industries Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 12
 - symbol: '034020'
   name: 두산에너빌리티
-  source_name: 두산에너빌리티
-  source: local_watchlist_kr_base50
+  source_name: Doosan Enerbility Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: '012450'
-  name: 한화에어로스페이스
-  source_name: 한화에어로스페이스
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 13
 - symbol: '055550'
   name: 신한지주
-  source_name: 신한지주
-  source: local_watchlist_kr_base50
+  source_name: Shinhan Financial Group Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: '066570'
-  name: LG전자
-  source_name: LG전자
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '006400'
-  name: 삼성SDI
-  source_name: 삼성SDI
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '034730'
-  name: SK
-  source_name: SK
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '035420'
-  name: NAVER
-  source_name: NAVER
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 14
 - symbol: 068270
   name: 셀트리온
-  source_name: 셀트리온
-  source: local_watchlist_kr_base50
+  source_name: Celltrion, Inc.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: '267260'
-  name: HD현대일렉트릭
-  source_name: HD현대일렉트릭
-  source: local_watchlist_kr_base50
+  market_cap_rank: 15
+- symbol: '012330'
+  name: 현대모비스
+  source_name: Hyundai Mobis Co.,Ltd
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: '010120'
-  name: LS ELECTRIC
-  source_name: LS ELECTRIC
-  source: local_watchlist_kr_base50
+  market_cap_rank: 16
+- symbol: '006400'
+  name: 삼성SDI
+  source_name: Samsung SDI Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: '042660'
-  name: 한화오션
-  source_name: 한화오션
-  source: local_watchlist_kr_base50
-  market: KOSPI
+  market_cap_rank: 17
 - symbol: 086790
   name: 하나금융지주
-  source_name: 하나금융지주
-  source: local_watchlist_kr_base50
+  source_name: Hana Financial Group Inc.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 18
+- symbol: '066570'
+  name: LG전자
+  source_name: LG Electronics Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 19
+- symbol: '035420'
+  name: NAVER
+  source_name: NAVER Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 20
+- symbol: '010120'
+  name: LS ELECTRIC
+  source_name: LS ELECTRIC Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 21
+- symbol: '034730'
+  name: SK
+  source_name: SK Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 22
+- symbol: '267260'
+  name: HD현대일렉트릭
+  source_name: HD Hyundai Electric Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 23
 - symbol: '298040'
   name: 효성중공업
-  source_name: 효성중공업
-  source: local_watchlist_kr_base50
+  source_name: Hyosung Heavy Industries Corporation
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 006800
-  name: 미래에셋증권
-  source_name: 미래에셋증권
-  source: local_watchlist_kr_base50
+  market_cap_rank: 24
+- symbol: '042660'
+  name: 한화오션
+  source_name: Hanwha Ocean Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 25
+- symbol: 009540
+  name: HD한국조선해양
+  source_name: HD Korea Shipbuilding & Offshore Engineering Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 26
 - symbol: 000810
   name: 삼성화재
-  source_name: 삼성화재
-  source: local_watchlist_kr_base50
+  source_name: Samsung Fire & Marine Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 005490
-  name: POSCO홀딩스
-  source_name: POSCO홀딩스
-  source: local_watchlist_kr_base50
-  market: KOSPI
-- symbol: '196170'
-  name: 알테오젠
-  source_name: 알테오젠
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '247540'
-  name: 에코프로비엠
-  source_name: 에코프로비엠
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 086520
-  name: 에코프로
-  source_name: 에코프로
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '277810'
-  name: 레인보우로보틱스
-  source_name: 레인보우로보틱스
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 036930
-  name: 주성엔지니어링
-  source_name: 주성엔지니어링
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 058470
-  name: 리노공업
-  source_name: 리노공업
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '000250'
-  name: 삼천당제약
-  source_name: 삼천당제약
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 028300
-  name: HLB
-  source_name: HLB
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '240810'
-  name: 원익IPS
-  source_name: 원익IPS
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 039030
-  name: 이오테크닉스
-  source_name: 이오테크닉스
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 087010
-  name: 펩트론
-  source_name: 펩트론
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '298380'
-  name: 에이비엘바이오
-  source_name: 에이비엘바이오
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '440110'
-  name: 파두
-  source_name: 파두
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '141080'
-  name: 리가켐바이오
-  source_name: 리가켐바이오
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '108490'
-  name: 로보티즈
-  source_name: 로보티즈
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: 095340
-  name: ISC
-  source_name: ISC
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '403870'
-  name: HPSP
-  source_name: HPSP
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '178320'
-  name: 서진시스템
-  source_name: 서진시스템
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '214370'
-  name: 케어젠
-  source_name: 케어젠
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '347850'
-  name: 디앤디파마텍
-  source_name: 디앤디파마텍
-  source: local_watchlist_kr_base50
-  market: KOSDAQ
-- symbol: '251970'
-  name: 펌텍코리아
-  source_name: 펌텍코리아
-  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  market: KOSDAQ
-- symbol: 009240
-  name: 한샘
-  source_name: 한샘
-  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  market: KOSPI
-- symbol: '001450'
-  name: 현대해상
-  source_name: 현대해상
-  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  market: KOSPI
-- symbol: '316140'
-  name: 우리금융지주
-  source_name: 우리금융지주
-  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  market: KOSPI
-- symbol: 008930
-  name: 한미사이언스
-  source_name: 한미사이언스
-  source: historical_default_watchlist:a463faa00a73156dbb73efe89ac8ccf8f99529d6
-  market: KOSPI
-- symbol: '042700'
-  name: 한미반도체
-  source_name: 한미반도체
-  source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
-  market: KOSPI
-- symbol: '319660'
-  name: 피에스케이
-  source_name: 피에스케이
-  source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
-  market: KOSDAQ
-- symbol: '222800'
-  name: 심텍
-  source_name: 심텍
-  source: historical_default_watchlist:e823af6344f32ca93596d5f1f776f45a12ecbf9f
-  market: KOSDAQ
-- symbol: '035720'
-  name: 카카오
-  source_name: 카카오
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: 051910
-  name: LG화학
-  source_name: LG화학
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: 096770
-  name: SK이노베이션
-  source_name: SK이노베이션
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: '003550'
-  name: LG
-  source_name: LG
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: '138040'
-  name: 메리츠금융지주
-  source_name: 메리츠금융지주
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: '015760'
-  name: 한국전력
-  source_name: 한국전력
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: '003670'
-  name: 포스코퓨처엠
-  source_name: 포스코퓨처엠
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: 018260
-  name: 삼성에스디에스
-  source_name: 삼성에스디에스
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
-- symbol: '011200'
-  name: HMM
-  source_name: HMM
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
-  market: KOSPI
+  market_cap_rank: 27
 - symbol: '010130'
   name: 고려아연
-  source_name: 고려아연
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  source_name: Korea Zinc Company, Ltd.
+  source: market_cap_kospi_top_150
   market: KOSPI
+  market_cap_rank: 28
+- symbol: 005490
+  name: POSCO홀딩스
+  source_name: POSCO Holdings Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 29
+- symbol: '316140'
+  name: 우리금융지주
+  source_name: Woori Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 30
+- symbol: '042700'
+  name: 한미반도체
+  source_name: HANMI Semiconductor Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 31
+- symbol: '015760'
+  name: 한국전력
+  source_name: Korea Electric Power Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 32
+- symbol: 096770
+  name: SK이노베이션
+  source_name: SK Innovation Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 33
+- symbol: 051910
+  name: LG화학
+  source_name: LG Chem, Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 34
+- symbol: '011200'
+  name: HMM
+  source_name: HMM Co.,Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 35
+- symbol: '017670'
+  name: SK텔레콤
+  source_name: SK Telecom Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 36
+- symbol: '138040'
+  name: 메리츠금융지주
+  source_name: Meritz Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 37
+- symbol: '000150'
+  name: 두산
+  source_name: Doosan Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 38
+- symbol: '010140'
+  name: 삼성중공업
+  source_name: Samsung Heavy Industries Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 39
+- symbol: 006800
+  name: 미래에셋증권
+  source_name: Mirae Asset Securities Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 40
+- symbol: 018260
+  name: 삼성에스디에스
+  source_name: Samsung SDS Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 41
+- symbol: 033780
+  name: KT&G
+  source_name: KT&G Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 42
+- symbol: '035720'
+  name: 카카오
+  source_name: Kakao Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 43
+- symbol: '003550'
+  name: LG
+  source_name: LG Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 44
+- symbol: '267250'
+  name: HD현대
+  source_name: HD Hyundai Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 45
+- symbol: 010950
+  name: S-Oil
+  source_name: S-Oil Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 46
+- symbol: '064350'
+  name: 현대로템
+  source_name: Hyundai Rotem Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 47
 - symbol: '024110'
   name: 기업은행
-  source_name: 기업은행
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  source_name: Industrial Bank of Korea
+  source: market_cap_kospi_top_150
   market: KOSPI
-- symbol: 094360
-  name: 칩스앤미디어
-  source_name: 칩스앤미디어
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 48
+- symbol: 086280
+  name: 현대글로비스
+  source_name: Hyundai Glovis Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 49
+- symbol: '278470'
+  name: 에이피알
+  source_name: APR Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 50
+- symbol: '272210'
+  name: 한화시스템
+  source_name: Hanwha Systems Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 51
+- symbol: '003670'
+  name: 포스코퓨처엠
+  source_name: Posco Future M Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 52
+- symbol: '011070'
+  name: LG이노텍
+  source_name: LG Innotek Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 53
+- symbol: '000720'
+  name: 현대건설
+  source_name: Hyundai Engineering & Construction Co.,Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 54
+- symbol: '030200'
+  name: KT
+  source_name: KT Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 55
+- symbol: '307950'
+  name: 현대오토에버
+  source_name: Hyundai Autoever Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 56
+- symbol: '071050'
+  name: 한국금융지주
+  source_name: Korea Investment Holdings Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 57
+- symbol: '323410'
+  name: 카카오뱅크
+  source_name: KakaoBank Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 58
+- symbol: 005940
+  name: NH투자증권
+  source_name: NH Investment & Securities Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 59
+- symbol: '259960'
+  name: 크래프톤
+  source_name: KRAFTON, Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 60
+- symbol: 005830
+  name: DB손해보험
+  source_name: DB Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 61
+- symbol: 078930
+  name: GS
+  source_name: GS Holdings Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 62
+- symbol: 003490
+  name: 대한항공
+  source_name: Korean Airlines Co.,Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 63
+- symbol: 028050
+  name: 삼성E&A
+  source_name: Samsung E&A Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 64
+- symbol: '047050'
+  name: 포스코인터내셔널
+  source_name: Posco International Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 65
+- symbol: '003230'
+  name: 삼양식품
+  source_name: Samyang Foods Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 66
+- symbol: '443060'
+  name: HD현대마린솔루션
+  source_name: HD Hyundai Marine Solution CO.,LTD.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 67
+- symbol: '006260'
+  name: LS
+  source_name: LS Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 68
+- symbol: '161390'
+  name: 한국타이어앤테크놀로지
+  source_name: Hankook Tire & Technology Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 69
+- symbol: 090430
+  name: 아모레퍼시픽
+  source_name: Amorepacific Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 70
+- symbol: '016360'
+  name: 삼성증권
+  source_name: Samsung Securities Co.,Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 71
+- symbol: 009830
+  name: 한화솔루션
+  source_name: Hanwha Solutions Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 72
+- symbol: '180640'
+  name: 한진칼
+  source_name: Hanjin Kal
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 73
+- symbol: 039490
+  name: 키움증권
+  source_name: Kiwoom Securities Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 74
+- symbol: '064400'
+  name: LG씨엔에스
+  source_name: LG CNS Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 75
+- symbol: '352820'
+  name: 하이브
+  source_name: HYBE Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 76
+- symbol: '047040'
+  name: 대우건설
+  source_name: Daewoo Engineering & Construction Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 77
+- symbol: '007660'
+  name: 이수페타시스
+  source_name: ISU Petasys Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 78
+- symbol: '326030'
+  name: SK바이오팜
+  source_name: SK Biopharmaceuticals Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 79
+- symbol: '021240'
+  name: 코웨이
+  source_name: COWAY Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 80
+- symbol: '267270'
+  name: HD현대건설기계
+  source_name: HD Construction Equipment Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 81
+- symbol: '032640'
+  name: LG유플러스
+  source_name: LG Uplus Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 82
+- symbol: '241560'
+  name: 두산밥캣
+  source_name: Doosan Bobcat Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 83
+- symbol: '000100'
+  name: 유한양행
+  source_name: Yuhan Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 84
+- symbol: '377300'
+  name: 카카오페이
+  source_name: Kakao Pay Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 85
+- symbol: '001440'
+  name: 대한전선
+  source_name: Taihan Cable & Solution Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 86
+- symbol: '062040'
+  name: 산일전기
+  source_name: Sanil Electric Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 87
+- symbol: '353200'
+  name: 대덕전자
+  source_name: DAEDUCK ELECTRONICS Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 88
+- symbol: 000880
+  name: 한화
+  source_name: Hanwha Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 89
+- symbol: '175330'
+  name: JB금융지주
+  source_name: JB Financial Group Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 90
+- symbol: '271560'
+  name: 오리온
+  source_name: ORION Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 91
+- symbol: '010060'
+  name: OCI홀딩스
+  source_name: OCI Holdings Company Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 92
+- symbol: '128940'
+  name: 한미약품
+  source_name: Hanmi Pharm. Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 93
+- symbol: '454910'
+  name: 두산로보틱스
+  source_name: Doosan Robotics Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 94
+- symbol: 029780
+  name: 삼성카드
+  source_name: Samsung Card Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 95
+- symbol: '000500'
+  name: 가온전선
+  source_name: GAON CABLE Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 96
+- symbol: '034220'
+  name: LG디스플레이
+  source_name: LG Display Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 97
+- symbol: '036570'
+  name: 엔씨소프트
+  source_name: NC Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 98
+- symbol: 051900
+  name: LG생활건강
+  source_name: LG H&H Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 99
+- symbol: '138930'
+  name: BNK금융지주
+  source_name: BNK Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 100
+- symbol: '001040'
+  name: CJ
+  source_name: CJ Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 101
+- symbol: 000990
+  name: DB하이텍
+  source_name: DB HiTek CO., LTD.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 102
+- symbol: 066970
+  name: 엘앤에프
+  source_name: L&F Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 103
+- symbol: 082740
+  name: 한화엔진
+  source_name: Hanwha Engine Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 104
+- symbol: 018880
+  name: 한온시스템
+  source_name: Hanon Systems
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 105
+- symbol: 052690
+  name: 한전기술
+  source_name: KEPCO Engineering & Construction Company, Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 106
+- symbol: '004020'
+  name: 현대제철
+  source_name: Hyundai Steel Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 107
+- symbol: 088350
+  name: 한화생명
+  source_name: Hanwha Life Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 108
+- symbol: '004170'
+  name: 신세계
+  source_name: SHINSEGAE Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 109
+- symbol: '111770'
+  name: 영원무역
+  source_name: Youngone Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 110
+- symbol: '103590'
+  name: 일진전기
+  source_name: Iljin Electric Co.,Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 111
+- symbol: '022100'
+  name: 포스코DX
+  source_name: Posco Dx Company Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 112
+- symbol: 002380
+  name: KCC
+  source_name: KCC Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 113
+- symbol: '161890'
+  name: 한국콜마
+  source_name: Kolmar Korea Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 114
+- symbol: '001450'
+  name: 현대해상
+  source_name: Hyundai Marine & Fire Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 115
+- symbol: '251270'
+  name: 넷마블
+  source_name: Netmarble Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 116
+- symbol: '036460'
+  name: 한국가스공사
+  source_name: Korea Gas Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 117
+- symbol: 009420
+  name: 한올바이오파마
+  source_name: Hanall Biopharma Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 118
+- symbol: 011780
+  name: 금호석유
+  source_name: Kumho Petro Chemical Co.,Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 119
+- symbol: '031210'
+  name: 서울보증보험
+  source_name: Seoul Guarantee Insurance Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 120
+- symbol: 011790
+  name: SKC
+  source_name: SKC Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 121
+- symbol: '006360'
+  name: GS건설
+  source_name: GS Engineering & Construction Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 122
+- symbol: 028670
+  name: 팬오션
+  source_name: Pan Ocean Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 123
+- symbol: 008930
+  name: 한미사이언스
+  source_name: Hanmi Science Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 124
+- symbol: '483650'
+  name: 달바글로벌
+  source_name: d'Alba Global Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 125
+- symbol: '302440'
+  name: SK바이오사이언스
+  source_name: SK bioscience Co.,Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 126
+- symbol: '375500'
+  name: DL이앤씨
+  source_name: DL E&C Co.,Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 127
+- symbol: 097950
+  name: CJ제일제당
+  source_name: CJ Cheiljedang Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 128
+- symbol: '035250'
+  name: 강원랜드
+  source_name: Kangwon Land, Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 129
+- symbol: '192820'
+  name: 코스맥스
+  source_name: Cosmax, Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 130
+- symbol: '023530'
+  name: 롯데쇼핑
+  source_name: Lotte Shopping Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 131
+- symbol: '450080'
+  name: 에코프로머티
+  source_name: Ecopro Materials Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 132
+- symbol: 004800
+  name: 효성
+  source_name: Hyosung Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 133
+- symbol: '489790'
+  name: 한화비전
+  source_name: Hanwha Vision CO.,LTD
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 134
+- symbol: 005850
+  name: SL
+  source_name: SL Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 135
+- symbol: '139130'
+  name: iM금융지주
+  source_name: iM Financial Group Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 136
+- symbol: '012750'
+  name: 에스원
+  source_name: S-1 Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 137
+- symbol: '204320'
+  name: HL만도
+  source_name: HL Mando Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 138
+- symbol: 017800
+  name: 현대엘리베이
+  source_name: Hyundai Elevator Co., Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 139
+- symbol: 003690
+  name: 코리안리
+  source_name: Korean Reinsurance Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 140
+- symbol: 026960
+  name: 동서
+  source_name: Dong Suh Companies Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 141
+- symbol: '383220'
+  name: F&F
+  source_name: F&F Co., Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 142
+- symbol: '007340'
+  name: DN오토모티브
+  source_name: DN Automotive Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 143
+- symbol: '336260'
+  name: 두산퓨얼셀
+  source_name: Doosan Fuel Cell Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 144
+- symbol: '282330'
+  name: BGF리테일
+  source_name: BGF Retail Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 145
+- symbol: '000240'
+  name: 한국앤컴퍼니
+  source_name: Hankook & Company Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 146
+- symbol: '011170'
+  name: 롯데케미칼
+  source_name: Lotte Chemical Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 147
+- symbol: 014680
+  name: 한솔케미칼
+  source_name: Hansol Chemical Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 148
+- symbol: '073240'
+  name: 금호타이어
+  source_name: Kumho Tire Co., Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 149
+- symbol: 085620
+  name: 미래에셋생명
+  source_name: MIRAE ASSET Life Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+  market_cap_rank: 150
+- symbol: '196170'
+  name: 알테오젠
+  source_name: ALTEOGEN Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
+  market_cap_rank: 1
+- symbol: 086520
+  name: 에코프로
+  source_name: Ecopro Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 2
+- symbol: '247540'
+  name: 에코프로비엠
+  source_name: EcoPro BM Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 3
+- symbol: '277810'
+  name: 레인보우로보틱스
+  source_name: Rainbow Robotics Co.,Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 4
+- symbol: 036930
+  name: 주성엔지니어링
+  source_name: JUSUNG ENGINEERING Co.,Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 5
+- symbol: '240810'
+  name: 원익IPS
+  source_name: Wonik IPS Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 6
+- symbol: 028300
+  name: HLB
+  source_name: HLB Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 7
+- symbol: 058470
+  name: 리노공업
+  source_name: LEENO Industrial Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 8
+- symbol: '298380'
+  name: 에이비엘바이오
+  source_name: ABL Bio Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 9
+- symbol: 039030
+  name: 이오테크닉스
+  source_name: EO Technics Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 10
+- symbol: 087010
+  name: 펩트론
+  source_name: Peptron, Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 11
+- symbol: '000250'
+  name: 삼천당제약
+  source_name: Sam Chun Dang Pharm. Co., Ltd
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 12
 - symbol: '214450'
   name: 파마리서치
-  source_name: 파마리서치
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  source_name: PharmaResearch Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '263750'
-  name: 펄어비스
-  source_name: 펄어비스
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 13
+- symbol: '141080'
+  name: 리가켐바이오
+  source_name: LigaChem Biosciences Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '145020'
-  name: 휴젤
-  source_name: 휴젤
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 14
+- symbol: '222800'
+  name: 심텍
+  source_name: SIMMTECH Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '214150'
-  name: 클래시스
-  source_name: 클래시스
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 15
+- symbol: '319660'
+  name: 피에스케이
+  source_name: PSK Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 068760
-  name: 셀트리온제약
-  source_name: 셀트리온제약
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 16
+- symbol: '108490'
+  name: 로보티즈
+  source_name: ROBOTIS Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 005290
-  name: 동진쎄미켐
-  source_name: 동진쎄미켐
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 17
+- symbol: '403870'
+  name: HPSP
+  source_name: HPSP Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '357780'
-  name: 솔브레인
-  source_name: 솔브레인
-  source: historical_default_watchlist:3b5f8b28dcea60577ffdc1aed0a97a065c7e021e
+  market_cap_rank: 18
+- symbol: 095340
+  name: ISC
+  source_name: ISC Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
+  market_cap_rank: 19
 - symbol: '310210'
   name: 보로노이
-  source_name: 보로노이
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
+  source_name: Voronoi, Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '319400'
-  name: 현대무벡스
-  source_name: 현대무벡스
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
+  market_cap_rank: 20
+- symbol: '440110'
+  name: 파두
+  source_name: FADU Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 080220
-  name: 제주반도체
-  source_name: 제주반도체
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
+  market_cap_rank: 21
+- symbol: '214370'
+  name: 케어젠
+  source_name: Caregen Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '010170'
-  name: 대한광통신
-  source_name: 대한광통신
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
-  market: KOSDAQ
-- symbol: '067310'
-  name: 하나마이크론
-  source_name: 하나마이크론
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
-  market: KOSDAQ
-- symbol: '064760'
-  name: 티씨케이
-  source_name: 티씨케이
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
-  market: KOSDAQ
+  market_cap_rank: 22
 - symbol: 084370
   name: 유진테크
-  source_name: 유진테크
-  source: historical_default_watchlist:f2355fc70702bf9a77c918c9e8ca0a23685b2efc
+  source_name: Eugene Technology Co.,Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 089030
-  name: Techwing
-  source_name: Techwing
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 23
+- symbol: 080220
+  name: 제주반도체
+  source_name: Jeju Semiconductor Corp.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '101490'
-  name: SFA Semicon
-  source_name: SFA Semicon
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 24
+- symbol: '131290'
+  name: 티에스이
+  source_name: TSE Co., Ltd
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '183300'
-  name: KOMICO
-  source_name: KOMICO
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 25
+- symbol: '145020'
+  name: 휴젤
+  source_name: Hugel, Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '036540'
-  name: SFA Engineering
-  source_name: SFA Engineering
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 26
+- symbol: '347850'
+  name: 디앤디파마텍
+  source_name: D&D Pharmatech Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
+  market_cap_rank: 27
+- symbol: '319400'
+  name: 현대무벡스
+  source_name: HYUNDAI MOVEX Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 28
+- symbol: '257720'
+  name: 실리콘투
+  source_name: SILICON2 Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 29
+- symbol: 095610
+  name: 테스
+  source_name: TES Co., Ltd
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 30
+- symbol: '214150'
+  name: 클래시스
+  source_name: CLASSYS Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 31
+- symbol: '357780'
+  name: 솔브레인
+  source_name: Soulbrain Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 32
+- symbol: '064760'
+  name: 티씨케이
+  source_name: Tokai Carbon Korea Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 33
+- symbol: 058610
+  name: 에스피지
+  source_name: SPG Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 34
+- symbol: '226950'
+  name: 올릭스
+  source_name: OliX Pharmaceuticals, Inc
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 35
+- symbol: '178320'
+  name: 서진시스템
+  source_name: Seojin System Co.,Ltd
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 36
+- symbol: 031980
+  name: 피에스케이홀딩스
+  source_name: PSK HOLDINGS Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 37
+- symbol: '237690'
+  name: 에스티팜
+  source_name: ST Pharm Co.,Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 38
+- symbol: '067310'
+  name: 하나마이크론
+  source_name: HANA Micron Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 39
+- symbol: 005290
+  name: 동진쎄미켐
+  source_name: Dongjin Semichem Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 40
+- symbol: '950160'
+  name: 코오롱티슈진
+  source_name: Kolon TissueGene, Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+  market_cap_rank: 41
 - symbol: 098460
-  name: Koh Young
-  source_name: Koh Young
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  name: 고영
+  source_name: Koh Young Technology Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '121600'
-  name: Nano New Material
-  source_name: Nano New Material
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 42
+- symbol: '140410'
+  name: 메지온
+  source_name: Mezzion Pharma Co.,Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 078600
-  name: Daejoo Electronic Materials
-  source_name: Daejoo Electronic Materials
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 43
+- symbol: '010170'
+  name: 대한광통신
+  source_name: Taihan Fiber Optics Co., Ltd
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '278280'
-  name: Chunbo
-  source_name: Chunbo
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 44
+- symbol: 032820
+  name: 우리기술
+  source_name: Woori Technology, Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '348370'
-  name: Enchem
-  source_name: Enchem
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 45
+- symbol: 068760
+  name: 셀트리온제약
+  source_name: Celltrion Pharm, Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 025900
-  name: Dongwha Enterprise
-  source_name: Dongwha Enterprise
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 46
+- symbol: '140860'
+  name: 파크시스템스
+  source_name: Park Systems Corp.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: 035900
-  name: JYP Entertainment
-  source_name: JYP Entertainment
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 47
+- symbol: '263750'
+  name: 펄어비스
+  source_name: Pearl Abyss Corp.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '041510'
-  name: SM Entertainment
-  source_name: SM Entertainment
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 48
+- symbol: 089030
+  name: 테크윙
+  source_name: Techwing, Inc.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '122870'
-  name: YG Entertainment
-  source_name: YG Entertainment
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
+  market_cap_rank: 49
+- symbol: 083650
+  name: 비에이치아이
+  source_name: BHI Co., Ltd.
+  source: market_cap_kosdaq_top_50
   market: KOSDAQ
-- symbol: '067160'
-  name: SOOP
-  source_name: SOOP
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
-  market: KOSDAQ
-- symbol: '112040'
-  name: Wemade
-  source_name: Wemade
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
-  market: KOSDAQ
-- symbol: '293490'
-  name: Kakao Games
-  source_name: Kakao Games
-  source: historical_default_watchlist:dbd811b4faa22a2ed903eb565638023ee6dd7e30
-  market: KOSDAQ
+  market_cap_rank: 50
