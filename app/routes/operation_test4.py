@@ -100,6 +100,21 @@ def arm_operation_test4_next_session(
     return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
 
 
+@router.post("/scheduler/arm-today")
+def arm_operation_test4_today(
+    payload: OperationTest4NextSessionArmRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest4Service = Depends(get_operation_test4_service),
+):
+    result = service.arm_today(
+        db,
+        confirm=payload.confirm,
+        confirmation=payload.confirmation,
+    )
+    status_code = 200 if result.get("status") == "armed" else 409
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
+
+
 @router.post("/enable-live")
 def enable_live_operation_test4(
     payload: OperationTest4ConfirmationRequest,

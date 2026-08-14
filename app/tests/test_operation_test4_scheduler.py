@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import pytest
+from fastapi.testclient import TestClient
+
+from app.db.database import get_db
+from app.main import app
+from app.routes.operation_test4 import get_operation_test4_service
+
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from app.db.models import OperationTest4Cycle, OrderLog
 from app.services.operation_test4_service import (
@@ -375,3 +383,218 @@ def test_enabled_operation_test4_active_monitor_calls_active_cycle_service(
 
     assert result == {"result": "hold"}
     assert calls == {"client": 1, "service": 1, "run": 1}
+
+
+def _kst_now(day: int, hour: int, minute: int) -> datetime:
+    return datetime(
+        2026,
+        8,
+        day,
+        hour,
+        minute,
+        tzinfo=ZoneInfo("Asia/Seoul"),
+    ).astimezone(UTC)
+
+
+def _fresh_watchlist_for_same_day(*args, **kwargs):
+    return {
+        "fresh": True,
+        "count": 50,
+        "configured_count": 50,
+        "selected_count": 50,
+        "symbols": [{"symbol": f"{index:06d}"} for index in range(1, 51)],
+    }
+
+
+def _fresh_possible_order_for_same_day(service, now):
+    service.possible_order_provider = lambda **kwargs: {
+        "raw_status": "ok",
+        "symbol": kwargs["symbol"],
+        "order_type": "market",
+        "reference_price": kwargs["order_price"],
+        "orderable_cash": 1_000_000,
+        "orderable_quantity": 100,
+        "queried_at": now.isoformat(),
+        "error": None,
+    }
+
+
+def test_arm_today_route_arms_safe_state_before_first_entry_slot(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    service.now_provider = lambda: _kst_now(10, 8, 30)
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_operation_test4_service] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/app/operation-test4/scheduler/arm-today",
+            json={
+                "confirm": True,
+                "confirmation": "ARM TEST4 TODAY",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "armed"
+    assert body["arm_mode"] == "same_day"
+    assert body["target_trading_date"] == "2026-08-10"
+    assert body["next_entry_slot_kst"] == "09:35"
+    assert body["master_scheduler_enabled"] is False
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["runtime"]["dry_run"] is True
+    assert body["runtime"]["kill_switch"] is True
+    assert body["runtime"]["operation_test4_scheduler_enabled"] is True
+    assert body["runtime"]["operation_test4_enabled"] is False
+    assert body["runtime"]["operation_test4_allow_real_entry"] is False
+    assert body["runtime"]["operation_test4_allow_real_exit"] is False
+    assert body["runtime"]["operation_test4_entry_enabled"] is False
+    assert body["runtime"]["operation_test4_position_management_enabled"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_arm_today_after_first_entry_slot_is_blocked_without_mutation(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    result = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(10, 9, 35),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "same_day_arm_window_closed"
+    assert "09:35" in result["detail"]
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    runtime = RuntimeSettingService().get_settings(db_session)
+    assert runtime["operation_test4_scheduler_enabled"] is False
+    assert runtime["scheduler_enabled"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+@pytest.mark.parametrize("day", [8, 17])
+def test_arm_today_non_trading_day_is_blocked_without_order(db_session, tmp_path, day):
+    service, _, _ = make_service(tmp_path)
+    result = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(day, 8, 30),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "not_a_valid_kr_trading_day"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+@pytest.mark.parametrize("blocker", ["position", "open_order", "active_cycle"])
+def test_arm_today_blocks_existing_positions_orders_or_cycle(
+    db_session,
+    tmp_path,
+    blocker,
+):
+    account_state = {
+        "fetch_success": True,
+        "equity": 1_000_000,
+        "orderable_cash": 1_000_000,
+        "positions": [{"symbol": "005930", "qty": 1}] if blocker == "position" else [],
+        "open_orders": [{"symbol": "005930", "side": "buy"}] if blocker == "open_order" else [],
+    }
+    service, _, _ = make_service(tmp_path, account_state=account_state)
+    if blocker == "active_cycle":
+        db_session.add(
+            OperationTest4Cycle(
+                cycle_key="test4-arm-today-active",
+                operation_test="test4",
+                provider="kis",
+                market="KR",
+                symbol="000001",
+                status="entry_pending",
+            )
+        )
+        db_session.commit()
+
+    result = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(10, 8, 30),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] in {
+        "position_exists",
+        "open_order_exists",
+        "active_cycle_exists",
+    }
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_arm_today_uses_existing_conflict_policy(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    RuntimeSettingService().update_settings(
+        db_session,
+        {"operation_test3_scheduler_enabled": True},
+    )
+
+    result = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(10, 8, 30),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "other_scheduler_live_flags_enabled"
+    assert "operation_test3_scheduler_enabled" in result["blocking_reasons"]
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_arm_today_reuses_existing_09_35_scheduler_and_guarded_submit_once(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(tmp_path)
+    armed = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(10, 8, 30),
+    )
+    assert armed["status"] == "armed"
+
+    service._load_watchlist = _fresh_watchlist_for_same_day
+    now = _kst_now(10, 9, 35)
+    _fresh_possible_order_for_same_day(service, now)
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="09:35",
+        now=now,
+    )
+
+    cycle = db_session.query(OperationTest4Cycle).one()
+    assert result["action"] == "BUY_READY"
+    assert result["reason"] == "entry_submitted"
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert result.get("target_trading_date_expired") is not True
+    assert len(service.manual_order_service.calls) == 1
+    assert cycle.status == "entry_pending"

@@ -2,7 +2,7 @@ market: KR
 currency: KRW
 timezone: Asia/Seoul
 operation_test: test4
-generated_at: '2026-08-12T00:35:01.235602+00:00'
+generated_at: '2026-08-14T00:35:19.054176+00:00'
 source:
   source_universe_file: config/watchlist_kr_test4_universe.yaml
   source_universe_count: 100

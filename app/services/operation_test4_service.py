@@ -359,6 +359,193 @@ class OperationTest4Service:
                 "broker_submit_called": False,
             }
         )
+
+    def arm_today(
+        self,
+        db: Session,
+        *,
+        confirm: bool,
+        confirmation: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Reserve today's KR session before the first Test4 entry slot."""
+
+        arm_mode = "same_day"
+        required_confirmation = "ARM TEST4 TODAY"
+        base_blocked = {
+            "status": "blocked",
+            "operation_test": OPERATION_TEST,
+            "arm_mode": arm_mode,
+            "immediate_order_execution": False,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+        }
+
+        if confirm is not True or confirmation != required_confirmation:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "operator_confirmation_required",
+                    "required_confirmation": required_confirmation,
+                }
+            )
+
+        now_utc = _aware_utc(now or self.now_provider())
+        now_kst = now_utc.astimezone(KR_TZ)
+        first_entry_time = time(9, 35)
+        if now_kst.time() >= first_entry_time:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "same_day_arm_window_closed",
+                    "detail": "same-day ARM is allowed only before 09:35 KST",
+                }
+            )
+
+        try:
+            calendar_service = getattr(self.session_service, "calendar_service", None)
+            if calendar_service is None:
+                from app.services.market_calendar_service import MarketCalendarService
+
+                calendar_service = MarketCalendarService()
+            target_date = now_kst.date()
+            if target_date.weekday() >= 5 or calendar_service.is_holiday("KR", target_date):
+                return sanitize_kis_payload(
+                    {
+                        **base_blocked,
+                        "reason": "not_a_valid_kr_trading_day",
+                        "target_trading_date": target_date.isoformat(),
+                    }
+                )
+        except Exception as exc:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "trading_calendar_unavailable",
+                    "error": _safe_error(exc),
+                }
+            )
+
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        live_test4_flags = (
+            "operation_test4_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
+        )
+        conflicts = [
+            key
+            for key in OTHER_SCHEDULER_LIVE_FLAGS
+            if runtime.get(key) is True
+        ]
+        if any(runtime.get(key) is True for key in live_test4_flags):
+            conflicts.append("operation_test4_live_mode_active")
+        if conflicts:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "other_scheduler_live_flags_enabled",
+                    "blocking_reasons": _dedupe(conflicts),
+                }
+            )
+
+        if self._active_cycle(db) is not None:
+            return sanitize_kis_payload(
+                {**base_blocked, "reason": "active_cycle_exists"}
+            )
+        if self._active_lifecycles(db):
+            return sanitize_kis_payload(
+                {**base_blocked, "reason": "active_lifecycle_exists"}
+            )
+
+        account = self._read_account_state(require_fresh=True)
+        if account.get("fetch_success") is not True:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "account_state_unavailable",
+                    "account": self._account_summary(account),
+                }
+            )
+        if account.get("position_count", 0) > 0:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "position_exists",
+                    "account": self._account_summary(account),
+                }
+            )
+        if account.get("open_order_count", 0) > 0:
+            return sanitize_kis_payload(
+                {
+                    **base_blocked,
+                    "reason": "open_order_exists",
+                    "account": self._account_summary(account),
+                }
+            )
+        if self._local_open_order_count(db) != 0:
+            return sanitize_kis_payload(
+                {**base_blocked, "reason": "local_open_order_exists"}
+            )
+
+        try:
+            settings_after = self.runtime_settings.update_settings(
+                db,
+                {
+                    # Reuse the overnight safe state. The existing scheduler
+                    # promotes its gates only in the guarded BUY_READY path.
+                    "dry_run": True,
+                    "kill_switch": True,
+                    "operation_test4_enabled": False,
+                    "operation_test4_scheduler_enabled": True,
+                    "operation_test4_allow_real_entry": False,
+                    "operation_test4_allow_real_exit": False,
+                    "operation_test4_entry_enabled": False,
+                    "operation_test4_position_management_enabled": False,
+                    "operation_test4_stop_loss_enabled": True,
+                    "operation_test4_take_profit_enabled": True,
+                    "operation_test4_scheduler_arm_mode": "next_session",
+                    "operation_test4_target_trading_date": target_date.isoformat(),
+                    "operation_test4_scheduler_armed_at": now_utc,
+                    "operation_test4_scheduler_last_error": None,
+                    "operation_test4_scheduler_last_stage": "armed",
+                    "operation_test4_scheduler_last_entry_decision": None,
+                    "operation_test4_scheduler_last_evaluated_trade_date": None,
+                    "operation_test4_scheduler_last_evaluated_slot_kst": None,
+                    **{key: False for key in BUY_FLAGS},
+                },
+            )
+        except OperationTestLiveModeConflict:
+            return sanitize_kis_payload(
+                {**base_blocked, "reason": "operation_test3_active"}
+            )
+
+        next_slot = next_entry_slot_for_session(
+            now_utc,
+            target_trading_date=target_date,
+            enabled=True,
+        )
+        return sanitize_kis_payload(
+            {
+                "status": "armed",
+                "operation_test": OPERATION_TEST,
+                "confirmation_accepted": True,
+                "arm_mode": arm_mode,
+                "test4_scheduler_armed": True,
+                "target_trading_date": target_date.isoformat(),
+                "entry_slots_kst": list(ENTRY_SLOTS),
+                "next_entry_slot_kst": next_slot["next_entry_slot_kst"],
+                "next_automatic_entry_run": next_slot["next_automatic_entry_run"],
+                "master_scheduler_enabled": settings_after.get("scheduler_enabled") is True,
+                "scheduler_effective": True,
+                "immediate_order_execution": False,
+                "runtime": self._runtime_snapshot(settings_after),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        )
+
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
