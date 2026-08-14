@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from zoneinfo import ZoneInfo
 
@@ -168,6 +168,113 @@ def _fresh_possible_order(service, now):
         "queried_at": now.isoformat(),
         "error": None,
     }
+
+def _arm_next_session_last_slot(service, db_session):
+    service.arm_next_session(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 NEXT SESSION",
+        now=NOW,
+    )
+    service._load_watchlist = _fresh_watchlist
+
+
+def test_next_session_delayed_buy_ready_uses_execution_clock_for_freshness(
+    db_session, tmp_path
+):
+    service, _, _ = make_service(tmp_path)
+    _arm_next_session_last_slot(service, db_session)
+
+    slot_now = _target_now(13, 30)
+    queried_at = _target_now(13, 33)
+    execution_now = queried_at + timedelta(seconds=3)
+    clock = {"now": slot_now}
+    service.now_provider = lambda: clock["now"]
+    _fresh_possible_order(service, queried_at)
+
+    original_preflight = service.preflight_once
+
+    def delayed_preflight(db, *, now=None):
+        result = original_preflight(db, now=now)
+        clock["now"] = execution_now
+        return result
+
+    service.preflight_once = delayed_preflight
+    validation_calls = []
+    delegate = service.validation_service
+
+    class CountingValidation:
+        def validate(self, request, *, now=None):
+            validation_calls.append(request)
+            return delegate.validate(request, now=now)
+
+    service.validation_service = CountingValidation()
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="13:30",
+        now=slot_now,
+    )
+
+    assert result["preflight"]["action"] == "BUY_READY"
+    assert result["reason"] == "entry_submitted"
+    assert result["entry"]["reason"] == "entry_submitted"
+    assert result["real_order_submitted"] is True
+    assert result["broker_submit_called"] is True
+    assert len(validation_calls) == 1
+    assert len(service.manual_order_service.calls) == 1
+    assert db_session.query(OperationTest4EntryReservation).count() == 1
+    assert db_session.query(OperationTest4Cycle).count() == 1
+
+
+def test_next_session_delayed_stale_possible_order_remains_blocked(
+    db_session, tmp_path
+):
+    service, _, _ = make_service(tmp_path)
+    _arm_next_session_last_slot(service, db_session)
+
+    queried_at = _target_now(13, 33)
+    service.now_provider = lambda: queried_at + timedelta(seconds=20)
+    _fresh_possible_order(service, queried_at)
+
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="13:30",
+        now=_target_now(13, 30),
+    )
+
+    assert result["reason"] == "possible_order_snapshot_stale"
+    assert result["session_complete"] is True
+    assert result["session_completion_reason"] == "session_complete"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OperationTest4EntryReservation).count() == 0
+    assert db_session.query(OperationTest4Cycle).count() == 0
+
+
+def test_next_session_delayed_buy_ready_after_cutoff_remains_blocked(
+    db_session, tmp_path
+):
+    service, _, _ = make_service(tmp_path)
+    _arm_next_session_last_slot(service, db_session)
+
+    service.now_provider = lambda: _target_now(14, 0) + timedelta(seconds=1)
+    _fresh_possible_order(service, _target_now(13, 30))
+
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="13:30",
+        now=_target_now(13, 30),
+    )
+
+    assert result["reason"] == "entry_after_14_00"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OperationTest4EntryReservation).count() == 0
+    assert db_session.query(OperationTest4Cycle).count() == 0
+
+
 def test_next_session_buy_ready_uses_existing_guarded_submit_once(db_session, tmp_path):
     service, _, _ = make_service(tmp_path)
     service.arm_next_session(

@@ -2168,11 +2168,14 @@ class OperationTest4Service:
             evaluated_slot=slot_label,
         )
         try:
+            execution_now_utc = _aware_utc(self.now_provider())
+            if execution_now_utc < now_utc:
+                execution_now_utc = now_utc
             entry = self.entry_run_once(
                 db,
                 confirm_live=True,
                 confirmation=ENTRY_CONFIRMATION,
-                now=now_utc,
+                now=execution_now_utc,
                 trigger_source="operation_test4_scheduler",
                 entry_slot_kst=slot_label,
                 _preflight=preflight,
