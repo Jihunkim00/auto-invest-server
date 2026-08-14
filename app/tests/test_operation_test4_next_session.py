@@ -441,6 +441,46 @@ def test_next_session_last_slot_buy_marks_session_complete_while_managing_cycle(
     assert runtime["operation_test4_scheduler_arm_mode"] == "active_cycle"
     assert runtime["operation_test4_scheduler_enabled"] is True
 
+def test_next_session_last_slot_preserves_entry_blocker_when_session_completes(
+    db_session, tmp_path
+):
+    service, _, _ = make_service(tmp_path)
+    service.arm_next_session(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 NEXT SESSION",
+        now=NOW,
+    )
+    service._load_watchlist = _fresh_watchlist
+    service.preflight_once = lambda *args, **kwargs: {
+        "status": "ready",
+        "action": "BUY_READY",
+        "candidate": {"symbol": "000001"},
+    }
+    service.entry_run_once = lambda *args, **kwargs: {
+        "status": "blocked",
+        "reason": "daily_buy_limit_reached",
+        "result": HOLD,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+    }
+
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="13:30",
+        now=_target_now(13, 30),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "daily_buy_limit_reached"
+    assert result["action"] == HOLD
+    assert result["session_complete"] is True
+    assert result["session_completion_reason"] == "session_complete"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert db_session.query(OrderLog).count() == 0
+
+
 def test_next_session_hold_keeps_arm_until_last_slot_then_completes(db_session, tmp_path):
     service, _, _ = make_service(
         tmp_path,

@@ -2241,7 +2241,7 @@ class OperationTest4Service:
             )
             return self._next_session_result(
                 status="blocked",
-                reason="session_complete",
+                reason=reason,
                 action=HOLD,
                 slot_label=slot_label,
                 preflight=preflight,
@@ -2249,6 +2249,8 @@ class OperationTest4Service:
                 watchlist_rebuild=rebuilt,
                 entry=entry,
                 session_completion=completion,
+                session_complete=True,
+                session_completion_reason="session_complete",
                 submit_path="operation_test4_existing_guarded_entry",
                 live_execution_permission=False,
             )
