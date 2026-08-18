@@ -340,6 +340,7 @@ def test_preflight_separates_preview_display_flags_from_test4_execution_blocks(
         "preview_only": True,
         "kr_trading_disabled": True,
         "trading_enabled": False,
+        "trading_disabled": True,
         "next_manual_action_hint": "review preview",
     }
     assert result["preview"]["preview_only"] is True
