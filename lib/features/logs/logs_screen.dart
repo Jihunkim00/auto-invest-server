@@ -1313,6 +1313,10 @@ class _OperationTest4SlotSummary extends StatelessWidget {
     );
     final slot = _textOrFallback('${history['slot_kst'] ?? ''}', fallback: '-');
     final completion = history['entry_slots_complete'] == true ? 'Yes' : 'No';
+    final rawGap = history['final_score_gap'];
+    final scoreGap = rawGap is num
+        ? _numberLabel(rawGap)
+        : _textOrFallback('$rawGap', fallback: '-');
     final order = run.hasOrder || run.realOrderSubmitted == true
         ? run.orderLabel
         : 'No order';
@@ -1346,6 +1350,7 @@ class _OperationTest4SlotSummary extends StatelessWidget {
             value:
                 '${_numberLabel(run.finalBuyScore)} / Required ${_numberLabel(run.effectiveMinEntryScore)}',
           ),
+          _DetailRow(label: 'Score gap', value: scoreGap),
           _DetailRow(label: 'Decision', value: _fallback(run.action, 'HOLD')),
           _DetailRow(
             label: 'Reason',
