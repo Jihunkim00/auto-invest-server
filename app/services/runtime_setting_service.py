@@ -64,6 +64,11 @@ OPERATION_TEST4_SAFE_SETTINGS = {
     "operation_test4_scheduler_last_entry_decision": None,
     "operation_test4_scheduler_last_evaluated_trade_date": None,
     "operation_test4_scheduler_last_evaluated_slot_kst": None,
+    "operation_test4_weekly_window_enabled": False,
+    "operation_test4_weekly_start_date": None,
+    "operation_test4_weekly_end_date": None,
+    "operation_test4_weekly_auto_rollover": False,
+    "operation_test4_weekly_authorized_at": None,
 }
 KR_SCHEDULER_MODES = {
     "disabled",
@@ -248,6 +253,11 @@ class RuntimeSettingService:
             "operation_test4_scheduler_last_entry_decision": None,
             "operation_test4_scheduler_last_evaluated_trade_date": None,
             "operation_test4_scheduler_last_evaluated_slot_kst": None,
+            "operation_test4_weekly_window_enabled": False,
+            "operation_test4_weekly_start_date": None,
+            "operation_test4_weekly_end_date": None,
+            "operation_test4_weekly_auto_rollover": False,
+            "operation_test4_weekly_authorized_at": None,
             "portfolio_orchestrator_enabled": False,
             "portfolio_orchestrator_allow_live_orders": False,
             "portfolio_orchestrator_positions_first": True,
@@ -780,6 +790,21 @@ class RuntimeSettingService:
             "operation_test4_scheduler_last_evaluated_slot_kst": getattr(
                 row, "operation_test4_scheduler_last_evaluated_slot_kst", None
             ),
+            "operation_test4_weekly_window_enabled": bool(
+                getattr(row, "operation_test4_weekly_window_enabled", False)
+            ),
+            "operation_test4_weekly_start_date": getattr(
+                row, "operation_test4_weekly_start_date", None
+            ),
+            "operation_test4_weekly_end_date": getattr(
+                row, "operation_test4_weekly_end_date", None
+            ),
+            "operation_test4_weekly_auto_rollover": bool(
+                getattr(row, "operation_test4_weekly_auto_rollover", False)
+            ),
+            "operation_test4_weekly_authorized_at": getattr(
+                row, "operation_test4_weekly_authorized_at", None
+            ),
             "portfolio_orchestrator_enabled": bool(
                 row.portfolio_orchestrator_enabled
             ),
@@ -1100,6 +1125,22 @@ class RuntimeSettingService:
             str(settings["operation_test4_scheduler_last_evaluated_slot_kst"])
             if settings.get("operation_test4_scheduler_last_evaluated_slot_kst")
             else None
+        )
+        settings["operation_test4_weekly_window_enabled"] = bool(
+            settings.get("operation_test4_weekly_window_enabled", False)
+        )
+        settings["operation_test4_weekly_start_date"] = (
+            str(settings["operation_test4_weekly_start_date"])
+            if settings.get("operation_test4_weekly_start_date")
+            else None
+        )
+        settings["operation_test4_weekly_end_date"] = (
+            str(settings["operation_test4_weekly_end_date"])
+            if settings.get("operation_test4_weekly_end_date")
+            else None
+        )
+        settings["operation_test4_weekly_auto_rollover"] = bool(
+            settings.get("operation_test4_weekly_auto_rollover", False)
         )
         settings["kis_position_lifecycle_scheduler_enabled"] = bool(
             settings.get("kis_position_lifecycle_scheduler_enabled", False)
@@ -2814,6 +2855,11 @@ class RuntimeSettingService:
             "operation_test4_scheduler_last_entry_decision",
             "operation_test4_scheduler_last_evaluated_trade_date",
             "operation_test4_scheduler_last_evaluated_slot_kst",
+            "operation_test4_weekly_window_enabled",
+            "operation_test4_weekly_start_date",
+            "operation_test4_weekly_end_date",
+            "operation_test4_weekly_auto_rollover",
+            "operation_test4_weekly_authorized_at",
             "portfolio_orchestrator_enabled",
             "portfolio_orchestrator_allow_live_orders",
             "portfolio_orchestrator_positions_first",

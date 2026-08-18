@@ -121,6 +121,18 @@ class OperationTest4NextSessionArmRequest(BaseModel):
         return str(value or "").strip()
 
 
+class OperationTest4WeekArmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    confirm_live: bool = False
+    confirmation: str = Field(min_length=1, max_length=300)
+
+    @field_validator("confirmation")
+    @classmethod
+    def normalize_confirmation(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
 class OperationTest4WatchlistRebuildRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 

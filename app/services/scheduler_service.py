@@ -30,7 +30,11 @@ from app.services.operation_test3_position_management_service import (
     SCHEDULER_TRIGGER_SOURCE as OPERATION_TEST3_SCHEDULER_TRIGGER_SOURCE,
     operation_test3_scheduler_gate,
 )
-from app.services.operation_test4_service import ACTIVE_CYCLE_STATUSES, OperationTest4Service
+from app.services.operation_test4_service import (
+    ACTIVE_CYCLE_STATUSES,
+    WEEKLY_MODES,
+    OperationTest4Service,
+)
 from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.automation_release_service import AutomationReleaseService
@@ -685,7 +689,7 @@ class SchedulerService:
         runtime = self.runtime_settings.get_settings_read_only(db)
         if runtime.get("operation_test4_scheduler_enabled") is not True:
             return None
-        if runtime.get("operation_test4_scheduler_arm_mode") == "next_session":
+        if runtime.get("operation_test4_scheduler_arm_mode") in {"next_session", *WEEKLY_MODES}:
             has_active_cycle = (
                 db.query(OperationTest4Cycle)
                 .filter(OperationTest4Cycle.status.in_(ACTIVE_CYCLE_STATUSES))

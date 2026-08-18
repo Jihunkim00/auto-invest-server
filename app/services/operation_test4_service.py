@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
+import time as time_module
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -35,7 +37,10 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
-from app.services.kis_account_state_cache_service import KisAccountStateCacheService
+from app.services.kis_account_state_cache_service import (
+    KisAccountStateCacheService,
+    _account_error_diagnostics,
+)
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileService
@@ -79,6 +84,14 @@ ENTRY_SLOTS = ("09:35", "11:30", "13:30")
 POSITION_SLOTS = ("10:00", "12:00", "14:30")
 ALL_SLOTS = ENTRY_SLOTS + POSITION_SLOTS
 POSSIBLE_ORDER_MAX_AGE_SECONDS = 10.0
+REQUIRED_ENTRY_SCORE = 65.0
+WEEKLY_START_DATE = date(2026, 8, 19)
+WEEKLY_END_DATE = date(2026, 8, 21)
+WEEKLY_CONFIRMATION = "ARM TEST4 WEEK 2026-08-19 TO 2026-08-21"
+WEEKLY_ARM_MODE = "weekly_window"
+WEEKLY_ACTIVE_CYCLE_MODE = "weekly_active_cycle"
+WEEKLY_MODES = {WEEKLY_ARM_MODE, WEEKLY_ACTIVE_CYCLE_MODE}
+logger = logging.getLogger(__name__)
 ACTIVE_CYCLE_STATUSES = (
     "entry_ready",
     "entry_submitted",
@@ -193,6 +206,7 @@ class OperationTest4Service:
         possible_order_provider: Callable[..., dict[str, Any]] | None = None,
         price_provider: Callable[..., dict[str, Any]] | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        account_state_sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
@@ -216,6 +230,7 @@ class OperationTest4Service:
         self.possible_order_provider = possible_order_provider
         self.price_provider = price_provider
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+        self.account_state_sleep = account_state_sleep or time_module.sleep
 
     def arm_next_session(
         self,
@@ -544,6 +559,133 @@ class OperationTest4Service:
             }
         )
 
+    def arm_week(
+        self,
+        db: Session,
+        *,
+        confirm_live: bool,
+        confirmation: str | None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Authorize exactly one bounded Test4 operating week.
+
+        Authorization is durable, but it never enables live flags or submits
+        an order. Each trading day must still pass the normal readiness and
+        KIS guarded-submit gates.
+        """
+        base = {
+            "status": "blocked",
+            "operation_test": OPERATION_TEST,
+            "arm_mode": WEEKLY_ARM_MODE,
+            "weekly_window_enabled": False,
+            "immediate_order_execution": False,
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+        }
+        if confirm_live is not True or str(confirmation or "").strip() != WEEKLY_CONFIRMATION:
+            return sanitize_kis_payload(
+                {
+                    **base,
+                    "reason": "operator_confirmation_required",
+                    "required_confirmation": WEEKLY_CONFIRMATION,
+                }
+            )
+
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        live_flags = (
+            "operation_test4_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
+        )
+        conflicts = [
+            key for key in OTHER_SCHEDULER_LIVE_FLAGS if runtime.get(key) is True
+        ]
+        if any(runtime.get(key) is True for key in live_flags):
+            conflicts.append("operation_test4_live_mode_active")
+        if conflicts:
+            return sanitize_kis_payload(
+                {
+                    **base,
+                    "reason": "other_scheduler_live_flags_enabled",
+                    "blocking_reasons": _dedupe(conflicts),
+                }
+            )
+        if self._active_cycle(db) is not None:
+            return sanitize_kis_payload({**base, "reason": "active_cycle_exists"})
+        if self._active_lifecycles(db):
+            return sanitize_kis_payload({**base, "reason": "active_lifecycle_exists"})
+
+        account = self._read_account_state(require_fresh=True)
+        if account.get("fetch_success") is not True:
+            return sanitize_kis_payload(
+                {
+                    **base,
+                    "reason": "account_state_unavailable",
+                    "account": self._account_summary(account),
+                }
+            )
+        if account.get("position_count", 0) > 0:
+            return sanitize_kis_payload({**base, "reason": "position_exists"})
+        if account.get("open_order_count", 0) > 0 or self._local_open_order_count(db):
+            return sanitize_kis_payload({**base, "reason": "open_order_exists"})
+
+        target_date = self._weekly_target_for_now(now_utc)
+        settings_after = self.runtime_settings.update_settings(
+            db,
+            {
+                "dry_run": True,
+                "kill_switch": True,
+                "operation_test4_enabled": False,
+                "operation_test4_scheduler_enabled": True,
+                "operation_test4_allow_real_entry": False,
+                "operation_test4_allow_real_exit": False,
+                "operation_test4_entry_enabled": False,
+                "operation_test4_position_management_enabled": False,
+                "operation_test4_stop_loss_enabled": True,
+                "operation_test4_take_profit_enabled": True,
+                "operation_test4_scheduler_arm_mode": WEEKLY_ARM_MODE,
+                "operation_test4_target_trading_date": target_date.isoformat(),
+                "operation_test4_scheduler_armed_at": now_utc,
+                "operation_test4_scheduler_last_error": None,
+                "operation_test4_scheduler_last_stage": "weekly_authorized",
+                "operation_test4_scheduler_last_entry_decision": None,
+                "operation_test4_scheduler_last_evaluated_trade_date": None,
+                "operation_test4_scheduler_last_evaluated_slot_kst": None,
+                "operation_test4_weekly_window_enabled": True,
+                "operation_test4_weekly_start_date": WEEKLY_START_DATE.isoformat(),
+                "operation_test4_weekly_end_date": WEEKLY_END_DATE.isoformat(),
+                "operation_test4_weekly_auto_rollover": True,
+                "operation_test4_weekly_authorized_at": now_utc,
+                **{key: False for key in BUY_FLAGS},
+            },
+        )
+        next_slot = next_entry_slot_for_session(
+            now_utc, target_trading_date=target_date, enabled=True
+        )
+        return sanitize_kis_payload(
+            {
+                "status": "armed",
+                "operation_test": OPERATION_TEST,
+                "arm_mode": WEEKLY_ARM_MODE,
+                "confirmation_accepted": True,
+                "weekly_window_enabled": True,
+                "weekly_start_date": WEEKLY_START_DATE.isoformat(),
+                "weekly_end_date": WEEKLY_END_DATE.isoformat(),
+                "current_target_date": target_date.isoformat(),
+                "target_trading_date": target_date.isoformat(),
+                "entry_slots_kst": list(ENTRY_SLOTS),
+                "position_slots_kst": list(POSITION_SLOTS),
+                "next_entry_slot_kst": next_slot["next_entry_slot_kst"],
+                "next_automatic_entry_run": next_slot["next_automatic_entry_run"],
+                "runtime": self._runtime_snapshot(settings_after),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        )
+
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -571,7 +713,30 @@ class OperationTest4Service:
             and arm_mode == "next_session"
             and target_trading_date is not None
         )
-        if test4_scheduler_armed:
+        if arm_mode in WEEKLY_MODES:
+            next_slot = next_entry_slot_for_session(
+                now_utc,
+                target_trading_date=target_trading_date,
+                enabled=True,
+            )
+            weekly = self._weekly_authorization_snapshot(runtime, now=now_utc)
+            if not weekly["weekly_authorization_valid_today"]:
+                automatic_entry_status = (
+                    "weekly_authorization_expired"
+                    if weekly["weekly_window_enabled"]
+                    else "disabled"
+                )
+            elif has_position_or_order:
+                automatic_entry_status = "position_management"
+            elif runtime.get("operation_test4_scheduler_last_entry_decision") == HOLD:
+                automatic_entry_status = (
+                    "holding_waiting_next_slot"
+                    if next_slot["next_entry_slot_kst"]
+                    else "session_complete"
+                )
+            else:
+                automatic_entry_status = "waiting_for_slot"
+        elif test4_scheduler_armed:
             next_slot = next_entry_slot_for_session(
                 now_utc,
                 target_trading_date=target_trading_date,
@@ -614,12 +779,16 @@ class OperationTest4Service:
                 "active_cycle_count": int(active is not None),
                 "account": self._account_summary(account),
                 "runtime": self._runtime_snapshot(runtime),
+                "weekly_authorization": self._weekly_authorization_snapshot(
+                    runtime, now=now_utc
+                ),
                 "scheduler": {
                     "position_slots_kst": list(POSITION_SLOTS),
                     "scheduler_enabled": scheduler_enabled,
                     "master_scheduler_enabled": runtime.get("scheduler_enabled") is True,
-                    "test4_scheduler_armed": test4_scheduler_armed,
-                    "scheduler_effective": test4_scheduler_armed or (
+                    "test4_scheduler_armed": test4_scheduler_armed
+                    or arm_mode in WEEKLY_MODES,
+                    "scheduler_effective": test4_scheduler_armed or arm_mode in WEEKLY_MODES or (
                         scheduler_enabled
                         and arm_mode in {"disarmed", "active_cycle"}
                     ),
@@ -1380,6 +1549,7 @@ class OperationTest4Service:
                     "final_ranked_count": len(preview.get("final_ranked_candidates") or []),
                     "preview_only": preview.get("preview_only"),
                     "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                    "trading_disabled": preview.get("trading_disabled"),
                     "trading_enabled": preview.get("trading_enabled"),
                     "next_manual_action_hint": preview.get("next_manual_action_hint"),
                 },
@@ -1387,6 +1557,7 @@ class OperationTest4Service:
                     "source_preview_fields": {
                         "preview_only": preview.get("preview_only"),
                         "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                        "trading_disabled": preview.get("trading_disabled"),
                         "trading_enabled": preview.get("trading_enabled"),
                         "next_manual_action_hint": preview.get("next_manual_action_hint"),
                     }
@@ -1399,6 +1570,7 @@ class OperationTest4Service:
                 "preview_display": {
                     "preview_only": preview.get("preview_only"),
                     "kr_trading_disabled": preview.get("kr_trading_disabled"),
+                    "trading_disabled": preview.get("trading_disabled"),
                     "trading_enabled": preview.get("trading_enabled"),
                     "next_manual_action_hint": preview.get("next_manual_action_hint"),
                 },
@@ -1510,11 +1682,13 @@ class OperationTest4Service:
             return self._entry_blocked("daily_buy_limit_reached")
 
         runtime = self.runtime_settings.get_settings_read_only(db)
+        arm_mode = runtime.get("operation_test4_scheduler_arm_mode")
         next_session_target = (
             runtime.get("operation_test4_target_trading_date")
-            if runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
+            if arm_mode == "next_session" or arm_mode in WEEKLY_MODES
             else None
         )
+        weekly_mode = arm_mode in WEEKLY_MODES
         candidate = preflight.get("candidate") or {}
         fresh_price = self._current_price(
             symbol=str(candidate.get("symbol") or ""),
@@ -1769,6 +1943,7 @@ class OperationTest4Service:
                 db,
                 target_trading_date=str(next_session_target),
                 session_complete=is_next_session_last_entry_slot(entry_slot),
+                weekly=weekly_mode,
             )
         return self._entry_result(
             cycle,
@@ -1916,10 +2091,36 @@ class OperationTest4Service:
         *,
         slot_label: str,
         now: datetime | None = None,
+        weekly: bool = False,
     ) -> dict[str, Any]:
         """Evaluate an armed slot and hand BUY_READY to the guarded entry path."""
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
+        if weekly:
+            authorization = self._weekly_authorization_snapshot(runtime, now=now_utc)
+            start = parse_trading_date(runtime.get("operation_test4_weekly_start_date"))
+            end = parse_trading_date(runtime.get("operation_test4_weekly_end_date"))
+            local_date = now_utc.astimezone(KR_TZ).date()
+            if not authorization["weekly_window_enabled"] or start is None or end is None:
+                return self._next_session_result(
+                    status="blocked",
+                    reason="weekly_authorization_unavailable",
+                    action=HOLD,
+                    slot_label=slot_label,
+                )
+            if local_date > end:
+                completion = self._complete_weekly_window(
+                    db, target_date=end, reason="weekly_end_reached"
+                )
+                return self._next_session_result(
+                    status="ok",
+                    reason="weekly_end_reached",
+                    action=HOLD,
+                    slot_label=slot_label,
+                    entry_slots_complete=True,
+                    session_completion_reason="weekly_end_reached",
+                    session_completion=completion,
+                )
         target_date = parse_trading_date(
             runtime.get("operation_test4_target_trading_date")
         )
@@ -1941,6 +2142,19 @@ class OperationTest4Service:
                 target_trading_date=target_date.isoformat(),
             )
         if local_date > target_date:
+            if weekly:
+                next_target = self._next_weekly_trading_date(
+                    target_date,
+                    end=parse_trading_date(runtime.get("operation_test4_weekly_end_date")),
+                )
+                if next_target is not None:
+                    self._set_weekly_target(db, next_target, reason="weekly_target_rollover")
+                    return self._next_session_result(
+                        status="ok",
+                        reason="waiting_for_target_trading_date",
+                        slot_label=slot_label,
+                        target_trading_date=next_target.isoformat(),
+                    )
             self._record_next_session_state(
                 db, stage="blocked", error="target_trading_date_expired"
             )
@@ -1948,6 +2162,24 @@ class OperationTest4Service:
             return self._next_session_result(
                 status="blocked", reason="target_trading_date_expired", slot_label=slot_label
             )
+
+        if weekly and local_date == target_date:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if runtime.get("operation_test4_enabled") is not True:
+                live = self.enable_live(
+                    db,
+                    confirm_live=True,
+                    confirmation=ENABLE_CONFIRMATION,
+                    now=now_utc,
+                )
+                if live.get("status") != "live_enabled":
+                    return self._next_session_result(
+                        status="blocked",
+                        reason=str(live.get("reason") or "weekly_live_transition_blocked"),
+                        action=HOLD,
+                        slot_label=slot_label,
+                        live_transition=live,
+                    )
 
         cycle = self._active_cycle(db)
         if cycle is not None:
@@ -2136,18 +2368,22 @@ class OperationTest4Service:
                 evaluated_slot=slot_label,
             )
             if is_next_session_last_entry_slot(slot_label):
-                completion = self._complete_next_session(
-                    db, target_date=target_date, reason="session_complete"
+                completion = (
+                    self._complete_weekly_window(db, target_date=target_date, reason="daily_safe_reset")
+                    if weekly
+                    else self._complete_next_session(db, target_date=target_date, reason="session_complete")
                 )
                 return self._next_session_result(
                     status="ok",
-                    reason="session_complete",
+                    reason=reason,
                     action=HOLD,
                     slot_label=slot_label,
                     preflight=preflight,
                     watchlist=watchlist,
                     watchlist_rebuild=rebuilt,
                     session_completion=completion,
+                    entry_slots_complete=True,
+                    session_completion_reason="session_complete",
                 )
             return self._next_session_result(
                 status="ok" if preflight.get("status") != "blocked" else "blocked",
@@ -2237,8 +2473,10 @@ class OperationTest4Service:
             evaluated_slot=slot_label,
         )
         if is_next_session_last_entry_slot(slot_label):
-            completion = self._complete_next_session(
-                db, target_date=target_date, reason="session_complete"
+            completion = (
+                self._complete_weekly_window(db, target_date=target_date, reason="daily_safe_reset")
+                if weekly
+                else self._complete_next_session(db, target_date=target_date, reason="session_complete")
             )
             return self._next_session_result(
                 status="blocked",
@@ -2251,6 +2489,7 @@ class OperationTest4Service:
                 entry=entry,
                 session_completion=completion,
                 session_complete=True,
+                entry_slots_complete=True,
                 session_completion_reason="session_complete",
                 submit_path="operation_test4_existing_guarded_entry",
                 live_execution_permission=False,
@@ -2293,6 +2532,32 @@ class OperationTest4Service:
             or runtime.get("operation_test4_target_trading_date")
             or now_utc.astimezone(KR_TZ).date().isoformat()
         )
+        result = dict(result)
+        try:
+            trade_day = date.fromisoformat(trade_date)
+            slot_hour, slot_minute = (int(part) for part in slot_label.split(":"))
+            slot_started = datetime(
+                trade_day.year,
+                trade_day.month,
+                trade_day.day,
+                slot_hour,
+                slot_minute,
+                tzinfo=KR_TZ,
+            ).astimezone(UTC)
+        except (TypeError, ValueError):
+            slot_started = now_utc
+        result.setdefault("slot_started_at", slot_started.isoformat())
+        result.setdefault("slot_finished_at", now_utc.isoformat())
+        try:
+            result.setdefault(
+                "duration_seconds",
+                max(
+                    0.0,
+                    (now_utc - datetime.fromisoformat(str(result["slot_started_at"]))).total_seconds(),
+                ),
+            )
+        except (TypeError, ValueError):
+            result.setdefault("duration_seconds", 0.0)
         history = self._build_slot_history_payload(
             result=result,
             trade_date=trade_date,
@@ -2352,7 +2617,6 @@ class OperationTest4Service:
         )
         db.commit()
         db.refresh(row)
-        result = dict(result)
         result["decision_history_id"] = row.id
         result["decision_history_run_key"] = run_key
         return result
@@ -2394,6 +2658,7 @@ class OperationTest4Service:
             "market": MARKET,
             "trade_date_kst": trade_date,
             "slot_kst": slot_label,
+            "created_at": result.get("created_at") or _iso(_aware_utc(self.now_provider())),
             "trigger_source": "operation_test4_scheduler",
             "run_key": f"operation_test4_{trade_date}_{slot_label.replace(':', '')}",
             "candidate_symbol": candidate.get("symbol"),
@@ -2410,10 +2675,22 @@ class OperationTest4Service:
             "final_buy_score": candidate.get("final_buy_score"),
             "final_sell_score": candidate.get("final_sell_score"),
             "effective_min_entry_score": candidate.get("effective_min_entry_score")
-            or getattr(get_settings(), "watchlist_min_entry_score", 65),
+            or REQUIRED_ENTRY_SCORE,
             "required_entry_score": candidate.get("required_entry_score")
-            or getattr(get_settings(), "watchlist_min_entry_score", 65),
+            or REQUIRED_ENTRY_SCORE,
             "final_score_gap": candidate.get("final_score_gap") or preflight.get("final_score_gap"),
+            "analysis_source_flags": _dedupe(
+                [
+                    flag
+                    for flag, enabled in (
+                        ("preview_only", bool(candidate.get("preview_only") or preflight.get("preview", {}).get("preview_only"))),
+                        ("kr_trading_disabled", bool(candidate.get("kr_trading_disabled") or preflight.get("preview", {}).get("kr_trading_disabled"))),
+                        ("trading_disabled", bool(candidate.get("trading_disabled") or preflight.get("preview", {}).get("trading_disabled"))),
+                    )
+                    if enabled
+                ]
+            ),
+            "test4_block_reasons": _dedupe([str(item) for item in blocking]),
             "entry_ready": bool(execution.get("trade_ready") or action == "BUY_READY"),
             "trade_allowed": bool(execution.get("trade_ready") or action == "BUY_READY"),
             "should_trade": bool(execution.get("trade_ready") or action == "BUY_READY"),
@@ -2435,10 +2712,27 @@ class OperationTest4Service:
             "account_state_error_code": account.get("account_state_error_code"),
             "account_state_http_status": account.get("account_state_http_status"),
             "account_state_last_checked_at": account.get("account_state_last_checked_at"),
+            "account_state_component_attempts": account.get("account_state_component_attempts") or {},
+            "configured_count": (
+                preflight.get("watchlist", {}).get("configured_count")
+                or preflight.get("preview", {}).get("configured_count")
+            ),
+            "analyzed_count": (
+                preflight.get("preview", {}).get("analyzed_count")
+                or preflight.get("watchlist", {}).get("analyzed_count")
+            ),
+            "gpt_analyzed_count": preflight.get("preview", {}).get("gpt_analyzed_count"),
+            "slot_started_at": result.get("slot_started_at"),
+            "analysis_started_at": preflight.get("analysis_started_at") or result.get("slot_started_at"),
+            "analysis_finished_at": preflight.get("analysis_finished_at") or result.get("slot_finished_at"),
+            "slot_finished_at": result.get("slot_finished_at"),
+            "duration_seconds": result.get("duration_seconds"),
             "real_order_submitted": submitted,
             "broker_submit_called": result.get("broker_submit_called") is True,
             "order_id": result.get("order_id"),
             "broker_order_id": result.get("broker_order_id"),
+            "entry_slots_complete": bool(result.get("entry_slots_complete") or result.get("session_complete")),
+            "session_completion_reason": result.get("session_completion_reason"),
         }
 
     def _record_next_session_state(
@@ -2482,13 +2776,16 @@ class OperationTest4Service:
         *,
         target_trading_date: str,
         session_complete: bool = False,
+        weekly: bool = False,
     ) -> dict[str, Any]:
         """Keep the armed session alive while the guarded cycle is managed."""
         settings = self.runtime_settings.update_settings(
             db,
             {
                 "operation_test4_scheduler_enabled": True,
-                "operation_test4_scheduler_arm_mode": "active_cycle",
+                "operation_test4_scheduler_arm_mode": (
+                    WEEKLY_ACTIVE_CYCLE_MODE if weekly else "active_cycle"
+                ),
                 "operation_test4_target_trading_date": target_trading_date,
                 "operation_test4_scheduler_last_stage": "session_complete" if session_complete else "buy_submitted",
                 "operation_test4_scheduler_last_entry_decision": "BUY_READY",
@@ -2524,6 +2821,90 @@ class OperationTest4Service:
         )
         return self._runtime_snapshot(settings)
 
+    def _next_weekly_trading_date(
+        self,
+        target_date: date,
+        *,
+        end: date | None,
+    ) -> date | None:
+        candidate = target_date + timedelta(days=1)
+        while end is None or candidate <= end:
+            checker = getattr(self.session_service, "is_trading_day", None)
+            try:
+                valid = bool(checker(MARKET, candidate)) if callable(checker) else candidate.weekday() < 5
+            except Exception:
+                valid = candidate.weekday() < 5
+            if valid:
+                return candidate
+            candidate += timedelta(days=1)
+        return None
+
+    def _set_weekly_target(
+        self,
+        db: Session,
+        target_date: date,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        settings = self.runtime_settings.update_settings(
+            db,
+            {
+                "operation_test4_scheduler_enabled": True,
+                "operation_test4_scheduler_arm_mode": WEEKLY_ARM_MODE,
+                "operation_test4_target_trading_date": target_date.isoformat(),
+                "operation_test4_scheduler_last_stage": reason,
+                "operation_test4_scheduler_last_entry_decision": None,
+                "operation_test4_scheduler_last_evaluated_trade_date": None,
+                "operation_test4_scheduler_last_evaluated_slot_kst": None,
+                "operation_test4_scheduler_last_error": None,
+            },
+        )
+        return self._runtime_snapshot(settings)
+
+    def _complete_weekly_window(
+        self,
+        db: Session,
+        *,
+        target_date: date,
+        reason: str,
+    ) -> dict[str, Any]:
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        end = parse_trading_date(runtime.get("operation_test4_weekly_end_date")) or WEEKLY_END_DATE
+        next_target = self._next_weekly_trading_date(target_date, end=end)
+        payload: dict[str, Any] = {
+            "dry_run": True,
+            "kill_switch": True,
+            "operation_test4_enabled": False,
+            "operation_test4_allow_real_entry": False,
+            "operation_test4_allow_real_exit": False,
+            "operation_test4_entry_enabled": False,
+            "operation_test4_position_management_enabled": False,
+            "operation_test4_stop_loss_enabled": True,
+            "operation_test4_take_profit_enabled": True,
+            "operation_test4_scheduler_last_stage": reason,
+            "operation_test4_scheduler_last_error": None,
+            "operation_test4_scheduler_last_evaluated_trade_date": None,
+            "operation_test4_scheduler_last_evaluated_slot_kst": None,
+            "operation_test4_weekly_window_enabled": next_target is not None,
+            "operation_test4_weekly_auto_rollover": next_target is not None,
+            "operation_test4_scheduler_arm_mode": WEEKLY_ARM_MODE if next_target else "weekly_complete",
+            "operation_test4_scheduler_enabled": next_target is not None,
+            "operation_test4_target_trading_date": next_target.isoformat() if next_target else None,
+            "operation_test4_scheduler_last_entry_decision": HOLD,
+            **{key: False for key in BUY_FLAGS},
+        }
+        settings = self.runtime_settings.update_settings(db, payload)
+        result = self._runtime_snapshot(settings)
+        result.update(
+            {
+                "safe_closed": True,
+                "weekly_window_enabled": next_target is not None,
+                "next_target_date": next_target.isoformat() if next_target else None,
+                "weekly_test_complete": next_target is None,
+            }
+        )
+        return result
+
     def _next_session_result(
         self,
         *,
@@ -2537,10 +2918,11 @@ class OperationTest4Service:
             {
                 "status": status,
                 "operation_test": OPERATION_TEST,
-                "result": action or reason,
-                "action": action,
-                "reason": reason,
-                "slot_label": slot_label,
+            "result": action or reason,
+            "action": action,
+            "reason": reason,
+            "block_reason": reason if action == HOLD or status == "blocked" else None,
+            "slot_label": slot_label,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
                 **extra,
@@ -2561,13 +2943,15 @@ class OperationTest4Service:
         runtime = self.runtime_settings.get_settings_read_only(db)
         if (
             runtime.get("operation_test4_scheduler_enabled") is True
-            and runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
+            and runtime.get("operation_test4_scheduler_arm_mode")
+            in {"next_session", *WEEKLY_MODES}
         ):
+            weekly = runtime.get("operation_test4_scheduler_arm_mode") in WEEKLY_MODES
             cycle = self._active_cycle(db)
             if cycle is not None:
                 return self.run_active_cycle_once(db, now=now)
             result = self._run_next_session_scheduler_once(
-                db, slot_label=slot_label, now=now
+                db, slot_label=slot_label, now=now, weekly=weekly
             )
             with _ENTRY_SUBMIT_LOCK:
                 return self._persist_slot_decision_history(
@@ -2775,7 +3159,7 @@ class OperationTest4Service:
         block_reasons = _candidate_block_reasons(
             selected,
             score=score,
-            min_score=float(getattr(get_settings(), "watchlist_min_entry_score", 65)),
+            min_score=REQUIRED_ENTRY_SCORE,
             score_gap=preview.get("final_score_gap"),
             min_score_gap=float(getattr(get_settings(), "watchlist_min_score_gap", 0)),
         )
@@ -2810,6 +3194,8 @@ class OperationTest4Service:
             "preview_only": bool(selected.get("preview_only")) or "preview_only" in raw_preview_reasons,
             "kr_trading_disabled": bool(selected.get("kr_trading_disabled"))
             or "kr_trading_disabled" in raw_preview_reasons,
+            "trading_disabled": bool(selected.get("trading_disabled"))
+            or "trading_disabled" in raw_preview_reasons,
             "trading_enabled": selected.get("trading_enabled"),
             "next_manual_action_hint": selected.get("next_manual_action_hint"),
         }
@@ -3048,13 +3434,16 @@ class OperationTest4Service:
         preserve_next_session = bool(
             target_date is not None
             and runtime_before_close.get("operation_test4_scheduler_arm_mode")
-            in {"next_session", "active_cycle"}
+            in {"next_session", "active_cycle", *WEEKLY_MODES}
         )
         if preserve_next_session and runtime_before_close.get(
             "operation_test4_scheduler_last_evaluated_slot_kst"
         ) == "13:30":
-            settings = self._complete_next_session(
-                db, target_date=target_date, reason="session_complete"
+            weekly_mode = runtime_before_close.get("operation_test4_weekly_window_enabled") is True
+            settings = (
+                self._complete_weekly_window(db, target_date=target_date, reason="daily_safe_reset")
+                if weekly_mode
+                else self._complete_next_session(db, target_date=target_date, reason="session_complete")
             )
             close_reason = "session_complete"
         else:
@@ -3416,9 +3805,11 @@ class OperationTest4Service:
         before = self.runtime_settings.get_settings_read_only(db)
         keep_next_session = bool(
             preserve_next_session
-            and before.get("operation_test4_scheduler_arm_mode") in {"next_session", "active_cycle"}
+            and before.get("operation_test4_scheduler_arm_mode")
+            in {"next_session", "active_cycle", *WEEKLY_MODES}
             and before.get("operation_test4_target_trading_date")
         )
+        before_arm_mode = str(before.get("operation_test4_scheduler_arm_mode") or "")
         preserve_live_session = bool(
             keep_next_session
             and before.get("dry_run") is False
@@ -3439,7 +3830,11 @@ class OperationTest4Service:
             "operation_test4_stop_loss_enabled": preserve_live_session,
             "operation_test4_take_profit_enabled": preserve_live_session,
             "operation_test4_scheduler_arm_mode": (
-                "next_session" if keep_next_session else "disarmed"
+                WEEKLY_ARM_MODE
+                if keep_next_session and before_arm_mode in WEEKLY_MODES
+                else "next_session"
+                if keep_next_session
+                else "disarmed"
             ),
             "operation_test4_target_trading_date": (
                 before.get("operation_test4_target_trading_date")
@@ -3526,16 +3921,66 @@ class OperationTest4Service:
             is not None
         )
 
+    def _read_account_state_provider(self) -> dict[str, Any]:
+        provider = self.account_state_provider
+        attempts = max(
+            1,
+            min(int(getattr(self.client.settings, "kis_account_state_max_attempts", 3) or 3), 3),
+        )
+        backoff = max(
+            0.0,
+            float(getattr(self.client.settings, "kis_account_state_retry_backoff_seconds", 5.0) or 5.0),
+        )
+        for attempt in range(1, attempts + 1):
+            try:
+                try:
+                    result = provider()
+                except TypeError:
+                    result = provider(self.client)
+                normalized = _normalize_account_state(result)
+                normalized["account_state_attempt_count"] = max(
+                    int(normalized.get("account_state_attempt_count") or 0), attempt
+                )
+                return normalized
+            except Exception as exc:
+                diagnostics = _account_error_diagnostics(exc)
+                logger.warning(
+                    "Operation Test4 account state unavailable",
+                    extra={
+                        "slot_kst": None,
+                        "attempt": attempt,
+                        "failed_component": "account_aggregation",
+                        "error_category": diagnostics.get("category"),
+                        "error_code": diagnostics.get("error_code"),
+                        "http_status": diagnostics.get("http_status"),
+                    },
+                )
+                if attempt >= attempts or not diagnostics.get("retryable"):
+                    failure = _account_error(exc)
+                    failure.update(
+                        {
+                            "account_state_failed_component": "account_aggregation",
+                            "account_state_attempt_count": attempt,
+                            "account_state_retryable": bool(diagnostics.get("retryable")),
+                            "account_state_error_category": diagnostics.get("category"),
+                            "account_state_error_code": diagnostics.get("error_code"),
+                            "account_state_http_status": diagnostics.get("http_status"),
+                        }
+                    )
+                    return failure
+                delay = backoff * (3 ** (attempt - 1))
+                retry_after = float(diagnostics.get("retry_after_seconds") or 0.0)
+                if retry_after > delay:
+                    delay = retry_after
+                if delay > 0:
+                    self.account_state_sleep(delay)
+        return _account_error(RuntimeError("account_state_unavailable"))
+
     def _read_account_state(self, *, require_fresh: bool = False) -> dict[str, Any]:
         if self.account_state_provider is not None:
-            try:
-                result = self.account_state_provider()
-                normalized = _normalize_account_state(result)
-            except TypeError:
-                result = self.account_state_provider(self.client)
-                normalized = _normalize_account_state(result)
-            except Exception as exc:
-                return _account_error(exc)
+            normalized = self._read_account_state_provider()
+            if normalized.get("fetch_success") is not True:
+                return normalized
             if require_fresh and normalized.get("account_state_live_verified") is not True:
                 blocked = _account_error(RuntimeError("account_state_stale_not_safe_for_live"))
                 blocked.update(
@@ -3628,6 +4073,52 @@ class OperationTest4Service:
                 "error": str((exc.details or {}).get("reason") or "watchlist_invalid"),
             }
 
+    def _weekly_target_for_now(self, now: datetime) -> date:
+        local_date = now.astimezone(KR_TZ).date()
+        candidate = max(local_date, WEEKLY_START_DATE)
+        is_trading_day = getattr(self.session_service, "is_trading_day", None)
+        while candidate <= WEEKLY_END_DATE:
+            try:
+                valid = bool(is_trading_day(MARKET, candidate)) if callable(is_trading_day) else candidate.weekday() < 5
+            except Exception:
+                valid = candidate.weekday() < 5
+            if valid:
+                return candidate
+            candidate += timedelta(days=1)
+        # An authorization created after the bounded window is not useful;
+        # keeping the end date makes the subsequent scheduler validation fail
+        # closed without inventing a new authorization range.
+        return WEEKLY_END_DATE
+
+    def _weekly_authorization_snapshot(
+        self,
+        runtime: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        start = parse_trading_date(runtime.get("operation_test4_weekly_start_date"))
+        end = parse_trading_date(runtime.get("operation_test4_weekly_end_date"))
+        target = parse_trading_date(runtime.get("operation_test4_target_trading_date"))
+        local_date = now.astimezone(KR_TZ).date()
+        enabled = bool(runtime.get("operation_test4_weekly_window_enabled"))
+        valid = bool(
+            enabled
+            and runtime.get("operation_test4_weekly_auto_rollover") is True
+            and start is not None
+            and end is not None
+            and start <= local_date <= end
+            and target == local_date
+        )
+        return {
+            "weekly_window_enabled": enabled,
+            "weekly_start_date": start.isoformat() if start else None,
+            "weekly_end_date": end.isoformat() if end else None,
+            "weekly_auto_rollover": runtime.get("operation_test4_weekly_auto_rollover") is True,
+            "weekly_authorized_at": runtime.get("operation_test4_weekly_authorized_at"),
+            "current_target_date": target.isoformat() if target else None,
+            "weekly_authorization_valid_today": valid,
+        }
+
     def _market_session(self, now: datetime) -> dict[str, Any]:
         try:
             return self.session_service.get_session_status(MARKET, now=now)
@@ -3670,6 +4161,11 @@ class OperationTest4Service:
                 "operation_test4_scheduler_last_entry_decision",
                 "operation_test4_scheduler_last_evaluated_trade_date",
                 "operation_test4_scheduler_last_evaluated_slot_kst",
+                "operation_test4_weekly_window_enabled",
+                "operation_test4_weekly_start_date",
+                "operation_test4_weekly_end_date",
+                "operation_test4_weekly_auto_rollover",
+                "operation_test4_weekly_authorized_at",
             )
         }
 

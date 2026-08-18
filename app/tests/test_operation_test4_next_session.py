@@ -654,7 +654,10 @@ def test_next_session_hold_keeps_arm_until_last_slot_then_completes(db_session, 
         slot_label="13:30",
         now=_target_now(13, 30),
     )
-    assert last["reason"] == "session_complete"
+    assert last["reason"] == "final_score_gate_not_met"
+    assert last["block_reason"] == "final_score_gate_not_met"
+    assert last["entry_slots_complete"] is True
+    assert last["session_completion_reason"] == "session_complete"
     runtime = RuntimeSettingService().get_settings(db_session)
     assert runtime["operation_test4_scheduler_enabled"] is False
     assert runtime["operation_test4_scheduler_arm_mode"] == "session_complete"

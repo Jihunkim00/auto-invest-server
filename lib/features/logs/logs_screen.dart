@@ -1166,6 +1166,10 @@ class _RunHistoryCard extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+            if (run.isOperationTest4Slot) ...[
+              const SizedBox(height: 10),
+              _OperationTest4SlotSummary(run: run),
+            ],
             if (run.operatorSummary != null) ...[
               const SizedBox(height: 10),
               _KisWatchlistOperatorSummarySection(
@@ -1290,6 +1294,68 @@ class _RunHistoryCard extends StatelessWidget {
             )),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _OperationTest4SlotSummary extends StatelessWidget {
+  const _OperationTest4SlotSummary({required this.run});
+
+  final TradingLogItem run;
+
+  @override
+  Widget build(BuildContext context) {
+    final history = run.slotHistory;
+    final candidate = _textOrFallback(
+      '${history['candidate_symbol'] ?? run.symbol}',
+      fallback: '-',
+    );
+    final slot = _textOrFallback('${history['slot_kst'] ?? ''}', fallback: '-');
+    final completion = history['entry_slots_complete'] == true ? 'Yes' : 'No';
+    final order = run.hasOrder || run.realOrderSubmitted == true
+        ? run.orderLabel
+        : 'No order';
+    final sourceFlags = history['analysis_source_flags'];
+    final sourceLabel = sourceFlags is List
+        ? sourceFlags.map((item) => item.toString()).join(', ')
+        : _textOrFallback('$sourceFlags', fallback: 'none');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.deepPurpleAccent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.deepPurpleAccent.withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _BadgeWrap(labels: [
+            'KIS TEST4 LIVE',
+            '$slot SLOT',
+            if (order == 'No order') 'NO ORDER SUBMIT',
+          ]),
+          const SizedBox(height: 8),
+          _DetailRow(label: 'Candidate', value: candidate),
+          _DetailRow(
+            label: 'Final score',
+            value:
+                '${_numberLabel(run.finalBuyScore)} / Required ${_numberLabel(run.effectiveMinEntryScore)}',
+          ),
+          _DetailRow(label: 'Decision', value: _fallback(run.action, 'HOLD')),
+          _DetailRow(
+            label: 'Reason',
+            value: _fallback(run.reason, 'none'),
+          ),
+          _DetailRow(label: 'Order', value: order),
+          _DetailRow(label: 'Entry slots complete', value: completion),
+          if (sourceLabel != 'none')
+            _DetailRow(label: 'Analysis source', value: sourceLabel),
+        ],
       ),
     );
   }

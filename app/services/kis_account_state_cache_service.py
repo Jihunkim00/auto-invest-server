@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import logging
 import threading
 import time
 from typing import Any
@@ -19,6 +20,7 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 
 RETRYABLE_ACCOUNT_CATEGORIES = {"rate_limit", "timeout", "connection_error"}
 ACCOUNT_COMPONENTS = {"balance", "positions", "open_orders", "account_aggregation", "unknown"}
+logger = logging.getLogger(__name__)
 
 
 class KisAccountStateCacheService:
@@ -136,6 +138,17 @@ class KisAccountStateCacheService:
                 last_exc = exc
                 diagnostics = _account_error_diagnostics(exc)
                 if attempt >= attempts or not diagnostics["retryable"]:
+                    logger.warning(
+                        "Operation Test4 account state unavailable",
+                        extra={
+                            "slot_kst": None,
+                            "attempt": attempt,
+                            "failed_component": component,
+                            "error_category": diagnostics.get("category"),
+                            "error_code": diagnostics.get("error_code"),
+                            "http_status": diagnostics.get("http_status"),
+                        },
+                    )
                     failed_component = component
                     if component == "account_aggregation":
                         text = str(exc).lower()
@@ -146,7 +159,23 @@ class KisAccountStateCacheService:
                     failure = _AccountComponentFailure(failed_component, exc, attempts=attempt)
                     failure.diagnostics = diagnostics
                     raise failure from exc
-                delay = max(backoff, min(float(diagnostics.get("retry_after_seconds") or 0.0), 2.0))
+                # Test4's read-only retry contract is 5s then 15s by default.
+                # A configured zero backoff remains useful for unit tests and
+                # callers that explicitly opt out of waiting.
+                retry_after = float(diagnostics.get("retry_after_seconds") or 0.0)
+                policy_delay = backoff * (3 ** (attempt - 1))
+                delay = max(policy_delay, retry_after)
+                logger.warning(
+                    "Operation Test4 account state unavailable",
+                    extra={
+                        "slot_kst": None,
+                        "attempt": attempt,
+                        "failed_component": component,
+                        "error_category": diagnostics.get("category"),
+                        "error_code": diagnostics.get("error_code"),
+                        "http_status": diagnostics.get("http_status"),
+                    },
+                )
                 if delay > 0:
                     time.sleep(delay)
         raise _AccountComponentFailure(component, last_exc or RuntimeError("account_read_failed"), attempts=attempts)

@@ -12,6 +12,7 @@ from app.db.database import get_db
 from app.schemas.operation_test import (
     OperationTest4ConfirmationRequest,
     OperationTest4NextSessionArmRequest,
+    OperationTest4WeekArmRequest,
     OperationTest4WatchlistRebuildRequest,
 )
 from app.services.operation_test4_service import OperationTest4Service
@@ -109,6 +110,21 @@ def arm_operation_test4_today(
     result = service.arm_today(
         db,
         confirm=payload.confirm,
+        confirmation=payload.confirmation,
+    )
+    status_code = 200 if result.get("status") == "armed" else 409
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
+
+
+@router.post("/scheduler/arm-week")
+def arm_operation_test4_week(
+    payload: OperationTest4WeekArmRequest,
+    db: Session = Depends(get_db),
+    service: OperationTest4Service = Depends(get_operation_test4_service),
+):
+    result = service.arm_week(
+        db,
+        confirm_live=payload.confirm_live,
         confirmation=payload.confirmation,
     )
     status_code = 200 if result.get("status") == "armed" else 409
