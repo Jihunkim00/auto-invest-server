@@ -421,6 +421,10 @@ def _fresh_possible_order_for_same_day(service, now):
 
 def test_arm_today_route_arms_safe_state_before_first_entry_slot(db_session, tmp_path):
     service, _, _ = make_service(tmp_path)
+    RuntimeSettingService().update_settings(
+        db_session,
+        {"dry_run": False, "kill_switch": True},
+    )
     service.now_provider = lambda: _kst_now(10, 8, 30)
 
     def override_get_db():
@@ -448,7 +452,7 @@ def test_arm_today_route_arms_safe_state_before_first_entry_slot(db_session, tmp
     assert body["master_scheduler_enabled"] is False
     assert body["real_order_submitted"] is False
     assert body["broker_submit_called"] is False
-    assert body["runtime"]["dry_run"] is True
+    assert body["runtime"]["dry_run"] is False
     assert body["runtime"]["kill_switch"] is True
     assert body["runtime"]["operation_test4_scheduler_enabled"] is True
     assert body["runtime"]["operation_test4_enabled"] is False
@@ -580,6 +584,12 @@ def test_arm_today_reuses_existing_09_35_scheduler_and_guarded_submit_once(
         now=_kst_now(10, 8, 30),
     )
     assert armed["status"] == "armed"
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=_kst_now(10, 8, 30),
+    )["status"] == "live_enabled"
 
     service._load_watchlist = _fresh_watchlist_for_same_day
     now = _kst_now(10, 9, 35)
@@ -598,3 +608,40 @@ def test_arm_today_reuses_existing_09_35_scheduler_and_guarded_submit_once(
     assert result.get("target_trading_date_expired") is not True
     assert len(service.manual_order_service.calls) == 1
     assert cycle.status == "entry_pending"
+
+
+def test_arm_only_scheduler_never_opens_global_guards_or_submits(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(tmp_path)
+    RuntimeSettingService().update_settings(
+        db_session,
+        {"dry_run": False, "kill_switch": True},
+    )
+    armed = service.arm_today(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 TODAY",
+        now=_kst_now(10, 8, 30),
+    )
+    assert armed["status"] == "armed"
+    service._load_watchlist = _fresh_watchlist_for_same_day
+    now = _kst_now(10, 9, 35)
+    _fresh_possible_order_for_same_day(service, now)
+
+    result = service.run_scheduler_once(
+        db_session,
+        slot_label="09:35",
+        now=now,
+    )
+    runtime = RuntimeSettingService().get_settings(db_session)
+
+    assert result["reason"] == "operation_test4_live_arm_incomplete"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert runtime["dry_run"] is False
+    assert runtime["kill_switch"] is True
+    assert runtime["operation_test4_enabled"] is False
+    assert service.manual_order_service.calls == []
+    assert db_session.query(OperationTest4Cycle).count() == 0

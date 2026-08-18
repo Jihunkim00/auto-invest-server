@@ -16,6 +16,7 @@ from app.db.models import (
 )
 from app.db.database import get_db
 from app.main import app
+from app.routes.operation_test4 import get_operation_test4_service
 from app.routes.ops import RuntimeSettingsUpdateRequest, update_settings as update_ops_settings
 from app.services.operation_test4_service import ENABLE_CONFIRMATION
 from app.services.operation_test_live_mode_claim_service import (
@@ -269,7 +270,7 @@ def test_rebuild_snapshot_is_read_only_and_returns_reserve_stats(db_session, tmp
     assert db_session.query(RuntimeSetting).count() == 0
 
 
-def test_enable_live_requires_exact_confirmation_and_does_not_change_global_guards(
+def test_enable_live_requires_exact_confirmation_and_atomically_opens_global_guards(
     db_session,
     tmp_path,
 ):
@@ -296,10 +297,89 @@ def test_enable_live_requires_exact_confirmation_and_does_not_change_global_guar
 
     assert blocked["status"] == "blocked"
     assert enabled["status"] == "live_enabled"
-    assert settings["dry_run"] is True
-    assert settings["kill_switch"] is True
+    assert settings["dry_run"] is False
+    assert settings["kill_switch"] is False
+    assert settings["operation_test4_enabled"] is True
+    assert settings["operation_test4_scheduler_enabled"] is True
     assert settings["operation_test4_allow_real_entry"] is True
     assert settings["operation_test4_allow_real_exit"] is True
+    assert settings["operation_test4_entry_enabled"] is True
+    assert settings["operation_test4_position_management_enabled"] is True
+    assert enabled["real_order_submitted"] is False
+    assert enabled["broker_submit_called"] is False
+
+
+def test_enable_live_blocker_preserves_existing_global_guards(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(
+        tmp_path,
+        account_state={
+            "fetch_success": True,
+            "equity": 1_000_000,
+            "orderable_cash": 1_000_000,
+            "positions": [{"symbol": "005930", "qty": 1}],
+            "open_orders": [],
+        },
+    )
+    runtime = RuntimeSettingService()
+    runtime.update_settings(
+        db_session,
+        {"dry_run": False, "kill_switch": True},
+    )
+
+    result = service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation=ENABLE_CONFIRMATION,
+        now=NOW,
+    )
+    settings = runtime.get_settings(db_session)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "position_exists"
+    assert settings["dry_run"] is False
+    assert settings["kill_switch"] is True
+    assert settings["operation_test4_enabled"] is False
+    assert settings["operation_test4_allow_real_entry"] is False
+
+
+def test_enable_live_route_json_encodes_runtime_datetime(
+    db_session,
+    tmp_path,
+):
+    service, _, _ = make_service(tmp_path)
+    armed = service.arm_next_session(
+        db_session,
+        confirm=True,
+        confirmation="ARM TEST4 NEXT SESSION",
+        now=NOW,
+    )
+    assert armed["status"] == "armed"
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_operation_test4_service] = lambda: service
+    try:
+        response = TestClient(app).post(
+            "/app/operation-test4/enable-live",
+            json={
+                "confirm_live": True,
+                "confirmation": ENABLE_CONFIRMATION,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "live_enabled"
+    assert isinstance(body["runtime"]["operation_test4_scheduler_armed_at"], str)
+    assert body["runtime"]["dry_run"] is False
+    assert body["runtime"]["kill_switch"] is False
 
 
 def test_ops_settings_cannot_directly_enable_test4_real_gates(db_session):

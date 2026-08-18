@@ -63,7 +63,7 @@ def test_next_session_arm_persists_target_without_live_flags(db_session, tmp_pat
     assert runtime["operation_test4_enabled"] is False
     assert runtime["operation_test4_allow_real_entry"] is False
     assert runtime["dry_run"] is True
-    assert runtime["kill_switch"] is True
+    assert runtime["kill_switch"] is False
     assert runtime["scheduler_enabled"] is False
 
 
@@ -176,6 +176,13 @@ def _arm_next_session_last_slot(service, db_session):
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    live = service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )
+    assert live["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
 
 
@@ -283,6 +290,12 @@ def test_next_session_buy_ready_uses_existing_guarded_submit_once(db_session, tm
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
     now = _target_now(9, 35)
     _fresh_possible_order(service, now)
@@ -320,6 +333,12 @@ def test_next_session_duplicate_tick_does_not_submit_again(db_session, tmp_path)
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
     now = _target_now(9, 35)
     _fresh_possible_order(service, now)
@@ -398,6 +417,12 @@ def test_next_session_filled_buy_promotes_to_position_lifecycle(db_session, tmp_
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
     _fresh_possible_order(service, _target_now(9, 35))
 
@@ -442,6 +467,12 @@ def test_next_session_cycle_close_preserves_later_slot_for_next_buy(db_session, 
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
     first_now = _target_now(9, 35)
     _fresh_possible_order(service, first_now)
@@ -505,8 +536,8 @@ def test_next_session_cycle_close_preserves_later_slot_for_next_buy(db_session, 
     assert sell.calls == 1
     assert runtime_after_close["operation_test4_scheduler_arm_mode"] == "next_session"
     assert runtime_after_close["operation_test4_scheduler_enabled"] is True
-    assert runtime_after_close["dry_run"] is True
-    assert runtime_after_close["kill_switch"] is True
+    assert runtime_after_close["dry_run"] is False
+    assert runtime_after_close["kill_switch"] is False
 
     first_order = db_session.query(OrderLog).filter(OrderLog.side == "buy").one()
     first_order.broker_order_id = "KIS-TEST4-ENTRY-FIRST"
@@ -532,6 +563,12 @@ def test_next_session_last_slot_buy_marks_session_complete_while_managing_cycle(
         confirmation="ARM TEST4 NEXT SESSION",
         now=NOW,
     )
+    assert service.enable_live(
+        db_session,
+        confirm_live=True,
+        confirmation="ENABLE TEST4 FULL CYCLE",
+        now=NOW,
+    )["status"] == "live_enabled"
     service._load_watchlist = _fresh_watchlist
     now = _target_now(13, 30)
     _fresh_possible_order(service, now)

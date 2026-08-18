@@ -262,10 +262,6 @@ def arm_for_entry(db_session, service):
         now=NOW,
     )
     assert result["status"] == "live_enabled"
-    RuntimeSettingService().update_settings(
-        db_session,
-        {"dry_run": False, "kill_switch": False},
-    )
 
 
 def test_entry_holds_when_score_gate_is_not_met(db_session, tmp_path):

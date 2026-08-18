@@ -129,7 +129,7 @@ def enable_live_operation_test4(
         },
     )
     status_code = 200 if result.get("status") == "live_enabled" else 409
-    return JSONResponse(status_code=status_code, content=result)
+    return JSONResponse(status_code=status_code, content=jsonable_encoder(result))
 
 
 @router.post("/entry/run-once")

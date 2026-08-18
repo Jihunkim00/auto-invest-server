@@ -299,10 +299,9 @@ class OperationTest4Service:
             settings_after = self.runtime_settings.update_settings(
                 db,
                 {
-                    # Overnight reservation is always safe. The existing
-                    # live gates are lowered only by the JIT BUY_READY path.
-                    "dry_run": True,
-                    "kill_switch": True,
+                    # ARM only reserves the scheduler session. Global
+                    # execution guards belong to the explicit enable-live
+                    # transition and are not rewritten here.
                     "operation_test4_enabled": False,
                     "operation_test4_scheduler_enabled": True,
                     "operation_test4_allow_real_entry": False,
@@ -493,10 +492,9 @@ class OperationTest4Service:
             settings_after = self.runtime_settings.update_settings(
                 db,
                 {
-                    # Reuse the overnight safe state. The existing scheduler
-                    # promotes its gates only in the guarded BUY_READY path.
-                    "dry_run": True,
-                    "kill_switch": True,
+                    # ARM only reserves the scheduler session. Global
+                    # execution guards belong to the explicit enable-live
+                    # transition and are not rewritten here.
                     "operation_test4_enabled": False,
                     "operation_test4_scheduler_enabled": True,
                     "operation_test4_allow_real_entry": False,
@@ -958,10 +956,13 @@ class OperationTest4Service:
         confirm_live: bool,
         confirmation: str | None,
         now: datetime | None = None,
-        activate_global_guards: bool = False,
+        # Kept for callers compiled against the previous internal API. A
+        # successful Test4 live approval always opens the global guards;
+        # callers cannot use this flag to bypass the atomic transition.
+        activate_global_guards: bool = True,
         allowed_cycle_id: int | None = None,
     ) -> dict[str, Any]:
-        if confirm_live is not True or str(confirmation or "").strip() != ENABLE_CONFIRMATION:
+        if confirm_live is not True or confirmation != ENABLE_CONFIRMATION:
             return self._blocked_enable("operator_confirmation_required")
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -1026,11 +1027,10 @@ class OperationTest4Service:
             settings_after = self.runtime_settings.update_settings(
                 db,
                 {
-                **(
-                    {"dry_run": False, "kill_switch": False}
-                    if activate_global_guards
-                    else {}
-                ),
+                # Test4 flags and global guards are committed together by
+                # RuntimeSettingService/OperationTestLiveModeClaimService.
+                "dry_run": False,
+                "kill_switch": False,
                 "operation_test4_enabled": True,
                 "operation_test4_scheduler_enabled": True,
                 "operation_test4_allow_real_entry": True,
@@ -1512,8 +1512,7 @@ class OperationTest4Service:
         runtime = self.runtime_settings.get_settings_read_only(db)
         next_session_target = (
             runtime.get("operation_test4_target_trading_date")
-            if arm_for_submit
-            and runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
+            if runtime.get("operation_test4_scheduler_arm_mode") == "next_session"
             else None
         )
         candidate = preflight.get("candidate") or {}
@@ -2179,7 +2178,6 @@ class OperationTest4Service:
                 trigger_source="operation_test4_scheduler",
                 entry_slot_kst=slot_label,
                 _preflight=preflight,
-                _arm_for_submit=True,
             )
         except Exception as exc:
             reason = "next_session_entry_exception"
@@ -3421,17 +3419,25 @@ class OperationTest4Service:
             and before.get("operation_test4_scheduler_arm_mode") in {"next_session", "active_cycle"}
             and before.get("operation_test4_target_trading_date")
         )
+        preserve_live_session = bool(
+            keep_next_session
+            and before.get("dry_run") is False
+            and before.get("kill_switch") is False
+        )
         payload: dict[str, Any] = {
-            "dry_run": True,
-            "kill_switch": True,
-            "operation_test4_enabled": False,
+            # A normal cycle close before the final slot keeps the operator's
+            # explicit live approval for the remaining scheduled session.
+            # Errors, disable, and session completion still use the safe reset.
+            "dry_run": False if preserve_live_session else True,
+            "kill_switch": False if preserve_live_session else True,
+            "operation_test4_enabled": preserve_live_session,
             "operation_test4_scheduler_enabled": keep_next_session,
-            "operation_test4_allow_real_entry": False,
-            "operation_test4_allow_real_exit": False,
-            "operation_test4_entry_enabled": False,
-            "operation_test4_position_management_enabled": False,
-            "operation_test4_stop_loss_enabled": False,
-            "operation_test4_take_profit_enabled": False,
+            "operation_test4_allow_real_entry": preserve_live_session,
+            "operation_test4_allow_real_exit": preserve_live_session,
+            "operation_test4_entry_enabled": preserve_live_session,
+            "operation_test4_position_management_enabled": preserve_live_session,
+            "operation_test4_stop_loss_enabled": preserve_live_session,
+            "operation_test4_take_profit_enabled": preserve_live_session,
             "operation_test4_scheduler_arm_mode": (
                 "next_session" if keep_next_session else "disarmed"
             ),
