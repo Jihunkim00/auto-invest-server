@@ -17,11 +17,18 @@ LIMITED_AUTO_BUY_SOURCE = "kis_limited_auto_buy"
 LIMITED_AUTO_BUY_SOURCE_TYPE = "guarded_entry"
 PORTFOLIO_MANUAL_SELL_SOURCE = "kis_portfolio_manual_sell"
 PORTFOLIO_MANUAL_SELL_SOURCE_TYPE = "operator_confirmed_position_exit"
+OPERATOR_FORCED_TEST_ENTRY_SOURCE = "kis_operator_forced_test_entry"
+OPERATOR_FORCED_TEST_ENTRY_SOURCE_TYPE = "operator_forced_one_share_buy"
+OPERATOR_FORCED_TEST_ENTRY_SOURCE_CONTEXT = "operator_forced_test_entry"
 
 _STRING_KEYS = {
     "source",
     "source_type",
     "source_context",
+    "audit_source_context",
+    "source_endpoint",
+    "order_source",
+    "operation_test",
     "operator_action_source",
     "mode",
     "preflight_id",
@@ -32,6 +39,9 @@ _STRING_KEYS = {
     "limited_auto_sell_checked_at",
     "limited_auto_buy_checked_at",
     "scheduler_live_checked_at",
+    "execution_request_id",
+    "idempotency_id",
+    "review_token_status",
     "queue_id",
     "queue_review_status",
     "shadow_review_status",
@@ -62,6 +72,7 @@ _FLOAT_KEYS = {
 }
 _BOOL_KEYS = {
     "manual_confirm_required",
+    "forced_test_entry",
     "auto_buy_enabled",
     "auto_sell_enabled",
     "scheduler_real_order_enabled",
@@ -115,14 +126,21 @@ MANUAL_LIVE_SOURCE_CONTEXTS = {
     "shadow_exit_manual_sell",
     "audit_sell_manual_ticket",
     "unknown_manual",
+    "operation_test4_scheduler",
+    "operation_test4_run_once",
+    "operation_test4_position_management",
+    OPERATOR_FORCED_TEST_ENTRY_SOURCE_CONTEXT,
 }
 
 _AUDIT_STRING_KEYS = {
     "audit_version",
     "broker",
     "market",
+    "mode",
+    "operation_test",
     "source_endpoint",
     "source_context",
+    "audit_source_context",
     "order_source",
     "operator_action_source",
     "symbol",
@@ -146,6 +164,7 @@ _AUDIT_FLOAT_KEYS = {
 }
 _AUDIT_BOOL_KEYS = {
     "dry_run",
+    "forced_test_entry",
     "kill_switch",
     "kis_enabled",
     "kis_real_order_enabled",
@@ -250,6 +269,16 @@ def normalize_kis_order_source_metadata(value: Any) -> dict[str, Any]:
         result.setdefault("real_order_submit_allowed", True)
         result.setdefault("limited_auto_buy_enabled", True)
         result.setdefault("limited_auto_buy_manual_submit_called", False)
+    if result.get("source") == OPERATOR_FORCED_TEST_ENTRY_SOURCE:
+        result.setdefault("source_type", OPERATOR_FORCED_TEST_ENTRY_SOURCE_TYPE)
+        result.setdefault("source_context", OPERATOR_FORCED_TEST_ENTRY_SOURCE_CONTEXT)
+        result.setdefault("operator_action_source", OPERATOR_FORCED_TEST_ENTRY_SOURCE_CONTEXT)
+        result.setdefault("manual_confirm_required", True)
+        result.setdefault("auto_buy_enabled", False)
+        result.setdefault("auto_sell_enabled", True)
+        result.setdefault("scheduler_real_order_enabled", False)
+        result.setdefault("real_order_submit_allowed", True)
+        result.setdefault("forced_test_entry", True)
     if result.get("source") == PORTFOLIO_MANUAL_SELL_SOURCE:
         result.setdefault("source_type", PORTFOLIO_MANUAL_SELL_SOURCE_TYPE)
         result.setdefault("manual_confirm_required", True)
@@ -280,10 +309,16 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "source": data.get("source"),
         "source_type": data.get("source_type"),
         "source_context": data.get("source_context"),
+        "audit_source_context": data.get("audit_source_context"),
+        "source_endpoint": data.get("source_endpoint"),
+        "order_source": data.get("order_source"),
+        "operation_test": data.get("operation_test"),
+        "mode": data.get("mode"),
         "operator_action_source": data.get("operator_action_source"),
         "exit_trigger": data.get("exit_trigger"),
         "exit_trigger_source": data.get("trigger_source"),
         "manual_confirm_required": data.get("manual_confirm_required"),
+        "forced_test_entry": data.get("forced_test_entry"),
         "auto_buy_enabled": data.get("auto_buy_enabled"),
         "auto_sell_enabled": data.get("auto_sell_enabled"),
         "scheduler_real_order_enabled": data.get("scheduler_real_order_enabled"),
@@ -341,6 +376,9 @@ def kis_order_source_fields(metadata: dict[str, Any] | None) -> dict[str, Any]:
         "real_order_submitted": data.get("real_order_submitted"),
         "broker_submit_called": data.get("broker_submit_called"),
         "manual_submit_called": data.get("manual_submit_called"),
+        "execution_request_id": data.get("execution_request_id"),
+        "idempotency_id": data.get("idempotency_id"),
+        "review_token_status": data.get("review_token_status"),
         "risk_flags": data.get("risk_flags"),
         "gating_notes": data.get("gating_notes"),
         "source_metadata": data,
@@ -363,6 +401,7 @@ def kis_order_source_metadata_from_payloads(*payloads: Any) -> dict[str, Any]:
             "trigger_source": payload.get("exit_trigger_source")
             or payload.get("trigger_source"),
             "manual_confirm_required": payload.get("manual_confirm_required"),
+            "forced_test_entry": payload.get("forced_test_entry"),
             "auto_buy_enabled": payload.get("auto_buy_enabled"),
             "auto_sell_enabled": payload.get("auto_sell_enabled"),
             "scheduler_real_order_enabled": payload.get(
@@ -475,6 +514,8 @@ def kis_manual_live_source_context(
         return "shadow_exit_manual_sell"
     if source == "kis_portfolio_manual_sell":
         return "audit_sell_manual_ticket"
+    if source == OPERATOR_FORCED_TEST_ENTRY_SOURCE:
+        return OPERATOR_FORCED_TEST_ENTRY_SOURCE_CONTEXT
     if source == "single_symbol_trading":
         return "direct_manual_ticket"
     if source == "watchlist_candidate" or source_type in {

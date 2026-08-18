@@ -122,7 +122,7 @@ class _AdvancedActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ExpansionTile(
+    return Material(type: MaterialType.transparency, child: ExpansionTile(
       key: const ValueKey('operation-advanced-actions'),
       tilePadding: EdgeInsets.zero,
       childrenPadding: EdgeInsets.zero,
@@ -189,7 +189,7 @@ class _AdvancedActions extends StatelessWidget {
           ),
         ]),
       ],
-    );
+    ));
   }
 }
 

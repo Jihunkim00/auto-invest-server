@@ -13,6 +13,11 @@ from app.schemas.agent_chat_orchestrator import (
 )
 from app.schemas.agent_chat_tool import AgentChatToolCall
 from app.services.agent_chat_tool_registry import AgentChatToolRegistry
+from app.services.agent_chat_privacy_service import (
+    AgentChatContextPrivacyService,
+    AgentChatPrivacyClass,
+)
+from app.services.symbol_search_service import SymbolSearchService
 
 
 AGENT_CHAT_ROUTER_SYSTEM_PROMPT = """
@@ -56,9 +61,14 @@ class AgentChatIntentRouterService:
         openai_client: Any | None = None,
         settings: Any | None = None,
         tool_registry: AgentChatToolRegistry | None = None,
+        symbol_search_service: SymbolSearchService | None = None,
+        privacy_service: AgentChatContextPrivacyService | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.tool_registry = tool_registry or AgentChatToolRegistry()
+        self.symbol_search_service = symbol_search_service or SymbolSearchService()
+        self.privacy_service = privacy_service or AgentChatContextPrivacyService()
+        self.last_gpt_called = False
         self.model_name = getattr(
             self.settings,
             "agent_chat_model",
@@ -81,10 +91,13 @@ class AgentChatIntentRouterService:
     def route(self, *, message: str, context: dict[str, Any] | None = None) -> AgentChatIntent:
         context = context or {}
         clean_message = str(message or "").strip()
+        self.last_gpt_called = False
         gpt_failed = False
-        if self.client:
+        safe_message, message_class = self.privacy_service.redact_user_message(clean_message)
+        public_context = self.privacy_service.public_router_context(context)
+        if self.client and safe_message is not None and message_class == AgentChatPrivacyClass.PUBLIC:
             try:
-                return self._route_with_gpt(clean_message, context)
+                return self._route_with_gpt(safe_message, public_context)
             except Exception:
                 if not self.fallback_enabled:
                     raise
@@ -92,7 +105,13 @@ class AgentChatIntentRouterService:
         return self.fallback_route(
             clean_message,
             context,
-            parser_status="failed_fallback_used" if gpt_failed else "fallback",
+            parser_status=(
+                "privacy_blocked_fallback"
+                if safe_message is None
+                else "failed_fallback_used"
+                if gpt_failed
+                else "fallback"
+            ),
         )
 
     def fallback_route(
@@ -292,6 +311,40 @@ class AgentChatIntentRouterService:
                 **base,
             )
 
+        if self._is_affordability_query(text, lowered):
+            return self._intent(
+                AgentChatIntentCategory.AFFORDABILITY_QUERY,
+                confidence=0.88 if symbol_info else 0.58,
+                reason="User is asking whether a read-only budget can afford a quantity.",
+                supported=bool(symbol_info),
+                **base,
+            )
+
+        if self._is_indicator_explanation_query(text, lowered):
+            if symbol_info and any(token in text for token in ("상태", "지금", "어때", "분석", "같이", "기준")):
+                return self._intent(
+                    AgentChatIntentCategory.ANALYSIS_REQUEST,
+                    confidence=0.86,
+                    reason="User asks for public market indicator analysis.",
+                    supported=True,
+                    requires_plan=True,
+                    **base,
+                )
+            return self._intent(
+                AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY,
+                confidence=0.9,
+                reason="User is asking for a general indicator explanation.",
+                market=None,
+                provider=None,
+                symbol=None,
+                symbol_name=None,
+                side="none",
+                notional=None,
+                currency=None,
+                fallback_used=True,
+                parser_status=parser_status,
+            )
+
         if self._is_price_query(text, lowered):
             return self._intent(
                 AgentChatIntentCategory.READ_ONLY_PRICE_QUERY,
@@ -417,6 +470,7 @@ class AgentChatIntentRouterService:
         if self.temperature is not None and self._model_supports_temperature(self.model_name):
             request_payload["temperature"] = self.temperature
         try:
+            self.last_gpt_called = True
             response = self.client.responses.create(**request_payload)
         except Exception as exc:
             if "temperature" in request_payload and self._is_unsupported_temperature_error(exc):
@@ -514,6 +568,19 @@ class AgentChatIntentRouterService:
         return intent
 
     def _detect_symbol(self, text: str) -> dict[str, str] | None:
+        plain_aliases = {
+            "삼성전자": ("005930", "삼성전자", "KR", "kis"),
+            "삼전": ("005930", "삼성전자", "KR", "kis"),
+            "현대차": ("005380", "현대차", "KR", "kis"),
+            "현대자동차": ("005380", "현대자동차", "KR", "kis"),
+            "005380": ("005380", "현대차", "KR", "kis"),
+        }
+        compact_input = re.sub(r"\s+", "", str(text or ""))
+        if compact_input in {"삼성", "현대"}:
+            return None
+        for alias, (symbol, name, market, provider) in plain_aliases.items():
+            if alias in str(text or "") or alias in str(text or "").upper():
+                return {"symbol": symbol, "name": name, "market": market, "provider": provider}
         compact = re.sub(r"\s+", "", str(text or ""))
         upper_text = str(text or "").upper()
         aliases = {
@@ -534,6 +601,21 @@ class AgentChatIntentRouterService:
         for alias, (symbol, name, market, provider) in aliases.items():
             if alias in upper_text or alias in compact:
                 return {"symbol": symbol, "name": name, "market": market, "provider": provider}
+        catalog_matches = self.symbol_search_service.search(text, limit=20).get("results") or []
+        exact_matches = [
+            item
+            for item in catalog_matches
+            if str(item.get("name") or "").casefold() in str(text or "").casefold()
+            or str(item.get("symbol") or "").casefold() in str(text or "").casefold()
+        ]
+        if len(exact_matches) == 1:
+            item = exact_matches[0]
+            return {
+                "symbol": str(item.get("symbol") or ""),
+                "name": str(item.get("name") or item.get("symbol") or ""),
+                "market": str(item.get("market") or "UNKNOWN"),
+                "provider": str(item.get("provider") or "unknown"),
+            }
         six_digit = re.search(r"\b\d{6}\b", str(text or ""))
         if six_digit:
             return {
@@ -1380,6 +1462,19 @@ class AgentChatIntentRouterService:
         if category == AgentChatIntentCategory.READ_ONLY_PRICE_QUERY:
             tool_name = "kis_price_lookup" if provider == "kis" or intent.market == "KR" else "alpaca_price_lookup"
             return [self._tool_call(tool_name, {"symbol": symbol}, "User asked for a current price.")]
+        if category == AgentChatIntentCategory.AFFORDABILITY_QUERY:
+            calls = [
+                self._tool_call(
+                    "kis_price_lookup" if provider == "kis" or intent.market == "KR" else "alpaca_price_lookup",
+                    {"symbol": symbol},
+                    "User asked for a read-only affordability calculation.",
+                )
+            ]
+            if intent.market == "KR" or provider == "kis":
+                calls.append(self._tool_call("kis_balance_lookup", {}, "User asked for read-only available cash."))
+            return calls
+        if category == AgentChatIntentCategory.EXPLAIN_INDICATOR_QUERY:
+            return []
         if category == AgentChatIntentCategory.READ_ONLY_POSITIONS_QUERY:
             return [self._tool_call("kis_positions_lookup", {}, "User asked for current positions.")]
         if category == AgentChatIntentCategory.READ_ONLY_BALANCE_QUERY:
@@ -1688,6 +1783,10 @@ class AgentChatIntentRouterService:
         return "unknown"
 
     def _detect_side(self, text: str) -> str:
+        if any(token in text for token in ("매도", "팔고", "팔아")) or "sell" in text.lower():
+            return "sell"
+        if any(token in text for token in ("매수", "사고", "사줘", "사는")) or "buy" in text.lower():
+            return "buy"
         lowered = text.lower()
         if any(token in text for token in ["매도", "팔", "전량"]) or "sell" in lowered:
             return "sell"
@@ -1696,6 +1795,13 @@ class AgentChatIntentRouterService:
         return "none"
 
     def _parse_amount(self, text: str) -> float | None:
+        plain = str(text or "").replace(",", "")
+        plain_man = re.search(r"(\d+(?:\.\d+)?)\s*만\s*원?", plain)
+        if plain_man:
+            return float(plain_man.group(1)) * 10000
+        plain_won = re.search(r"(\d+(?:\.\d+)?)\s*원", plain)
+        if plain_won:
+            return float(plain_won.group(1))
         compact = str(text or "").replace(",", "")
         man = re.search(r"(\d+(?:\.\d+)?)\s*만\s*원?", compact)
         if man:
@@ -1730,18 +1836,44 @@ class AgentChatIntentRouterService:
         return None
 
     def _is_price_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("가격", "현재가", "얼마")):
+            return True
         return any(token in text for token in ["가격", "현재가", "주가", "얼마"]) or "price" in lowered
 
+    def _is_affordability_query(self, text: str, lowered: str) -> bool:
+        affordability = any(
+            token in text
+            for token in ["살 수", "살수", "구매 가능", "매수 가능", "살까요", "살 만", "살만"]
+        ) or any(token in lowered for token in ["afford", "can i buy", "buying power"])
+        return affordability and (
+            self._parse_quantity(text, self._detect_symbol(text)) is not None
+            or self._parse_amount(text) is not None
+            or any(token in text for token in ["한 주", "몇 주", "주 살"])
+        )
+
+    def _is_indicator_explanation_query(self, text: str, lowered: str) -> bool:
+        indicators = ("rsi", "vwap", "atr", "ema", "이동평균", "상대강도", "변동성 지표")
+        return (
+            any(token in lowered for token in indicators)
+            and any(token in text for token in ["뭐", "설명", "의미", "알려", "어떻게", "뜻"])
+        ) or any(token in lowered for token in ["what is rsi", "explain rsi", "what is vwap", "explain atr"])
+
     def _is_positions_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("포트폴리오", "보유 종목", "보유한 종목", "수익 중인 종목", "손실 큰 종목")):
+            return True
         return any(token in text for token in ["보유종목", "보유 종목", "포지션", "들고 있어", "보유 중", "가지고 있어"]) or "positions" in lowered
 
     def _is_balance_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("계좌", "현금", "예수금")):
+            return True
         return any(token in text for token in ["잔고", "현금", "계좌 상태", "예수금", "평가손익", "손익"]) or "balance" in lowered or "cash" in lowered
 
     def _is_orders_query(self, text: str) -> bool:
         return "주문" in text and any(token in text for token in ["기록", "내역", "최근", "오늘", "보여", "조회"])
 
     def _is_runs_query(self, text: str, lowered: str) -> bool:
+        if any(token in text for token in ("왜 안 샀", "왜 안샀", "왜 매수 안", "왜 매수하지", "왜 매수하지 않았", "왜 안 샀어", "오늘 왜 HOLD", "최근 자동매매 판단", "최근 판단", "자동매매 결과")):
+            return True
         return (
             any(token in text for token in ["실행 로그", "실행 기록", "런 기록"])
             or "run log" in lowered
@@ -1754,13 +1886,17 @@ class AgentChatIntentRouterService:
         return "신호" in text or "시그널" in text or "signals" in lowered
 
     def _is_analysis_request(self, text: str, lowered: str) -> bool:
-        return any(token in text for token in ["살만", "분석", "봐줘", "검토", "진입 괜찮"]) or "analysis" in lowered or "analyze" in lowered
+        if any(token in text for token in ("분석", "살만해", "진입", "어때", "상태")):
+            return True
+        return any(token in text for token in ["살만", "분석", "봐줘", "검토", "진입 괜찮"]) or "analysis" in lowered or "analyze" in lowered or "how is" in lowered
 
     def _is_manual_ticket_request(self, text: str) -> bool:
         return any(token in text for token in ["티켓", "주문서", "주문 표"]) and any(token in text for token in ["준비", "만들", "작성"])
 
     def _is_live_order_request(self, text: str) -> bool:
         lowered = text.lower()
+        if any(token in text for token in ("사고 싶", "매수해", "팔고 싶", "매도해")):
+            return True
         direct_tokens = ["사줘", "매수해", "바로 매수", "팔아", "매도해", "전량 매도", "주문 넣어", "주문해"]
         return any(token in text for token in direct_tokens) or "buy now" in lowered or "sell now" in lowered
 

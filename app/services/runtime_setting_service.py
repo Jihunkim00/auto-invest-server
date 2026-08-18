@@ -41,6 +41,35 @@ OPERATION_MODE_PRESETS = {
     "kis_sell_only_automation",
     "full_live_test_mode",
 }
+OPERATION_TEST4_SAFE_SETTINGS = {
+    "operation_test4_enabled": False,
+    "operation_test4_scheduler_enabled": False,
+    "operation_test4_allow_real_entry": False,
+    "operation_test4_allow_real_exit": False,
+    "operation_test4_entry_enabled": False,
+    "operation_test4_position_management_enabled": False,
+    "operation_test4_stop_loss_enabled": True,
+    "operation_test4_take_profit_enabled": True,
+    "operation_test4_max_buy_orders_per_day": 3,
+    "operation_test4_max_sell_orders_per_day": 3,
+    "operation_test4_max_open_positions": 1,
+    "operation_test4_allow_single_share_budget_bump": True,
+    "operation_test4_cash_only": True,
+    "operation_test4_no_new_entry_after": "14:00",
+    "operation_test4_scheduler_arm_mode": "disarmed",
+    "operation_test4_target_trading_date": None,
+    "operation_test4_scheduler_armed_at": None,
+    "operation_test4_scheduler_last_error": None,
+    "operation_test4_scheduler_last_stage": None,
+    "operation_test4_scheduler_last_entry_decision": None,
+    "operation_test4_scheduler_last_evaluated_trade_date": None,
+    "operation_test4_scheduler_last_evaluated_slot_kst": None,
+    "operation_test4_weekly_window_enabled": False,
+    "operation_test4_weekly_start_date": None,
+    "operation_test4_weekly_end_date": None,
+    "operation_test4_weekly_auto_rollover": False,
+    "operation_test4_weekly_authorized_at": None,
+}
 KR_SCHEDULER_MODES = {
     "disabled",
     "dry_run",
@@ -64,6 +93,10 @@ class RuntimeSettingService:
             "automation_mode_updated_by": None,
             "automation_mode_reason": None,
             "automation_mode_requires_manual_review": True,
+            "operation_mode_requested": "paper",
+            "operation_mode_changed_at": None,
+            "operation_mode_changed_by": None,
+            "operation_mode_reason": None,
             "default_symbol": self.settings.default_symbol.upper(),
             "default_gate_level": DEFAULT_GATE_LEVEL,
             "max_trades_per_day": MAX_TRADES_PER_DAY,
@@ -108,6 +141,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review": True,
             "kis_limited_auto_buy_max_orders_per_day": 1,
             "kis_limited_auto_buy_max_notional_pct": 0.03,
+            "kis_limited_auto_buy_max_notional_krw": 55000.0,
             "kis_limited_auto_buy_min_cash_buffer_krw": 0.0,
             "kis_limited_auto_buy_requires_existing_sell_guards": True,
             "kis_limited_auto_buy_min_final_score": 75.0,
@@ -183,8 +217,47 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis": True,
             "strategy_live_auto_exit_min_quantity": 1,
             "position_management_scheduler_enabled": False,
+            "kis_position_lifecycle_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
             "position_management_scheduler_allow_live_orders": False,
+            "operation_test3_enabled": False,
+            "operation_test3_scheduler_enabled": False,
+            "operation_test3_allow_real_orders": False,
+            "operation_test3_position_management_enabled": False,
+            "operation_test3_stop_loss_enabled": True,
+            "operation_test3_take_profit_enabled": False,
+            "operation_test3_max_sell_orders_per_day": 1,
+            "operation_test4_enabled": False,
+            "operation_test4_scheduler_enabled": False,
+            "operation_test4_allow_real_entry": False,
+            "operation_test4_allow_real_exit": False,
+            "operation_test4_entry_enabled": False,
+            "operation_test4_position_management_enabled": False,
+            "operation_test4_stop_loss_enabled": True,
+            "operation_test4_take_profit_enabled": True,
+            "operation_test4_min_position_pct": 10.0,
+            "operation_test4_max_position_pct": 100.0,
+            "operation_test4_max_order_notional_krw": 1_000_000.0,
+            "operation_test4_price_cap_krw": 1_000_000.0,
+            "operation_test4_max_buy_orders_per_day": 3,
+            "operation_test4_max_sell_orders_per_day": 3,
+            "operation_test4_max_open_positions": 1,
+            "operation_test4_allow_single_share_budget_bump": True,
+            "operation_test4_cash_only": True,
+            "operation_test4_no_new_entry_after": "14:00",
+            "operation_test4_scheduler_arm_mode": "disarmed",
+            "operation_test4_target_trading_date": None,
+            "operation_test4_scheduler_armed_at": None,
+            "operation_test4_scheduler_last_error": None,
+            "operation_test4_scheduler_last_stage": None,
+            "operation_test4_scheduler_last_entry_decision": None,
+            "operation_test4_scheduler_last_evaluated_trade_date": None,
+            "operation_test4_scheduler_last_evaluated_slot_kst": None,
+            "operation_test4_weekly_window_enabled": False,
+            "operation_test4_weekly_start_date": None,
+            "operation_test4_weekly_end_date": None,
+            "operation_test4_weekly_auto_rollover": False,
+            "operation_test4_weekly_authorized_at": None,
             "portfolio_orchestrator_enabled": False,
             "portfolio_orchestrator_allow_live_orders": False,
             "portfolio_orchestrator_positions_first": True,
@@ -250,16 +323,24 @@ class RuntimeSettingService:
             "kis_scheduler_live_respect_kill_switch": True,
         }
 
-    def get_or_create(self, db: Session) -> RuntimeSetting:
-        row = db.query(RuntimeSetting).first()
+    def get_or_create(
+        self,
+        db: Session,
+        *,
+        commit: bool = True,
+    ) -> RuntimeSetting:
+        row = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
         if row:
             return row
 
         defaults = self._defaults()
         row = RuntimeSetting(**defaults)
         db.add(row)
-        db.commit()
-        db.refresh(row)
+        if commit:
+            db.commit()
+            db.refresh(row)
+        else:
+            db.flush()
         return row
 
     def get_settings(self, db: Session) -> dict[str, Any]:
@@ -267,7 +348,7 @@ class RuntimeSettingService:
         return self._settings_from_row(row)
 
     def get_settings_read_only(self, db: Session) -> dict[str, Any]:
-        row = db.query(RuntimeSetting).first()
+        row = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
         if row:
             return self._settings_from_row(row)
 
@@ -296,6 +377,20 @@ class RuntimeSettingService:
             "automation_mode_requires_manual_review": bool(
                 getattr(row, "automation_mode_requires_manual_review", True)
             ),
+            "operation_mode_requested": str(
+                getattr(row, "operation_mode_requested", None) or "paper"
+            ),
+            "operation_mode_changed_at": getattr(
+                row,
+                "operation_mode_changed_at",
+                None,
+            ),
+            "operation_mode_changed_by": getattr(
+                row,
+                "operation_mode_changed_by",
+                None,
+            ),
+            "operation_mode_reason": getattr(row, "operation_mode_reason", None),
             "default_symbol": row.default_symbol,
             "default_gate_level": int(row.default_gate_level),
             "max_trades_per_day": int(row.max_trades_per_day),
@@ -401,6 +496,9 @@ class RuntimeSettingService:
             ),
             "kis_limited_auto_buy_max_notional_pct": float(
                 row.kis_limited_auto_buy_max_notional_pct
+            ),
+            "kis_limited_auto_buy_max_notional_krw": float(
+                row.kis_limited_auto_buy_max_notional_krw
             ),
             "kis_limited_auto_buy_min_cash_buffer_krw": float(
                 row.kis_limited_auto_buy_min_cash_buffer_krw
@@ -594,10 +692,119 @@ class RuntimeSettingService:
             "position_management_scheduler_enabled": bool(
                 row.position_management_scheduler_enabled
             ),
+            "kis_position_lifecycle_scheduler_enabled": bool(
+                row.kis_position_lifecycle_scheduler_enabled
+            ),
             "position_management_scheduler_dry_run_only": bool(
                 row.position_management_scheduler_dry_run_only
             ),
             "position_management_scheduler_allow_live_orders": False,
+            "operation_test3_enabled": bool(getattr(row, "operation_test3_enabled", False)),
+            "operation_test3_scheduler_enabled": bool(getattr(row, "operation_test3_scheduler_enabled", False)),
+            "operation_test3_allow_real_orders": bool(getattr(row, "operation_test3_allow_real_orders", False)),
+            "operation_test3_position_management_enabled": bool(
+                getattr(row, "operation_test3_position_management_enabled", False)
+            ),
+            "operation_test3_stop_loss_enabled": bool(getattr(row, "operation_test3_stop_loss_enabled", True)),
+            "operation_test3_take_profit_enabled": bool(getattr(row, "operation_test3_take_profit_enabled", False)),
+            "operation_test3_max_sell_orders_per_day": int(
+                getattr(row, "operation_test3_max_sell_orders_per_day", 1) or 1
+            ),
+            "operation_test4_enabled": bool(getattr(row, "operation_test4_enabled", False)),
+            "operation_test4_scheduler_enabled": bool(
+                getattr(row, "operation_test4_scheduler_enabled", False)
+            ),
+            "operation_test4_allow_real_entry": bool(
+                getattr(row, "operation_test4_allow_real_entry", False)
+            ),
+            "operation_test4_allow_real_exit": bool(
+                getattr(row, "operation_test4_allow_real_exit", False)
+            ),
+            "operation_test4_entry_enabled": bool(
+                getattr(row, "operation_test4_entry_enabled", False)
+            ),
+            "operation_test4_position_management_enabled": bool(
+                getattr(row, "operation_test4_position_management_enabled", False)
+            ),
+            "operation_test4_stop_loss_enabled": bool(
+                getattr(row, "operation_test4_stop_loss_enabled", True)
+            ),
+            "operation_test4_take_profit_enabled": bool(
+                getattr(row, "operation_test4_take_profit_enabled", True)
+            ),
+            "operation_test4_min_position_pct": float(
+                getattr(row, "operation_test4_min_position_pct", 10.0) or 10.0
+            ),
+            "operation_test4_max_position_pct": float(
+                getattr(row, "operation_test4_max_position_pct", 100.0) or 100.0
+            ),
+            "operation_test4_max_order_notional_krw": float(
+                getattr(row, "operation_test4_max_order_notional_krw", 1_000_000.0)
+                or 1_000_000.0
+            ),
+            "operation_test4_price_cap_krw": float(
+                getattr(row, "operation_test4_price_cap_krw", 1_000_000.0)
+                or 1_000_000.0
+            ),
+            "operation_test4_max_buy_orders_per_day": int(
+                getattr(row, "operation_test4_max_buy_orders_per_day", 3) or 3
+            ),
+            "operation_test4_max_sell_orders_per_day": int(
+                getattr(row, "operation_test4_max_sell_orders_per_day", 3) or 3
+            ),
+            "operation_test4_max_open_positions": int(
+                getattr(row, "operation_test4_max_open_positions", 1) or 1
+            ),
+            "operation_test4_allow_single_share_budget_bump": bool(
+                getattr(row, "operation_test4_allow_single_share_budget_bump", True)
+            ),
+            "operation_test4_cash_only": bool(
+                getattr(row, "operation_test4_cash_only", True)
+            ),
+            "operation_test4_no_new_entry_after": str(
+                getattr(row, "operation_test4_no_new_entry_after", "14:00")
+                or "14:00"
+            ),
+            "operation_test4_scheduler_arm_mode": str(
+                getattr(row, "operation_test4_scheduler_arm_mode", "disarmed")
+                or "disarmed"
+            ),
+            "operation_test4_target_trading_date": getattr(
+                row, "operation_test4_target_trading_date", None
+            ),
+            "operation_test4_scheduler_armed_at": getattr(
+                row, "operation_test4_scheduler_armed_at", None
+            ),
+            "operation_test4_scheduler_last_error": getattr(
+                row, "operation_test4_scheduler_last_error", None
+            ),
+            "operation_test4_scheduler_last_stage": getattr(
+                row, "operation_test4_scheduler_last_stage", None
+            ),
+            "operation_test4_scheduler_last_entry_decision": getattr(
+                row, "operation_test4_scheduler_last_entry_decision", None
+            ),
+            "operation_test4_scheduler_last_evaluated_trade_date": getattr(
+                row, "operation_test4_scheduler_last_evaluated_trade_date", None
+            ),
+            "operation_test4_scheduler_last_evaluated_slot_kst": getattr(
+                row, "operation_test4_scheduler_last_evaluated_slot_kst", None
+            ),
+            "operation_test4_weekly_window_enabled": bool(
+                getattr(row, "operation_test4_weekly_window_enabled", False)
+            ),
+            "operation_test4_weekly_start_date": getattr(
+                row, "operation_test4_weekly_start_date", None
+            ),
+            "operation_test4_weekly_end_date": getattr(
+                row, "operation_test4_weekly_end_date", None
+            ),
+            "operation_test4_weekly_auto_rollover": bool(
+                getattr(row, "operation_test4_weekly_auto_rollover", False)
+            ),
+            "operation_test4_weekly_authorized_at": getattr(
+                row, "operation_test4_weekly_authorized_at", None
+            ),
             "portfolio_orchestrator_enabled": bool(
                 row.portfolio_orchestrator_enabled
             ),
@@ -803,6 +1010,141 @@ class RuntimeSettingService:
         settings["strategy_auto_buy_scheduler_allow_live_orders"] = False
         settings["position_management_scheduler_dry_run_only"] = True
         settings["position_management_scheduler_allow_live_orders"] = False
+        settings["operation_test3_enabled"] = bool(
+            settings.get("operation_test3_enabled", False)
+        )
+        settings["operation_test3_scheduler_enabled"] = bool(
+            settings.get("operation_test3_scheduler_enabled", False)
+        )
+        settings["operation_test3_allow_real_orders"] = bool(
+            settings.get("operation_test3_allow_real_orders", False)
+        )
+        settings["operation_test3_position_management_enabled"] = bool(
+            settings.get("operation_test3_position_management_enabled", False)
+        )
+        settings["operation_test3_stop_loss_enabled"] = bool(
+            settings.get("operation_test3_stop_loss_enabled", True)
+        )
+        settings["operation_test3_take_profit_enabled"] = bool(
+            settings.get("operation_test3_take_profit_enabled", False)
+        )
+        settings["operation_test3_max_sell_orders_per_day"] = max(
+            0,
+            int(settings.get("operation_test3_max_sell_orders_per_day") or 1),
+        )
+        settings["operation_test4_enabled"] = bool(
+            settings.get("operation_test4_enabled", False)
+        )
+        settings["operation_test4_scheduler_enabled"] = bool(
+            settings.get("operation_test4_scheduler_enabled", False)
+        )
+        settings["operation_test4_allow_real_entry"] = bool(
+            settings.get("operation_test4_allow_real_entry", False)
+        )
+        settings["operation_test4_allow_real_exit"] = bool(
+            settings.get("operation_test4_allow_real_exit", False)
+        )
+        settings["operation_test4_entry_enabled"] = bool(
+            settings.get("operation_test4_entry_enabled", False)
+        )
+        settings["operation_test4_position_management_enabled"] = bool(
+            settings.get("operation_test4_position_management_enabled", False)
+        )
+        settings["operation_test4_stop_loss_enabled"] = bool(
+            settings.get("operation_test4_stop_loss_enabled", True)
+        )
+        settings["operation_test4_take_profit_enabled"] = bool(
+            settings.get("operation_test4_take_profit_enabled", True)
+        )
+        settings["operation_test4_min_position_pct"] = max(
+            0.0, float(settings.get("operation_test4_min_position_pct") or 10.0)
+        )
+        settings["operation_test4_max_position_pct"] = min(
+            100.0,
+            max(0.0, float(settings.get("operation_test4_max_position_pct") or 100.0)),
+        )
+        settings["operation_test4_max_order_notional_krw"] = max(
+            0.0,
+            float(
+                settings.get("operation_test4_max_order_notional_krw")
+                or 1_000_000.0
+            ),
+        )
+        settings["operation_test4_price_cap_krw"] = max(
+            0.0,
+            float(settings.get("operation_test4_price_cap_krw") or 1_000_000.0),
+        )
+        settings["operation_test4_max_buy_orders_per_day"] = min(
+            3,
+            max(0, int(settings.get("operation_test4_max_buy_orders_per_day") or 1)),
+        )
+        settings["operation_test4_max_sell_orders_per_day"] = min(
+            3,
+            max(0, int(settings.get("operation_test4_max_sell_orders_per_day") or 1)),
+        )
+        settings["operation_test4_max_open_positions"] = min(
+            1,
+            max(0, int(settings.get("operation_test4_max_open_positions") or 1)),
+        )
+        settings["operation_test4_allow_single_share_budget_bump"] = bool(
+            settings.get("operation_test4_allow_single_share_budget_bump", True)
+        )
+        settings["operation_test4_cash_only"] = True
+        settings["operation_test4_no_new_entry_after"] = str(
+            settings.get("operation_test4_no_new_entry_after") or "14:00"
+        )
+        settings["operation_test4_scheduler_arm_mode"] = str(
+            settings.get("operation_test4_scheduler_arm_mode") or "disarmed"
+        )
+        settings["operation_test4_target_trading_date"] = (
+            str(settings["operation_test4_target_trading_date"])
+            if settings.get("operation_test4_target_trading_date")
+            else None
+        )
+        settings["operation_test4_scheduler_last_error"] = (
+            str(settings["operation_test4_scheduler_last_error"])
+            if settings.get("operation_test4_scheduler_last_error")
+            else None
+        )
+        settings["operation_test4_scheduler_last_stage"] = (
+            str(settings["operation_test4_scheduler_last_stage"])
+            if settings.get("operation_test4_scheduler_last_stage")
+            else None
+        )
+        settings["operation_test4_scheduler_last_entry_decision"] = (
+            str(settings["operation_test4_scheduler_last_entry_decision"])
+            if settings.get("operation_test4_scheduler_last_entry_decision")
+            else None
+        )
+        settings["operation_test4_scheduler_last_evaluated_trade_date"] = (
+            str(settings["operation_test4_scheduler_last_evaluated_trade_date"])
+            if settings.get("operation_test4_scheduler_last_evaluated_trade_date")
+            else None
+        )
+        settings["operation_test4_scheduler_last_evaluated_slot_kst"] = (
+            str(settings["operation_test4_scheduler_last_evaluated_slot_kst"])
+            if settings.get("operation_test4_scheduler_last_evaluated_slot_kst")
+            else None
+        )
+        settings["operation_test4_weekly_window_enabled"] = bool(
+            settings.get("operation_test4_weekly_window_enabled", False)
+        )
+        settings["operation_test4_weekly_start_date"] = (
+            str(settings["operation_test4_weekly_start_date"])
+            if settings.get("operation_test4_weekly_start_date")
+            else None
+        )
+        settings["operation_test4_weekly_end_date"] = (
+            str(settings["operation_test4_weekly_end_date"])
+            if settings.get("operation_test4_weekly_end_date")
+            else None
+        )
+        settings["operation_test4_weekly_auto_rollover"] = bool(
+            settings.get("operation_test4_weekly_auto_rollover", False)
+        )
+        settings["kis_position_lifecycle_scheduler_enabled"] = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         settings["portfolio_orchestrator_positions_first"] = True
         settings["portfolio_orchestrator_max_actions_per_run"] = 1
         settings["portfolio_orchestrator_require_production_ready"] = True
@@ -1014,6 +1356,9 @@ class RuntimeSettingService:
         )
         scheduler_enabled = bool(settings["scheduler_enabled"])
         kis_scheduler_enabled = bool(settings["kis_scheduler_enabled"])
+        kis_position_lifecycle_scheduler_enabled = bool(
+            settings.get("kis_position_lifecycle_scheduler_enabled", False)
+        )
         kis_scheduler_dry_run = bool(settings["kis_scheduler_dry_run"])
         kis_scheduler_allow_real_orders = bool(
             settings["kis_scheduler_allow_real_orders"]
@@ -1058,6 +1403,9 @@ class RuntimeSettingService:
         return {
             "scheduler_enabled": scheduler_enabled,
             "kis_scheduler_enabled": kis_scheduler_enabled,
+            "kis_position_lifecycle_scheduler_enabled": (
+                kis_position_lifecycle_scheduler_enabled
+            ),
             "kis_scheduler_dry_run": kis_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kis_scheduler_allow_real_orders,
             "kis_scheduler_configured_allow_real_orders": (
@@ -1452,6 +1800,7 @@ class RuntimeSettingService:
             raise ValueError(f"unsupported operation mode preset: {preset}")
 
         preset_payload = self._preset_payload(normalized)
+        preset_payload.update(OPERATION_TEST4_SAFE_SETTINGS)
         if normalized == "full_live_test_mode" and not confirm_dangerous:
             settings = self.get_settings(db)
             risk_summary = self._kis_risk_summary(
@@ -1878,6 +2227,22 @@ class RuntimeSettingService:
                 affects=["KIS/KR live order notional cap"],
             ),
             _catalog_item(
+                "kis_limited_auto_buy_max_notional_krw",
+                "KIS limited buy max KRW",
+                "Absolute KRW cap for reviewed one-share KIS limited auto-buy.",
+                "risk_limits",
+                "float",
+                settings["kis_limited_auto_buy_max_notional_krw"],
+                defaults["kis_limited_auto_buy_max_notional_krw"],
+                minimum=0.0,
+                unit="KRW",
+                scope="kis",
+                market="KR",
+                broker="kis",
+                timezone=str(KR_TZ.key),
+                affects=["KIS reviewed limited auto-buy"],
+            ),
+            _catalog_item(
                 "daily_max_loss_pct",
                 "Daily max loss %",
                 "Displayed for UI consistency; no runtime executor currently consumes it.",
@@ -2049,8 +2414,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
@@ -2085,8 +2458,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": False,
@@ -2117,8 +2498,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
             }
@@ -2148,8 +2537,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                 "portfolio_orchestrator_enabled": False,
                 "portfolio_orchestrator_allow_live_orders": False,
                 "kis_limited_auto_stop_loss_enabled": True,
@@ -2180,22 +2577,49 @@ class RuntimeSettingService:
                     "strategy_live_auto_exit_enabled": False,
                     "strategy_live_auto_exit_scheduler_enabled": False,
                     "position_management_scheduler_enabled": False,
+                    "kis_position_lifecycle_scheduler_enabled": False,
                     "position_management_scheduler_dry_run_only": True,
                     "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
                     "portfolio_orchestrator_enabled": False,
                     "portfolio_orchestrator_allow_live_orders": False,
                     "kis_limited_auto_buy_requires_shadow_review": True,
                     "kis_limited_auto_buy_max_orders_per_day": CONSERVATIVE_LIVE_ORDER_LIMIT,
                     "kis_limited_auto_buy_max_notional_pct": CONSERVATIVE_MAX_NOTIONAL_PCT,
+                    "kis_limited_auto_buy_max_notional_krw": 55000.0,
                     "kis_limited_auto_buy_max_positions": 3,
                 }
             )
             return payload
         raise ValueError(f"unsupported operation mode preset: {preset}")
 
-    def update_settings(self, db: Session, payload: dict[str, Any]) -> dict[str, Any]:
+    def update_settings(
+        self,
+        db: Session,
+        payload: dict[str, Any],
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
         payload = dict(payload)
         self._normalize_simplified_payload(payload)
+        if commit:
+            from app.services.operation_test_live_mode_claim_service import (
+                OPERATION_TEST_MODE_SETTING_KEYS,
+                OperationTestLiveModeClaimService,
+            )
+
+            if any(key in payload for key in OPERATION_TEST_MODE_SETTING_KEYS):
+                return OperationTestLiveModeClaimService().update_runtime_settings(
+                    db,
+                    runtime_settings=self,
+                    payload=payload,
+                )
         if "strategy_auto_buy_scheduler_dry_run_only" in payload:
             payload["strategy_auto_buy_scheduler_dry_run_only"] = True
         if "strategy_auto_buy_scheduler_allow_live_orders" in payload:
@@ -2262,7 +2686,7 @@ class RuntimeSettingService:
                 1,
                 max(0, int(payload.get("automation_release_max_daily_auto_sells") or 1)),
             )
-        row = self.get_or_create(db)
+        row = self.get_or_create(db, commit=commit)
         _sync_bool_alias(
             payload,
             "kis_limited_auto_stop_loss_enabled",
@@ -2328,6 +2752,7 @@ class RuntimeSettingService:
             "kis_limited_auto_buy_requires_shadow_review",
             "kis_limited_auto_buy_max_orders_per_day",
             "kis_limited_auto_buy_max_notional_pct",
+            "kis_limited_auto_buy_max_notional_krw",
             "kis_limited_auto_buy_min_cash_buffer_krw",
             "kis_limited_auto_buy_requires_existing_sell_guards",
             "kis_limited_auto_buy_min_final_score",
@@ -2394,8 +2819,47 @@ class RuntimeSettingService:
             "strategy_live_auto_exit_requires_cost_basis",
             "strategy_live_auto_exit_min_quantity",
             "position_management_scheduler_enabled",
+            "kis_position_lifecycle_scheduler_enabled",
             "position_management_scheduler_dry_run_only",
             "position_management_scheduler_allow_live_orders",
+            "operation_test3_enabled",
+            "operation_test3_scheduler_enabled",
+            "operation_test3_allow_real_orders",
+            "operation_test3_position_management_enabled",
+            "operation_test3_stop_loss_enabled",
+            "operation_test3_take_profit_enabled",
+            "operation_test3_max_sell_orders_per_day",
+            "operation_test4_enabled",
+            "operation_test4_scheduler_enabled",
+            "operation_test4_allow_real_entry",
+            "operation_test4_allow_real_exit",
+            "operation_test4_entry_enabled",
+            "operation_test4_position_management_enabled",
+            "operation_test4_stop_loss_enabled",
+            "operation_test4_take_profit_enabled",
+            "operation_test4_min_position_pct",
+            "operation_test4_max_position_pct",
+            "operation_test4_max_order_notional_krw",
+            "operation_test4_price_cap_krw",
+            "operation_test4_max_buy_orders_per_day",
+            "operation_test4_max_sell_orders_per_day",
+            "operation_test4_max_open_positions",
+            "operation_test4_allow_single_share_budget_bump",
+            "operation_test4_cash_only",
+            "operation_test4_no_new_entry_after",
+            "operation_test4_scheduler_arm_mode",
+            "operation_test4_target_trading_date",
+            "operation_test4_scheduler_armed_at",
+            "operation_test4_scheduler_last_error",
+            "operation_test4_scheduler_last_stage",
+            "operation_test4_scheduler_last_entry_decision",
+            "operation_test4_scheduler_last_evaluated_trade_date",
+            "operation_test4_scheduler_last_evaluated_slot_kst",
+            "operation_test4_weekly_window_enabled",
+            "operation_test4_weekly_start_date",
+            "operation_test4_weekly_end_date",
+            "operation_test4_weekly_auto_rollover",
+            "operation_test4_weekly_authorized_at",
             "portfolio_orchestrator_enabled",
             "portfolio_orchestrator_allow_live_orders",
             "portfolio_orchestrator_positions_first",
@@ -2528,6 +2992,17 @@ class RuntimeSettingService:
                 value = min(2, max(0, int(value or 2)))
             if key == "automation_release_max_daily_auto_buys":
                 value = min(1, max(0, int(value or 1)))
+            if key == "operation_test3_max_sell_orders_per_day":
+                value = max(0, int(value or 1))
+            if key in {
+                "operation_test4_max_buy_orders_per_day",
+                "operation_test4_max_sell_orders_per_day",
+            }:
+                value = min(3, max(0, int(value or 1)))
+            if key == "operation_test4_max_open_positions":
+                value = min(1, max(0, int(value or 1)))
+            if key == "operation_test4_cash_only":
+                value = True
             if key == "automation_release_max_daily_auto_sells":
                 value = min(1, max(0, int(value or 1)))
             setattr(row, key, value)
@@ -2566,9 +3041,12 @@ class RuntimeSettingService:
             1,
             max(0, int(row.automation_release_max_daily_auto_sells or 1)),
         )
-        db.commit()
-        db.refresh(row)
-        return self.get_settings(db)
+        if commit:
+            db.commit()
+            db.refresh(row)
+            return self.get_settings(db)
+        db.flush()
+        return self._settings_from_row(row)
 
     def _normalize_simplified_payload(self, payload: dict[str, Any]) -> None:
         if "us_no_new_entry_after" in payload:
@@ -2623,6 +3101,7 @@ class RuntimeSettingService:
             if mode not in KR_SCHEDULER_MODES:
                 raise ValueError(f"unsupported KR scheduler mode: {mode}")
             payload.update(self._kr_scheduler_mode_payload(mode))
+            payload.update(OPERATION_TEST4_SAFE_SETTINGS)
 
     def _kr_scheduler_mode_payload(self, mode: str) -> dict[str, Any]:
         if mode == "disabled":
@@ -2648,8 +3127,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
             }
         if mode == "dry_run":
             return {
@@ -2675,8 +3162,16 @@ class RuntimeSettingService:
                 "strategy_live_auto_exit_enabled": False,
                 "strategy_live_auto_exit_scheduler_enabled": False,
                 "position_management_scheduler_enabled": False,
+                "kis_position_lifecycle_scheduler_enabled": False,
                 "position_management_scheduler_dry_run_only": True,
                 "position_management_scheduler_allow_live_orders": False,
+                "operation_test3_enabled": False,
+                "operation_test3_scheduler_enabled": False,
+                "operation_test3_allow_real_orders": False,
+                "operation_test3_position_management_enabled": False,
+                "operation_test3_stop_loss_enabled": True,
+                "operation_test3_take_profit_enabled": False,
+                "operation_test3_max_sell_orders_per_day": 1,
             }
         if mode == "sell_only_live":
             return self._preset_payload("kis_sell_only_automation")
@@ -2785,7 +3280,7 @@ def _catalog_scope_metadata(
     automation_scope: str | None,
 ) -> dict[str, Any]:
     if scope is None:
-        if key.startswith(("kis_", "kr_")) or group == "kis_kr_trading":
+        if key.startswith(("kis_", "kr_", "operation_test3_", "operation_test4_")) or group == "kis_kr_trading":
             scope = "kis"
         elif key.startswith("us_") or group == "alpaca_us_trading":
             scope = "alpaca"
@@ -2862,7 +3357,33 @@ def _advanced_runtime_keys() -> tuple[str, ...]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_enabled",
+        "kis_position_lifecycle_scheduler_enabled",
         "position_management_scheduler_allow_live_orders",
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+        "operation_test3_stop_loss_enabled",
+        "operation_test3_take_profit_enabled",
+        "operation_test3_max_sell_orders_per_day",
+        "operation_test4_enabled",
+        "operation_test4_scheduler_enabled",
+        "operation_test4_allow_real_entry",
+        "operation_test4_allow_real_exit",
+        "operation_test4_entry_enabled",
+        "operation_test4_position_management_enabled",
+        "operation_test4_stop_loss_enabled",
+        "operation_test4_take_profit_enabled",
+        "operation_test4_min_position_pct",
+        "operation_test4_max_position_pct",
+        "operation_test4_max_order_notional_krw",
+        "operation_test4_price_cap_krw",
+        "operation_test4_max_buy_orders_per_day",
+        "operation_test4_max_sell_orders_per_day",
+        "operation_test4_max_open_positions",
+        "operation_test4_allow_single_share_budget_bump",
+        "operation_test4_cash_only",
+        "operation_test4_no_new_entry_after",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
         "broker_sync_watchdog_enabled",
@@ -2922,6 +3443,18 @@ def _dangerous_runtime_keys() -> set[str]:
         "strategy_live_auto_exit_allow_max_holding_days",
         "strategy_live_auto_exit_allow_target_hit_reduce",
         "position_management_scheduler_allow_live_orders",
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+        "operation_test4_enabled",
+        "operation_test4_scheduler_enabled",
+        "operation_test4_allow_real_entry",
+        "operation_test4_allow_real_exit",
+        "operation_test4_entry_enabled",
+        "operation_test4_position_management_enabled",
+        "operation_test3_take_profit_enabled",
+        "kis_position_lifecycle_scheduler_enabled",
         "portfolio_orchestrator_enabled",
         "portfolio_orchestrator_allow_live_orders",
         "automation_soak_enabled",

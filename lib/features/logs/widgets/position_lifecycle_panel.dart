@@ -27,9 +27,11 @@ class PositionLifecyclePanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -103,7 +105,8 @@ class PositionLifecyclePanel extends StatelessWidget {
                   const SizedBox(height: 8),
                 ],
               ],
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -180,14 +183,15 @@ class _LifecycleItemTile extends StatelessWidget {
             item.market,
             strings,
           );
-    return Container(
+    return Material(
       key: ValueKey('position-lifecycle-item-${item.lifecycleId}'),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
+      color: Colors.white.withValues(alpha: 0.05),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
       ),
-      child: ExpansionTile(
+      clipBehavior: Clip.antiAlias,
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         key: ValueKey('position-lifecycle-expansion-${item.lifecycleId}'),
         tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -238,7 +242,7 @@ class _LifecycleItemTile extends StatelessWidget {
             for (final event in item.events)
               _TimelineEventRow(event: event, strings: strings),
         ],
-      ),
+      )),
     );
   }
 }

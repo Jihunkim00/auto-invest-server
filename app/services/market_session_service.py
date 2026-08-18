@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -84,6 +84,37 @@ class MarketSessionService:
 
     def get_entry_slots(self, market: str | None = None) -> list[dict[str, str]]:
         return [asdict(slot) for slot in self.get_session(market).entry_slots]
+
+    def is_trading_day(self, market: str, value: datetime | date) -> bool:
+        session = self.get_session(market)
+        local_date = (
+            value.astimezone(ZoneInfo(session.timezone)).date()
+            if isinstance(value, datetime) and value.tzinfo is not None
+            else value.date()
+            if isinstance(value, datetime)
+            else value
+        )
+        if local_date.weekday() >= 5:
+            return False
+        return not self.calendar_service.is_holiday(session.market, local_date)
+
+    def get_next_valid_trading_date(
+        self,
+        market: str,
+        value: datetime | date,
+    ) -> date:
+        session = self.get_session(market)
+        local_date = (
+            value.astimezone(ZoneInfo(session.timezone)).date()
+            if isinstance(value, datetime) and value.tzinfo is not None
+            else value.date()
+            if isinstance(value, datetime)
+            else value
+        )
+        candidate = local_date + timedelta(days=1)
+        while not self.is_trading_day(session.market, candidate):
+            candidate += timedelta(days=1)
+        return candidate
 
     def is_market_open(self, market: str, now: datetime | None = None) -> bool:
         session = self.get_session(market)

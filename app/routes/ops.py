@@ -16,6 +16,9 @@ from app.services.ops_production_readiness_service import (
 )
 from app.services.daily_ops_summary_service import DailyOpsSummaryService
 from app.services.operator_alerts_service import OperatorAlertsService
+from app.services.operation_test_live_mode_claim_service import (
+    OperationTestLiveModeConflict,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.trading_orchestrator_service import TradingOrchestratorService
 from app.services.trading_service import TradingService
@@ -120,6 +123,7 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     strategy_live_auto_exit_requires_cost_basis: bool | None = None
     strategy_live_auto_exit_min_quantity: int | None = Field(default=None, ge=1)
     kis_scheduler_enabled: bool | None = None
+    kis_position_lifecycle_scheduler_enabled: bool | None = None
     kis_scheduler_dry_run: bool | None = None
     kis_scheduler_live_enabled: bool | None = None
     kis_scheduler_allow_real_orders: bool | None = None
@@ -129,6 +133,31 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     kis_scheduler_allow_limited_auto_buy: bool | None = None
     kis_scheduler_allow_limited_auto_sell: bool | None = None
     kis_scheduler_max_live_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    operation_test3_enabled: bool | None = None
+    operation_test3_scheduler_enabled: bool | None = None
+    operation_test3_allow_real_orders: bool | None = None
+    operation_test3_position_management_enabled: bool | None = None
+    operation_test3_stop_loss_enabled: bool | None = None
+    operation_test3_take_profit_enabled: bool | None = None
+    operation_test3_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=20)
+    operation_test4_enabled: bool | None = None
+    operation_test4_scheduler_enabled: bool | None = None
+    operation_test4_allow_real_entry: bool | None = None
+    operation_test4_allow_real_exit: bool | None = None
+    operation_test4_entry_enabled: bool | None = None
+    operation_test4_position_management_enabled: bool | None = None
+    operation_test4_stop_loss_enabled: bool | None = None
+    operation_test4_take_profit_enabled: bool | None = None
+    operation_test4_min_position_pct: float | None = Field(default=None, ge=0, le=100)
+    operation_test4_max_position_pct: float | None = Field(default=None, ge=0, le=100)
+    operation_test4_max_order_notional_krw: float | None = Field(default=None, ge=0)
+    operation_test4_price_cap_krw: float | None = Field(default=None, gt=0)
+    operation_test4_max_buy_orders_per_day: int | None = Field(default=None, ge=0, le=3)
+    operation_test4_max_sell_orders_per_day: int | None = Field(default=None, ge=0, le=3)
+    operation_test4_max_open_positions: int | None = Field(default=None, ge=0, le=1)
+    operation_test4_allow_single_share_budget_bump: bool | None = None
+    operation_test4_cash_only: bool | None = None
+    operation_test4_no_new_entry_after: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
     kis_scheduler_live_requires_dry_run_false: bool | None = None
     kis_scheduler_live_respect_kill_switch: bool | None = None
     portfolio_orchestrator_enabled: bool | None = None
@@ -235,6 +264,65 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
     svc = RuntimeSettingService()
     payload_values = payload.model_dump(exclude_none=True)
     deprecation_warnings: list[dict[str, str]] = []
+    test3_activation_keys = (
+        "operation_test3_enabled",
+        "operation_test3_scheduler_enabled",
+        "operation_test3_allow_real_orders",
+        "operation_test3_position_management_enabled",
+    )
+    test4_activation_keys = (
+        "operation_test4_enabled",
+        "operation_test4_scheduler_enabled",
+        "operation_test4_allow_real_entry",
+        "operation_test4_allow_real_exit",
+        "operation_test4_entry_enabled",
+        "operation_test4_position_management_enabled",
+    )
+    current_settings = svc.get_settings_read_only(db)
+    test3_requested = any(payload_values.get(key) is True for key in test3_activation_keys)
+    test4_requested = any(payload_values.get(key) is True for key in test4_activation_keys)
+    test3_active = any(current_settings.get(key) is True for key in test3_activation_keys)
+    test4_active = any(current_settings.get(key) is True for key in test4_activation_keys)
+    if test3_requested and test4_requested:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test3 and Operation Test4 cannot be enabled together.",
+        )
+    if test3_requested and test4_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test3 cannot be enabled while Operation Test4 is active.",
+        )
+    if test4_requested and test3_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Operation Test4 cannot be enabled while Operation Test3 is active.",
+        )
+
+    if payload_values.get("operation_test3_allow_real_orders") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test3_allow_real_orders requires the "
+                "/app/operation-test3/position-management/enable live confirmation endpoint."
+            ),
+        )
+    if payload_values.get("operation_test4_allow_real_entry") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test4_allow_real_entry requires the "
+                "/app/operation-test4/enable-live confirmation endpoint."
+            ),
+        )
+    if payload_values.get("operation_test4_allow_real_exit") is True:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "operation_test4_allow_real_exit requires the "
+                "/app/operation-test4/enable-live confirmation endpoint."
+            ),
+        )
     if "no_new_entry_after" in payload_values:
         deprecation_warnings.append(
             {
@@ -248,6 +336,12 @@ def update_settings(payload: RuntimeSettingsUpdateRequest, db: Session = Depends
         )
     try:
         settings = svc.update_settings(db, payload_values)
+    except OperationTestLiveModeConflict as exc:
+        opposite = "Test4" if exc.active_owner == "test4" else "Test3"
+        raise HTTPException(
+            status_code=409,
+            detail=f"Operation {opposite} is active in another session.",
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     response: dict[str, Any] = {"result": "updated", "settings": settings}

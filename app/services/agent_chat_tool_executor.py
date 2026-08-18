@@ -28,6 +28,7 @@ from app.services.position_management_dry_run_service import (
 )
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
+from app.services.kis_single_symbol_analysis_service import KisSingleSymbolAnalysisService
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
 )
@@ -58,6 +59,7 @@ class AgentChatToolExecutor:
         *,
         registry: AgentChatToolRegistry | None = None,
         kis_client_factory: Callable[[Session], KisClient] | None = None,
+        analysis_service_factory: Callable[[Session], KisSingleSymbolAnalysisService] | None = None,
         alpaca_client_factory: Callable[[], AlpacaClient] | None = None,
         runtime_setting_service: RuntimeSettingService | None = None,
         strategy_profile_service: StrategyProfileService | None = None,
@@ -90,6 +92,9 @@ class AgentChatToolExecutor:
     ) -> None:
         self.registry = registry or AgentChatToolRegistry()
         self.kis_client_factory = kis_client_factory or self._default_kis_client
+        self.analysis_service_factory = analysis_service_factory or (
+            lambda db: KisSingleSymbolAnalysisService(self.kis_client_factory(db))
+        )
         self.alpaca_client_factory = alpaca_client_factory or AlpacaClient
         self.runtime_setting_service = runtime_setting_service or RuntimeSettingService()
         self.strategy_profile_service = strategy_profile_service or StrategyProfileService()
@@ -229,7 +234,7 @@ class AgentChatToolExecutor:
             if tool.tool_name == "watchlist_preview":
                 return self._analysis_stub(tool.tool_name, "analysis")
             if tool.tool_name == "safe_symbol_analysis":
-                return self._safe_symbol_analysis(call, intent)
+                return self._safe_symbol_analysis(call, intent, db)
         except Exception as exc:
             return self._failed(tool.tool_name, self._result_type_for_tool(tool.tool_name), self._safe_error(exc))
 
@@ -894,23 +899,29 @@ class AgentChatToolExecutor:
                 "note": "Analysis-only chat tool selected. No order or setting path was executed.",
             }
         }
-        return self._success(tool_name, result_type, data, "Analysis-only tool selected. No mutation performed.", read_only=False)
+        return self._success(tool_name, result_type, data, "Analysis-only tool selected. No mutation performed.", read_only=True)
 
     def _safe_symbol_analysis(
         self,
         call: AgentChatToolCall,
         intent: AgentChatIntent,
+        db: Session,
     ) -> AgentChatToolResult:
         symbol = self._symbol(call, intent)
-        data = {
-            "analysis": {
-                "symbol": symbol,
-                "action": "hold",
-                "note": "Safe analysis mode selected. No order path was executed.",
-            }
-        }
-        return self._success("safe_symbol_analysis", "analysis", data, "Safe symbol analysis selected.", read_only=False)
-
+        market = str(intent.market or ("KR" if str(symbol or "").isdigit() else "US")).upper()
+        analysis = self.analysis_service_factory(db).analyze(
+            db,
+            symbol=symbol or "",
+            symbol_name=intent.symbol_name,
+            market=market,
+        )
+        return self._success(
+            "safe_symbol_analysis",
+            "analysis",
+            {"analysis": analysis},
+            "Read-only KIS/quant/market analysis completed. No order path was executed.",
+            read_only=True,
+        )
     def _success(
         self,
         tool_name: str,

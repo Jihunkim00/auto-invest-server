@@ -839,14 +839,23 @@ class GPTMarketService:
             if score_key in result:
                 result[score_key] = self._clamp_float(result.get(score_key), 0.0, 100.0)
 
-        confidence_source = result.get("market_confidence", result.get("confidence", result.get("regime_confidence", 0)))
-        confidence = self._clamp_float(confidence_source, 0.0, 100.0)
-        if confidence > 1.0:
-            confidence = confidence / 100.0
-        confidence = max(0.0, min(confidence, 1.0))
+        confidence_source = next(
+            (
+                result.get(key)
+                for key in ("confidence", "market_confidence", "regime_confidence")
+                if key in result and result.get(key) is not None
+            ),
+            None,
+        )
+        if confidence_source is None:
+            confidence = None
+        else:
+            confidence = self._clamp_float(confidence_source, 0.0, 100.0)
+            if confidence > 1.0:
+                confidence = confidence / 100.0
+            confidence = max(0.0, min(confidence, 1.0))
         result["market_confidence"] = confidence
         result["confidence"] = confidence
-
         for list_key in ("affected_sectors", "risk_flags", "gating_notes"):
             raw = result.get(list_key)
             if isinstance(raw, list):

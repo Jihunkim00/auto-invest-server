@@ -18,6 +18,84 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _migrate_strategy_profile_columns_if_needed():
+    """Bring legacy strategy_profiles tables up to the current ORM shape.
+
+    Base.metadata.create_all does not add columns to an existing SQLite table.
+    This migration therefore has to run before any service performs a full
+    StrategyProfile ORM query (notably the startup seed).
+    """
+    inspector = inspect(engine)
+    if "strategy_profiles" not in inspector.get_table_names():
+        return
+
+    strategy_profile_columns = {
+        "profile_key": "VARCHAR(80)",
+        "custom_name": "VARCHAR(120)",
+        "provider": "VARCHAR(20)",
+        "market": "VARCHAR(10)",
+        "enabled": "BOOLEAN DEFAULT 0",
+        "custom_status": "VARCHAR(20)",
+        "settings_json": "TEXT",
+        # SQLite cannot add CURRENT_TIMESTAMP as an ALTER TABLE default on all
+        # supported versions, so add these nullable and backfill them below.
+        "created_at": "DATETIME",
+        "updated_at": "DATETIME",
+    }
+
+    existing_columns = {col["name"] for col in inspector.get_columns("strategy_profiles")}
+    for column_name, column_sql in strategy_profile_columns.items():
+        if column_name not in existing_columns:
+            _add_column_if_missing("strategy_profiles", column_name, column_sql)
+            existing_columns.add(column_name)
+
+    # Preserve legacy rows and give the newly-added timestamp columns the same
+    # usable value that the current table definition provides for new rows.
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE strategy_profiles "
+                "SET created_at = CURRENT_TIMESTAMP "
+                "WHERE created_at IS NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE strategy_profiles "
+                "SET updated_at = CURRENT_TIMESTAMP "
+                "WHERE updated_at IS NULL"
+            )
+        )
+
+    # All columns must exist before any index is created. A unique custom key
+    # index is best-effort for installations that already contain duplicate
+    # non-null keys; the service still validates key conflicts on writes.
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_strategy_profiles_profile_key "
+                    "ON strategy_profiles (profile_key)"
+                )
+            )
+    except Exception:
+        pass
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_enabled "
+                "ON strategy_profiles (enabled)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_strategy_profiles_custom_status "
+                "ON strategy_profiles (custom_status)"
+            )
+        )
+
+
 def _create_trade_run_logs_optional_indexes_if_possible():
     inspector = inspect(engine)
     if "trade_run_logs" not in inspector.get_table_names():
@@ -139,6 +217,10 @@ def _create_runtime_settings_table_if_missing():
                     automation_mode_updated_by VARCHAR(80),
                     automation_mode_reason TEXT,
                     automation_mode_requires_manual_review BOOLEAN NOT NULL DEFAULT 1,
+                    operation_mode_requested VARCHAR(20) NOT NULL DEFAULT 'paper',
+                    operation_mode_changed_at DATETIME,
+                    operation_mode_changed_by VARCHAR(80),
+                    operation_mode_reason TEXT,
                     default_symbol VARCHAR(20) NOT NULL DEFAULT 'AAPL',
                     default_gate_level INTEGER NOT NULL DEFAULT 2,
                     max_trades_per_day INTEGER NOT NULL DEFAULT 3,
@@ -183,6 +265,7 @@ def _create_runtime_settings_table_if_missing():
                     kis_limited_auto_buy_requires_shadow_review BOOLEAN NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_max_orders_per_day INTEGER NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_max_notional_pct FLOAT NOT NULL DEFAULT 0.03,
+                    kis_limited_auto_buy_max_notional_krw FLOAT NOT NULL DEFAULT 55000,
                     kis_limited_auto_buy_min_cash_buffer_krw FLOAT NOT NULL DEFAULT 0,
                     kis_limited_auto_buy_requires_existing_sell_guards BOOLEAN NOT NULL DEFAULT 1,
                     kis_limited_auto_buy_min_final_score FLOAT NOT NULL DEFAULT 75,
@@ -249,8 +332,47 @@ def _create_runtime_settings_table_if_missing():
                     strategy_live_auto_exit_requires_cost_basis BOOLEAN NOT NULL DEFAULT 1,
                     strategy_live_auto_exit_min_quantity INTEGER NOT NULL DEFAULT 1,
                     position_management_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    kis_position_lifecycle_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     position_management_scheduler_dry_run_only BOOLEAN NOT NULL DEFAULT 1,
                     position_management_scheduler_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_allow_real_orders BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_position_management_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test3_take_profit_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test3_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_allow_real_entry BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_allow_real_exit BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_entry_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_position_management_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_stop_loss_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_take_profit_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_min_position_pct FLOAT NOT NULL DEFAULT 10.0,
+                    operation_test4_max_position_pct FLOAT NOT NULL DEFAULT 100.0,
+                    operation_test4_max_order_notional_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    operation_test4_price_cap_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    operation_test4_max_buy_orders_per_day INTEGER NOT NULL DEFAULT 3,
+                    operation_test4_max_sell_orders_per_day INTEGER NOT NULL DEFAULT 3,
+                    operation_test4_max_open_positions INTEGER NOT NULL DEFAULT 1,
+                    operation_test4_allow_single_share_budget_bump BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_cash_only BOOLEAN NOT NULL DEFAULT 1,
+                    operation_test4_no_new_entry_after VARCHAR(5) NOT NULL DEFAULT '14:00',
+                    operation_test4_scheduler_arm_mode VARCHAR(32) NOT NULL DEFAULT 'disarmed',
+                    operation_test4_target_trading_date VARCHAR(10),
+                    operation_test4_scheduler_armed_at DATETIME,
+                    operation_test4_scheduler_last_error TEXT,
+                    operation_test4_scheduler_last_stage VARCHAR(64),
+                    operation_test4_scheduler_last_entry_decision VARCHAR(32),
+                    operation_test4_scheduler_last_evaluated_trade_date VARCHAR(10),
+                    operation_test4_scheduler_last_evaluated_slot_kst VARCHAR(5),
+                    operation_test4_weekly_window_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_weekly_start_date VARCHAR(10),
+                    operation_test4_weekly_end_date VARCHAR(10),
+                    operation_test4_weekly_auto_rollover BOOLEAN NOT NULL DEFAULT 0,
+                    operation_test4_weekly_authorized_at DATETIME,
                     portfolio_orchestrator_enabled BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_allow_live_orders BOOLEAN NOT NULL DEFAULT 0,
                     portfolio_orchestrator_positions_first BOOLEAN NOT NULL DEFAULT 1,
@@ -322,6 +444,28 @@ def _create_runtime_settings_table_if_missing():
         )
 
 
+def _migrate_operation_test4_limits_if_needed():
+    """Promote the old Test4 one-order defaults without touching live flags."""
+    inspector = inspect(engine)
+    if "runtime_settings" not in inspector.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE runtime_settings "
+                "SET operation_test4_max_buy_orders_per_day = 3 "
+                "WHERE operation_test4_max_buy_orders_per_day = 1"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE runtime_settings "
+                "SET operation_test4_max_sell_orders_per_day = 3 "
+                "WHERE operation_test4_max_sell_orders_per_day = 1"
+            )
+        )
+
+
 def _create_strategy_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -351,6 +495,13 @@ def _create_strategy_tables_if_missing():
                     consecutive_loss_reduce_threshold INTEGER NOT NULL DEFAULT 1,
                     is_active BOOLEAN NOT NULL DEFAULT 0,
                     is_builtin BOOLEAN NOT NULL DEFAULT 1,
+                    profile_key VARCHAR(80) UNIQUE,
+                    custom_name VARCHAR(120),
+                    provider VARCHAR(20),
+                    market VARCHAR(10),
+                    enabled BOOLEAN DEFAULT 0,
+                    custom_status VARCHAR(20),
+                    settings_json TEXT,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
                 )
@@ -790,6 +941,311 @@ def _create_kis_shadow_exit_review_queue_state_table_if_missing():
                 "CREATE INDEX IF NOT EXISTS "
                 "ix_kis_shadow_exit_review_queue_state_status "
                 "ON kis_shadow_exit_review_queue_state (status)"
+            )
+        )
+
+
+def _create_position_lifecycles_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS position_lifecycles (
+                    id INTEGER PRIMARY KEY,
+                    symbol VARCHAR(20) NOT NULL,
+                    entry_order_id INTEGER NOT NULL UNIQUE,
+                    entry_price FLOAT NOT NULL,
+                    cost_basis FLOAT NOT NULL,
+                    quantity FLOAT NOT NULL DEFAULT 1.0,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    opened_at DATETIME NOT NULL,
+                    last_price FLOAT,
+                    unrealized_pl FLOAT,
+                    unrealized_pl_pct FLOAT,
+                    max_price_since_entry FLOAT,
+                    stop_loss_threshold_pct FLOAT,
+                    take_profit_threshold_pct FLOAT,
+                    exit_reason TEXT,
+                    exit_order_id INTEGER,
+                    exit_order_status VARCHAR(40),
+                    manual_review_required BOOLEAN NOT NULL DEFAULT 0,
+                    closed_at DATETIME,
+                    last_evaluated_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_symbol "
+                "ON position_lifecycles (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "ix_position_lifecycles_entry_order_id "
+                "ON position_lifecycles (entry_order_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_status "
+                "ON position_lifecycles (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_position_lifecycles_exit_order_id "
+                "ON position_lifecycles (exit_order_id)"
+            )
+        )
+
+
+def _create_operation_test_cycles_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_test_cycles (
+                    id INTEGER PRIMARY KEY,
+                    cycle_key VARCHAR(120) NOT NULL,
+                    operation_test VARCHAR(20) NOT NULL DEFAULT 'test4',
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    symbol VARCHAR(20) NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'idle',
+                    entry_trigger_source VARCHAR(80),
+                    min_position_pct FLOAT NOT NULL DEFAULT 10.0,
+                    max_position_pct FLOAT NOT NULL DEFAULT 100.0,
+                    price_cap_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    max_order_notional_krw FLOAT NOT NULL DEFAULT 1000000.0,
+                    equity_at_entry FLOAT,
+                    orderable_cash_at_entry FLOAT,
+                    estimated_entry_price FLOAT,
+                    requested_quantity INTEGER,
+                    estimated_notional FLOAT,
+                    effective_position_pct FLOAT,
+                    entry_order_id INTEGER,
+                    entry_broker_order_id VARCHAR(100),
+                    entry_filled_quantity FLOAT,
+                    entry_average_fill_price FLOAT,
+                    lifecycle_id INTEGER,
+                    exit_order_id INTEGER,
+                    exit_reason TEXT,
+                    manual_review_required BOOLEAN NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    started_at DATETIME,
+                    entry_submitted_at DATETIME,
+                    entry_filled_at DATETIME,
+                    completed_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        # Add missing columns before creating any index that references them.
+        cycle_columns = {
+            "operation_test": "VARCHAR(20) DEFAULT 'test4'",
+            "provider": "VARCHAR(20) DEFAULT 'kis'",
+            "market": "VARCHAR(10) DEFAULT 'KR'",
+            "symbol": "VARCHAR(20)",
+            "status": "VARCHAR(30) DEFAULT 'idle'",
+            "entry_trigger_source": "VARCHAR(80)",
+            "min_position_pct": "FLOAT DEFAULT 10.0",
+            "max_position_pct": "FLOAT DEFAULT 100.0",
+            "price_cap_krw": "FLOAT DEFAULT 1000000.0",
+            "max_order_notional_krw": "FLOAT DEFAULT 1000000.0",
+            "equity_at_entry": "FLOAT",
+            "orderable_cash_at_entry": "FLOAT",
+            "estimated_entry_price": "FLOAT",
+            "requested_quantity": "INTEGER",
+            "estimated_notional": "FLOAT",
+            "effective_position_pct": "FLOAT",
+            "entry_order_id": "INTEGER",
+            "entry_broker_order_id": "VARCHAR(100)",
+            "entry_filled_quantity": "FLOAT",
+            "entry_average_fill_price": "FLOAT",
+            "lifecycle_id": "INTEGER",
+            "exit_order_id": "INTEGER",
+            "exit_reason": "TEXT",
+            "manual_review_required": "BOOLEAN DEFAULT 0",
+            "last_error": "TEXT",
+            "started_at": "DATETIME",
+            "entry_submitted_at": "DATETIME",
+            "entry_filled_at": "DATETIME",
+            "completed_at": "DATETIME",
+            "created_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+            "updated_at": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+        }
+        for column_name, column_sql in cycle_columns.items():
+            _add_column_if_missing("operation_test_cycles", column_name, column_sql)
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_operation_test_cycles_cycle_key "
+                "ON operation_test_cycles (cycle_key)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_status "
+                "ON operation_test_cycles (status)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_symbol "
+                "ON operation_test_cycles (symbol)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_entry_order_id "
+                "ON operation_test_cycles (entry_order_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_operation_test_cycles_exit_order_id "
+                "ON operation_test_cycles (exit_order_id)"
+            )
+        )
+
+
+def _create_operation_test_live_mode_claims_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_test_live_mode_claims (
+                    id INTEGER PRIMARY KEY,
+                    scope_key VARCHAR(64) NOT NULL UNIQUE,
+                    owner VARCHAR(20) NOT NULL DEFAULT '',
+                    generation INTEGER NOT NULL DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test_live_mode_claims_scope_key "
+                "ON operation_test_live_mode_claims (scope_key)"
+            )
+        )
+    _add_column_if_missing(
+        "operation_test_live_mode_claims",
+        "generation",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+
+
+def _create_operation_test4_entry_reservations_table_if_missing():
+    table_name = "operation_test4_entry_reservations"
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    if table_name not in table_names:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS operation_test4_entry_reservations (
+                        id INTEGER PRIMARY KEY,
+                        trade_date_kst VARCHAR(10) NOT NULL,
+                        entry_slot_kst VARCHAR(5) NOT NULL DEFAULT '09:35',
+                        reservation_token VARCHAR(64) NOT NULL UNIQUE,
+                        cycle_id INTEGER,
+                        submission_attempted BOOLEAN NOT NULL DEFAULT 0,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                        UNIQUE (trade_date_kst, entry_slot_kst)
+                    )
+                    """
+                )
+            )
+    else:
+        existing_columns = {
+            col["name"] for col in inspector.get_columns(table_name)
+        }
+        legacy_unique_trade_date = False
+        with engine.connect() as conn:
+            for index in conn.exec_driver_sql(
+                "PRAGMA index_list(operation_test4_entry_reservations)"
+            ).fetchall():
+                if not bool(index[2]):
+                    continue
+                index_columns = [
+                    row[2]
+                    for row in conn.exec_driver_sql(
+                        f"PRAGMA index_info({index[1]})"
+                    ).fetchall()
+                ]
+                if index_columns == ["trade_date_kst"]:
+                    legacy_unique_trade_date = True
+                    break
+
+        if "entry_slot_kst" not in existing_columns or legacy_unique_trade_date:
+            legacy_table_name = f"{table_name}_legacy_migration"
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}"))
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE operation_test4_entry_reservations (
+                            id INTEGER PRIMARY KEY,
+                            trade_date_kst VARCHAR(10) NOT NULL,
+                            entry_slot_kst VARCHAR(5) NOT NULL DEFAULT '09:35',
+                            reservation_token VARCHAR(64) NOT NULL UNIQUE,
+                            cycle_id INTEGER,
+                            submission_attempted BOOLEAN NOT NULL DEFAULT 0,
+                            created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                            UNIQUE (trade_date_kst, entry_slot_kst)
+                        )
+                        """
+                    )
+                )
+                legacy_slot = (
+                    "entry_slot_kst"
+                    if "entry_slot_kst" in existing_columns
+                    else "'09:35'"
+                )
+                conn.execute(
+                    text(
+                        f"""
+                        INSERT INTO {table_name} (
+                            id, trade_date_kst, entry_slot_kst,
+                            reservation_token, cycle_id, submission_attempted,
+                            created_at, updated_at
+                        )
+                        SELECT
+                            id, trade_date_kst, {legacy_slot},
+                            reservation_token, cycle_id, submission_attempted,
+                            created_at, updated_at
+                        FROM {legacy_table_name}
+                        """
+                    )
+                )
+                conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test4_entry_reservations_trade_date_kst "
+                "ON operation_test4_entry_reservations (trade_date_kst)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS "
+                "ix_operation_test4_entry_reservations_entry_slot_kst "
+                "ON operation_test4_entry_reservations (entry_slot_kst)"
             )
         )
 
@@ -1327,6 +1783,49 @@ def _create_agent_chat_live_order_settings_audits_table_if_missing():
             )
 
 
+def _create_operation_mode_audits_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS operation_mode_audits (
+                    id INTEGER PRIMARY KEY,
+                    previous_mode VARCHAR(20) NOT NULL,
+                    requested_mode VARCHAR(20) NOT NULL,
+                    effective_mode VARCHAR(20) NOT NULL,
+                    status VARCHAR(30) NOT NULL,
+                    changed_by VARCHAR(80) NOT NULL DEFAULT 'api',
+                    reason TEXT,
+                    acknowledged BOOLEAN NOT NULL DEFAULT 0,
+                    provider VARCHAR(20),
+                    market VARCHAR(10),
+                    blocking_reasons_json TEXT NOT NULL DEFAULT '[]',
+                    warnings_json TEXT NOT NULL DEFAULT '[]',
+                    before_state_json TEXT NOT NULL,
+                    after_state_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        for name, column in {
+            "previous_mode": "previous_mode",
+            "requested_mode": "requested_mode",
+            "effective_mode": "effective_mode",
+            "status": "status",
+            "changed_by": "changed_by",
+            "provider": "provider",
+            "market": "market",
+            "created_at": "created_at",
+        }.items():
+            conn.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS ix_operation_mode_audits_{name} "
+                    f"ON operation_mode_audits ({column})"
+                )
+            )
+
+
 def _create_agent_execution_tables_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -1477,7 +1976,11 @@ def init_db():
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _migrate_operation_test4_limits_if_needed()
     _create_strategy_tables_if_missing()
+    # This must precede the startup seed: the seed service queries every
+    # StrategyProfile column through the ORM.
+    _migrate_strategy_profile_columns_if_needed()
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()
@@ -1485,12 +1988,17 @@ def init_db():
     _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
+    _create_position_lifecycles_table_if_missing()
+    _create_operation_test_cycles_table_if_missing()
+    _create_operation_test4_entry_reservations_table_if_missing()
+    _create_operation_test_live_mode_claims_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()
     _create_agent_chat_live_order_settings_audits_table_if_missing()
+    _create_operation_mode_audits_table_if_missing()
     _create_agent_plan_tables_if_missing()
     _create_agent_execution_tables_if_missing()
     _create_agent_review_queue_state_table_if_missing()
@@ -1542,6 +2050,10 @@ def init_db():
         "automation_mode_updated_by": "VARCHAR(80)",
         "automation_mode_reason": "TEXT",
         "automation_mode_requires_manual_review": "BOOLEAN DEFAULT 1",
+        "operation_mode_requested": "VARCHAR(20) DEFAULT 'paper'",
+        "operation_mode_changed_at": "DATETIME",
+        "operation_mode_changed_by": "VARCHAR(80)",
+        "operation_mode_reason": "TEXT",
         "default_symbol": "VARCHAR(20) DEFAULT 'AAPL'",
         "default_gate_level": "INTEGER DEFAULT 2",
         "max_trades_per_day": "INTEGER DEFAULT 3",
@@ -1586,6 +2098,7 @@ def init_db():
         "kis_limited_auto_buy_requires_shadow_review": "BOOLEAN DEFAULT 1",
         "kis_limited_auto_buy_max_orders_per_day": "INTEGER DEFAULT 1",
         "kis_limited_auto_buy_max_notional_pct": "FLOAT DEFAULT 0.03",
+        "kis_limited_auto_buy_max_notional_krw": "FLOAT DEFAULT 55000",
         "kis_limited_auto_buy_min_cash_buffer_krw": "FLOAT DEFAULT 0",
         "kis_limited_auto_buy_requires_existing_sell_guards": "BOOLEAN DEFAULT 1",
         "kis_limited_auto_buy_min_final_score": "FLOAT DEFAULT 75",
@@ -1652,8 +2165,47 @@ def init_db():
         "strategy_live_auto_exit_requires_cost_basis": "BOOLEAN DEFAULT 1",
         "strategy_live_auto_exit_min_quantity": "INTEGER DEFAULT 1",
         "position_management_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "kis_position_lifecycle_scheduler_enabled": "BOOLEAN DEFAULT 0",
         "position_management_scheduler_dry_run_only": "BOOLEAN DEFAULT 1",
         "position_management_scheduler_allow_live_orders": "BOOLEAN DEFAULT 0",
+        "operation_test3_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_allow_real_orders": "BOOLEAN DEFAULT 0",
+        "operation_test3_position_management_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_stop_loss_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test3_take_profit_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test3_max_sell_orders_per_day": "INTEGER DEFAULT 1",
+        "operation_test4_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_allow_real_entry": "BOOLEAN DEFAULT 0",
+        "operation_test4_allow_real_exit": "BOOLEAN DEFAULT 0",
+        "operation_test4_entry_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_position_management_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_stop_loss_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test4_take_profit_enabled": "BOOLEAN DEFAULT 1",
+        "operation_test4_min_position_pct": "FLOAT DEFAULT 10.0",
+        "operation_test4_max_position_pct": "FLOAT DEFAULT 100.0",
+        "operation_test4_max_order_notional_krw": "FLOAT DEFAULT 1000000.0",
+        "operation_test4_price_cap_krw": "FLOAT DEFAULT 1000000.0",
+        "operation_test4_max_buy_orders_per_day": "INTEGER DEFAULT 3",
+        "operation_test4_max_sell_orders_per_day": "INTEGER DEFAULT 3",
+        "operation_test4_max_open_positions": "INTEGER DEFAULT 1",
+        "operation_test4_allow_single_share_budget_bump": "BOOLEAN DEFAULT 1",
+        "operation_test4_cash_only": "BOOLEAN DEFAULT 1",
+        "operation_test4_no_new_entry_after": "VARCHAR(5) DEFAULT '14:00'",
+        "operation_test4_scheduler_arm_mode": "VARCHAR(32) DEFAULT 'disarmed'",
+        "operation_test4_target_trading_date": "VARCHAR(10)",
+        "operation_test4_scheduler_armed_at": "DATETIME",
+        "operation_test4_scheduler_last_error": "TEXT",
+        "operation_test4_scheduler_last_stage": "VARCHAR(64)",
+        "operation_test4_scheduler_last_entry_decision": "VARCHAR(32)",
+        "operation_test4_scheduler_last_evaluated_trade_date": "VARCHAR(10)",
+        "operation_test4_scheduler_last_evaluated_slot_kst": "VARCHAR(5)",
+        "operation_test4_weekly_window_enabled": "BOOLEAN DEFAULT 0",
+        "operation_test4_weekly_start_date": "VARCHAR(10)",
+        "operation_test4_weekly_end_date": "VARCHAR(10)",
+        "operation_test4_weekly_auto_rollover": "BOOLEAN DEFAULT 0",
+        "operation_test4_weekly_authorized_at": "DATETIME",
         "portfolio_orchestrator_enabled": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_allow_live_orders": "BOOLEAN DEFAULT 0",
         "portfolio_orchestrator_positions_first": "BOOLEAN DEFAULT 1",
@@ -1725,6 +2277,11 @@ def init_db():
         "symbol_role": "VARCHAR(30)",
     }
 
+    position_lifecycle_columns = {
+        "exit_order_status": "VARCHAR(40)",
+        "manual_review_required": "BOOLEAN DEFAULT 0",
+        "closed_at": "DATETIME",
+    }
     order_columns = {
         "market": "VARCHAR(10)",
         "kis_odno": "VARCHAR(100)",
@@ -1749,6 +2306,8 @@ def init_db():
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)
 
+    for name, ddl in position_lifecycle_columns.items():
+        _add_column_if_missing("position_lifecycles", name, ddl)
     for name, ddl in order_columns.items():
         _add_column_if_missing("orders", name, ddl)
 

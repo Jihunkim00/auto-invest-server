@@ -5,6 +5,8 @@ from app.config import get_settings
 from app.db.init_db import init_db
 from app.routes.account import router as account_router
 from app.routes.automation import router as automation_router
+from app.routes.automation_profiles import router as automation_profiles_router
+from app.routes.automation_profiles import symbol_router as symbol_router
 from app.routes.agent import router as agent_router
 from app.routes.agent_chat import router as agent_chat_router
 from app.routes.agent_execution import router as agent_execution_router
@@ -12,6 +14,7 @@ from app.routes.agent_live import router as agent_live_router
 from app.routes.agent_operations import router as agent_operations_router
 from app.routes.agent_plans import router as agent_plans_router
 from app.routes.agent_schedules import router as agent_schedules_router
+from app.routes.app_facade import router as app_facade_router
 from app.routes.brokers import router as brokers_router
 from app.routes.broker_sync_watchdog import router as broker_sync_watchdog_router
 from app.routes.health import router as health_router
@@ -23,6 +26,7 @@ from app.routes.market_analysis import router as market_analysis_router
 from app.routes.market_profiles import router as market_profiles_router
 from app.routes.market_sessions import router as market_sessions_router
 from app.routes.ops import router as ops_router
+from app.routes.operation_test4 import router as operation_test4_router
 from app.routes.orders import router as orders_router
 from app.routes.positions import router as positions_router
 from app.routes.portfolio import router as portfolio_router
@@ -86,6 +90,7 @@ app.include_router(agent_chat_router)
 app.include_router(agent_plans_router)
 app.include_router(agent_execution_router)
 app.include_router(agent_schedules_router)
+app.include_router(app_facade_router)
 app.include_router(agent_live_router)
 app.include_router(agent_operations_router)
 app.include_router(brokers_router)
@@ -93,6 +98,8 @@ app.include_router(broker_sync_watchdog_router)
 app.include_router(kis_router)
 app.include_router(account_router)
 app.include_router(automation_router)
+app.include_router(automation_profiles_router)
+app.include_router(symbol_router)
 app.include_router(positions_router)
 app.include_router(portfolio_router)
 app.include_router(market_router)
@@ -115,6 +122,7 @@ app.include_router(strategy_positions_router)
 app.include_router(strategy_risk_router)
 app.include_router(trading_router)
 app.include_router(ops_router)
+app.include_router(operation_test4_router)
 app.include_router(scheduler_router)
 
 

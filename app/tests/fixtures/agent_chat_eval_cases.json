@@ -284,35 +284,35 @@
     "group": "analysis",
     "message": "삼성전자 살만한지 분석해줘",
     "context": {"default_market": "KR", "default_provider": "kis"},
-    "expected": {"category": "analysis_request", "symbol": "005930", "provider": "kis", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": false}
+    "expected": {"category": "analysis_request", "symbol": "005930", "provider": "kis", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": true}
   },
   {
     "id": "analysis_aapl",
     "group": "analysis",
     "message": "AAPL 분석해줘",
     "context": {"default_market": "KR", "default_provider": "kis"},
-    "expected": {"category": "analysis_request", "symbol": "AAPL", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": false}
+    "expected": {"category": "analysis_request", "symbol": "AAPL", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": true}
   },
   {
     "id": "analysis_nvda_entry",
     "group": "analysis",
     "message": "NVDA 진입 괜찮은지 검토해줘",
     "context": {"default_market": "KR", "default_provider": "kis"},
-    "expected": {"category": "analysis_request", "symbol": "NVDA", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": false}
+    "expected": {"category": "analysis_request", "symbol": "NVDA", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": true}
   },
   {
     "id": "analysis_context_seen",
     "group": "analysis",
     "message": "방금 본 종목 분석해줘",
     "context": {"last_symbol": "AAPL", "last_symbol_name": "Apple", "last_market": "US", "last_provider": "alpaca"},
-    "expected": {"category": "analysis_request", "symbol": "AAPL", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": false}
+    "expected": {"category": "analysis_request", "symbol": "AAPL", "provider": "alpaca", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": true}
   },
   {
     "id": "analysis_context_this",
     "group": "analysis",
     "message": "이거 검토해줘",
     "context": {"last_symbol": "005930", "last_symbol_name": "삼성전자", "last_market": "KR", "last_provider": "kis"},
-    "expected": {"category": "analysis_request", "symbol": "005930", "provider": "kis", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": false}
+    "expected": {"category": "analysis_request", "symbol": "005930", "provider": "kis", "selected_tool": "safe_symbol_analysis", "answer_type": "analysis_summary", "result_card_type": "analysis", "read_only": true}
   },
   {
     "id": "watchlist_preview",

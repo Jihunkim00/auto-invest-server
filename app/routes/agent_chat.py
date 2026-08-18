@@ -19,12 +19,14 @@ from app.schemas.agent_chat_strategy import (
     AgentChatStrategyActionConfirmRequest,
 )
 from app.schemas.agent_chat_orchestrator import AgentChatSendRequest
+from app.schemas.agent_chat_v2 import AgentChatV2MessageRequest
 from app.services.agent_chat_live_order_service import (
     AgentChatLiveOrderNotFound,
     AgentChatLiveOrderSettingsAckRequired,
     AgentChatLiveOrderService,
 )
 from app.services.agent_chat_orchestrator_service import AgentChatOrchestratorService
+from app.services.agent_chat_v2_service import AgentChatV2Service
 from app.services.agent_chat_service import (
     AgentChatConversationNotFound,
     AgentChatService,
@@ -63,6 +65,10 @@ def get_agent_chat_orchestrator_service() -> AgentChatOrchestratorService:
     return AgentChatOrchestratorService()
 
 
+def get_agent_chat_v2_service() -> AgentChatV2Service:
+    return AgentChatV2Service()
+
+
 def get_agent_chat_live_order_service() -> AgentChatLiveOrderService:
     return AgentChatLiveOrderService()
 
@@ -81,6 +87,19 @@ def send_agent_chat_message(
     payload: AgentChatSendRequest,
     db: Session = Depends(get_db),
     service: AgentChatOrchestratorService = Depends(get_agent_chat_orchestrator_service),
+):
+    try:
+        return service.send(db, request=payload)
+    except AgentChatConversationNotFound:
+        raise HTTPException(status_code=404, detail="agent_chat_conversation_not_found")
+
+
+@router.post("/v2/message")
+@router.post("/v2/send", include_in_schema=False)
+def send_agent_chat_v2_message(
+    payload: AgentChatV2MessageRequest,
+    db: Session = Depends(get_db),
+    service: AgentChatV2Service = Depends(get_agent_chat_v2_service),
 ):
     try:
         return service.send(db, request=payload)

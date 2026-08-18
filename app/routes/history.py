@@ -173,6 +173,51 @@ def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
 def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     request_payload = _parse_json_object(row.request_payload)
     response_payload = _parse_json_object(row.response_payload)
+    slot_history = response_payload.get("slot_history")
+    if not isinstance(slot_history, dict):
+        slot_history = None
+    test4_slot_fields = {}
+    if slot_history is not None:
+        for field in (
+            "trade_date_kst",
+            "slot_kst",
+            "candidate_symbol",
+            "candidate_name",
+            "candidate_rank",
+            "candidate_price",
+            "quant_buy_score",
+            "quant_sell_score",
+            "ai_buy_score",
+            "ai_sell_score",
+            "gpt_buy_score",
+            "gpt_sell_score",
+            "final_buy_score",
+            "final_sell_score",
+            "required_entry_score",
+            "effective_min_entry_score",
+            "final_score_gap",
+            "confidence",
+            "entry_ready",
+            "trade_allowed",
+            "should_trade",
+            "block_reason",
+            "hard_block",
+            "analysis_source_flags",
+            "test4_block_reasons",
+            "entry_slots_complete",
+            "session_completion_reason",
+            "account_state_status",
+            "account_state_attempt_count",
+            "configured_count",
+            "analyzed_count",
+            "gpt_analyzed_count",
+            "slot_started_at",
+            "analysis_started_at",
+            "analysis_finished_at",
+            "slot_finished_at",
+            "duration_seconds",
+        ):
+            test4_slot_fields[field] = slot_history.get(field)
     candidate_payload = _payload_candidate(response_payload)
     audit_metadata = candidate_payload.get("audit_metadata")
     if not isinstance(audit_metadata, dict):
@@ -377,6 +422,9 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
             response_payload.get("entry_candidate"),
             request_payload.get("final_best_candidate"),
         ),
+        "slot_history": slot_history,
+        "test4_slot_history": slot_history,
+        **test4_slot_fields,
     }
 
 

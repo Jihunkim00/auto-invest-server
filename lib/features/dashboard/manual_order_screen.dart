@@ -232,7 +232,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           },
         ),
         const SizedBox(height: 12),
-        CheckboxListTile(
+        Material(type: MaterialType.transparency, child: CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           controlAffinity: ListTileControlAffinity.leading,
           value: controller.kisGuardedRunConfirmation,
@@ -243,7 +243,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
           title: const Text(
             'I understand Submit Live Order requires confirm_live and final confirmation.',
           ),
-        ),
+        )),
         Wrap(spacing: 8, runSpacing: 8, children: [
           OutlinedButton.icon(
             key: const Key('kis_trading_analyze_button'),
@@ -799,7 +799,7 @@ class _KisResultPanel extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 8),
-        ExpansionTile(
+        Material(type: MaterialType.transparency, child: ExpansionTile(
           tilePadding: EdgeInsets.zero,
           childrenPadding: EdgeInsets.zero,
           title: const Text('Developer Raw Payload'),
@@ -809,7 +809,7 @@ class _KisResultPanel extends StatelessWidget {
                   const JsonEncoder.withIndent('  ').convert(result.rawPayload),
             ),
           ],
-        ),
+        )),
       ]),
     );
   }

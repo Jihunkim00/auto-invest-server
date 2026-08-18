@@ -83,6 +83,20 @@ def test_gpt_response_normalization_broad_extreme_risk_is_advisory_penalty():
     assert "gpt_hard_block_downgraded_to_advisory" in normalized["gating_notes"]
 
 
+def test_gpt_response_without_confidence_keeps_confidence_null():
+    service = GPTMarketService()
+    normalized = service._normalize_candidate({
+        "market_regime": "trend",
+        "entry_bias": "neutral",
+        "entry_allowed": False,
+        "gpt_buy_score": 62,
+        "gpt_sell_score": 38,
+        "reason": "No confidence field returned.",
+    })
+
+    assert normalized["confidence"] is None
+    assert normalized["market_confidence"] is None
+
 def test_gpt_response_normalization_true_severe_symbol_risk_allows_999():
     service = GPTMarketService()
 

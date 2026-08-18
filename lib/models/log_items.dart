@@ -50,6 +50,7 @@ class TradingLogItem {
     this.gatingNotes = const [],
     this.operatorSummary,
     this.gptContext = GptRiskContext.empty,
+    this.slotHistory = const {},
   });
 
   final int id;
@@ -99,6 +100,7 @@ class TradingLogItem {
   final List<String> gatingNotes;
   final WatchlistOperatorSummary? operatorSummary;
   final GptRiskContext gptContext;
+  final Map<String, dynamic> slotHistory;
 
   bool get hasOrder => relatedOrderId != null;
   bool get isHold => action.toLowerCase() == 'hold';
@@ -151,6 +153,9 @@ class TradingLogItem {
       );
   bool get isKisSchedulerLive =>
       _isKisSchedulerLive(provider, market, mode, triggerSource);
+  bool get isOperationTest4Slot =>
+      slotHistory.isNotEmpty ||
+      (isKis && mode == 'operation_test4_slot_decision');
   bool get isKisManualLive =>
       isKis &&
       !isKisPreview &&
@@ -163,6 +168,7 @@ class TradingLogItem {
       !isKisLimitedAutoBuy &&
       !isKisSchedulerLive;
   String get sourceLabel {
+    if (isOperationTest4Slot) return 'KIS TEST4 LIVE';
     if (isKisBuyShadow) return 'KIS BUY SHADOW';
     if (isKisSingleSymbolAnalyzeBuy) return 'Single Symbol Analyze & Buy';
     if (isKisSchedulerLive) return 'KIS SCHEDULER LIVE';
@@ -374,6 +380,10 @@ class TradingLogItem {
       operatorSummary: WatchlistOperatorSummary.fromJson(
           json['operator_summary'] ?? json['operatorSummary']),
       gptContext: GptRiskContext.fromJson(json['gpt_context']),
+      slotHistory: _optionalMap(
+            json['slot_history'] ?? json['test4_slot_history'],
+          ) ??
+          const {},
     );
   }
 }

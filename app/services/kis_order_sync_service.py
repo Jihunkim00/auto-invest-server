@@ -141,6 +141,7 @@ class KisOrderSyncService:
 
         db.commit()
         db.refresh(order)
+        self._sync_filled_buy_lifecycle(db, order)
         return order
 
     def sync_open_orders(self, db: Session) -> list[OrderLog]:
@@ -269,6 +270,24 @@ class KisOrderSyncService:
             attempt["error"] = _exception_payload(exc)
             raise
 
+    def _sync_filled_buy_lifecycle(self, db: Session, order: OrderLog) -> None:
+        if (
+            str(order.broker or "").strip().lower() != "kis"
+            or str(order.side or "").strip().lower() != "buy"
+            or str(order.internal_status or "").upper()
+            != InternalOrderStatus.FILLED.value
+        ):
+            return
+
+        from app.services.kis_position_lifecycle_service import (
+            KisPositionLifecycleService,
+        )
+
+        KisPositionLifecycleService(
+            self.client,
+            runtime_settings=None,
+        ).sync_filled_buy(db, order)
+
 
 def summarize_kis_orders(
     db: Session,
@@ -367,6 +386,8 @@ def serialize_kis_order(order: OrderLog, *, include_sync_payload: bool = False) 
         "internal_status": order.internal_status,
         "broker_order_status": order.broker_order_status or order.broker_status,
         "broker_status": order.broker_status,
+        "broker_status_raw": order.broker_status,
+        "broker_status_display": _display_status(internal_status),
         "broker_order_id": order.broker_order_id,
         "kis_odno": order.kis_odno or order.broker_order_id,
         "kis_orgn_odno": order.kis_orgn_odno,

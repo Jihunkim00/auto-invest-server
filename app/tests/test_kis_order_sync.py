@@ -10,10 +10,11 @@ from app.brokers.base import KisApiError
 from app.config import Settings
 from app.core.enums import InternalOrderStatus
 from app.db.database import get_db
-from app.db.models import BrokerAuthToken, OrderLog
+from app.db.models import BrokerAuthToken, OrderLog, PositionLifecycle
 from app.main import app
 from app.services.kis_order_mapper import find_kis_order_row, map_kis_order_row
 from app.services.kis_order_sync_service import KR_TZ, KisOrderSyncService
+from app.services.runtime_setting_service import RuntimeSettingService
 
 _DEFAULT_SUBMITTED_AT = datetime(2026, 5, 4, 4, 10, 24, 698131)
 
@@ -111,6 +112,17 @@ def _exit_source_metadata():
         "real_order_submit_allowed": False,
         "risk_flags": ["stop_loss_triggered"],
         "gating_notes": ["manual_confirm_required", "no_auto_submit"],
+    }
+
+
+def _reviewed_buy_source_metadata():
+    return {
+        "source": "kis_limited_auto_buy",
+        "source_type": "operator_reviewed_limited_auto_buy",
+        "source_context": "operator_reviewed_limited_auto_buy",
+        "operator_action_source": "operator_reviewed_limited_auto_buy",
+        "mode": "kis_limited_auto_buy_execute_reviewed",
+        "trigger_source": "limited_auto_buy_execute_reviewed_once",
     }
 
 
@@ -453,6 +465,61 @@ def test_kis_sync_success_sanitizes_raw_payload_and_preserves_fill_mapping(
     assert "87654321" not in combined
     assert "real-app-key" not in combined
     assert "secret-access-token" not in combined
+
+
+def test_kis_sync_filled_reviewed_buy_creates_lifecycle_and_disables_buy(
+    db_session,
+):
+    RuntimeSettingService().update_settings(
+        db_session,
+        {
+            "kis_live_auto_buy_enabled": True,
+            "kis_limited_auto_buy_enabled": True,
+            "kis_scheduler_buy_enabled": True,
+            "kis_scheduler_allow_limited_auto_buy": True,
+        },
+    )
+    order = _seed_order(
+        db_session,
+        qty=1,
+        source_metadata=_reviewed_buy_source_metadata(),
+    )
+
+    class _Client:
+        def inquire_daily_order_executions(self, **kwargs):
+            return {
+                "orders": [
+                    {
+                        "odno": "0001234567",
+                        "ord_qty": "1",
+                        "tot_ccld_qty": "1",
+                        "rmn_qty": "0",
+                        "avg_prvs": "72,000",
+                    }
+                ]
+            }
+
+    service = KisOrderSyncService(
+        _Client(),
+        now_provider=lambda: datetime(2026, 5, 4, 15, 0, tzinfo=KR_TZ),
+    )
+    synced = service.sync_order(db_session, order.id)
+    duplicate_sync = service.sync_order(db_session, order.id)
+
+    lifecycle = db_session.query(PositionLifecycle).one()
+    settings = RuntimeSettingService().get_settings(db_session)
+    assert synced.internal_status == InternalOrderStatus.FILLED.value
+    assert duplicate_sync.internal_status == InternalOrderStatus.FILLED.value
+    assert lifecycle.symbol == "005930"
+    assert lifecycle.entry_order_id == order.id
+    assert lifecycle.entry_price == 72000
+    assert lifecycle.cost_basis == 72000
+    assert lifecycle.quantity == 1
+    assert settings["kis_live_auto_buy_enabled"] is False
+    assert settings["kis_limited_auto_buy_enabled"] is False
+    assert settings["kis_scheduler_buy_enabled"] is False
+    assert settings["kis_scheduler_allow_limited_auto_buy"] is False
+    assert db_session.query(PositionLifecycle).count() == 1
 
 
 def test_kis_sync_failure_stores_sanitized_kis_api_diagnostics(

@@ -11,8 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.database import get_db
-from app.db.models import TradeRunLog
+from app.db.models import PositionLifecycle, TradeRunLog
 from app.services.market_session_service import MarketSessionService
+from app.services.operation_test3_position_management_service import (
+    SCHEDULER_SLOTS_KST,
+    SCHEDULER_TRIGGER_SOURCE,
+    TRADE_RUN_PREFLIGHT_MODE,
+    TRADE_RUN_RUN_MODE,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
@@ -93,6 +99,12 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         runtime_state["scheduler_enabled"]
         and kr_scheduler_enabled
         and kr_scheduler_dry_run
+    )
+
+    operation_test3 = _operation_test3_summary(
+        db,
+        runtime_settings=runtime_settings,
+        runtime_state=runtime_state,
     )
 
     kr_scheduler_any_enabled = bool(
@@ -207,6 +219,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "live_order_possible": bool(live_buy_possible or live_sell_possible),
         "live_buy_possible": live_buy_possible,
         "live_sell_possible": live_sell_possible,
+        "operation_test3": operation_test3,
         "daily_live_order_remaining": daily_live_order_remaining,
         "warning_message": warning_message,
         "runtime_scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
@@ -286,6 +299,82 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         },
     }
 
+
+def _operation_test3_summary(
+    db: Session,
+    *,
+    runtime_settings: dict[str, Any],
+    runtime_state: dict[str, Any],
+) -> dict[str, Any]:
+    enabled = bool(runtime_settings.get("operation_test3_enabled", False))
+    scheduler_enabled = bool(runtime_settings.get("operation_test3_scheduler_enabled", False))
+    position_management_enabled = bool(
+        runtime_settings.get("operation_test3_position_management_enabled", False)
+    )
+    allow_real_orders = bool(runtime_settings.get("operation_test3_allow_real_orders", False))
+    active_lifecycle_count = int(
+        db.query(PositionLifecycle)
+        .filter(PositionLifecycle.status.in_(["open", "closing"]))
+        .count()
+        or 0
+    )
+    next_run = _next_slot(
+        [{"name": slot, "time": slot} for slot in SCHEDULER_SLOTS_KST],
+        "Asia/Seoul",
+    )
+    latest_run = _latest_operation_test3_run(db)
+    live_ready = bool(
+        enabled
+        and scheduler_enabled
+        and position_management_enabled
+        and allow_real_orders
+        and not bool(runtime_settings.get("dry_run", True))
+        and not bool(runtime_settings.get("kill_switch", False))
+        and bool(runtime_state.get("kis_enabled", False))
+        and bool(runtime_state.get("kis_real_order_enabled", False))
+        and active_lifecycle_count == 1
+    )
+    return {
+        "enabled": enabled,
+        "scheduler_enabled": scheduler_enabled,
+        "position_management_enabled": position_management_enabled,
+        "allow_real_orders": allow_real_orders,
+        "monitoring_only": bool(
+            enabled
+            and scheduler_enabled
+            and position_management_enabled
+            and not allow_real_orders
+        ),
+        "slots_kst": SCHEDULER_SLOTS_KST,
+        "active_lifecycle_count": active_lifecycle_count,
+        "next_run_kst": next_run["time_local"],
+        "latest_run": _serialize_operation_test3_latest_run(latest_run),
+        "live_ready": live_ready,
+    }
+
+
+def _latest_operation_test3_run(db: Session) -> TradeRunLog | None:
+    return (
+        db.query(TradeRunLog)
+        .filter(
+            or_(
+                TradeRunLog.trigger_source == SCHEDULER_TRIGGER_SOURCE,
+                TradeRunLog.mode.in_([TRADE_RUN_PREFLIGHT_MODE, TRADE_RUN_RUN_MODE]),
+            )
+        )
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .first()
+    )
+
+
+def _serialize_operation_test3_latest_run(row: TradeRunLog | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    return {
+        "trigger_source": row.trigger_source,
+        "result": row.result,
+        "reason": row.reason,
+    }
 
 def _user_friendly_summary(mode: str, risk_summary: dict[str, Any]) -> str:
     warning_level = str(risk_summary.get("warning_level") or "safe")

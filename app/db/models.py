@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 from app.db.database import Base
 
@@ -198,6 +198,10 @@ class RuntimeSetting(Base):
     automation_mode_updated_by = Column(String(80), nullable=True)
     automation_mode_reason = Column(Text, nullable=True)
     automation_mode_requires_manual_review = Column(Boolean, nullable=False, default=True)
+    operation_mode_requested = Column(String(20), nullable=False, default="paper")
+    operation_mode_changed_at = Column(DateTime(timezone=True), nullable=True)
+    operation_mode_changed_by = Column(String(80), nullable=True)
+    operation_mode_reason = Column(Text, nullable=True)
     default_symbol = Column(String(20), nullable=False, default="AAPL")
     default_gate_level = Column(Integer, nullable=False, default=2)
     max_trades_per_day = Column(Integer, nullable=False, default=3)
@@ -242,6 +246,7 @@ class RuntimeSetting(Base):
     kis_limited_auto_buy_requires_shadow_review = Column(Boolean, nullable=False, default=True)
     kis_limited_auto_buy_max_orders_per_day = Column(Integer, nullable=False, default=1)
     kis_limited_auto_buy_max_notional_pct = Column(Float, nullable=False, default=0.03)
+    kis_limited_auto_buy_max_notional_krw = Column(Float, nullable=False, default=55000)
     kis_limited_auto_buy_min_cash_buffer_krw = Column(Float, nullable=False, default=0)
     kis_limited_auto_buy_requires_existing_sell_guards = Column(Boolean, nullable=False, default=True)
     kis_limited_auto_buy_min_final_score = Column(Float, nullable=False, default=75)
@@ -308,8 +313,48 @@ class RuntimeSetting(Base):
     strategy_live_auto_exit_requires_cost_basis = Column(Boolean, nullable=False, default=True)
     strategy_live_auto_exit_min_quantity = Column(Integer, nullable=False, default=1)
     position_management_scheduler_enabled = Column(Boolean, nullable=False, default=False)
+    kis_position_lifecycle_scheduler_enabled = Column(Boolean, nullable=False, default=False)
     position_management_scheduler_dry_run_only = Column(Boolean, nullable=False, default=True)
     position_management_scheduler_allow_live_orders = Column(Boolean, nullable=False, default=False)
+    operation_test3_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test3_scheduler_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test3_allow_real_orders = Column(Boolean, nullable=False, default=False)
+    operation_test3_position_management_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test3_stop_loss_enabled = Column(Boolean, nullable=False, default=True)
+    operation_test3_take_profit_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test3_max_sell_orders_per_day = Column(Integer, nullable=False, default=1)
+    operation_test4_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test4_scheduler_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test4_allow_real_entry = Column(Boolean, nullable=False, default=False)
+    operation_test4_allow_real_exit = Column(Boolean, nullable=False, default=False)
+    operation_test4_entry_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test4_position_management_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test4_stop_loss_enabled = Column(Boolean, nullable=False, default=True)
+    operation_test4_take_profit_enabled = Column(Boolean, nullable=False, default=True)
+    operation_test4_min_position_pct = Column(Float, nullable=False, default=10.0)
+    operation_test4_max_position_pct = Column(Float, nullable=False, default=100.0)
+    operation_test4_max_order_notional_krw = Column(Float, nullable=False, default=1_000_000.0)
+    operation_test4_price_cap_krw = Column(Float, nullable=False, default=1_000_000.0)
+    operation_test4_max_buy_orders_per_day = Column(Integer, nullable=False, default=3)
+    operation_test4_max_sell_orders_per_day = Column(Integer, nullable=False, default=3)
+    operation_test4_max_open_positions = Column(Integer, nullable=False, default=1)
+    operation_test4_allow_single_share_budget_bump = Column(Boolean, nullable=False, default=True)
+    operation_test4_cash_only = Column(Boolean, nullable=False, default=True)
+    operation_test4_no_new_entry_after = Column(String(5), nullable=False, default="14:00")
+    # A next-session reservation is separate from live execution flags.
+    operation_test4_scheduler_arm_mode = Column(String(32), nullable=False, default="disarmed")
+    operation_test4_target_trading_date = Column(String(10), nullable=True)
+    operation_test4_scheduler_armed_at = Column(DateTime(timezone=True), nullable=True)
+    operation_test4_scheduler_last_error = Column(Text, nullable=True)
+    operation_test4_scheduler_last_stage = Column(String(64), nullable=True)
+    operation_test4_scheduler_last_entry_decision = Column(String(32), nullable=True)
+    operation_test4_scheduler_last_evaluated_trade_date = Column(String(10), nullable=True)
+    operation_test4_scheduler_last_evaluated_slot_kst = Column(String(5), nullable=True)
+    operation_test4_weekly_window_enabled = Column(Boolean, nullable=False, default=False)
+    operation_test4_weekly_start_date = Column(String(10), nullable=True)
+    operation_test4_weekly_end_date = Column(String(10), nullable=True)
+    operation_test4_weekly_auto_rollover = Column(Boolean, nullable=False, default=False)
+    operation_test4_weekly_authorized_at = Column(DateTime(timezone=True), nullable=True)
     portfolio_orchestrator_enabled = Column(Boolean, nullable=False, default=False)
     portfolio_orchestrator_allow_live_orders = Column(Boolean, nullable=False, default=False)
     portfolio_orchestrator_positions_first = Column(Boolean, nullable=False, default=True)
@@ -403,6 +448,17 @@ class StrategyProfile(Base):
     consecutive_loss_reduce_threshold = Column(Integer, nullable=False, default=1)
     is_active = Column(Boolean, nullable=False, default=False, index=True)
     is_builtin = Column(Boolean, nullable=False, default=True, index=True)
+    # PR108 custom automation profile fields. The legacy risk-profile fields
+    # above remain the source for the existing /strategy/profiles API; these
+    # nullable columns let the new configuration layer coexist without
+    # changing Test4 or the legacy presets.
+    profile_key = Column(String(80), nullable=True, unique=True, index=True)
+    custom_name = Column(String(120), nullable=True)
+    provider = Column(String(20), nullable=True)
+    market = Column(String(10), nullable=True)
+    enabled = Column(Boolean, nullable=True, default=False, index=True)
+    custom_status = Column(String(20), nullable=True, index=True)
+    settings_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -588,6 +644,105 @@ class KisShadowExitReviewQueueState(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class PositionLifecycle(Base):
+    __tablename__ = "position_lifecycles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    entry_order_id = Column(Integer, nullable=False, unique=True, index=True)
+    entry_price = Column(Float, nullable=False)
+    cost_basis = Column(Float, nullable=False)
+    quantity = Column(Float, nullable=False, default=1.0)
+    status = Column(String(20), nullable=False, default="open", index=True)
+    opened_at = Column(DateTime(timezone=True), nullable=False)
+    last_price = Column(Float, nullable=True)
+    unrealized_pl = Column(Float, nullable=True)
+    unrealized_pl_pct = Column(Float, nullable=True)
+    max_price_since_entry = Column(Float, nullable=True)
+    stop_loss_threshold_pct = Column(Float, nullable=True)
+    take_profit_threshold_pct = Column(Float, nullable=True)
+    exit_reason = Column(Text, nullable=True)
+    exit_order_id = Column(Integer, nullable=True, index=True)
+    exit_order_status = Column(String(40), nullable=True)
+    manual_review_required = Column(Boolean, nullable=False, default=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+    last_evaluated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class OperationTest4Cycle(Base):
+    __tablename__ = "operation_test_cycles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cycle_key = Column(String(120), nullable=False)
+    operation_test = Column(String(20), nullable=False, default="test4")
+    provider = Column(String(20), nullable=False, default="kis")
+    market = Column(String(10), nullable=False, default="KR")
+    symbol = Column(String(20), nullable=False)
+    status = Column(String(30), nullable=False, default="idle")
+    entry_trigger_source = Column(String(80), nullable=True)
+    min_position_pct = Column(Float, nullable=False, default=10.0)
+    max_position_pct = Column(Float, nullable=False, default=100.0)
+    price_cap_krw = Column(Float, nullable=False, default=1_000_000.0)
+    max_order_notional_krw = Column(Float, nullable=False, default=1_000_000.0)
+    equity_at_entry = Column(Float, nullable=True)
+    orderable_cash_at_entry = Column(Float, nullable=True)
+    estimated_entry_price = Column(Float, nullable=True)
+    requested_quantity = Column(Integer, nullable=True)
+    estimated_notional = Column(Float, nullable=True)
+    effective_position_pct = Column(Float, nullable=True)
+    entry_order_id = Column(Integer, nullable=True)
+    entry_broker_order_id = Column(String(100), nullable=True)
+    entry_filled_quantity = Column(Float, nullable=True)
+    entry_average_fill_price = Column(Float, nullable=True)
+    lifecycle_id = Column(Integer, nullable=True)
+    exit_order_id = Column(Integer, nullable=True)
+    exit_reason = Column(Text, nullable=True)
+    manual_review_required = Column(Boolean, nullable=False, default=False)
+    last_error = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    entry_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    entry_filled_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+
+class OperationTest4EntryReservation(Base):
+    """Durable exactly-once claim for one Test4 entry slot."""
+
+    __tablename__ = "operation_test4_entry_reservations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    trade_date_kst = Column(String(10), nullable=False, index=True)
+    entry_slot_kst = Column(String(5), nullable=False, default="09:35", index=True)
+    reservation_token = Column(String(64), nullable=False, unique=True, index=True)
+    cycle_id = Column(Integer, nullable=True, index=True)
+    submission_attempted = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "trade_date_kst",
+            "entry_slot_kst",
+            name="uq_operation_test4_entry_reservation_slot",
+        ),
+    )
+
+class OperationTestLiveModeClaim(Base):
+    """One durable owner for mutually exclusive Test3/Test4 activation."""
+
+    __tablename__ = "operation_test_live_mode_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    scope_key = Column(String(64), nullable=False, unique=True, index=True)
+    owner = Column(String(20), nullable=False, default="")
+    generation = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
 class TradeRunLog(Base):
     __tablename__ = "trade_run_logs"
 
@@ -743,6 +898,26 @@ class AgentChatLiveOrderSettingsAudit(Base):
     after_snapshot_json = Column(Text, nullable=False)
     request_payload_json = Column(Text, nullable=False)
     safety_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class OperationModeAudit(Base):
+    __tablename__ = "operation_mode_audits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    previous_mode = Column(String(20), nullable=False, index=True)
+    requested_mode = Column(String(20), nullable=False, index=True)
+    effective_mode = Column(String(20), nullable=False, index=True)
+    status = Column(String(30), nullable=False, index=True)
+    changed_by = Column(String(80), nullable=False, default="api", index=True)
+    reason = Column(Text, nullable=True)
+    acknowledged = Column(Boolean, nullable=False, default=False)
+    provider = Column(String(20), nullable=True, index=True)
+    market = Column(String(10), nullable=True, index=True)
+    blocking_reasons_json = Column(Text, nullable=False, default="[]")
+    warnings_json = Column(Text, nullable=False, default="[]")
+    before_state_json = Column(Text, nullable=False)
+    after_state_json = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 

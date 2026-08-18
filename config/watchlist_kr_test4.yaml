@@ -1,0 +1,336 @@
+market: KR
+currency: KRW
+timezone: Asia/Seoul
+operation_test: test4
+generated_at: '2026-08-18T00:35:08.561602+00:00'
+source:
+  source_universe_file: config/watchlist_kr_test4_universe.yaml
+  source_universe_count: 200
+  source_count: 200
+  source_priority: 1
+  source_counts:
+    market_cap_kospi_top_150: 150
+    market_cap_kosdaq_top_50: 50
+source_universe_file: config/watchlist_kr_test4_universe.yaml
+source_universe_count: 200
+price_cap_krw: 1000000.0
+configured_count: 50
+quote_checked_count: 200
+eligible_count: 192
+selected_count: 50
+reserve_eligible_count: 142
+excluded_count: 8
+exclusion_reasons:
+  price_cap_exceeded: 8
+market_quotas:
+  KOSPI: 40
+  KOSDAQ: 10
+eligible_market_counts:
+  KOSPI: 142
+  KOSDAQ: 50
+selected_market_counts:
+  KOSPI: 40
+  KOSDAQ: 10
+market_quota_fallback: {}
+selected_symbols:
+- 005930
+- 005380
+- '373220'
+- '105560'
+- 028260
+- '000270'
+- 032830
+- '329180'
+- '034020'
+- '055550'
+- 068270
+- '012330'
+- '006400'
+- 086790
+- '066570'
+- '035420'
+- '010120'
+- '034730'
+- '267260'
+- '042660'
+- 009540
+- 000810
+- 005490
+- '316140'
+- '042700'
+- '015760'
+- 096770
+- 051910
+- '011200'
+- '017670'
+- '138040'
+- '010140'
+- 006800
+- 018260
+- 033780
+- '035720'
+- '003550'
+- '267250'
+- 010950
+- '064350'
+- '196170'
+- 086520
+- '247540'
+- '277810'
+- 036930
+- '240810'
+- 028300
+- 058470
+- '298380'
+- 039030
+symbols:
+- symbol: 005930
+  name: 삼성전자
+  source_name: Samsung Electronics Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 005380
+  name: 현대차
+  source_name: Hyundai Motor Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '373220'
+  name: LG에너지솔루션
+  source_name: LG Energy Solution, Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '105560'
+  name: KB금융
+  source_name: KB Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 028260
+  name: 삼성물산
+  source_name: Samsung C&T Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '000270'
+  name: 기아
+  source_name: Kia Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 032830
+  name: 삼성생명
+  source_name: Samsung Life Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '329180'
+  name: HD현대중공업
+  source_name: HD Hyundai Heavy Industries Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '034020'
+  name: 두산에너빌리티
+  source_name: Doosan Enerbility Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '055550'
+  name: 신한지주
+  source_name: Shinhan Financial Group Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 068270
+  name: 셀트리온
+  source_name: Celltrion, Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '012330'
+  name: 현대모비스
+  source_name: Hyundai Mobis Co.,Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '006400'
+  name: 삼성SDI
+  source_name: Samsung SDI Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 086790
+  name: 하나금융지주
+  source_name: Hana Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '066570'
+  name: LG전자
+  source_name: LG Electronics Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '035420'
+  name: NAVER
+  source_name: NAVER Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '010120'
+  name: LS ELECTRIC
+  source_name: LS ELECTRIC Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '034730'
+  name: SK
+  source_name: SK Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '267260'
+  name: HD현대일렉트릭
+  source_name: HD Hyundai Electric Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '042660'
+  name: 한화오션
+  source_name: Hanwha Ocean Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 009540
+  name: HD한국조선해양
+  source_name: HD Korea Shipbuilding & Offshore Engineering Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 000810
+  name: 삼성화재
+  source_name: Samsung Fire & Marine Insurance Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 005490
+  name: POSCO홀딩스
+  source_name: POSCO Holdings Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '316140'
+  name: 우리금융지주
+  source_name: Woori Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '042700'
+  name: 한미반도체
+  source_name: HANMI Semiconductor Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '015760'
+  name: 한국전력
+  source_name: Korea Electric Power Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 096770
+  name: SK이노베이션
+  source_name: SK Innovation Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 051910
+  name: LG화학
+  source_name: LG Chem, Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '011200'
+  name: HMM
+  source_name: HMM Co.,Ltd
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '017670'
+  name: SK텔레콤
+  source_name: SK Telecom Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '138040'
+  name: 메리츠금융지주
+  source_name: Meritz Financial Group Inc.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '010140'
+  name: 삼성중공업
+  source_name: Samsung Heavy Industries Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 006800
+  name: 미래에셋증권
+  source_name: Mirae Asset Securities Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 018260
+  name: 삼성에스디에스
+  source_name: Samsung SDS Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 033780
+  name: KT&G
+  source_name: KT&G Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '035720'
+  name: 카카오
+  source_name: Kakao Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '003550'
+  name: LG
+  source_name: LG Corp.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '267250'
+  name: HD현대
+  source_name: HD Hyundai Co., Ltd.
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: 010950
+  name: S-Oil
+  source_name: S-Oil Corporation
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '064350'
+  name: 현대로템
+  source_name: Hyundai Rotem Company
+  source: market_cap_kospi_top_150
+  market: KOSPI
+- symbol: '196170'
+  name: 알테오젠
+  source_name: ALTEOGEN Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: 086520
+  name: 에코프로
+  source_name: Ecopro Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: '247540'
+  name: 에코프로비엠
+  source_name: EcoPro BM Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: '277810'
+  name: 레인보우로보틱스
+  source_name: Rainbow Robotics Co.,Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: 036930
+  name: 주성엔지니어링
+  source_name: JUSUNG ENGINEERING Co.,Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: '240810'
+  name: 원익IPS
+  source_name: Wonik IPS Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: 028300
+  name: HLB
+  source_name: HLB Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: 058470
+  name: 리노공업
+  source_name: LEENO Industrial Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: '298380'
+  name: 에이비엘바이오
+  source_name: ABL Bio Inc.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ
+- symbol: 039030
+  name: 이오테크닉스
+  source_name: EO Technics Co., Ltd.
+  source: market_cap_kosdaq_top_50
+  market: KOSDAQ

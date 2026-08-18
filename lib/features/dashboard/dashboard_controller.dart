@@ -64,6 +64,7 @@ import '../../models/portfolio_summary.dart';
 import '../../models/position_exit_review.dart';
 import '../../models/position_lifecycle.dart';
 import '../../models/position_management_dry_run.dart';
+import '../../models/operation_mode.dart';
 import '../../models/scheduler_status.dart';
 import '../../models/strategy_profile.dart';
 import '../../models/strategy_auto_buy_operations.dart';
@@ -160,6 +161,7 @@ class DashboardController extends ChangeNotifier {
     minEntryScore: 65,
     minScoreGap: 3,
   );
+  OperationModeStatus operationModeStatus = OperationModeStatus.safeDefault;
   SchedulerStatus schedulerStatus = SchedulerStatus.safeDefault();
   bool schedulerStatusLoading = false;
   bool schedulerStatusLoaded = false;
@@ -605,6 +607,9 @@ class DashboardController extends ChangeNotifier {
   bool killSwitchLoading = false;
   bool dryRunLoading = false;
   bool kisAutomationSettingsLoading = false;
+  bool operationModeLoading = false;
+  bool operationModeUpdating = false;
+  String? operationModeError;
   bool runOnceLoading = false;
   bool manualRunLoading = false;
   String? manualRunSymbol;
@@ -618,6 +623,7 @@ class DashboardController extends ChangeNotifier {
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
+      await refreshOperationMode(silent: true);
       await refreshSchedulerStatus(silent: true);
       await refreshAgentChatLiveOrderReadiness(silent: true);
       await refreshKisSchedulerStatus(silent: true);
@@ -1174,6 +1180,92 @@ class DashboardController extends ChangeNotifier {
       return ActionResult(success: false, message: error!);
     } finally {
       kisAutomationSettingsLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<ActionResult> refreshOperationMode({bool silent = false}) async {
+    if (operationModeLoading) {
+      return const ActionResult(
+        success: false,
+        message: 'Operation mode refresh already in progress.',
+      );
+    }
+
+    operationModeLoading = true;
+    if (!silent) notifyListeners();
+
+    try {
+      operationModeStatus = await apiClient.fetchOperationMode();
+      settings = settings.copyWith(
+        currentOperationMode: operationModeStatus.effectiveMode,
+      );
+      operationModeError = null;
+      return const ActionResult(
+        success: true,
+        message: 'Operation mode refreshed.',
+      );
+    } catch (e) {
+      operationModeError =
+          'Operation mode unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      return ActionResult(success: false, message: operationModeError!);
+    } finally {
+      operationModeLoading = false;
+      if (!silent) notifyListeners();
+    }
+  }
+
+  Future<ActionResult> setOperationMode(
+    String mode, {
+    bool acknowledged = false,
+    String? reason,
+  }) async {
+    if (operationModeUpdating) {
+      return const ActionResult(
+        success: false,
+        message: 'Operation mode update already in progress.',
+      );
+    }
+
+    final normalizedMode = OperationModeStatus.normalizeMode(mode);
+    final previousStatus = operationModeStatus;
+    final previousSettings = settings;
+    operationModeUpdating = true;
+    operationModeError = null;
+    settings = settings.copyWith(currentOperationMode: normalizedMode);
+    notifyListeners();
+
+    try {
+      final result = await apiClient.updateOperationMode(
+        mode: normalizedMode,
+        acknowledged: normalizedMode == 'live' && acknowledged,
+        reason: reason,
+      );
+      operationModeStatus = result.toStatus(fallback: previousStatus);
+      settings = settings.copyWith(
+        currentOperationMode: operationModeStatus.effectiveMode,
+      );
+      await refreshOperationMode(silent: true);
+      await refreshSchedulerStatus(silent: true);
+      _recordSettingsChangeEvent(_operationModeFacadeLabel(normalizedMode), {
+        'mode': normalizedMode,
+        'acknowledged': normalizedMode == 'live' && acknowledged,
+      });
+      _rebuildAutomationRuntimeMonitorFromCurrentState();
+      _rebuildPortfolioManagementItems();
+      return ActionResult(success: true, message: result.message);
+    } catch (e) {
+      settings = previousSettings;
+      operationModeStatus = previousStatus;
+      final message =
+          'Operation mode update failed: ${ApiErrorFormatter.format(e.toString())}';
+      await refreshOperationMode(silent: true);
+      await refreshSchedulerStatus(silent: true);
+      operationModeError = message;
+      error = message;
+      return ActionResult(success: false, message: operationModeError!);
+    } finally {
+      operationModeUpdating = false;
       notifyListeners();
     }
   }
@@ -8219,6 +8311,18 @@ String _settingsChangeSummary(
 String _onOff(bool enabled) => enabled ? 'ON' : 'OFF';
 
 String _formatPct(double value) => '${(value * 100).toStringAsFixed(2)}%';
+
+String _operationModeFacadeLabel(String mode) {
+  switch (OperationModeStatus.normalizeMode(mode)) {
+    case 'live':
+      return 'Live Mode';
+    case 'paused':
+      return 'Paused Mode';
+    case 'paper':
+      return 'Paper Mode';
+  }
+  return mode;
+}
 
 String _operationModeLabel(String preset) {
   switch (preset) {

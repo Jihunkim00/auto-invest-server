@@ -50,6 +50,7 @@ def test_ops_settings_defaults_remain_safe(db_session):
     assert settings["dry_run"] is True
     assert settings["kill_switch"] is False
     assert settings["kis_scheduler_enabled"] is False
+    assert settings["kis_position_lifecycle_scheduler_enabled"] is False
     assert settings["kis_scheduler_dry_run"] is True
     assert settings["kis_scheduler_live_enabled"] is False
     assert settings["kis_scheduler_allow_real_orders"] is False
@@ -549,3 +550,16 @@ def test_us_no_new_entry_after_is_derived_read_only(client):
 
     assert response.status_code == 422
     assert "read-only/derived" in response.json()["detail"]
+
+
+def test_ops_settings_blocks_direct_operation_test3_real_orders_enable(client):
+    response = client.put(
+        "/ops/settings",
+        json={"operation_test3_allow_real_orders": True},
+    )
+
+    assert response.status_code == 409
+    assert "operation_test3_allow_real_orders requires" in response.json()["detail"]
+
+    settings = client.get("/ops/settings").json()
+    assert settings["operation_test3_allow_real_orders"] is False

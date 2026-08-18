@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import threading
 from datetime import UTC, date, datetime, timedelta
@@ -30,6 +31,9 @@ KIS_MARKET_CAP_RANKING_TR_ID = "FHPST01740000"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_BALANCE_TR_ID_REAL = "TTTC8434R"
 KIS_BALANCE_TR_ID_DEMO = "VTTC8434R"
+KIS_POSSIBLE_ORDER_PATH = "/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+KIS_POSSIBLE_ORDER_TR_ID_REAL = "TTTC8908R"
+KIS_POSSIBLE_ORDER_TR_ID_DEMO = "VTTC8908R"
 KIS_OPEN_ORDERS_PATH = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
 KIS_OPEN_ORDERS_TR_ID = "TTTC0084R"
 KIS_DAILY_ORDER_EXECUTIONS_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
@@ -211,13 +215,26 @@ class KisClient:
         response = self._request_balance()
         summary = _first_dict(response.get("output2"))
 
-        cash = first_float(summary, ["dnca_tot_amt", "nass_amt", "cash"])
-        stock_evaluation_amount = first_float(summary, ["scts_evlu_amt", "tot_evlu_amt"])
-        total_asset_value = first_float(
+        cash = optional_first_float(summary, ["dnca_tot_amt", "cash"])
+        withdrawable_cash = optional_first_float(summary, ["wdrw_psbl_tot_amt"])
+        d1_cash = optional_first_float(summary, ["nxdy_excc_amt"])
+        d2_cash = optional_first_float(summary, ["d2_cash", "d2_excc_amt"])
+        orderable_cash = optional_first_float(
+            summary,
+            ["ord_psbl_cash", "ord_psbl_amt", "ord_psbl_cash_amt"],
+        )
+        stock_evaluation_amount = optional_first_float(
+            summary, ["scts_evlu_amt"]
+        )
+        total_asset_value = optional_first_float(
             summary, ["tot_evlu_amt", "nass_amt", "tot_asst_amt"]
         )
-        purchase_amount = first_float(summary, ["pchs_amt_smtl_amt", "pchs_amt"])
-        unrealized_pl = first_float(summary, ["evlu_pfls_smtl_amt", "evlu_pfls_amt"])
+        purchase_amount = optional_first_float(
+            summary, ["pchs_amt_smtl_amt", "pchs_amt"]
+        )
+        unrealized_pl = optional_first_float(
+            summary, ["evlu_pfls_smtl_amt", "evlu_pfls_amt"]
+        )
         unrealized_plpc = normalize_percent(
             first_present(summary, ["asst_icdc_erng_rt", "evlu_pfls_rt"])
         )
@@ -227,12 +244,118 @@ class KisClient:
             "environment": self.settings.kis_env,
             "currency": "KRW",
             "cash": cash,
+            "cash_balance": cash,
+            "withdrawable_cash": withdrawable_cash,
+            "d1_cash": d1_cash,
+            "d2_cash": d2_cash,
+            "orderable_cash": orderable_cash,
+            "orderable_cash_source": (
+                "kis_balance" if orderable_cash is not None else None
+            ),
+            "orderable_cash_status": (
+                "ok" if orderable_cash is not None else "candidate_required"
+            ),
             "total_asset_value": total_asset_value,
             "stock_evaluation_amount": stock_evaluation_amount,
             "purchase_amount": purchase_amount,
             "unrealized_pl": unrealized_pl,
             "unrealized_plpc": unrealized_plpc,
             "raw_status": "ok",
+        }
+
+    def get_domestic_possible_order(
+        self,
+        *,
+        symbol: str,
+        order_type: str = "market",
+        order_price: float | None = None,
+        side: str = "buy",
+        market: str = "KR",
+        quantity_hint: int | None = None,
+    ) -> dict:
+        """Return KIS cash-buy possible amount/quantity without submitting an order."""
+        normalized_market = str(market or "").strip().upper()
+        normalized_side = str(side or "").strip().lower()
+        normalized_order_type = str(order_type or "market").strip().lower()
+        normalized_symbol = str(symbol or "").strip()
+        if normalized_market != "KR":
+            raise ValueError("KIS possible order market must be KR.")
+        if normalized_side != "buy":
+            raise ValueError("KIS possible order currently supports cash buy only.")
+        if not re.fullmatch(r"\d{6}", normalized_symbol):
+            raise ValueError("KIS possible order symbol must be a 6-digit KR code.")
+        if normalized_order_type == "market":
+            order_division = KIS_MARKET_ORDER_DIVISION
+            reference_price = to_float(order_price, 0.0) or None
+            order_price_param = ""
+        elif normalized_order_type in {"limit", "지정가"}:
+            if order_price is None or to_float(order_price) <= 0:
+                raise ValueError("limit possible order requires a positive order price.")
+            order_division = "00"
+            reference_price = to_float(order_price)
+            order_price_param = str(reference_price)
+        else:
+            raise ValueError("KIS possible order supports market or limit only.")
+
+        queried_at = datetime.now(UTC).isoformat()
+        base_payload = {
+            "provider": "kis",
+            "environment": self.settings.kis_env,
+            "market": normalized_market,
+            "symbol": normalized_symbol,
+            "side": normalized_side,
+            "order_type": normalized_order_type,
+            "reference_price": reference_price,
+            "quantity_hint": quantity_hint,
+            "source": "kis_domestic_possible_order",
+            "queried_at": queried_at,
+        }
+        try:
+            response = self.request_get(
+                KIS_POSSIBLE_ORDER_PATH,
+                tr_id=self._possible_order_tr_id(),
+                params={
+                    "CANO": self.settings.kis_account_no,
+                    "ACNT_PRDT_CD": self.settings.kis_account_product_code,
+                    "PDNO": normalized_symbol,
+                    "ORD_UNPR": order_price_param,
+                    "ORD_DVSN": order_division,
+                    "CMA_EVLU_AMT_ICLD_YN": "N",
+                    "OVRS_ICLD_YN": "N",
+                },
+            )
+        except Exception as exc:
+            return {
+                **base_payload,
+                "raw_status": "error",
+                "orderable_cash": None,
+                "orderable_quantity": None,
+                "cash_balance": None,
+                "withdrawable_cash": None,
+                "d1_cash": None,
+                "d2_cash": None,
+                "error": _safe_client_error(exc, self.settings),
+            }
+
+        output = _first_dict(response.get("output"))
+        no_credit_cash = optional_first_float(output, ["nrcvb_buy_amt"])
+        orderable_cash = no_credit_cash
+        orderable_cash_field = "nrcvb_buy_amt" if no_credit_cash is not None else None
+        if orderable_cash is None:
+            orderable_cash = optional_first_float(output, ["ord_psbl_cash"])
+            orderable_cash_field = "ord_psbl_cash" if orderable_cash is not None else None
+        orderable_quantity = optional_first_int(output, ["nrcvb_buy_qty"])
+        return {
+            **base_payload,
+            "raw_status": "ok",
+            "orderable_cash": orderable_cash,
+            "orderable_cash_field": orderable_cash_field,
+            "orderable_quantity": orderable_quantity,
+            "cash_balance": optional_first_float(output, ["cash_balance"]),
+            "withdrawable_cash": optional_first_float(output, ["withdrawable_cash"]),
+            "d1_cash": optional_first_float(output, ["d1_cash"]),
+            "d2_cash": optional_first_float(output, ["d2_cash"]),
+            "error": None,
         }
 
     def list_positions(self) -> list[dict]:
@@ -687,7 +810,11 @@ class KisClient:
             # Detect KIS per-second rate limit (EGW00201) and map to structured reason
             msg_cd = str(response_data.get("msg_cd") or "").strip()
             msg1 = str(response_data.get("msg1") or "").strip()
-            if msg_cd == "EGW00201" or "초당 거래건수" in msg1 or "허용 가능한 초당 거래건수" in msg1:
+            if (
+                msg_cd in {"EGW00201", "EGW00215"}
+                or "초당 거래건수" in msg1
+                or "허용 가능한 초당 거래건수" in msg1
+            ):
                 retry_after = float(getattr(self.settings, "kis_read_only_rate_limit_retry_seconds", 1.2) or 1.2)
                 details.update(
                     {
@@ -902,6 +1029,12 @@ class KisClient:
             return KIS_BALANCE_TR_ID_DEMO
         return KIS_BALANCE_TR_ID_REAL
 
+    def _possible_order_tr_id(self) -> str:
+        env = str(self.settings.kis_env or "").lower()
+        if env in ("paper", "vps", "demo", "mock"):
+            return KIS_POSSIBLE_ORDER_TR_ID_DEMO
+        return KIS_POSSIBLE_ORDER_TR_ID_REAL
+
     def _daily_order_executions_tr_id(self) -> str:
         env = str(self.settings.kis_env or "").lower()
         if env in ("paper", "vps", "demo", "mock"):
@@ -1068,6 +1201,16 @@ def first_float(item: dict, keys: list[str], default: float = 0.0) -> float:
     return to_float(value, default)
 
 
+def optional_first_float(item: dict, keys: list[str]) -> float | None:
+    value = first_present(item, keys)
+    return None if value is None else to_float(value)
+
+
+def optional_first_int(item: dict, keys: list[str]) -> int | None:
+    value = first_present(item, keys)
+    return None if value is None else to_int(value)
+
+
 def _as_dict(value) -> dict:
     return value if isinstance(value, dict) else {}
 
@@ -1119,6 +1262,14 @@ def _format_kis_api_error(prefix: str, details: dict) -> str:
         if value is not None and str(value).strip():
             parts.append(f"{key}={value}")
     return f"{prefix}: {', '.join(parts)}" if parts else prefix
+
+
+def _safe_client_error(exc: Exception, settings) -> str:
+    text = sanitize_kis_text(
+        str(exc).strip() or exc.__class__.__name__,
+        known_secrets=_known_sensitive_values(settings),
+    )
+    return f"{exc.__class__.__name__}: {text[:240]}"
 
 
 def _mask_account_value(value) -> str | None:

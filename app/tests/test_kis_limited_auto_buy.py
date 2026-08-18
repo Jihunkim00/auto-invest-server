@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.core.enums import InternalOrderStatus
-from app.db.database import get_db
+from app.db.database import Base, get_db
 from app.db.models import OrderLog, RuntimeSetting, SignalLog, TradeRunLog
 from app.main import app
 from app.services.kis_limited_auto_buy_service import (
@@ -31,6 +34,7 @@ class _FakeClient:
         balance=None,
         positions=None,
         open_orders=None,
+        current_price=52_000,
     ):
         self.settings = settings or SimpleNamespace(
             kis_enabled=True,
@@ -41,6 +45,8 @@ class _FakeClient:
         self.balance = balance if balance is not None else _balance()
         self.positions = positions if positions is not None else []
         self.open_orders = open_orders if open_orders is not None else []
+        self.current_price = current_price
+        self.submit_calls = []
 
     def get_account_balance(self):
         return self.balance
@@ -50,6 +56,25 @@ class _FakeClient:
 
     def list_open_orders(self):
         return self.open_orders
+
+    def get_domestic_stock_price(self, symbol):
+        return {"symbol": symbol, "current_price": self.current_price}
+
+    def build_domestic_order_payload(self, **kwargs):
+        return {"tr_id": "TTTC0802U", **kwargs}
+
+    def submit_domestic_cash_order(self, **kwargs):
+        self.submit_calls.append(kwargs)
+        return {"rt_cd": "0", "output": {"ODNO": "KIS123"}}
+
+    def inquire_daily_order_executions(self, **kwargs):
+        return {"rt_cd": "0", "output1": [], "output2": []}
+
+
+class _TimeoutAfterAcceptClient(_FakeClient):
+    def submit_domestic_cash_order(self, **kwargs):
+        self.submit_calls.append(kwargs)
+        raise TimeoutError("broker timed out after accepting order")
 
 
 class _FakeShadowService:
@@ -95,7 +120,7 @@ class _FakeValidationResult:
         validated_for_submission=True,
         block_reasons=None,
         symbol="005930",
-        qty=4,
+        qty=1,
     ):
         self.provider = "kis"
         self.market = "KR"
@@ -107,8 +132,8 @@ class _FakeValidationResult:
         self.side = "buy"
         self.qty = qty
         self.order_type = "market"
-        self.current_price = 72_000
-        self.estimated_amount = 288_000
+        self.current_price = 52_000
+        self.estimated_amount = 52_000
         self.available_cash = 3_000_000
         self.held_qty = None
         self.warnings = []
@@ -256,6 +281,11 @@ def test_preflight_good_candidate_returns_buy_ready_readiness_only(db_session):
     assert result["primary_block_reason"] == "auto_buy_execution_disabled"
     assert result["real_order_submitted"] is False
     assert result["broker_submit_called"] is False
+    assert result["review_token"]
+    assert result["review_token_status"] == "issued"
+    assert result["review"]["status"] == "issued"
+    assert result["review"]["qty"] == 1
+    assert result["review"]["estimated_notional"] == pytest.approx(52_000)
     candidate = result["final_candidate"]
     assert candidate["status"] == "BUY READY"
     assert candidate["symbol"] == "005930"
@@ -390,7 +420,7 @@ def test_candidate_score_sell_pressure_and_indicator_blocks(
     ("client_override", "reason"),
     [
         ({"balance": _balance(cash=1000)}, "insufficient_cash"),
-        ({"positions": [{"symbol": "005930", "qty": 1}]}, "duplicate_position"),
+        ({"positions": [{"symbol": "005930", "qty": 1}]}, "max_positions_reached"),
         ({"open_orders": [{"symbol": "005930", "side": "buy", "status": "PENDING"}]}, "duplicate_open_buy_order"),
     ],
 )
@@ -455,108 +485,463 @@ def test_no_new_entry_after_blocks_entry(db_session):
     assert result["entry_allowed_now"] is False
 
 
-def test_validation_failure_blocks_without_manual_submit(monkeypatch, db_session):
+def test_run_once_requires_operator_token_without_validation_or_submit(
+    monkeypatch,
+    db_session,
+):
     _enable_runtime(
         db_session,
         dry_run=False,
         kis_live_auto_buy_enabled=True,
         kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
     )
-    validation_calls = []
-
-    def fake_validate(self, request, **kwargs):
-        validation_calls.append(request)
-        return _FakeValidationResult(
-            validated_for_submission=False,
-            block_reasons=["current_price_unavailable"],
-        )
-
     monkeypatch.setattr(
         "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
-        fake_validate,
+        lambda *args, **kwargs: pytest.fail("run-once must not validate"),
     )
     monkeypatch.setattr(
         "app.services.kis_limited_auto_buy_service.KisManualOrderService.submit_manual",
-        lambda *args, **kwargs: pytest.fail("validation failure must not submit"),
+        lambda *args, **kwargs: pytest.fail("run-once must not submit"),
     )
 
     result = _service().run_once(db_session)
 
-    assert len(validation_calls) == 1
     assert result["result"] == "blocked"
-    assert result["primary_block_reason"] == "validation_failed"
-    assert result["validation_called"] is True
-    assert result["validation_status"] == "failed"
+    assert result["primary_block_reason"] == "operator_review_token_required"
+    assert result["validation_called"] is False
     assert result["manual_submit_called"] is False
     assert result["real_order_submitted"] is False
     assert db_session.query(OrderLog).count() == 0
 
 
-def test_all_gates_true_validates_then_calls_manual_submit(monkeypatch, db_session):
+def test_reviewed_execute_success_submits_one_share_and_syncs(monkeypatch, db_session):
     _enable_runtime(
         db_session,
         dry_run=False,
         kis_live_auto_buy_enabled=True,
         kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
     )
+    client = _FakeClient()
+    service = _service(client=client)
+    preflight = service.preflight_once(db_session)
     validation_calls = []
-    submit_calls = []
 
     def fake_validate(self, request, **kwargs):
         validation_calls.append(request)
         assert request.side == "buy"
+        assert request.qty == 1
         assert request.dry_run is True
         assert request.source_metadata["source_type"] == GUARDED_SOURCE_TYPE
         return _FakeValidationResult()
-
-    def fake_submit(self, db, request, **kwargs):
-        submit_calls.append(request)
-        assert request.side == "buy"
-        assert request.dry_run is False
-        assert request.confirm_live is True
-        assert request.source_metadata["source_type"] == GUARDED_SOURCE_TYPE
-        assert request.source_metadata["validation_called"] is True
-        return 200, {
-            "provider": "kis",
-            "market": "KR",
-            "mode": "manual_live",
-            "source": SOURCE,
-            "source_type": GUARDED_SOURCE_TYPE,
-            "real_order_submitted": True,
-            "broker_submit_called": True,
-            "manual_submit_called": True,
-            "symbol": "005930",
-            "side": "buy",
-            "qty": 4,
-            "order_id": 123,
-            "order_log_id": 123,
-            "broker_order_id": "KIS-123",
-            "kis_odno": "KIS-123",
-            "broker_status": "submitted",
-        }
 
     monkeypatch.setattr(
         "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
         fake_validate,
     )
-    monkeypatch.setattr(
-        "app.services.kis_limited_auto_buy_service.KisManualOrderService.submit_manual",
-        fake_submit,
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
     )
 
-    result = _service().run_once(db_session)
-
     assert len(validation_calls) == 1
-    assert len(submit_calls) == 1
+    assert len(client.submit_calls) == 1
+    assert client.submit_calls[0]["qty"] == 1
     assert result["result"] == "submitted"
     assert result["action"] == "buy"
-    assert result["source_type"] == GUARDED_SOURCE_TYPE
+    assert result["source_type"] == "operator_reviewed_limited_auto_buy"
     assert result["real_order_submitted"] is True
     assert result["broker_submit_called"] is True
     assert result["manual_submit_called"] is True
     assert result["validation_called"] is True
-    assert result["order_id"] == 123
-    assert result["kis_odno"] == "KIS-123"
+    assert result["qty"] == 1
+    assert result["kis_odno"] == "KIS123"
+    order = db_session.get(OrderLog, result["order_id"])
+    assert order is not None
+    assert order.internal_status in {
+        InternalOrderStatus.PENDING.value,
+        InternalOrderStatus.FILLED.value,
+    }
+    assert result["review_token_used"] is True
+    assert result["review_token_status"] == "completed"
+    assert result["review_token_reusable"] is False
+    assert result["execution_request_id"]
+    assert result["idempotency_key"] == result["execution_request_id"]
+    request_payload = json.loads(order.request_payload)
+    assert request_payload["source_metadata"]["execution_request_id"] == result["execution_request_id"]
+    assert request_payload["source_metadata"]["idempotency_id"] == result["execution_request_id"]
+    runtime = db_session.query(RuntimeSetting).first()
+    assert runtime.dry_run is True
+    assert runtime.kill_switch is True
+    assert runtime.kis_limited_auto_buy_enabled is False
+    assert runtime.kis_limited_auto_buy_max_notional_krw == pytest.approx(50_000)
+    assert runtime.kis_limited_auto_buy_max_notional_pct == pytest.approx(0.80)
+
+
+def test_reviewed_execute_blocks_expired_token(db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    service = _service()
+    now = datetime(2026, 5, 22, 5, 30, tzinfo=UTC)
+    preflight = service.preflight_once(db_session, now=now)
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+        now=now + timedelta(minutes=6),
+    )
+
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "review_token_expired"
+    assert result["real_order_submitted"] is False
+
+
+def test_reviewed_execute_blocks_token_reuse(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    client = _FakeClient()
+    service = _service(client=client)
+    preflight = service.preflight_once(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda self, request, **kwargs: _FakeValidationResult(qty=request.qty),
+    )
+
+    first = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    second = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    assert first["result"] == "submitted"
+    assert second["result"] == "blocked"
+    assert second["primary_block_reason"] == "review_token_already_used"
+    assert len(client.submit_calls) == 1
+
+
+def test_reviewed_execute_concurrent_same_token_submits_once(monkeypatch, tmp_path):
+    engine = create_engine(
+        f"sqlite:///{(tmp_path / 'review-token-concurrency.db').as_posix()}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+    Base.metadata.create_all(bind=engine)
+    client = _FakeClient()
+    service = _service(client=client)
+    validation_started = threading.Event()
+    release_validation = threading.Event()
+    validation_lock = threading.Lock()
+    validation_calls = 0
+    results = {}
+
+    def fake_validate(self, request, **kwargs):
+        nonlocal validation_calls
+        with validation_lock:
+            validation_calls += 1
+            is_first = validation_calls == 1
+        if is_first:
+            validation_started.set()
+            assert release_validation.wait(timeout=5)
+        return _FakeValidationResult(qty=request.qty)
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        fake_validate,
+    )
+
+    try:
+        setup = SessionLocal()
+        _enable_runtime(
+            setup,
+            dry_run=False,
+            kis_live_auto_buy_enabled=True,
+            kis_limited_auto_buy_enabled=True,
+            kis_limited_auto_buy_max_notional_pct=0.94,
+        )
+        preflight = service.preflight_once(setup)
+        setup.close()
+
+        def execute(name):
+            session = SessionLocal()
+            try:
+                results[name] = service.execute_reviewed_once(
+                    session,
+                    review_token=preflight["review_token"],
+                    confirm_live=True,
+                    confirmation="TEST3 LIVE BUY 1 SHARE",
+                )
+            finally:
+                session.close()
+
+        first = threading.Thread(target=execute, args=("first",))
+        second = threading.Thread(target=execute, args=("second",))
+        first.start()
+        assert validation_started.wait(timeout=5)
+        second.start()
+        second.join(timeout=5)
+        release_validation.set()
+        first.join(timeout=5)
+
+        assert not first.is_alive()
+        assert not second.is_alive()
+        assert len(client.submit_calls) == 1
+        submitted = [item for item in results.values() if item["result"] == "submitted"]
+        blocked = [item for item in results.values() if item["result"] == "blocked"]
+        assert len(submitted) == 1
+        assert len(blocked) == 1
+        assert blocked[0]["primary_block_reason"] == "review_token_execution_in_progress"
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_reviewed_execute_ambiguous_broker_timeout_blocks_token_reuse(
+    monkeypatch,
+    db_session,
+):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    client = _TimeoutAfterAcceptClient()
+    service = _service(client=client)
+    preflight = service.preflight_once(db_session)
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda self, request, **kwargs: _FakeValidationResult(qty=request.qty),
+    )
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+    submit_count_after_first = len(client.submit_calls)
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    retry = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    assert submit_count_after_first == 1
+    assert len(client.submit_calls) == 1
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "review_token_submit_attempted"
+    assert result["broker_submit_called"] is True
+    assert result["order_reconciliation_required"] is True
+    assert result["review_token_status"] == "failed_after_submit_attempt"
+    assert result["review_token_reusable"] is False
+    assert retry["result"] == "blocked"
+    assert retry["primary_block_reason"] == "review_token_submit_attempted"
+    assert retry["broker_submit_called"] is False
+    assert retry["order_reconciliation_required"] is True
+    assert retry["review_token_status"] == "failed_after_submit_attempt"
+
+
+@pytest.mark.parametrize(
+    ("candidate_override", "client_mutation", "reason"),
+    [
+        ({"symbol": "000660"}, None, "review_token_symbol_mismatch"),
+        ({"suggested_quantity": 2}, None, "review_token_qty_mismatch"),
+        (None, {"current_price": 56_000}, "max_notional_krw_exceeded"),
+        (None, {"balance": _balance(total_asset_value=50_000, cash=100_000)}, "max_notional_pct_exceeded"),
+        (None, {"balance": _balance(cash=10_000)}, "insufficient_cash"),
+        (None, {"positions": [{"symbol": "000660", "qty": 1}]}, "max_positions_reached"),
+        (None, {"open_orders": [{"symbol": "005930", "side": "buy", "status": "PENDING"}]}, "duplicate_open_buy_order"),
+    ],
+)
+def test_reviewed_execute_blocks_guard_violations(
+    db_session,
+    candidate_override,
+    client_mutation,
+    reason,
+):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    client = _FakeClient()
+    service = _service(client=client)
+    preflight = service.preflight_once(db_session)
+    if client_mutation:
+        for key, value in client_mutation.items():
+            setattr(client, key, value)
+    execute_service = (
+        _service(
+            client=client,
+            shadow_service=_FakeShadowService(_shadow_payload(**candidate_override)),
+        )
+        if candidate_override
+        else service
+    )
+
+    result = execute_service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    assert result["result"] == "blocked"
+    assert reason in result["block_reasons"]
+    assert result["real_order_submitted"] is False
+    assert len(client.submit_calls) == 0
+
+
+def test_reviewed_execute_blocks_daily_limit(db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    service = _service()
+    preflight = service.preflight_once(db_session)
+    _seed_limited_buy_order(db_session)
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    assert result["result"] == "blocked"
+    assert "daily_auto_buy_limit_reached" in result["block_reasons"]
+
+
+def test_reviewed_execute_blocks_after_1450(db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+        kis_limited_auto_buy_no_new_entry_after="14:50",
+    )
+    service = _service()
+    preflight_time = datetime(2026, 5, 22, 5, 48, tzinfo=UTC)
+    preflight = service.preflight_once(db_session, now=preflight_time)
+
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+        now=preflight_time + timedelta(minutes=3),
+    )
+
+    assert result["result"] == "blocked"
+    assert "no_new_entry_after_blocked" in result["block_reasons"]
+
+
+def test_reviewed_execute_blocks_bad_confirmation_and_scheduler_context(db_session):
+    _enable_runtime(db_session)
+    service = _service()
+
+    bad_confirmation = service.execute_reviewed_once(
+        db_session,
+        review_token="missing",
+        confirm_live=True,
+        confirmation="WRONG",
+    )
+    scheduler = service.execute_reviewed_once(
+        db_session,
+        review_token="missing",
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+        scheduler_context=True,
+    )
+
+    assert bad_confirmation["primary_block_reason"] == "confirmation_mismatch"
+    assert scheduler["primary_block_reason"] == "scheduler_context_blocked"
+    assert bad_confirmation["real_order_submitted"] is False
+    assert scheduler["real_order_submitted"] is False
+
+
+def test_reviewed_execute_restores_safe_settings_on_exception(monkeypatch, db_session):
+    _enable_runtime(
+        db_session,
+        dry_run=False,
+        kill_switch=False,
+        kis_live_auto_buy_enabled=True,
+        kis_limited_auto_buy_enabled=True,
+        kis_limited_auto_buy_max_notional_pct=0.94,
+    )
+    service = _service()
+    preflight = service.preflight_once(db_session)
+
+    monkeypatch.setattr(
+        "app.services.kis_limited_auto_buy_service.KisOrderValidationService.validate",
+        lambda self, request, **kwargs: _FakeValidationResult(qty=request.qty),
+    )
+    monkeypatch.setattr(
+        service,
+        "_submit_reviewed_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    result = service.execute_reviewed_once(
+        db_session,
+        review_token=preflight["review_token"],
+        confirm_live=True,
+        confirmation="TEST3 LIVE BUY 1 SHARE",
+    )
+
+    runtime = db_session.query(RuntimeSetting).first()
+    assert result["result"] == "blocked"
+    assert result["primary_block_reason"] == "reviewed_execute_failed"
+    assert runtime.dry_run is True
+    assert runtime.kill_switch is True
+    assert runtime.kis_live_auto_buy_enabled is False
+    assert runtime.kis_limited_auto_buy_max_notional_krw == pytest.approx(50_000)
+    assert runtime.kis_limited_auto_buy_max_notional_pct == pytest.approx(0.80)
 
 
 def test_kill_switch_blocks_without_candidate_source(db_session):
@@ -615,11 +1000,12 @@ def _enable_runtime(db_session, **overrides):
         "kis_limited_auto_buy_requires_shadow_review": True,
         "kis_limited_auto_buy_max_orders_per_day": 1,
         "kis_limited_auto_buy_max_notional_pct": 0.03,
+        "kis_limited_auto_buy_max_notional_krw": 55_000,
         "kis_limited_auto_buy_min_cash_buffer_krw": 0,
         "kis_limited_auto_buy_requires_existing_sell_guards": True,
         "kis_limited_auto_buy_min_final_score": 75,
         "kis_limited_auto_buy_min_confidence": 0.70,
-        "kis_limited_auto_buy_max_positions": 3,
+        "kis_limited_auto_buy_max_positions": 1,
         "kis_limited_auto_buy_block_if_position_exists": True,
         "kis_limited_auto_buy_block_if_open_order_exists": True,
         "kis_limited_auto_buy_allow_reentry_same_day": False,
@@ -672,16 +1058,17 @@ def _candidate(**overrides):
         "ai_buy_score": 65.0,
         "ai_sell_score": 14.0,
         "confidence": 0.76,
-        "current_price": 72_000,
-        "suggested_notional": 288_000,
-        "suggested_quantity": 4,
-        "indicator_status": "ready",
+        "current_price": 52_000,
+        "suggested_notional": 52_000,
+        "estimated_notional": 52_000,
+        "suggested_quantity": 1,
+        "indicator_status": "ok",
         "indicator_bar_count": 120,
         "indicator_payload": {
-            "price": 72_000,
-            "ema20": 70_500,
-            "ema50": 69_000,
-            "vwap": 71_200,
+            "price": 52_000,
+            "ema20": 50_500,
+            "ema50": 49_000,
+            "vwap": 51_200,
             "rsi": 57.5,
             "atr": 1200,
             "volume_ratio": 1.3,

@@ -27,9 +27,11 @@ class DailyOpsSummaryPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -103,7 +105,8 @@ class DailyOpsSummaryPanel extends StatelessWidget {
                   child: _DetailsExpansion(summary: summary, strings: strings),
                 ),
               ],
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -281,7 +284,7 @@ class _DetailsExpansion extends StatelessWidget {
   Widget build(BuildContext context) {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
+      child: Material(type: MaterialType.transparency, child: ExpansionTile(
         key: const ValueKey('daily-ops-summary-details-expansion'),
         tilePadding: EdgeInsets.zero,
         childrenPadding: EdgeInsets.zero,
@@ -306,7 +309,7 @@ class _DetailsExpansion extends StatelessWidget {
             emptyText: strings.none,
           ),
         ],
-      ),
+      )),
     );
   }
 }

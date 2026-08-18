@@ -34,16 +34,30 @@ class WatchlistResearchService:
         symbol: str,
         indicators: dict[str, Any],
         gate_level: int,
+        market: str = "US",
     ) -> dict[str, Any]:
-        analysis = self._gpt_service.analyze(
-            db=db,
-            symbol=symbol.upper(),
-            indicators=indicators,
-            gate_level=gate_level,
-        )
+        try:
+            analysis = self._gpt_service.analyze(
+                db=db,
+                symbol=symbol.upper(),
+                indicators=indicators,
+                gate_level=gate_level,
+                market=market,
+            )
+        except TypeError as exc:
+            # Keep compatibility with older test doubles/integrations that predate market.
+            if "unexpected keyword argument 'market'" not in str(exc):
+                raise
+            analysis = self._gpt_service.analyze(
+                db=db,
+                symbol=symbol.upper(),
+                indicators=indicators,
+                gate_level=gate_level,
+            )
 
         fallback_used = bool(analysis.get("audit", {}).get("fallback_used"))
         market_confidence = float(analysis.get("market_confidence", 0.0) or 0.0)
+        confidence = self._optional_float(analysis.get("confidence"))
         hard_blocked = bool(analysis.get("hard_blocked"))
         entry_allowed = bool(analysis.get("entry_allowed"))
         reason = str(analysis.get("reason", "") or "").strip()
@@ -76,6 +90,7 @@ class WatchlistResearchService:
         return {
             "market_research_score": research_score,
             "market_confidence": market_confidence,
+            "confidence": confidence,
             "event_risk": event_risk,
             "event_risk_level": gpt_context.get("event_risk_level"),
             "sector_context": sector_context,
@@ -96,7 +111,20 @@ class WatchlistResearchService:
             "entry_allowed": entry_allowed,
             "market_research_blocked": research_blocks_entry,
             "fallback_used": fallback_used,
+            "gate_level": gate_level,
+            "market_gpt_used": bool(analysis.get("audit", {}).get("gpt_used")),
+            "market_model": self._settings.openai_model,
+            "market_reasoning_effort": self._settings.openai_reasoning_effort,
         }
+
+    @staticmethod
+    def _optional_float(value: Any) -> float | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
 
     def _normalize_score(self, value: float) -> int:
         return int(max(0, min(round(value * 100), 100)))

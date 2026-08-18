@@ -38,6 +38,7 @@ class DashboardScreen extends StatelessWidget {
     this.onReviewPosition,
     this.onOpenLogs,
     this.onOpenSettings,
+    this.onOpenAdmin,
   });
 
   final DashboardController controller;
@@ -45,6 +46,7 @@ class DashboardScreen extends StatelessWidget {
   final VoidCallback? onReviewPosition;
   final VoidCallback? onOpenLogs;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onOpenAdmin;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +76,12 @@ class DashboardScreen extends StatelessWidget {
                           ),
                         ),
                         GlobalBrokerSelector(controller: controller),
+                        IconButton(
+                          key: const ValueKey('home-open-admin'),
+                          tooltip: 'Advanced / Admin',
+                          onPressed: onOpenAdmin,
+                          icon: const Icon(Icons.admin_panel_settings_outlined),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -404,16 +412,17 @@ class _HomeAdvancedDetailsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return Material(
       key: const Key('home_advanced_details_section'),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+      color: Colors.white.withValues(alpha: 0.04),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
+        child: Material(type: MaterialType.transparency, child: ExpansionTile(
           key: const ValueKey('home-advanced-details-toggle'),
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
           childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -535,7 +544,7 @@ class _HomeAdvancedDetailsSection extends StatelessWidget {
             const SizedBox(height: 12),
             _RecentActivityCard(controller: controller),
           ],
-        ),
+        )),
       ),
     );
   }

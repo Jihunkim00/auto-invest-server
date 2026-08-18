@@ -5,7 +5,8 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.db.database import SessionLocal
-from app.db.models import RuntimeSetting, TradeRunLog
+from app.core.enums import InternalOrderStatus
+from app.db.models import OrderLog, PositionLifecycle, RuntimeSetting, TradeRunLog
 from app.main import app
 from app.services.scheduler_service import scheduler_service
 
@@ -471,6 +472,92 @@ def test_scheduler_status_kr_enabled_for_scheduler_is_true_in_dry_run_validation
     assert body["KR"]["kr_dry_run_scheduler_enabled_effective"] is True
     assert body["KR"]["enabled_for_scheduler_block_reasons"] == []
 
+
+def test_scheduler_status_includes_operation_test3_summary_without_kis_client(monkeypatch):
+    def fail_kis_client_init(*args, **kwargs):
+        raise AssertionError("/scheduler/status must not create a KIS client")
+
+    monkeypatch.setattr("app.brokers.kis_client.KisClient.__init__", fail_kis_client_init)
+    with SessionLocal() as db:
+        from app.services.runtime_setting_service import RuntimeSettingService
+
+        RuntimeSettingService().update_settings(
+            db,
+            {
+                "dry_run": True,
+                "kill_switch": True,
+                "operation_test3_enabled": True,
+                "operation_test3_scheduler_enabled": True,
+                "operation_test3_position_management_enabled": True,
+                "operation_test3_allow_real_orders": False,
+            },
+        )
+        order = OrderLog(
+            broker="kis",
+            market="KR",
+            symbol="009240",
+            side="buy",
+            order_type="market",
+            qty=1,
+            requested_qty=1,
+            filled_qty=1,
+            remaining_qty=0,
+            avg_fill_price=100.0,
+            filled_avg_price=100.0,
+            notional=100.0,
+            internal_status=InternalOrderStatus.FILLED.value,
+            created_at=datetime(2026, 8, 4, 1, 0),
+            filled_at=datetime(2026, 8, 4, 1, 0),
+        )
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+        db.add(
+            PositionLifecycle(
+                symbol="009240",
+                entry_order_id=order.id,
+                entry_price=100.0,
+                cost_basis=100.0,
+                quantity=1.0,
+                status="open",
+                opened_at=datetime(2026, 8, 4, 1, 0),
+            )
+        )
+        db.add(
+            TradeRunLog(
+                run_key="op_test3_pm_20260804_1000",
+                trigger_source="operation_test3_scheduler",
+                symbol="009240",
+                mode="op_test3_pm_run",
+                stage="done",
+                result="review",
+                reason="broker_positions_unavailable",
+                request_payload=json.dumps({"scheduler_slot": "10:00"}),
+                response_payload=json.dumps({"scheduler_slot": "10:00"}),
+                created_at=datetime(2026, 8, 4, 1, 1),
+            )
+        )
+        db.commit()
+
+    with TestClient(app) as client:
+        response = client.get("/scheduler/status")
+
+    assert response.status_code == 200
+    summary = response.json()["operation_test3"]
+    assert summary["enabled"] is True
+    assert summary["scheduler_enabled"] is True
+    assert summary["position_management_enabled"] is True
+    assert summary["allow_real_orders"] is False
+    assert summary["monitoring_only"] is True
+    assert summary["slots_kst"] == ["10:00", "12:00", "14:30"]
+    assert summary["active_lifecycle_count"] == 1
+    assert summary["next_run_kst"]
+    assert summary["latest_run"] == {
+        "trigger_source": "operation_test3_scheduler",
+        "result": "review",
+        "reason": "broker_positions_unavailable",
+    }
+    assert summary["live_ready"] is False
 
 def test_scheduler_status_risk_summary_safe_defaults():
     with TestClient(app) as client:

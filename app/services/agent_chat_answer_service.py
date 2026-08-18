@@ -90,7 +90,10 @@ class AgentChatAnswerService:
         if category == AgentChatIntentCategory.STRATEGY_PROFILE_CHANGE_REQUEST:
             return self._strategy_change_answer(data)
 
-        if category == AgentChatIntentCategory.ANALYSIS_REQUEST:
+        if category in {
+            AgentChatIntentCategory.ANALYSIS_REQUEST,
+            AgentChatIntentCategory.EXIT_REVIEW_REQUEST,
+        }:
             return self._analysis_answer(intent, plan=plan, run=run, data=data)
 
         if category == AgentChatIntentCategory.MANUAL_TICKET_REQUEST:
@@ -410,32 +413,58 @@ class AgentChatAnswerService:
                 answer_type="error",
             )
         symbol = intent.symbol or (plan or {}).get("symbol") or "해당 종목"
-        result = run.get("result") if isinstance(run, dict) else {}
+        result = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
+        if not result and isinstance(run, dict) and isinstance(run.get("result"), dict):
+            result = dict(run["result"])
         latest = result.get("latest_analysis") if isinstance(result, dict) else None
         if isinstance(latest, dict) and latest:
-            reason = latest.get("risk_note") or latest.get("reason") or "최근 분석 기록을 확인했습니다"
-            return AgentChatAnswer(
-                text=(
-                    f"{symbol} 분석 요청으로 이해했습니다. 안전 분석만 수행했고 주문은 제출하지 않았습니다. "
-                    f"요약: {reason}"
-                ),
-                answer_type="analysis_summary",
+            result = latest
+        if result and result.get("result_type") == "analysis_result":
+            label = result.get("symbol_name") or result.get("symbol") or symbol
+            action = str(result.get("action") or "hold").upper()
+            parts = [f"{label}({result.get('symbol') or symbol}) 안전 분석 결과입니다. action={action}."]
+            if result.get("current_price") is not None:
+                parts.append(f"현재가={result['current_price']} {result.get('currency') or 'KRW'}.")
+            indicators = result.get("indicators") if isinstance(result.get("indicators"), dict) else {}
+            indicator_parts = [
+                f"{key}={indicators[key]}"
+                for key in ("ema20", "ema50", "rsi", "vwap", "atr", "volume_ratio", "momentum")
+                if indicators.get(key) is not None
+            ]
+            if indicator_parts:
+                parts.append("지표: " + ", ".join(indicator_parts) + ".")
+            score_keys = (
+                ("quant_buy", "quant_buy_score"),
+                ("quant_sell", "quant_sell_score"),
+                ("gpt_buy", "gpt_buy_score"),
+                ("gpt_sell", "gpt_sell_score"),
+                ("final_buy", "final_buy_score"),
+                ("final_sell", "final_sell_score"),
             )
+            score_parts = [
+                f"{label}={result[key]}"
+                for label, key in score_keys
+                if result.get(key) is not None
+            ]
+            if score_parts:
+                parts.append("점수: " + ", ".join(score_parts) + ".")
+            if result.get("confidence") is not None:
+                parts.append(f"신뢰도={result['confidence']}.")
+            if result.get("reason"):
+                parts.append(f"사유: {result['reason']}")
+            if result.get("risk_flags"):
+                parts.append("리스크 플래그: " + ", ".join(str(item) for item in result["risk_flags"][:5]) + ".")
+            parts.append("주문, validation, manual submit 경로는 실행하지 않았습니다.")
+            return AgentChatAnswer(text=" ".join(parts), answer_type="analysis_summary")
         if plan:
             return AgentChatAnswer(
-                text=(
-                    f"{symbol} 안전 분석 plan을 만들었습니다. 주문·validation·confirm_live는 실행하지 않았습니다."
-                ),
+                text=f"{symbol} 안전 분석 plan을 만들었습니다. 주문, validation, confirm_live 경로는 실행하지 않았습니다.",
                 answer_type="analysis_summary",
             )
         return AgentChatAnswer(
-            text=(
-                f"{symbol} 분석 요청으로 이해했지만 현재 사용할 수 있는 분석 결과가 충분하지 않습니다. "
-                "주문은 실행하지 않았습니다."
-            ),
+            text=f"{symbol}에 대한 근거 있는 분석 결과가 없습니다. 주문은 실행하지 않았습니다.",
             answer_type="analysis_summary",
         )
-
     def _manual_ticket_answer(
         self,
         *,

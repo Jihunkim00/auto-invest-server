@@ -3,46 +3,36 @@ __pycache__/
 *.pyc
 .env
 .dart_tool/
+.dart_appdata/
 build/
 auto_invest.db
 *.db
 data/
 logs/
+artifacts/
 .tmp_pytest*/
 tmp_pytest*/
-__pycache__/
 .pytest_cache/
 test_auto_invest.db
 *test*.db
 .pytest_tmp/
-.pytest_run_*/
-Add-Content .gitignore "`nconfig/watchlist_kr.backup*.yaml"
-.pytest_runs/backend_pr33c/test_balanced_update_aborts_wh0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_dedupes_a0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_dedupes_a0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_does_not_0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_does_not_0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_injects_r0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_injects_r0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_reports_r0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_reports_r0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_uses_curr0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_uses_curr0/watchlist_kr.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_writes_ex0/watchlist_kr.backup.20260527_145913.yaml
-.pytest_runs/backend_pr33c/test_balanced_update_writes_ex0/watchlist_kr.yaml
-
-.pytest_runs/
-
 .pytest_run*/
 .pytest_runs/
 
-.pytest_run*/
-.pytest_runs/
-
-.dart_appdata/
-.dart_tool/
+# Stage 3 local operations
+stage3_logs/
+trend_watchlist_report_*.json
+scheduled_check_*.log
+scheduled_preview_*.json
+scheduled_preflight_*.json
+stage3_day2_*.json
+config/watchlist_kr.backup*.yaml
+config/watchlist_kr.stage3.*.yaml
+config/watchlist_kr.stage3.before_*.yaml
+config/watchlist_kr.stage3.universe100.yaml
 
 # Keep Flutter Logs feature source tracked
 !lib/features/logs/
 !lib/features/logs/**
-
+.tmp/
+config/local-watchlists/
