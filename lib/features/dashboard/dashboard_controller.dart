@@ -6,6 +6,7 @@ import '../../core/i18n/app_language.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
+import '../../core/storage_provider_preference.dart';
 import '../../core/utils/kr_symbol.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_live_order_action.dart';
@@ -128,7 +129,12 @@ class DashboardController extends ChangeNotifier {
     this.apiClient, {
     bool autoload = true,
     AppLanguage initialLanguage = AppLanguage.korean,
-  }) : appLanguage = initialLanguage {
+    bool persistProvider = false,
+    ProviderPreferenceStore? providerPreferenceStore,
+  })  : appLanguage = initialLanguage,
+        _persistProvider = persistProvider,
+        _providerPreferenceStore =
+            providerPreferenceStore ?? const ProviderPreferenceStore() {
     agentMessages = _defaultAgentSafetyMessages(appLanguage);
     if (autoload) {
       load();
@@ -137,6 +143,9 @@ class DashboardController extends ChangeNotifier {
 
   final ApiClient apiClient;
   AppLanguage appLanguage;
+  final bool _persistProvider;
+  final ProviderPreferenceStore _providerPreferenceStore;
+  int _providerContextVersion = 0;
 
   AppStrings get strings => AppStrings(appLanguage);
 
@@ -188,11 +197,11 @@ class DashboardController extends ChangeNotifier {
   bool kisManagedPositionsLoading = false;
   String? kisManagedPositionsError;
   ManualSellPreparation? latestManualSellPreparation;
-  PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
+  PortfolioMarket selectedPortfolioMarket = PortfolioMarket.kr;
   SelectedProvider selectedProvider = SelectedProvider.kis;
   int selectedGateLevel = 2;
-  PortfolioMarket selectedOrderMarket = PortfolioMarket.us;
-  PortfolioMarket selectedWatchlistMarket = PortfolioMarket.us;
+  PortfolioMarket selectedOrderMarket = PortfolioMarket.kr;
+  PortfolioMarket selectedWatchlistMarket = PortfolioMarket.kr;
   bool krPortfolioUnavailable = false;
   String? krPortfolioError;
   MarketWatchlist usWatchlist = MarketWatchlist.empty('US');
@@ -542,9 +551,7 @@ class DashboardController extends ChangeNotifier {
   PortfolioSummary get portfolioSummary => usPortfolioSummary;
 
   PortfolioSummary get selectedPortfolioSummary =>
-      selectedPortfolioMarket == PortfolioMarket.kr
-          ? krPortfolioSummary
-          : usPortfolioSummary;
+      isKisSelected ? krPortfolioSummary : usPortfolioSummary;
 
   List<PortfolioPositionManagementItem> get selectedPortfolioManagementItems =>
       portfolioManagementItemsForMarket(selectedPortfolioMarket);
@@ -567,7 +574,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   bool get selectedPortfolioUnavailable =>
-      selectedPortfolioMarket == PortfolioMarket.kr && krPortfolioUnavailable;
+      isKisSelected && krPortfolioUnavailable;
 
   ManagedPosition? kisManagedPositionForSymbol(String symbol) {
     final normalized = symbol.trim().toUpperCase();
@@ -619,6 +626,7 @@ class DashboardController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
+      await _restoreProviderPreference();
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
@@ -927,7 +935,7 @@ class DashboardController extends ChangeNotifier {
       hasLatestRunResult = true;
       showingOfflineFallback = false;
       recentRuns = await apiClient.getRecentTradingRuns();
-      await _refreshUsPortfolioSummary();
+      await _refreshUsPortfolioSummary(contextVersion: _providerContextVersion);
       return ActionResult(
         success: true,
         message:
@@ -1360,6 +1368,8 @@ class DashboardController extends ChangeNotifier {
   }
 
   void selectPortfolioMarket(PortfolioMarket market) {
+    final expected = isKisSelected ? PortfolioMarket.kr : PortfolioMarket.us;
+    if (market != expected) return;
     if (selectedPortfolioMarket == market) return;
     selectedPortfolioMarket = market;
     notifyListeners();
@@ -1367,6 +1377,29 @@ class DashboardController extends ChangeNotifier {
 
   void setProvider(SelectedProvider provider) {
     if (selectedProvider == provider) return;
+    _applyProviderContext(provider);
+    _clearProviderScopedState();
+    final version = ++_providerContextVersion;
+    unawaited(_saveProviderPreference());
+    if (provider == SelectedProvider.kis) {
+      unawaited(refreshKisOrderMonitoring(silent: true));
+    }
+    notifyListeners();
+    unawaited(_reloadProviderContext(version));
+  }
+
+  void _ensureProviderContext(SelectedProvider provider) {
+    if (selectedProvider == provider) {
+      _applyProviderContext(provider);
+      return;
+    }
+    _applyProviderContext(provider);
+    _clearProviderScopedState();
+    _providerContextVersion += 1;
+    unawaited(_saveProviderPreference());
+  }
+
+  void _applyProviderContext(SelectedProvider provider) {
     selectedProvider = provider;
     final market = provider == SelectedProvider.kis
         ? PortfolioMarket.kr
@@ -1374,6 +1407,19 @@ class DashboardController extends ChangeNotifier {
     selectedPortfolioMarket = market;
     selectedWatchlistMarket = market;
     selectedOrderMarket = market;
+  }
+
+  void _clearProviderScopedState() {
+    usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
+    krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+    usWatchlist = MarketWatchlist.empty('US');
+    krWatchlist = MarketWatchlist.empty('KR');
+    portfolioManagementItems = const [];
+    kisManagedPositions = const [];
+    kisManagedPositionsError = null;
+    krPortfolioUnavailable = false;
+    krPortfolioError = null;
+    watchlistError = null;
     runResult = _emptyRunResult;
     manualRunResult = null;
     krWatchlistPreview = null;
@@ -1382,13 +1428,51 @@ class DashboardController extends ChangeNotifier {
     kisSingleSymbolTradingError = null;
     kisGuardedRunConfirmation = false;
     kisLiveConfirmation = false;
-    if (provider == SelectedProvider.kis) {
-      refreshKisOrderMonitoring(silent: true);
+    kisOrders = const [];
+    kisOrderSummary = KisOrderSummary.empty;
+    latestKisManualOrder = null;
+    selectedKisOrder = null;
+    kisManualOrderError = null;
+    kisManualOrderErrorRaw = null;
+  }
+
+  Future<void> _restoreProviderPreference() async {
+    if (!_persistProvider) return;
+    try {
+      final saved =
+          (await _providerPreferenceStore.read())?.trim().toLowerCase();
+      if (saved == 'kis') {
+        _applyProviderContext(SelectedProvider.kis);
+      } else if (saved == 'alpaca') {
+        _applyProviderContext(SelectedProvider.alpaca);
+      } else {
+        _applyProviderContext(SelectedProvider.kis);
+      }
+    } catch (_) {
+      _applyProviderContext(SelectedProvider.kis);
     }
+  }
+
+  Future<void> _saveProviderPreference() async {
+    if (!_persistProvider) return;
+    try {
+      await _providerPreferenceStore.write(selectedProviderCode);
+    } catch (_) {
+      // Provider persistence must never block dashboard loading or switching.
+    }
+  }
+
+  Future<void> _reloadProviderContext(int version) async {
+    await loadMarketWatchlists(contextVersion: version);
+    await _refreshPortfolioSummaries(contextVersion: version);
+    if (version != _providerContextVersion) return;
+    _rebuildPortfolioManagementItems();
     notifyListeners();
   }
 
   void selectOrderMarket(PortfolioMarket market) {
+    final expected = isKisSelected ? PortfolioMarket.kr : PortfolioMarket.us;
+    if (market != expected) return;
     if (selectedOrderMarket == market) return;
     selectedOrderMarket = market;
     orderValidationError = null;
@@ -1396,6 +1480,8 @@ class DashboardController extends ChangeNotifier {
   }
 
   void selectWatchlistMarket(PortfolioMarket market) {
+    final expected = isKisSelected ? PortfolioMarket.kr : PortfolioMarket.us;
+    if (market != expected) return;
     if (selectedWatchlistMarket == market) return;
     selectedWatchlistMarket = market;
     notifyListeners();
@@ -4990,12 +5076,8 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    selectedProvider =
-        provider == 'kis' ? SelectedProvider.kis : SelectedProvider.alpaca;
-    selectedPortfolioMarket =
-        market == 'KR' ? PortfolioMarket.kr : PortfolioMarket.us;
-    selectedWatchlistMarket = selectedPortfolioMarket;
-    selectedOrderMarket = selectedPortfolioMarket;
+    _ensureProviderContext(
+        provider == 'kis' ? SelectedProvider.kis : SelectedProvider.alpaca);
     orderTicketSymbol = symbol;
     orderTicketSide =
         prefill.side.trim().toLowerCase() == 'sell' ? 'sell' : 'buy';
@@ -5098,10 +5180,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    selectedProvider = SelectedProvider.kis;
-    selectedPortfolioMarket = PortfolioMarket.kr;
-    selectedWatchlistMarket = PortfolioMarket.kr;
-    selectedOrderMarket = PortfolioMarket.kr;
+    _ensureProviderContext(SelectedProvider.kis);
     kisGuardedRunSymbol = normalizedSymbol;
     kisGuardedRunConfirmation = false;
     kisSingleSymbolTradingError = null;
@@ -5203,8 +5282,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    selectedProvider = SelectedProvider.kis;
-    selectedOrderMarket = PortfolioMarket.kr;
+    _ensureProviderContext(SelectedProvider.kis);
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
     orderTicketQty = qty;
@@ -5291,8 +5369,7 @@ class DashboardController extends ChangeNotifier {
         );
       }
 
-      selectedProvider = SelectedProvider.kis;
-      selectedOrderMarket = PortfolioMarket.kr;
+      _ensureProviderContext(SelectedProvider.kis);
       final preparedSymbol = normalizeKrSymbol(preparation.symbol);
       orderTicketSymbol = preparedSymbol;
       orderTicketSide = 'sell';
@@ -5349,8 +5426,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    selectedProvider = SelectedProvider.kis;
-    selectedOrderMarket = PortfolioMarket.kr;
+    _ensureProviderContext(SelectedProvider.kis);
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
     orderTicketQty = qty;
@@ -5383,8 +5459,7 @@ class DashboardController extends ChangeNotifier {
       );
     }
 
-    selectedProvider = SelectedProvider.kis;
-    selectedOrderMarket = PortfolioMarket.kr;
+    _ensureProviderContext(SelectedProvider.kis);
     orderTicketSymbol = symbol;
     orderTicketSide = 'sell';
     orderTicketQty = qty;
@@ -5404,18 +5479,33 @@ class DashboardController extends ChangeNotifier {
     );
   }
 
-  Future<void> loadMarketWatchlists() async {
+  Future<void> loadMarketWatchlists({int? contextVersion}) async {
+    final version = contextVersion ?? _providerContextVersion;
+    final provider = selectedProvider;
     watchlistLoading = true;
     watchlistError = null;
     notifyListeners();
     try {
-      usWatchlist = await apiClient.fetchMarketWatchlist('US');
-      krWatchlist = await apiClient.fetchMarketWatchlist('KR');
+      if (provider == SelectedProvider.kis) {
+        usWatchlist = MarketWatchlist.empty('US');
+        final kr = await apiClient.fetchMarketWatchlist('KR');
+        if (version != _providerContextVersion) return;
+        krWatchlist = kr;
+      } else {
+        krWatchlist = MarketWatchlist.empty('KR');
+        final us = await apiClient.fetchMarketWatchlist('US');
+        if (version != _providerContextVersion) return;
+        usWatchlist = us;
+      }
     } catch (e) {
-      watchlistError = 'Watchlists unavailable: $e';
+      if (version == _providerContextVersion) {
+        watchlistError = 'Watchlists unavailable: $e';
+      }
     } finally {
-      watchlistLoading = false;
-      notifyListeners();
+      if (version == _providerContextVersion) {
+        watchlistLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -5634,7 +5724,7 @@ class DashboardController extends ChangeNotifier {
       }
 
       await _refreshKisOrdersAfterAction();
-      await _refreshKrPortfolioSummary();
+      await _refreshKrPortfolioSummary(contextVersion: _providerContextVersion);
       return ActionResult(
         success: true,
         message: _submittedMessage(latestKisManualOrder ?? result),
@@ -6959,34 +7049,57 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshPortfolioSummaries() async {
-    await _refreshUsPortfolioSummary();
-    await _refreshKrPortfolioSummary();
-  }
-
-  Future<void> _refreshUsPortfolioSummary() async {
-    try {
-      usPortfolioSummary = await apiClient.fetchUsPortfolioSummary();
-    } catch (_) {
-      // Keep the last live snapshot if the backend returns a transient error.
+  Future<void> _refreshPortfolioSummaries({int? contextVersion}) async {
+    final version = contextVersion ?? _providerContextVersion;
+    final provider = selectedProvider;
+    if (provider == SelectedProvider.kis) {
+      usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
+      await _refreshKrPortfolioSummary(contextVersion: version);
+    } else {
+      krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+      kisManagedPositions = const [];
+      krPortfolioUnavailable = false;
+      krPortfolioError = null;
+      await _refreshUsPortfolioSummary(contextVersion: version);
     }
   }
 
-  Future<void> _refreshKrPortfolioSummary() async {
+  Future<void> _refreshUsPortfolioSummary({required int contextVersion}) async {
     try {
-      krPortfolioSummary = await apiClient.fetchKrPortfolioSummary();
-      krPortfolioUnavailable = krPortfolioSummary.hasUnavailableKisData;
+      final summary = await apiClient.fetchUsPortfolioSummary();
+      if (contextVersion == _providerContextVersion &&
+          selectedProvider == SelectedProvider.alpaca) {
+        usPortfolioSummary = summary;
+      }
+    } catch (_) {
+      // Keep the selected provider's last live snapshot on a transient error.
+    }
+  }
+
+  Future<void> _refreshKrPortfolioSummary({required int contextVersion}) async {
+    try {
+      final summary = await apiClient.fetchKrPortfolioSummary();
+      if (contextVersion != _providerContextVersion ||
+          selectedProvider != SelectedProvider.kis) {
+        return;
+      }
+      krPortfolioSummary = summary;
+      krPortfolioUnavailable = summary.hasUnavailableKisData;
       krPortfolioError = krPortfolioUnavailable
-          ? krPortfolioSummary.kisAuthErrorMessage ??
+          ? summary.kisAuthErrorMessage ??
               'KIS account data partially unavailable'
           : null;
-      if (krPortfolioSummary.positionsUnavailable) {
+      if (summary.positionsUnavailable) {
         kisManagedPositions = const [];
         kisManagedPositionsError = null;
       } else {
-        await _refreshKisManagedPositions();
+        await _refreshKisManagedPositions(contextVersion: contextVersion);
       }
     } catch (_) {
+      if (contextVersion != _providerContextVersion ||
+          selectedProvider != SelectedProvider.kis) {
+        return;
+      }
       krPortfolioSummary = PortfolioSummary.empty(
         currency: 'KRW',
         cashKnown: false,
@@ -7001,17 +7114,31 @@ class DashboardController extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshKisManagedPositions() async {
+  Future<void> _refreshKisManagedPositions(
+      {required int contextVersion}) async {
+    if (contextVersion != _providerContextVersion ||
+        selectedProvider != SelectedProvider.kis) {
+      return;
+    }
     kisManagedPositionsLoading = true;
     kisManagedPositionsError = null;
     try {
-      kisManagedPositions = await apiClient.fetchKisManagedPositions();
+      final positions = await apiClient.fetchKisManagedPositions();
+      if (contextVersion == _providerContextVersion &&
+          selectedProvider == SelectedProvider.kis) {
+        kisManagedPositions = positions;
+      }
     } catch (e) {
-      kisManagedPositions = const [];
-      kisManagedPositionsError =
-          'KIS position management unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      if (contextVersion == _providerContextVersion &&
+          selectedProvider == SelectedProvider.kis) {
+        kisManagedPositions = const [];
+        kisManagedPositionsError =
+            'KIS position management unavailable: ${ApiErrorFormatter.format(e.toString())}';
+      }
     } finally {
-      kisManagedPositionsLoading = false;
+      if (contextVersion == _providerContextVersion) {
+        kisManagedPositionsLoading = false;
+      }
     }
   }
 

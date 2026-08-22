@@ -1,9 +1,11 @@
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.automation_profile_service import (
+    AutomationProfileConflict,
     AutomationProfileService,
     AutomationProfileValidationError,
 )
 from app.services.symbol_search_service import SymbolSearchService
+from app.services.strategy_profile_service import StrategyProfileService
 
 
 def _request(**overrides):
@@ -130,3 +132,69 @@ def test_profile_http_routes_cover_crud_validation_and_readiness(db_session):
             assert archived.json()['status'] == 'archived'
     finally:
         app.dependency_overrides.pop(get_db, None)
+
+
+def test_profile_key_is_generated_when_omitted_and_stays_immutable(db_session):
+    service = AutomationProfileService()
+    payload = _request(name='Generated profile').model_dump()
+    payload.pop('profile_key', None)
+
+    first = service.create(db_session, AutomationProfileWriteRequest(**payload))
+    second = service.create(db_session, AutomationProfileWriteRequest(**payload))
+
+    assert first['profile_key'].startswith('aut_kis_')
+    assert len(first['profile_key']) == len('aut_kis_') + 8
+    assert first['profile_key'] != second['profile_key']
+    assert first['profile_key_generated'] is True
+
+    renamed = service.update(
+        db_session,
+        str(first['id']),
+        AutomationProfileWriteRequest(name='Renamed profile'),
+    )
+    assert renamed['name'] == 'Renamed profile'
+    assert renamed['profile_key'] == first['profile_key']
+
+    activated = service.activate(db_session, str(first['id']))
+    assert activated['profile']['profile_key'] == first['profile_key']
+    runtime = service.runtime_settings.get_settings_read_only(db_session)
+    assert runtime['active_automation_profile_key'] == first['profile_key']
+    assert StrategyProfileService().active_profile(db_session).profile_key == first['profile_key']
+
+    try:
+        service.update(
+            db_session,
+            str(first['id']),
+            AutomationProfileWriteRequest(profile_key='aut_kis_changed', name='Renamed again'),
+        )
+    except AutomationProfileConflict as exc:
+        assert str(exc) == 'profile_key_is_immutable'
+    else:
+        raise AssertionError('generated profile key unexpectedly changed')
+
+
+def test_kis_profile_runtime_uses_test4_hard_safety_floor(db_session):
+    service = AutomationProfileService()
+    created = service.create(
+        db_session,
+        _request(
+            profile_key='below-hard-floor',
+            capital={'max_order_notional_krw': 2_000_000, 'cash_only': False},
+            entry={'min_final_score': 62, 'no_new_entry_after': '15:00'},
+            exit={'stop_loss_pct': 8, 'take_profit_pct': 10},
+            max_open_positions=3,
+        ),
+    )
+
+    effective = created['effective_settings']
+    assert effective['entry']['min_final_score'] == 65
+    assert effective['entry']['no_new_entry_after'] == '14:00'
+    assert effective['max_open_positions'] == 1
+    assert effective['capital']['max_order_notional_krw'] == 1_000_000
+    assert effective['capital']['cash_only'] is True
+    assert effective['exit']['stop_loss_pct'] == 2
+    assert effective['exit']['take_profit_pct'] == 3
+
+    readiness = service.readiness(db_session, str(created['id']))
+    assert readiness['effective_settings']['max_open_positions'] == 1
+    assert readiness['requires_pr109_portfolio_engine'] is True

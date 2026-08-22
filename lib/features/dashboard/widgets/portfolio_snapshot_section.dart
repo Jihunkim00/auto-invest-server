@@ -27,8 +27,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = controller.strings;
     final summary = controller.selectedPortfolioSummary;
-    final selectedMarket = controller.selectedPortfolioMarket;
-    final isKr = selectedMarket == PortfolioMarket.kr;
+    final isKr = controller.isKisSelected;
     final managementItems = controller.selectedPortfolioManagementItems;
     final marketTitle =
         isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';

@@ -23,8 +23,8 @@ class AutoInvestApp extends StatefulWidget {
 }
 
 class _AutoInvestAppState extends State<AutoInvestApp> {
-  late final DashboardController _controller =
-      widget.controller ?? DashboardController(ApiClient());
+  late final DashboardController _controller = widget.controller ??
+      DashboardController(ApiClient(), persistProvider: true);
   int _index = 0;
 
   void _selectTab(int index) {
@@ -42,7 +42,8 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
   void _openAutomationProfile(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AutomationProfileScreen(apiClient: _controller.apiClient),
+        builder: (_) =>
+            AutomationProfileScreen(apiClient: _controller.apiClient),
       ),
     );
   }
@@ -72,7 +73,8 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                   HomeScreen(
                     controller: _controller,
                     onOpenAdmin: () => _openAdmin(appContext),
-                    onOpenAutomationProfile: () => _openAutomationProfile(appContext),
+                    onOpenAutomationProfile: () =>
+                        _openAutomationProfile(appContext),
                   ),
                   AiScreen(
                     controller: _controller,

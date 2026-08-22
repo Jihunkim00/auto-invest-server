@@ -11,7 +11,8 @@ import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
 void main() {
   testWidgets('Portfolio Snapshot switches between USD and KRW summaries',
       (tester) async {
-    final controller = await _pumpSnapshot(tester);
+    final controller =
+        await _pumpSnapshot(tester, provider: SelectedProvider.alpaca);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
     expect(find.text('전역: 알파카 / 미국'), findsOneWidget);
@@ -21,6 +22,7 @@ void main() {
     expect(find.text('₩1,200,000'), findsNothing);
     expect(find.text('+25.00%'), findsOneWidget);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -43,6 +45,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krTokenExpiredSummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -70,6 +73,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krCashOnlySummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -87,6 +91,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krPositionsOnlySummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -104,6 +109,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krSmallProfitSummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -124,6 +130,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krNegativeProfitSummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -140,6 +147,7 @@ void main() {
     final controller =
         await _pumpSnapshot(tester, krSummary: _krMissingCostSummary);
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -162,6 +170,7 @@ void main() {
       managementMode: true,
     );
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -229,6 +238,7 @@ void main() {
       ]),
     );
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -287,6 +297,7 @@ void main() {
       ]),
     );
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -315,6 +326,7 @@ void main() {
       managementMode: true,
     );
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -334,6 +346,7 @@ void main() {
       managementMode: true,
     );
 
+    controller.selectedProvider = SelectedProvider.kis;
     controller.selectedPortfolioMarket = PortfolioMarket.kr;
     controller.notifyListeners();
     await tester.pumpAndSettle();
@@ -347,8 +360,8 @@ void main() {
 
   testWidgets('US portfolio percent display keeps raw decimal behavior',
       (tester) async {
-    final controller =
-        await _pumpSnapshot(tester, usSummary: _usPositionSummary);
+    final controller = await _pumpSnapshot(tester,
+        usSummary: _usPositionSummary, provider: SelectedProvider.alpaca);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
     expect(find.text('AAPL - Apple Inc.'), findsOneWidget);
@@ -360,8 +373,8 @@ void main() {
 
   testWidgets('US position title falls back to symbol without duplication',
       (tester) async {
-    final controller =
-        await _pumpSnapshot(tester, usSummary: _usSymbolFallbackSummary);
+    final controller = await _pumpSnapshot(tester,
+        usSummary: _usSymbolFallbackSummary, provider: SelectedProvider.alpaca);
 
     expect(find.text('US Portfolio / Alpaca Paper'), findsOneWidget);
     expect(find.text('AAPL'), findsOneWidget);
@@ -402,6 +415,7 @@ Future<DashboardController> _pumpSnapshot(
   WidgetTester tester, {
   PortfolioSummary usSummary = _usSummary,
   PortfolioSummary krSummary = _krSummary,
+  SelectedProvider provider = SelectedProvider.kis,
   List<ManagedPosition> managedPositions = const [],
   bool managementMode = false,
   AutomationRuntimeMonitor? monitor,
@@ -410,6 +424,16 @@ Future<DashboardController> _pumpSnapshot(
     _NoopApiClient(usSummary: usSummary, krSummary: krSummary),
     autoload: false,
   )
+    ..selectedProvider = provider
+    ..selectedPortfolioMarket = provider == SelectedProvider.kis
+        ? PortfolioMarket.kr
+        : PortfolioMarket.us
+    ..selectedWatchlistMarket = provider == SelectedProvider.kis
+        ? PortfolioMarket.kr
+        : PortfolioMarket.us
+    ..selectedOrderMarket = provider == SelectedProvider.kis
+        ? PortfolioMarket.kr
+        : PortfolioMarket.us
     ..usPortfolioSummary = usSummary
     ..krPortfolioSummary = krSummary
     ..kisManagedPositions = managedPositions

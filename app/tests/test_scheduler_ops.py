@@ -840,3 +840,25 @@ def _safe_mode_settings():
         "kis_limited_auto_sell_take_profit_enabled": False,
         "kis_limited_auto_sell_allow_take_profit_trigger": False,
     }
+
+
+def test_scheduler_exception_keeps_slot_claim_and_does_not_retry_same_slot():
+    run_key = '2026-08-22:KR:strategy_auto_buy_dry_run:midday'
+    previous_error = scheduler_service._last_scheduler_error
+    scheduler_service._slot_runs.add(run_key)
+    calls = 0
+
+    def failing_job():
+        nonlocal calls
+        calls += 1
+        raise RuntimeError('broker unavailable')
+
+    try:
+        assert scheduler_service._safe_call(failing_job) is None
+        assert calls == 1
+        assert run_key in scheduler_service._slot_runs
+        assert scheduler_service._last_scheduler_error is not None
+        assert 'RuntimeError' in scheduler_service._last_scheduler_error
+    finally:
+        scheduler_service._slot_runs.discard(run_key)
+        scheduler_service._last_scheduler_error = previous_error

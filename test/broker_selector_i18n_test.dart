@@ -9,7 +9,11 @@ import 'package:auto_invest_dashboard/features/dashboard/widgets/broker_context_
 void main() {
   testWidgets('Korean broker selector uses compact one-line labels',
       (tester) async {
-    final controller = DashboardController(ApiClient(), autoload: false);
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us;
 
     await tester.pumpWidget(_brokerSelectorHarness(controller, width: 190));
     await tester.pumpAndSettle();
@@ -56,7 +60,11 @@ void main() {
       ApiClient(),
       autoload: false,
       initialLanguage: AppLanguage.english,
-    );
+    )
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us;
 
     await tester.pumpWidget(_brokerSelectorHarness(controller, width: 190));
     await tester.pumpAndSettle();

@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import re
+import secrets
 from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from app.config import get_settings
 from app.db.models import StrategyProfile
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.automation_profile_safety import TEST4_HARD_SAFETY, effective_profile_settings
 from app.services.strategy_profile_sizing_service import StrategyProfileSizingService
 
 
@@ -120,7 +122,10 @@ class AutomationProfileService:
     def create(self, db: Session, request: AutomationProfileWriteRequest) -> dict[str, Any]:
         values = self._normalize_request(request, require_identity=True)
         self.validate_settings(values['settings'])
-        key = values['profile_key']
+        generated_key = not values['profile_key']
+        key = values['profile_key'] or self._new_profile_key(db, values['provider'])
+        if generated_key:
+            values['settings'].setdefault('_system', {})['generated_profile_key'] = True
         if db.query(StrategyProfile).filter(StrategyProfile.profile_key == key).first() is not None:
             raise AutomationProfileConflict('profile_key_already_exists')
         legacy_name = key[:40]
@@ -180,8 +185,8 @@ class AutomationProfileService:
         self.validate_settings(values['settings'])
         requested_key = values['profile_key']
         if requested_key != row.profile_key:
-            if self._status(row) == 'active':
-                raise AutomationProfileConflict('active_profile_key_is_immutable')
+            if self._status(row) == 'active' or self._is_generated_profile_key(row):
+                raise AutomationProfileConflict('profile_key_is_immutable')
             conflict = db.query(StrategyProfile).filter(StrategyProfile.profile_key == requested_key).first()
             if conflict is not None and conflict.id != row.id:
                 raise AutomationProfileConflict('profile_key_already_exists')
@@ -295,20 +300,24 @@ class AutomationProfileService:
     def readiness(self, db: Session, profile_id: str) -> dict[str, Any]:
         row = self.get(db, profile_id)
         settings = self._settings(row)
-        period_status = self._period_status(row, settings)
-        now = datetime.now(_profile_timezone(settings, row.market or 'KR'))
-        cutoff = _parse_time(settings['entry']['no_new_entry_after'])
+        effective = effective_profile_settings(settings, provider=row.provider or 'kis', market=row.market or 'KR')
+        period_status = self._period_status(row, effective)
+        now = datetime.now(_profile_timezone(effective, row.market or 'KR'))
+        cutoff = _parse_time(effective['entry']['no_new_entry_after'])
         entry_allowed = period_status == 'active' and now.time() < cutoff
         runtime = self.runtime_settings.get_settings_read_only(db)
-        max_positions = int(settings.get('max_open_positions') or 1)
+        max_positions = int(effective.get('max_open_positions') or 1)
+        configured_max_positions = int(settings.get('max_open_positions') or 1)
         return {
             'profile': self.serialize(row),
+            'effective_settings': effective,
+            'safety_hard_floors': TEST4_HARD_SAFETY,
             'status': period_status,
             'period': settings['operation'],
             'entry_allowed_now': entry_allowed,
             'new_entries_allowed': entry_allowed and bool(row.enabled),
             'multi_position_execution_supported': False,
-            'requires_pr109_portfolio_engine': max_positions > 1,
+            'requires_pr109_portfolio_engine': configured_max_positions > 1,
             'operation_mode': runtime.get('operation_mode_requested', 'paper'),
             'runtime_safety': {
                 'dry_run': bool(runtime.get('dry_run', True)),
@@ -347,6 +356,7 @@ class AutomationProfileService:
 
     def serialize(self, row: StrategyProfile) -> dict[str, Any]:
         settings = self._settings(row)
+        effective = effective_profile_settings(settings, provider=row.provider or 'kis', market=row.market or 'KR')
         return {
             'id': row.id,
             'profile_key': row.profile_key,
@@ -357,6 +367,9 @@ class AutomationProfileService:
             'enabled': bool(row.enabled),
             'status': self._status(row),
             'settings': settings,
+            'effective_settings': effective,
+            'safety_hard_floors': TEST4_HARD_SAFETY,
+            'profile_key_generated': self._is_generated_profile_key(row),
             'capital': settings['capital'],
             'universe': settings['universe'],
             'entry': settings['entry'],
@@ -369,6 +382,19 @@ class AutomationProfileService:
             'created_at': row.created_at.isoformat() if row.created_at else None,
             'updated_at': row.updated_at.isoformat() if row.updated_at else None,
         }
+
+    def _is_generated_profile_key(self, row: StrategyProfile) -> bool:
+        settings = self._settings(row)
+        system = settings.get('_system') if isinstance(settings.get('_system'), dict) else {}
+        return bool(system.get('generated_profile_key'))
+
+    def _new_profile_key(self, db: Session, provider: str) -> str:
+        prefix = f'aut_{str(provider).strip().lower()}'
+        for _ in range(10):
+            candidate = f'{prefix}_{secrets.token_hex(4)}'
+            if db.query(StrategyProfile).filter(StrategyProfile.profile_key == candidate).first() is None:
+                return candidate
+        raise AutomationProfileConflict('profile_key_generation_failed')
 
     def validate_settings(self, settings: dict[str, Any]) -> None:
         errors: list[dict[str, str]] = []
@@ -456,8 +482,8 @@ class AutomationProfileService:
         name = str(payload.get('name') or base.get('name') or '').strip()
         provider = str(payload.get('provider') or base.get('provider') or 'kis').strip().lower()
         market = str(payload.get('market') or base.get('market') or 'KR').strip().upper()
-        if require_identity and (not key or not name):
-            raise AutomationProfileValidationError([{'field': 'profile_key/name', 'message': 'profile_key and name are required'}])
+        if require_identity and not name:
+            raise AutomationProfileValidationError([{'field': 'name', 'message': 'name is required'}])
         if key in RESERVED_PROFILE_KEYS:
             raise AutomationProfileValidationError([{'field': 'profile_key', 'message': 'legacy profile key is reserved'}])
         if provider not in ALLOWED_PROVIDERS or market not in ALLOWED_MARKETS:

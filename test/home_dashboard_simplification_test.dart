@@ -20,6 +20,10 @@ void main() {
     expect(find.text('Agent Assistant'), findsOneWidget);
     expect(find.byKey(const Key('home_compact_safety_status_bar')),
         findsOneWidget);
+    await _showHomeFinder(
+      tester,
+      find.byKey(const Key('home_compact_portfolio_summary_card')),
+    );
     expect(find.byKey(const Key('home_compact_portfolio_summary_card')),
         findsOneWidget);
     await _showHomeFinder(

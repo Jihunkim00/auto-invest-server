@@ -905,6 +905,10 @@ void main() {
     final api =
         _FakeApiClient(runWatchlistDelay: const Duration(milliseconds: 50));
     final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us
       ..usWatchlist = _usWatchlist
       ..krWatchlist = _krWatchlist;
 
@@ -952,6 +956,10 @@ void main() {
       ),
     );
     final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us
       ..usWatchlist = _usWatchlist
       ..krWatchlist = _krWatchlist;
 
@@ -1158,6 +1166,10 @@ void main() {
       ),
     );
     final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us
       ..usWatchlist = _usWatchlist
       ..krWatchlist = _krWatchlist;
 

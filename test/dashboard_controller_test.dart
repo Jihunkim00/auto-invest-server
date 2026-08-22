@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
+import 'package:auto_invest_dashboard/core/storage_provider_preference.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_live_order_readiness.dart';
 import 'package:auto_invest_dashboard/models/candidate.dart';
@@ -205,7 +206,7 @@ void main() {
     controller.dispose();
   });
 
-  test('portfolio market defaults to US and keeps summaries separate',
+  test('KIS is the default portfolio context and keeps Alpaca state empty',
       () async {
     final api = _FakeApiClient(
       usPortfolio: _portfolio('USD', marketValue: 1200),
@@ -215,20 +216,59 @@ void main() {
 
     await controller.load();
 
-    expect(controller.selectedPortfolioMarket, PortfolioMarket.us);
-    expect(controller.selectedPortfolioSummary.currency, 'USD');
-    expect(controller.selectedPortfolioSummary.totalMarketValue, 1200);
-
-    controller.selectPortfolioMarket(PortfolioMarket.kr);
-
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.selectedPortfolioMarket, PortfolioMarket.kr);
     expect(controller.selectedPortfolioSummary.currency, 'KRW');
     expect(controller.selectedPortfolioSummary.totalMarketValue, 2500000);
-    expect(controller.usPortfolioSummary.totalMarketValue, 1200);
-    expect(controller.krPortfolioSummary.totalMarketValue, 2500000);
+    expect(controller.usPortfolioSummary.currency, 'USD');
+    expect(controller.usPortfolioSummary.totalMarketValue, 0);
+
+    controller.selectPortfolioMarket(PortfolioMarket.us);
+    expect(controller.selectedPortfolioMarket, PortfolioMarket.kr);
+    expect(controller.selectedPortfolioSummary.currency, 'KRW');
 
     controller.dispose();
   });
+  test('saved provider restores and switching reloads only its context',
+      () async {
+    final store = _MemoryProviderPreferenceStore('alpaca');
+    final api = _FakeApiClient(
+      usPortfolio: _portfolio('USD', marketValue: 1200),
+      krPortfolio: _portfolio('KRW', marketValue: 2500000),
+      usWatchlist: _watchlist('US', const ['AAPL']),
+      krWatchlist: _watchlist('KR', const ['005930']),
+    );
+    final controller = DashboardController(
+      api,
+      autoload: false,
+      persistProvider: true,
+      providerPreferenceStore: store,
+    );
 
+    await controller.load();
+
+    expect(controller.selectedProvider, SelectedProvider.alpaca);
+    expect(controller.selectedPortfolioMarket, PortfolioMarket.us);
+    expect(controller.selectedPortfolioSummary.currency, 'USD');
+    expect(api.usPortfolioCalls, 1);
+    expect(api.krPortfolioCalls, 0);
+    expect(api.usWatchlistCalls, 1);
+    expect(api.krWatchlistCalls, 0);
+
+    controller.setProvider(SelectedProvider.kis);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    expect(store.value, 'kis');
+    expect(controller.selectedProvider, SelectedProvider.kis);
+    expect(controller.selectedPortfolioMarket, PortfolioMarket.kr);
+    expect(controller.selectedPortfolioSummary.currency, 'KRW');
+    expect(api.usPortfolioCalls, 1);
+    expect(api.krPortfolioCalls, 1);
+    expect(api.usWatchlistCalls, 1);
+    expect(api.krWatchlistCalls, 1);
+
+    controller.dispose();
+  });
   test('KR portfolio unavailable does not crash dashboard state', () async {
     final api = _FakeApiClient(throwKrPortfolio: true);
     final controller = DashboardController(api, autoload: false);
@@ -244,7 +284,8 @@ void main() {
     controller.dispose();
   });
 
-  test('watchlist defaults to US and can switch to KR', () async {
+  test('KIS is the default watchlist context and blocks US switching',
+      () async {
     final api = _FakeApiClient(
       usWatchlist: _watchlist('US', const ['AAPL', 'MSFT']),
       krWatchlist: const MarketWatchlist(
@@ -263,17 +304,15 @@ void main() {
 
     await controller.load();
 
-    expect(controller.selectedWatchlistMarket, PortfolioMarket.us);
-    expect(controller.usWatchlist.symbols.first.symbol, 'AAPL');
-
-    controller.selectWatchlistMarket(PortfolioMarket.kr);
-
+    expect(controller.selectedWatchlistMarket, PortfolioMarket.kr);
     expect(controller.krWatchlist.symbols.first.symbol, '005930');
-    expect(controller.krWatchlist.symbols.first.market, 'KOSPI');
+    expect(controller.usWatchlist.symbols, isEmpty);
+
+    controller.selectWatchlistMarket(PortfolioMarket.us);
+    expect(controller.selectedWatchlistMarket, PortfolioMarket.kr);
 
     controller.dispose();
   });
-
   test('KR top 50 update calls backend and refreshes KR watchlist', () async {
     final updatedWatchlist = _watchlist('KR', const ['100001', '100002']);
     final api = _FakeApiClient(updatedKosdaqWatchlist: updatedWatchlist);
@@ -1336,6 +1375,20 @@ Map<String, dynamic> _queueActionJson({required String status, String? note}) {
   };
 }
 
+class _MemoryProviderPreferenceStore extends ProviderPreferenceStore {
+  _MemoryProviderPreferenceStore(this.value);
+
+  String? value;
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> write(String provider) async {
+    value = provider;
+  }
+}
+
 class _FakeApiClient extends ApiClient {
   _FakeApiClient({
     this.latest,
@@ -1404,6 +1457,10 @@ class _FakeApiClient extends ApiClient {
   final List<ManagedPosition> managedPositions;
   final MarketWatchlist? updatedKosdaqWatchlist;
   final ManualSellPreparation? manualSellPreparation;
+  int usPortfolioCalls = 0;
+  int krPortfolioCalls = 0;
+  int usWatchlistCalls = 0;
+  int krWatchlistCalls = 0;
   int mockCalls = 0;
   int getOpsSettingsCalls = 0;
   int updateOpsSettingsCalls = 0;
@@ -1708,6 +1765,12 @@ class _FakeApiClient extends ApiClient {
       usPortfolio ?? PortfolioSummary.empty();
 
   @override
+  Future<PortfolioSummary> fetchUsPortfolioSummary() async {
+    usPortfolioCalls += 1;
+    return usPortfolio ?? PortfolioSummary.empty();
+  }
+
+  @override
   Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
     return market.trim().toUpperCase() == 'KR'
         ? fetchKrPortfolioSummary()
@@ -1716,6 +1779,7 @@ class _FakeApiClient extends ApiClient {
 
   @override
   Future<PortfolioSummary> fetchKrPortfolioSummary() async {
+    krPortfolioCalls += 1;
     if (throwKrPortfolio) {
       throw const ApiRequestException('KIS unavailable');
     }
@@ -1730,12 +1794,14 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<MarketWatchlist> fetchMarketWatchlist(String market) async {
     if (market.toUpperCase() == 'KR') {
+      krWatchlistCalls += 1;
       if (updateKosdaqTop50WatchlistCalls > 0 &&
           updatedKosdaqWatchlist != null) {
         return updatedKosdaqWatchlist!;
       }
       return krWatchlist ?? MarketWatchlist.empty('KR');
     }
+    usWatchlistCalls += 1;
     return usWatchlist ?? MarketWatchlist.empty('US');
   }
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import RuntimeSetting, StrategyProfile, StrategyProfileAudit
 from app.schemas.strategy import StrategyProfilePayload
+from app.services.automation_profile_safety import effective_profile_settings
 
 
 PROFILE_ORDER = {"safe": 0, "balanced": 1, "aggressive": 2}
@@ -303,14 +304,26 @@ class StrategyProfileService:
                 custom_settings = json.loads(row.settings_json or "{}")
             except (TypeError, ValueError):
                 custom_settings = {}
+            provider = row.provider or "kis"
+            market = row.market or "KR"
+            effective = effective_profile_settings(
+                custom_settings if isinstance(custom_settings, dict) else {},
+                provider=provider,
+                market=market,
+            )
             payload.update({
                 "profile_name": row.profile_key,
                 "display_name": row.custom_name or row.display_name,
                 "is_active": row.custom_status == "active" and bool(row.enabled),
                 "profile_key": row.profile_key,
-                "provider": row.provider or "kis",
-                "market": row.market or "KR",
-                "automation_settings": custom_settings if isinstance(custom_settings, dict) else {},
+                "provider": provider,
+                "market": market,
+                "max_positions": int(effective.get("max_open_positions") or 1),
+                "buy_score_threshold": float(effective.get("entry", {}).get("min_final_score") or 65),
+                "max_order_notional_krw": float(effective.get("capital", {}).get("max_order_notional_krw") or 1_000_000),
+                "stop_loss_pct": -float(effective.get("exit", {}).get("stop_loss_pct") or 2) / 100.0,
+                "take_profit_pct": float(effective.get("exit", {}).get("take_profit_pct") or 3) / 100.0,
+                "automation_settings": effective,
             })
         return payload
 

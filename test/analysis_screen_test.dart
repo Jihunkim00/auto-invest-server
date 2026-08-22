@@ -690,7 +690,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _AnalysisFakeApi(realisticScores: true);
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us;
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
@@ -729,7 +733,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _AnalysisFakeApi(signalIdOnly: true);
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us;
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.enterText(find.widgetWithText(TextField, 'Symbol'), 'aapl');
@@ -762,7 +770,11 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _AnalysisFakeApi(signalIdOnly: true, failSignalFetch: true);
-    final controller = DashboardController(api, autoload: false);
+    final controller = DashboardController(api, autoload: false)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us
+      ..selectedWatchlistMarket = PortfolioMarket.us
+      ..selectedOrderMarket = PortfolioMarket.us;
 
     await tester.pumpWidget(_wrapTrading(controller));
     await tester.tap(find.text('Analyze & Paper Buy'));
