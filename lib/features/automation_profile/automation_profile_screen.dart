@@ -117,8 +117,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       'name': _nameController.text.trim(),
       'provider': 'kis',
       'market': 'KR',
-      'enabled': false,
-      'status': 'disabled',
+      'enabled': _selected?.status == 'active',
+      'status': _selected?.status == 'active' ? 'active' : 'disabled',
       'capital': {
         'sizing_mode': _sizingMode,
         'target_position_pct': target,
@@ -188,6 +188,38 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
+  Future<void> _activate(AutomationStrategyProfile profile) async {
+    setState(() => _busy = true);
+    try {
+      await widget.apiClient.activateAutomationProfile(profile.id);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('운용 프로필을 활성화했습니다. 실거래 권한은 별도 안전 게이트입니다.')),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _pause(AutomationStrategyProfile profile) async {
+    setState(() => _busy = true);
+    try {
+      await widget.apiClient.pauseAutomationProfile(profile.id);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('운용 프로필을 일시정지했습니다.')),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _validate() async {
     if (_selected == null) {
       setState(() => _error = 'Save the profile before validating it.');
@@ -210,7 +242,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Automation Profiles'),
+        title: const Text('자동화 프로필'),
         actions: [
           IconButton(key: const ValueKey('automation-profile-create'), onPressed: _newProfile, icon: const Icon(Icons.add)),
         ],
@@ -221,15 +253,29 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               padding: const EdgeInsets.all(16),
               children: [
                 if (_error != null) Text(_error!, key: const ValueKey('automation-profile-error'), style: const TextStyle(color: Colors.orangeAccent)),
-                const Text('Profiles describe search, sizing, and monitoring only. They do not change live safety flags.', style: TextStyle(color: Colors.white70)),
+                const Text('프로필은 종목 탐색·자금 배분·분석·모니터링 정책을 정의합니다. 실거래 안전 플래그와 주문 권한은 별도로 유지됩니다.', style: TextStyle(color: Colors.white70)),
                 const SizedBox(height: 12),
                 for (final profile in _list?.profiles ?? const <AutomationStrategyProfile>[])
                   Card(
                     key: ValueKey('automation-profile-${profile.id}'),
                     child: ListTile(
                       title: Text(profile.name),
-                      subtitle: Text('${profile.profileKey} · ${profile.status} · max positions ${profile.maxOpenPositions}'),
-                      trailing: const Icon(Icons.chevron_right),
+                      subtitle: Text('${profile.profileKey} · ${_statusLabel(profile.status)} · 최대 포지션 ${profile.maxOpenPositions}'),
+                      trailing: Wrap(spacing: 0, children: [
+                        IconButton(
+                          key: ValueKey('automation-profile-activate-${profile.id}'),
+                          tooltip: '활성 프로필로 설정',
+                          onPressed: _busy || profile.status == 'active' ? null : () => _activate(profile),
+                          icon: const Icon(Icons.play_arrow_outlined),
+                        ),
+                        IconButton(
+                          key: ValueKey('automation-profile-pause-${profile.id}'),
+                          tooltip: '프로필 일시정지',
+                          onPressed: _busy || profile.status != 'active' ? null : () => _pause(profile),
+                          icon: const Icon(Icons.pause_outlined),
+                        ),
+                        const Icon(Icons.chevron_right),
+                      ]),
                       onTap: () => _edit(profile),
                     ),
                   ),
@@ -240,6 +286,19 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     );
   }
 
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'active':
+        return '활성';
+      case 'paused':
+        return '일시정지';
+      case 'archived':
+        return '보관';
+      default:
+        return '비활성';
+    }
+  }
+
   Widget _editor(BuildContext context) {
     return Card(
       key: const ValueKey('automation-profile-editor'),
@@ -248,56 +307,60 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_selected == null ? 'Create profile' : 'Edit profile', style: Theme.of(context).textTheme.titleLarge),
+            Text(_selected == null ? '프로필 생성' : '프로필 편집', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
-            TextField(key: const ValueKey('automation-profile-key'), controller: _keyController, decoration: const InputDecoration(labelText: 'Profile key')),
-            TextField(key: const ValueKey('automation-profile-name'), controller: _nameController, decoration: const InputDecoration(labelText: 'Name')),
+            TextField(key: const ValueKey('automation-profile-key'), controller: _keyController, readOnly: _selected?.status == 'active', decoration: const InputDecoration(labelText: '프로필 키 (내부 식별자)')),
+            TextField(key: const ValueKey('automation-profile-name'), controller: _nameController, decoration: const InputDecoration(labelText: '프로필 이름')),
             Row(children: [
-              Expanded(child: TextField(controller: _startController, decoration: const InputDecoration(labelText: 'Start date'))),
+              Expanded(child: TextField(controller: _startController, decoration: const InputDecoration(labelText: '시작일'))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _endController, decoration: const InputDecoration(labelText: 'End date'))),
+              Expanded(child: TextField(controller: _endController, decoration: const InputDecoration(labelText: '종료일'))),
             ]),
-            TextField(controller: _maxEntriesController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max new entries per day')),
-            TextField(controller: _timesController, decoration: const InputDecoration(labelText: 'Analysis times (HH:mm,...)')),
+            TextField(controller: _maxEntriesController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '일일 신규 진입 한도')),
+            TextField(controller: _timesController, decoration: const InputDecoration(labelText: '분석 시각 (HH:mm,...)')),
             Row(children: [
-              Expanded(child: TextField(controller: _watchlistController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Watchlist size'))),
+              Expanded(child: TextField(controller: _watchlistController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '관심종목 수'))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(key: const ValueKey('automation-profile-max-positions'), controller: _maxPositionsController, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'Max open positions'))),
+              Expanded(child: TextField(key: const ValueKey('automation-profile-max-positions'), controller: _maxPositionsController, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: '최대 보유 포지션'))),
             ]),
             DropdownButtonFormField<String>(initialValue: _sizingMode, items: const [
-              DropdownMenuItem(value: 'equity_pct', child: Text('Equity percentage')),
-              DropdownMenuItem(value: 'fixed_budget', child: Text('Fixed budget')),
-            ], onChanged: (value) => setState(() => _sizingMode = value ?? 'equity_pct'), decoration: const InputDecoration(labelText: 'Sizing mode')),
+              DropdownMenuItem(value: 'equity_pct', child: Text('자산 비율')),
+              DropdownMenuItem(value: 'fixed_budget', child: Text('고정 예산')),
+            ], onChanged: (value) => setState(() => _sizingMode = value ?? 'equity_pct'), decoration: const InputDecoration(labelText: '자금 배분 방식')),
             Row(children: [
-              Expanded(child: TextField(controller: _targetPctController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Target position %'))),
+              Expanded(child: TextField(controller: _targetPctController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '목표 포지션 비율'))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _maxOrderController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Max order KRW'))),
+              Expanded(child: TextField(controller: _maxOrderController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '최대 주문 금액 (원)'))),
             ]),
-            TextField(controller: _fixedBudgetController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Fixed budget KRW (when selected)')),
+            TextField(controller: _fixedBudgetController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '고정 예산 (원)')),
             Row(children: [
-              Expanded(child: TextField(controller: _stopLossController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stop-loss %'))),
+              Expanded(child: TextField(controller: _stopLossController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '손절 비율'))),
               const SizedBox(width: 8),
-              Expanded(child: TextField(controller: _takeProfitController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Take-profit %'))),
+              Expanded(child: TextField(controller: _takeProfitController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '익절 비율'))),
             ]),
             if ((int.tryParse(_maxPositionsController.text) ?? 1) > 1)
               const Padding(
                 padding: EdgeInsets.only(top: 12),
-                child: Text('Multi-position live execution is not supported yet; the PR109 portfolio engine is required.', key: ValueKey('automation-profile-multi-position-warning'), style: TextStyle(color: Colors.orangeAccent)),
+                child: Text('다중 포지션 실거래는 아직 지원되지 않습니다. PR109 포트폴리오 엔진이 필요합니다.', key: ValueKey('automation-profile-multi-position-warning'), style: TextStyle(color: Colors.orangeAccent)),
               ),
             const SizedBox(height: 12),
             Wrap(spacing: 8, children: [
-              FilledButton(key: const ValueKey('automation-profile-save'), onPressed: _busy ? null : _save, child: const Text('Save')),
-              OutlinedButton(key: const ValueKey('automation-profile-validate'), onPressed: _selected == null ? null : _validate, child: const Text('Validate')),
+              FilledButton(key: const ValueKey('automation-profile-save'), onPressed: _busy ? null : _save, child: const Text('저장')),
+              OutlinedButton(key: const ValueKey('automation-profile-validate'), onPressed: _selected == null ? null : _validate, child: const Text('검증')),
+              if (_selected != null && _selected!.status != 'active')
+                OutlinedButton(key: const ValueKey('automation-profile-start'), onPressed: _busy ? null : () => _activate(_selected!), child: const Text('운용 시작')),
+              if (_selected != null && _selected!.status == 'active')
+                OutlinedButton(key: const ValueKey('automation-profile-stop'), onPressed: _busy ? null : () => _pause(_selected!), child: const Text('운용 정지')),
             ]),
             const SizedBox(height: 14),
-            TextField(key: const ValueKey('automation-profile-search'), decoration: const InputDecoration(labelText: 'Search symbols (read-only)'), onSubmitted: (query) async {
+            TextField(key: const ValueKey('automation-profile-search'), decoration: const InputDecoration(labelText: '종목 검색 (읽기 전용)'), onSubmitted: (query) async {
               if (query.trim().isEmpty) return;
               final results = await widget.apiClient.searchSymbols(query, market: 'KR');
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(results.map((item) => '${item['name']} (${item['symbol']})').join(', '))));
             }),
             const SizedBox(height: 6),
-            const Text('Favorites, manual watchlist, and auto universe remain separate profile settings.', style: TextStyle(color: Colors.white54)),
+            const Text('즐겨찾기·수동 관심종목·자동 유니버스는 프로필별로 별도 관리됩니다.', style: TextStyle(color: Colors.white54)),
           ],
         ),
       ),

@@ -71,7 +71,7 @@ class StrategyAutoBuySchedulerService:
         ).get("pending_count", 0)
         primary = self._primary_block_reason(
             settings=settings,
-            profile_name=str(profile.get("profile_name") or ""),
+            profile=profile,
             market_session=market_session,
             runs_today=runs_today,
             latest_run=latest,
@@ -108,6 +108,7 @@ class StrategyAutoBuySchedulerService:
                 "market_open": market_session.get("is_market_open"),
                 "after_no_new_entry_time": self._after_no_new_entry_time(
                     settings=settings,
+                    profile=profile,
                     now_utc=now_utc,
                 ),
                 "primary_block_reason": primary,
@@ -138,7 +139,7 @@ class StrategyAutoBuySchedulerService:
         market_session = self._market_session(now_utc)
         block_reason = self._primary_block_reason(
             settings=settings,
-            profile_name=str(profile.get("profile_name") or ""),
+            profile=profile,
             market_session=market_session,
             runs_today=runs_today,
             latest_run=latest,
@@ -236,7 +237,7 @@ class StrategyAutoBuySchedulerService:
         self,
         *,
         settings: dict[str, Any],
-        profile_name: str,
+        profile: dict[str, Any],
         market_session: dict[str, Any],
         runs_today: int,
         latest_run: TradeRunLog | None,
@@ -264,9 +265,12 @@ class StrategyAutoBuySchedulerService:
                     "strategy_auto_buy_scheduler_block_after_no_new_entry_time"
                 )
             )
-            and self._after_no_new_entry_time(settings=settings, now_utc=now_utc)
+            and self._after_no_new_entry_time(
+                settings=settings, profile=profile, now_utc=now_utc
+            )
         ):
             return "after_no_new_entry_time"
+        profile_name = str(profile.get("profile_name") or "")
         if profile_name == "aggressive" and not bool(
             settings.get("strategy_auto_buy_scheduler_allow_aggressive")
         ):
@@ -306,10 +310,11 @@ class StrategyAutoBuySchedulerService:
         self,
         *,
         settings: dict[str, Any],
+        profile: dict[str, Any] | None = None,
         now_utc: datetime,
     ) -> bool:
         cutoff = _parse_hhmm(
-            str(settings.get("strategy_auto_buy_scheduler_no_new_entry_after") or "15:00")
+            str(((profile or {}).get("automation_settings") or {}).get("entry", {}).get("no_new_entry_after") or settings.get("strategy_auto_buy_scheduler_no_new_entry_after") or "15:00")
         )
         local = now_utc.astimezone(KST)
         return local.time() >= cutoff

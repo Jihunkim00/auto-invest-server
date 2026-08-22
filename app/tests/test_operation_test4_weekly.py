@@ -71,6 +71,27 @@ def test_weekly_arm_persists_exact_range_and_stays_safe_closed(db_session, tmp_p
     assert runtime["kill_switch"] is True
 
 
+def test_startup_reconciliation_closes_expired_week_without_replaying_entry_slot(db_session, tmp_path):
+    service, _, _ = make_service(tmp_path)
+    service.arm_week(
+        db_session,
+        confirm_live=True,
+        confirmation=WEEKLY_CONFIRMATION,
+        now=_kst(18, 18),
+    )
+
+    result = service.reconcile_scheduler_state(db_session, now=_kst(22, 11, 0))
+    runtime = RuntimeSettingService().get_settings(db_session)
+
+    assert result['status'] == 'reconciled'
+    assert result['reason'] == 'expired_weekly_window_closed'
+    assert runtime['operation_test4_weekly_window_enabled'] is False
+    assert runtime['operation_test4_scheduler_enabled'] is False
+    assert runtime['operation_test4_scheduler_arm_mode'] == 'weekly_complete'
+    assert runtime['operation_test4_scheduler_last_evaluated_slot_kst'] is None
+    assert db_session.query(TradeRunLog).count() == 0
+
+
 def test_weekly_final_slot_preserves_score_reason_and_rolls_target(db_session, tmp_path):
     service, _, _ = make_service(
         tmp_path,

@@ -686,6 +686,90 @@ class OperationTest4Service:
             }
         )
 
+    def reconcile_scheduler_state(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Reconcile a bounded weekly arm after process startup.
+
+        This is a state check only: it never replays a missed entry slot. An
+        expired window is closed only after local lifecycle/open-order checks
+        and a fresh broker account read show that no position or order needs
+        management. Unknown broker state remains fail-closed.
+        """
+        now_utc = _aware_utc(now or self.now_provider())
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        arm_mode = str(runtime.get("operation_test4_scheduler_arm_mode") or "")
+        if arm_mode not in WEEKLY_MODES or not bool(
+            runtime.get("operation_test4_weekly_window_enabled")
+        ):
+            return {
+                "status": "not_required",
+                "reason": "weekly_window_not_active",
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        end = parse_trading_date(runtime.get("operation_test4_weekly_end_date"))
+        local_date = now_utc.astimezone(KR_TZ).date()
+        if end is None or local_date <= end:
+            return {
+                "status": "not_required",
+                "reason": "weekly_window_not_expired",
+                "weekly_end_date": end.isoformat() if end else None,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+
+        active_cycle = self._active_cycle(db)
+        active_lifecycles = self._active_lifecycles(db)
+        local_open_orders = self._local_open_order_count(db)
+        if active_cycle is not None or active_lifecycles or local_open_orders:
+            return {
+                "status": "held",
+                "reason": "position_or_order_requires_management",
+                "active_cycle": bool(active_cycle),
+                "active_lifecycle_count": len(active_lifecycles),
+                "local_open_order_count": local_open_orders,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+
+        account = self._read_account_state(require_fresh=True)
+        if account.get("fetch_success") is not True:
+            return {
+                "status": "blocked",
+                "reason": "account_state_unavailable",
+                "account": self._account_summary(account),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        if account.get("position_count", 0) > 0 or account.get("open_order_count", 0) > 0:
+            return {
+                "status": "held",
+                "reason": "broker_position_or_order_requires_management",
+                "account": self._account_summary(account),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+
+        result = self._complete_weekly_window(
+            db,
+            target_date=end,
+            reason="startup_weekly_reconciliation",
+        )
+        result.update(
+            {
+                "status": "reconciled",
+                "reason": "expired_weekly_window_closed",
+                "account": self._account_summary(account),
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+        )
+        return sanitize_kis_payload(result)
+
     def status(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         runtime = self.runtime_settings.get_settings_read_only(db)

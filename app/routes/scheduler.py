@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.database import get_db
 from app.db.models import PositionLifecycle, TradeRunLog
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.operation_test3_position_management_service import (
     SCHEDULER_SLOTS_KST,
@@ -20,6 +21,7 @@ from app.services.operation_test3_position_management_service import (
     TRADE_RUN_RUN_MODE,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.scheduler_service import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
@@ -64,9 +66,21 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
     runtime_settings = runtime_service.get_settings_read_only(db)
+    profile_state = AutomationProfileService().list_profiles(db)
+    active_profile = profile_state.get("active_profile") or {}
+    scheduler_runtime = scheduler_service.runtime_status()
     kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
     current_operation_mode = runtime_service.current_operation_mode_read_only(db)
     daily_live_order_remaining = kr_risk_summary.get("daily_live_order_remaining")
+    daily_live_order_limit = kr_risk_summary.get("daily_live_order_limit")
+    daily_order_count = (
+        max(0, int(daily_live_order_limit) - int(daily_live_order_remaining))
+        if daily_live_order_limit is not None and daily_live_order_remaining is not None
+        else 0
+    )
+    active_position_count = db.query(PositionLifecycle).filter(
+        PositionLifecycle.status.in_(["open", "closing"])
+    ).count()
     live_order_remaining_ok = (
         daily_live_order_remaining is None or int(daily_live_order_remaining) > 0
     )
@@ -167,6 +181,26 @@ def get_scheduler_status(db: Session = Depends(get_db)):
                 )
 
     return {
+        **scheduler_runtime,
+        "active_profile_key": active_profile.get("profile_key"),
+        "active_profile_name": active_profile.get("name") or active_profile.get("display_name"),
+        "active_profile_provider": active_profile.get("provider") or "kis",
+        "active_profile_market": active_profile.get("market") or "KR",
+        "active_profile_status": active_profile.get("status"),
+        "automation_enabled": bool(
+            active_profile.get("enabled")
+            and active_profile.get("status") == "active"
+        ),
+        "profile_scheduler_enabled": bool(
+            runtime_state["scheduler_enabled"]
+            and active_profile.get("enabled")
+            and active_profile.get("status") == "active"
+        ),
+        "runtime_authorized": bool(real_orders_allowed),
+        "daily_order_count": daily_order_count,
+        "daily_order_limit": daily_live_order_limit,
+        "active_position_count": int(active_position_count),
+        "active_profile": active_profile or None,
         "current_operation_mode": current_operation_mode,
         "display_mode_label": _display_mode_label(current_operation_mode),
         "display_warning_level": warning_level,

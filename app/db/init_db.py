@@ -2045,6 +2045,7 @@ def init_db():
         "dry_run": "BOOLEAN DEFAULT 1",
         "kill_switch": "BOOLEAN DEFAULT 0",
         "scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "active_automation_profile_key": "VARCHAR(80)",
         "automation_mode": "VARCHAR(32) DEFAULT 'off'",
         "automation_mode_updated_at": "DATETIME",
         "automation_mode_updated_by": "VARCHAR(80)",

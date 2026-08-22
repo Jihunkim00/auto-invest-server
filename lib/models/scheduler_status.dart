@@ -13,7 +13,24 @@ class SchedulerStatus {
     this.liveBuyPossible = false,
     this.liveSellPossible = false,
     this.dailyLiveOrderRemaining,
+    this.dailyOrderCount = 0,
+    this.activePositionCount = 0,
     this.warningMessage = '',
+    this.schedulerEngineRunning = false,
+    this.schedulerStartedAt,
+    this.schedulerLastHeartbeatAt,
+    this.schedulerLastTickAt,
+    this.schedulerLastError,
+    this.activeProfileKey,
+    this.activeProfileName,
+    this.activeProfileProvider = 'kis',
+    this.activeProfileMarket = 'KR',
+    this.profileSchedulerEnabled = false,
+    this.automationEnabled = false,
+    this.runtimeAuthorized = false,
+    this.lastProfileRunAt,
+    this.lastProfileRunResult,
+    this.nextProfileRunAt,
   });
 
   factory SchedulerStatus.fromJson(Map<String, dynamic> json) {
@@ -62,7 +79,24 @@ class SchedulerStatus {
       dailyLiveOrderRemaining:
           _readNullableInt(json['daily_live_order_remaining']) ??
               effectiveRiskSummary.dailyLiveOrderRemaining,
+      dailyOrderCount: _readInt(json['daily_order_count'], 0),
+      activePositionCount: _readInt(json['active_position_count'], 0),
       warningMessage: _readString(json['warning_message'], ''),
+      schedulerEngineRunning: _readBool(json['scheduler_engine_running']) ?? false,
+      schedulerStartedAt: _readNullableString(json['scheduler_started_at']),
+      schedulerLastHeartbeatAt: _readNullableString(json['scheduler_last_heartbeat_at']),
+      schedulerLastTickAt: _readNullableString(json['scheduler_last_tick_at']),
+      schedulerLastError: _readNullableString(json['scheduler_last_error']),
+      activeProfileKey: _readNullableString(json['active_profile_key']),
+      activeProfileName: _readNullableString(json['active_profile_name']),
+      activeProfileProvider: _readString(json['active_profile_provider'], 'kis'),
+      activeProfileMarket: _readString(json['active_profile_market'], 'KR'),
+      profileSchedulerEnabled: _readBool(json['profile_scheduler_enabled']) ?? false,
+      automationEnabled: _readBool(json['automation_enabled']) ?? false,
+      runtimeAuthorized: _readBool(json['runtime_authorized']) ?? false,
+      lastProfileRunAt: _readNullableString(json['last_profile_run_at']),
+      lastProfileRunResult: _readNullableString(json['last_profile_run_result']),
+      nextProfileRunAt: _readNullableString(json['next_profile_run_at']),
     );
   }
 
@@ -110,7 +144,24 @@ class SchedulerStatus {
   final bool liveBuyPossible;
   final bool liveSellPossible;
   final int? dailyLiveOrderRemaining;
+  final int dailyOrderCount;
+  final int activePositionCount;
   final String warningMessage;
+  final bool schedulerEngineRunning;
+  final String? schedulerStartedAt;
+  final String? schedulerLastHeartbeatAt;
+  final String? schedulerLastTickAt;
+  final String? schedulerLastError;
+  final String? activeProfileKey;
+  final String? activeProfileName;
+  final String activeProfileProvider;
+  final String activeProfileMarket;
+  final bool profileSchedulerEnabled;
+  final bool automationEnabled;
+  final bool runtimeAuthorized;
+  final String? lastProfileRunAt;
+  final String? lastProfileRunResult;
+  final String? nextProfileRunAt;
 
   String get modeLabel {
     if (displayModeLabel.trim().isNotEmpty) return displayModeLabel;
@@ -120,6 +171,14 @@ class SchedulerStatus {
   String get warningLevel {
     if (displayWarningLevel.trim().isNotEmpty) return displayWarningLevel;
     return riskSummary.warningLevel;
+  }
+
+  bool get schedulerHeartbeatHealthy {
+    final raw = schedulerLastHeartbeatAt;
+    if (!schedulerEngineRunning || raw == null) return false;
+    final heartbeat = DateTime.tryParse(raw);
+    if (heartbeat == null) return false;
+    return DateTime.now().toUtc().difference(heartbeat.toUtc()).inSeconds < 90;
   }
 }
 

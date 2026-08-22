@@ -32,6 +32,7 @@ def test_profile_crud_archive_and_activation_does_not_touch_legacy_state(db_sess
     row = service.get(db_session, str(created['id']))
     assert row.is_active is False
     assert row.enabled is True
+    assert service.list_profiles(db_session)['active_profile']['profile_key'] == 'pr108-demo'
 
     paused = service.pause(db_session, str(created['id']))
     assert paused['status'] == 'paused'

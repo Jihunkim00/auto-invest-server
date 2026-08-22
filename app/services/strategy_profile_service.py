@@ -4,9 +4,10 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import StrategyProfile, StrategyProfileAudit
+from app.db.models import RuntimeSetting, StrategyProfile, StrategyProfileAudit
 from app.schemas.strategy import StrategyProfilePayload
 
 
@@ -155,6 +156,18 @@ class StrategyProfileService:
 
     def active_profile(self, db: Session) -> StrategyProfile:
         self.ensure_seeded(db)
+        runtime = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
+        active_key = str(getattr(runtime, 'active_automation_profile_key', None) or '').strip().lower()
+        if active_key:
+            custom = (
+                db.query(StrategyProfile)
+                .filter(StrategyProfile.profile_key == active_key)
+                .filter(StrategyProfile.enabled == True)  # noqa: E712
+                .filter(StrategyProfile.custom_status == 'active')
+                .first()
+            )
+            if custom is not None:
+                return custom
         row = (
             db.query(StrategyProfile)
             .filter(StrategyProfile.is_active == True)  # noqa: E712
@@ -210,6 +223,10 @@ class StrategyProfileService:
             row.is_active = row.profile_name == requested.profile_name
             row.updated_at = now
         db.commit()
+        runtime = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
+        if runtime is not None:
+            runtime.active_automation_profile_key = None
+            db.commit()
         db.refresh(requested)
         after_snapshot = self.serialize_profile(requested)
         audit = self._audit(
@@ -280,13 +297,31 @@ class StrategyProfileService:
         }
 
     def serialize_profile(self, row: StrategyProfile) -> dict[str, Any]:
-        return StrategyProfilePayload.model_validate(row).model_dump(mode="json")
+        payload = StrategyProfilePayload.model_validate(row).model_dump(mode="json")
+        if row.profile_key:
+            try:
+                custom_settings = json.loads(row.settings_json or "{}")
+            except (TypeError, ValueError):
+                custom_settings = {}
+            payload.update({
+                "profile_name": row.profile_key,
+                "display_name": row.custom_name or row.display_name,
+                "is_active": row.custom_status == "active" and bool(row.enabled),
+                "profile_key": row.profile_key,
+                "provider": row.provider or "kis",
+                "market": row.market or "KR",
+                "automation_settings": custom_settings if isinstance(custom_settings, dict) else {},
+            })
+        return payload
 
     def _profile_or_raise(self, db: Session, profile_name: str) -> StrategyProfile:
         normalized = str(profile_name or "").strip().lower()
         row = (
             db.query(StrategyProfile)
-            .filter(StrategyProfile.profile_name == normalized)
+            .filter(or_(
+                StrategyProfile.profile_name == normalized,
+                StrategyProfile.profile_key == normalized,
+            ))
             .first()
         )
         if row is None:

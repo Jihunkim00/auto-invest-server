@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.brokers.kis_auth_manager import KisAuthManager
@@ -89,6 +89,14 @@ class SchedulerService:
         self.operation_test4_active_monitor_interval_seconds = 60
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._started_at: datetime | None = None
+        self._last_heartbeat_at: datetime | None = None
+        self._last_tick_at: datetime | None = None
+        self._last_scheduler_error: str | None = None
+        self._last_profile_run_at: datetime | None = None
+        self._last_profile_run_result: str | None = None
+        self._next_profile_run_at: datetime | None = None
+        self._startup_reconciliation_result: dict | None = None
         self._slot_runs: set[str] = set()
         self._us_slots = [
             ("open_phase", 9, 35),
@@ -120,6 +128,10 @@ class SchedulerService:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
+        self._started_at = datetime.now(UTC)
+        self._last_heartbeat_at = self._started_at
+        self._last_scheduler_error = None
+        self._startup_reconciliation_result = None
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="trading-scheduler")
         self._thread.start()
 
@@ -131,10 +143,28 @@ class SchedulerService:
     def is_running(self) -> bool:
         return bool(self._thread and self._thread.is_alive())
 
+    def runtime_status(self) -> dict[str, object]:
+        def iso(value: datetime | None) -> str | None:
+            return value.isoformat() if value is not None else None
+        return {
+            "scheduler_engine_running": self.is_running(),
+            "scheduler_started_at": iso(self._started_at),
+            "scheduler_last_heartbeat_at": iso(self._last_heartbeat_at),
+            "scheduler_last_tick_at": iso(self._last_tick_at),
+            "scheduler_last_error": self._last_scheduler_error,
+            "last_profile_run_at": iso(self._last_profile_run_at),
+            "last_profile_run_result": self._last_profile_run_result,
+            "next_profile_run_at": iso(self._next_profile_run_at),
+            "startup_reconciliation": self._startup_reconciliation_result,
+        }
+
     def _run_loop(self):
+        self._safe_call(self._run_startup_reconciliation)
         while not self._stop_event.is_set():
+            self._last_heartbeat_at = datetime.now(UTC)
             now_ny = datetime.now(NY_TZ)
             now_kr = datetime.now(KR_TZ)
+            self._next_profile_run_at = self._next_strategy_profile_run_at(now_kr)
             ny_day_key = now_ny.strftime("%Y-%m-%d")
             kr_day_key = now_kr.strftime("%Y-%m-%d")
             self._slot_runs = {
@@ -148,41 +178,41 @@ class SchedulerService:
                     run_key = f"{ny_day_key}:US:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_us_scheduled_once(slot_name)
+                        self._safe_call(self._run_us_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self._kr_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_kr_scheduled_once(slot_name)
+                        self._safe_call(self._run_kr_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self.position_management_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:position_management_dry_run:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_position_management_dry_run_scheduled_once(slot_name)
+                        self._safe_call(self._run_position_management_dry_run_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self.position_lifecycle_management_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:position_management:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_position_lifecycle_management_scheduled_once(slot_name)
+                        self._safe_call(self._run_position_lifecycle_management_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self.operation_test3_position_management_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:operation_test3:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_operation_test3_position_management_scheduled_once(slot_name)
+                        self._safe_call(self._run_operation_test3_position_management_scheduled_once, slot_name)
             for slot_name, hour, minute in self.operation_test4_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:operation_test4:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_operation_test4_scheduled_once(slot_name)
+                        self._safe_call(self._run_operation_test4_scheduled_once, slot_name)
 
             current_test4_slot = f"{now_kr.hour:02d}:{now_kr.minute:02d}"
             configured_test4_slots = {
@@ -195,29 +225,83 @@ class SchedulerService:
                 )
                 if run_key not in self._slot_runs:
                     self._slot_runs.add(run_key)
-                    self._run_operation_test4_active_monitor_scheduled_once()
+                    self._safe_call(self._run_operation_test4_active_monitor_scheduled_once)
             for slot_name, hour, minute in self._strategy_auto_buy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:strategy_auto_buy_dry_run:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_strategy_auto_buy_dry_run_scheduled_once(slot_name)
+                        self._safe_call(self._run_strategy_auto_buy_dry_run_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self._broker_sync_watchdog_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:broker_sync_watchdog:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_broker_sync_watchdog_scheduled_once(slot_name)
+                        self._safe_call(self._run_broker_sync_watchdog_scheduled_once, slot_name)
 
             for slot_name, hour, minute in self._automation_release_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:automation_release:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
-                        self._run_automation_release_scheduled_once(slot_name)
+                        self._safe_call(self._run_automation_release_scheduled_once, slot_name)
 
+            self._last_tick_at = datetime.now(UTC)
             time.sleep(20)
+
+    def _safe_call(self, callback, *args):
+        try:
+            result = callback(*args)
+            if callback.__name__ == "_run_strategy_auto_buy_dry_run_scheduled_once":
+                self._last_profile_run_at = datetime.now(UTC)
+                if isinstance(result, dict):
+                    self._last_profile_run_result = str(
+                        result.get("result")
+                        or result.get("action")
+                        or result.get("status")
+                        or "completed"
+                    )
+                else:
+                    self._last_profile_run_result = "completed"
+            return result
+        except Exception as exc:
+            self._last_scheduler_error = f"{callback.__name__}: {exc.__class__.__name__}: {exc}"
+            self._last_tick_at = datetime.now(UTC)
+            if callback.__name__ == "_run_strategy_auto_buy_dry_run_scheduled_once":
+                self._last_profile_run_at = datetime.now(UTC)
+                self._last_profile_run_result = "error"
+            return None
+
+    def _next_strategy_profile_run_at(self, now_kr: datetime) -> datetime:
+        for _, hour, minute in self._strategy_auto_buy_slots:
+            candidate = now_kr.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if candidate > now_kr:
+                return candidate
+        next_day = now_kr + timedelta(days=1)
+        _, hour, minute = self._strategy_auto_buy_slots[0]
+        return next_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    def _run_startup_reconciliation(self):
+        db = SessionLocal()
+        try:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if runtime.get("operation_test4_scheduler_enabled") is not True:
+                self._startup_reconciliation_result = {
+                    "status": "not_required",
+                    "reason": "test4_scheduler_disabled",
+                }
+                return self._startup_reconciliation_result
+            settings_obj = get_settings()
+            kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+            result = OperationTest4Service(
+                kis_client,
+                runtime_settings=self.runtime_settings,
+            ).reconcile_scheduler_state(db)
+            self._startup_reconciliation_result = result if isinstance(result, dict) else {"status": "completed"}
+            return self._startup_reconciliation_result
+        finally:
+            db.close()
 
     def _run_scheduled_once(self, slot_name: str):
         return self._run_us_scheduled_once(slot_name)

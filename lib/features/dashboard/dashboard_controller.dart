@@ -189,7 +189,7 @@ class DashboardController extends ChangeNotifier {
   String? kisManagedPositionsError;
   ManualSellPreparation? latestManualSellPreparation;
   PortfolioMarket selectedPortfolioMarket = PortfolioMarket.us;
-  SelectedProvider selectedProvider = SelectedProvider.alpaca;
+  SelectedProvider selectedProvider = SelectedProvider.kis;
   int selectedGateLevel = 2;
   PortfolioMarket selectedOrderMarket = PortfolioMarket.us;
   PortfolioMarket selectedWatchlistMarket = PortfolioMarket.us;

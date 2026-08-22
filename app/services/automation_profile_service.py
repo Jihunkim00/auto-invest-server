@@ -104,9 +104,17 @@ class AutomationProfileService:
             .order_by(StrategyProfile.id.asc())
             .all()
         )
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        active_key = str(runtime.get('active_automation_profile_key') or '').strip()
+        active = next(
+            (self.serialize(row) for row in rows if row.profile_key == active_key and self._status(row) == 'active'),
+            None,
+        )
+        if active is None:
+            active = next((self.serialize(row) for row in rows if self._status(row) == 'active'), None)
         return {
             'profiles': [self.serialize(row) for row in rows],
-            'active_profile': next((self.serialize(row) for row in rows if self._status(row) == 'active'), None),
+            'active_profile': active,
         }
 
     def create(self, db: Session, request: AutomationProfileWriteRequest) -> dict[str, Any]:
@@ -172,6 +180,8 @@ class AutomationProfileService:
         self.validate_settings(values['settings'])
         requested_key = values['profile_key']
         if requested_key != row.profile_key:
+            if self._status(row) == 'active':
+                raise AutomationProfileConflict('active_profile_key_is_immutable')
             conflict = db.query(StrategyProfile).filter(StrategyProfile.profile_key == requested_key).first()
             if conflict is not None and conflict.id != row.id:
                 raise AutomationProfileConflict('profile_key_already_exists')
@@ -205,6 +215,14 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        if (
+            runtime.get("active_automation_profile_key") == row.profile_key
+            and self._status(row) != "active"
+        ):
+            self.runtime_settings.update_settings(
+                db, {"active_automation_profile_key": None}
+            )
         return self.serialize(row)
 
     def archive(self, db: Session, profile_id: str) -> dict[str, Any]:
@@ -215,6 +233,9 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        if runtime.get('active_automation_profile_key') == row.profile_key:
+            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None})
         return self.serialize(row)
 
     def activate(self, db: Session, profile_id: str) -> dict[str, Any]:
@@ -233,8 +254,10 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
-        # Activation intentionally only changes profile state. No runtime
-        # flags, operation mode, broker capability, or scheduler values move.
+        # Select policy at runtime; safety and authorization remain separate.
+        self.runtime_settings.update_settings(
+            db, {'active_automation_profile_key': row.profile_key},
+        )
         return {
             'status': 'active',
             'profile': self.serialize(row),
@@ -250,6 +273,9 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        if runtime.get('active_automation_profile_key') == row.profile_key:
+            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None})
         return {'status': 'paused', 'profile': self.serialize(row), 'safety': _profile_safety(setting_changed=True)}
 
     def validate_profile(self, db: Session, profile_id: str) -> dict[str, Any]:
