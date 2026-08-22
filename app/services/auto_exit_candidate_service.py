@@ -19,6 +19,8 @@ from app.schemas.auto_exit_candidate import (
 )
 from app.services.market_session_service import MarketSessionService
 from app.services.position_exit_review_service import PositionExitReviewService
+from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
+from app.services.strategy_profile_service import StrategyProfileService
 
 
 PROVIDER = "kis"
@@ -48,9 +50,11 @@ class AutoExitCandidateService:
         exit_review_service: PositionExitReviewService,
         *,
         session_service: MarketSessionService | None = None,
+        strategy_profiles: StrategyProfileService | None = None,
     ) -> None:
         self.exit_review_service = exit_review_service
         self.session_service = session_service or MarketSessionService()
+        self.strategy_profiles = strategy_profiles or StrategyProfileService()
 
     def candidates(
         self,
@@ -67,6 +71,15 @@ class AutoExitCandidateService:
         normalized_market = _normalize_market(market)
         normalized_symbol = _normalize_symbol(symbol)
         severity = _normalize_min_severity(min_severity)
+        take_profit_threshold = None
+        stop_loss_threshold = None
+        try:
+            profile = self.strategy_profiles.selected_profile(db) or self.strategy_profiles.active_profile(db)
+            serialized_profile = self.strategy_profiles.serialize_profile(profile)
+            take_profit_threshold = serialized_profile.get("take_profit_pct")
+            stop_loss_threshold = serialized_profile.get("stop_loss_pct")
+        except Exception:
+            pass
 
         if normalized_provider != PROVIDER or normalized_market != MARKET:
             return AutoExitCandidatesResponse(
@@ -100,6 +113,8 @@ class AutoExitCandidateService:
                     position=position,
                     generated_at=generated_at,
                     near_close=near_close,
+                    take_profit_threshold=take_profit_threshold,
+                    stop_loss_threshold=stop_loss_threshold,
                 )
             )
 
@@ -141,12 +156,27 @@ class AutoExitCandidateService:
         position: dict[str, Any],
         generated_at: datetime,
         near_close: bool,
+        take_profit_threshold: Any = None,
+        stop_loss_threshold: Any = None,
     ) -> list[AutoExitCandidate]:
         symbol = str(position.get("symbol") or "").upper()
         if not symbol:
             return []
         duplicate = bool(position.get("duplicate_open_sell_order"))
         sync_required = _symbol_sync_required(db, symbol=symbol)
+        threshold_reasons, diagnostics = position_exit_threshold_reasons(
+            position,
+            take_profit_threshold=take_profit_threshold,
+            stop_loss_threshold=stop_loss_threshold,
+        )
+        position = {
+            **position,
+            "stop_loss_triggered": "stop_loss_triggered" in threshold_reasons,
+            "take_profit_triggered": "take_profit_triggered" in threshold_reasons,
+            "stop_loss_threshold_pct": diagnostics.get("stop_loss_threshold_pct"),
+            "take_profit_threshold_pct": diagnostics.get("take_profit_threshold_pct"),
+            "unrealized_pl_pct": diagnostics.get("unrealized_pl_pct"),
+        }
         base = _base_payload(
             position,
             generated_at=generated_at,

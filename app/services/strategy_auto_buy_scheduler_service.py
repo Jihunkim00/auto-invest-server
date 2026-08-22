@@ -86,7 +86,7 @@ class StrategyAutoBuySchedulerService:
             {
                 "provider": provider,
                 "market": market,
-                "enabled": bool(settings.get("strategy_auto_buy_scheduler_enabled")),
+                "enabled": bool(settings.get("strategy_auto_buy_scheduler_enabled") or settings.get("automation_profile_scheduler_enabled")),
                 "dry_run_only": True,
                 "promotion_queue_only": True,
                 "allow_live_orders": False,
@@ -114,7 +114,7 @@ class StrategyAutoBuySchedulerService:
                 "primary_block_reason": primary,
                 "pending_promotion_count": int(pending_promotions or 0),
                 "latest_scheduler_run": self._run_item(latest) if latest else None,
-                "schedule_slots": list(SCHEDULE_SLOTS),
+                "schedule_slots": list(((profile.get("automation_settings") or {}).get("entry") or {}).get("analysis_times") or SCHEDULE_SLOTS),
                 "safety": _safety(read_only=True),
             }
         )
@@ -243,7 +243,18 @@ class StrategyAutoBuySchedulerService:
         latest_run: TradeRunLog | None,
         now_utc: datetime,
     ) -> str | None:
-        if not bool(settings.get("strategy_auto_buy_scheduler_enabled")):
+        custom_profile = bool(profile.get("profile_key"))
+        profile_status = str(profile.get("status") or "")
+        if custom_profile:
+            if not bool(settings.get("automation_profile_scheduler_enabled")):
+                return "profile_scheduler_disabled"
+            if profile_status == "scheduled":
+                return "profile_not_started"
+            if profile_status == "ended":
+                return "profile_period_ended"
+            if profile_status != "active":
+                return "profile_status_not_active"
+        elif not bool(settings.get("strategy_auto_buy_scheduler_enabled")):
             return "scheduler_disabled"
         if not bool(settings.get("strategy_auto_buy_scheduler_dry_run_only")):
             return "scheduler_dry_run_only_disabled"
@@ -260,23 +271,20 @@ class StrategyAutoBuySchedulerService:
         ):
             return "market_closed"
         if (
-            bool(
-                settings.get(
-                    "strategy_auto_buy_scheduler_block_after_no_new_entry_time"
-                )
-            )
+            bool(settings.get("strategy_auto_buy_scheduler_block_after_no_new_entry_time"))
             and self._after_no_new_entry_time(
                 settings=settings, profile=profile, now_utc=now_utc
             )
         ):
             return "after_no_new_entry_time"
         profile_name = str(profile.get("profile_name") or "")
-        if profile_name == "aggressive" and not bool(
+        if not custom_profile and profile_name == "aggressive" and not bool(
             settings.get("strategy_auto_buy_scheduler_allow_aggressive")
         ):
             return "aggressive_profile_blocked"
-        if profile_name not in _allowed_profiles(settings):
+        if not custom_profile and profile_name not in _allowed_profiles(settings):
             return "active_profile_not_allowed"
+
         max_runs = _int(settings.get("strategy_auto_buy_scheduler_max_runs_per_day"), 3)
         if runs_today >= max_runs:
             return "max_runs_per_day_reached"
@@ -332,9 +340,10 @@ class StrategyAutoBuySchedulerService:
             }
 
     def _active_profile(self, db: Session) -> dict[str, Any]:
-        row = self.strategy_profiles.active_profile(db)
+        row = self.strategy_profiles.selected_profile(db)
+        if row is None:
+            row = self.strategy_profiles.active_profile(db)
         return self.strategy_profiles.serialize_profile(row)
-
     def _latest_run(self, db: Session) -> TradeRunLog | None:
         return (
             db.query(TradeRunLog)

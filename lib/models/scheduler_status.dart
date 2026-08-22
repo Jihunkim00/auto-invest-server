@@ -25,6 +25,16 @@ class SchedulerStatus {
     this.activeProfileName,
     this.activeProfileProvider = 'kis',
     this.activeProfileMarket = 'KR',
+    this.selectedProfileName,
+    this.selectedProfileStatus,
+    this.selectedProfileProvider = 'kis',
+    this.selectedProfileMarket = 'KR',
+    this.selectedProfileStartDate,
+    this.selectedProfileEndDate,
+    this.profileAnalysisTimes = const [],
+    this.effectiveProfileAnalysisTimes = const [],
+    this.profileStopLossPct,
+    this.profileTakeProfitPct,
     this.profileSchedulerEnabled = false,
     this.automationEnabled = false,
     this.runtimeAuthorized = false,
@@ -91,6 +101,16 @@ class SchedulerStatus {
       activeProfileName: _readNullableString(json['active_profile_name']),
       activeProfileProvider: _readString(json['active_profile_provider'], 'kis'),
       activeProfileMarket: _readString(json['active_profile_market'], 'KR'),
+      selectedProfileName: _readNullableString(json['selected_profile_name']),
+      selectedProfileStatus: _readNullableString(json['selected_profile_status']),
+      selectedProfileProvider: _readString(json['selected_profile_provider'], 'kis'),
+      selectedProfileMarket: _readString(json['selected_profile_market'], 'KR'),
+      selectedProfileStartDate: _readNullableString(json['selected_profile_start_date']),
+      selectedProfileEndDate: _readNullableString(json['selected_profile_end_date']),
+      profileAnalysisTimes: _readStringList(json['profile_analysis_times']),
+      effectiveProfileAnalysisTimes: _readStringList(json['effective_profile_analysis_times']),
+      profileStopLossPct: _readNullableDouble(json['profile_stop_loss_pct']),
+      profileTakeProfitPct: _readNullableDouble(json['profile_take_profit_pct']),
       profileSchedulerEnabled: _readBool(json['profile_scheduler_enabled']) ?? false,
       automationEnabled: _readBool(json['automation_enabled']) ?? false,
       runtimeAuthorized: _readBool(json['runtime_authorized']) ?? false,
@@ -156,6 +176,16 @@ class SchedulerStatus {
   final String? activeProfileName;
   final String activeProfileProvider;
   final String activeProfileMarket;
+  final String? selectedProfileName;
+  final String? selectedProfileStatus;
+  final String selectedProfileProvider;
+  final String selectedProfileMarket;
+  final String? selectedProfileStartDate;
+  final String? selectedProfileEndDate;
+  final List<String> profileAnalysisTimes;
+  final List<String> effectiveProfileAnalysisTimes;
+  final double? profileStopLossPct;
+  final double? profileTakeProfitPct;
   final bool profileSchedulerEnabled;
   final bool automationEnabled;
   final bool runtimeAuthorized;
@@ -492,6 +522,12 @@ List<String> _readStringList(Object? value) {
 int _readInt(Object? value, int fallback) {
   if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '') ?? fallback;
+}
+
+double? _readNullableDouble(Object? value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value.toString());
 }
 
 int? _readNullableInt(Object? value) {

@@ -1,3 +1,7 @@
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import inspect, text
 
 from app.db.database import SessionLocal, engine
@@ -17,6 +21,51 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
     with engine.begin() as conn:
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
+
+def _backfill_automation_profile_scheduler_enabled_if_needed():
+    """Arm legacy PR110 selections after adding the profile scheduler flag."""
+    inspector = inspect(engine)
+    if "runtime_settings" not in inspector.get_table_names():
+        return
+
+    with engine.begin() as conn:
+        runtime = conn.execute(
+            text(
+                "SELECT id, active_automation_profile_key "
+                "FROM runtime_settings ORDER BY id ASC LIMIT 1"
+            )
+        ).mappings().first()
+        if not runtime or not runtime.get("active_automation_profile_key"):
+            return
+        profile = conn.execute(
+            text(
+                "SELECT enabled, custom_status, settings_json, market "
+                "FROM strategy_profiles WHERE profile_key = :profile_key LIMIT 1"
+            ),
+            {"profile_key": runtime["active_automation_profile_key"]},
+        ).mappings().first()
+        if not profile or not profile.get("enabled"):
+            return
+        if profile.get("custom_status") in {"paused", "disabled", "archived"}:
+            return
+        try:
+            settings = json.loads(profile.get("settings_json") or "{}")
+            operation = settings.get("operation") or {}
+            end = datetime.fromisoformat(str(operation["end_date"])).date()
+            timezone_name = str(operation.get("timezone") or "").strip()
+            timezone = ZoneInfo(timezone_name) if timezone_name else ZoneInfo(
+                "America/New_York" if str(profile.get("market") or "KR").upper() == "US" else "Asia/Seoul"
+            )
+        except Exception:
+            return
+        if datetime.now(timezone).date() <= end:
+            conn.execute(
+                text(
+                    "UPDATE runtime_settings SET automation_profile_scheduler_enabled = 1 "
+                    "WHERE id = :runtime_id"
+                ),
+                {"runtime_id": runtime["id"]},
+            )
 
 def _migrate_strategy_profile_columns_if_needed():
     """Bring legacy strategy_profiles tables up to the current ORM shape.
@@ -212,6 +261,7 @@ def _create_runtime_settings_table_if_missing():
                     dry_run BOOLEAN NOT NULL DEFAULT 1,
                     kill_switch BOOLEAN NOT NULL DEFAULT 0,
                     scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
+                    automation_profile_scheduler_enabled BOOLEAN NOT NULL DEFAULT 0,
                     automation_mode VARCHAR(32) NOT NULL DEFAULT 'off',
                     automation_mode_updated_at DATETIME,
                     automation_mode_updated_by VARCHAR(80),
@@ -2045,6 +2095,7 @@ def init_db():
         "dry_run": "BOOLEAN DEFAULT 1",
         "kill_switch": "BOOLEAN DEFAULT 0",
         "scheduler_enabled": "BOOLEAN DEFAULT 0",
+        "automation_profile_scheduler_enabled": "BOOLEAN DEFAULT 0",
         "active_automation_profile_key": "VARCHAR(80)",
         "automation_mode": "VARCHAR(32) DEFAULT 'off'",
         "automation_mode_updated_at": "DATETIME",
@@ -2303,6 +2354,8 @@ def init_db():
 
     for name, ddl in runtime_setting_columns.items():
         _add_column_if_missing("runtime_settings", name, ddl)
+
+    _backfill_automation_profile_scheduler_enabled_if_needed()
 
     for name, ddl in trade_run_log_columns.items():
         _add_column_if_missing("trade_run_logs", name, ddl)

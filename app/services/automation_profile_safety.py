@@ -11,7 +11,8 @@ TEST4_HARD_SAFETY = {
     'max_order_notional_krw': 1_000_000.0,
     'cash_only': True,
     'stop_loss_pct': 2.0,
-    'take_profit_pct': 3.0,
+    'take_profit_min_pct': 1.0,
+    'take_profit_max_pct': 15.0,
 }
 
 
@@ -53,9 +54,10 @@ def effective_profile_settings(
         TEST4_HARD_SAFETY['stop_loss_pct'],
         float(exit_settings.get('stop_loss_pct') or TEST4_HARD_SAFETY['stop_loss_pct']),
     )
+    requested_take_profit = float(exit_settings.get('take_profit_pct') or 3.0)
     exit_settings['take_profit_pct'] = min(
-        TEST4_HARD_SAFETY['take_profit_pct'],
-        float(exit_settings.get('take_profit_pct') or TEST4_HARD_SAFETY['take_profit_pct']),
+        TEST4_HARD_SAFETY['take_profit_max_pct'],
+        max(TEST4_HARD_SAFETY['take_profit_min_pct'], requested_take_profit),
     )
     return effective
 

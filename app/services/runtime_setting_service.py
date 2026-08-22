@@ -88,6 +88,7 @@ class RuntimeSettingService:
             "dry_run": bool(self.settings.dry_run),
             "kill_switch": False,
             "scheduler_enabled": False,
+            "automation_profile_scheduler_enabled": False,
             "active_automation_profile_key": None,
             "automation_mode": "off",
             "automation_mode_updated_at": None,
@@ -363,6 +364,9 @@ class RuntimeSettingService:
             "dry_run": bool(row.dry_run),
             "kill_switch": bool(row.kill_switch),
             "scheduler_enabled": bool(row.scheduler_enabled),
+            "automation_profile_scheduler_enabled": bool(
+                getattr(row, "automation_profile_scheduler_enabled", False)
+            ),
             "active_automation_profile_key": getattr(row, "active_automation_profile_key", None),
             "automation_mode": str(getattr(row, "automation_mode", None) or "off"),
             "automation_mode_updated_at": getattr(
@@ -2705,6 +2709,7 @@ class RuntimeSettingService:
             "dry_run",
             "kill_switch",
             "scheduler_enabled",
+            "automation_profile_scheduler_enabled",
             "active_automation_profile_key",
             "automation_mode",
             "automation_mode_updated_at",

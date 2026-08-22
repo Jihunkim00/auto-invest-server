@@ -1,3 +1,6 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.automation_profile_service import (
     AutomationProfileConflict,
@@ -193,8 +196,71 @@ def test_kis_profile_runtime_uses_test4_hard_safety_floor(db_session):
     assert effective['capital']['max_order_notional_krw'] == 1_000_000
     assert effective['capital']['cash_only'] is True
     assert effective['exit']['stop_loss_pct'] == 2
-    assert effective['exit']['take_profit_pct'] == 3
+    assert effective['exit']['take_profit_pct'] == 10
 
     readiness = service.readiness(db_session, str(created['id']))
     assert readiness['effective_settings']['max_open_positions'] == 1
     assert readiness['requires_pr109_portfolio_engine'] is True
+def test_future_selected_profile_is_scheduled_and_arms_profile_scheduler_only(db_session):
+    service = AutomationProfileService()
+    created = service.create(
+        db_session,
+        _request(
+            profile_key='future-schedule',
+            entry={
+                'analysis_times': ['09:10', '11:30', '13:30'],
+                'no_new_entry_after': '14:00',
+            },
+            operation={
+                'start_date': '2099-08-24',
+                'end_date': '2099-09-30',
+                'weekdays_only': True,
+                'timezone': 'Asia/Seoul',
+            },
+        ),
+    )
+
+    service.activate(db_session, str(created['id']))
+    state = service.list_profiles(db_session)
+    assert state['selected_profile']['profile_key'] == 'future-schedule'
+    assert state['selected_profile_status'] == 'scheduled'
+    assert state['active_profile'] is None
+    assert state['automation_selected'] is True
+
+    runtime = service.runtime_settings.get_settings_read_only(db_session)
+    assert runtime['automation_profile_scheduler_enabled'] is True
+    assert runtime['scheduler_enabled'] is False
+    assert runtime['dry_run'] is True
+    assert runtime['kill_switch'] is False
+
+    schedule = service.selected_profile_schedule(
+        db_session,
+        now=datetime(2099, 8, 23, 12, tzinfo=ZoneInfo('Asia/Seoul')),
+    )
+    assert schedule['status'] == 'scheduled'
+    assert schedule['analysis_times'] == ['09:10', '11:30', '13:30']
+    assert schedule['next_run_at'].isoformat() == '2099-08-24T09:10:00+09:00'
+
+    active_schedule = service.selected_profile_schedule(
+        db_session,
+        now=datetime(2099, 8, 24, 10, tzinfo=ZoneInfo('Asia/Seoul')),
+    )
+    assert active_schedule['status'] == 'active'
+    assert active_schedule['next_run_at'].isoformat() == '2099-08-24T11:30:00+09:00'
+
+
+def test_take_profit_outside_pr110_range_is_rejected(db_session):
+    service = AutomationProfileService()
+    for value in (0.5, 15.1):
+        try:
+            service.create(
+                db_session,
+                _request(
+                    profile_key=f'invalid-tp-{value}',
+                    exit={'take_profit_pct': value},
+                ),
+            )
+        except AutomationProfileValidationError as exc:
+            assert any(item['field'] == 'exit.take_profit_pct' for item in exc.errors)
+        else:
+            raise AssertionError('invalid take profit unexpectedly created')

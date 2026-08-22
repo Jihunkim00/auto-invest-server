@@ -5,7 +5,7 @@ import hashlib
 import json
 import re
 import secrets
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -99,6 +99,18 @@ class AutomationProfileService:
     def __init__(self, *, runtime_settings: RuntimeSettingService | None = None) -> None:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
 
+    def selected_profile(self, db: Session) -> StrategyProfile | None:
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        active_key = str(runtime.get("active_automation_profile_key") or "").strip().lower()
+        if not active_key:
+            return None
+        return (
+            db.query(StrategyProfile)
+            .filter(StrategyProfile.profile_key == active_key)
+            .filter(StrategyProfile.profile_key.isnot(None))
+            .first()
+        )
+
     def list_profiles(self, db: Session) -> dict[str, Any]:
         rows = (
             db.query(StrategyProfile)
@@ -106,17 +118,62 @@ class AutomationProfileService:
             .order_by(StrategyProfile.id.asc())
             .all()
         )
-        runtime = self.runtime_settings.get_settings_read_only(db)
-        active_key = str(runtime.get('active_automation_profile_key') or '').strip()
-        active = next(
-            (self.serialize(row) for row in rows if row.profile_key == active_key and self._status(row) == 'active'),
-            None,
-        )
-        if active is None:
-            active = next((self.serialize(row) for row in rows if self._status(row) == 'active'), None)
+        selected_row = self.selected_profile(db)
+        selected = self.serialize(selected_row) if selected_row is not None else None
+        selected_status = self._status(selected_row) if selected_row is not None else None
+        active = selected if selected_status == "active" else None
         return {
-            'profiles': [self.serialize(row) for row in rows],
-            'active_profile': active,
+            "profiles": [self.serialize(row) for row in rows],
+            "selected_profile": selected,
+            "selected_profile_status": selected_status,
+            "automation_selected": selected is not None,
+            "active_profile": active,
+        }
+
+    def selected_profile_schedule(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        row = self.selected_profile(db)
+        if row is None:
+            return None
+        settings = self._settings(row)
+        timezone_name = str(settings["operation"].get("timezone") or "Asia/Seoul")
+        timezone = _profile_timezone(settings, row.market or "KR")
+        local_now = _aware_in_timezone(now, timezone)
+        status = self._status(row, now=local_now)
+        cutoff = _parse_time(settings["entry"]["no_new_entry_after"])
+        analysis_times = sorted({
+            value.strftime("%H:%M")
+            for value in (_parse_time(value) for value in settings["entry"]["analysis_times"])
+            if value < cutoff
+        })
+        start = date.fromisoformat(settings["operation"]["start_date"])
+        end = date.fromisoformat(settings["operation"]["end_date"])
+        next_run = None
+        if status in {"scheduled", "active"} and analysis_times:
+            cursor = max(local_now.date(), start)
+            while cursor <= end:
+                if not settings["operation"].get("weekdays_only") or cursor.weekday() < 5:
+                    for value in analysis_times:
+                        hour, minute = (int(part) for part in value.split(":", 1))
+                        candidate = datetime.combine(cursor, time(hour, minute), tzinfo=timezone)
+                        if candidate > local_now:
+                            next_run = candidate
+                            break
+                if next_run is not None:
+                    break
+                cursor += timedelta(days=1)
+        return {
+            "selected": True,
+            "profile": self.serialize(row),
+            "profile_key": row.profile_key,
+            "status": status,
+            "timezone": timezone_name,
+            "analysis_times": analysis_times,
+            "next_run_at": next_run,
         }
 
     def create(self, db: Session, request: AutomationProfileWriteRequest) -> dict[str, Any]:
@@ -221,12 +278,9 @@ class AutomationProfileService:
         db.commit()
         db.refresh(row)
         runtime = self.runtime_settings.get_settings_read_only(db)
-        if (
-            runtime.get("active_automation_profile_key") == row.profile_key
-            and self._status(row) != "active"
-        ):
+        if (runtime.get("active_automation_profile_key") == row.profile_key and self._status(row) in {"paused", "archived", "disabled"}):
             self.runtime_settings.update_settings(
-                db, {"active_automation_profile_key": None}
+                db, {"active_automation_profile_key": None, "automation_profile_scheduler_enabled": False}
             )
         return self.serialize(row)
 
@@ -240,7 +294,7 @@ class AutomationProfileService:
         db.refresh(row)
         runtime = self.runtime_settings.get_settings_read_only(db)
         if runtime.get('active_automation_profile_key') == row.profile_key:
-            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None})
+            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
         return self.serialize(row)
 
     def activate(self, db: Session, profile_id: str) -> dict[str, Any]:
@@ -261,7 +315,7 @@ class AutomationProfileService:
         db.refresh(row)
         # Select policy at runtime; safety and authorization remain separate.
         self.runtime_settings.update_settings(
-            db, {'active_automation_profile_key': row.profile_key},
+            db, {'active_automation_profile_key': row.profile_key, 'automation_profile_scheduler_enabled': True},
         )
         return {
             'status': 'active',
@@ -280,7 +334,7 @@ class AutomationProfileService:
         db.refresh(row)
         runtime = self.runtime_settings.get_settings_read_only(db)
         if runtime.get('active_automation_profile_key') == row.profile_key:
-            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None})
+            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
         return {'status': 'paused', 'profile': self.serialize(row), 'safety': _profile_safety(setting_changed=True)}
 
     def validate_profile(self, db: Session, profile_id: str) -> dict[str, Any]:
@@ -422,6 +476,8 @@ class AutomationProfileService:
         if float(universe['min_price_krw']) >= float(universe['max_price_krw']):
             errors.append({'field': 'universe.price_filter', 'message': 'min price must be below max price'})
         times = list(entry['analysis_times'])
+        if not times:
+            errors.append({'field': 'entry.analysis_times', 'message': 'at least one analysis time is required'})
         parsed_times = []
         for value in times:
             try:
@@ -436,6 +492,8 @@ class AutomationProfileService:
             cutoff = _parse_time(entry['no_new_entry_after'])
             if cutoff > time(15, 30):
                 errors.append({'field': 'entry.no_new_entry_after', 'message': 'must not be after 15:30'})
+            if parsed_times and any(value >= cutoff for value in parsed_times):
+                errors.append({'field': 'entry.analysis_times', 'message': 'BUY analysis times must be before no_new_entry_after'})
         except ValueError:
             errors.append({'field': 'entry.no_new_entry_after', 'message': 'invalid HH:mm'})
         if not 1 <= int(entry['max_new_entries_per_day']) <= 3:
@@ -448,8 +506,8 @@ class AutomationProfileService:
             errors.append({'field': 'monitoring.interval_seconds', 'message': 'must be at least 30 seconds'})
         if not 0 < float(exit_settings['stop_loss_pct']) <= 50:
             errors.append({'field': 'exit.stop_loss_pct', 'message': 'must be > 0 and <= 50'})
-        if not 0 < float(exit_settings['take_profit_pct']) <= 100:
-            errors.append({'field': 'exit.take_profit_pct', 'message': 'must be > 0 and <= 100'})
+        if not 1 <= float(exit_settings['take_profit_pct']) <= 15:
+            errors.append({'field': 'exit.take_profit_pct', 'message': 'must be between 1 and 15 percent'})
         try:
             start = date.fromisoformat(operation['start_date'])
             end = date.fromisoformat(operation['end_date'])
@@ -522,23 +580,29 @@ class AutomationProfileService:
             raw = {}
         return self._normalize_settings(raw if isinstance(raw, dict) else {})
 
-    def _status(self, row: StrategyProfile) -> str:
-        if row.custom_status in {'paused', 'archived', 'disabled'}:
+    def _status(self, row: StrategyProfile | None, *, now: datetime | None = None) -> str:
+        if row is None:
+            return "disabled"
+        if row.custom_status in {"paused", "archived", "disabled"}:
             return str(row.custom_status)
-        return self._period_status(row, self._settings(row)) if row.enabled else 'disabled'
+        return self._period_status(row, self._settings(row), now=now) if row.enabled else "disabled"
 
-    def _period_status(self, row: StrategyProfile, settings: dict[str, Any]) -> str:
-        if row.custom_status in {'paused', 'archived', 'disabled'}:
-            return str(row.custom_status)
-        now = datetime.now(_profile_timezone(settings, row.market or 'KR')).date()
-        start = date.fromisoformat(settings['operation']['start_date'])
-        end = date.fromisoformat(settings['operation']['end_date'])
-        if now < start:
-            return 'scheduled'
-        if now > end:
-            return 'ended'
-        return 'active' if row.enabled else 'disabled'
-
+    def _period_status(
+        self,
+        row: StrategyProfile,
+        settings: dict[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> str:
+        current = _aware_in_timezone(now, _profile_timezone(settings, row.market or "KR"))
+        current_date = current.date()
+        start = date.fromisoformat(settings["operation"]["start_date"])
+        end = date.fromisoformat(settings["operation"]["end_date"])
+        if current_date < start:
+            return "scheduled"
+        if current_date > end:
+            return "ended"
+        return "active" if row.enabled else "disabled"
 
 def _deep_merge(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(base)
@@ -572,6 +636,13 @@ def _parse_time(value: Any) -> time:
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
+
+def _aware_in_timezone(value: datetime | None, timezone: ZoneInfo) -> datetime:
+    if value is None:
+        return datetime.now(timezone)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone)
+    return value.astimezone(timezone)
 
 def _profile_timezone(settings: dict[str, Any], market: str) -> ZoneInfo:
     operation = settings.get('operation') if isinstance(settings.get('operation'), dict) else {}

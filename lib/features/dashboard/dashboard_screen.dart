@@ -560,51 +560,68 @@ class _HomeAutomationProfileCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = controller.schedulerStatus;
-    final profile = status.activeProfileName?.trim().isNotEmpty == true
-        ? status.activeProfileName!.trim()
-        : '활성 프로필 없음';
-    final nextRun = status.nextProfileRunAt ?? '예정 없음';
-    final heartbeat = status.schedulerHeartbeatHealthy ? '정상' : '확인 필요';
+    final selectedName = status.selectedProfileName?.trim();
+    final activeName = status.activeProfileName?.trim();
+    final profile = selectedName != null && selectedName.isNotEmpty
+        ? selectedName
+        : (activeName != null && activeName.isNotEmpty ? activeName : "선택된 자동화 프로필 없음");
+    final profileStatus = status.selectedProfileStatus ?? "disabled";
+    final nextRun = status.nextProfileRunAt ?? "예정 없음";
+    final schedule = status.effectiveProfileAnalysisTimes.isNotEmpty
+        ? status.effectiveProfileAnalysisTimes.join(" · ")
+        : (status.profileAnalysisTimes.isEmpty ? "예정 없음" : status.profileAnalysisTimes.join(" · "));
+    final tp = status.profileTakeProfitPct == null
+        ? "-"
+        : status.profileTakeProfitPct!.toString() + "%";
+    final sl = status.profileStopLossPct == null
+        ? "-"
+        : status.profileStopLossPct!.toString() + "%";
+    final dates = (status.selectedProfileStartDate == null &&
+            status.selectedProfileEndDate == null)
+        ? "-"
+        : (status.selectedProfileStartDate ?? "-") + " ~ " +
+            (status.selectedProfileEndDate ?? "-");
+    final heartbeat = status.schedulerHeartbeatHealthy ? "정상" : "확인 필요";
     return SectionCard(
-      key: const ValueKey('home-automation-profile-status'),
+      key: const ValueKey("home-automation-profile-status"),
       padding: const EdgeInsets.all(14),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           const Icon(Icons.auto_awesome_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('자동 운용 상태', style: Theme.of(context).textTheme.titleMedium),
+            child: Text("자동화 프로필 운용 상태", style: Theme.of(context).textTheme.titleMedium),
           ),
           _SafetyPill(
-            text: status.schedulerEngineRunning ? '엔진 실행 중' : '엔진 중지',
-            color: status.schedulerEngineRunning
-                ? Colors.greenAccent
-                : Colors.orangeAccent,
+            text: status.schedulerEngineRunning ? "엔진 실행 중" : "엔진 중지",
+            color: status.schedulerEngineRunning ? Colors.greenAccent : Colors.orangeAccent,
           ),
         ]),
         const SizedBox(height: 10),
-        Text('활성 프로필: $profile', style: const TextStyle(fontWeight: FontWeight.w800)),
+        Text("선택 프로필: " + profile, style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          _CompactMetric(label: '브로커/시장', value: '${status.activeProfileProvider.toUpperCase()} · ${status.activeProfileMarket}'),
-          _CompactMetric(label: '프로필 스케줄러', value: status.profileSchedulerEnabled ? '활성' : '대기'),
-          _CompactMetric(label: 'runtime 권한', value: status.runtimeAuthorized ? '허용' : '차단'),
-          _CompactMetric(label: '포지션', value: '${status.activePositionCount}'),
-          _CompactMetric(label: '오늘 주문', value: '${status.dailyOrderCount}'),
-          _CompactMetric(label: '다음 실행', value: nextRun),
-          _CompactMetric(label: 'heartbeat', value: heartbeat),
-          _CompactMetric(label: 'dry-run', value: status.global.dryRun ? 'ON' : 'OFF'),
-          _CompactMetric(label: 'kill switch', value: status.global.killSwitch ? 'ON' : 'OFF'),
+          _CompactMetric(label: "상태", value: profileStatus),
+          _CompactMetric(label: "브로커/시장", value: status.selectedProfileProvider.toUpperCase() + " · " + status.selectedProfileMarket),
+          _CompactMetric(label: "운용 기간", value: dates),
+          _CompactMetric(label: "분석 스케줄(KST)", value: schedule),
+          _CompactMetric(label: "Take Profit", value: tp),
+          _CompactMetric(label: "Stop Loss", value: sl),
+          _CompactMetric(label: "다음 실행", value: nextRun),
+          _CompactMetric(label: "프로필 스케줄러", value: status.profileSchedulerEnabled ? "활성" : "중지"),
+          _CompactMetric(label: "runtime 권한", value: status.runtimeAuthorized ? "허용" : "차단"),
+          _CompactMetric(label: "heartbeat", value: heartbeat),
+          _CompactMetric(label: "dry-run", value: status.global.dryRun ? "ON" : "OFF"),
+          _CompactMetric(label: "kill switch", value: status.global.killSwitch ? "ON" : "OFF"),
         ]),
         if (status.schedulerLastError?.trim().isNotEmpty == true) ...[
           const SizedBox(height: 8),
-          Text('엔진 오류: ${status.schedulerLastError}', style: const TextStyle(color: Colors.orangeAccent)),
+          Text("엔진 오류: " + status.schedulerLastError!, style: const TextStyle(color: Colors.orangeAccent)),
         ],
       ]),
     );
   }
 }
-
 class _CompactMetric extends StatelessWidget {
   const _CompactMetric({
     required this.label,

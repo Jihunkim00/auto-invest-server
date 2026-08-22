@@ -47,10 +47,12 @@ class AutomationStrategyProfile {
 }
 
 class AutomationStrategyProfileList {
-  const AutomationStrategyProfileList({required this.profiles, this.activeProfile});
+  const AutomationStrategyProfileList({required this.profiles, this.activeProfile, this.selectedProfile, this.selectedProfileStatus});
 
   final List<AutomationStrategyProfile> profiles;
   final AutomationStrategyProfile? activeProfile;
+  final AutomationStrategyProfile? selectedProfile;
+  final String? selectedProfileStatus;
 
   factory AutomationStrategyProfileList.fromJson(Map<String, dynamic> json) {
     final items = json['profiles'] is List ? json['profiles'] as List : const [];
@@ -65,6 +67,10 @@ class AutomationStrategyProfileList {
       activeProfile: active is Map
           ? AutomationStrategyProfile.fromJson(Map<String, dynamic>.from(active))
           : null,
+      selectedProfile: json['selected_profile'] is Map
+          ? AutomationStrategyProfile.fromJson(Map<String, dynamic>.from(json['selected_profile'] as Map))
+          : null,
+      selectedProfileStatus: json['selected_profile_status']?.toString(),
     );
   }
 }

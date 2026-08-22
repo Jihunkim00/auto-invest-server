@@ -21,7 +21,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   final _nameController = TextEditingController();
   final _startController = TextEditingController(text: '2026-08-17');
   final _endController = TextEditingController(text: '2026-09-18');
-  final _timesController = TextEditingController(text: '09:10,11:30,13:30');
+  List<String> _analysisTimes = <String>['09:10', '11:30', '13:30'];
   final _watchlistController = TextEditingController(text: '50');
   final _maxPositionsController = TextEditingController(text: '1');
   final _targetPctController = TextEditingController(text: '10');
@@ -44,7 +44,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _nameController,
       _startController,
       _endController,
-      _timesController,
+
       _watchlistController,
       _maxPositionsController,
       _targetPctController,
@@ -84,6 +84,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _nameController.text = '';
       _sizingMode = 'equity_pct';
       _maxPositionsController.text = '1';
+      _analysisTimes = <String>['09:10', '11:30', '13:30'];
     });
   }
 
@@ -95,8 +96,10 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           '${profile.operation['start_date'] ?? '2026-08-17'}';
       _endController.text = '${profile.operation['end_date'] ?? '2026-09-18'}';
       final times = profile.entry['analysis_times'];
-      _timesController.text =
-          times is List ? times.join(',') : '09:10,11:30,13:30';
+      _analysisTimes = times is List
+          ? times.map((value) => value.toString()).toSet().toList()
+          : <String>['09:10', '11:30', '13:30'];
+      _analysisTimes.sort();
       _watchlistController.text = '${profile.universe['watchlist_size'] ?? 50}';
       _maxPositionsController.text = '${profile.maxOpenPositions}';
       _targetPctController.text =
@@ -111,6 +114,68 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           '${profile.entry['max_new_entries_per_day'] ?? 1}';
       _sizingMode = '${profile.capital['sizing_mode'] ?? 'equity_pct'}';
     });
+  }
+
+  Future<void> _addAnalysisTime() async {
+    final seed = _analysisTimes.isEmpty
+        ? const TimeOfDay(hour: 9, minute: 10)
+        : _timeOfDayFromValue(_analysisTimes.last) ??
+            const TimeOfDay(hour: 9, minute: 10);
+    final picked = await showTimePicker(context: context, initialTime: seed);
+    if (!mounted || picked == null) return;
+    final value = _formatTime(picked);
+    if (_analysisTimes.contains(value)) {
+      setState(() => _error = "분석 시각은 중복될 수 없습니다.");
+      return;
+    }
+    setState(() {
+      _analysisTimes = [..._analysisTimes, value]..sort();
+      _error = null;
+    });
+  }
+
+  void _removeAnalysisTime(String value) {
+    if (_analysisTimes.length <= 1) {
+      setState(() => _error = "분석 시각은 최소 1개가 필요합니다.");
+      return;
+    }
+    setState(() => _analysisTimes = _analysisTimes.where((item) => item != value).toList());
+  }
+
+  TimeOfDay? _timeOfDayFromValue(String value) {
+    final parts = value.split(":");
+    if (parts.length != 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  String _formatTime(TimeOfDay value) =>
+      value.hour.toString().padLeft(2, "0") +
+      ":" +
+      value.minute.toString().padLeft(2, "0");
+
+  String? _validateEditor() {
+    if (_analysisTimes.isEmpty) return "분석 시각은 최소 1개가 필요합니다.";
+    final seen = <String>{};
+    for (final value in _analysisTimes) {
+      final time = _timeOfDayFromValue(value);
+      if (time == null) return "분석 시각은 HH:mm 형식이어야 합니다.";
+      final minutes = time.hour * 60 + time.minute;
+      if (minutes < 9 * 60 || minutes > 15 * 60 + 30) {
+        return "분석 시각은 KST 09:00~15:30 범위여야 합니다.";
+      }
+      if (minutes >= 14 * 60) return "분석 시각은 신규 진입 cutoff 14:00 전이어야 합니다.";
+      if (!seen.add(value)) return "분석 시각은 중복될 수 없습니다.";
+    }
+    final takeProfit = double.tryParse(_takeProfitController.text);
+    if (takeProfit == null || takeProfit < 1 || takeProfit > 15) {
+      return "Take Profit은 1%~15% 범위여야 합니다.";
+    }
+    return null;
   }
 
   Map<String, dynamic> _body() {
@@ -145,11 +210,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         'exclude_spac': true,
       },
       'entry': {
-        'analysis_times': _timesController.text
-            .split(',')
-            .map((value) => value.trim())
-            .where((value) => value.isNotEmpty)
-            .toList(),
+        'analysis_times': List<String>.from(_analysisTimes),
         'no_new_entry_after': '14:00',
         'max_new_entries_per_day':
             int.tryParse(_maxEntriesController.text) ?? 1,
@@ -167,6 +228,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       'operation': {
         'start_date': _startController.text.trim(),
         'end_date': _endController.text.trim(),
+        'timezone': 'Asia/Seoul',
         'weekdays_only': true,
         'auto_start': false,
         'end_policy': 'manage_until_exit',
@@ -176,6 +238,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   }
 
   Future<void> _save() async {
+    final validation = _validateEditor();
+    if (validation != null) {
+      setState(() => _error = validation);
+      return;
+    }
     setState(() => _busy = true);
     try {
       final body = _body();
@@ -248,6 +315,16 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
+
+  bool _isSelected(AutomationStrategyProfile profile) =>
+      _list?.selectedProfile?.id == profile.id;
+
+  bool _isArmed(AutomationStrategyProfile profile) {
+    if (!_isSelected(profile)) return false;
+    final status = _list?.selectedProfileStatus;
+    return status == "scheduled" || status == "active";
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -293,7 +370,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                             key: ValueKey(
                                 'automation-profile-activate-${profile.id}'),
                             tooltip: '프로필 활성화',
-                            onPressed: _busy || profile.status == 'active'
+                            onPressed: _busy || profile.status == 'active' || _isArmed(profile)
                                 ? null
                                 : () => _activate(profile),
                             icon: const Icon(Icons.play_arrow_outlined),
@@ -302,7 +379,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                             key: ValueKey(
                                 'automation-profile-pause-${profile.id}'),
                             tooltip: '프로필 일시정지',
-                            onPressed: _busy || profile.status != 'active'
+                            onPressed: _busy || (!_isSelected(profile) && profile.status != 'active')
                                 ? null
                                 : () => _pause(profile),
                             icon: const Icon(Icons.pause_outlined),
@@ -372,10 +449,35 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                 controller: _maxEntriesController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: '일일 신규 진입 횟수')),
-            TextField(
-                controller: _timesController,
-                decoration:
-                    const InputDecoration(labelText: '분석 시각 (HH:mm,...)')),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: Text("분석 시각 (KST)")),
+                    OutlinedButton.icon(
+                      key: const ValueKey("automation-profile-add-analysis-time"),
+                      onPressed: _busy ? null : _addAnalysisTime,
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text("시간 추가"),
+                    ),
+                  ],
+                ),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    for (final value in _analysisTimes)
+                      InputChip(
+                        label: Text(value),
+                        onDeleted: () => _removeAnalysisTime(value),
+                      ),
+                  ],
+                ),
+                const Text("중복 금지 · 최소 1개 · 09:00~15:30 · 신규 진입 cutoff 14:00 전",
+                    style: TextStyle(color: Colors.white54)),
+              ],
+            ),
             Row(
               children: [
                 Expanded(
@@ -436,6 +538,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                     child: TextField(
+                        key: const ValueKey("automation-profile-take-profit"),
                         controller: _takeProfitController,
                         keyboardType: TextInputType.number,
                         decoration: const InputDecoration(labelText: '익절 비율'))),

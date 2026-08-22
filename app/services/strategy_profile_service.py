@@ -155,23 +155,30 @@ class StrategyProfileService:
             "active_profile": self.serialize_profile(active),
         }
 
-    def active_profile(self, db: Session) -> StrategyProfile:
+    def selected_profile(self, db: Session) -> StrategyProfile | None:
         self.ensure_seeded(db)
         runtime = db.query(RuntimeSetting).order_by(RuntimeSetting.id.asc()).first()
-        active_key = str(getattr(runtime, 'active_automation_profile_key', None) or '').strip().lower()
-        if active_key:
-            custom = (
-                db.query(StrategyProfile)
-                .filter(StrategyProfile.profile_key == active_key)
-                .filter(StrategyProfile.enabled == True)  # noqa: E712
-                .filter(StrategyProfile.custom_status == 'active')
-                .first()
-            )
-            if custom is not None:
+        active_key = str(getattr(runtime, "active_automation_profile_key", None) or "").strip().lower()
+        if not active_key:
+            return None
+        return (
+            db.query(StrategyProfile)
+            .filter(StrategyProfile.profile_key == active_key)
+            .filter(StrategyProfile.enabled == True)
+            .first()
+        )
+
+    def active_profile(self, db: Session) -> StrategyProfile:
+        self.ensure_seeded(db)
+        custom = self.selected_profile(db)
+        if custom is not None:
+            from app.services.automation_profile_service import AutomationProfileService
+
+            if AutomationProfileService()._status(custom) == "active":
                 return custom
         row = (
             db.query(StrategyProfile)
-            .filter(StrategyProfile.is_active == True)  # noqa: E712
+            .filter(StrategyProfile.is_active == True)
             .order_by(StrategyProfile.id.asc())
             .first()
         )
@@ -181,7 +188,6 @@ class StrategyProfileService:
             db.commit()
             db.refresh(row)
         return row
-
     def get_profile(self, db: Session, profile_name: str) -> StrategyProfile:
         self.ensure_seeded(db)
         return self._profile_or_raise(db, profile_name)
@@ -311,10 +317,12 @@ class StrategyProfileService:
                 provider=provider,
                 market=market,
             )
+            from app.services.automation_profile_service import AutomationProfileService
+            profile_status = AutomationProfileService()._status(row)
             payload.update({
                 "profile_name": row.profile_key,
                 "display_name": row.custom_name or row.display_name,
-                "is_active": row.custom_status == "active" and bool(row.enabled),
+                "is_active": profile_status == "active" and bool(row.enabled),
                 "profile_key": row.profile_key,
                 "provider": provider,
                 "market": market,
@@ -323,6 +331,8 @@ class StrategyProfileService:
                 "max_order_notional_krw": float(effective.get("capital", {}).get("max_order_notional_krw") or 1_000_000),
                 "stop_loss_pct": -float(effective.get("exit", {}).get("stop_loss_pct") or 2) / 100.0,
                 "take_profit_pct": float(effective.get("exit", {}).get("take_profit_pct") or 3) / 100.0,
+                "status": profile_status,
+                "enabled": bool(row.enabled),
                 "automation_settings": effective,
             })
         return payload

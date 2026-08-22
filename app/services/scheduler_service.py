@@ -39,6 +39,7 @@ from app.services.auto_exit_candidate_service import AutoExitCandidateService
 from app.services.position_exit_review_service import PositionExitReviewService
 from app.services.automation_release_service import AutomationReleaseService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.strategy_auto_buy_scheduler_service import (
     StrategyAutoBuySchedulerService,
 )
@@ -61,6 +62,7 @@ class SchedulerService:
     def __init__(self):
         self.orchestrator = TradingOrchestratorService()
         self.runtime_settings = RuntimeSettingService()
+        self.automation_profiles = AutomationProfileService()
         self.watchlist_run_service = WatchlistRunService()
         self.strategy_auto_buy_scheduler_service = StrategyAutoBuySchedulerService()
         self.position_management_slots = [
@@ -226,13 +228,13 @@ class SchedulerService:
                 if run_key not in self._slot_runs:
                     self._slot_runs.add(run_key)
                     self._safe_call(self._run_operation_test4_active_monitor_scheduled_once)
-            for slot_name, hour, minute in self._strategy_auto_buy_slots:
+            strategy_slots = self._strategy_schedule_slots(now_kr)
+            for slot_name, hour, minute in strategy_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:strategy_auto_buy_dry_run:{slot_name}"
                     if run_key not in self._slot_runs:
                         self._slot_runs.add(run_key)
                         self._safe_call(self._run_strategy_auto_buy_dry_run_scheduled_once, slot_name)
-
             for slot_name, hour, minute in self._broker_sync_watchdog_slots:
                 if now_kr.hour == hour and now_kr.minute == minute:
                     run_key = f"{kr_day_key}:KR:broker_sync_watchdog:{slot_name}"
@@ -273,7 +275,36 @@ class SchedulerService:
                 self._last_profile_run_result = "error"
             return None
 
-    def _next_strategy_profile_run_at(self, now_kr: datetime) -> datetime:
+    def _strategy_schedule_slots(self, now_kr: datetime) -> list[tuple[str, int, int]]:
+        db = SessionLocal()
+        try:
+            schedule = self.automation_profiles.selected_profile_schedule(db, now=now_kr)
+            if schedule is None:
+                return list(self._strategy_auto_buy_slots)
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if not bool(runtime.get("automation_profile_scheduler_enabled")):
+                return []
+            if schedule.get("status") != "active":
+                return []
+            result = []
+            for value in schedule.get("analysis_times") or []:
+                hour, minute = (int(part) for part in str(value).split(":", 1))
+                result.append((f"profile:{value}", hour, minute))
+            return result
+        finally:
+            db.close()
+
+    def _next_strategy_profile_run_at(self, now_kr: datetime) -> datetime | None:
+        db = SessionLocal()
+        try:
+            schedule = self.automation_profiles.selected_profile_schedule(db, now=now_kr)
+            if schedule is not None:
+                runtime = self.runtime_settings.get_settings_read_only(db)
+                if not bool(runtime.get("automation_profile_scheduler_enabled")):
+                    return None
+                return schedule.get("next_run_at")
+        finally:
+            db.close()
         for _, hour, minute in self._strategy_auto_buy_slots:
             candidate = now_kr.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if candidate > now_kr:
@@ -281,7 +312,6 @@ class SchedulerService:
         next_day = now_kr + timedelta(days=1)
         _, hour, minute = self._strategy_auto_buy_slots[0]
         return next_day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-
     def _run_startup_reconciliation(self):
         db = SessionLocal()
         try:

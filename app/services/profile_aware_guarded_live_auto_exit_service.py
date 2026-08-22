@@ -769,7 +769,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         )
 
     def _active_profile(self, db: Session) -> dict[str, Any]:
-        row = self.strategy_profiles.active_profile(db)
+        row = self.strategy_profiles.selected_profile(db) or self.strategy_profiles.active_profile(db)
         return self.strategy_profiles.serialize_profile(row)
 
     def _global_settings(self) -> Any:

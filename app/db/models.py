@@ -193,6 +193,7 @@ class RuntimeSetting(Base):
     dry_run = Column(Boolean, nullable=False, default=True)
     kill_switch = Column(Boolean, nullable=False, default=False)
     scheduler_enabled = Column(Boolean, nullable=False, default=False)
+    automation_profile_scheduler_enabled = Column(Boolean, nullable=False, default=False)
     # Runtime selection for the custom Automation Profile layer.
     active_automation_profile_key = Column(String(80), nullable=True, index=True)
     automation_mode = Column(String(32), nullable=False, default="off")

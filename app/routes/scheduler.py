@@ -66,8 +66,12 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
     runtime_settings = runtime_service.get_settings_read_only(db)
-    profile_state = AutomationProfileService().list_profiles(db)
+    automation_profiles = AutomationProfileService()
+    profile_state = automation_profiles.list_profiles(db)
+    selected_profile = profile_state.get("selected_profile") or {}
     active_profile = profile_state.get("active_profile") or {}
+    selected_profile_status = profile_state.get("selected_profile_status")
+    profile_schedule = automation_profiles.selected_profile_schedule(db)
     scheduler_runtime = scheduler_service.runtime_status()
     kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
     current_operation_mode = runtime_service.current_operation_mode_read_only(db)
@@ -187,20 +191,34 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "active_profile_provider": active_profile.get("provider") or "kis",
         "active_profile_market": active_profile.get("market") or "KR",
         "active_profile_status": active_profile.get("status"),
+        "selected_profile": selected_profile or None,
+        "selected_profile_name": selected_profile.get("name") or selected_profile.get("display_name"),
+        "selected_profile_provider": selected_profile.get("provider") or "kis",
+        "selected_profile_market": selected_profile.get("market") or "KR",
+        "selected_profile_start_date": (((selected_profile.get("effective_settings") or {}).get("operation") or {}).get("start_date")),
+        "selected_profile_end_date": (((selected_profile.get("effective_settings") or {}).get("operation") or {}).get("end_date")),
+        "selected_profile_status": selected_profile_status,
+        "automation_selected": bool(profile_state.get("automation_selected")),
         "automation_enabled": bool(
-            active_profile.get("enabled")
-            and active_profile.get("status") == "active"
+            selected_profile.get("enabled")
+            and selected_profile_status in {"scheduled", "active"}
         ),
         "profile_scheduler_enabled": bool(
-            runtime_state["scheduler_enabled"]
-            and active_profile.get("enabled")
-            and active_profile.get("status") == "active"
+            runtime_settings.get("automation_profile_scheduler_enabled")
+            and selected_profile.get("enabled")
+            and selected_profile_status in {"scheduled", "active"}
         ),
         "runtime_authorized": bool(real_orders_allowed),
         "daily_order_count": daily_order_count,
         "daily_order_limit": daily_live_order_limit,
         "active_position_count": int(active_position_count),
         "active_profile": active_profile or None,
+        "profile_analysis_times": (profile_schedule or {}).get("analysis_times") or [],
+        "effective_profile_analysis_times": (((selected_profile.get("effective_settings") or {}).get("entry") or {}).get("analysis_times") or (((selected_profile.get("settings") or {}).get("entry") or {}).get("analysis_times") or [])),
+        "profile_next_run_at": ((profile_schedule or {}).get("next_run_at").isoformat() if (profile_schedule or {}).get("next_run_at") is not None else None),
+        "next_profile_run_at": ((profile_schedule or {}).get("next_run_at").isoformat() if (profile_schedule or {}).get("next_run_at") is not None else None),
+        "profile_stop_loss_pct": (((selected_profile.get("effective_settings") or {}).get("exit") or {}).get("stop_loss_pct")),
+        "profile_take_profit_pct": (((selected_profile.get("effective_settings") or {}).get("exit") or {}).get("take_profit_pct")),
         "current_operation_mode": current_operation_mode,
         "display_mode_label": _display_mode_label(current_operation_mode),
         "display_warning_level": warning_level,

@@ -38,6 +38,7 @@ from app.services.kis_order_sync_service import (
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.strategy_profile_service import StrategyProfileService
 
 
 GUARDED_SELL_MODE = "guarded_position_sell"
@@ -59,6 +60,7 @@ class PositionExitReviewService:
     ):
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
+        self.strategy_profiles = StrategyProfileService()
         self.session_service = session_service or MarketSessionService()
         self.manual_order_service = manual_order_service or KisManualOrderService(
             client,
@@ -643,11 +645,23 @@ class PositionExitReviewService:
         raw: dict[str, Any],
         *,
         snapshot: dict[str, Any],
+        take_profit_threshold: Any = None,
+        stop_loss_threshold: Any = None,
     ) -> dict[str, Any]:
         position = _normalize_position(raw)
         symbol = str(position.get("symbol") or "").upper()
-        diagnostics = position_pl_diagnostics(position)
-        reasons, diagnostics = position_exit_threshold_reasons(position)
+        if take_profit_threshold is None and stop_loss_threshold is None:
+            take_profit_threshold, stop_loss_threshold = self._profile_exit_thresholds(db)
+        diagnostics = position_pl_diagnostics(
+            position,
+            take_profit_threshold=take_profit_threshold,
+            stop_loss_threshold=stop_loss_threshold,
+        )
+        reasons, diagnostics = position_exit_threshold_reasons(
+            position,
+            take_profit_threshold=take_profit_threshold,
+            stop_loss_threshold=stop_loss_threshold,
+        )
         stop_loss = "stop_loss_triggered" in reasons
         take_profit = "take_profit_triggered" in reasons
         duplicate_sell = _has_duplicate_open_sell(
@@ -715,6 +729,14 @@ class PositionExitReviewService:
             ),
             "next_safe_action": _next_safe_review_action(status),
         }
+
+    def _profile_exit_thresholds(self, db: Session) -> tuple[Any, Any]:
+        try:
+            profile = self.strategy_profiles.selected_profile(db) or self.strategy_profiles.active_profile(db)
+            serialized = self.strategy_profiles.serialize_profile(profile)
+            return serialized.get("take_profit_pct"), serialized.get("stop_loss_pct")
+        except Exception:
+            return None, None
 
     def _position_by_symbol(
         self,
