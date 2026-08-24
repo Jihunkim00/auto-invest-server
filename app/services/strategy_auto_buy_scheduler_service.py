@@ -91,7 +91,7 @@ class StrategyAutoBuySchedulerService:
                 "promotion_queue_only": True,
                 "allow_live_orders": False,
                 "real_order_submit_allowed": False,
-                "active_profile": profile.get("profile_name"),
+                **self._profile_context(db, profile),
                 "allowed_profiles": _allowed_profiles(settings),
                 "runs_today": runs_today,
                 "max_runs_per_day": _int(
@@ -145,12 +145,16 @@ class StrategyAutoBuySchedulerService:
             latest_run=latest,
             now_utc=now_utc,
         )
-        request_payload = payload.model_dump(mode="json")
+        profile_context = self._profile_context(db, profile)
+        request_payload = {
+            **payload.model_dump(mode="json"),
+            **profile_context,
+        }
         if block_reason is not None:
             response = self._blocked_response(
                 block_reason=block_reason,
                 request_payload=request_payload,
-                active_profile=profile.get("profile_name"),
+                profile_context=profile_context,
             )
             run = self._save_scheduler_run(
                 db,
@@ -169,7 +173,9 @@ class StrategyAutoBuySchedulerService:
         dry_request = ProfileAwareDryRunAutoBuyRequest(
             provider=payload.provider,
             market=payload.market,
-            profile_name=profile.get("profile_name"),
+            profile_name=profile_context["legacy_profile_name"],
+            automation_profile_key=profile_context["automation_profile_key"],
+            automation_profile_name=profile_context["automation_profile_name"],
             symbol=payload.symbol,
             max_candidates=5,
             trigger_source=TRIGGER_SOURCE,
@@ -204,7 +210,7 @@ class StrategyAutoBuySchedulerService:
             "action": str(dry_result.get("action") or "hold"),
             "provider": payload.provider,
             "market": payload.market,
-            "active_profile": dry_result.get("active_profile") or profile.get("profile_name"),
+            **profile_context,
             "dry_run_result": dry_result,
             "promotion": promotion,
             "created_promotion": created_promotion,
@@ -344,6 +350,28 @@ class StrategyAutoBuySchedulerService:
         if row is None:
             row = self.strategy_profiles.active_profile(db)
         return self.strategy_profiles.serialize_profile(row)
+
+    def _profile_context(
+        self,
+        db: Session,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        automation_profile_key = profile.get("profile_key")
+        legacy_profile_name = (
+            self.strategy_profiles.legacy_active_profile(db).profile_name
+            if automation_profile_key
+            else profile.get("profile_name")
+        )
+        return {
+            "active_profile": profile.get("profile_name"),
+            "profile_key": automation_profile_key or profile.get("profile_name"),
+            "profile_name": legacy_profile_name,
+            "automation_profile_key": automation_profile_key,
+            "automation_profile_name": (
+                profile.get("display_name") if automation_profile_key else None
+            ),
+            "legacy_profile_name": legacy_profile_name,
+        }
     def _latest_run(self, db: Session) -> TradeRunLog | None:
         return (
             db.query(TradeRunLog)
@@ -404,14 +432,14 @@ class StrategyAutoBuySchedulerService:
         *,
         block_reason: str,
         request_payload: dict[str, Any],
-        active_profile: str | None,
+        profile_context: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "status": "blocked",
             "action": "blocked",
             "provider": request_payload.get("provider", PROVIDER),
             "market": request_payload.get("market", MARKET),
-            "active_profile": active_profile,
+            **profile_context,
             "dry_run_result": None,
             "promotion": None,
             "created_promotion": False,

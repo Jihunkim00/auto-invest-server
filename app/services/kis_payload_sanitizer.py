@@ -57,6 +57,7 @@ SAFE_AUTH_DIAGNOSTIC_KEYS = {
     "refresh_guard_bypassed_for_token_expired",
 }
 SECRET_KEY_TOKENS = ("token", "secret", "key", "auth", "password")
+NON_SECRET_CONTEXT_KEYS = {"profile_key", "automation_profile_key"}
 
 PHONE_RE = re.compile(
     r"\b(?:01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}|0\d{1,2}[-\s.]\d{3,4}[-\s.]\d{4})\b"
@@ -178,7 +179,9 @@ def _is_personal_key(key: str) -> bool:
 
 
 def _is_secret_key(key: str) -> bool:
-    return any(token in key for token in SECRET_KEY_TOKENS)
+    return key not in NON_SECRET_CONTEXT_KEYS and any(
+        token in key for token in SECRET_KEY_TOKENS
+    )
 
 
 def _is_account_key(key: str) -> bool:

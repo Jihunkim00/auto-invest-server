@@ -8,6 +8,8 @@ from app.db.models import (
     StrategyAutoBuyPromotion,
     TradeRunLog,
 )
+from app.schemas.automation_profile import AutomationProfileWriteRequest
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.strategy_auto_buy_scheduler_service import (
     MODE,
     StrategyAutoBuySchedulerService,
@@ -185,6 +187,40 @@ def test_manual_scheduler_dry_run_uses_pr73_and_never_submits(db_session):
     assert body["safety"]["real_order_submit_allowed"] is False
     assert db_session.query(KisOrderValidationLog).count() == 0
     assert db_session.query(OrderLog).count() == 0
+
+
+def test_scheduler_passes_custom_identity_separately_from_legacy_profile(
+    db_session,
+):
+    automation = AutomationProfileService()
+    created = automation.create(
+        db_session,
+        AutomationProfileWriteRequest(
+            profile_key="aut_kis_eaa46d83",
+            name="Custom KIS Entry",
+            provider="kis",
+            market="KR",
+            operation={
+                "start_date": "2026-08-01",
+                "end_date": "2026-09-30",
+                "timezone": "Asia/Seoul",
+            },
+        ),
+    )
+    automation.activate(db_session, str(created["id"]))
+    dry = FakeDryRunService()
+
+    body = scheduler_service(
+        runtime=enabled_settings(automation_profile_scheduler_enabled=True),
+        dry_run=dry,
+    ).run_dry_run_once(db_session, {}, now=_now())
+
+    assert len(dry.calls) == 1
+    assert dry.calls[0].profile_name == "safe"
+    assert dry.calls[0].automation_profile_key == "aut_kis_eaa46d83"
+    assert dry.calls[0].automation_profile_name == "Custom KIS Entry"
+    assert body["automation_profile_key"] == "aut_kis_eaa46d83"
+    assert body["legacy_profile_name"] == "safe"
 
 
 def test_would_buy_creates_pending_promotion(db_session):

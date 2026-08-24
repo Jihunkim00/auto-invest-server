@@ -150,6 +150,11 @@ class StrategyAutoBuySchedulerStatusResponse(BaseModel):
     allow_live_orders: bool
     real_order_submit_allowed: bool
     active_profile: str | None = None
+    profile_key: str | None = None
+    profile_name: str | None = None
+    automation_profile_key: str | None = None
+    automation_profile_name: str | None = None
+    legacy_profile_name: str | None = None
     allowed_profiles: list[str] = Field(default_factory=list)
     runs_today: int = 0
     max_runs_per_day: int = 0
@@ -170,6 +175,11 @@ class StrategyAutoBuySchedulerRunResponse(BaseModel):
     provider: str = "kis"
     market: str = "KR"
     active_profile: str | None = None
+    profile_key: str | None = None
+    profile_name: str | None = None
+    automation_profile_key: str | None = None
+    automation_profile_name: str | None = None
+    legacy_profile_name: str | None = None
     dry_run_result: dict[str, Any] | None = None
     promotion: StrategyAutoBuyPromotionItem | None = None
     created_promotion: bool = False

@@ -351,6 +351,18 @@ class StrategyProfileService:
             raise StrategyProfileNotFound(normalized)
         return row
 
+    def legacy_active_profile(self, db: Session) -> StrategyProfile:
+        """Return the active built-in preset, excluding custom profiles."""
+        self.ensure_seeded(db)
+        row = (
+            db.query(StrategyProfile)
+            .filter(StrategyProfile.is_builtin == True)  # noqa: E712
+            .filter(StrategyProfile.is_active == True)  # noqa: E712
+            .order_by(StrategyProfile.id.asc())
+            .first()
+        )
+        return row or self._profile_or_raise(db, "safe")
+
     def _audit(
         self,
         db: Session,
@@ -403,4 +415,3 @@ def _source(value: str) -> str:
 
 def _json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
-

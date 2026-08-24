@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 
 from app.db.models import OrderLog, SignalLog, TradeRunLog
+from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.schemas.strategy_dry_run_auto_buy import (
     ProfileAwareDryRunAutoBuyRequest,
 )
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
 )
+from app.services.automation_profile_service import AutomationProfileService
 
 
 class FakeTargetRisk:
@@ -163,6 +165,47 @@ def test_dry_run_can_use_explicit_balanced_profile_without_mutating_active(
     assert result["action"] == "would_buy"
     assert risk.calls[0]["profile_name"] == "balanced"
     assert result["simulated_quantity"] == 5
+
+
+def test_dry_run_separates_custom_automation_identity_from_legacy_profile(
+    db_session,
+):
+    automation = AutomationProfileService()
+    created = automation.create(
+        db_session,
+        AutomationProfileWriteRequest(
+            profile_key="aut_kis_eaa46d83",
+            name="Custom KIS Entry",
+            provider="kis",
+            market="KR",
+            entry={"min_final_score": 65},
+            operation={
+                "start_date": "2026-08-01",
+                "end_date": "2026-09-30",
+                "timezone": "Asia/Seoul",
+            },
+        ),
+    )
+    automation.activate(db_session, str(created["id"]))
+    risk = FakeTargetRisk(recommended=50_000)
+
+    result = service(risk).run_once(
+        db_session,
+        request(
+            profile_name="safe",
+            automation_profile_key="aut_kis_eaa46d83",
+            automation_profile_name="Custom KIS Entry",
+        ),
+        preview_override=preview(candidate(score=65, price=10_000)),
+    )
+
+    assert result["active_profile"] == "aut_kis_eaa46d83"
+    assert result["profile_key"] == "aut_kis_eaa46d83"
+    assert result["automation_profile_key"] == "aut_kis_eaa46d83"
+    assert result["automation_profile_name"] == "Custom KIS Entry"
+    assert result["legacy_profile_name"] == "safe"
+    assert risk.calls[0]["profile_name"] == "aut_kis_eaa46d83"
+    assert result["action"] == "would_buy"
 
 
 def test_buy_score_below_profile_threshold_returns_blocked(db_session):

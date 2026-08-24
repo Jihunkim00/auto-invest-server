@@ -61,12 +61,27 @@ class ProfileAwareDryRunAutoBuyService:
             else ProfileAwareDryRunAutoBuyRequest.model_validate(request)
         )
         now_utc = _utc_now(now)
+        # Custom automation settings are the source of truth. ``profile_name``
+        # remains the compatible legacy strategy/risk preset identity.
         profile_row = (
-            self.strategy_profiles.get_profile(db, payload.profile_name)
-            if payload.profile_name
-            else self.strategy_profiles.active_profile(db)
+            self.strategy_profiles.get_profile(db, payload.automation_profile_key)
+            if payload.automation_profile_key
+            else (
+                self.strategy_profiles.get_profile(db, payload.profile_name)
+                if payload.profile_name
+                else self.strategy_profiles.active_profile(db)
+            )
         )
         profile = self.strategy_profiles.serialize_profile(profile_row)
+        legacy_profile_name = (
+            payload.profile_name
+            or self.strategy_profiles.legacy_active_profile(db).profile_name
+        )
+        automation_profile_key = profile.get("profile_key")
+        automation_profile_name = (
+            profile.get("display_name") if automation_profile_key else None
+        )
+        risk_profile_name = automation_profile_key or profile["profile_name"]
         preview = self._preview(
             db,
             request=payload,
@@ -87,7 +102,7 @@ class ProfileAwareDryRunAutoBuyService:
                 db,
                 candidate,
                 profile=profile,
-                profile_name=profile["profile_name"],
+                profile_name=risk_profile_name,
             )
             for candidate in candidates
         ]
@@ -106,6 +121,9 @@ class ProfileAwareDryRunAutoBuyService:
             evaluated=evaluated,
             selected=selected,
             decision=decision,
+            legacy_profile_name=legacy_profile_name,
+            automation_profile_key=automation_profile_key,
+            automation_profile_name=automation_profile_name,
             now_utc=now_utc,
         )
 
@@ -531,6 +549,9 @@ class ProfileAwareDryRunAutoBuyService:
         evaluated: list[dict[str, Any]],
         selected: dict[str, Any] | None,
         decision: dict[str, Any],
+        legacy_profile_name: str,
+        automation_profile_key: str | None,
+        automation_profile_name: str | None,
         now_utc: datetime,
     ) -> dict[str, Any]:
         target = selected.get("target_risk_result") if selected else {}
@@ -578,7 +599,10 @@ class ProfileAwareDryRunAutoBuyService:
             "market": str(request.market).upper(),
             "active_profile": profile["profile_name"],
             "profile_key": profile.get("profile_key") or profile["profile_name"],
-            "profile_name": profile.get("display_name") or profile["profile_name"],
+            "profile_name": legacy_profile_name,
+            "automation_profile_key": automation_profile_key,
+            "automation_profile_name": automation_profile_name,
+            "legacy_profile_name": legacy_profile_name,
             "profile_provider": profile.get("provider") or request.provider,
             "profile_market": profile.get("market") or request.market,
             "selected_symbol": selected.get("symbol") if selected else None,
@@ -647,7 +671,9 @@ class ProfileAwareDryRunAutoBuyService:
             position_size_pct=response["recommended_notional_pct"],
             signal_status=response["action"],
             trigger_source=TRIGGER_SOURCE,
-            gate_profile_name=response["active_profile"],
+            # Keep the legacy signal column compatible; custom identity is
+            # persisted in the run/order payload fields above.
+            gate_profile_name=response["legacy_profile_name"],
             hard_block_reason=(
                 response["reason"] if response["action"] != "would_buy" else None
             ),
@@ -688,6 +714,9 @@ class ProfileAwareDryRunAutoBuyService:
                     "active_profile": response["active_profile"],
                     "profile_key": response.get("profile_key"),
                     "profile_name": response.get("profile_name"),
+                    "automation_profile_key": response.get("automation_profile_key"),
+                    "automation_profile_name": response.get("automation_profile_name"),
+                    "legacy_profile_name": response.get("legacy_profile_name"),
                     "profile_provider": response.get("profile_provider"),
                     "profile_market": response.get("profile_market"),
                     "target_risk_result": response["target_risk_result"],
@@ -738,6 +767,9 @@ class ProfileAwareDryRunAutoBuyService:
                     "active_profile": response["active_profile"],
                     "profile_key": response.get("profile_key"),
                     "profile_name": response.get("profile_name"),
+                    "automation_profile_key": response.get("automation_profile_key"),
+                    "automation_profile_name": response.get("automation_profile_name"),
+                    "legacy_profile_name": response.get("legacy_profile_name"),
                     "profile_provider": response.get("profile_provider"),
                     "profile_market": response.get("profile_market"),
                     "dry_run": True,

@@ -13,7 +13,11 @@ class ProfileAwareDryRunAutoBuyRequest(BaseModel):
 
     provider: str = "kis"
     market: str = "KR"
+    # ``profile_name`` is the legacy strategy/risk preset identity. Custom
+    # automation profile identity must travel separately.
     profile_name: StrategyProfileName | None = None
+    automation_profile_key: str | None = Field(default=None, max_length=80)
+    automation_profile_name: str | None = Field(default=None, max_length=120)
     symbol: str | None = None
     max_candidates: int = Field(default=5, ge=1, le=20)
     trigger_source: str = Field(
@@ -36,6 +40,14 @@ class ProfileAwareDryRunAutoBuyRequest(BaseModel):
             raise ValueError("KIS symbol must be numeric.")
         return symbol.zfill(6)
 
+    @field_validator("automation_profile_key", "automation_profile_name")
+    @classmethod
+    def normalize_automation_profile_context(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
 
 class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     status: str
@@ -43,6 +55,13 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     provider: str
     market: str
     active_profile: str
+    profile_key: str | None = None
+    profile_name: str | None = None
+    automation_profile_key: str | None = None
+    automation_profile_name: str | None = None
+    legacy_profile_name: StrategyProfileName | None = None
+    profile_provider: str | None = None
+    profile_market: str | None = None
     selected_symbol: str | None = None
     selected_symbol_name: str | None = None
     candidate_count: int
