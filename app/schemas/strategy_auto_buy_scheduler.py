@@ -155,8 +155,12 @@ class StrategyAutoBuySchedulerStatusResponse(BaseModel):
     automation_profile_key: str | None = None
     automation_profile_name: str | None = None
     legacy_profile_name: str | None = None
-    allowed_profiles: list[str] = Field(default_factory=list)
     runs_today: int = 0
+    completed_analysis_count: int = 0
+    blocked_attempt_count: int = 0
+    scheduled_analysis_count: int = 0
+    scheduled_slot_key: str | None = None
+    allowed_profiles: list[str] = Field(default_factory=list)
     max_runs_per_day: int = 0
     next_allowed_run_at: str | None = None
     min_minutes_between_runs: int = 0
@@ -180,6 +184,24 @@ class StrategyAutoBuySchedulerRunResponse(BaseModel):
     automation_profile_key: str | None = None
     automation_profile_name: str | None = None
     legacy_profile_name: str | None = None
+    runs_today: int = 0
+    completed_analysis_count: int = 0
+    blocked_attempt_count: int = 0
+    scheduled_analysis_count: int = 0
+    scheduled_slot_key: str | None = None
+    analysis_completed: bool = False
+    scheduled_analysis_counted: bool = False
+    selected_symbol: str | None = None
+    final_buy_score: float | None = None
+    required_entry_score: float = 0
+    reason: str | None = None
+    configured_symbol_count: int = 0
+    analyzed_symbol_count: int = 0
+    quant_candidate_count: int = 0
+    gpt_candidate_count: int = 0
+    final_candidate_count: int = 0
+    preview_status: str = "unknown"
+    preview_error: str | None = None
     dry_run_result: dict[str, Any] | None = None
     promotion: StrategyAutoBuyPromotionItem | None = None
     created_promotion: bool = False

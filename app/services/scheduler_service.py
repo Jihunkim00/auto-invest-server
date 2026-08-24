@@ -112,8 +112,8 @@ class SchedulerService:
         ]
         self._strategy_auto_buy_slots = [
             ("strategy_auto_buy_dry_run_open_phase", 9, 10),
-            ("strategy_auto_buy_dry_run_midday", 10, 30),
-            ("strategy_auto_buy_dry_run_before_close", 14, 30),
+            ("strategy_auto_buy_dry_run_midday", 11, 30),
+            ("strategy_auto_buy_dry_run_before_close", 13, 30),
         ]
         self._broker_sync_watchdog_slots = [
             ("broker_sync_watchdog_open_phase", 9, 2),

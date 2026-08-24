@@ -138,6 +138,43 @@ def test_recent_signals_returns_items_array(client, db_session):
     assert item["market"] == "US"
 
 
+def test_recent_signals_resolves_provider_and_market_from_parent_run(
+    client,
+    db_session,
+):
+    signal = SignalLog(
+        symbol="005930",
+        action="hold",
+        signal_status="hold",
+        trigger_source="profile_aware_dry_run_auto_buy",
+        reason="no_candidates",
+    )
+    db_session.add(signal)
+    db_session.flush()
+    run = TradeRunLog(
+        run_key="profile-aware-kis-run",
+        trigger_source="profile_aware_dry_run_auto_buy",
+        symbol="WATCHLIST",
+        mode="strategy_dry_run_auto_buy",
+        stage="done",
+        result="hold",
+        reason="no_candidates",
+        signal_id=signal.id,
+        request_payload=json.dumps({"provider": "kis", "market": "KR"}),
+        response_payload=json.dumps({"provider": "kis", "market": "KR"}),
+    )
+    db_session.add(run)
+    db_session.commit()
+
+    response = client.get("/signals/recent")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["provider"] == "kis"
+    assert item["market"] == "KR"
+    assert item["parent_run_id"] == run.id
+
+
 def test_recent_runs_preserves_kis_dry_run_safety_fields(client, db_session):
     db_session.add(
         TradeRunLog(

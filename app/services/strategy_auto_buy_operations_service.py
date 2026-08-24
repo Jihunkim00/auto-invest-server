@@ -16,8 +16,8 @@ from app.schemas.strategy_auto_buy_operations import (
     StrategyAutoBuyOperationsSafetyStatus,
     StrategyAutoBuyOperationsStatusResponse,
 )
-from app.services.profile_aware_dry_run_auto_buy_service import (
-    ProfileAwareDryRunAutoBuyService,
+from app.services.profile_aware_dry_run_auto_buy_factory import (
+    build_profile_aware_dry_run_auto_buy_service,
 )
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
@@ -49,7 +49,7 @@ class StrategyAutoBuyOperationsService:
         promotion_service: Any | None = None,
         target_risk_service: Any | None = None,
     ) -> None:
-        self.dry_run_service = dry_run_service or ProfileAwareDryRunAutoBuyService()
+        self.dry_run_service = dry_run_service
         self.live_auto_buy_service = (
             live_auto_buy_service or ProfileAwareGuardedLiveAutoBuyService()
         )
@@ -149,7 +149,7 @@ class StrategyAutoBuyOperationsService:
         market: str,
     ) -> dict[str, Any]:
         try:
-            result = self.dry_run_service.recent(
+            result = self._dry_run_service(db).recent(
                 db,
                 provider=provider,
                 market=market,
@@ -174,7 +174,7 @@ class StrategyAutoBuyOperationsService:
         market: str,
     ) -> dict[str, Any]:
         try:
-            result = self.dry_run_service.summary(
+            result = self._dry_run_service(db).summary(
                 db,
                 provider=provider,
                 market=market,
@@ -190,6 +190,9 @@ class StrategyAutoBuyOperationsService:
                 "error": _safe_error(exc),
                 "safety": _read_only_safety(),
             }
+
+    def _dry_run_service(self, db: Session):
+        return self.dry_run_service or build_profile_aware_dry_run_auto_buy_service(db)
 
     def _live_readiness(
         self,

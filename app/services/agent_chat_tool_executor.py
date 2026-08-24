@@ -27,10 +27,12 @@ from app.services.position_management_dry_run_service import (
     PositionManagementDryRunService,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
-from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.kis_single_symbol_analysis_service import KisSingleSymbolAnalysisService
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
+)
+from app.services.profile_aware_dry_run_auto_buy_factory import (
+    build_profile_aware_dry_run_auto_buy_service,
 )
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
@@ -1078,24 +1080,9 @@ class AgentChatToolExecutor:
         self,
         db: Session,
     ) -> ProfileAwareDryRunAutoBuyService:
-        client = self.kis_client_factory(db)
-        target_risk = TargetAwareRiskService(
-            budget_service=StrategyRiskBudgetService(
-                position_loader=lambda session, provider, market: (
-                    client.list_positions()
-                    if provider == "kis" and market == "KR"
-                    else []
-                ),
-                balance_loader=lambda session, provider, market: (
-                    client.get_account_balance()
-                    if provider == "kis" and market == "KR"
-                    else {}
-                ),
-            )
-        )
-        return ProfileAwareDryRunAutoBuyService(
-            preview_service=KisWatchlistPreviewService(client, db=db),
-            target_risk_service=target_risk,
+        return build_profile_aware_dry_run_auto_buy_service(
+            db,
+            client_factory=self.kis_client_factory,
         )
 
     def _default_live_auto_buy_service(

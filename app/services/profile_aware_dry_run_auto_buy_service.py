@@ -114,6 +114,12 @@ class ProfileAwareDryRunAutoBuyService:
             profile=profile,
             preview=preview,
         )
+        preview_failure_reason = self._preview_failure_reason(preview)
+        if preview_failure_reason is not None and not evaluated:
+            decision = {
+                **decision,
+                "reason": preview_failure_reason,
+            }
         response = self._response(
             request=payload,
             profile=profile,
@@ -251,46 +257,49 @@ class ProfileAwareDryRunAutoBuyService:
         preview_override: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if preview_override is not None:
-            return sanitize_kis_payload(dict(preview_override))
+            return _normalize_preview_payload(preview_override, status="override")
         if self.preview_service is None:
-            return {
-                "provider": PROVIDER,
-                "market": MARKET,
-                "final_ranked_candidates": [],
-                "risk_flags": ["preview_service_unavailable"],
-                "gating_notes": ["Watchlist preview service is unavailable."],
-            }
+            return _unavailable_preview_payload("preview_service_unavailable")
         if request.symbol:
-            return self._single_symbol_preview(db, request.symbol)
+            return _normalize_preview_payload(
+                self._single_symbol_preview(db, request.symbol),
+                status="ok",
+            )
         if not request.use_watchlist:
-            return {
+            return _normalize_preview_payload({
                 "provider": PROVIDER,
                 "market": MARKET,
                 "final_ranked_candidates": [],
                 "risk_flags": ["watchlist_disabled_for_request"],
                 "gating_notes": ["No symbol was supplied and watchlist use was disabled."],
-            }
+            }, status="disabled")
         try:
-            return sanitize_kis_payload(
-                self.preview_service.run_preview(
+            try:
+                preview = self.preview_service.run_preview(
                     include_gpt=True,
                     db=db,
                     record_run=False,
                     trigger_source=TRIGGER_SOURCE,
                 )
-            )
-        except TypeError:
-            return sanitize_kis_payload(
-                self.preview_service.run_preview(include_gpt=True, db=db)
-            )
+            except TypeError:
+                preview = self.preview_service.run_preview(include_gpt=True, db=db)
+            return _normalize_preview_payload(preview, status="ok")
         except Exception as exc:
-            return {
-                "provider": PROVIDER,
-                "market": MARKET,
-                "final_ranked_candidates": [],
-                "risk_flags": ["preview_unavailable"],
-                "gating_notes": [f"Watchlist preview failed: {exc.__class__.__name__}"],
-            }
+            return _unavailable_preview_payload(
+                "preview_unavailable",
+                error=exc.__class__.__name__,
+                note=f"Watchlist preview failed: {exc.__class__.__name__}",
+            )
+
+    def _preview_failure_reason(self, preview: dict[str, Any]) -> str | None:
+        flags = set(_strings(preview.get("risk_flags")))
+        if "preview_service_unavailable" in flags:
+            return "preview_service_unavailable"
+        if "preview_unavailable" in flags:
+            return "preview_unavailable"
+        if str(preview.get("preview_status") or "").lower() == "unavailable":
+            return str(preview.get("preview_error") or "preview_unavailable")
+        return None
 
     def _single_symbol_preview(self, db: Session, symbol: str) -> dict[str, Any]:
         market_session = self._market_session(datetime.now(UTC))
@@ -608,10 +617,13 @@ class ProfileAwareDryRunAutoBuyService:
             "selected_symbol": selected.get("symbol") if selected else None,
             "selected_symbol_name": selected.get("name") if selected else None,
             "candidate_count": len(evaluated),
+            **_preview_observability(preview),
             "candidates": [_public_candidate(item) for item in evaluated],
             "buy_score": selected.get("buy_score") if selected else None,
+            "final_buy_score": selected.get("final_score") if selected else None,
             "sell_score": selected.get("sell_score") if selected else None,
             "final_score": selected.get("final_score") if selected else None,
+            "required_entry_score": float(profile.get("buy_score_threshold") or 0),
             "confidence": selected.get("confidence") if selected else None,
             "target_risk_approved": decision["target_risk_approved"],
             "target_risk_result": target or {},
@@ -909,6 +921,79 @@ def _parse_object(value: Any) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _normalize_preview_payload(
+    value: Any,
+    *,
+    status: str,
+    error: str | None = None,
+) -> dict[str, Any]:
+    payload = dict(value) if isinstance(value, dict) else {}
+    payload.setdefault("provider", PROVIDER)
+    payload.setdefault("market", MARKET)
+    payload.setdefault("final_ranked_candidates", [])
+    payload.setdefault("risk_flags", [])
+    payload.setdefault("gating_notes", [])
+    payload.setdefault("preview_status", status)
+    payload.setdefault("preview_error", error)
+    return sanitize_kis_payload(payload)
+
+
+def _unavailable_preview_payload(
+    reason: str,
+    *,
+    error: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    return _normalize_preview_payload(
+        {
+            "provider": PROVIDER,
+            "market": MARKET,
+            "final_ranked_candidates": [],
+            "risk_flags": [reason],
+            "gating_notes": [note or "Watchlist preview service is unavailable."],
+        },
+        status="unavailable",
+        error=error or reason,
+    )
+
+
+def _preview_observability(preview: dict[str, Any]) -> dict[str, Any]:
+    final_candidates = preview.get("final_ranked_candidates")
+    if not isinstance(final_candidates, list):
+        final_candidates = []
+    quant_candidates = preview.get("quant_candidates_count")
+    if not isinstance(quant_candidates, int):
+        quant_candidates = len(preview.get("top_quant_candidates") or [])
+    gpt_candidates = preview.get("gpt_target_count")
+    if not isinstance(gpt_candidates, int):
+        gpt_candidates = len(preview.get("gpt_target_symbols") or [])
+    return {
+        "configured_symbol_count": _preview_count(
+            preview, "configured_symbol_count", "watchlist"
+        ),
+        "analyzed_symbol_count": _preview_count(
+            preview, "analyzed_symbol_count", "items"
+        ),
+        "quant_candidate_count": int(quant_candidates or 0),
+        "gpt_candidate_count": int(gpt_candidates or 0),
+        "final_candidate_count": len(final_candidates),
+        "preview_status": str(preview.get("preview_status") or "unknown"),
+        "preview_error": preview.get("preview_error"),
+    }
+
+
+def _preview_count(
+    preview: dict[str, Any],
+    key: str,
+    fallback_key: str,
+) -> int:
+    value = preview.get(key)
+    if isinstance(value, (int, float)):
+        return int(value)
+    fallback = preview.get(fallback_key)
+    return len(fallback) if isinstance(fallback, list) else 0
 
 
 def _parse_datetime(value: Any) -> datetime | None:

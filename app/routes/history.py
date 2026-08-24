@@ -139,6 +139,41 @@ def _infer_market(provider: str, market: str | None = None) -> str:
     return "KR" if provider.lower() == "kis" else "US"
 
 
+_KIS_SIGNAL_TRIGGER_SOURCES = {
+    "profile_aware_dry_run_auto_buy",
+    "strategy_auto_buy_dry_run",
+    "kis_dry_run_auto_buy",
+}
+
+
+def _known_signal_provider(trigger_source: str | None) -> str | None:
+    value = str(trigger_source or "").strip().lower()
+    if value in _KIS_SIGNAL_TRIGGER_SOURCES or value.startswith("kis_"):
+        return "kis"
+    if value.startswith("alpaca"):
+        return "alpaca"
+    return None
+
+
+def _signal_parent_context(
+    row: SignalLog,
+    db: Session,
+) -> tuple[dict[str, Any], dict[str, Any], int | None]:
+    parent = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.signal_id == row.id)
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .first()
+    )
+    if parent is None:
+        return {}, {}, None
+    return (
+        _parse_json_object(parent.request_payload),
+        _parse_json_object(parent.response_payload),
+        parent.id,
+    )
+
+
 def _payload_list(
     response_payload: dict[str, Any],
     trade_result: dict[str, Any],
@@ -582,8 +617,23 @@ def _serialize_order(row: OrderLog) -> dict[str, Any]:
 
 
 def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
-    provider = _infer_provider(mode=None, trigger_source=row.trigger_source)
-    market = _infer_market(provider)
+    request_payload, response_payload, parent_run_id = _signal_parent_context(row, db)
+    known_provider = _known_signal_provider(row.trigger_source)
+    provider = str(
+        _first_present(
+            response_payload.get("provider"),
+            request_payload.get("provider"),
+            known_provider,
+            _infer_provider(mode=None, trigger_source=row.trigger_source),
+        )
+    )
+    market = str(
+        _first_present(
+            response_payload.get("market"),
+            request_payload.get("market"),
+            _infer_market(provider),
+        )
+    )
     simulated = provider == "kis" and str(row.signal_status or "").lower() == "simulated"
     buy_shadow = (
         provider == "kis"
@@ -600,6 +650,7 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
             gpt_context = gpt_context_from_market_analysis(analysis)
     return {
         "id": row.id,
+        "parent_run_id": parent_run_id,
         "run_key": None,
         "provider": provider,
         "market": market,

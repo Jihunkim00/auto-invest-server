@@ -57,7 +57,11 @@ SAFE_AUTH_DIAGNOSTIC_KEYS = {
     "refresh_guard_bypassed_for_token_expired",
 }
 SECRET_KEY_TOKENS = ("token", "secret", "key", "auth", "password")
-NON_SECRET_CONTEXT_KEYS = {"profile_key", "automation_profile_key"}
+NON_SECRET_CONTEXT_KEYS = {
+    "profile_key",
+    "automation_profile_key",
+    "scheduled_slot_key",
+}
 
 PHONE_RE = re.compile(
     r"\b(?:01[016789][-\s.]?\d{3,4}[-\s.]?\d{4}|0\d{1,2}[-\s.]\d{3,4}[-\s.]\d{4})\b"

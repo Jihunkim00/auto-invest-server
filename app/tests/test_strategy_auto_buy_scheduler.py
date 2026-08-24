@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from app.db.models import (
     KisOrderValidationLog,
@@ -123,6 +124,46 @@ def enabled_settings(**overrides) -> FakeRuntimeSettings:
     }
     values.update(overrides)
     return FakeRuntimeSettings(**values)
+
+
+def test_scheduler_default_path_builds_dry_run_service_for_db(
+    db_session,
+    monkeypatch,
+):
+    captured = {}
+
+    class BuiltDryRunService:
+        def run_once(self, db, request):
+            captured["run_db"] = db
+            captured["request"] = request
+            return {
+                "status": "ok",
+                "action": "hold",
+                "provider": "kis",
+                "market": "KR",
+                "active_profile": "safe",
+                "reason": "no_candidates",
+                "safety": _dry_safety(),
+            }
+
+    def build(db):
+        captured["build_db"] = db
+        return BuiltDryRunService()
+
+    monkeypatch.setattr(
+        "app.services.strategy_auto_buy_scheduler_service.build_profile_aware_dry_run_auto_buy_service",
+        build,
+    )
+
+    body = StrategyAutoBuySchedulerService(
+        runtime_settings=enabled_settings(),
+        market_sessions=FakeMarketSessions(),
+    ).run_dry_run_once(db_session, {}, now=_now())
+
+    assert body["action"] == "hold"
+    assert captured["build_db"] is db_session
+    assert captured["run_db"] is db_session
+    assert captured["request"].trigger_source == "strategy_auto_buy_dry_run"
 
 
 def test_scheduler_status_default_disabled(db_session):
@@ -252,12 +293,193 @@ def test_max_runs_per_day_blocks_extra_dry_run(db_session):
     service = scheduler_service(
         runtime=enabled_settings(strategy_auto_buy_scheduler_max_runs_per_day=1)
     )
-    first = service.run_dry_run_once(db_session, {}, now=_now())
-    second = service.run_dry_run_once(db_session, {}, now=_now() + timedelta(minutes=1))
+    first = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "slot-1"},
+        now=_now(),
+    )
+    second = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "slot-2"},
+        now=_now() + timedelta(minutes=1),
+    )
 
     assert first["status"] == "ok"
     assert second["status"] == "blocked"
     assert second["block_reason"] == "max_runs_per_day_reached"
+
+
+def test_blocked_scheduled_slot_does_not_consume_next_slot_quota(db_session):
+    _activate_custom_profile(db_session)
+    runtime = enabled_settings(
+        automation_profile_scheduler_enabled=True,
+        kill_switch=True,
+        strategy_auto_buy_scheduler_min_minutes_between_runs=0,
+    )
+    service = scheduler_service(runtime=runtime)
+
+    first = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:09:10"},
+        now=_kst(9, 10),
+    )
+    runtime.values["kill_switch"] = False
+    second = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:11:30"},
+        now=_kst(11, 30),
+    )
+
+    assert first["block_reason"] == "kill_switch_enabled"
+    assert first["completed_analysis_count"] == 0
+    assert second["status"] == "ok"
+    assert second["completed_analysis_count"] == 1
+    assert second["blocked_attempt_count"] == 1
+
+
+def test_manual_blocked_attempts_do_not_consume_scheduled_quota(db_session):
+    _activate_custom_profile(db_session)
+    runtime = enabled_settings(
+        automation_profile_scheduler_enabled=True,
+        kill_switch=True,
+        strategy_auto_buy_scheduler_min_minutes_between_runs=0,
+    )
+    service = scheduler_service(runtime=runtime)
+
+    for index in range(5):
+        body = service.run_dry_run_once(
+            db_session,
+            {},
+            now=_kst(10, index),
+        )
+        assert body["block_reason"] == "kill_switch_enabled"
+
+    runtime.values["kill_switch"] = False
+    scheduled = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:11:30"},
+        now=_kst(11, 30),
+    )
+
+    assert scheduled["status"] == "ok"
+    assert scheduled["completed_analysis_count"] == 1
+    assert scheduled["blocked_attempt_count"] == 5
+    assert scheduled["runs_today"] == 6
+
+
+def test_same_scheduled_slot_is_idempotent(db_session):
+    _activate_custom_profile(db_session)
+    service = scheduler_service(
+        runtime=enabled_settings(
+            automation_profile_scheduler_enabled=True,
+            strategy_auto_buy_scheduler_min_minutes_between_runs=0,
+        )
+    )
+
+    first = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:09:10"},
+        now=_kst(9, 10),
+    )
+    second = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:09:10"},
+        now=_kst(9, 10),
+    )
+
+    assert first["status"] == "ok"
+    assert second["status"] == "blocked"
+    assert second["block_reason"] == "scheduled_slot_already_attempted"
+    assert second["completed_analysis_count"] == 1
+    assert second["blocked_attempt_count"] == 1
+
+
+def test_three_profile_slots_are_independent_and_no_missed_replay(db_session):
+    _activate_custom_profile(db_session)
+    service = scheduler_service(
+        runtime=enabled_settings(
+            automation_profile_scheduler_enabled=True,
+            strategy_auto_buy_scheduler_max_runs_per_day=3,
+            strategy_auto_buy_scheduler_min_minutes_between_runs=0,
+        )
+    )
+
+    early = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:11:30"},
+        now=_kst(9, 10),
+    )
+    results = [
+        service.run_dry_run_once(
+            db_session,
+            {"scheduler_slot": f"profile:{slot}"},
+            now=_kst(*time_value),
+        )
+        for slot, time_value in (
+            ("09:10", (9, 10)),
+            ("11:30", (11, 30)),
+            ("13:30", (13, 30)),
+        )
+    ]
+    replay = service.run_dry_run_once(
+        db_session,
+        {"scheduler_slot": "profile:09:10"},
+        now=_kst(13, 30),
+    )
+
+    assert all(item["status"] == "ok" for item in results)
+    assert early["block_reason"] == "missed_slot_replay_forbidden"
+    assert results[-1]["completed_analysis_count"] == 3
+    assert replay["block_reason"] == "scheduled_slot_already_attempted"
+
+
+def test_analysis_quota_is_independent_from_real_order_cap(db_session):
+    _activate_custom_profile(db_session)
+    service = scheduler_service(
+        runtime=enabled_settings(
+            automation_profile_scheduler_enabled=True,
+            strategy_auto_buy_scheduler_max_runs_per_day=3,
+            strategy_auto_buy_scheduler_min_minutes_between_runs=0,
+        )
+    )
+
+    for slot, hour, minute in (
+        ("09:10", 9, 10),
+        ("11:30", 11, 30),
+        ("13:30", 13, 30),
+    ):
+        service.run_dry_run_once(
+            db_session,
+            {"scheduler_slot": f"profile:{slot}"},
+            now=_kst(hour, minute),
+        )
+
+    assert db_session.query(OrderLog).count() == 0
+
+
+def _activate_custom_profile(db_session):
+    automation = AutomationProfileService()
+    created = automation.create(
+        db_session,
+        AutomationProfileWriteRequest(
+            profile_key="aut_kis_slot_test",
+            name="Slot Test Profile",
+            provider="kis",
+            market="KR",
+            entry={"analysis_times": ["09:10", "11:30", "13:30"]},
+            operation={
+                "start_date": "2026-08-01",
+                "end_date": "2026-09-30",
+                "timezone": "Asia/Seoul",
+            },
+        ),
+    )
+    automation.activate(db_session, str(created["id"]))
+    return created
+
+
+def _kst(hour: int, minute: int) -> datetime:
+    return datetime(2026, 8, 24, hour, minute, tzinfo=ZoneInfo("Asia/Seoul"))
 
 
 def test_min_interval_blocks_too_frequent_dry_run(db_session):

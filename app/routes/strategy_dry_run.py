@@ -3,9 +3,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from app.brokers.kis_auth_manager import KisAuthManager
-from app.brokers.kis_client import KisClient
-from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.strategy_dry_run_auto_buy import (
     ProfileAwareDryRunAutoBuyRequest,
@@ -13,12 +10,12 @@ from app.schemas.strategy_dry_run_auto_buy import (
     ProfileAwareDryRunRecentResponse,
     ProfileAwareDryRunSummaryResponse,
 )
-from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
 )
-from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
-from app.services.target_aware_risk_service import TargetAwareRiskService
+from app.services.profile_aware_dry_run_auto_buy_factory import (
+    build_profile_aware_dry_run_auto_buy_service,
+)
 
 
 router = APIRouter(prefix="/strategy/dry-run", tags=["strategy-dry-run"])
@@ -29,45 +26,7 @@ def get_profile_aware_dry_run_auto_buy_service(
 ) -> (
     ProfileAwareDryRunAutoBuyService
 ):
-    cache: dict[str, object] = {}
-
-    def client(session: Session) -> KisClient:
-        if "client" not in cache:
-            settings = get_settings()
-            cache["client"] = KisClient(
-                settings,
-                KisAuthManager(settings, session),
-            )
-        return cache["client"]  # type: ignore[return-value]
-
-    def positions(db: Session, provider: str, market: str):
-        if "positions" not in cache:
-            cache["positions"] = (
-                client(db).list_positions()
-                if provider == "kis" and market == "KR"
-                else []
-            )
-        return cache["positions"]  # type: ignore[return-value]
-
-    def balance(db: Session, provider: str, market: str):
-        if "balance" not in cache:
-            cache["balance"] = (
-                client(db).get_account_balance()
-                if provider == "kis" and market == "KR"
-                else {}
-            )
-        return cache["balance"]  # type: ignore[return-value]
-
-    risk_service = TargetAwareRiskService(
-        budget_service=StrategyRiskBudgetService(
-            position_loader=positions,
-            balance_loader=balance,
-        )
-    )
-    return ProfileAwareDryRunAutoBuyService(
-        preview_service=KisWatchlistPreviewService(client(db), db=db),
-        target_risk_service=risk_service,
-    )
+    return build_profile_aware_dry_run_auto_buy_service(db)
 
 
 @router.post(

@@ -65,10 +65,19 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     selected_symbol: str | None = None
     selected_symbol_name: str | None = None
     candidate_count: int
+    configured_symbol_count: int = 0
+    analyzed_symbol_count: int = 0
+    quant_candidate_count: int = 0
+    gpt_candidate_count: int = 0
+    final_candidate_count: int = 0
+    preview_status: str = "unknown"
+    preview_error: str | None = None
     candidates: list[dict[str, Any]] = Field(default_factory=list)
     buy_score: float | None = None
+    final_buy_score: float | None = None
     sell_score: float | None = None
     final_score: float | None = None
+    required_entry_score: float = 0
     confidence: float | None = None
     target_risk_approved: bool
     target_risk_result: dict[str, Any] = Field(default_factory=dict)

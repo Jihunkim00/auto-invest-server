@@ -138,6 +138,42 @@ def test_dry_run_returns_hold_when_no_candidates(db_session):
     assert result["action"] == "hold"
     assert result["reason"] == "no_candidates"
     assert result["simulated_order_id"] is None
+    assert result["reason"] == "no_candidates"
+    assert result["preview_status"] == "override"
+
+
+def test_dry_run_distinguishes_preview_infrastructure_failure(db_session):
+    result = service().run_once(db_session, request())
+
+    assert result["action"] == "hold"
+    assert result["reason"] == "preview_service_unavailable"
+    assert result["preview_status"] == "unavailable"
+    assert result["preview_error"] == "preview_service_unavailable"
+    assert result["configured_symbol_count"] == 0
+    assert result["analyzed_symbol_count"] == 0
+
+
+def test_dry_run_exposes_preview_pipeline_observability(db_session):
+    result = service().run_once(
+        db_session,
+        request(),
+        preview_override={
+            **preview(candidate()),
+            "configured_symbol_count": 50,
+            "analyzed_symbol_count": 50,
+            "quant_candidates_count": 10,
+            "gpt_target_count": 5,
+            "final_ranked_candidates": [candidate(), candidate("000660")],
+        },
+    )
+
+    assert result["configured_symbol_count"] == 50
+    assert result["analyzed_symbol_count"] == 50
+    assert result["quant_candidate_count"] == 10
+    assert result["gpt_candidate_count"] == 5
+    assert result["final_candidate_count"] == 2
+    assert result["preview_status"] == "override"
+    assert result["preview_error"] is None
 
 
 def test_dry_run_uses_active_safe_profile_by_default(db_session):

@@ -16,6 +16,9 @@ from app.services.market_session_service import MarketSessionService
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
 )
+from app.services.profile_aware_dry_run_auto_buy_factory import (
+    build_profile_aware_dry_run_auto_buy_service,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_auto_buy_promotion_service import (
     StrategyAutoBuyPromotionService,
@@ -28,7 +31,7 @@ TRIGGER_SOURCE = "strategy_auto_buy_dry_run"
 PROVIDER = "kis"
 MARKET = "KR"
 KST = ZoneInfo("Asia/Seoul")
-SCHEDULE_SLOTS = ["09:10", "10:30", "14:30"]
+SCHEDULE_SLOTS = ["09:10", "11:30", "13:30"]
 
 
 class StrategyAutoBuySchedulerService:
@@ -46,7 +49,7 @@ class StrategyAutoBuySchedulerService:
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.market_sessions = market_sessions or MarketSessionService()
-        self.dry_run_service = dry_run_service or ProfileAwareDryRunAutoBuyService()
+        self.dry_run_service = dry_run_service
         self.promotion_service = promotion_service or StrategyAutoBuyPromotionService()
 
     def status(
@@ -61,7 +64,16 @@ class StrategyAutoBuySchedulerService:
         settings = self.runtime_settings.get_settings_read_only(db)
         profile = self._active_profile(db)
         latest = self._latest_run(db)
-        runs_today = self._runs_today(db, now_utc=now_utc)
+        metrics = self._run_metrics(db, now_utc=now_utc)
+        current_scheduler_slot = self._current_profile_scheduler_slot(
+            profile,
+            now_utc=now_utc,
+        )
+        current_slot_key = self._scheduled_slot_key(
+            profile,
+            current_scheduler_slot,
+            now_utc=now_utc,
+        )
         market_session = self._market_session(now_utc)
         pending_promotions = self.promotion_service.summary(
             db,
@@ -69,17 +81,31 @@ class StrategyAutoBuySchedulerService:
             market=market,
             now=now_utc,
         ).get("pending_count", 0)
-        primary = self._primary_block_reason(
+        slot_block_reason = self._scheduled_slot_block_reason(
+            db,
+            profile=profile,
+            scheduler_slot=current_scheduler_slot,
+            scheduled_slot_key=current_slot_key,
+            now_utc=now_utc,
+        )
+        primary = slot_block_reason or self._primary_block_reason(
             settings=settings,
             profile=profile,
             market_session=market_session,
-            runs_today=runs_today,
-            latest_run=latest,
+            completed_analysis_count=metrics["completed_analysis_count"],
+            latest_run=self._latest_rate_run(
+                db,
+                scheduled=current_slot_key is not None,
+            ),
             now_utc=now_utc,
+            scheduled_slot_key=current_slot_key,
         )
         next_allowed = self._next_allowed_run_at(
             settings=settings,
-            latest_run=latest,
+            latest_run=self._latest_rate_run(
+                db,
+                scheduled=current_slot_key is not None,
+            ),
             now_utc=now_utc,
         )
         return sanitize_kis_payload(
@@ -93,7 +119,8 @@ class StrategyAutoBuySchedulerService:
                 "real_order_submit_allowed": False,
                 **self._profile_context(db, profile),
                 "allowed_profiles": _allowed_profiles(settings),
-                "runs_today": runs_today,
+                **metrics,
+                "scheduled_slot_key": current_slot_key,
                 "max_runs_per_day": _int(
                     settings.get("strategy_auto_buy_scheduler_max_runs_per_day"),
                     3,
@@ -134,27 +161,46 @@ class StrategyAutoBuySchedulerService:
         now_utc = _aware_utc(now)
         settings = self.runtime_settings.get_settings(db)
         profile = self._active_profile(db)
-        latest = self._latest_run(db)
-        runs_today = self._runs_today(db, now_utc=now_utc)
+        metrics = self._run_metrics(db, now_utc=now_utc)
         market_session = self._market_session(now_utc)
-        block_reason = self._primary_block_reason(
+        scheduled_slot_key = self._scheduled_slot_key(
+            profile,
+            payload.scheduler_slot,
+            now_utc=now_utc,
+        )
+        latest_rate_run = self._latest_rate_run(
+            db,
+            scheduled=scheduled_slot_key is not None,
+        )
+        slot_block_reason = self._scheduled_slot_block_reason(
+            db,
+            profile=profile,
+            scheduler_slot=payload.scheduler_slot,
+            scheduled_slot_key=scheduled_slot_key,
+            now_utc=now_utc,
+        )
+        block_reason = slot_block_reason or self._primary_block_reason(
             settings=settings,
             profile=profile,
             market_session=market_session,
-            runs_today=runs_today,
-            latest_run=latest,
+            completed_analysis_count=metrics["completed_analysis_count"],
+            latest_run=latest_rate_run,
             now_utc=now_utc,
+            scheduled_slot_key=scheduled_slot_key,
         )
         profile_context = self._profile_context(db, profile)
         request_payload = {
             **payload.model_dump(mode="json"),
             **profile_context,
+            "scheduled_slot_key": scheduled_slot_key,
+            "scheduled_analysis": scheduled_slot_key is not None,
         }
         if block_reason is not None:
             response = self._blocked_response(
                 block_reason=block_reason,
                 request_payload=request_payload,
                 profile_context=profile_context,
+                scheduled_slot_key=scheduled_slot_key,
             )
             run = self._save_scheduler_run(
                 db,
@@ -166,6 +212,7 @@ class StrategyAutoBuySchedulerService:
                 now_utc=now_utc,
             )
             response["scheduler_run_id"] = run.id
+            response.update(self._run_metrics(db, now_utc=now_utc))
             run.response_payload = _json(response)
             db.commit()
             return sanitize_kis_payload(response)
@@ -182,7 +229,8 @@ class StrategyAutoBuySchedulerService:
             use_watchlist=True,
             save_logs=True,
         )
-        dry_result = self.dry_run_service.run_once(db, dry_request)
+        dry_run_service = self.dry_run_service or build_profile_aware_dry_run_auto_buy_service(db)
+        dry_result = dry_run_service.run_once(db, dry_request)
         promotion = None
         created_promotion = False
         if (
@@ -211,6 +259,10 @@ class StrategyAutoBuySchedulerService:
             "provider": payload.provider,
             "market": payload.market,
             **profile_context,
+            "scheduled_slot_key": scheduled_slot_key,
+            "analysis_completed": True,
+            "scheduled_analysis_counted": scheduled_slot_key is not None,
+            **_scheduler_analysis_observability(dry_result),
             "dry_run_result": dry_result,
             "promotion": promotion,
             "created_promotion": created_promotion,
@@ -235,6 +287,7 @@ class StrategyAutoBuySchedulerService:
             now_utc=now_utc,
         )
         response["scheduler_run_id"] = run.id
+        response.update(self._run_metrics(db, now_utc=now_utc))
         run.response_payload = _json(response)
         db.commit()
         return sanitize_kis_payload(response)
@@ -245,9 +298,10 @@ class StrategyAutoBuySchedulerService:
         settings: dict[str, Any],
         profile: dict[str, Any],
         market_session: dict[str, Any],
-        runs_today: int,
+        completed_analysis_count: int,
         latest_run: TradeRunLog | None,
         now_utc: datetime,
+        scheduled_slot_key: str | None = None,
     ) -> str | None:
         custom_profile = bool(profile.get("profile_key"))
         profile_status = str(profile.get("status") or "")
@@ -292,7 +346,7 @@ class StrategyAutoBuySchedulerService:
             return "active_profile_not_allowed"
 
         max_runs = _int(settings.get("strategy_auto_buy_scheduler_max_runs_per_day"), 3)
-        if runs_today >= max_runs:
+        if scheduled_slot_key is not None and completed_analysis_count >= max_runs:
             return "max_runs_per_day_reached"
         next_allowed = self._next_allowed_run_at(
             settings=settings,
@@ -351,6 +405,46 @@ class StrategyAutoBuySchedulerService:
             row = self.strategy_profiles.active_profile(db)
         return self.strategy_profiles.serialize_profile(row)
 
+    def _current_profile_scheduler_slot(
+        self,
+        profile: dict[str, Any],
+        *,
+        now_utc: datetime,
+    ) -> str | None:
+        if not profile.get("profile_key"):
+            return None
+        local_slot = _aware_utc(now_utc).astimezone(KST).strftime("%H:%M")
+        configured = {
+            str(value).strip()
+            for value in (
+                ((profile.get("automation_settings") or {}).get("entry") or {}).get(
+                    "analysis_times"
+                )
+                or []
+            )
+            if str(value).strip()
+        }
+        return f"profile:{local_slot}" if local_slot in configured else None
+
+    def _latest_rate_run(
+        self,
+        db: Session,
+        *,
+        scheduled: bool,
+    ) -> TradeRunLog | None:
+        rows = (
+            db.query(TradeRunLog)
+            .filter(TradeRunLog.mode == MODE)
+            .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+            .limit(200)
+            .all()
+        )
+        for row in rows:
+            _, row_scheduled = _run_analysis_metadata(row)
+            if row_scheduled is scheduled:
+                return row
+        return None
+
     def _profile_context(
         self,
         db: Session,
@@ -372,6 +466,101 @@ class StrategyAutoBuySchedulerService:
             ),
             "legacy_profile_name": legacy_profile_name,
         }
+
+    def _scheduled_slot_key(
+        self,
+        profile: dict[str, Any],
+        scheduler_slot: str | None,
+        *,
+        now_utc: datetime,
+    ) -> str | None:
+        raw_slot = str(scheduler_slot or "").strip()
+        if not raw_slot:
+            return None
+        profile_identity = str(
+            profile.get("profile_key") or profile.get("profile_name") or "unknown"
+        )
+        slot = _profile_slot_value(raw_slot)
+        local_date = _aware_utc(now_utc).astimezone(KST).date().isoformat()
+        return f"{profile_identity}:{local_date}:{slot}"
+
+    def _scheduled_slot_block_reason(
+        self,
+        db: Session,
+        *,
+        profile: dict[str, Any],
+        scheduler_slot: str | None,
+        scheduled_slot_key: str | None,
+        now_utc: datetime,
+    ) -> str | None:
+        if scheduled_slot_key is None:
+            return None
+        raw_slot = str(scheduler_slot or "").strip()
+        if self._scheduled_slot_attempted(
+            db,
+            scheduler_slot=scheduler_slot,
+            scheduled_slot_key=scheduled_slot_key,
+            now_utc=now_utc,
+        ):
+            return "scheduled_slot_already_attempted"
+        if raw_slot.lower().startswith("profile:"):
+            slot = _profile_slot_value(raw_slot)
+            configured = {
+                str(value).strip()
+                for value in (
+                    ((profile.get("automation_settings") or {}).get("entry") or {}).get(
+                        "analysis_times"
+                    )
+                    or SCHEDULE_SLOTS
+                )
+                if str(value).strip()
+            }
+            if slot not in configured:
+                return "scheduled_slot_not_configured"
+            local = _aware_utc(now_utc).astimezone(KST)
+            if local.strftime("%H:%M") != slot:
+                return "missed_slot_replay_forbidden"
+        return None
+
+    def _scheduled_slot_attempted(
+        self,
+        db: Session,
+        *,
+        scheduler_slot: str | None,
+        scheduled_slot_key: str,
+        now_utc: datetime,
+    ) -> bool:
+        raw_slot = str(scheduler_slot or "").strip()
+        profile_identity = scheduled_slot_key.rsplit(":", 2)[0]
+        for row in self._today_run_rows(db, now_utc=now_utc):
+            request = _parse_object(row.request_payload)
+            response = _parse_object(row.response_payload)
+            if response.get("block_reason") in {
+                "missed_slot_replay_forbidden",
+                "scheduled_slot_not_configured",
+            }:
+                continue
+            stored_key = str(
+                response.get("scheduled_slot_key")
+                or request.get("scheduled_slot_key")
+                or ""
+            ).strip()
+            if stored_key == scheduled_slot_key:
+                return True
+            stored_slot = str(request.get("scheduler_slot") or "").strip()
+            stored_profile = str(
+                request.get("automation_profile_key")
+                or request.get("profile_key")
+                or ""
+            ).strip()
+            if (
+                raw_slot
+                and stored_slot == raw_slot
+                and (not stored_profile or stored_profile == profile_identity)
+            ):
+                return True
+        return False
+
     def _latest_run(self, db: Session) -> TradeRunLog | None:
         return (
             db.query(TradeRunLog)
@@ -381,13 +570,39 @@ class StrategyAutoBuySchedulerService:
         )
 
     def _runs_today(self, db: Session, *, now_utc: datetime) -> int:
+        return len(self._today_run_rows(db, now_utc=now_utc))
+
+    def _run_metrics(self, db: Session, *, now_utc: datetime) -> dict[str, int]:
+        rows = self._today_run_rows(db, now_utc=now_utc)
+        completed_scheduled = 0
+        blocked_attempts = 0
+        for row in rows:
+            completed, scheduled = _run_analysis_metadata(row)
+            if completed and scheduled:
+                completed_scheduled += 1
+            if not completed:
+                blocked_attempts += 1
+        return {
+            "runs_today": len(rows),
+            "completed_analysis_count": completed_scheduled,
+            "blocked_attempt_count": blocked_attempts,
+            "scheduled_analysis_count": completed_scheduled,
+        }
+
+    def _today_run_rows(
+        self,
+        db: Session,
+        *,
+        now_utc: datetime,
+    ) -> list[TradeRunLog]:
         start_utc, end_utc = _kr_day_bounds_utc(now_utc)
         return (
             db.query(TradeRunLog)
             .filter(TradeRunLog.mode == MODE)
             .filter(TradeRunLog.created_at >= start_utc)
             .filter(TradeRunLog.created_at < end_utc)
-            .count()
+            .order_by(TradeRunLog.created_at.asc(), TradeRunLog.id.asc())
+            .all()
         )
 
     def _save_scheduler_run(
@@ -418,6 +633,11 @@ class StrategyAutoBuySchedulerService:
                     "validation_called": False,
                     "broker_submit_called": False,
                     "manual_submit_called": False,
+                    "analysis_completed": response.get("analysis_completed") is True,
+                    "scheduled_analysis_counted": response.get(
+                        "scheduled_analysis_counted"
+                    ) is True,
+                    "scheduled_slot_key": response.get("scheduled_slot_key"),
                 }
             ),
             response_payload=_json(response),
@@ -433,6 +653,7 @@ class StrategyAutoBuySchedulerService:
         block_reason: str,
         request_payload: dict[str, Any],
         profile_context: dict[str, Any],
+        scheduled_slot_key: str | None,
     ) -> dict[str, Any]:
         return {
             "status": "blocked",
@@ -440,6 +661,9 @@ class StrategyAutoBuySchedulerService:
             "provider": request_payload.get("provider", PROVIDER),
             "market": request_payload.get("market", MARKET),
             **profile_context,
+            "scheduled_slot_key": scheduled_slot_key,
+            "analysis_completed": False,
+            "scheduled_analysis_counted": False,
             "dry_run_result": None,
             "promotion": None,
             "created_promotion": False,
@@ -514,6 +738,50 @@ def _parse_object(value: Any) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except Exception:
         return {}
+
+
+def _profile_slot_value(value: str) -> str:
+    text = str(value or "").strip()
+    if text.lower().startswith("profile:"):
+        return text.split(":", 1)[1].strip()
+    return text
+
+
+def _run_analysis_metadata(row: TradeRunLog) -> tuple[bool, bool]:
+    request = _parse_object(row.request_payload)
+    response = _parse_object(row.response_payload)
+    completed_marker = response.get("analysis_completed")
+    if completed_marker is None:
+        completed_marker = request.get("analysis_completed")
+    completed = (
+        bool(completed_marker)
+        if completed_marker is not None
+        else response.get("dry_run_result") is not None
+    )
+    scheduled = bool(
+        response.get("scheduled_slot_key")
+        or request.get("scheduled_slot_key")
+        or request.get("scheduler_slot")
+    )
+    return completed, scheduled
+
+
+def _scheduler_analysis_observability(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "selected_symbol": result.get("selected_symbol"),
+        "final_buy_score": result.get("final_buy_score")
+        if result.get("final_buy_score") is not None
+        else result.get("final_score"),
+        "required_entry_score": float(result.get("required_entry_score") or 0),
+        "reason": result.get("reason"),
+        "configured_symbol_count": int(result.get("configured_symbol_count") or 0),
+        "analyzed_symbol_count": int(result.get("analyzed_symbol_count") or 0),
+        "quant_candidate_count": int(result.get("quant_candidate_count") or 0),
+        "gpt_candidate_count": int(result.get("gpt_candidate_count") or 0),
+        "final_candidate_count": int(result.get("final_candidate_count") or 0),
+        "preview_status": str(result.get("preview_status") or "unknown"),
+        "preview_error": result.get("preview_error"),
+    }
 
 
 def _parse_hhmm(value: str) -> time:
