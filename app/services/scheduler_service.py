@@ -11,7 +11,7 @@ from app.brokers.kis_client import KisClient
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.database import SessionLocal
-from app.db.models import OperationTest4Cycle, PositionLifecycle
+from app.db.models import AutomationProfileBuyReservation, OperationTest4Cycle, PositionLifecycle
 from app.services.kis_scheduler_simulation_service import KisSchedulerSimulationService
 from app.services.kis_scheduler_live_service import KisSchedulerLiveService
 from app.services.auto_buy_live_phase1_service import AutoBuyLivePhase1Service
@@ -43,6 +43,12 @@ from app.services.automation_profile_service import AutomationProfileService
 from app.services.strategy_auto_buy_scheduler_service import (
     StrategyAutoBuySchedulerService,
 )
+from app.services.automation_profile_buy_scheduler_service import (
+    AutomationProfileBuySchedulerService,
+)
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
+from app.services.kis_order_sync_service import KisOrderSyncService
+from app.services.kis_order_validation_service import KisOrderValidationService
 from app.services.profile_aware_guarded_live_auto_buy_service import (
     ProfileAwareGuardedLiveAutoBuyService,
 )
@@ -65,6 +71,7 @@ class SchedulerService:
         self.automation_profiles = AutomationProfileService()
         self.watchlist_run_service = WatchlistRunService()
         self.strategy_auto_buy_scheduler_service = StrategyAutoBuySchedulerService()
+        self.automation_profile_buy_scheduler_service = None
         self.position_management_slots = [
             ("position_management_dry_run_open_phase", 9, 0),
             ("position_management_dry_run_midday", 10, 25),
@@ -282,6 +289,9 @@ class SchedulerService:
             if schedule is None:
                 return list(self._strategy_auto_buy_slots)
             runtime = self.runtime_settings.get_settings_read_only(db)
+            authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+            if authority_reader:
+                runtime['automation_profile_scheduler_enabled'] = bool(authority_reader.get('scheduler_allowed'))
             if not bool(runtime.get("automation_profile_scheduler_enabled")):
                 return []
             if schedule.get("status") != "active":
@@ -300,6 +310,9 @@ class SchedulerService:
             schedule = self.automation_profiles.selected_profile_schedule(db, now=now_kr)
             if schedule is not None:
                 runtime = self.runtime_settings.get_settings_read_only(db)
+                authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+                if authority_reader:
+                    runtime['automation_profile_scheduler_enabled'] = bool(authority_reader.get('scheduler_allowed'))
                 if not bool(runtime.get("automation_profile_scheduler_enabled")):
                     return None
                 return schedule.get("next_run_at")
@@ -454,10 +467,19 @@ class SchedulerService:
         finally:
             db.close()
 
-    def _run_strategy_auto_buy_dry_run_scheduled_once(self, slot_name: str):
+    def _run_strategy_auto_buy_dry_run_scheduled_once(self, slot_name: str, *, now: datetime | None = None):
         db = SessionLocal()
         try:
-            if self._position_lifecycle_management_should_preempt_buy(db):
+            authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+            if not authority_reader.get('scheduler_allowed'):
+                return self._create_scheduler_skip_log(
+                    db,
+                    slot_name=slot_name,
+                    reason='automation_mode_off',
+                    market='KR',
+                    provider='kis',
+                )
+            if self._position_lifecycle_management_should_preempt_buy(db, slot_name=slot_name, now=now):
                 if not self._automation_profile_execution_active(db):
                     self._disable_kis_buy_scheduler_flags(db)
                 return self._create_scheduler_skip_log(
@@ -539,6 +561,26 @@ class SchedulerService:
                     "scheduler_slot": slot_name,
                 },
             )
+            if self._automation_profile_live_buy_requested(db, now=now):
+                profile_result = self._profile_buy_scheduler_service(
+                    db,
+                    kis_client=kis_client,
+                ).run_once(
+                    db,
+                    dry_result.get('dry_run_result', dry_result)
+                    if isinstance(dry_result, dict)
+                    else dry_result,
+                    scheduler_slot=self._profile_scheduler_slot(slot_name),
+                    trigger_source='automation_profile_scheduler',
+                    now=now,
+                )
+                return {
+                    'position_management': position_result,
+                    'auto_sell_phase1': sell_phase1_result,
+                    'dry_run': dry_result,
+                    'profile_buy': profile_result,
+                    'phase1': None,
+                }
             phase1_result = None
             if (
                 buy_phase1_requested
@@ -720,18 +762,97 @@ class SchedulerService:
             scheduler_slot=slot_name,
         )
 
-    def _position_lifecycle_management_should_preempt_buy(self, db) -> bool:
+    def _position_lifecycle_management_should_preempt_buy(
+        self,
+        db,
+        *,
+        slot_name: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        if self._profile_slot_reservation_exists(db, slot_name=slot_name, now=now):
+            return False
         return bool(
             db.query(PositionLifecycle)
             .filter(PositionLifecycle.status.in_(["open", "closing"]))
             .count()
         )
 
+    def _profile_slot_reservation_exists(
+        self,
+        db,
+        *,
+        slot_name: str | None,
+        now: datetime | None,
+    ) -> bool:
+        slot = self._profile_scheduler_slot(slot_name or '')
+        if slot is None:
+            return False
+        schedule = self.automation_profiles.selected_profile_schedule(
+            db,
+            now=now or datetime.now(KR_TZ),
+        )
+        profile_key = schedule.get('profile_key') if schedule else None
+        if not profile_key:
+            return False
+        local_date = (now or datetime.now(UTC)).astimezone(KR_TZ).date().isoformat()
+        return bool(
+            db.query(AutomationProfileBuyReservation)
+            .filter(AutomationProfileBuyReservation.profile_key == str(profile_key))
+            .filter(AutomationProfileBuyReservation.trade_date_kst == local_date)
+            .filter(AutomationProfileBuyReservation.scheduler_slot_kst == slot)
+            .first()
+        )
+
+    def _automation_profile_live_buy_requested(self, db, *, now: datetime | None = None) -> bool:
+        schedule = self.automation_profiles.selected_profile_schedule(
+            db,
+            now=now or datetime.now(KR_TZ),
+        )
+        if not schedule or schedule.get('status') != 'active':
+            return False
+        authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+        if authority_reader:
+            return bool(authority_reader.get('scheduler_allowed'))
+        gate_reader = getattr(
+            self.runtime_settings,
+            'get_automation_profile_live_order_gate_read_only',
+            None,
+        )
+        if not callable(gate_reader):
+            return False
+        return bool(gate_reader(db).get('allowed'))
+
+    def _profile_buy_scheduler_service(self, db, *, kis_client=None):
+        if self.automation_profile_buy_scheduler_service is not None:
+            return self.automation_profile_buy_scheduler_service
+        client = kis_client
+        if client is None:
+            settings_obj = get_settings()
+            client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        self.automation_profile_buy_scheduler_service = AutomationProfileBuySchedulerService(
+            client=client,
+            broker=KisBroker(client),
+            validation_service=KisOrderValidationService(client),
+            order_sync_service=KisOrderSyncService(client),
+            runtime_settings=self.runtime_settings,
+            strategy_profiles=self.automation_profiles,
+        )
+        return self.automation_profile_buy_scheduler_service
+
+    def _profile_scheduler_slot(self, slot_name: str) -> str | None:
+        for name, hour, minute in self._strategy_auto_buy_slots:
+            if name == slot_name:
+                return f'{hour:02d}:{minute:02d}'
+        return slot_name if len(str(slot_name)) == 5 and str(slot_name)[2] == ':' else None
+
     def _automation_profile_execution_active(self, db) -> bool:
         schedule = self.automation_profiles.selected_profile_schedule(
             db,
             now=datetime.now(KR_TZ),
         )
+        authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+        if authority_reader:
+            return bool(schedule and schedule.get('status') == 'active' and authority_reader.get('scheduler_allowed'))
         runtime = self.runtime_settings.get_settings_read_only(db)
         return bool(
             schedule

@@ -207,6 +207,7 @@ def enable_live_settings(db_session):
     RuntimeSettingService().update_settings(
         db_session,
         {
+            'automation_mode': 'live',
             "dry_run": False,
             "kill_switch": False,
             "strategy_live_auto_buy_enabled": True,

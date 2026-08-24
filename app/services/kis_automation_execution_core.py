@@ -5,6 +5,8 @@ from typing import Any, Callable
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.core.enums import InternalOrderStatus
+from app.core.automation_mode import automation_mode_authority
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.db.models import OrderLog
 from app.services.kis_manual_order_service import KisManualOrderSubmitRequest
 from app.services.kis_order_validation_service import KisOrderValidationRequest, record_kis_order_validation
@@ -61,12 +63,63 @@ class KisAutomationExecutionCore:
         return int(status_code), sanitize_kis_payload(payload)
 
     def submit_market_buy(self, db: Session, *, order: OrderLog, symbol: str, qty: int, submitter: Callable[[], dict[str, Any]] | None = None, now: datetime | None = None, expected_price: float | None = None, max_positions: int = 1, max_order_notional_krw: float | None = None) -> dict[str, Any]:
+        authority = self._execution_authority(db)
+        if authority.get('automation_mode') == 'off':
+            return self._blocked(db, order, {'allowed': False, 'reason': 'automation_mode_off', 'automation_mode': 'off'})
         guard = self._buy_jit_guard(db, order_id=order.id, symbol=symbol, qty=qty, expected_price=expected_price, max_positions=max_positions, max_order_notional_krw=max_order_notional_krw, now=now)
+        if guard.get('allowed') and authority.get('automation_mode') == 'test':
+            return self._simulate_market(db, order=order, side='buy', symbol=symbol, qty=qty, now=now, guard=guard)
         return self._blocked(db, order, guard) if not guard.get("allowed") else self._submit_market(db, order=order, side="buy", symbol=symbol, qty=qty, submitter=submitter or self._broker_buy(symbol, qty), now=now, guard=guard)
 
     def submit_market_sell(self, db: Session, *, order: OrderLog, symbol: str, qty: int, submitter: Callable[[], dict[str, Any]] | None = None, now: datetime | None = None) -> dict[str, Any]:
+        authority = self._execution_authority(db)
+        if authority.get('automation_mode') == 'off':
+            return self._blocked(db, order, {'allowed': False, 'reason': 'automation_mode_off', 'automation_mode': 'off'})
         guard = self._sell_jit_guard(db, order_id=order.id, symbol=symbol, qty=qty)
+        if guard.get('allowed') and authority.get('automation_mode') == 'test':
+            return self._simulate_market(db, order=order, side='sell', symbol=symbol, qty=qty, now=now, guard=guard)
         return self._blocked(db, order, guard) if not guard.get("allowed") else self._submit_market(db, order=order, side="sell", symbol=symbol, qty=qty, submitter=submitter or self._broker_sell(symbol, qty), now=now, guard=guard)
+
+    def _execution_authority(self, db: Session) -> dict[str, Any]:
+        return AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+        if self.runtime_settings is None:
+            try:
+                from app.services.runtime_setting_service import RuntimeSettingService
+                settings = RuntimeSettingService().get_settings_read_only(db)
+                return automation_mode_authority(settings.get('automation_mode'))
+            except Exception:
+                return {'automation_mode': 'off', 'execution_authority': 'OFF', 'broker_submit_allowed': False, 'source_of_truth': 'automation_mode', 'reason': 'automation_mode_unavailable'}
+        reader = getattr(self.runtime_settings, 'get_automation_execution_authority_read_only', None)
+        if callable(reader):
+            try:
+                return dict(reader(db))
+            except Exception:
+                return {'automation_mode': 'off', 'execution_authority': 'OFF', 'broker_submit_allowed': False, 'source_of_truth': 'automation_mode', 'reason': 'automation_mode_unavailable'}
+        try:
+            settings = self.runtime_settings.get_settings_read_only(db)
+            return automation_mode_authority(settings.get('automation_mode'))
+        except Exception:
+            return {'automation_mode': 'off', 'execution_authority': 'OFF', 'broker_submit_allowed': False, 'source_of_truth': 'automation_mode', 'reason': 'automation_mode_unavailable'}
+
+    def _simulate_market(self, db: Session, *, order: OrderLog, side: str, symbol: str, qty: int, now: datetime | None, guard: dict[str, Any]) -> dict[str, Any]:
+        now_utc = _aware_utc(now or self.now_provider())
+        fill_price = _number(guard.get('current_price')) or _number(getattr(order, 'limit_price', None)) or 0
+        simulation_order_id = f'SIM-{side.upper()}-{order.id}'
+        order.symbol = order.symbol or symbol
+        order.side = order.side or side
+        order.qty = order.qty or qty
+        order.requested_qty = order.requested_qty or qty
+        order.broker_order_id = order.kis_odno = simulation_order_id
+        order.broker_status = order.broker_order_status = 'simulated_filled'
+        order.internal_status = InternalOrderStatus.FILLED.value
+        order.submitted_at = now_utc
+        order.filled_qty = int(qty)
+        order.remaining_qty = 0
+        order.avg_fill_price = order.filled_avg_price = fill_price
+        order.filled_at = now_utc
+        order.response_payload = _json({'execution_core': 'kis_automation_execution_core', 'status': 'simulated_filled', 'simulation': True, 'real_order_submitted': False, 'broker_submit_called': False, 'source_metadata': _source_metadata(order), 'guard': guard})
+        db.commit()
+        return {'status': 'filled', 'submitted': True, 'simulated': True, 'real_order_submitted': False, 'broker_submit_called': False, 'manual_submit_called': False, 'order_id': order.id, 'broker_order_id': simulation_order_id, 'kis_odno': simulation_order_id, 'broker_status': 'simulated_filled', 'internal_status': order.internal_status, 'lifecycle': self._reconcile_filled_order(db, order, now=now_utc), 'guard': guard}
 
     def _broker_buy(self, symbol: str, qty: int) -> Callable[[], dict[str, Any]]:
         if self.broker is None:
@@ -100,6 +153,10 @@ class KisAutomationExecutionCore:
         return {"status": "blocked", "reason": reason, "submitted": False, "real_order_submitted": False, "broker_submit_called": False, "manual_submit_called": False, "order_id": order.id, "internal_status": order.internal_status, "guard": guard}
 
     def _submit_market(self, db: Session, *, order: OrderLog, side: str, symbol: str, qty: int, submitter: Callable[[], dict[str, Any]], now: datetime | None, guard: dict[str, Any]) -> dict[str, Any]:
+        authority = self._execution_authority(db)
+        if authority.get('automation_mode') != 'live':
+            reason = 'automation_mode_off' if authority.get('automation_mode') == 'off' else 'automation_mode_not_live'
+            return self._blocked(db, order, {'allowed': False, 'reason': reason, 'automation_mode': authority.get('automation_mode'), 'execution_authority': authority.get('execution_authority')})
         now_utc = _aware_utc(now or self.now_provider())
         try:
             response = submitter()

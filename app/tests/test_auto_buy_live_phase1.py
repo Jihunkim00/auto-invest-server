@@ -111,6 +111,8 @@ def phase1_runtime(**overrides) -> FakeRuntimeSettings:
 
 
 def add_phase1_promotion(db_session, *, symbol: str = "005930"):
+    from app.services.runtime_setting_service import RuntimeSettingService
+    RuntimeSettingService().update_settings(db_session, {'automation_mode': 'live'})
     dry_run = add_dry_run(db_session, symbol=symbol)
     promotion = add_promotion_for_dry_run(db_session, dry_run)
     return dry_run, promotion

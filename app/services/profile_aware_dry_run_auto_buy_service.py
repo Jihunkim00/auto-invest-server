@@ -107,7 +107,7 @@ class ProfileAwareDryRunAutoBuyService:
             for candidate in candidates
         ]
         evaluated.sort(key=_candidate_sort_key)
-        selected = evaluated[0] if evaluated else None
+        selected = _select_executable_candidate(evaluated, profile=profile)
         decision = self._decision(
             selected,
             market_session=market_session,
@@ -957,6 +957,26 @@ def _unavailable_preview_payload(
         status="unavailable",
         error=error or reason,
     )
+
+
+def _select_executable_candidate(evaluated: list[dict[str, Any]], *, profile: dict[str, Any]) -> dict[str, Any] | None:
+    threshold = max(65.0, float(profile.get('buy_score_threshold') or 0.0))
+    for item in evaluated:
+        score = item.get('buy_score')
+        if score is None or float(score) < threshold:
+            continue
+        if not item.get('data_sufficient') or item.get('target_risk_approved') is not True:
+            continue
+        price = _score(item, 'price')
+        target = item.get('target_risk_result')
+        target = target if isinstance(target, dict) else {}
+        approved = _score(target, 'approved_notional_krw', 'recommended_notional_krw')
+        if price is None or price <= 0 or approved is None or approved <= 0:
+            continue
+        if math.floor(approved / price) < 1:
+            continue
+        return item
+    return evaluated[0] if evaluated else None
 
 
 def _preview_observability(preview: dict[str, Any]) -> dict[str, Any]:

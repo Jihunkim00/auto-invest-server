@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.constants import DEFAULT_GATE_LEVEL, MAX_TRADES_PER_DAY, NEAR_CLOSE_MINUTES
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.db.models import OrderLog, RuntimeSetting
 from app.services.market_session_service import MarketSessionService
 
@@ -357,6 +358,30 @@ class RuntimeSettingService:
         settings = self._defaults()
         settings["updated_at"] = None
         return self._finalize_settings(settings)
+
+    def get_automation_execution_authority_read_only(
+        self,
+        db: Session,
+    ) -> dict[str, Any]:
+        return AutomationExecutionAuthorityService(self).snapshot(db)
+        settings = self.get_settings_read_only(db)
+        authority = automation_mode_authority(settings.get('automation_mode'))
+        return {
+            **authority,
+            'automation_mode_updated_at': settings.get('automation_mode_updated_at'),
+            'automation_mode_updated_by': settings.get('automation_mode_updated_by'),
+            'automation_mode_reason': settings.get('automation_mode_reason'),
+            'legacy_flags_ignored': [
+                'dry_run',
+                'kill_switch',
+                'runtime_authorized',
+                'live_order_possible',
+                'kis_real_order_enabled',
+                'strategy_live_auto_buy_enabled',
+                'strategy_live_auto_buy_scheduler_enabled',
+                'auto_buy_live_phase1_enabled',
+            ],
+        }
 
     def _settings_from_row(self, row: RuntimeSetting) -> dict[str, Any]:
         settings = {
@@ -1347,6 +1372,62 @@ class RuntimeSettingService:
     ) -> dict[str, Any]:
         settings = self.get_settings_read_only(db)
         return self._kis_scheduler_runtime_state(settings)
+
+    def get_automation_profile_live_order_gate_read_only(
+        self,
+        db: Session,
+    ) -> dict[str, Any]:
+        settings = self.get_settings_read_only(db)
+        app_settings = self.settings
+        dry_run = bool(settings.get('dry_run', True))
+        kill_switch = bool(settings.get('kill_switch', True))
+        kis_real_order_enabled = bool(getattr(app_settings, 'kis_real_order_enabled', False))
+        explicit_authorized = settings.get('runtime_authorized')
+        if explicit_authorized is None:
+            runtime_authorized = bool(
+                settings.get('automation_profile_scheduler_enabled')
+                and settings.get('automation_release_allow_live_phase1')
+                and settings.get('auto_buy_live_phase1_enabled')
+                and settings.get('auto_buy_live_phase1_allow_real_orders')
+            )
+        else:
+            runtime_authorized = bool(explicit_authorized)
+        explicit_possible = settings.get('live_order_possible')
+        if explicit_possible is None:
+            live_order_possible = bool(
+                runtime_authorized
+                and not dry_run
+                and not kill_switch
+                and kis_real_order_enabled
+            )
+        else:
+            live_order_possible = bool(explicit_possible)
+        reasons = []
+        if dry_run:
+            reasons.append('dry_run_true')
+        if kill_switch:
+            reasons.append('kill_switch_enabled')
+        if not kis_real_order_enabled:
+            reasons.append('kis_real_order_disabled')
+        if not runtime_authorized:
+            reasons.append('runtime_not_authorized')
+        if not live_order_possible:
+            reasons.append('live_order_not_possible')
+        return {
+            'dry_run': dry_run,
+            'kill_switch': kill_switch,
+            'kis_real_order_enabled': kis_real_order_enabled,
+            'runtime_authorized': runtime_authorized,
+            'live_order_possible': live_order_possible,
+            'allowed': not reasons,
+            'blocking_reasons': reasons,
+            'source_of_truth': 'automation_profile_live_order_gate',
+            'legacy_flags_not_rechecked': [
+                'kis_scheduler_enabled',
+                'kis_scheduler_live_enabled',
+                'kis_scheduler_allow_real_orders',
+            ],
+        }
 
     def get_kis_risk_summary_read_only(self, db: Session) -> dict[str, Any]:
         settings = self.get_settings_read_only(db)

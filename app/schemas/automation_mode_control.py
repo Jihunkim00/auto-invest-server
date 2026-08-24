@@ -4,8 +4,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.automation_mode import SUPPORTED_AUTOMATION_MODE_VALUES
+
 
 AutomationMode = Literal[
+    'test',
+    'live',
     "off",
     "monitor_only",
     "dry_run_auto",
@@ -13,6 +17,7 @@ AutomationMode = Literal[
 ]
 
 AutomationEffectiveStatus = Literal[
+    'test_ready',
     "off",
     "monitoring",
     "dry_run_ready",
@@ -31,6 +36,14 @@ class AutomationModeSetRequest(BaseModel):
     operator_acknowledged_risks: bool = False
     language: str | None = Field(default=None, max_length=20)
     locale: str | None = Field(default=None, max_length=20)
+
+    @field_validator('automation_mode', mode='before')
+    @classmethod
+    def normalize_automation_mode(cls, value: str) -> str:
+        text = str(value or '').strip().lower()
+        if text not in SUPPORTED_AUTOMATION_MODE_VALUES:
+            raise ValueError(f'unsupported automation mode: {text}')
+        return text
 
     @field_validator("reason")
     @classmethod
@@ -67,6 +80,15 @@ class AutomationModeStatusResponse(BaseModel):
     can_run_dry_run: bool
     can_attempt_phase1_live: bool
     can_submit_live_order: bool
+    execution_authority: str = 'OFF'
+    scheduler_allowed: bool = False
+    simulation_allowed: bool = False
+    broker_submit_allowed: bool = False
+    read_only_allowed: bool = True
+    legacy_alias: str | None = None
+    source_of_truth: str = 'automation_mode'
+    authority_snapshot_source: str = 'AutomationExecutionAuthorityService'
+    legacy_flags_ignored: list[str] = Field(default_factory=list)
     kill_switch: bool
     dry_run: bool
     kis_enabled: bool
@@ -90,6 +112,7 @@ class AutomationModeStatusResponse(BaseModel):
     soak_kill_latch_reason: str | None = None
     soak_kill_latch_triggered_at: str | None = None
     blocking_reasons: list[str] = Field(default_factory=list)
+    diagnostic_blocking_reasons: list[str] = Field(default_factory=list)
     warning_reasons: list[str] = Field(default_factory=list)
     next_safe_action: str
     safety_flags: dict[str, Any] = Field(default_factory=dict)

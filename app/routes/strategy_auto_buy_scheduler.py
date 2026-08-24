@@ -34,6 +34,12 @@ from app.services.strategy_auto_buy_promotion_service import (
 from app.services.strategy_auto_buy_scheduler_service import (
     StrategyAutoBuySchedulerService,
 )
+from app.services.automation_profile_buy_scheduler_service import (
+    AutomationProfileBuySchedulerService,
+)
+from app.services.automation_profile_buy_scheduler_service import (
+    build_automation_profile_buy_scheduler_service,
+)
 
 
 router = APIRouter(
@@ -58,6 +64,12 @@ def get_strategy_auto_buy_scheduler_service(
         dry_run_service=dry_run_service,
         promotion_service=promotion_service,
     )
+
+
+def get_automation_profile_buy_scheduler_service(
+    db: Session = Depends(get_db),
+) -> AutomationProfileBuySchedulerService:
+    return build_automation_profile_buy_scheduler_service(db)
 
 
 def get_auto_buy_live_phase1_service(
@@ -95,6 +107,16 @@ def get_strategy_auto_buy_scheduler_status(
     ),
 ):
     return service.status(db, provider=provider, market=market)
+
+
+@router.get('/scheduler/buy-readiness')
+def get_automation_profile_buy_readiness(
+    db: Session = Depends(get_db),
+    service: AutomationProfileBuySchedulerService = Depends(
+        get_automation_profile_buy_scheduler_service
+    ),
+):
+    return service.readiness(db)
 
 
 @router.post(

@@ -138,6 +138,7 @@ def live_exit_service(
 
 def enable_live_exit_settings(db_session, **overrides):
     values = {
+        'automation_mode': 'live',
         "dry_run": False,
         "kill_switch": False,
         "strategy_live_auto_exit_enabled": True,

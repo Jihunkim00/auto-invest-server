@@ -546,6 +546,25 @@ class StrategyLiveAutoBuyAttempt(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class AutomationProfileBuyReservation(Base):
+    __tablename__ = 'automation_profile_buy_reservations'
+
+    id = Column(Integer, primary_key=True, index=True)
+    reservation_key = Column(String(180), nullable=False, unique=True, index=True)
+    provider = Column(String(20), nullable=False, default='kis', index=True)
+    market = Column(String(10), nullable=False, default='KR', index=True)
+    profile_key = Column(String(80), nullable=False, index=True)
+    trade_date_kst = Column(String(10), nullable=False, index=True)
+    scheduler_slot_kst = Column(String(5), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default='reserved', index=True)
+    order_id = Column(Integer, nullable=True, index=True)
+    attempt_id = Column(Integer, nullable=True, index=True)
+    block_reason = Column(String(160), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class StrategyAutoBuyPromotion(Base):
     __tablename__ = "strategy_auto_buy_promotions"
 

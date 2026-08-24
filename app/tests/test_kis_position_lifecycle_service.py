@@ -518,6 +518,7 @@ def test_scheduler_position_management_slots_and_buy_preemption(
     db_session,
 ):
     _open_lifecycle(db_session)
+    RuntimeSettingService().update_settings(db_session, {'automation_mode': 'test'})
     scheduler = SchedulerService()
     scheduler.strategy_auto_buy_scheduler_service = SimpleNamespace(
         run_dry_run_once=lambda *args, **kwargs: pytest.fail(

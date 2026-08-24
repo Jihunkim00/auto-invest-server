@@ -49,6 +49,7 @@ def _order(
     stop_loss_pct=None,
     take_profit_pct=None,
 ):
+    RuntimeSettingService().update_settings(db, {'automation_mode': 'live'})
     payload = {
         "source": "strategy_live_auto_buy" if side == "buy" else "strategy_live_auto_exit",
         "source_type": "profile_aware_guarded_live_auto_buy" if side == "buy" else "guarded_profile_exit",
@@ -82,6 +83,7 @@ def _enable_profile_scheduler(db):
     RuntimeSettingService().update_settings(
         db,
         {
+            'automation_mode': 'live',
             "automation_profile_scheduler_enabled": True,
             "strategy_auto_buy_scheduler_enabled": True,
             "strategy_live_auto_buy_scheduler_enabled": True,

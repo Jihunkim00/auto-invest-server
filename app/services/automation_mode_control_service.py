@@ -9,15 +9,25 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
+from app.core.automation_mode import (
+    AUTOMATION_MODE_LIVE,
+    AUTOMATION_MODE_OFF,
+    AUTOMATION_MODE_TEST,
+    automation_mode_authority,
+    execution_mode,
+)
 from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
 from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.ops_production_readiness_service import (
     OpsProductionReadinessService,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 
 
 ALLOWED_AUTOMATION_MODES = {
+    'test',
+    'live',
     "off",
     "monitor_only",
     "dry_run_auto",
@@ -27,6 +37,8 @@ ACK_REQUIRED_MODES = {"dry_run_auto", "phase1_live_ready"}
 PROVIDER = "kis"
 MARKET = "KR"
 KST = ZoneInfo("Asia/Seoul")
+
+ACK_REQUIRED_CANONICAL_MODES = {'test', 'live'}
 
 OPEN_ORDER_STATUSES = {
     InternalOrderStatus.REQUESTED.value,
@@ -83,6 +95,7 @@ class AutomationModeControlService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         now_utc = _utc(now)
+        authority = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
         settings = self.runtime_settings.get_settings_read_only(db)
         mode = _mode(settings.get("automation_mode"))
         app_settings = getattr(self.runtime_settings, "settings", None)
@@ -111,6 +124,7 @@ class AutomationModeControlService:
         critical_exit_count = self._latest_critical_exit_candidate_count(db)
 
         blocking_reasons: list[str] = []
+        diagnostic_blocking_reasons: list[str] = []
         warning_reasons: list[str] = []
         can_run_monitoring = mode in {"monitor_only", "dry_run_auto", "phase1_live_ready"}
         can_run_dry_run = mode == "dry_run_auto"
@@ -146,6 +160,7 @@ class AutomationModeControlService:
                 daily_trade_limit_remaining=daily_remaining,
             )
             blocking_reasons.extend(live_gate_reasons)
+            diagnostic_blocking_reasons.extend(live_gate_reasons)
             can_submit_live_order = not live_gate_reasons
             can_attempt_phase1_live = can_submit_live_order
             effective_status = "live_ready" if can_submit_live_order else "live_ready_blocked"
@@ -155,6 +170,29 @@ class AutomationModeControlService:
         if settings.get("kill_switch") is True and mode != "off":
             warning_reasons.append("kill_switch_is_separate")
         soak_latch_active = bool(settings.get("automation_soak_kill_latch_active"))
+        if mode in {'off', 'test', 'live'}:
+            if mode == 'off':
+                blocking_reasons = ['automation_mode_off']
+                effective_status = 'off'
+                can_run_monitoring = False
+                can_run_dry_run = False
+                can_attempt_phase1_live = False
+                can_submit_live_order = False
+            elif mode == 'test':
+                blocking_reasons = []
+                effective_status = 'test_ready'
+                can_run_monitoring = True
+                can_run_dry_run = True
+                can_attempt_phase1_live = False
+                can_submit_live_order = False
+            else:
+                blocking_reasons = []
+                effective_status = 'live_ready'
+                can_run_monitoring = True
+                can_run_dry_run = False
+                can_attempt_phase1_live = True
+                can_submit_live_order = True
+
         if soak_latch_active:
             blocking_reasons.append("automation_soak_kill_latch_active")
             effective_status = "kill_latched"
@@ -171,6 +209,21 @@ class AutomationModeControlService:
         blocking_reasons = _dedupe(blocking_reasons)
         warning_reasons = _dedupe(warning_reasons)
         return {
+            'diagnostic_blocking_reasons': _dedupe(diagnostic_blocking_reasons),
+            'authority_snapshot_source': authority.get('authority_snapshot_source', 'AutomationExecutionAuthorityService'),
+            'legacy_flags_ignored': authority.get('legacy_flags_ignored', []),
+            **{
+                key: authority[key]
+                for key in (
+                    'execution_authority',
+                    'scheduler_allowed',
+                    'simulation_allowed',
+                    'broker_submit_allowed',
+                    'read_only_allowed',
+                    'legacy_alias',
+                    'source_of_truth',
+                )
+            },
             "generated_at": now_utc.isoformat(),
             "automation_mode": mode,
             "mode_label": _mode_label(mode),
@@ -244,7 +297,7 @@ class AutomationModeControlService:
         now: datetime | None = None,
     ) -> dict[str, Any]:
         mode = _mode(automation_mode)
-        if mode in ACK_REQUIRED_MODES and not operator_acknowledged_risks:
+        if mode in ACK_REQUIRED_MODES.union(ACK_REQUIRED_CANONICAL_MODES) and not operator_acknowledged_risks:
             raise AutomationModeAcknowledgementRequired(
                 f"{mode} requires operator_acknowledged_risks=true"
             )
@@ -279,6 +332,36 @@ class AutomationModeControlService:
         return self.status(db, now=now)
 
     def _mode_payload(self, mode: str) -> dict[str, Any]:
+        if mode == 'test':
+            payload = self._off_payload()
+            payload.update({
+                'scheduler_enabled': True,
+                'automation_profile_scheduler_enabled': True,
+                'strategy_auto_buy_scheduler_enabled': True,
+                'strategy_auto_buy_scheduler_dry_run_only': True,
+                'strategy_auto_buy_scheduler_allow_live_orders': False,
+                'position_management_scheduler_enabled': True,
+                'position_management_scheduler_dry_run_only': True,
+                'position_management_scheduler_allow_live_orders': False,
+                'portfolio_orchestrator_enabled': True,
+                'portfolio_orchestrator_allow_live_orders': False,
+            })
+            return payload
+        if mode == 'live':
+            payload = self._off_payload()
+            payload.update({
+                'scheduler_enabled': True,
+                'automation_profile_scheduler_enabled': True,
+                'strategy_auto_buy_scheduler_enabled': True,
+                'strategy_auto_buy_scheduler_dry_run_only': False,
+                'strategy_auto_buy_scheduler_allow_live_orders': True,
+                'position_management_scheduler_enabled': True,
+                'position_management_scheduler_dry_run_only': False,
+                'position_management_scheduler_allow_live_orders': True,
+                'portfolio_orchestrator_enabled': True,
+                'portfolio_orchestrator_allow_live_orders': True,
+            })
+            return payload
         if mode == "off":
             return self._off_payload()
         if mode == "monitor_only":
@@ -320,6 +403,7 @@ class AutomationModeControlService:
 
     def _off_payload(self) -> dict[str, Any]:
         return {
+            'automation_profile_scheduler_enabled': False,
             "scheduler_enabled": False,
             "position_management_scheduler_enabled": False,
             "position_management_scheduler_dry_run_only": True,
@@ -623,6 +707,10 @@ def _mode(value: Any) -> str:
 
 
 def _mode_label(mode: str) -> str:
+    if mode == 'test':
+        return 'Test Automation'
+    if mode == 'live':
+        return 'Live Automation'
     return {
         "off": "Automation Off",
         "monitor_only": "Monitoring Only",
@@ -632,6 +720,10 @@ def _mode_label(mode: str) -> str:
 
 
 def _mode_description(mode: str) -> str:
+    if mode == 'test':
+        return 'Automation profiles and shared-core simulation may run; broker submission is forbidden.'
+    if mode == 'live':
+        return 'Automation profiles may submit only after every hard safety gate passes.'
     return {
         "off": "All automation layer flags are disabled.",
         "monitor_only": "Read-only monitoring and diagnostics may be reviewed.",
@@ -648,6 +740,10 @@ def _next_safe_action(
     effective_status: str,
     blocking_reasons: list[str],
 ) -> str:
+    if mode == 'test':
+        return 'review_simulated_automation_results'
+    if mode == 'live' and effective_status == 'live_ready':
+        return 'run_live_automation_only_if_operator_intends'
     if mode == "off":
         return "automation_is_off"
     if mode == "monitor_only":

@@ -746,6 +746,9 @@ def test_us_scheduler_does_not_run_kis_services(monkeypatch):
 
 def test_strategy_auto_buy_scheduler_slot_uses_pr78_dry_run_service_only(monkeypatch):
     calls = []
+    from app.services.runtime_setting_service import RuntimeSettingService
+    with SessionLocal() as db:
+        RuntimeSettingService().update_settings(db, {'automation_mode': 'test'})
 
     class FakeStrategyAutoBuySchedulerService:
         def run_dry_run_once(self, db, request):
