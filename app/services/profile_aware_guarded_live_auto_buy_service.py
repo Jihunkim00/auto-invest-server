@@ -23,6 +23,7 @@ from app.schemas.strategy_live_auto_buy import (
     ProfileAwareGuardedLiveAutoBuyRunRequest,
 )
 from app.services.kis_order_sync_service import KisOrderSyncService
+from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.kis_order_validation_service import (
     KisOrderValidationRequest,
     KisOrderValidationService,
@@ -82,6 +83,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         positions_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         balance_loader: Callable[[Session], dict[str, Any]] | None = None,
         open_orders_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
+        execution_core: KisAutomationExecutionCore | None = None,
     ) -> None:
         self.client = client
         self.broker = broker or (KisBroker(client) if client is not None else None)
@@ -99,6 +101,15 @@ class ProfileAwareGuardedLiveAutoBuyService:
         self.positions_loader = positions_loader
         self.balance_loader = balance_loader
         self.open_orders_loader = open_orders_loader
+        self.execution_core = execution_core or KisAutomationExecutionCore(
+            client,
+            broker=self.broker,
+            validation_service=self.validation_service,
+            order_sync_service=self.order_sync_service,
+            runtime_settings=self.runtime_settings,
+            positions_loader=self.positions_loader,
+            open_orders_loader=self.open_orders_loader,
+        )
 
     def readiness(
         self,
@@ -1011,7 +1022,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
             return response
         if self.order_sync_service is None:
             raise ValueError("kis_order_sync_service_unavailable")
-        order = self.order_sync_service.sync_order(db, int(attempt.related_order_id))
+        self.execution_core.order_sync_service = self.order_sync_service
+        order = self.execution_core.sync_order(db, int(attempt.related_order_id))
         status = _attempt_status_from_order(order)
         attempt.status = status
         attempt.broker_order_id = order.broker_order_id or order.kis_odno
@@ -1216,29 +1228,36 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     "attempt_status": "submitting",
                 },
             )
-        safety["broker_submit_called"] = True
-        try:
-            broker_response = self.broker.submit_market_buy(
-                symbol=symbol,
-                qty=int(plan["quantity"]),
+        execution = self.execution_core.submit_market_buy(
+            db,
+            order=order,
+            symbol=symbol,
+            qty=int(plan["quantity"]),
+            expected_price=_float(plan.get("estimated_price")),
+            max_positions=min(int(profile.get("max_positions") or 1), 1),
+            max_order_notional_krw=(
+                profile.get("max_order_notional_krw")
+                or settings.get("strategy_live_auto_buy_max_notional_krw")
+            ),
+            now=now_utc,
+        )
+        safety["broker_submit_called"] = bool(execution.get("broker_submit_called"))
+        safety["real_order_submitted"] = bool(execution.get("real_order_submitted"))
+        if execution.get("submitted") is not True:
+            block_reason = str(
+                execution.get("reason")
+                or execution.get("status")
+                or "execution_core_gate_blocked"
             )
-        except Exception as exc:
-            safety["real_order_submitted"] = False
-            order.internal_status = InternalOrderStatus.UNKNOWN_STALE.value
-            order.broker_status = "sync_required"
-            order.broker_order_status = "sync_required"
-            order.error_message = _safe_error(exc)
-            order.response_payload = _json(
-                {
-                    "mode": MODE,
-                    "status": "sync_required",
-                    "error": _safe_error(exc),
-                    "safety": safety,
-                }
+            status = str(execution.get("status") or "blocked")
+            order.internal_status = (
+                InternalOrderStatus.UNKNOWN_STALE.value
+                if status == "sync_required"
+                else InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
             )
             response = self._run_response(
-                status="sync_required",
-                action="sync_required",
+                status=status,
+                action="sync_required" if status == "sync_required" else "blocked",
                 active_profile=profile.get("profile_name"),
                 symbol=symbol,
                 symbol_name=dry_payload.get("selected_symbol_name"),
@@ -1253,9 +1272,9 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 submitted_notional_krw=plan.get("estimated_notional_krw"),
                 related_order_id=order.id,
                 internal_status=order.internal_status,
-                block_reason="broker_submit_sync_required",
-                risk_flags=["broker_submit_sync_required"],
-                gating_notes=["Broker submit raised after call; manual sync is required before retry."],
+                block_reason=block_reason,
+                risk_flags=[block_reason],
+                gating_notes=[f"Shared KIS execution core blocked BUY: {block_reason}"],
                 attempt_id=attempt.id,
                 promotion_id=_int((promotion_context or {}).get("promotion_id")),
                 promotion_trace={
@@ -1264,33 +1283,28 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     "order_id": order.id,
                     "converted_live_attempt_id": attempt.id,
                     "converted_order_id": order.id,
-                    "attempt_status": "sync_required",
+                    "attempt_status": status,
                 },
                 safety=safety,
             )
-            attempt.status = "sync_required"
-            attempt.block_reason = "broker_submit_sync_required"
+            attempt.status = status
+            attempt.block_reason = block_reason
             attempt.response_payload = _json(response)
+            order.response_payload = _json(response)
             if promotion_context and promotion_context.get("accepted") is True:
                 self.promotion_service.mark_live_sync(
                     db,
                     live_attempt_id=attempt.id,
                     order_id=order.id,
-                    sync_status="sync_required",
+                    sync_status=status,
                     trace=response["promotion_trace"],
                 )
             db.commit()
             return sanitize_kis_payload(response)
 
-        broker_order_id = _extract_broker_order_id(broker_response)
-        broker_status = _extract_broker_status(broker_response)
-        safety["real_order_submitted"] = True
-        order.internal_status = InternalOrderStatus.SUBMITTED.value
-        order.broker_status = broker_status
-        order.broker_order_status = broker_status
-        order.broker_order_id = broker_order_id
-        order.kis_odno = broker_order_id
-        order.submitted_at = now_utc
+        broker_response = execution.get("broker_response") or {}
+        broker_order_id = execution.get("broker_order_id")
+        broker_status = execution.get("broker_status")
         signal = self._save_signal(
             db,
             dry_run=dry_run,
@@ -1379,7 +1393,9 @@ class ProfileAwareGuardedLiveAutoBuyService:
         target_risk: dict[str, Any],
         promotion_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self.validation_service is None:
+        if self.validation_service is not None:
+            self.execution_core.validation_service = self.validation_service
+        if self.execution_core.validation_service is None:
             return {
                 "validated_for_submission": False,
                 "block_reasons": ["kis_validation_service_unavailable"],
@@ -1402,12 +1418,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 "promotion_trace": _promotion_trace(promotion_context),
             },
         )
-        result = self.validation_service.validate(request)
-        try:
-            record_kis_order_validation(db, request=request, result=result)
-        except Exception:
-            pass
-        return sanitize_kis_payload(result.to_dict() if hasattr(result, "to_dict") else dict(result))
+        return self.execution_core.validate_order(db, request)
 
     def _recent_dry_run(
         self,
@@ -1698,6 +1709,10 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     "operator_trigger_source": run_request.trigger_source,
                     "source_dry_run_id": dry_run.get("trade_run_id"),
                     "source_signal_id": dry_payload.get("signal_id"),
+                    "source": "strategy_live_auto_buy",
+                    "source_type": "profile_aware_guarded_live_auto_buy",
+                    "automation_profile": True,
+                    "automation_profile_key": profile.get("profile_key"),
                     "active_profile": profile.get("profile_name"),
                     "profile_key": profile.get("profile_key") or profile.get("profile_name"),
                     "profile_name": profile.get("display_name") or profile.get("profile_name"),
@@ -1708,6 +1723,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     "quantity": plan["quantity"],
                     "estimated_price": plan["estimated_price"],
                     "estimated_notional_krw": plan["estimated_notional_krw"],
+                    "stop_loss_pct": profile.get("stop_loss_pct"),
+                    "take_profit_pct": profile.get("take_profit_pct"),
                     "safety": safety,
                     "real_order_submitted": False,
                     "validation_called": True,

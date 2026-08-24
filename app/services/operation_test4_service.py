@@ -41,6 +41,7 @@ from app.services.kis_account_state_cache_service import (
     KisAccountStateCacheService,
     _account_error_diagnostics,
 )
+from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileService
@@ -201,6 +202,7 @@ class OperationTest4Service:
         validation_service: Any | None = None,
         lifecycle_service: Any | None = None,
         order_sync_service: Any | None = None,
+        execution_core: Any | None = None,
         account_state_provider: Callable[..., dict[str, Any]] | None = None,
         candidate_provider: Callable[..., dict[str, Any]] | None = None,
         possible_order_provider: Callable[..., dict[str, Any]] | None = None,
@@ -225,6 +227,14 @@ class OperationTest4Service:
         self.validation_service = validation_service
         self.lifecycle_service = lifecycle_service
         self.order_sync_service = order_sync_service
+        self.execution_core = execution_core or KisAutomationExecutionCore(
+            client,
+            validation_service=self.validation_service
+            or KisOrderValidationService(client, session_service=self.session_service),
+            order_sync_service=self.order_sync_service or KisOrderSyncService(client),
+            lifecycle_service=self.lifecycle_service,
+            runtime_settings=self.runtime_settings,
+        )
         self.account_state_provider = account_state_provider
         self.candidate_provider = candidate_provider
         self.possible_order_provider = possible_order_provider
@@ -3410,20 +3420,10 @@ class OperationTest4Service:
                 "final_score": candidate.get("final_buy_score"),
             },
         )
-        try:
-            validator = getattr(self, "validation_service", None) or KisOrderValidationService(
-                self.client,
-                session_service=self.session_service,
-            )
-            result = validator.validate(request, now=now)
-            summary = result.to_dict() if hasattr(result, "to_dict") else dict(result)
-            row = record_kis_order_validation(db, request=request, result=result)
-            summary["validation_id"] = row.id
-        except Exception as exc:
-            return {"valid": False, "reason": "validation_failed", "error": _safe_error(exc)}
-        valid = bool(
-            getattr(result, "validated_for_submission", summary.get("validated_for_submission"))
-        )
+        if self.validation_service is not None:
+            self.execution_core.validation_service = self.validation_service
+        summary = self.execution_core.validate_order(db, request, now=now)
+        valid = bool(summary.get("validated_for_submission"))
         return {
             "valid": valid,
             "reason": None if valid else "validation_failed",
@@ -3844,12 +3844,18 @@ class OperationTest4Service:
             session_service=self.session_service,
             runtime_settings=self.runtime_settings,
         )
-        return service.submit_manual(db, request, now=now)
+        return self.execution_core.submit_manual(
+            db,
+            request,
+            manual_order_service=service,
+            now=now,
+        )
 
     def _sync_order(self, db: Session, order_id: int) -> OrderLog | None:
         try:
-            service = self.order_sync_service or KisOrderSyncService(self.client)
-            return service.sync_order(db, order_id)
+            if self.order_sync_service is not None:
+                self.execution_core.order_sync_service = self.order_sync_service
+            return self.execution_core.sync_order(db, order_id)
         except Exception:
             return db.get(OrderLog, order_id)
 

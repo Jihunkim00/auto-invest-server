@@ -142,6 +142,7 @@ class KisOrderSyncService:
         db.commit()
         db.refresh(order)
         self._sync_filled_buy_lifecycle(db, order)
+        self._sync_filled_sell_lifecycle(db, order)
         return order
 
     def sync_open_orders(self, db: Session) -> list[OrderLog]:
@@ -287,6 +288,23 @@ class KisOrderSyncService:
             self.client,
             runtime_settings=None,
         ).sync_filled_buy(db, order)
+
+    def _sync_filled_sell_lifecycle(self, db: Session, order: OrderLog) -> None:
+        if (
+            str(order.broker or "").strip().lower() != "kis"
+            or str(order.side or "").strip().lower() != "sell"
+            or str(order.internal_status or "").upper()
+            != InternalOrderStatus.FILLED.value
+        ):
+            return
+        from app.services.kis_position_lifecycle_service import (
+            KisPositionLifecycleService,
+        )
+
+        KisPositionLifecycleService(
+            self.client,
+            runtime_settings=None,
+        ).sync_filled_sell(db, order)
 
 
 def summarize_kis_orders(

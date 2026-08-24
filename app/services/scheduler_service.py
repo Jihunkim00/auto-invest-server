@@ -458,7 +458,8 @@ class SchedulerService:
         db = SessionLocal()
         try:
             if self._position_lifecycle_management_should_preempt_buy(db):
-                self._disable_kis_buy_scheduler_flags(db)
+                if not self._automation_profile_execution_active(db):
+                    self._disable_kis_buy_scheduler_flags(db)
                 return self._create_scheduler_skip_log(
                     db,
                     slot_name=slot_name,
@@ -711,7 +712,8 @@ class SchedulerService:
         )
         if not service.has_manageable_position(db):
             return None
-        self._disable_kis_buy_scheduler_flags(db)
+        if not self._automation_profile_execution_active(db):
+            self._disable_kis_buy_scheduler_flags(db)
         return service.run_once(
             db,
             trigger_source=trigger_source,
@@ -723,6 +725,18 @@ class SchedulerService:
             db.query(PositionLifecycle)
             .filter(PositionLifecycle.status.in_(["open", "closing"]))
             .count()
+        )
+
+    def _automation_profile_execution_active(self, db) -> bool:
+        schedule = self.automation_profiles.selected_profile_schedule(
+            db,
+            now=datetime.now(KR_TZ),
+        )
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        return bool(
+            schedule
+            and schedule.get("status") == "active"
+            and runtime.get("automation_profile_scheduler_enabled")
         )
 
     def _disable_kis_buy_scheduler_flags(self, db) -> None:

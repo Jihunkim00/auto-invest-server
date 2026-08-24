@@ -54,6 +54,9 @@ FORCED_TEST_ENTRY_MODE = "operator_forced_one_share_buy"
 OPERATION_TEST4_ENTRY_SOURCE = "operation_test4_auto_entry"
 OPERATION_TEST4_ENTRY_ENDPOINT = "/app/operation-test4/entry/run-once"
 OPERATION_TEST4_ENTRY_MODE = "operation_test4_live"
+PROFILE_AUTO_BUY_SOURCE = "strategy_live_auto_buy"
+PROFILE_AUTO_BUY_SOURCE_TYPE = "profile_aware_guarded_live_auto_buy"
+PROFILE_AUTO_BUY_MODE = "strategy_live_auto_buy"
 KR_TZ = ZoneInfo("Asia/Seoul")
 
 SUBMITTED_SELL_STATUSES = {
@@ -170,7 +173,8 @@ class KisPositionLifecycleService:
             .first()
         )
         if existing is not None:
-            self._disable_new_buy_settings(db)
+            if not _is_profile_auto_buy_order(row):
+                self._disable_new_buy_settings(db)
             return {
                 "created": False,
                 "reason": "lifecycle_already_exists",
@@ -213,14 +217,8 @@ class KisPositionLifecycleService:
             unrealized_pl=0.0,
             unrealized_pl_pct=0.0,
             max_price_since_entry=float(entry_price),
-            stop_loss_threshold_pct=round(
-                DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL * 100.0,
-                4,
-            ),
-            take_profit_threshold_pct=round(
-                DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0,
-                4,
-            ),
+            stop_loss_threshold_pct=_profile_exit_threshold(row, "stop_loss_pct", DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL * 100.0),
+            take_profit_threshold_pct=_profile_exit_threshold(row, "take_profit_pct", DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0),
             exit_reason=None,
             exit_order_id=None,
             last_evaluated_at=None,
@@ -229,7 +227,8 @@ class KisPositionLifecycleService:
         db.commit()
         db.refresh(lifecycle)
 
-        self._disable_new_buy_settings(db)
+        if not _is_profile_auto_buy_order(row):
+            self._disable_new_buy_settings(db)
         return {
             "created": True,
             "reason": "filled_buy_lifecycle_created",
@@ -302,6 +301,46 @@ class KisPositionLifecycleService:
             "position": _position_for_lifecycle(matched, row),
             "lifecycle": _serialize_lifecycle(row),
         }
+
+    def sync_filled_sell(
+        self,
+        db: Session,
+        order: OrderLog | int,
+        *,
+        now: datetime | None = None,
+        positions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        row = db.get(OrderLog, int(order)) if isinstance(order, int) else order
+        now_utc = _aware_utc(now or self.now_provider())
+        if row is None or not _is_filled_kis_sell(row):
+            return {"closed": False, "reason": "exit_order_not_filled_sell"}
+        lifecycle = (
+            db.query(PositionLifecycle)
+            .filter(PositionLifecycle.symbol == str(row.symbol or "").strip().upper())
+            .filter(PositionLifecycle.status.in_([OPEN, CLOSING]))
+            .order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc())
+            .first()
+        )
+        if lifecycle is None:
+            return {"closed": False, "reason": "open_lifecycle_not_found", "order_id": row.id}
+        lifecycle.exit_order_id = row.id
+        lifecycle.exit_order_status = InternalOrderStatus.FILLED.value
+        lifecycle.last_evaluated_at = _naive_utc(now_utc)
+        remaining = _find_position(
+            positions if positions is not None else self._broker_positions(),
+            lifecycle.symbol,
+        )
+        if remaining is None or _safe_float(remaining.get("qty") or remaining.get("quantity"), 0.0) <= 0:
+            lifecycle.status = CLOSED
+            lifecycle.closed_at = _naive_utc(now_utc)
+            lifecycle.exit_reason = lifecycle.exit_reason or "filled_sell_position_closed"
+            db.commit()
+            db.refresh(lifecycle)
+            return {"closed": True, "reason": "filled_sell_lifecycle_closed", "lifecycle": _serialize_lifecycle(lifecycle)}
+        lifecycle.status = CLOSING
+        db.commit()
+        db.refresh(lifecycle)
+        return {"closed": False, "reason": "position_remains_after_exit_fill", "lifecycle": _serialize_lifecycle(lifecycle)}
 
     def evaluate_position(
         self,
@@ -468,7 +507,14 @@ class KisPositionLifecycleService:
         now_utc = _aware_utc(now or self.now_provider())
         self._ensure_lifecycles_from_filled_buys(db, now=now_utc)
         active = self._active_lifecycles(db)
-        if active:
+        active_entry_orders = [
+            db.get(OrderLog, int(row.entry_order_id))
+            for row in active
+        ]
+        if active and any(
+            order is not None and not _is_profile_auto_buy_order(order)
+            for order in active_entry_orders
+        ):
             self._disable_new_buy_settings(db)
 
         if not active:
@@ -972,6 +1018,15 @@ def _is_filled_kis_buy(order: OrderLog) -> bool:
     )
 
 
+def _is_filled_kis_sell(order: OrderLog) -> bool:
+    return (
+        str(order.broker or "").lower() == PROVIDER
+        and str(order.side or "").lower() == SELL
+        and str(order.internal_status or "").upper()
+        == InternalOrderStatus.FILLED.value
+    )
+
+
 def _is_reviewed_buy_order(order: OrderLog) -> bool:
     payloads = [
         _parse_object(order.request_payload),
@@ -981,10 +1036,45 @@ def _is_reviewed_buy_order(order: OrderLog) -> bool:
     return any(_payload_has_reviewed_buy_marker(payload) for payload in payloads)
 
 
+def _is_profile_auto_buy_order(order: OrderLog) -> bool:
+    payloads = [
+        _parse_object(order.request_payload),
+        _parse_object(order.response_payload),
+        _parse_object(order.last_sync_payload),
+    ]
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        values = {
+            str(payload.get("source") or "").strip().lower(),
+            str(payload.get("source_type") or "").strip().lower(),
+            str(payload.get("mode") or "").strip().lower(),
+            str(payload.get("trigger_source") or "").strip().lower(),
+        }
+        if (
+            PROFILE_AUTO_BUY_SOURCE in values
+            or PROFILE_AUTO_BUY_SOURCE_TYPE in values
+            or PROFILE_AUTO_BUY_MODE in values
+            or payload.get("automation_profile") is True
+        ):
+            return True
+        nested = payload.get("source_metadata") or payload.get("audit_metadata")
+        if isinstance(nested, dict):
+            nested_order = OrderLog(
+                request_payload=json.dumps(nested, ensure_ascii=False),
+                response_payload=None,
+                last_sync_payload=None,
+            )
+            if _is_profile_auto_buy_order(nested_order):
+                return True
+    return False
+
+
 def _payload_has_reviewed_buy_marker(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
     text_values = [
+        payload.get("source"),
         payload.get("source_type"),
         payload.get("source_context"),
         payload.get("operator_action_source"),
@@ -1007,6 +1097,10 @@ def _payload_has_reviewed_buy_marker(payload: dict[str, Any]) -> bool:
     if OPERATION_TEST4_ENTRY_SOURCE in normalized:
         return True
     if OPERATION_TEST4_ENTRY_ENDPOINT in normalized or OPERATION_TEST4_ENTRY_MODE in normalized:
+        return True
+    if PROFILE_AUTO_BUY_SOURCE in normalized or PROFILE_AUTO_BUY_SOURCE_TYPE in normalized:
+        return True
+    if PROFILE_AUTO_BUY_MODE in normalized or payload.get("automation_profile") is True:
         return True
     if payload.get("forced_test_entry") is True:
         return True
@@ -1043,6 +1137,18 @@ def _entry_price(order: OrderLog) -> float | None:
             if parsed is not None and parsed > 0:
                 return parsed
     return None
+
+
+def _profile_exit_threshold(order: OrderLog, key: str, default: float) -> float:
+    for payload in (
+        _parse_object(order.request_payload),
+        _parse_object(order.response_payload),
+        _parse_object(order.last_sync_payload),
+    ):
+        value = _safe_float_or_none(payload.get(key)) if isinstance(payload, dict) else None
+        if value is not None and value > 0:
+            return round(abs(value), 4)
+    return round(float(default), 4)
 
 
 def _valid_cost_basis(lifecycle: PositionLifecycle) -> bool:
