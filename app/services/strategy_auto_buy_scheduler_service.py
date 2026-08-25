@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import uuid
 from datetime import UTC, datetime, time, timedelta
@@ -230,7 +231,13 @@ class StrategyAutoBuySchedulerService:
             save_logs=True,
         )
         dry_run_service = self.dry_run_service or build_profile_aware_dry_run_auto_buy_service(db)
-        dry_result = dry_run_service.run_once(db, dry_request)
+        run_once = dry_run_service.run_once
+        if 'now' in inspect.signature(run_once).parameters:
+            dry_result = run_once(db, dry_request, now=now_utc)
+        else:
+            # Preserve compatibility with small test/dry-run adapters that
+            # predate the scheduler virtual-clock parameter.
+            dry_result = run_once(db, dry_request)
         promotion = None
         created_promotion = False
         if (
@@ -744,7 +751,11 @@ def _profile_slot_value(value: str) -> str:
     text = str(value or "").strip()
     if text.lower().startswith("profile:"):
         return text.split(":", 1)[1].strip()
-    return text
+    return {
+        "strategy_auto_buy_dry_run_open_phase": "09:10",
+        "strategy_auto_buy_dry_run_midday": "11:30",
+        "strategy_auto_buy_dry_run_before_close": "13:30",
+    }.get(text, text)
 
 
 def _run_analysis_metadata(row: TradeRunLog) -> tuple[bool, bool]:

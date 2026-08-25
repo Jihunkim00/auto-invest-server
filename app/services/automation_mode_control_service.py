@@ -9,13 +9,6 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
-from app.core.automation_mode import (
-    AUTOMATION_MODE_LIVE,
-    AUTOMATION_MODE_OFF,
-    AUTOMATION_MODE_TEST,
-    automation_mode_authority,
-    execution_mode,
-)
 from app.db.models import OrderLog, RuntimeSetting, TradeRunLog
 from app.services.broker_sync_watchdog_service import BrokerSyncWatchdogService
 from app.services.ops_production_readiness_service import (
@@ -126,25 +119,24 @@ class AutomationModeControlService:
         blocking_reasons: list[str] = []
         diagnostic_blocking_reasons: list[str] = []
         warning_reasons: list[str] = []
-        can_run_monitoring = mode in {"monitor_only", "dry_run_auto", "phase1_live_ready"}
-        can_run_dry_run = mode == "dry_run_auto"
+        # Execution status is intentionally derived from the authority snapshot.
+        # Runtime safety/readiness flags below remain useful diagnostics, but must
+        # not redefine the mode authority exposed by this endpoint.
+        authority_mode = str(authority.get("automation_mode") or "off").strip().lower()
+        can_run_monitoring = bool(authority.get("scheduler_allowed"))
+        can_run_dry_run = authority_mode == "test"
+        can_attempt_phase1_live = bool(authority.get("broker_submit_allowed"))
+        can_submit_live_order = bool(authority.get("broker_submit_allowed"))
 
-        if mode == "off":
+        if authority_mode == "off":
             blocking_reasons.append("automation_mode_off")
             effective_status = "off"
-            can_attempt_phase1_live = False
-            can_submit_live_order = False
-        elif mode == "monitor_only":
-            blocking_reasons.append("phase1_live_disabled_in_monitor_only")
-            effective_status = "monitoring"
-            can_attempt_phase1_live = False
-            can_submit_live_order = False
-        elif mode == "dry_run_auto":
-            blocking_reasons.append("phase1_live_disabled_in_dry_run_auto")
+        elif authority_mode == "test":
             effective_status = "dry_run_ready"
-            can_attempt_phase1_live = False
-            can_submit_live_order = False
         else:
+            # Keep all independent live gates in diagnostics only. The actual
+            # BUY/SELL execution core continues to enforce those gates before
+            # any broker call.
             live_gate_reasons = self._live_gate_blockers(
                 settings=settings,
                 kis_enabled=kis_enabled,
@@ -159,46 +151,20 @@ class AutomationModeControlService:
                 ),
                 daily_trade_limit_remaining=daily_remaining,
             )
-            blocking_reasons.extend(live_gate_reasons)
             diagnostic_blocking_reasons.extend(live_gate_reasons)
-            can_submit_live_order = not live_gate_reasons
-            can_attempt_phase1_live = can_submit_live_order
-            effective_status = "live_ready" if can_submit_live_order else "live_ready_blocked"
+            effective_status = "live_ready"
 
         if settings.get("dry_run") is True and mode != "off":
             warning_reasons.append("dry_run_is_separate")
         if settings.get("kill_switch") is True and mode != "off":
             warning_reasons.append("kill_switch_is_separate")
         soak_latch_active = bool(settings.get("automation_soak_kill_latch_active"))
-        if mode in {'off', 'test', 'live'}:
-            if mode == 'off':
-                blocking_reasons = ['automation_mode_off']
-                effective_status = 'off'
-                can_run_monitoring = False
-                can_run_dry_run = False
-                can_attempt_phase1_live = False
-                can_submit_live_order = False
-            elif mode == 'test':
-                blocking_reasons = []
-                effective_status = 'test_ready'
-                can_run_monitoring = True
-                can_run_dry_run = True
-                can_attempt_phase1_live = False
-                can_submit_live_order = False
-            else:
-                blocking_reasons = []
-                effective_status = 'live_ready'
-                can_run_monitoring = True
-                can_run_dry_run = False
-                can_attempt_phase1_live = True
-                can_submit_live_order = True
 
         if soak_latch_active:
-            blocking_reasons.append("automation_soak_kill_latch_active")
-            effective_status = "kill_latched"
-            can_attempt_phase1_live = False
-            can_submit_live_order = False
-            can_run_dry_run = False
+            # The latch remains visible and is still enforced by the execution
+            # services. It is not an automation-mode authority value, so it
+            # belongs in diagnostics rather than the authority-derived fields.
+            diagnostic_blocking_reasons.append("automation_soak_kill_latch_active")
         if not kis_real_order_enabled and mode != "off":
             warning_reasons.append("kis_real_orders_are_separate")
         if production_status not in {"ready", "warning"} and mode != "off":

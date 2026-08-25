@@ -6,17 +6,19 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.enums import InternalOrderStatus
-from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, StrategyProfile
+from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, StrategyProfile, TradeRunLog
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.automation_profile_buy_scheduler_service import AutomationProfileBuySchedulerService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.scheduler_service import SchedulerService
+from app.services.strategy_auto_buy_scheduler_service import StrategyAutoBuySchedulerService
 from app.services.strategy_profile_service import StrategyProfileService
 
 
 NOW = datetime(2026, 8, 25, 0, 10, tzinfo=UTC)
+SCHEDULED_1130 = datetime(2026, 8, 25, 2, 30, tzinfo=UTC)
 
 
 class PR110RuntimeSettingService(RuntimeSettingService):
@@ -167,8 +169,22 @@ class FakeDryRunService:
         self.candidate = candidate
         self.calls = 0
 
-    def run_dry_run_once(self, db, request):
+    def run_dry_run_once(self, db, request, *, now=None):
         self.calls += 1
+        return {
+            'status': 'ok',
+            'action': 'would_buy',
+            'final_ranked_candidates': [self.candidate],
+        }
+
+
+class FakeProfileAwareAnalysisService:
+    def __init__(self, candidate):
+        self.candidate = candidate
+        self.calls = []
+
+    def run_once(self, db, request):
+        self.calls.append(request.model_dump(mode='json'))
         return {
             'status': 'ok',
             'action': 'would_buy',
@@ -220,7 +236,7 @@ def _build_service(db, *, client=None, runtime=None, key='aut_pr110_readiness'):
         validation_service=validation,
         order_sync_service=sync,
         runtime_settings=runtime,
-        strategy_profiles=StrategyProfileService(),
+        strategy_profiles=profiles,
         target_risk_service=target,
     )
     return service, runtime, profiles, client, broker, validation, sync, target
@@ -235,6 +251,87 @@ def _candidate(score=70, *, symbol='005930', price=30000):
         'data_sufficient': True,
         'target_risk_approved': True,
     }
+
+
+def test_scheduler_callback_uses_custom_profile_at_next_1130_slot(db_session, monkeypatch):
+    service, runtime, profiles, client, broker, validation, sync, _ = _build_service(db_session)
+    key = 'aut_pr110_readiness'
+    runtime.update_settings(db_session, {'automation_mode': 'test'})
+    client.now = SCHEDULED_1130
+    analysis = FakeProfileAwareAnalysisService(_candidate())
+    scheduler = SchedulerService()
+    scheduler.runtime_settings = runtime
+    scheduler.automation_profiles = profiles
+    scheduler.automation_profile_buy_scheduler_service = service
+    scheduler.strategy_auto_buy_scheduler_service = StrategyAutoBuySchedulerService(
+        runtime_settings=runtime,
+        strategy_profiles=StrategyProfileService(),
+        dry_run_service=analysis,
+    )
+
+    import app.services.scheduler_service as scheduler_module
+
+    monkeypatch.setattr(scheduler_module, 'SessionLocal', lambda: db_session)
+    result = scheduler._run_strategy_auto_buy_dry_run_scheduled_once(
+        'profile:11:30',
+        now=SCHEDULED_1130,
+    )
+
+    assert analysis.calls and analysis.calls[0]['automation_profile_key'] == key
+    assert result['dry_run']['profile_key'] == key
+    assert result['dry_run']['automation_profile_key'] == key
+    assert result['profile_buy']['status'] == 'filled'
+    assert broker.buy_calls == []
+    assert client.external_kis_submit_count == 0
+    reservations = db_session.query(AutomationProfileBuyReservation).all()
+    assert [row.scheduler_slot_kst for row in reservations] == ['11:30']
+    assert reservations[0].profile_key == key
+    scheduler_runs = db_session.query(TradeRunLog).filter(
+        TradeRunLog.mode == 'strategy_auto_buy_scheduler_dry_run',
+    ).all()
+    assert len(scheduler_runs) == 1
+    assert 'profile:11:30' in scheduler_runs[0].request_payload
+
+    manual = service.run_once(
+        db_session,
+        [_candidate()],
+        scheduler_slot='11:30',
+        trigger_source='manual_smoke',
+        now=SCHEDULED_1130,
+    )
+    assert manual['reason'] == 'manual_execution_isolation'
+    assert db_session.query(AutomationProfileBuyReservation).count() == 1
+
+
+@pytest.mark.parametrize('state', ['missing_key', 'missing_profile', 'paused', 'disabled'])
+def test_scheduler_nonrunnable_active_profile_fails_closed(db_session, state):
+    service, runtime, profiles, _, _, _, _, _ = _build_service(db_session)
+    row = profiles.get(db_session, 'aut_pr110_readiness')
+    if state == 'missing_key':
+        runtime.update_settings(db_session, {'active_automation_profile_key': None})
+    elif state == 'missing_profile':
+        runtime.update_settings(db_session, {'active_automation_profile_key': 'aut_pr110_missing'})
+    elif state == 'paused':
+        row.custom_status = 'paused'
+        row.enabled = False
+        db_session.commit()
+    else:
+        row.custom_status = 'active'
+        row.enabled = False
+        db_session.commit()
+
+    assert profiles.get_active_profile(db_session) is None
+    result = service.run_once(
+        db_session,
+        [_candidate()],
+        scheduler_slot='11:30',
+        trigger_source='automation_profile_scheduler',
+        now=SCHEDULED_1130,
+    )
+    assert result['status'] == 'blocked'
+    assert result['reason'] == 'profile_status_not_active'
+    assert result['profile_key'] is None
+    assert db_session.query(AutomationProfileBuyReservation).count() == 0
 
 
 def test_background_scheduler_shared_core_buy_is_exactly_once_and_restart_safe(db_session, monkeypatch):

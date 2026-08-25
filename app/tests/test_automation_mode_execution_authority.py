@@ -6,6 +6,7 @@ from app.db.models import PositionLifecycle
 from app.main import app
 from app.routes.automation import get_automation_mode_control_service
 from app.routes.strategy_auto_buy_scheduler import get_automation_profile_buy_scheduler_service
+from app.services.automation_mode_control_service import AutomationModeControlService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 from app.tests.test_pr110_final_buy_readiness import (
@@ -46,7 +47,7 @@ def _run(service, db, candidate=None):
     ('mode', 'expected_authority', 'expected_scheduler', 'expected_broker', 'expected_status', 'expected_can_submit'),
     [
         ('live', 'LIVE', True, True, 'live_ready', True),
-        ('test', 'TEST', True, False, 'test_ready', False),
+        ('test', 'TEST', True, False, 'dry_run_ready', False),
         ('off', 'OFF', False, False, 'off', False),
     ],
 )
@@ -242,4 +243,66 @@ def test_readiness_reports_mode_authority_without_submitting(db_session):
     assert result['simulation_allowed'] is True
     assert result['broker_submit_allowed'] is False
     assert result['source_of_truth'] == 'automation_mode'
+    assert broker.buy_calls == []
+
+
+def test_live_status_and_buy_readiness_ignore_legacy_diagnostics(db_session):
+    service, runtime, _, _, broker, _, _, _ = _build_service(db_session)
+    runtime.update_settings(db_session, {'automation_mode': 'live', 'dry_run': True})
+
+    class BlockedReadiness:
+        def readiness(self, db, **kwargs):
+            return {'overall_status': 'blocked'}
+
+    class HealthyWatchdog:
+        def status(self, db, **kwargs):
+            return {
+                'sync_health': 'healthy',
+                'should_block_orchestrator': False,
+                'should_block_auto_buy': False,
+                'should_block_auto_sell': False,
+                'issues': [],
+                'blocking_reasons': [],
+            }
+
+    mode_service = AutomationModeControlService(
+        runtime_settings=runtime,
+        readiness_service=BlockedReadiness(),
+        broker_sync_watchdog_service=HealthyWatchdog(),
+    )
+
+    def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_automation_mode_control_service] = lambda: mode_service
+    app.dependency_overrides[get_automation_profile_buy_scheduler_service] = lambda: service
+    try:
+        client = TestClient(app)
+        mode_response = client.get('/automation/mode/status')
+        readiness_response = client.get('/strategy/auto-buy/scheduler/buy-readiness')
+    finally:
+        app.dependency_overrides.clear()
+
+    assert mode_response.status_code == 200
+    assert readiness_response.status_code == 200
+    mode_status = mode_response.json()
+    readiness = readiness_response.json()
+
+    assert mode_status['execution_authority'] == 'LIVE'
+    assert mode_status['effective_status'] == 'live_ready'
+    assert mode_status['scheduler_allowed'] is True
+    assert mode_status['broker_submit_allowed'] is True
+    assert mode_status['can_run_monitoring'] is True
+    assert mode_status['can_run_dry_run'] is False
+    assert mode_status['can_attempt_phase1_live'] is True
+    assert mode_status['can_submit_live_order'] is True
+    assert mode_status['blocking_reasons'] == []
+    assert 'dry_run_enabled' in mode_status['diagnostic_blocking_reasons']
+    assert 'production_readiness_not_ready' in mode_status['diagnostic_blocking_reasons']
+
+    assert readiness['execution_authority'] == 'LIVE'
+    assert readiness['scheduler_allowed'] is True
+    assert readiness['broker_submit_allowed'] is True
+    assert readiness['source_of_truth'] == 'automation_mode'
     assert broker.buy_calls == []

@@ -20,7 +20,7 @@ from app.services.automation_execution_authority_service import AutomationExecut
 from app.services.kis_order_validation_service import KisOrderValidationRequest
 from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, KisPositionLifecycleService
 from app.services.runtime_setting_service import RuntimeSettingService
-from app.services.strategy_profile_service import StrategyProfileService
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -43,7 +43,7 @@ def build_automation_profile_buy_scheduler_service(db: Session) -> 'AutomationPr
         validation_service=KisOrderValidationService(client),
         order_sync_service=KisOrderSyncService(client),
         runtime_settings=RuntimeSettingService(),
-        strategy_profiles=StrategyProfileService(),
+        strategy_profiles=AutomationProfileService(),
     )
 
 
@@ -57,7 +57,7 @@ class AutomationProfileBuySchedulerService:
         order_sync_service: Any | None = None,
         lifecycle_service: Any | None = None,
         runtime_settings: RuntimeSettingService | None = None,
-        strategy_profiles: StrategyProfileService | None = None,
+        strategy_profiles: AutomationProfileService | None = None,
         target_risk_service: Any | None = None,
         positions_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         balance_loader: Callable[[Session], dict[str, Any]] | None = None,
@@ -70,7 +70,9 @@ class AutomationProfileBuySchedulerService:
         self.validation_service = validation_service
         self.order_sync_service = order_sync_service
         self.runtime_settings = runtime_settings or RuntimeSettingService()
-        self.strategy_profiles = strategy_profiles or StrategyProfileService()
+        self.strategy_profiles = strategy_profiles or AutomationProfileService(
+            runtime_settings=self.runtime_settings,
+        )
         self.target_risk_service = target_risk_service or TargetAwareRiskService()
         self.positions_loader = positions_loader
         self.balance_loader = balance_loader
@@ -144,8 +146,8 @@ class AutomationProfileBuySchedulerService:
         }
 
     def _active_profile(self, db: Session) -> dict[str, Any]:
-        row = self.strategy_profiles.active_profile(db)
-        return self.strategy_profiles.serialize_profile(row)
+        profile = self.strategy_profiles.get_active_profile(db)
+        return dict(profile) if isinstance(profile, dict) else {}
 
     def _position_priority(self, db: Session) -> bool:
         return bool(
@@ -179,6 +181,10 @@ class AutomationProfileBuySchedulerService:
             'simulation_allowed': bool(gate.get('simulation_allowed')),
             'broker_submit_allowed': bool(gate.get('broker_submit_allowed')),
             'source_of_truth': gate.get('source_of_truth', 'automation_mode'),
+            'authority_snapshot_source': gate.get(
+                'authority_snapshot_source',
+                'AutomationExecutionAuthorityService',
+            ),
             'buy_ready_except_score': not blocking,
             **checks,
             'next_slot': _iso(_next_slot(now_utc, settings.get('entry', {}).get('analysis_times'))),
@@ -231,6 +237,16 @@ class AutomationProfileBuySchedulerService:
             return self._blocked('missed_slot_replay_forbidden', profile=profile)
         if not gate.get('allowed'):
             return self._blocked((gate.get('blocking_reasons') or ['live_order_not_possible'])[0], profile=profile, live_order_gate=gate)
+        existing_slot = (
+            db.query(AutomationProfileBuyReservation)
+            .filter(AutomationProfileBuyReservation.profile_key == str(profile.get('profile_key')))
+            .filter(AutomationProfileBuyReservation.trade_date_kst == now_utc.astimezone(KST).date().isoformat())
+            .filter(AutomationProfileBuyReservation.scheduler_slot_kst == slot)
+            .order_by(AutomationProfileBuyReservation.id.asc())
+            .first()
+        )
+        if existing_slot is not None:
+            return self._recovery(db, existing_slot, gate)
         values = _candidate_values(candidates)
         if not values and self.candidate_provider:
             try:
@@ -367,7 +383,7 @@ class AutomationProfileBuySchedulerService:
                     'market': MARKET,
                     'symbol': _symbol(candidate),
                     'side': 'buy',
-                    'requested_notional_krw': _score(candidate, 'approved_notional_krw', 'recommended_notional_krw') or 0,
+                    'requested_notional_krw': _score(candidate, 'approved_notional_krw', 'recommended_notional_krw'),
                     'buy_score': score,
                     'trigger_source': TRIGGER_SOURCE,
                     'dry_run': False,

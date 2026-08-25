@@ -119,7 +119,7 @@ def test_setting_monitor_only_does_not_enable_live_order_flags(db_session):
     status = service.set_mode(db_session, automation_mode="monitor_only")
 
     settings = service.runtime_settings.get_settings(db_session)
-    assert status["effective_status"] == "monitoring"
+    assert status["effective_status"] == "off"
     assert status["can_attempt_phase1_live"] is False
     assert settings["portfolio_orchestrator_allow_live_orders"] is False
     assert settings["auto_buy_live_phase1_enabled"] is False
@@ -192,9 +192,11 @@ def test_phase1_live_ready_blocked_when_dry_run_true(db_session):
 
     status = service.status(db_session)
 
-    assert status["effective_status"] == "live_ready_blocked"
-    assert status["can_submit_live_order"] is False
-    assert "dry_run_enabled" in status["blocking_reasons"]
+    assert status["effective_status"] == "live_ready"
+    assert status["can_attempt_phase1_live"] is True
+    assert status["can_submit_live_order"] is True
+    assert status["blocking_reasons"] == []
+    assert "dry_run_enabled" in status["diagnostic_blocking_reasons"]
 
 
 def test_phase1_live_ready_reports_live_ready_when_all_gates_pass(db_session):
@@ -243,10 +245,11 @@ def test_phase1_live_ready_blocks_pending_or_sync_required_orders(db_session):
 
     status = service.status(db_session)
 
-    assert status["effective_status"] == "live_ready_blocked"
-    assert status["sync_required_count"] == 1
-    assert "pending_order_blocker_exists" in status["blocking_reasons"]
-    assert "sync_required_order_exists" in status["blocking_reasons"]
+    assert status["effective_status"] == "live_ready"
+    assert status["can_submit_live_order"] is True
+    assert status["blocking_reasons"] == []
+    assert "pending_order_blocker_exists" in status["diagnostic_blocking_reasons"]
+    assert "sync_required_order_exists" in status["diagnostic_blocking_reasons"]
 
 
 def test_phase1_live_ready_blocks_unsafe_broker_sync_watchdog(db_session):
@@ -276,10 +279,12 @@ def test_phase1_live_ready_blocks_unsafe_broker_sync_watchdog(db_session):
 
     status = service.status(db_session)
 
-    assert status["effective_status"] == "live_ready_blocked"
+    assert status["effective_status"] == "live_ready"
+    assert status["can_submit_live_order"] is True
     assert status["broker_sync_health"] == "unsafe"
     assert status["broker_sync_issue_count"] == 1
-    assert "broker_sync_watchdog_blocked" in status["blocking_reasons"]
+    assert status["blocking_reasons"] == []
+    assert "broker_sync_watchdog_blocked" in status["diagnostic_blocking_reasons"]
 
 
 def test_mode_off_endpoint_does_not_create_or_submit_orders(db_session):

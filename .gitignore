@@ -36,3 +36,4 @@ config/watchlist_kr.stage3.universe100.yaml
 !lib/features/logs/**
 .tmp/
 config/local-watchlists/
+.flutter-plugins-dependencies
