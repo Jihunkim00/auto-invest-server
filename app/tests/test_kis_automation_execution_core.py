@@ -161,6 +161,36 @@ def test_stale_possible_order_blocks_without_submit(db_session):
     assert calls == []
 
 
+def test_profile_max_price_jit_guard_blocks_current_price_spike_without_submit(
+    db_session,
+):
+    client = FakeKisClient()
+
+    def current_price(symbol):
+        return {'current_price': 501_000, 'symbol': symbol}
+
+    client.get_domestic_stock_price = current_price
+    order = _order(db_session, side='buy')
+    calls = []
+
+    result = KisAutomationExecutionCore(client).submit_market_buy(
+        db_session,
+        order=order,
+        symbol='005930',
+        qty=1,
+        expected_price=499_000,
+        min_price_krw=5_000,
+        max_price_krw=500_000,
+        submitter=lambda: calls.append(True) or {'order_id': 'never'},
+        now=NOW,
+    )
+
+    assert result['reason'] == 'profile_max_price_exceeded'
+    assert result['guard']['current_price'] == 501_000
+    assert calls == []
+    assert client.possible_order_calls == 0
+
+
 def test_duplicate_open_position_blocks_without_submit(db_session):
     client = FakeKisClient(positions=[{"symbol": "005930", "qty": 1}])
     order = _order(db_session, side="buy")

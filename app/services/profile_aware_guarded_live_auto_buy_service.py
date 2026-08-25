@@ -31,6 +31,7 @@ from app.services.kis_order_validation_service import (
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.market_session_service import MarketSessionService
+from app.services.profile_universe_service import profile_universe_bounds
 from app.services.profile_aware_dry_run_auto_buy_service import (
     MODE as DRY_RUN_MODE,
 )
@@ -1228,6 +1229,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     "attempt_status": "submitting",
                 },
             )
+        settings = self.runtime_settings.get_settings_read_only(db)
+        min_price_krw, max_price_krw = profile_universe_bounds(profile)
         execution = self.execution_core.submit_market_buy(
             db,
             order=order,
@@ -1239,6 +1242,8 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 profile.get("max_order_notional_krw")
                 or settings.get("strategy_live_auto_buy_max_notional_krw")
             ),
+            min_price_krw=min_price_krw,
+            max_price_krw=max_price_krw,
             now=now_utc,
         )
         safety["broker_submit_called"] = bool(execution.get("broker_submit_called"))

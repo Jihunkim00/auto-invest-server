@@ -15,6 +15,7 @@ from app.services.event_risk_service import EventRiskService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.profile_universe_service import profile_price_exclusion_reason
 from app.services.quant_signal_service import QuantSignalService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import (
@@ -112,6 +113,8 @@ class KisWatchlistPreviewService:
         db=None,
         record_run: bool = False,
         trigger_source: str = "manual_kis_preview",
+        min_price_krw: float | None = None,
+        max_price_krw: float | None = None,
     ) -> dict[str, Any]:
         db = db if db is not None else self.db
         settings = get_settings()
@@ -133,18 +136,32 @@ class KisWatchlistPreviewService:
         managed_symbols = [position["symbol"] for position in managed_positions]
 
         quant_items = []
+        profile_exclusion_counts: dict[str, int] = {}
+        profile_filtered_symbols: set[str] = set()
         for raw in configured_symbols:
-            quant_items.append(
-                self._preview_symbol(
-                    raw,
-                    gate_level=gate_level,
-                    market_session=market_session,
-                    session_warnings=session_warnings,
-                    reference_sources=references.get("sources") or [],
-                    include_gpt=False,
-                    db=db,
-                )
+            item = self._preview_symbol(
+                raw,
+                gate_level=gate_level,
+                market_session=market_session,
+                session_warnings=session_warnings,
+                reference_sources=references.get("sources") or [],
+                include_gpt=False,
+                db=db,
             )
+            reason = profile_price_exclusion_reason(
+                item.get('current_price'),
+                min_price_krw=min_price_krw,
+                max_price_krw=max_price_krw,
+            )
+            if reason is not None:
+                symbol = str(item.get('symbol') or '').strip().upper()
+                if symbol not in profile_filtered_symbols:
+                    profile_filtered_symbols.add(symbol)
+                    profile_exclusion_counts[reason] = (
+                        profile_exclusion_counts.get(reason, 0) + 1
+                    )
+                continue
+            quant_items.append(item)
 
         quant_ranked_candidates = self._rank_quant_candidates(quant_items)
         gpt_target_symbols = []
@@ -336,6 +353,14 @@ class KisWatchlistPreviewService:
             "configured_symbol_count": len(configured_symbols),
             "analyzed_symbol_count": len(items),
             "quant_scanned_symbol_count": len(quant_items),
+            "profile_eligible_symbol_count": len(quant_items),
+            "profile_price_filtered_count": len(profile_filtered_symbols),
+            "profile_exclusion_counts": profile_exclusion_counts,
+            "quant_scored_count": sum(
+                1
+                for item in quant_items
+                if item.get("quant_buy_score") is not None
+            ),
             "gpt_target_symbols": gpt_target_symbols,
             "gpt_target_count": len(gpt_target_symbols),
             "gpt_analyzed_symbol_count": len(gpt_analyzed_symbols),

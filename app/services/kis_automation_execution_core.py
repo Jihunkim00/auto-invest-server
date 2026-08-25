@@ -62,11 +62,11 @@ class KisAutomationExecutionCore:
             payload.update({"execution_core": "kis_automation_execution_core", "kis_odno": order.kis_odno or order.broker_order_id, "internal_status": order.internal_status, "lifecycle": self._reconcile_filled_order(db, order, now=now)})
         return int(status_code), sanitize_kis_payload(payload)
 
-    def submit_market_buy(self, db: Session, *, order: OrderLog, symbol: str, qty: int, submitter: Callable[[], dict[str, Any]] | None = None, now: datetime | None = None, expected_price: float | None = None, max_positions: int = 1, max_order_notional_krw: float | None = None) -> dict[str, Any]:
+    def submit_market_buy(self, db: Session, *, order: OrderLog, symbol: str, qty: int, submitter: Callable[[], dict[str, Any]] | None = None, now: datetime | None = None, expected_price: float | None = None, max_positions: int = 1, max_order_notional_krw: float | None = None, min_price_krw: float | None = None, max_price_krw: float | None = None) -> dict[str, Any]:
         authority = self._execution_authority(db)
         if authority.get('automation_mode') == 'off':
             return self._blocked(db, order, {'allowed': False, 'reason': 'automation_mode_off', 'automation_mode': 'off'})
-        guard = self._buy_jit_guard(db, order_id=order.id, symbol=symbol, qty=qty, expected_price=expected_price, max_positions=max_positions, max_order_notional_krw=max_order_notional_krw, now=now)
+        guard = self._buy_jit_guard(db, order_id=order.id, symbol=symbol, qty=qty, expected_price=expected_price, max_positions=max_positions, max_order_notional_krw=max_order_notional_krw, min_price_krw=min_price_krw, max_price_krw=max_price_krw, now=now)
         if guard.get('allowed') and authority.get('automation_mode') == 'test':
             return self._simulate_market(db, order=order, side='buy', symbol=symbol, qty=qty, now=now, guard=guard)
         return self._blocked(db, order, guard) if not guard.get("allowed") else self._submit_market(db, order=order, side="buy", symbol=symbol, qty=qty, submitter=submitter or self._broker_buy(symbol, qty), now=now, guard=guard)
@@ -199,7 +199,7 @@ class KisAutomationExecutionCore:
         db.commit()
         return {"status": "filled" if filled else "submitted", "submitted": True, "real_order_submitted": True, "broker_submit_called": True, "manual_submit_called": False, "order_id": order.id, "broker_order_id": broker_id, "kis_odno": order.kis_odno, "broker_status": status, "internal_status": order.internal_status, "broker_response": response, "lifecycle": self._reconcile_filled_order(db, order, now=now_utc), "guard": guard}
 
-    def _buy_jit_guard(self, db: Session, *, order_id: int | None, symbol: str, qty: int, expected_price: float | None, max_positions: int, max_order_notional_krw: float | None, now: datetime | None) -> dict[str, Any]:
+    def _buy_jit_guard(self, db: Session, *, order_id: int | None, symbol: str, qty: int, expected_price: float | None, max_positions: int, max_order_notional_krw: float | None, min_price_krw: float | None, max_price_krw: float | None, now: datetime | None) -> dict[str, Any]:
         if self.client is None:
             return {"allowed": True, "checks": [], "current_price": expected_price}
         try:
@@ -218,6 +218,10 @@ class KisAutomationExecutionCore:
         price = self._current_price(symbol)
         if not price or price <= 0:
             return {"allowed": False, "reason": "current_price_unavailable"}
+        if max_price_krw is not None and price > float(max_price_krw):
+            return {"allowed": False, "reason": "profile_max_price_exceeded", "current_price": price, "profile_max_price_krw": float(max_price_krw)}
+        if min_price_krw is not None and price < float(min_price_krw):
+            return {"allowed": False, "reason": "profile_min_price_not_met", "current_price": price, "profile_min_price_krw": float(min_price_krw)}
         possible = self._possible_order(symbol, price)
         if possible.get("raw_status") != "ok":
             return {"allowed": False, "reason": "possible_order_unavailable", "possible_order": possible}

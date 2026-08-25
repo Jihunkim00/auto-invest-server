@@ -18,6 +18,11 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
+from app.services.profile_universe_service import (
+    candidate_price,
+    profile_price_exclusion_reason,
+    profile_universe_bounds,
+)
 from app.services.strategy_profile_service import StrategyProfileService
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
@@ -86,7 +91,9 @@ class ProfileAwareDryRunAutoBuyService:
             db,
             request=payload,
             preview_override=preview_override,
+            profile=profile,
         )
+        preview = self._apply_profile_universe(preview, profile=profile)
         candidates = self._candidate_list(
             preview,
             requested_symbol=payload.symbol,
@@ -255,6 +262,7 @@ class ProfileAwareDryRunAutoBuyService:
         *,
         request: ProfileAwareDryRunAutoBuyRequest,
         preview_override: dict[str, Any] | None,
+        profile: dict[str, Any],
     ) -> dict[str, Any]:
         if preview_override is not None:
             return _normalize_preview_payload(preview_override, status="override")
@@ -274,12 +282,15 @@ class ProfileAwareDryRunAutoBuyService:
                 "gating_notes": ["No symbol was supplied and watchlist use was disabled."],
             }, status="disabled")
         try:
+            min_price_krw, max_price_krw = profile_universe_bounds(profile)
             try:
                 preview = self.preview_service.run_preview(
                     include_gpt=True,
                     db=db,
                     record_run=False,
                     trigger_source=TRIGGER_SOURCE,
+                    min_price_krw=min_price_krw,
+                    max_price_krw=max_price_krw,
                 )
             except TypeError:
                 preview = self.preview_service.run_preview(include_gpt=True, db=db)
@@ -291,14 +302,111 @@ class ProfileAwareDryRunAutoBuyService:
                 note=f"Watchlist preview failed: {exc.__class__.__name__}",
             )
 
+    def _apply_profile_universe(
+        self,
+        preview: dict[str, Any],
+        *,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        min_price_krw, max_price_krw = profile_universe_bounds(profile)
+        candidate_keys = (
+            'watchlist',
+            'items',
+            'top_quant_candidates',
+            'researched_candidates',
+            'final_ranked_candidates',
+        )
+        all_candidates: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        excluded_symbols: set[str] = set()
+        exclusion_counts = {
+            str(key): int(value)
+            for key, value in (preview.get('profile_exclusion_counts') or {}).items()
+            if isinstance(value, (int, float))
+        }
+
+        for key in candidate_keys:
+            values = preview.get(key)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                symbol = str(item.get('symbol') or '').strip().upper()
+                if not symbol or symbol in seen:
+                    continue
+                seen.add(symbol)
+                all_candidates.append(item)
+
+        eligible_symbols: set[str] = set()
+        for item in all_candidates:
+            symbol = str(item.get('symbol') or '').strip().upper()
+            reason = profile_price_exclusion_reason(
+                candidate_price(item),
+                min_price_krw=min_price_krw,
+                max_price_krw=max_price_krw,
+            )
+            if reason is None:
+                eligible_symbols.add(symbol)
+                continue
+            excluded_symbols.add(symbol)
+            exclusion_counts[reason] = exclusion_counts.get(reason, 0) + 1
+
+        def keep_candidate(item: Any) -> bool:
+            if not isinstance(item, dict):
+                return False
+            symbol = str(item.get('symbol') or '').strip().upper()
+            return bool(symbol) and symbol not in excluded_symbols
+
+        for key in candidate_keys:
+            values = preview.get(key)
+            if isinstance(values, list):
+                preview[key] = [item for item in values if keep_candidate(item)]
+
+        best = preview.get('final_best_candidate')
+        if isinstance(best, dict) and not keep_candidate(best):
+            preview['final_best_candidate'] = None
+        target_symbols = preview.get('gpt_target_symbols')
+        if isinstance(target_symbols, list):
+            preview['gpt_target_symbols'] = [
+                symbol
+                for symbol in target_symbols
+                if str(symbol).strip().upper() not in excluded_symbols
+            ]
+            preview['gpt_target_count'] = len(preview['gpt_target_symbols'])
+
+        items = preview.get('items')
+        if isinstance(items, list):
+            preview['analyzed_symbol_count'] = len(items)
+            preview['gpt_analyzed_symbol_count'] = sum(
+                1 for item in items if isinstance(item, dict) and item.get('gpt_used')
+            )
+
+        existing_eligible = preview.get('profile_eligible_symbol_count')
+        if not isinstance(existing_eligible, (int, float)):
+            existing_eligible = len(eligible_symbols)
+        existing_filtered = preview.get('profile_price_filtered_count')
+        if not isinstance(existing_filtered, (int, float)):
+            existing_filtered = 0
+        preview['profile_eligible_symbol_count'] = int(existing_eligible)
+        preview['profile_price_filtered_count'] = max(
+            int(existing_filtered),
+            len(excluded_symbols),
+        )
+        preview['profile_exclusion_counts'] = exclusion_counts
+        return _normalize_preview_payload(
+            preview,
+            status=str(preview.get('preview_status') or 'ok'),
+        )
+
     def _preview_failure_reason(self, preview: dict[str, Any]) -> str | None:
-        flags = set(_strings(preview.get("risk_flags")))
-        if "preview_service_unavailable" in flags:
-            return "preview_service_unavailable"
-        if "preview_unavailable" in flags:
-            return "preview_unavailable"
-        if str(preview.get("preview_status") or "").lower() == "unavailable":
-            return str(preview.get("preview_error") or "preview_unavailable")
+        flags = set(_strings(preview.get('risk_flags')))
+        if 'preview_service_unavailable' in flags:
+            return 'preview_service_unavailable'
+        if 'preview_unavailable' in flags:
+            return 'preview_unavailable'
+        if str(preview.get('preview_status') or '').lower() == 'unavailable':
+            return str(preview.get('preview_error') or 'preview_unavailable')
         return None
 
     def _single_symbol_preview(self, db: Session, symbol: str) -> dict[str, Any]:
@@ -617,7 +725,7 @@ class ProfileAwareDryRunAutoBuyService:
             "selected_symbol": selected.get("symbol") if selected else None,
             "selected_symbol_name": selected.get("name") if selected else None,
             "candidate_count": len(evaluated),
-            **_preview_observability(preview),
+            **_preview_observability(preview, evaluated_count=len(evaluated)),
             "candidates": [_public_candidate(item) for item in evaluated],
             "buy_score": selected.get("buy_score") if selected else None,
             "final_buy_score": selected.get("final_score") if selected else None,
@@ -979,7 +1087,11 @@ def _select_executable_candidate(evaluated: list[dict[str, Any]], *, profile: di
     return evaluated[0] if evaluated else None
 
 
-def _preview_observability(preview: dict[str, Any]) -> dict[str, Any]:
+def _preview_observability(
+    preview: dict[str, Any],
+    *,
+    evaluated_count: int,
+) -> dict[str, Any]:
     final_candidates = preview.get("final_ranked_candidates")
     if not isinstance(final_candidates, list):
         final_candidates = []
@@ -989,6 +1101,26 @@ def _preview_observability(preview: dict[str, Any]) -> dict[str, Any]:
     gpt_candidates = preview.get("gpt_target_count")
     if not isinstance(gpt_candidates, int):
         gpt_candidates = len(preview.get("gpt_target_symbols") or [])
+    items = preview.get('items')
+    if not isinstance(items, list):
+        items = final_candidates
+    quant_scored = preview.get('quant_scored_count')
+    if not isinstance(quant_scored, int):
+        quant_scored = sum(
+            1
+            for item in items
+            if isinstance(item, dict)
+            and _score(item, 'quant_buy_score', 'quant_score') is not None
+        )
+    eligible = preview.get('profile_eligible_symbol_count')
+    if not isinstance(eligible, (int, float)):
+        eligible = _preview_count(preview, 'analyzed_symbol_count', 'items')
+    filtered = preview.get('profile_price_filtered_count')
+    if not isinstance(filtered, (int, float)):
+        filtered = 0
+    exclusions = preview.get('profile_exclusion_counts')
+    if not isinstance(exclusions, dict):
+        exclusions = {}
     return {
         "configured_symbol_count": _preview_count(
             preview, "configured_symbol_count", "watchlist"
@@ -997,8 +1129,18 @@ def _preview_observability(preview: dict[str, Any]) -> dict[str, Any]:
             preview, "analyzed_symbol_count", "items"
         ),
         "quant_candidate_count": int(quant_candidates or 0),
+        "quant_scored_count": int(quant_scored or 0),
         "gpt_candidate_count": int(gpt_candidates or 0),
         "final_candidate_count": len(final_candidates),
+        "final_ranked_count": len(final_candidates),
+        "profile_eligible_symbol_count": int(eligible or 0),
+        "profile_price_filtered_count": int(filtered or 0),
+        "execution_candidate_count": int(evaluated_count),
+        "profile_exclusion_counts": {
+            str(key): int(value)
+            for key, value in exclusions.items()
+            if isinstance(value, (int, float))
+        },
         "preview_status": str(preview.get("preview_status") or "unknown"),
         "preview_error": preview.get("preview_error"),
     }

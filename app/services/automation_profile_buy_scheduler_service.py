@@ -21,6 +21,11 @@ from app.services.kis_order_validation_service import KisOrderValidationRequest
 from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, KisPositionLifecycleService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.profile_universe_service import (
+    candidate_price,
+    profile_price_exclusion_reason,
+    profile_universe_bounds,
+)
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -253,8 +258,36 @@ class AutomationProfileBuySchedulerService:
                 values = _candidate_values(self.candidate_provider(db=db, profile=profile, now=now_utc))
             except TypeError:
                 values = _candidate_values(self.candidate_provider(db, profile))
+        min_price_krw, max_price_krw = profile_universe_bounds(profile)
+        eligible_values: list[dict[str, Any]] = []
+        profile_exclusion_counts: dict[str, int] = {}
+        filtered_symbols: set[str] = set()
+        for candidate in values:
+            reason = profile_price_exclusion_reason(
+                candidate_price(candidate),
+                min_price_krw=min_price_krw,
+                max_price_krw=max_price_krw,
+            )
+            if reason is None:
+                eligible_values.append(candidate)
+                continue
+            symbol = _symbol(candidate)
+            if symbol not in filtered_symbols:
+                filtered_symbols.add(symbol)
+                profile_exclusion_counts[reason] = (
+                    profile_exclusion_counts.get(reason, 0) + 1
+                )
+        values = eligible_values
         if not values:
-            return self._blocked('no_buy_candidate', profile=profile, live_order_gate=gate)
+            reason = next(iter(profile_exclusion_counts), 'no_buy_candidate')
+            return self._blocked(
+                reason,
+                profile=profile,
+                profile_eligible_symbol_count=0,
+                profile_price_filtered_count=len(filtered_symbols),
+                profile_exclusion_counts=profile_exclusion_counts,
+                live_order_gate=gate,
+            )
         selected, target, plan, top_score = self._select_candidate(db, profile, values, self._account_snapshot(db))
         if selected is None:
             reason = 'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
@@ -293,6 +326,8 @@ class AutomationProfileBuySchedulerService:
             expected_price=plan['price'],
             max_positions=1,
             max_order_notional_krw=plan['approved_notional_krw'],
+            min_price_krw=(settings.get('universe') or {}).get('min_price_krw'),
+            max_price_krw=(settings.get('universe') or {}).get('max_price_krw'),
             now=now_utc,
         )
         if execution.get('submitted') is not True:

@@ -68,8 +68,14 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     configured_symbol_count: int = 0
     analyzed_symbol_count: int = 0
     quant_candidate_count: int = 0
+    quant_scored_count: int = 0
     gpt_candidate_count: int = 0
     final_candidate_count: int = 0
+    final_ranked_count: int = 0
+    profile_eligible_symbol_count: int = 0
+    profile_price_filtered_count: int = 0
+    execution_candidate_count: int = 0
+    profile_exclusion_counts: dict[str, int] = Field(default_factory=dict)
     preview_status: str = "unknown"
     preview_error: str | None = None
     candidates: list[dict[str, Any]] = Field(default_factory=list)
