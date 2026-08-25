@@ -12,6 +12,10 @@ from app.config import get_settings
 from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
 from app.db.models import TradeRunLog
 from app.services.event_risk_service import EventRiskService
+from app.services.automation_observability import (
+    candidate_gpt_quant_observability,
+    gpt_result_counts,
+)
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
@@ -324,6 +328,9 @@ class KisWatchlistPreviewService:
             final_best_candidate=final_best_candidate,
             gpt_target_symbols=gpt_target_symbols,
         )
+        gpt_counts = gpt_result_counts(
+            [item for item in items if isinstance(item, dict)]
+        )
 
         trade_result = {
             "action": "hold",
@@ -364,6 +371,7 @@ class KisWatchlistPreviewService:
             "gpt_target_symbols": gpt_target_symbols,
             "gpt_target_count": len(gpt_target_symbols),
             "gpt_analyzed_symbol_count": len(gpt_analyzed_symbols),
+            **gpt_counts,
             "quant_only_symbols": quant_only_symbols,
             "max_watchlist_size": self.limit,
             "watchlist": items,
@@ -1163,10 +1171,18 @@ def _preview_log_payload(
             "gpt_target_symbols": payload.get("gpt_target_symbols") or [],
             "gpt_target_count": payload.get("gpt_target_count"),
             "gpt_analyzed_symbol_count": payload.get("gpt_analyzed_symbol_count"),
+            "gpt_completed_count": payload.get("gpt_completed_count"),
+            "gpt_failed_count": payload.get("gpt_failed_count"),
+            "gpt_not_run_count": payload.get("gpt_not_run_count"),
             "quant_only_symbols": payload.get("quant_only_symbols") or [],
             "quant_candidates_count": payload.get("quant_candidates_count"),
             "researched_candidates_count": payload.get("researched_candidates_count"),
             "final_best_candidate": final_best,
+            "selected_candidate_observability": (
+                candidate_gpt_quant_observability(final_best)
+                if isinstance(final_best, dict)
+                else {}
+            ),
             "final_ranked_symbols": _candidate_symbols(ranked),
             "operator_summary": payload.get("operator_summary"),
             "risk_flags": _string_list(payload.get("risk_flags")),

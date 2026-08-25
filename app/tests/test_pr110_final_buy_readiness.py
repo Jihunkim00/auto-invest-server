@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -301,6 +302,60 @@ def test_scheduler_callback_uses_custom_profile_at_next_1130_slot(db_session, mo
     )
     assert manual['reason'] == 'manual_execution_isolation'
     assert db_session.query(AutomationProfileBuyReservation).count() == 1
+
+
+def test_scheduled_trade_run_preserves_selected_gpt_quant_audit(db_session):
+    service, _, _, _, broker, _, _, _ = _build_service(db_session)
+    candidate = _candidate(70)
+    candidate.update(
+        {
+            'quant_buy_score': 66.0,
+            'quant_sell_score': 19.0,
+            'ai_buy_score': 58.0,
+            'ai_sell_score': 23.0,
+            'final_buy_score': 66.0,
+            'final_sell_score': 21.0,
+            'confidence': 0.71,
+            'gpt_analysis_status': 'completed',
+            'gpt_used': True,
+            'gpt_reason': '정량 지표와 시장 맥락을 함께 확인했습니다.',
+            'why_hold': '스케줄러 감사용 진단입니다.',
+            'why_not_buy': ['manual_review'],
+            'risk_flags': ['preview_only'],
+            'gating_notes': ['operator_review'],
+        }
+    )
+
+    result = service.run_once(
+        db_session,
+        [candidate],
+        scheduler_slot='09:10',
+        trigger_source='automation_profile_scheduler',
+        now=NOW,
+    )
+
+    assert result['status'] == 'filled'
+    assert broker.buy_calls == [('005930', 2)]
+    run = (
+        db_session.query(TradeRunLog)
+        .filter(TradeRunLog.mode == 'automation_profile_scheduler_buy')
+        .order_by(TradeRunLog.id.desc())
+        .first()
+    )
+    assert run is not None
+    audit = json.loads(run.response_payload)['selected_candidate_observability']
+    assert audit['symbol'] == '005930'
+    assert audit['quant_buy_score'] == 66.0
+    assert audit['ai_buy_score'] == 58.0
+    assert audit['final_buy_score'] == 66.0
+    assert audit['confidence'] == 0.71
+    assert audit['gpt_analysis_status'] == 'completed'
+    assert audit['gpt_used'] is True
+    assert audit['gpt_reason'] == candidate['gpt_reason']
+    assert audit['why_hold'] == candidate['why_hold']
+    assert audit['why_not_buy'] == ['manual_review']
+    assert audit['risk_flags'] == ['preview_only']
+    assert audit['gating_notes'] == ['operator_review']
 
 
 @pytest.mark.parametrize('state', ['missing_key', 'missing_profile', 'paused', 'disabled'])

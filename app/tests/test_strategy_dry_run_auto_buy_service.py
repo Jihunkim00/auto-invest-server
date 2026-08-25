@@ -109,6 +109,12 @@ def preview(*items: dict, market_open: bool = True) -> dict:
     }
 
 
+def observed_candidate(**fields) -> dict:
+    item = candidate()
+    item.update(fields)
+    return item
+
+
 def service(risk: FakeTargetRisk | None = None) -> ProfileAwareDryRunAutoBuyService:
     return ProfileAwareDryRunAutoBuyService(
         target_risk_service=risk or FakeTargetRisk(),
@@ -174,6 +180,67 @@ def test_dry_run_exposes_preview_pipeline_observability(db_session):
     assert result["final_candidate_count"] == 2
     assert result["preview_status"] == "override"
     assert result["preview_error"] is None
+
+
+def test_dry_run_exposes_existing_gpt_quant_candidate_observability(db_session):
+    item = observed_candidate(
+        quant_buy_score=66.0,
+        quant_sell_score=21.0,
+        ai_buy_score=58.0,
+        ai_sell_score=25.0,
+        final_buy_score=64.0,
+        final_sell_score=22.0,
+        gpt_analysis_status="completed",
+        gpt_used=True,
+        gpt_reason="정량 지표는 양호하지만 보수적 진입이 필요합니다.",
+        ai_reason="정량 지표는 양호하지만 보수적 진입이 필요합니다.",
+        why_hold="KIS preview는 자문 전용입니다.",
+        why_not_buy=["preview_only"],
+    )
+
+    result = service().run_once(
+        db_session,
+        request(),
+        preview_override=preview(item),
+    )
+
+    public = result["candidates"][0]
+    assert public["quant_buy_score"] == 66.0
+    assert public["ai_buy_score"] == 58.0
+    assert public["final_buy_score"] == 64.0
+    assert public["gpt_analysis_status"] == "completed"
+    assert public["gpt_used"] is True
+    assert public["gpt_reason"] == item["gpt_reason"]
+    assert public["ai_reason"] == item["ai_reason"]
+    assert public["why_hold"] == item["why_hold"]
+    assert public["why_not_buy"] == ["preview_only"]
+    assert result["selected_quant_buy_score"] == 66.0
+    assert result["selected_ai_buy_score"] == 58.0
+    assert result["selected_final_buy_score"] == 64.0
+    assert result["selected_gpt_analysis_status"] == "completed"
+    assert result["selected_gpt_used"] is True
+    assert result["gpt_completed_count"] == 1
+    assert result["gpt_failed_count"] == 0
+    assert result["gpt_not_run_count"] == 0
+
+    signal = db_session.query(SignalLog).one()
+    assert signal.quant_buy_score == 66.0
+    assert signal.quant_sell_score == 21.0
+    assert signal.ai_buy_score == 58.0
+    assert signal.ai_sell_score == 25.0
+    assert signal.final_buy_score == 64.0
+    assert signal.final_sell_score == 22.0
+    assert signal.quant_reason is None
+    assert signal.ai_reason == item["ai_reason"]
+
+    payload = json.loads(db_session.query(TradeRunLog).one().response_payload)
+    audit = payload["selected_candidate_observability"]
+    assert audit["quant_buy_score"] == 66.0
+    assert audit["ai_buy_score"] == 58.0
+    assert audit["final_buy_score"] == 64.0
+    assert audit["gpt_analysis_status"] == "completed"
+    assert audit["gpt_used"] is True
+    assert audit["gpt_reason"] == item["gpt_reason"]
 
 
 def test_dry_run_uses_active_safe_profile_by_default(db_session):
@@ -318,6 +385,60 @@ def test_data_insufficient_never_returns_would_buy(db_session):
 
     assert result["action"] == "blocked"
     assert result["reason"] == "data_quality_blocked"
+
+
+def test_dry_run_gpt_not_run_exposes_nullable_ai_fields(db_session):
+    result = service().run_once(
+        db_session,
+        request(save_logs=False),
+        preview_override=preview(candidate()),
+    )
+
+    public = result["candidates"][0]
+    assert public["gpt_used"] is False
+    assert public["gpt_analysis_status"] == "not_run"
+    assert public["ai_buy_score"] is None
+    assert public["ai_sell_score"] is None
+    assert public["gpt_reason"] is None
+    assert result["gpt_completed_count"] == 0
+    assert result["gpt_failed_count"] == 0
+    assert result["gpt_not_run_count"] == 1
+    assert db_session.query(SignalLog).count() == 0
+    assert db_session.query(TradeRunLog).count() == 0
+    assert db_session.query(OrderLog).count() == 0
+
+
+def test_dry_run_gpt_failed_preserves_quant_only_final_score(db_session):
+    item = observed_candidate(
+        quant_buy_score=70.0,
+        quant_sell_score=24.0,
+        ai_buy_score=None,
+        ai_sell_score=None,
+        final_buy_score=70.0,
+        final_sell_score=24.0,
+        gpt_analysis_status="failed",
+        gpt_used=False,
+        gpt_reason=None,
+        ai_reason=None,
+        risk_flags=["gpt_unavailable"],
+    )
+
+    result = service().run_once(
+        db_session,
+        request(),
+        preview_override=preview(item),
+    )
+
+    public = result["candidates"][0]
+    assert public["gpt_analysis_status"] == "failed"
+    assert public["gpt_used"] is False
+    assert public["ai_buy_score"] is None
+    assert public["ai_reason"] is None
+    assert public["final_buy_score"] == public["quant_buy_score"] == 70.0
+    assert "gpt_unavailable" in public["risk_flags"]
+    assert result["gpt_completed_count"] == 0
+    assert result["gpt_failed_count"] == 1
+    assert result["gpt_not_run_count"] == 0
 
 
 def test_result_saves_signal_run_and_simulated_order_payload(db_session):

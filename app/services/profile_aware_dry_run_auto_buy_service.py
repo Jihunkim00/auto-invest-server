@@ -16,6 +16,10 @@ from app.schemas.strategy_dry_run_auto_buy import (
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
+from app.services.automation_observability import (
+    candidate_gpt_quant_observability,
+    gpt_result_counts,
+)
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.profile_universe_service import (
@@ -563,6 +567,20 @@ class ProfileAwareDryRunAutoBuyService:
             "data_sufficient": data_sufficient,
             "target_risk_approved": target_risk.get("approved") is True,
             "target_risk_result": target_risk,
+            "quant_buy_score": candidate.get("quant_buy_score"),
+            "quant_sell_score": candidate.get("quant_sell_score"),
+            "ai_buy_score": candidate.get("ai_buy_score"),
+            "ai_sell_score": candidate.get("ai_sell_score"),
+            "final_buy_score": candidate.get("final_buy_score"),
+            "final_sell_score": candidate.get("final_sell_score"),
+            "gpt_analysis_status": str(
+                candidate.get("gpt_analysis_status") or "not_run"
+            ).strip().lower(),
+            "gpt_used": bool(candidate.get("gpt_used")),
+            "gpt_reason": candidate.get("gpt_reason"),
+            "ai_reason": candidate.get("ai_reason"),
+            "why_hold": candidate.get("why_hold"),
+            "why_not_buy": candidate.get("why_not_buy"),
             "risk_flags": _dedupe(
                 [
                     *_strings(candidate.get("risk_flags")),
@@ -672,6 +690,14 @@ class ProfileAwareDryRunAutoBuyService:
         now_utc: datetime,
     ) -> dict[str, Any]:
         target = selected.get("target_risk_result") if selected else {}
+        selected_observability = (
+            candidate_gpt_quant_observability(
+                selected.get("raw"),
+                evaluated=selected,
+            )
+            if selected
+            else {}
+        )
         risk_flags = _dedupe(
             [
                 "dry_run_only",
@@ -731,6 +757,23 @@ class ProfileAwareDryRunAutoBuyService:
             "final_buy_score": selected.get("final_score") if selected else None,
             "sell_score": selected.get("sell_score") if selected else None,
             "final_score": selected.get("final_score") if selected else None,
+            "selected_quant_buy_score": selected_observability.get("quant_buy_score"),
+            "selected_quant_sell_score": selected_observability.get("quant_sell_score"),
+            "selected_ai_buy_score": selected_observability.get("ai_buy_score"),
+            "selected_ai_sell_score": selected_observability.get("ai_sell_score"),
+            "selected_gpt_analysis_status": selected_observability.get(
+                "gpt_analysis_status"
+            ),
+            "selected_gpt_used": bool(selected_observability.get("gpt_used")),
+            "selected_gpt_reason": selected_observability.get("gpt_reason"),
+            "selected_final_buy_score": selected_observability.get(
+                "final_buy_score"
+            ),
+            "selected_final_sell_score": selected_observability.get(
+                "final_sell_score"
+            ),
+            "selected_confidence": selected_observability.get("confidence"),
+            "selected_candidate_observability": selected_observability,
             "required_entry_score": float(profile.get("buy_score_threshold") or 0),
             "confidence": selected.get("confidence") if selected else None,
             "target_risk_approved": decision["target_risk_approved"],
@@ -781,8 +824,17 @@ class ProfileAwareDryRunAutoBuyService:
             quant_sell_score=_score(candidate, "quant_sell_score"),
             ai_buy_score=_score(candidate, "ai_buy_score", "gpt_buy_score"),
             ai_sell_score=_score(candidate, "ai_sell_score", "gpt_sell_score"),
-            final_buy_score=response.get("final_score"),
-            final_sell_score=response.get("sell_score"),
+            final_buy_score=_score(
+                candidate,
+                "final_buy_score",
+                "final_entry_score",
+                "final_score",
+            ) or response.get("final_score"),
+            final_sell_score=_score(
+                candidate,
+                "final_sell_score",
+                "final_score",
+            ) or response.get("sell_score"),
             quant_reason=str(candidate.get("quant_reason") or "") or None,
             ai_reason=str(candidate.get("gpt_reason") or candidate.get("ai_reason") or "")
             or None,
@@ -918,25 +970,19 @@ def _candidate_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def _public_candidate(item: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: item.get(key)
-        for key in (
-            "symbol",
-            "name",
-            "buy_score",
-            "sell_score",
-            "final_score",
-            "confidence",
-            "price",
-            "entry_ready",
-            "atr_risk",
-            "volume_ratio",
-            "data_sufficient",
-            "target_risk_approved",
-            "risk_flags",
-            "gating_notes",
-        )
-    }
+    public = candidate_gpt_quant_observability(item.get("raw"), evaluated=item)
+    public.update(
+        {
+            "entry_ready": item.get("entry_ready"),
+            "atr_risk": item.get("atr_risk"),
+            "volume_ratio": item.get("volume_ratio"),
+            "data_sufficient": item.get("data_sufficient"),
+            "target_risk_approved": item.get("target_risk_approved"),
+            "risk_flags": item.get("risk_flags") or [],
+            "gating_notes": item.get("gating_notes") or [],
+        }
+    )
+    return public
 
 
 def _risk_reason(value: str) -> str:
@@ -1104,6 +1150,8 @@ def _preview_observability(
     items = preview.get('items')
     if not isinstance(items, list):
         items = final_candidates
+    gpt_items = [item for item in items if isinstance(item, dict)]
+    gpt_counts = gpt_result_counts(gpt_items)
     quant_scored = preview.get('quant_scored_count')
     if not isinstance(quant_scored, int):
         quant_scored = sum(
@@ -1131,6 +1179,8 @@ def _preview_observability(
         "quant_candidate_count": int(quant_candidates or 0),
         "quant_scored_count": int(quant_scored or 0),
         "gpt_candidate_count": int(gpt_candidates or 0),
+        "gpt_target_count": int(gpt_candidates or 0),
+        **gpt_counts,
         "final_candidate_count": len(final_candidates),
         "final_ranked_count": len(final_candidates),
         "profile_eligible_symbol_count": int(eligible or 0),

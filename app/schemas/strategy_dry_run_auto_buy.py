@@ -70,6 +70,10 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     quant_candidate_count: int = 0
     quant_scored_count: int = 0
     gpt_candidate_count: int = 0
+    gpt_target_count: int = 0
+    gpt_completed_count: int = 0
+    gpt_failed_count: int = 0
+    gpt_not_run_count: int = 0
     final_candidate_count: int = 0
     final_ranked_count: int = 0
     profile_eligible_symbol_count: int = 0
@@ -83,6 +87,17 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     final_buy_score: float | None = None
     sell_score: float | None = None
     final_score: float | None = None
+    selected_quant_buy_score: float | None = None
+    selected_quant_sell_score: float | None = None
+    selected_ai_buy_score: float | None = None
+    selected_ai_sell_score: float | None = None
+    selected_gpt_analysis_status: str | None = None
+    selected_gpt_used: bool = False
+    selected_gpt_reason: str | None = None
+    selected_final_buy_score: float | None = None
+    selected_final_sell_score: float | None = None
+    selected_confidence: float | None = None
+    selected_candidate_observability: dict[str, Any] = Field(default_factory=dict)
     required_entry_score: float = 0
     confidence: float | None = None
     target_risk_approved: bool

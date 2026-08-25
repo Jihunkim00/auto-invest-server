@@ -500,6 +500,9 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert body["quant_candidates_count"] == 50
     assert body["gpt_target_count"] == 5
     assert body["gpt_analyzed_symbol_count"] == 5
+    assert body["gpt_completed_count"] == 5
+    assert body["gpt_failed_count"] == 0
+    assert body["gpt_not_run_count"] == 45
     assert len(body["quant_only_symbols"]) == 45
     assert body["researched_candidates_count"] == 5
     assert body["top_quant_candidates"]
@@ -523,6 +526,7 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert non_top["confidence"] is None
     assert non_top["gpt_reason"] is None
     assert captured_symbols == body["gpt_target_symbols"]
+    assert len(captured_symbols) == 5
     assert len(bar_symbols) == 55
     assert len(captured_payloads) == 5
     assert body["best_score"] is not None

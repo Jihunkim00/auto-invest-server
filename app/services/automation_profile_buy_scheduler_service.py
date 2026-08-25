@@ -26,6 +26,7 @@ from app.services.profile_universe_service import (
     profile_price_exclusion_reason,
     profile_universe_bounds,
 )
+from app.services.automation_observability import candidate_gpt_quant_observability
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -349,6 +350,9 @@ class AutomationProfileBuySchedulerService:
             'action': 'buy',
             'reason': 'buy_filled' if reservation.status == 'filled' else 'buy_submitted',
             'selected_symbol': symbol,
+            'selected_candidate_observability': candidate_gpt_quant_observability(
+                selected
+            ),
             'final_buy_score': _score(selected, 'final_buy_score', 'final_score', 'buy_score'),
             'required_entry_score': _threshold(profile),
             'quantity': int(plan['quantity']),
