@@ -560,6 +560,7 @@ class SchedulerService:
                     "trigger_source": "strategy_auto_buy_dry_run",
                     "scheduler_slot": slot_name,
                 },
+                **({'now': now} if now is not None else {}),
             )
             if self._automation_profile_live_buy_requested(db, now=now):
                 profile_result = self._profile_buy_scheduler_service(
@@ -840,10 +841,13 @@ class SchedulerService:
         return self.automation_profile_buy_scheduler_service
 
     def _profile_scheduler_slot(self, slot_name: str) -> str | None:
+        normalized = str(slot_name or '').strip()
+        if normalized.lower().startswith('profile:'):
+            normalized = normalized.split(':', 1)[1].strip()
         for name, hour, minute in self._strategy_auto_buy_slots:
             if name == slot_name:
                 return f'{hour:02d}:{minute:02d}'
-        return slot_name if len(str(slot_name)) == 5 and str(slot_name)[2] == ':' else None
+        return normalized if len(normalized) == 5 and normalized[2] == ':' else None
 
     def _automation_profile_execution_active(self, db) -> bool:
         schedule = self.automation_profiles.selected_profile_schedule(

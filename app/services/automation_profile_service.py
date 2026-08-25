@@ -111,6 +111,20 @@ class AutomationProfileService:
             .first()
         )
 
+    def get_active_profile(self, db: Session) -> dict[str, Any] | None:
+        runtime = self.runtime_settings.get_settings_read_only(db)
+        active_key = str(runtime.get('active_automation_profile_key') or '').strip().lower()
+        if not active_key:
+            return None
+        try:
+            row = self.get(db, active_key)
+        except AutomationProfileNotFound:
+            return None
+        profile = self.serialize(row)
+        if profile.get('status') != 'active' or profile.get('enabled') is not True:
+            return None
+        return profile
+
     def list_profiles(self, db: Session) -> dict[str, Any]:
         rows = (
             db.query(StrategyProfile)
