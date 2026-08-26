@@ -35,6 +35,19 @@ class StrategyRiskStateResponse(BaseModel):
     risk_flags: list[str] = Field(default_factory=list)
     gating_notes: list[str] = Field(default_factory=list)
     data_quality: dict[str, Any] = Field(default_factory=dict)
+    data_quality_limited: bool = False
+    data_quality_notes: list[str] = Field(default_factory=list)
+    data_quality_reduction_reasons: list[str] = Field(default_factory=list)
+    sizing_mode: str = "equity_pct"
+    fixed_budget_krw: float = 0.0
+    target_position_pct: float = 0.0
+    available_cash_krw: float | None = None
+    total_assets_krw: float | None = None
+    configured_max_order_notional_krw: float = 0.0
+    hard_max_order_notional_krw: float = 1_000_000.0
+    base_order_cap_krw: float = 0.0
+    effective_max_order_notional_krw: float = 0.0
+    order_cap_source: str = "equity_pct"
     safety: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -63,6 +76,19 @@ class StrategyEntryRiskEvaluationResponse(BaseModel):
     approved_notional_krw: float
     recommended_notional_krw: float
     sizing_multiplier: float
+    sizing_mode: str = "equity_pct"
+    fixed_budget_krw: float = 0.0
+    target_position_pct: float = 0.0
+    available_cash_krw: float | None = None
+    total_assets_krw: float | None = None
+    configured_max_order_notional_krw: float = 0.0
+    hard_max_order_notional_krw: float = 1_000_000.0
+    base_order_cap_krw: float = 0.0
+    effective_max_order_notional_krw: float = 0.0
+    order_cap_source: str = "equity_pct"
+    data_quality_limited: bool = False
+    data_quality_notes: list[str] = Field(default_factory=list)
+    data_quality_reduction_reasons: list[str] = Field(default_factory=list)
     block_reason: str | None = None
     risk_flags: list[str] = Field(default_factory=list)
     gating_notes: list[str] = Field(default_factory=list)

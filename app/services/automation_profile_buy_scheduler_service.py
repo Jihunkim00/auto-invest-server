@@ -21,6 +21,7 @@ from app.services.kis_order_validation_service import KisOrderValidationRequest
 from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, KisPositionLifecycleService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
 from app.services.profile_universe_service import (
     candidate_price,
     profile_price_exclusion_reason,
@@ -79,9 +80,14 @@ class AutomationProfileBuySchedulerService:
         self.strategy_profiles = strategy_profiles or AutomationProfileService(
             runtime_settings=self.runtime_settings,
         )
-        self.target_risk_service = target_risk_service or TargetAwareRiskService()
         self.positions_loader = positions_loader
         self.balance_loader = balance_loader
+        self.target_risk_service = target_risk_service or TargetAwareRiskService(
+            budget_service=StrategyRiskBudgetService(
+                position_loader=self._risk_positions,
+                balance_loader=self._risk_balance,
+            )
+        )
         self.open_orders_loader = open_orders_loader
         self.candidate_provider = candidate_provider
         self.lifecycle_service = lifecycle_service or KisPositionLifecycleService(
@@ -97,6 +103,38 @@ class AutomationProfileBuySchedulerService:
             positions_loader=positions_loader,
             open_orders_loader=open_orders_loader,
         )
+
+    def _risk_positions(
+        self,
+        db: Session,
+        provider: str,
+        market: str,
+    ) -> list[dict[str, Any]]:
+        if provider != PROVIDER or market != MARKET:
+            return []
+        if self.positions_loader is not None:
+            return self.positions_loader(db)
+        if self.client is not None:
+            reader = getattr(self.client, "list_positions", None)
+            if callable(reader):
+                return reader()
+        return []
+
+    def _risk_balance(
+        self,
+        db: Session,
+        provider: str,
+        market: str,
+    ) -> dict[str, Any]:
+        if provider != PROVIDER or market != MARKET:
+            return {}
+        if self.balance_loader is not None:
+            return self.balance_loader(db)
+        if self.client is not None:
+            reader = getattr(self.client, "get_account_balance", None)
+            if callable(reader):
+                return reader()
+        return {}
 
     def live_order_gate(self, db: Session) -> dict[str, Any]:
         authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
@@ -357,6 +395,20 @@ class AutomationProfileBuySchedulerService:
             'required_entry_score': _threshold(profile),
             'quantity': int(plan['quantity']),
             'approved_notional_krw': plan['approved_notional_krw'],
+            'target_risk_result': target,
+            'sizing_mode': target.get('sizing_mode', 'equity_pct'),
+            'fixed_budget_krw': target.get('fixed_budget_krw'),
+            'target_position_pct': target.get('target_position_pct'),
+            'available_cash_krw': target.get('available_cash_krw'),
+            'total_assets_krw': target.get('total_assets_krw'),
+            'configured_max_order_notional_krw': target.get('configured_max_order_notional_krw'),
+            'hard_max_order_notional_krw': target.get('hard_max_order_notional_krw'),
+            'base_order_cap_krw': target.get('base_order_cap_krw'),
+            'effective_max_order_notional_krw': target.get('effective_max_order_notional_krw'),
+            'order_cap_source': target.get('order_cap_source'),
+            'data_quality_limited': target.get('data_quality_limited', False),
+            'data_quality_notes': target.get('data_quality_notes', []),
+            'data_quality_reduction_reasons': target.get('data_quality_reduction_reasons', []),
             'order_id': order.id,
             'reservation_id': reservation.id,
             'internal_status': order.internal_status,

@@ -474,14 +474,28 @@ class AutomationProfileService:
         operation = settings['operation']
         if capital['sizing_mode'] not in {'equity_pct', 'fixed_budget'}:
             errors.append({'field': 'capital.sizing_mode', 'message': 'must be equity_pct or fixed_budget'})
-        if not 0 < float(capital['target_position_pct']) <= 100:
+        if (
+            capital['sizing_mode'] == 'equity_pct'
+            and not 0 < float(capital['target_position_pct']) <= 100
+        ):
             errors.append({'field': 'capital.target_position_pct', 'message': 'must be between 0 and 100'})
-        if float(capital['max_position_pct']) < float(capital['target_position_pct']):
+        if (
+            capital['sizing_mode'] == 'equity_pct'
+            and float(capital['max_position_pct']) < float(capital['target_position_pct'])
+        ):
             errors.append({'field': 'capital.max_position_pct', 'message': 'must be >= target_position_pct'})
-        if float(capital['max_total_exposure_pct']) < float(capital['max_position_pct']):
+        if (
+            capital['sizing_mode'] == 'equity_pct'
+            and float(capital['max_total_exposure_pct']) < float(capital['max_position_pct'])
+        ):
             errors.append({'field': 'capital.max_total_exposure_pct', 'message': 'must be >= max_position_pct'})
         if float(capital['max_order_notional_krw']) <= 0:
             errors.append({'field': 'capital.max_order_notional_krw', 'message': 'must be positive'})
+        if (
+            capital['sizing_mode'] == 'fixed_budget'
+            and float(capital.get('fixed_budget') or 0) <= 0
+        ):
+            errors.append({'field': 'capital.fixed_budget', 'message': 'must be positive in fixed_budget mode'})
         watchlist_size = int(universe['watchlist_size'])
         if not 1 <= watchlist_size <= 100:
             errors.append({'field': 'universe.watchlist_size', 'message': 'must be between 1 and 100'})

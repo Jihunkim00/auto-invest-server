@@ -162,6 +162,25 @@ class TargetAwareRiskService:
             "approved_notional_krw": round(approved_notional, 2),
             "recommended_notional_krw": round(recommended, 2),
             "sizing_multiplier": round(multiplier, 4),
+            "sizing_mode": snapshot["sizing_mode"],
+            "fixed_budget_krw": snapshot["fixed_budget_krw"],
+            "target_position_pct": snapshot["target_position_pct"],
+            "available_cash_krw": snapshot["available_cash_krw"],
+            "total_assets_krw": snapshot["total_assets_krw"],
+            "configured_max_order_notional_krw": snapshot[
+                "configured_max_order_notional_krw"
+            ],
+            "hard_max_order_notional_krw": snapshot["hard_max_order_notional_krw"],
+            "base_order_cap_krw": snapshot["base_order_cap_krw"],
+            "effective_max_order_notional_krw": snapshot[
+                "effective_max_order_notional_krw"
+            ],
+            "order_cap_source": snapshot["order_cap_source"],
+            "data_quality_limited": snapshot["data_quality_limited"],
+            "data_quality_notes": snapshot["data_quality_notes"],
+            "data_quality_reduction_reasons": snapshot[
+                "data_quality_reduction_reasons"
+            ],
             "block_reason": block_reason,
             "risk_flags": _dedupe(flags),
             "gating_notes": _dedupe(notes),
@@ -187,6 +206,11 @@ class TargetAwareRiskService:
                 "max_order_notional_pct": snapshot["max_order_notional_pct"],
                 "max_order_notional_krw": snapshot["max_order_notional_krw"],
                 "effective_max_order_notional_krw": cap,
+                "sizing_mode": snapshot["sizing_mode"],
+                "fixed_budget_krw": snapshot["fixed_budget_krw"],
+                "target_position_pct": snapshot["target_position_pct"],
+                "base_order_cap_krw": snapshot["base_order_cap_krw"],
+                "order_cap_source": snapshot["order_cap_source"],
                 "max_trades_per_day": snapshot["max_trades_per_day"],
                 "max_positions": snapshot["max_positions"],
                 "consecutive_loss_reduce_threshold": int(

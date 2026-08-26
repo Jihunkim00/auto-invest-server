@@ -716,13 +716,19 @@ class ProfileAwareDryRunAutoBuyService:
                 *_strings(selected.get("gating_notes") if selected else []),
             ]
         )
+        target_quality_notes = (
+            _strings((target or {}).get("data_quality_notes"))
+            if isinstance(target, dict)
+            else []
+        )
+        target_quality_reasons = (
+            _strings((target or {}).get("data_quality_reduction_reasons"))
+            if isinstance(target, dict)
+            else []
+        )
         quality_notes = _dedupe(
             [
-                *_strings(
-                    (target or {}).get("risk_flags")
-                    if isinstance(target, dict)
-                    else []
-                ),
+                *target_quality_notes,
                 *(
                     ["candidate_data_insufficient"]
                     if selected and not selected["data_sufficient"]
@@ -794,8 +800,57 @@ class ProfileAwareDryRunAutoBuyService:
                     selected and selected["data_sufficient"]
                 ),
                 "notes": quality_notes,
+                "limited": bool((target or {}).get("data_quality_limited"))
+                if isinstance(target, dict)
+                else False,
+                "reduction_reasons": target_quality_reasons,
                 "preview_error": preview.get("preview_error"),
             },
+            "data_quality_limited": bool((target or {}).get("data_quality_limited"))
+            if isinstance(target, dict)
+            else False,
+            "data_quality_notes": quality_notes,
+            "data_quality_reduction_reasons": target_quality_reasons,
+            "sizing_mode": (target or {}).get("sizing_mode", "equity_pct")
+            if isinstance(target, dict)
+            else "equity_pct",
+            "fixed_budget_krw": float((target or {}).get("fixed_budget_krw") or 0)
+            if isinstance(target, dict)
+            else 0.0,
+            "target_position_pct": float(
+                (target or {}).get("target_position_pct") or 0
+            )
+            if isinstance(target, dict)
+            else 0.0,
+            "available_cash_krw": (target or {}).get("available_cash_krw")
+            if isinstance(target, dict)
+            else None,
+            "total_assets_krw": (target or {}).get("total_assets_krw")
+            if isinstance(target, dict)
+            else None,
+            "configured_max_order_notional_krw": float(
+                (target or {}).get("configured_max_order_notional_krw") or 0
+            )
+            if isinstance(target, dict)
+            else 0.0,
+            "hard_max_order_notional_krw": float(
+                (target or {}).get("hard_max_order_notional_krw") or 1_000_000
+            )
+            if isinstance(target, dict)
+            else 1_000_000.0,
+            "base_order_cap_krw": float(
+                (target or {}).get("base_order_cap_krw") or 0
+            )
+            if isinstance(target, dict)
+            else 0.0,
+            "effective_max_order_notional_krw": float(
+                (target or {}).get("effective_max_order_notional_krw") or 0
+            )
+            if isinstance(target, dict)
+            else 0.0,
+            "order_cap_source": (target or {}).get("order_cap_source", "equity_pct")
+            if isinstance(target, dict)
+            else "equity_pct",
             "safety": _safety(),
             "created_at": now_utc.isoformat(),
         }

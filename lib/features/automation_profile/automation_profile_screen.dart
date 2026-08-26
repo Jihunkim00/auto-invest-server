@@ -31,6 +31,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   final _takeProfitController = TextEditingController(text: '3');
   final _maxEntriesController = TextEditingController(text: '1');
   String _sizingMode = 'equity_pct';
+  double _maxPositionPct = 12;
+  double _maxTotalExposurePct = 30;
 
   @override
   void initState() {
@@ -44,7 +46,6 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _nameController,
       _startController,
       _endController,
-
       _watchlistController,
       _maxPositionsController,
       _targetPctController,
@@ -85,6 +86,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _sizingMode = 'equity_pct';
       _maxPositionsController.text = '1';
       _analysisTimes = <String>['09:10', '11:30', '13:30'];
+      _targetPctController.text = '10';
+      _fixedBudgetController.text = '500000';
+      _maxOrderController.text = '500000';
+      _maxPositionPct = 12;
+      _maxTotalExposurePct = 30;
     });
   }
 
@@ -112,7 +118,12 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _takeProfitController.text = '${profile.exit['take_profit_pct'] ?? 3}';
       _maxEntriesController.text =
           '${profile.entry['max_new_entries_per_day'] ?? 1}';
-      _sizingMode = '${profile.capital['sizing_mode'] ?? 'equity_pct'}';
+      _sizingMode = profile.capital['sizing_mode'] == 'fixed_budget'
+          ? 'fixed_budget'
+          : 'equity_pct';
+      _maxPositionPct = _asDouble(profile.capital['max_position_pct'], 12);
+      _maxTotalExposurePct =
+          _asDouble(profile.capital['max_total_exposure_pct'], 30);
     });
   }
 
@@ -139,7 +150,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       setState(() => _error = "분석 시각은 최소 1개가 필요합니다.");
       return;
     }
-    setState(() => _analysisTimes = _analysisTimes.where((item) => item != value).toList());
+    setState(() => _analysisTimes =
+        _analysisTimes.where((item) => item != value).toList());
   }
 
   TimeOfDay? _timeOfDayFromValue(String value) {
@@ -147,7 +159,12 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     if (parts.length != 2) return null;
     final hour = int.tryParse(parts[0]);
     final minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    if (hour == null ||
+        minute == null ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
       return null;
     }
     return TimeOfDay(hour: hour, minute: minute);
@@ -178,6 +195,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     return null;
   }
 
+  double _asDouble(Object? value, double fallback) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
   Map<String, dynamic> _body() {
     final target = double.tryParse(_targetPctController.text) ?? 10;
     return {
@@ -190,8 +212,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       'capital': {
         'sizing_mode': _sizingMode,
         'target_position_pct': target,
-        'max_position_pct': target,
-        'max_total_exposure_pct': target,
+        'max_position_pct': _maxPositionPct,
+        'max_total_exposure_pct': _maxTotalExposurePct,
         'max_order_notional_krw':
             double.tryParse(_maxOrderController.text) ?? 500000,
         'fixed_budget': double.tryParse(_fixedBudgetController.text) ?? 500000,
@@ -315,7 +337,6 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
-
   bool _isSelected(AutomationStrategyProfile profile) =>
       _list?.selectedProfile?.id == profile.id;
 
@@ -370,7 +391,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                             key: ValueKey(
                                 'automation-profile-activate-${profile.id}'),
                             tooltip: '프로필 활성화',
-                            onPressed: _busy || profile.status == 'active' || _isArmed(profile)
+                            onPressed: _busy ||
+                                    profile.status == 'active' ||
+                                    _isArmed(profile)
                                 ? null
                                 : () => _activate(profile),
                             icon: const Icon(Icons.play_arrow_outlined),
@@ -379,7 +402,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                             key: ValueKey(
                                 'automation-profile-pause-${profile.id}'),
                             tooltip: '프로필 일시정지',
-                            onPressed: _busy || (!_isSelected(profile) && profile.status != 'active')
+                            onPressed: _busy ||
+                                    (!_isSelected(profile) &&
+                                        profile.status != 'active')
                                 ? null
                                 : () => _pause(profile),
                             icon: const Icon(Icons.pause_outlined),
@@ -456,7 +481,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                   children: [
                     const Expanded(child: Text("분석 시각 (KST)")),
                     OutlinedButton.icon(
-                      key: const ValueKey("automation-profile-add-analysis-time"),
+                      key: const ValueKey(
+                          "automation-profile-add-analysis-time"),
                       onPressed: _busy ? null : _addAnalysisTime,
                       icon: const Icon(Icons.add, size: 16),
                       label: const Text("시간 추가"),
@@ -498,19 +524,28 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               ],
             ),
             DropdownButtonFormField<String>(
+              key: ValueKey('automation-profile-sizing-mode-$_sizingMode'),
               initialValue: _sizingMode,
               items: const [
-                DropdownMenuItem(value: 'equity_pct', child: Text('자산 비율')),
-                DropdownMenuItem(value: 'fixed_budget', child: Text('고정 예산')),
+                DropdownMenuItem(
+                    key: ValueKey('automation-profile-sizing-equity-pct'),
+                    value: 'equity_pct',
+                    child: Text('자산 비율')),
+                DropdownMenuItem(
+                    key: ValueKey('automation-profile-sizing-fixed-budget'),
+                    value: 'fixed_budget',
+                    child: Text('고정 예산')),
               ],
-              onChanged: (value) =>
-                  setState(() => _sizingMode = value ?? 'equity_pct'),
+              onChanged: (value) => setState(() => _sizingMode =
+                  value == 'fixed_budget' ? 'fixed_budget' : 'equity_pct'),
               decoration: const InputDecoration(labelText: '자금 배분 방식'),
             ),
             Row(
               children: [
                 Expanded(
                     child: TextField(
+                        key: const ValueKey('automation-profile-target-pct'),
+                        enabled: _sizingMode == 'equity_pct',
                         controller: _targetPctController,
                         keyboardType: TextInputType.number,
                         decoration:
@@ -518,13 +553,28 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                     child: TextField(
+                        key: const ValueKey('automation-profile-max-order'),
                         controller: _maxOrderController,
                         keyboardType: TextInputType.number,
                         decoration:
                             const InputDecoration(labelText: '최대 주문 금액 (원)'))),
               ],
             ),
+            if (_sizingMode == 'fixed_budget')
+              const Text(
+                '고정 예산 방식에서는 주문 크기 계산에 목표 자산 비율을 사용하지 않습니다.',
+                key: ValueKey('automation-profile-target-pct-helper'),
+                style: TextStyle(color: Colors.white54),
+              ),
+            if (_sizingMode == 'equity_pct')
+              const Text(
+                '자산 비율 방식에서는 고정 예산을 사용하지 않습니다.',
+                key: ValueKey('automation-profile-fixed-budget-helper'),
+                style: TextStyle(color: Colors.white54),
+              ),
             TextField(
+                key: const ValueKey('automation-profile-fixed-budget'),
+                enabled: _sizingMode == 'fixed_budget',
                 controller: _fixedBudgetController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: '고정 예산 (원)')),

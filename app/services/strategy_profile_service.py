@@ -334,6 +334,7 @@ class StrategyProfileService:
                 "status": profile_status,
                 "enabled": bool(row.enabled),
                 "automation_settings": effective,
+                "automation_settings_configured": custom_settings,
             })
         return payload
 

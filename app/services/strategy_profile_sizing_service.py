@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from app.services.automation_profile_safety import TEST4_HARD_SAFETY
+
 
 class StrategyProfileSizingService:
     @staticmethod
@@ -20,21 +22,36 @@ class StrategyProfileSizingService:
         target_pct = max(0.0, float(capital.get('target_position_pct') or 0))
         max_position_pct = max(0.0, float(capital.get('max_position_pct') or 0))
         exposure_pct = max(0.0, float(capital.get('max_total_exposure_pct') or 0))
-        max_notional = max(0.0, float(capital.get('max_order_notional_krw') or 0))
+        configured_max_notional = max(
+            0.0, float(capital.get('max_order_notional_krw') or 0)
+        )
+        hard_max_notional = float(TEST4_HARD_SAFETY['max_order_notional_krw'])
+        max_notional = configured_max_notional or hard_max_notional
         if mode == 'fixed_budget':
             target_notional = max(0.0, float(capital.get('fixed_budget') or 0))
             if target_notional <= 0:
                 target_notional = max_notional
         else:
             target_notional = max(0.0, float(equity)) * target_pct / 100.0
+        cap_components = [
+            ('fixed_budget' if mode == 'fixed_budget' else 'equity_pct', target_notional),
+            ('configured_order_cap_limited', max_notional),
+            ('hard_cap_limited', hard_max_notional),
+        ]
+        if orderable_cash >= 0:
+            cap_components.append(('cash_limited', max(0.0, float(orderable_cash))))
+        base_order_cap = min(value for _, value in cap_components)
+        order_cap_source = next(
+            source
+            for source, value in cap_components
+            if abs(value - base_order_cap) <= 0.01
+        )
         max_position_value = max(0.0, float(equity)) * max_position_pct / 100.0
         max_total_exposure = max(0.0, float(equity)) * exposure_pct / 100.0
         remaining_position = max(0.0, max_position_value - float(current_position_value))
         remaining_exposure = max(0.0, max_total_exposure - float(current_total_exposure))
         estimated_notional = min(
-            target_notional,
-            max_notional or target_notional,
-            max(0.0, float(orderable_cash)),
+            base_order_cap,
             remaining_position,
             remaining_exposure,
         )
@@ -45,6 +62,15 @@ class StrategyProfileSizingService:
         return {
             'sizing_mode': mode,
             'target_notional': round(target_notional, 2),
+            'fixed_budget_krw': round(max(0.0, float(capital.get('fixed_budget') or 0)), 2),
+            'target_position_pct': round(target_pct, 4),
+            'available_cash_krw': round(max(0.0, float(orderable_cash)), 2),
+            'total_assets_krw': round(max(0.0, float(equity)), 2),
+            'configured_max_order_notional_krw': round(configured_max_notional, 2),
+            'hard_max_order_notional_krw': round(hard_max_notional, 2),
+            'base_order_cap_krw': round(base_order_cap, 2),
+            'effective_max_order_notional_krw': round(base_order_cap, 2),
+            'order_cap_source': order_cap_source,
             'max_position_value': round(max_position_value, 2),
             'max_total_exposure': round(max_total_exposure, 2),
             'remaining_position_capacity': round(remaining_position, 2),

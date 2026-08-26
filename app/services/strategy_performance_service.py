@@ -397,6 +397,8 @@ class StrategyPerformanceService:
             return [], ["positions_not_loaded"]
         try:
             rows = self.position_loader(db, _provider(provider), _market(market))
+            if not isinstance(rows, list):
+                return [], ["positions_unavailable:invalid_payload"]
             return [
                 _sanitize_payload(item)
                 for item in rows

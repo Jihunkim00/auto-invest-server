@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.db.models import OrderLog
+from app.services.automation_profile_safety import TEST4_HARD_SAFETY
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_performance_service import StrategyPerformanceService
 from app.services.strategy_profile_service import StrategyProfileService
@@ -108,13 +109,35 @@ class StrategyRiskBudgetService:
         max_positions = max(0, int(profile.get("max_positions") or 0))
         consecutive_losses = self._consecutive_losses(trades.get("items"))
         total_assets = self._total_assets(balance, positions)
-        max_order_pct = max(0.0, _float(profile.get("max_order_notional_pct")))
-        profile_max_krw = max(0.0, _float(profile.get("max_order_notional_krw")))
-        pct_cap_krw = total_assets * max_order_pct if total_assets and total_assets > 0 else None
-        effective_max_krw = (
-            min(profile_max_krw, pct_cap_krw)
-            if pct_cap_krw is not None and profile_max_krw > 0
-            else profile_max_krw
+        capital = _capital_settings(profile)
+        sizing_mode = capital["sizing_mode"]
+        target_position_pct = capital["target_position_pct"]
+        fixed_budget_krw = capital["fixed_budget_krw"]
+        max_order_pct = capital["max_order_notional_pct"]
+        profile_max_krw = capital["configured_max_order_notional_krw"]
+        available_cash = self._available_cash(balance)
+        hard_max_krw = float(TEST4_HARD_SAFETY["max_order_notional_krw"])
+        if sizing_mode == "fixed_budget":
+            sizing_budget_krw = fixed_budget_krw or profile_max_krw
+        elif total_assets is not None and total_assets > 0:
+            sizing_budget_krw = total_assets * target_position_pct / 100.0
+        else:
+            sizing_budget_krw = 0.0
+        cap_components = [
+            (
+                "fixed_budget" if sizing_mode == "fixed_budget" else "equity_pct",
+                max(0.0, sizing_budget_krw),
+            ),
+            ("configured_order_cap_limited", profile_max_krw or hard_max_krw),
+        ]
+        if available_cash is not None:
+            cap_components.append(("cash_limited", max(0.0, available_cash)))
+        cap_components.append(("hard_cap_limited", hard_max_krw))
+        effective_max_krw = min(value for _, value in cap_components)
+        order_cap_source = next(
+            source
+            for source, value in cap_components
+            if abs(value - effective_max_krw) <= 0.01
         )
 
         quality_notes = _dedupe(
@@ -143,6 +166,22 @@ class StrategyRiskBudgetService:
             )
             for note in quality_notes
         )
+        quality_reduction_reasons = [
+            note
+            for note in quality_notes
+            if note.startswith(
+                (
+                    "positions_not_loaded",
+                    "positions_unavailable",
+                    "balance_not_loaded",
+                    "balance_unavailable",
+                    "average_price_missing",
+                    "unmatched_sell",
+                    "insufficient_cost_basis",
+                    "total_assets_unavailable",
+                )
+            )
+        ]
 
         risk_flags: list[str] = []
         gating_notes: list[str] = []
@@ -215,12 +254,19 @@ class StrategyRiskBudgetService:
                 "성과 데이터 품질이 제한되어 보수적인 주문 크기를 권장합니다."
             )
 
-        recommended_pct = max_order_pct * sizing_multiplier
+        recommended_pct = (
+            max_order_pct * sizing_multiplier
+            if sizing_mode == "equity_pct"
+            else 0.0
+        )
         recommended_krw = max(0.0, effective_max_krw * sizing_multiplier)
         data_quality = {
             "mode": "conservative" if quality_limited else "best_effort",
             "limited": quality_limited,
+            "data_quality_limited": quality_limited,
             "notes": quality_notes,
+            "data_quality_notes": quality_notes,
+            "data_quality_reduction_reasons": quality_reduction_reasons,
             "total_assets_available": bool(total_assets and total_assets > 0),
             "positions_available": not any(
                 note.startswith(("positions_not_loaded", "positions_unavailable"))
@@ -245,8 +291,21 @@ class StrategyRiskBudgetService:
             "daily_loss_limit_hit": daily_loss_hit,
             "max_order_notional_pct": max_order_pct,
             "max_order_notional_krw": profile_max_krw,
+            "sizing_mode": sizing_mode,
+            "fixed_budget_krw": fixed_budget_krw,
+            "target_position_pct": target_position_pct,
+            "available_cash_krw": available_cash,
+            "total_assets_krw": total_assets,
+            "configured_max_order_notional_krw": profile_max_krw,
+            "hard_max_order_notional_krw": hard_max_krw,
+            "base_order_cap_krw": round(effective_max_krw, 2),
+            "effective_max_order_notional_krw": round(effective_max_krw, 2),
+            "order_cap_source": order_cap_source,
             "recommended_order_notional_pct": recommended_pct,
             "recommended_order_notional_krw": recommended_krw,
+            "data_quality_limited": quality_limited,
+            "data_quality_notes": quality_notes,
+            "data_quality_reduction_reasons": quality_reduction_reasons,
             "max_trades_per_day": max_trades,
             "trades_used_today": trades_used,
             "trades_remaining_today": max(0, max_trades - trades_used),
@@ -268,6 +327,8 @@ class StrategyRiskBudgetService:
             "_total_assets": total_assets,
             "_effective_max_order_notional_krw": effective_max_krw,
             "_sizing_multiplier": sizing_multiplier,
+            "_sizing_mode": sizing_mode,
+            "_order_cap_source": order_cap_source,
             "_consecutive_losses": consecutive_losses,
         }
 
@@ -305,6 +366,8 @@ class StrategyRiskBudgetService:
             return [], ["positions_not_loaded"]
         try:
             rows = loader(db, provider, market)
+            if not isinstance(rows, list):
+                return [], ["positions_unavailable:invalid_payload"]
             return [dict(item) for item in rows if isinstance(item, dict)], []
         except Exception as exc:
             return [], [f"positions_unavailable:{exc.__class__.__name__}"]
@@ -319,9 +382,18 @@ class StrategyRiskBudgetService:
             return {}, ["balance_not_loaded"]
         try:
             payload = self.balance_loader(db, provider, market)
-            return (dict(payload) if isinstance(payload, dict) else {}), []
+            if not isinstance(payload, dict):
+                return {}, ["balance_unavailable:invalid_payload"]
+            return dict(payload), []
         except Exception as exc:
             return {}, [f"balance_unavailable:{exc.__class__.__name__}"]
+
+    def _available_cash(self, balance: dict[str, Any]) -> float | None:
+        for key in ("orderable_cash", "available_cash", "cash"):
+            value = _optional_float(balance.get(key))
+            if value is not None and value >= 0:
+                return value
+        return None
 
     def _position_count(self, positions: list[dict[str, Any]]) -> int:
         symbols = {
@@ -414,6 +486,37 @@ def _quality_notes(value: Any) -> list[str]:
         return []
     notes = value.get("notes")
     return [str(item) for item in notes] if isinstance(notes, list) else []
+
+
+def _capital_settings(profile: dict[str, Any]) -> dict[str, Any]:
+    """Resolve custom capital settings without falling back to legacy caps."""
+    configured = profile.get("automation_settings_configured")
+    effective = profile.get("automation_settings")
+    settings = configured if isinstance(configured, dict) else effective
+    capital = settings.get("capital") if isinstance(settings, dict) else None
+    if isinstance(capital, dict):
+        mode = str(capital.get("sizing_mode") or "equity_pct").strip().lower()
+        target_pct = max(0.0, _float(capital.get("target_position_pct")))
+        configured_max = max(0.0, _float(capital.get("max_order_notional_krw")))
+        return {
+            "sizing_mode": (
+                mode if mode in {"fixed_budget", "equity_pct"} else "equity_pct"
+            ),
+            "target_position_pct": target_pct,
+            "fixed_budget_krw": max(0.0, _float(capital.get("fixed_budget"))),
+            "configured_max_order_notional_krw": configured_max,
+            "max_order_notional_pct": target_pct / 100.0,
+        }
+    legacy_pct = max(0.0, _float(profile.get("max_order_notional_pct")))
+    return {
+        "sizing_mode": "equity_pct",
+        "target_position_pct": legacy_pct * 100.0,
+        "fixed_budget_krw": 0.0,
+        "configured_max_order_notional_krw": max(
+            0.0, _float(profile.get("max_order_notional_krw"))
+        ),
+        "max_order_notional_pct": legacy_pct,
+    }
 
 
 def _optional_float(value: Any) -> float | None:
