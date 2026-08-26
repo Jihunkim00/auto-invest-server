@@ -222,7 +222,15 @@ void main() {
     expect(find.text('SELL'), findsWidgets);
     expect(find.textContaining('Samsung Electronics'), findsWidgets);
     expect(find.text('2'), findsWidgets);
-    expect(find.text('Operator-selected position exit'), findsOneWidget);
+    final dialog = find.byType(AlertDialog);
+    expect(dialog, findsOneWidget);
+    expect(
+      find.descendant(
+        of: dialog,
+        matching: find.text('Operator-selected position exit'),
+      ),
+      findsOneWidget,
+    );
     expect(find.text('OFF'), findsWidgets);
     expect(find.text('ENABLED'), findsWidgets);
 
