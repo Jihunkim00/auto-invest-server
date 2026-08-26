@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.core.enums import InternalOrderStatus
 from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, TradeRunLog
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
+from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.services.kis_order_validation_service import KisOrderValidationRequest
 from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, KisPositionLifecycleService
@@ -114,6 +115,10 @@ class AutomationProfileBuySchedulerService:
             return []
         if self.positions_loader is not None:
             return self.positions_loader(db)
+        state = self._cached_kis_account_state()
+        if state is not None:
+            values = state.get("positions")
+            return values if isinstance(values, list) else []
         if self.client is not None:
             reader = getattr(self.client, "list_positions", None)
             if callable(reader):
@@ -130,6 +135,10 @@ class AutomationProfileBuySchedulerService:
             return {}
         if self.balance_loader is not None:
             return self.balance_loader(db)
+        state = self._cached_kis_account_state()
+        if state is not None:
+            value = state.get("balance")
+            return value if isinstance(value, dict) else {}
         if self.client is not None:
             reader = getattr(self.client, "get_account_balance", None)
             if callable(reader):
@@ -425,11 +434,23 @@ class AutomationProfileBuySchedulerService:
         return result
 
     def _account_snapshot(self, db: Session) -> dict[str, Any]:
-        positions = self.positions_loader(db) if self.positions_loader is not None else []
-        open_orders = self.open_orders_loader(db) if self.open_orders_loader is not None else []
+        state = self._cached_kis_account_state()
+        positions = (
+            self.positions_loader(db)
+            if self.positions_loader is not None
+            else (state or {}).get('positions', [])
+        )
+        open_orders = (
+            self.open_orders_loader(db)
+            if self.open_orders_loader is not None
+            else (state or {}).get('open_orders', [])
+        )
         balance = {}
         if self.balance_loader is not None:
             balance = self.balance_loader(db) or {}
+        elif state is not None:
+            value = state.get('balance')
+            balance = value if isinstance(value, dict) else {}
         elif self.client is not None:
             reader = getattr(self.client, 'get_account_balance', None)
             if callable(reader):
@@ -441,6 +462,14 @@ class AutomationProfileBuySchedulerService:
             'balance': balance if isinstance(balance, dict) else {},
             'read_at': datetime.now(UTC).isoformat(),
         }
+
+    def _cached_kis_account_state(self) -> dict[str, Any] | None:
+        if not isinstance(self.client, KisClient):
+            return None
+        return KisAccountStateCacheService.get_or_create(self.client).get_account_state(
+            read_only=True,
+            require_fresh=False,
+        )
 
     def _blocked(self, reason: str, *, profile: dict[str, Any], **extra: Any) -> dict[str, Any]:
         return {

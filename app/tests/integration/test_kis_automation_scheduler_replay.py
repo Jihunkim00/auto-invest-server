@@ -616,7 +616,7 @@ def test_score_pass_safety_matrix_never_submits(
                 qty=1,
                 requested_qty=1,
                 internal_status=InternalOrderStatus.FILLED.value,
-                submitted_at=UTC_NOW.replace(tzinfo=None),
+                submitted_at=datetime.now(UTC).replace(tzinfo=None),
             )
         )
         db_session.commit()

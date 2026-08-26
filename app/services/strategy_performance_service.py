@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     AgentChatOrderAction,
+    AutomationProfileBuyReservation,
     OrderLog,
+    PositionLifecycle,
     SignalLog,
+    StrategyLiveAutoBuyAttempt,
+    StrategyLiveAutoExitAttempt,
     StrategyPerformanceSnapshot,
     TradeRunLog,
 )
@@ -168,15 +172,19 @@ class StrategyPerformanceService:
         symbol: str | None = None,
         status: str | None = None,
         limit: int = 50,
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         positions, position_notes = self._load_positions(db, provider, market)
         orders = self._orders(db, provider=provider, market=market)
-        items, quality = self._match_orders(
+        profile = self._performance_profile(db, profile_name)
+        items, quality = self._match_profile_orders(
             db,
             orders=orders,
             provider=provider,
             market=market,
             positions=positions,
+            profile=profile,
+            include_ignored=True,
         )
         quality["notes"] = _dedupe([*quality["notes"], *position_notes])
         if symbol:
@@ -294,15 +302,21 @@ class StrategyPerformanceService:
         profile = self.strategy_profiles.serialize_profile(active)
         positions, position_notes = self._load_positions(db, provider, market)
         all_orders = self._orders(db, provider=provider, market=market, before=end)
-        items, quality = self._match_orders(
+        performance_orders = (
+            self._scoped_orders(db, all_orders, profile)
+            if _is_custom_profile(profile)
+            else all_orders
+        )
+        items, quality = self._match_profile_orders(
             db,
             orders=all_orders,
             provider=provider,
             market=market,
             positions=positions,
+            profile=profile,
         )
         period_orders = [
-            order for order in all_orders
+            order for order in performance_orders
             if start <= _order_event_time(order) < end
         ]
         closed = [
@@ -338,6 +352,12 @@ class StrategyPerformanceService:
         )
         if position_values["missing_cost_basis"]:
             quality["notes"].append("insufficient_cost_basis")
+            quality["reduction_reasons"] = _dedupe(
+                [*(quality.get("reduction_reasons") or []), "insufficient_cost_basis"]
+            )
+            quality["data_quality_reduction_reasons"] = list(
+                quality["reduction_reasons"]
+            )
         return {
             "active_profile": profile,
             "realized_pnl": _round_money(realized),
@@ -365,6 +385,18 @@ class StrategyPerformanceService:
             "max_drawdown_pct": self._max_drawdown_pct(closed),
             "data_quality": quality,
         }
+
+    def _performance_profile(
+        self,
+        db: Session,
+        profile_name: str | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.strategy_profiles.get_profile(db, profile_name)
+            if profile_name
+            else self.strategy_profiles.active_profile(db)
+        )
+        return self.strategy_profiles.serialize_profile(row)
 
     def _orders(
         self,
@@ -406,6 +438,199 @@ class StrategyPerformanceService:
             ], []
         except Exception as exc:
             return [], [f"positions_unavailable:{exc.__class__.__name__}"]
+
+    def _match_profile_orders(
+        self,
+        db: Session,
+        *,
+        orders: list[OrderLog],
+        provider: str,
+        market: str,
+        positions: list[dict[str, Any]],
+        profile: dict[str, Any],
+        include_ignored: bool = False,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Match fills while keeping custom-profile quality scoped.
+
+        Built-in profiles retain the historical account-wide behavior. Custom
+        profiles have explicit provenance, so only orders owned by that
+        profile participate in performance calculations. The complete order
+        set is still inspected to retain informational unmatched-sell
+        diagnostics for legacy/manual/external activity.
+        """
+        if not _is_custom_profile(profile):
+            return self._match_orders(
+                db,
+                orders=orders,
+                provider=provider,
+                market=market,
+                positions=positions,
+            )
+
+        scoped_orders = self._scoped_orders(db, orders, profile)
+        scoped_items, scoped_quality = self._match_orders(
+            db,
+            orders=scoped_orders,
+            provider=provider,
+            market=market,
+            positions=positions,
+        )
+        all_items, all_quality = self._match_orders(
+            db,
+            orders=orders,
+            provider=provider,
+            market=market,
+            positions=positions,
+        )
+
+        total_unmatched = int(all_quality.get("unmatched_orders_count") or 0)
+        relevant_unmatched = int(scoped_quality.get("unmatched_orders_count") or 0)
+        ignored_unmatched = max(0, total_unmatched - relevant_unmatched)
+        quality = dict(scoped_quality)
+        quality["unmatched_orders_count"] = total_unmatched
+        quality["unmatched_sell_total_count"] = total_unmatched
+        quality["unmatched_sell_relevant_count"] = relevant_unmatched
+        quality["unmatched_sell_ignored_count"] = ignored_unmatched
+        quality["has_complete_fills"] = bool(scoped_quality.get("has_complete_fills"))
+        quality["reduction_reasons"] = list(
+            scoped_quality.get("reduction_reasons") or []
+        )
+        quality["data_quality_reduction_reasons"] = list(
+            quality["reduction_reasons"]
+        )
+        if total_unmatched:
+            quality["notes"] = _dedupe(
+                [*(quality.get("notes") or []), "unmatched_sell"]
+            )
+
+        if include_ignored and ignored_unmatched:
+            scoped_ids = {row.id for row in scoped_orders if row.id is not None}
+            for item in all_items:
+                if (
+                    item.get("status") == "unmatched_sell"
+                    and item.get("order_id") not in scoped_ids
+                ):
+                    informational = dict(item)
+                    informational["data_quality"] = {
+                        **(informational.get("data_quality") or {}),
+                        "profile_scope": "informational_only",
+                        "risk_reduction_applied": False,
+                    }
+                    scoped_items.append(informational)
+
+        return scoped_items, quality
+
+    def _scoped_orders(
+        self,
+        db: Session,
+        orders: list[OrderLog],
+        profile: dict[str, Any],
+    ) -> list[OrderLog]:
+        profile_key = _normalized_value(profile.get("profile_key"))
+        if not profile_key:
+            return orders
+        provenance = self._order_provenance(db, orders)
+        return [
+            order
+            for order in orders
+            if _belongs_to_profile(
+                order,
+                provenance.get(order.id or -1, {}),
+                profile_key=profile_key,
+                profile_created_at=_profile_created_at(profile),
+            )
+        ]
+
+    def _order_provenance(
+        self,
+        db: Session,
+        orders: list[OrderLog],
+    ) -> dict[int, dict[str, Any]]:
+        order_ids = [row.id for row in orders if row.id is not None]
+        info: dict[int, dict[str, Any]] = {
+            order_id: _new_provenance()
+            for order_id in order_ids
+        }
+        if not order_ids:
+            return info
+
+        for order in orders:
+            info[order.id] = _payload_provenance(order)
+
+        for signal in (
+            db.query(SignalLog)
+            .filter(SignalLog.related_order_id.in_(order_ids))
+            .all()
+        ):
+            target = info.setdefault(signal.related_order_id, _new_provenance())
+            _add_profile_value(target, signal.gate_profile_name)
+            _add_marker(target, signal.trigger_source)
+
+        for run in (
+            db.query(TradeRunLog)
+            .filter(TradeRunLog.order_id.in_(order_ids))
+            .all()
+        ):
+            target = info.setdefault(run.order_id, _new_provenance())
+            _add_marker(target, run.mode)
+            _add_marker(target, run.trigger_source)
+            _merge_provenance(target, _json_provenance(run.request_payload))
+            _merge_provenance(target, _json_provenance(run.response_payload))
+
+        for reservation in (
+            db.query(AutomationProfileBuyReservation)
+            .filter(AutomationProfileBuyReservation.order_id.in_(order_ids))
+            .all()
+        ):
+            target = info.setdefault(reservation.order_id, _new_provenance())
+            _add_profile_value(target, reservation.profile_key)
+
+        for attempt_model in (
+            StrategyLiveAutoBuyAttempt,
+            StrategyLiveAutoExitAttempt,
+        ):
+            for attempt in (
+                db.query(attempt_model)
+                .filter(attempt_model.related_order_id.in_(order_ids))
+                .all()
+            ):
+                target = info.setdefault(
+                    attempt.related_order_id,
+                    _new_provenance(),
+                )
+                _add_profile_value(target, attempt.active_profile)
+
+        for action in (
+            db.query(AgentChatOrderAction)
+            .filter(AgentChatOrderAction.related_order_id.in_(order_ids))
+            .all()
+        ):
+            target = info.setdefault(action.related_order_id, _new_provenance())
+            target["manual"] = True
+
+        lifecycles = (
+            db.query(PositionLifecycle)
+            .filter(
+                (PositionLifecycle.entry_order_id.in_(order_ids))
+                | (PositionLifecycle.exit_order_id.in_(order_ids))
+            )
+            .all()
+        )
+        for lifecycle in lifecycles:
+            entry = info.setdefault(lifecycle.entry_order_id, _new_provenance())
+            exit_info = (
+                info.setdefault(lifecycle.exit_order_id, _new_provenance())
+                if lifecycle.exit_order_id is not None
+                else None
+            )
+            if exit_info is not None:
+                _merge_provenance(entry, exit_info)
+                _merge_provenance(exit_info, entry)
+            entry["lifecycle"] = True
+            if exit_info is not None:
+                exit_info["lifecycle"] = True
+
+        return info
 
     def _match_orders(
         self,
@@ -611,16 +836,26 @@ class StrategyPerformanceService:
             "has_complete_fills": missing_price == 0 and unmatched == 0,
             "missing_cost_basis": False,
             "unmatched_orders_count": unmatched,
+            "unmatched_sell_total_count": unmatched,
+            "unmatched_sell_relevant_count": unmatched,
+            "unmatched_sell_ignored_count": 0,
             "missing_fill_price_count": missing_price,
             "partially_matched_count": partial,
             "notes": [],
+            "reduction_reasons": [],
+            "data_quality_reduction_reasons": [],
         }
         if missing_price:
             quality["notes"].append("average_price_missing")
+            quality["reduction_reasons"].append("average_price_missing")
         if unmatched:
             quality["notes"].append("unmatched_sell")
+            quality["reduction_reasons"].append("unmatched_sell")
         if partial:
             quality["notes"].append("partially_matched")
+        quality["data_quality_reduction_reasons"] = list(
+            quality["reduction_reasons"]
+        )
         return items, quality
 
     def _trade_item(
@@ -808,6 +1043,145 @@ def _ensure_aware(value: datetime) -> datetime:
 def _order_event_time(order: OrderLog) -> datetime:
     value = order.filled_at or order.submitted_at or order.created_at or datetime.now(UTC)
     return _ensure_aware(value)
+
+
+def _is_custom_profile(profile: dict[str, Any]) -> bool:
+    return bool(_normalized_value(profile.get("profile_key")))
+
+
+def _profile_created_at(profile: dict[str, Any]) -> datetime | None:
+    value = profile.get("created_at")
+    if isinstance(value, datetime):
+        return _ensure_aware(value)
+    if not value:
+        return None
+    try:
+        return _ensure_aware(
+            datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _new_provenance() -> dict[str, Any]:
+    return {
+        "profile_keys": set(),
+        "markers": set(),
+        "automation_profile": False,
+        "manual": False,
+        "lifecycle": False,
+    }
+
+
+def _normalized_value(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _add_profile_value(target: dict[str, Any], value: Any) -> None:
+    normalized = _normalized_value(value)
+    if normalized:
+        target.setdefault("profile_keys", set()).add(normalized)
+
+
+def _add_marker(target: dict[str, Any], value: Any) -> None:
+    normalized = _normalized_value(value)
+    if normalized:
+        target.setdefault("markers", set()).add(normalized)
+
+
+def _merge_provenance(
+    target: dict[str, Any],
+    source: dict[str, Any],
+) -> None:
+    target.setdefault("profile_keys", set()).update(
+        source.get("profile_keys") or set()
+    )
+    target.setdefault("markers", set()).update(source.get("markers") or set())
+    target["automation_profile"] = bool(
+        target.get("automation_profile") or source.get("automation_profile")
+    )
+    target["manual"] = bool(target.get("manual") or source.get("manual"))
+    target["lifecycle"] = bool(target.get("lifecycle") or source.get("lifecycle"))
+
+
+def _payload_provenance(order: OrderLog) -> dict[str, Any]:
+    result = _new_provenance()
+    for value in (
+        order.request_payload,
+        order.response_payload,
+        order.last_sync_payload,
+    ):
+        _merge_provenance(result, _json_provenance(value))
+    return result
+
+
+def _json_provenance(value: Any) -> dict[str, Any]:
+    result = _new_provenance()
+
+    def walk(item: Any) -> None:
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                normalized_key = _normalized_value(key)
+                if normalized_key in {"automation_profile_key", "profile_key"}:
+                    _add_profile_value(result, nested)
+                elif normalized_key == "active_profile":
+                    _add_profile_value(result, nested)
+                elif normalized_key in {
+                    "source",
+                    "source_type",
+                    "mode",
+                    "trigger_source",
+                    "operator_trigger_source",
+                }:
+                    _add_marker(result, nested)
+                elif normalized_key == "automation_profile" and nested is True:
+                    result["automation_profile"] = True
+                if isinstance(nested, (dict, list)):
+                    walk(nested)
+        elif isinstance(item, list):
+            for nested in item:
+                walk(nested)
+
+    parsed = _parse_json(value)
+    walk(parsed)
+    return result
+
+
+def _is_custom_provenance(provenance: dict[str, Any]) -> bool:
+    if provenance.get("automation_profile"):
+        return True
+    custom_markers = {
+        "automation_profile_scheduler",
+        "automation_profile_scheduler_buy",
+        "strategy_live_auto_buy",
+        "strategy_live_auto_exit",
+        "profile_aware_guarded_live_auto_buy",
+        "profile_aware_guarded_live_auto_exit",
+        "guarded_profile_exit",
+    }
+    return any(
+        marker in custom_markers or marker.startswith("automation_profile")
+        for marker in provenance.get("markers") or set()
+    )
+
+
+def _belongs_to_profile(
+    order: OrderLog,
+    provenance: dict[str, Any],
+    *,
+    profile_key: str,
+    profile_created_at: datetime | None,
+) -> bool:
+    profile_keys = provenance.get("profile_keys") or set()
+    if profile_key in profile_keys:
+        return True
+    if profile_keys or provenance.get("manual"):
+        return False
+    if not _is_custom_provenance(provenance):
+        return False
+    if profile_created_at is not None and _order_event_time(order) < profile_created_at:
+        return False
+    return True
 
 
 def _is_filled(order: OrderLog) -> bool:

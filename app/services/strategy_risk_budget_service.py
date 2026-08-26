@@ -149,26 +149,62 @@ class StrategyRiskBudgetService:
                 *balance_notes,
             ]
         )
+        quality_sources = [
+            monthly.get("data_quality"),
+            daily.get("data_quality"),
+            trades.get("data_quality"),
+        ]
+        quality_reduction_reasons: list[str] = []
+        has_explicit_quality_reasons = False
+        for source in quality_sources:
+            if not isinstance(source, dict):
+                continue
+            if (
+                "data_quality_reduction_reasons" in source
+                or "reduction_reasons" in source
+            ):
+                has_explicit_quality_reasons = True
+                raw_reasons = source.get(
+                    "data_quality_reduction_reasons",
+                    source.get("reduction_reasons"),
+                )
+                if isinstance(raw_reasons, list):
+                    quality_reduction_reasons.extend(
+                        str(reason)
+                        for reason in raw_reasons
+                        if str(reason).strip()
+                    )
         if total_assets is None or total_assets <= 0:
             quality_notes.append("total_assets_unavailable")
-        quality_limited = any(
-            note.startswith(
-                (
-                    "positions_not_loaded",
-                    "positions_unavailable",
-                    "balance_not_loaded",
-                    "balance_unavailable",
-                    "average_price_missing",
-                    "unmatched_sell",
-                    "insufficient_cost_basis",
-                    "total_assets_unavailable",
-                )
-            )
-            for note in quality_notes
+        quality_reduction_prefixes = (
+            "positions_not_loaded",
+            "positions_unavailable",
+            "balance_not_loaded",
+            "balance_unavailable",
+            "average_price_missing",
+            "unmatched_sell",
+            "insufficient_cost_basis",
+            "total_assets_unavailable",
         )
+        if not has_explicit_quality_reasons:
+            quality_reduction_reasons.extend(
+                note
+                for note in quality_notes
+                if note.startswith(quality_reduction_prefixes)
+            )
+        quality_reduction_reasons.extend(
+            note
+            for note in [*position_notes, *balance_notes]
+            if note.startswith(quality_reduction_prefixes)
+        )
+        if total_assets is None or total_assets <= 0:
+            quality_reduction_reasons.append("total_assets_unavailable")
+        quality_reduction_reasons = _dedupe(quality_reduction_reasons)
+        quality_limited = bool(quality_reduction_reasons)
+        unmatched_counts = _quality_unmatched_counts(quality_sources)
         quality_reduction_reasons = [
             note
-            for note in quality_notes
+            for note in quality_reduction_reasons
             if note.startswith(
                 (
                     "positions_not_loaded",
@@ -267,6 +303,7 @@ class StrategyRiskBudgetService:
             "notes": quality_notes,
             "data_quality_notes": quality_notes,
             "data_quality_reduction_reasons": quality_reduction_reasons,
+            **unmatched_counts,
             "total_assets_available": bool(total_assets and total_assets > 0),
             "positions_available": not any(
                 note.startswith(("positions_not_loaded", "positions_unavailable"))
@@ -306,6 +343,7 @@ class StrategyRiskBudgetService:
             "data_quality_limited": quality_limited,
             "data_quality_notes": quality_notes,
             "data_quality_reduction_reasons": quality_reduction_reasons,
+            **unmatched_counts,
             "max_trades_per_day": max_trades,
             "trades_used_today": trades_used,
             "trades_remaining_today": max(0, max_trades - trades_used),
@@ -486,6 +524,24 @@ def _quality_notes(value: Any) -> list[str]:
         return []
     notes = value.get("notes")
     return [str(item) for item in notes] if isinstance(notes, list) else []
+
+
+def _quality_unmatched_counts(values: list[Any]) -> dict[str, int]:
+    keys = (
+        "unmatched_sell_total_count",
+        "unmatched_sell_relevant_count",
+        "unmatched_sell_ignored_count",
+    )
+    result = {key: 0 for key in keys}
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        for key in keys:
+            try:
+                result[key] = max(result[key], int(value.get(key) or 0))
+            except (TypeError, ValueError):
+                continue
+    return result
 
 
 def _capital_settings(profile: dict[str, Any]) -> dict[str, Any]:
