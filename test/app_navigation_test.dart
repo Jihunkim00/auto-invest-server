@@ -14,8 +14,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('AI'), findsOneWidget);
-    expect(find.text('Assets'), findsOneWidget);
+    expect(find.text('AI 도우미'), findsOneWidget);
+    expect(find.text('자산'), findsOneWidget);
     expect(find.byKey(const ValueKey('home-open-admin')), findsOneWidget);
     expect(find.text('Watchlist'), findsNothing);
     expect(find.text('Manual'), findsNothing);
@@ -30,12 +30,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('AI'));
+    await tester.tap(find.text('AI 도우미'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('ai-v2-welcome-card')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-quick-종목 분석')), findsOneWidget);
 
-    await tester.tap(find.text('Assets'));
+    await tester.tap(find.text('자산'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('assets-summary-card')), findsOneWidget);
     expect(find.byKey(const ValueKey('assets-open-admin')), findsOneWidget);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/i18n/app_language.dart';
 import 'core/network/api_client.dart';
@@ -42,8 +43,10 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
   void _openAutomationProfile(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            AutomationProfileScreen(apiClient: _controller.apiClient),
+        builder: (_) => AutomationProfileScreen(
+          apiClient: _controller.apiClient,
+          appLanguage: _controller.appLanguage,
+        ),
       ),
     );
   }
@@ -64,6 +67,11 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
           debugShowCheckedModeBanner: false,
           title: strings.appTitle,
           locale: Locale(_controller.appLanguage.languageCode),
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          supportedLocales: const [
+            Locale('ko', 'KR'),
+            Locale('en', 'US'),
+          ],
           theme: AppTheme.darkTheme,
           home: Builder(
             builder: (appContext) => Scaffold(
@@ -92,15 +100,15 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                     selectedIcon: const Icon(Icons.home),
                     label: strings.home,
                   ),
-                  const NavigationDestination(
+                  NavigationDestination(
                     icon: Icon(Icons.auto_awesome_outlined),
                     selectedIcon: Icon(Icons.auto_awesome),
-                    label: 'AI',
+                    label: strings.aiAssistant,
                   ),
-                  const NavigationDestination(
+                  NavigationDestination(
                     icon: Icon(Icons.account_balance_wallet_outlined),
                     selectedIcon: Icon(Icons.account_balance_wallet),
-                    label: 'Assets',
+                    label: strings.assets,
                   ),
                 ],
               ),

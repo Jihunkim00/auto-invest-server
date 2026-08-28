@@ -24,7 +24,7 @@ void main() {
     expect(
         find.byKey(const ValueKey('ai-v2-assistant-message')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-v2-analysis-card')), findsOneWidget);
-    expect(find.text('HOLD'), findsWidgets);
+    expect(find.text('관망'), findsWidgets);
   });
 
   testWidgets('AI trade prepare renders preview confirmation card',

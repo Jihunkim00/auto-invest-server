@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 
@@ -74,7 +75,9 @@ void main() {
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
     await tester.pumpWidget(MaterialApp(
-        home: AutomationProfileScreen(apiClient: ApiClient(client: client))));
+      supportedLocales: const [Locale('ko', 'KR'), Locale('en', 'US')],
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('automation-profile-1')), findsOneWidget);
     expect(
@@ -131,6 +134,44 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('date fields open a calendar and keep API date serialization',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final client = _ProfileClient();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('ko', 'KR'), Locale('en', 'US')],
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('automation-profile-1')));
+    await tester.pump();
+
+    final startField = tester.widget<TextField>(
+      find.byKey(const ValueKey('automation-profile-start-date')),
+    );
+    expect(startField.readOnly, isTrue);
+    expect(find.byIcon(Icons.calendar_month_outlined), findsNWidgets(2));
+
+    await tester.tap(
+      find.byKey(const ValueKey('automation-profile-start-date')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    expect(find.text('시작일 선택'), findsOneWidget);
+
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('automation-profile-save')));
+    await tester.pumpAndSettle();
+
+    final operation = client.writes.last['operation'] as Map;
+    expect(operation['start_date'], '2026-08-17');
+    expect(operation['end_date'], '2026-09-18');
+  });
+
   testWidgets(
       'save payload preserves selected sizing mode and unrelated capital settings',
       (tester) async {
@@ -149,6 +190,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('automation-profile-save')));
     await tester.pumpAndSettle();
     expect(client.writes, isNotEmpty);
+    final operation = client.writes.last['operation'] as Map;
+    expect(operation['start_date'], '2026-08-17');
+    expect(operation['end_date'], '2026-09-18');
     final fixedCapital = client.writes.last['capital'] as Map;
     expect(fixedCapital['sizing_mode'], 'fixed_budget');
     expect(fixedCapital['fixed_budget'], 600000);

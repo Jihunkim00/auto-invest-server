@@ -609,6 +609,13 @@ class DashboardController extends ChangeNotifier {
   bool hasLatestRunResult = false;
   bool showingOfflineFallback = false;
   bool loading = false;
+
+  /// Presentation state for the account/portfolio connection indicator.
+  /// This does not alter any broker or order authority.
+  bool portfolioLoading = false;
+  bool portfolioLoaded = false;
+  String? portfolioLoadError;
+  DateTime? portfolioLoadedAt;
   bool schedulerLoading = false;
   bool botLoading = false;
   bool killSwitchLoading = false;
@@ -1419,6 +1426,10 @@ class DashboardController extends ChangeNotifier {
     kisManagedPositionsError = null;
     krPortfolioUnavailable = false;
     krPortfolioError = null;
+    portfolioLoading = false;
+    portfolioLoaded = false;
+    portfolioLoadError = null;
+    portfolioLoadedAt = null;
     watchlistError = null;
     runResult = _emptyRunResult;
     manualRunResult = null;
@@ -7052,15 +7063,26 @@ class DashboardController extends ChangeNotifier {
   Future<void> _refreshPortfolioSummaries({int? contextVersion}) async {
     final version = contextVersion ?? _providerContextVersion;
     final provider = selectedProvider;
-    if (provider == SelectedProvider.kis) {
-      usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
-      await _refreshKrPortfolioSummary(contextVersion: version);
-    } else {
-      krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
-      kisManagedPositions = const [];
-      krPortfolioUnavailable = false;
-      krPortfolioError = null;
-      await _refreshUsPortfolioSummary(contextVersion: version);
+    if (version != _providerContextVersion) return;
+    portfolioLoading = true;
+    portfolioLoadError = null;
+    notifyListeners();
+    try {
+      if (provider == SelectedProvider.kis) {
+        usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
+        await _refreshKrPortfolioSummary(contextVersion: version);
+      } else {
+        krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
+        kisManagedPositions = const [];
+        krPortfolioUnavailable = false;
+        krPortfolioError = null;
+        await _refreshUsPortfolioSummary(contextVersion: version);
+      }
+    } finally {
+      if (version == _providerContextVersion) {
+        portfolioLoading = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -7070,8 +7092,14 @@ class DashboardController extends ChangeNotifier {
       if (contextVersion == _providerContextVersion &&
           selectedProvider == SelectedProvider.alpaca) {
         usPortfolioSummary = summary;
+        portfolioLoaded = true;
+        portfolioLoadedAt = DateTime.now();
       }
-    } catch (_) {
+    } catch (error) {
+      if (contextVersion == _providerContextVersion &&
+          selectedProvider == SelectedProvider.alpaca) {
+        portfolioLoadError = error.toString();
+      }
       // Keep the selected provider's last live snapshot on a transient error.
     }
   }
@@ -7084,6 +7112,8 @@ class DashboardController extends ChangeNotifier {
         return;
       }
       krPortfolioSummary = summary;
+      portfolioLoaded = true;
+      portfolioLoadedAt = DateTime.now();
       krPortfolioUnavailable = summary.hasUnavailableKisData;
       krPortfolioError = krPortfolioUnavailable
           ? summary.kisAuthErrorMessage ??
@@ -7095,22 +7125,26 @@ class DashboardController extends ChangeNotifier {
       } else {
         await _refreshKisManagedPositions(contextVersion: contextVersion);
       }
-    } catch (_) {
+    } catch (error) {
       if (contextVersion != _providerContextVersion ||
           selectedProvider != SelectedProvider.kis) {
         return;
       }
-      krPortfolioSummary = PortfolioSummary.empty(
-        currency: 'KRW',
-        cashKnown: false,
-        balanceUnavailable: true,
-        positionsUnavailable: true,
-        openOrdersUnavailable: true,
-        kisAuthErrorMessage: 'KIS account data unavailable',
-      );
-      kisManagedPositions = const [];
       krPortfolioUnavailable = true;
       krPortfolioError = 'KIS account data unavailable';
+      portfolioLoadError = error.toString();
+      // Preserve an already loaded account snapshot during background refresh.
+      if (!portfolioLoaded) {
+        krPortfolioSummary = PortfolioSummary.empty(
+          currency: 'KRW',
+          cashKnown: false,
+          balanceUnavailable: true,
+          positionsUnavailable: true,
+          openOrdersUnavailable: true,
+          kisAuthErrorMessage: 'KIS account data unavailable',
+        );
+        kisManagedPositions = const [];
+      }
     }
   }
 

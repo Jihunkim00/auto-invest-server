@@ -9,6 +9,8 @@ class AppStrings {
 
   String get appTitle => 'AUTO INVEST';
   String get home => isKorean ? '홈' : 'Home';
+  String get aiAssistant => isKorean ? 'AI 도우미' : 'AI Assistant';
+  String get assets => isKorean ? '자산' : 'Assets';
   String get watchlist => isKorean ? '관심종목' : 'Watchlist';
   String get analysis => isKorean ? '분석' : 'Analysis';
   String get trading => isKorean ? '거래' : 'Trading';
@@ -52,6 +54,100 @@ class AppStrings {
       ? '알파카 / 미국 활동을 먼저 표시합니다.'
       : 'Showing Alpaca / US activity first.';
 
+  String get adminTooltip => isKorean ? '고급 설정 열기' : 'Open advanced settings';
+  String get operationMode => isKorean ? '운영 모드' : 'Operation mode';
+  String get paperOperation => isKorean ? '모의투자 모드' : 'Paper operation';
+  String get automationProfile => isKorean ? '자동화 프로필' : 'Automation profile';
+  String get automationProfileDescription => isKorean
+      ? '종목 탐색, 자금 배분, 모니터링을 안전 설정과 분리해 관리합니다.'
+      : 'Configure search, sizing, and monitoring separately from live safety.';
+  String get configure => isKorean ? '설정' : 'Configure';
+  String get portfolio => isKorean ? '자산 현황' : 'Portfolio';
+  String get value => isKorean ? '평가금액' : 'Value';
+  String get cash => isKorean ? '예수금' : 'Cash';
+  String get pnl => isKorean ? '손익' : 'P/L';
+  String get currentPositions => isKorean ? '현재 보유 종목' : 'Current positions';
+  String get latestDecision => isKorean ? '최근 AI 판단' : 'Latest decision';
+  String get noCandidateYet =>
+      isKorean ? '아직 분석 후보가 없습니다.' : 'No candidate yet';
+  String get askAiForAnalysis =>
+      isKorean ? 'AI 도우미에게 종목 분석을 요청해 보세요.' : 'Ask AI for an analysis.';
+  String get unknownValue => isKorean ? '확인 중' : 'Unknown';
+  String get unavailablePortfolio => isKorean
+      ? '일부 계좌 정보가 없어 새로고침이 필요합니다.'
+      : 'Some account data is unavailable. Refresh to retry.';
+  String connectionLoading(String broker) =>
+      isKorean ? '$broker 계좌 연결 확인 중' : 'Checking $broker account connection';
+  String connectionSuccess(String broker) =>
+      isKorean ? '$broker 연결됨' : '$broker connected';
+  String get connectionError =>
+      isKorean ? '계좌 연결을 확인해 주세요.' : 'Account connection needs attention.';
+  String get retry => isKorean ? '다시 시도' : 'Retry';
+  String updatedAt(String time) => isKorean ? '$time 업데이트' : 'Updated $time';
+  String get analysisReadOnlyNotice => isKorean
+      ? '분석·조회는 읽기 전용입니다. 주문은 실행되지 않으며, 실주문은 별도 확인 카드가 필요합니다.'
+      : 'Analysis and queries are read-only. No order is executed; live orders require a separate confirmation card.';
+  String get aiAnalyzing => isKorean ? '확인 중…' : 'Checking…';
+  String get aiWelcomeTitle =>
+      isKorean ? '무엇을 확인해 볼까요?' : 'What would you like to check?';
+  String get aiWelcomeDescription => isKorean
+      ? '현재가, 종목 분석, 보유 종목과 최근 판단을 물어보세요. 계좌·주문 정보는 조회 전용입니다.'
+      : 'Ask about quotes, analysis, holdings, and recent decisions. Account and order information is read-only.';
+  String get aiInputHint => isKorean ? '무엇을 도와드릴까요?' : 'What can I help with?';
+  String get aiError => isKorean
+      ? 'AI 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.'
+      : 'The AI response could not be loaded. Please try again shortly.';
+  String get aiSafetyBlocked => isKorean
+      ? '현재 안전 중지 상태라 주문할 수 없습니다.'
+      : 'Orders are blocked by the current safety stop.';
+  String get aiDryRun =>
+      isKorean ? '현재 모의·안전 모드입니다.' : 'The app is currently in paper/safe mode.';
+  String get aiOpenOrder => isKorean
+      ? '이미 처리 중인 주문이 있습니다.'
+      : 'There is already an order in progress.';
+  String get quickQuote => isKorean ? '현재가' : 'Quote';
+  String get quickAnalysis => isKorean ? '종목 분석' : 'Analyze';
+  String get quickPortfolio => isKorean ? '내 자산' : 'My assets';
+  String get quickDecision => isKorean ? '최근 판단' : 'Recent decision';
+  String get quickWhyNoBuy => isKorean ? '왜 안 샀어?' : 'Why no buy?';
+  String get currency => isKorean ? '통화' : 'Currency';
+  String get updated => isKorean ? '업데이트' : 'Updated';
+  String get finalScore => isKorean ? '최종 점수' : 'Final score';
+  String get keyRisk => isKorean ? '핵심 위험' : 'Key risk';
+  String get recentDecisionExplanation =>
+      isKorean ? '최근 판단 설명' : 'Recent decision explanation';
+  String get recentDecisionLookup =>
+      isKorean ? '최근 판단·기록 기반 조회' : 'Lookup from recent decision/log';
+  String get firstHeldPosition => isKorean ? '첫 보유 종목' : 'First holding';
+
+  String operationModeLabel(String mode) {
+    final normalized = mode.trim().toLowerCase();
+    if (!isKorean) {
+      return switch (normalized) {
+        'live' => 'Live',
+        'paused' => 'Paused',
+        _ => 'Paper',
+      };
+    }
+    return switch (normalized) {
+      'live' => '실거래 모드',
+      'paused' => '일시정지',
+      _ => '모의투자 모드',
+    };
+  }
+
+  String decisionLabel(String action) {
+    final normalized = action.trim().toLowerCase();
+    if (!isKorean)
+      return normalized.isEmpty ? 'HOLD' : normalized.toUpperCase();
+    return switch (normalized) {
+      'buy' => '매수',
+      'sell' => '매도',
+      'hold' => '관망',
+      _ => normalized.isEmpty ? '관망' : action.toUpperCase(),
+    };
+  }
+
   String get refresh => isKorean ? '새로고침' : 'Refresh';
   String get cancel => isKorean ? '취소' : 'Cancel';
   String get confirm => isKorean ? '확인' : 'Confirm';
@@ -91,9 +187,9 @@ class AppStrings {
       isKorean ? '수동 실거래 확인' : 'CONFIRM_LIVE MANUAL';
   String get authRequired => isKorean ? '인증 필요' : 'AUTH REQUIRED';
 
-  String get agentAssistant => isKorean ? 'Agent Assistant' : 'Agent Assistant';
+  String get agentAssistant => isKorean ? 'AI 도우미' : 'AI Assistant';
   String get agentAssistantSubtitle => isKorean
-      ? '분석, 포트폴리오, 확인이 필요한 한국투자증권 주문 준비를 요청하세요.'
+      ? '분석, 자산 조회, 확인이 필요한 한국투자증권 주문 준비를 요청하세요.'
       : 'Ask for analysis, portfolio, or confirmed KIS order prep.';
   String get agentNaturalLanguageReview =>
       isKorean ? '자연어 명령 검토' : 'Natural language command review';
@@ -101,20 +197,18 @@ class AppStrings {
       isKorean ? '대화 $key' : 'Conversation $key';
   String get newChat => isKorean ? '새 대화' : 'New Chat';
   String get refreshHistory => isKorean ? '기록 새로고침' : 'Refresh History';
-  String get expandAgentChat =>
-      isKorean ? 'Agent Chat 펼치기' : 'Expand Agent Chat';
+  String get expandAgentChat => isKorean ? 'AI 도우미 펼치기' : 'Expand Agent Chat';
   String get collapseAgentChat =>
-      isKorean ? 'Agent Chat 접기' : 'Collapse Agent Chat';
-  String get resizeAgentChat =>
-      isKorean ? 'Agent Chat 크기 변경' : 'Resize Agent Chat';
+      isKorean ? 'AI 도우미 접기' : 'Collapse Agent Chat';
+  String get resizeAgentChat => isKorean ? 'AI 도우미 크기 변경' : 'Resize Agent Chat';
   String get openFullAgentChat =>
-      isKorean ? '전체 Agent Chat 열기' : 'Open Full Agent Chat';
+      isKorean ? '전체 AI 도우미 열기' : 'Open Full Agent Chat';
   String get loadingPreviousChat =>
       isKorean ? '이전 대화를 불러오는 중...' : 'Loading previous chat...';
   String get askAgentHint =>
-      isKorean ? 'Agent Assistant에게 물어보세요...' : 'Ask Agent Assistant...';
+      isKorean ? 'AI 도우미에게 물어보세요...' : 'Ask Agent Assistant...';
   String get messageAgentHint =>
-      isKorean ? 'Agent Assistant에게 메시지 보내기...' : 'Message Agent Assistant...';
+      isKorean ? 'AI 도우미에게 메시지 보내기...' : 'Message Agent Assistant...';
   String get send => isKorean ? '보내기' : 'Send';
   String get archive => isKorean ? '보관' : 'Archive';
   String get minimize => isKorean ? '최소화' : 'Minimize';
@@ -126,16 +220,16 @@ class AppStrings {
       ? 'Agent Chat의 한국투자증권 실주문은 명시적인 확인 카드가 필요합니다. 제출 전 서버 검증과 위험 게이트를 다시 실행하며 OpenAI API 호출은 FastAPI 서버에서만 수행됩니다.'
       : 'Live KIS orders from Agent Chat require an explicit confirmation card. Backend validation and risk gates rerun before submit. OpenAI API is called only from the FastAPI server.';
   String get agentEnterMessage => isKorean
-      ? 'Agent Assistant에 보낼 메시지를 입력하세요.'
+      ? 'AI 도우미에 보낼 메시지를 입력하세요.'
       : 'Enter a message for Agent Assistant.';
   String get agentParsing => isKorean
-      ? 'FastAPI Agent 엔드포인트로 분석 중...'
+      ? 'FastAPI 분석 엔드포인트로 처리 중...'
       : 'Parsing with the FastAPI agent endpoint...';
   String get agentAnsweredNoOrder => isKorean
-      ? 'Agent Chat이 응답했습니다. 주문은 제출되지 않았습니다.'
+      ? 'AI 도우미가 응답했습니다. 주문은 제출되지 않았습니다.'
       : 'Agent chat answered. No order submitted.';
   String get agentErrorNoOrder => isKorean
-      ? 'Agent Chat 오류가 발생했습니다. 주문은 제출되지 않았습니다.'
+      ? 'AI 도우미 오류가 발생했습니다. 주문은 제출되지 않았습니다.'
       : 'Agent chat returned an error. No order submitted.';
   String get chatEndpointFallback => isKorean
       ? '채팅 엔드포인트를 사용할 수 없어 명령 검토로 전환합니다...'
@@ -375,7 +469,7 @@ class AppStrings {
   String get syncWarning => isKorean ? '동기화 경고' : 'Sync Warning';
   String get syncUnsafe => isKorean ? '동기화 위험' : 'Sync Unsafe';
   String get syncUnknown => isKorean ? '동기화 상태 알 수 없음' : 'Sync Unknown';
-  String get staleOrders => isKorean ? 'stale 二쇰Ц' : 'Stale Orders';
+  String get staleOrders => isKorean ? '오래된 주문' : 'Stale Orders';
   String get pendingSyncOrders =>
       isKorean ? '동기화 필요 주문' : 'Pending Sync Orders';
   String get missingBrokerId => isKorean ? '브로커 ID 누락' : 'Missing Broker ID';

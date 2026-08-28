@@ -23,8 +23,8 @@ class AssetsScreen extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Expanded(
-                    child: Text('Assets',
+                  Expanded(
+                    child: Text(controller.strings.assets,
                         style: TextStyle(
                             fontSize: 28, fontWeight: FontWeight.w700)),
                   ),

@@ -17,7 +17,7 @@ void main() {
     ));
     await tester.pump();
 
-    expect(find.text('Agent Assistant'), findsOneWidget);
+    expect(find.text('AI 도우미'), findsOneWidget);
     expect(find.byKey(const Key('home_compact_safety_status_bar')),
         findsOneWidget);
     await _showHomeFinder(

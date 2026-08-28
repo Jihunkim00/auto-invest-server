@@ -21,7 +21,7 @@ void main() {
       ),
     ));
 
-    expect(find.text('Agent Assistant'), findsOneWidget);
+    expect(find.text('AI 도우미'), findsOneWidget);
     expect(find.text('GPT 기반'), findsOneWidget);
     expect(find.text('서버 API'), findsWidgets);
     expect(find.text('안전 모드'), findsWidgets);

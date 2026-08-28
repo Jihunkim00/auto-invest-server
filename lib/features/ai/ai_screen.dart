@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_language.dart';
+import '../../core/i18n/app_strings.dart';
 import '../../core/network/api_error_formatter.dart';
+import '../../core/theme/app_theme.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_v2_response.dart';
@@ -35,40 +37,57 @@ class _AiScreenState extends State<AiScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = widget.controller.strings;
     return Material(
       color: Colors.transparent,
       child: SafeArea(
         child: Column(
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.auto_awesome, color: Colors.lightBlueAccent),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('AI 투자 도우미',
-                            style: TextStyle(
-                                fontSize: 24, fontWeight: FontWeight.w900)),
-                        Text('현재가·종목 분석·내 자산을 안전하게 확인하세요.',
-                            style: TextStyle(color: Colors.white70)),
-                      ],
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.auto_awesome,
+                          color: AppTheme.primaryAccent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(strings.aiAssistant,
+                                style:
+                                    Theme.of(context).textTheme.headlineMedium),
+                            const SizedBox(height: 4),
+                            Text(
+                              strings.agentAssistantSubtitle,
+                              style: const TextStyle(
+                                  color: Colors.white70, height: 1.35),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        key: const ValueKey('ai-open-admin'),
+                        tooltip: strings.adminTooltip,
+                        onPressed: widget.onOpenAdmin,
+                        icon: const Icon(Icons.admin_panel_settings_outlined),
+                      ),
+                    ],
                   ),
-                  _SafetyBadge('자동 주문 없음'),
-                  IconButton(
-                    key: const ValueKey('ai-open-admin'),
-                    tooltip: 'Advanced / Admin',
-                    onPressed: widget.onOpenAdmin,
-                    icon: const Icon(Icons.admin_panel_settings_outlined),
-                  ),
+                  const SizedBox(height: 10),
+                  _SafetyBadge(strings.noAutoSubmit),
+                  const SizedBox(height: 8),
+                  Text(strings.analysisReadOnlyNotice,
+                      style:
+                          const TextStyle(color: Colors.white60, height: 1.35)),
                 ],
               ),
             ),
-            _QuickActions(onSelected: _quickAction),
+            _QuickActions(onSelected: _quickAction, strings: strings),
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -80,20 +99,22 @@ class _AiScreenState extends State<AiScreen> {
                 controller: _scroll,
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                 children: [
-                  if (_entries.isEmpty) const _WelcomeCard(),
+                  if (_entries.isEmpty) _WelcomeCard(strings: strings),
                   for (final entry in _entries)
                     _EntryView(
                       entry: entry,
+                      strings: strings,
                       onConfirm: _confirm,
                       onCancel: _cancel,
                     ),
                   if (_loading)
-                    const Align(
+                    Align(
                       alignment: Alignment.centerLeft,
                       child: Padding(
                         padding: EdgeInsets.all(8),
-                        child: Text('분석 중…',
-                            style: TextStyle(color: Colors.lightBlueAccent)),
+                        child: Text(strings.aiAnalyzing,
+                            style:
+                                const TextStyle(color: AppTheme.primaryAccent)),
                       ),
                     ),
                 ],
@@ -103,6 +124,7 @@ class _AiScreenState extends State<AiScreen> {
               controller: _input,
               loading: _loading,
               onSubmit: _send,
+              strings: strings,
             ),
           ],
         ),
@@ -179,15 +201,15 @@ class _AiScreenState extends State<AiScreen> {
   String _formatError(Object error) {
     final value = ApiErrorFormatter.format(error.toString()).toLowerCase();
     if (value.contains('kill_switch') || value.contains('kill switch')) {
-      return '현재 안전 중지 상태라 주문할 수 없습니다.';
+      return widget.controller.strings.aiSafetyBlocked;
     }
     if (value.contains('dry_run') || value.contains('dry run')) {
-      return '현재 모의/안전 모드입니다.';
+      return widget.controller.strings.aiDryRun;
     }
     if (value.contains('open order')) {
-      return '이미 처리 중인 주문이 있습니다.';
+      return widget.controller.strings.aiOpenOrder;
     }
-    return 'Agent 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.';
+    return widget.controller.strings.aiError;
   }
 }
 
@@ -204,32 +226,38 @@ class _AiEntry {
 }
 
 class _QuickActions extends StatelessWidget {
-  const _QuickActions({required this.onSelected});
+  const _QuickActions({required this.onSelected, required this.strings});
 
   final ValueChanged<String> onSelected;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
     const actions = <String, String>{
       '현재가': '삼성전자 현재가 얼마야?',
       '종목 분석': '삼성전자 분석해줘',
-      '포트폴리오': '내 포트폴리오 보여줘',
+      '내 자산': '내 포트폴리오 보여줘',
       '최근 판단': '최근 자동매매 판단 알려줘',
       '왜 안 샀어?': '왜 오늘 매수하지 않았어?',
     };
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    final labels = <String, String>{
+      actions.keys.elementAt(0): strings.quickQuote,
+      actions.keys.elementAt(1): strings.quickAnalysis,
+      actions.keys.elementAt(2): strings.quickPortfolio,
+      actions.keys.elementAt(3): strings.quickDecision,
+      actions.keys.elementAt(4): strings.quickWhyNoBuy,
+    };
+    return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
           for (final item in actions.entries)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ActionChip(
-                key: ValueKey('ai-quick-' + item.key),
-                label: Text(item.key),
-                onPressed: () => onSelected(item.value),
-              ),
+            ActionChip(
+              key: ValueKey('ai-quick-' + item.key),
+              label: Text(labels[item.key] ?? item.key),
+              onPressed: () => onSelected(item.value),
             ),
         ],
       ),
@@ -238,21 +266,22 @@ class _QuickActions extends StatelessWidget {
 }
 
 class _WelcomeCard extends StatelessWidget {
-  const _WelcomeCard();
+  const _WelcomeCard({required this.strings});
+
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
-    return const SectionCard(
+    return SectionCard(
       key: ValueKey('ai-v2-welcome-card'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('무엇을 확인해 볼까요?',
+          Text(strings.aiWelcomeTitle,
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
           SizedBox(height: 8),
           Text(
-            '삼성전자 현재가, 종목 분석, 보유 종목과 최근 판단을 물어보세요. '
-            '계좌·주문 정보는 조회 전용이며 실제 주문은 별도 확인이 필요합니다.',
+            strings.aiWelcomeDescription,
             style: TextStyle(color: Colors.white70, height: 1.35),
           ),
         ],
@@ -264,11 +293,13 @@ class _WelcomeCard extends StatelessWidget {
 class _EntryView extends StatelessWidget {
   const _EntryView({
     required this.entry,
+    required this.strings,
     required this.onConfirm,
     required this.onCancel,
   });
 
   final _AiEntry entry;
+  final AppStrings strings;
   final Future<void> Function(AgentChatLiveOrderAction) onConfirm;
   final Future<void> Function(AgentChatLiveOrderAction) onCancel;
 
@@ -277,14 +308,19 @@ class _EntryView extends StatelessWidget {
     if (entry.userText != null) {
       return Align(
         alignment: Alignment.centerRight,
-        child: Container(
-          key: const ValueKey('ai-v2-user-message'),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(12),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.82,
           ),
-          child: Text(entry.userText!),
+          child: Container(
+            key: const ValueKey('ai-v2-user-message'),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryAccent.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(entry.userText!, softWrap: true),
+          ),
         ),
       );
     }
@@ -321,12 +357,14 @@ class _EntryView extends StatelessWidget {
             ],
           ),
         ),
-        if (response.intent == 'quote') _QuoteCard(response),
+        if (response.intent == 'quote') _QuoteCard(response, strings: strings),
         if (response.intent == 'analyze' ||
             response.intent == 'market_analysis')
-          _AnalysisCard(response),
-        if (response.intent == 'explain') _DecisionCard(response),
-        if (response.intent == 'portfolio') _PortfolioCard(response),
+          _AnalysisCard(response, strings: strings),
+        if (response.intent == 'explain')
+          _DecisionCard(response, strings: strings),
+        if (response.intent == 'portfolio')
+          _PortfolioCard(response, strings: strings),
         if (action != null && response.requiresConfirmation)
           AgentChatLiveOrderConfirmationCard(
             action: action,
@@ -382,15 +420,16 @@ class _EntryView extends StatelessWidget {
       case 'safety_block':
         return '안전';
       default:
-        return 'Agent';
+        return strings.aiAssistant;
     }
   }
 }
 
 class _QuoteCard extends StatelessWidget {
-  const _QuoteCard(this.response);
+  const _QuoteCard(this.response, {required this.strings});
 
   final AgentChatV2Response response;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
@@ -400,7 +439,7 @@ class _QuoteCard extends StatelessWidget {
     final value = data['price'] ?? data['current_price'];
     final currency = data['currency']?.toString() ?? 'KRW';
     final formatted = value == null
-        ? '조회 실패'
+        ? strings.connectionError
         : currency == 'KRW'
             ? '${_group(value)}원'
             : '\$${value.toString()}';
@@ -409,9 +448,11 @@ class _QuoteCard extends StatelessWidget {
       title: '${response.symbolName ?? response.symbol ?? '종목'} 현재가',
       primary: formatted,
       rows: [
-        ('종목코드', response.symbol ?? '-'),
-        ('통화', currency),
-        if (data['timestamp'] != null) ('업데이트', data['timestamp'].toString()),
+        (strings.symbolLabel, response.symbol ?? '-'),
+        (strings.currency, currency),
+        if (data['timestamp'] != null)
+          (strings.updated, data['timestamp'].toString()),
+        (strings.readOnly, strings.noOrderSubmit),
       ],
     );
   }
@@ -427,50 +468,55 @@ class _QuoteCard extends StatelessWidget {
 }
 
 class _AnalysisCard extends StatelessWidget {
-  const _AnalysisCard(this.response);
+  const _AnalysisCard(this.response, {required this.strings});
 
   final AgentChatV2Response response;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
     final flags = response.analysis['risk_flags'];
     final risk = flags is List && flags.isNotEmpty
         ? flags.take(3).join(', ')
-        : '추가 위험 없음';
+        : strings.isKorean
+            ? '추가 위험 없음'
+            : 'No additional risk';
     return _DataCard(
       key: const ValueKey('ai-v2-analysis-card'),
-      title: (response.symbolName ?? response.symbol ?? '종목') + ' 분석',
-      primary: response.action ?? 'HOLD',
+      title: (response.symbolName ?? response.symbol ?? '종목') +
+          ' ${strings.analysis}',
+      primary: strings.decisionLabel(response.action ?? 'hold'),
       rows: [
         (
-          '최종 점수',
+          strings.finalScore,
           response.scores['final_score'] ?? response.scores['final_buy'] ?? '-'
         ),
-        ('신뢰도', response.confidence ?? '-'),
-        ('핵심 위험', risk),
+        (strings.confidence, response.confidence ?? '-'),
+        (strings.keyRisk, risk),
       ],
     );
   }
 }
 
 class _DecisionCard extends StatelessWidget {
-  const _DecisionCard(this.response);
+  const _DecisionCard(this.response, {required this.strings});
 
   final AgentChatV2Response response;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
     final reasons = response.risk['block_reasons'];
     return _DataCard(
       key: const ValueKey('ai-v2-decision-card'),
-      title: '최근 판단 설명',
-      primary: response.action ?? 'HOLD',
+      title: strings.recentDecisionExplanation,
+      primary: strings.decisionLabel(response.action ?? 'hold'),
       rows: [
         (
-          '주요 이유',
+          strings.primaryReason,
           reasons is List && reasons.isNotEmpty
               ? reasons.first
-              : '최근 decision/log 기반 조회'
+              : strings.recentDecisionLookup
         ),
       ],
     );
@@ -478,9 +524,10 @@ class _DecisionCard extends StatelessWidget {
 }
 
 class _PortfolioCard extends StatelessWidget {
-  const _PortfolioCard(this.response);
+  const _PortfolioCard(this.response, {required this.strings});
 
   final AgentChatV2Response response;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
@@ -488,16 +535,20 @@ class _PortfolioCard extends StatelessWidget {
     final positions = portfolio['positions'];
     return _DataCard(
       key: const ValueKey('ai-v2-portfolio-card'),
-      title: '내 포트폴리오',
-      primary: (portfolio['count']?.toString() ?? '0') + '개 종목',
+      title: strings.portfolio,
+      primary: (portfolio['count']?.toString() ?? '0') +
+          (strings.isKorean ? '개 종목' : ' positions'),
       rows: [
         if (portfolio['cash'] != null)
           (
-            '현금',
+            strings.cash,
             (portfolio['cash'].toString() + ' ' + (portfolio['currency'] ?? ''))
           ),
         if (positions is List && positions.isNotEmpty)
-          ('첫 보유 종목', (positions.first as Map)['symbol']?.toString() ?? '-'),
+          (
+            strings.firstHeldPosition,
+            (positions.first as Map)['symbol']?.toString() ?? '-'
+          ),
       ],
     );
   }
@@ -527,11 +578,14 @@ class _DataCard extends StatelessWidget {
                 child: Text(title,
                     style: const TextStyle(fontWeight: FontWeight.w800)),
               ),
-              Text(primary,
-                  style: const TextStyle(
-                      color: Colors.lightBlueAccent,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900)),
+              Flexible(
+                child: Text(primary,
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        color: AppTheme.primaryAccent,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900)),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -539,14 +593,18 @@ class _DataCard extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
+                  Flexible(
+                      flex: 2,
                       child: Text(row.$1,
                           style: const TextStyle(color: Colors.white60))),
+                  const SizedBox(width: 12),
                   Flexible(
-                      child: Text(row.$2.toString(),
-                          textAlign: TextAlign.right,
-                          overflow: TextOverflow.ellipsis)),
+                    flex: 3,
+                    child: Text(row.$2.toString(),
+                        textAlign: TextAlign.right, softWrap: true),
+                  ),
                 ],
               ),
             ),
@@ -561,11 +619,13 @@ class _InputBar extends StatelessWidget {
     required this.controller,
     required this.loading,
     required this.onSubmit,
+    required this.strings,
   });
 
   final TextEditingController controller;
   final bool loading;
   final VoidCallback onSubmit;
+  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
@@ -586,8 +646,8 @@ class _InputBar extends StatelessWidget {
                 onSubmitted: (_) {
                   if (!loading) onSubmit();
                 },
-                decoration: const InputDecoration(
-                  hintText: '무엇을 도와드릴까요?',
+                decoration: InputDecoration(
+                  hintText: strings.aiInputHint,
                   filled: true,
                 ),
               ),
