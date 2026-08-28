@@ -70,7 +70,7 @@ class _ProfileClient extends http.BaseClient {
 void main() {
   testWidgets('fixed budget profile loads with mode-aware controls',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.physicalSize = const Size(800, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -136,7 +136,7 @@ void main() {
 
   testWidgets('date fields open a calendar and keep API date serialization',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.physicalSize = const Size(800, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -164,9 +164,13 @@ void main() {
 
     await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('automation-profile-save')));
+    final saveButton = find.byKey(const ValueKey('automation-profile-save'));
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
 
+    expect(client.writes, isNotEmpty);
     final operation = client.writes.last['operation'] as Map;
     expect(operation['start_date'], '2026-08-17');
     expect(operation['end_date'], '2026-09-18');
@@ -175,7 +179,7 @@ void main() {
   testWidgets(
       'save payload preserves selected sizing mode and unrelated capital settings',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1800);
+    tester.view.physicalSize = const Size(800, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -187,7 +191,10 @@ void main() {
     await tester.enterText(
         find.byKey(const ValueKey('automation-profile-fixed-budget')),
         '600000');
-    await tester.tap(find.byKey(const ValueKey('automation-profile-save')));
+    final saveButton = find.byKey(const ValueKey('automation-profile-save'));
+    await tester.ensureVisible(saveButton);
+    await tester.pumpAndSettle();
+    await tester.tap(saveButton);
     await tester.pumpAndSettle();
     expect(client.writes, isNotEmpty);
     final operation = client.writes.last['operation'] as Map;
@@ -211,13 +218,11 @@ void main() {
     await tester.pump();
     await tester.enterText(
         find.byKey(const ValueKey('automation-profile-target-pct')), '12');
-    await tester.scrollUntilVisible(
-      find.byKey(const ValueKey('automation-profile-save')),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.byKey(const ValueKey('automation-profile-save')));
+    await tester.ensureVisible(saveButton);
     await tester.pumpAndSettle();
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+    expect(client.writes, isNotEmpty);
     final equityCapital = client.writes.last['capital'] as Map;
     expect(equityCapital['sizing_mode'], 'equity_pct');
     expect(equityCapital['target_position_pct'], 12);
