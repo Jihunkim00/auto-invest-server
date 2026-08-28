@@ -50,6 +50,42 @@ void main() {
         findsOneWidget);
     expect(find.text('주문 준비가 완료되었습니다.'), findsOneWidget);
   });
+
+  testWidgets('AI controls wrap at phone width with larger text',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = DashboardController(_FakeV2Api(), autoload: false);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(1.3)),
+          child: child!,
+        ),
+        home: AiScreen(controller: controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ActionChip), findsNWidgets(5));
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-v2-input')),
+      '삼성전자 최근 실적과 위험 요인을 자세히 설명해 주세요. '
+      '긴 한국어 질문도 화면 밖으로 잘리지 않아야 합니다.',
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
+    await tester.pumpAndSettle();
+
+    final userMessage = find.byKey(const ValueKey('ai-v2-user-message'));
+    expect(userMessage, findsOneWidget);
+    expect(tester.getSize(userMessage).width, lessThanOrEqualTo(398));
+    expect(find.byKey(const ValueKey('ai-v2-analysis-card')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    controller.dispose();
+  });
 }
 
 class _FakeV2Api extends ApiClient {

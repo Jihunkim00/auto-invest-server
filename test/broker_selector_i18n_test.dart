@@ -15,7 +15,7 @@ void main() {
       ..selectedWatchlistMarket = PortfolioMarket.us
       ..selectedOrderMarket = PortfolioMarket.us;
 
-    await tester.pumpWidget(_brokerSelectorHarness(controller, width: 190));
+    await tester.pumpWidget(_brokerSelectorHarness(controller, width: 280));
     await tester.pumpAndSettle();
 
     expect(
@@ -41,9 +41,9 @@ void main() {
       find.byKey(const ValueKey('broker-option-kis-label')),
     );
     expect(alpacaLabel.maxLines, 1);
-    expect(alpacaLabel.overflow, TextOverflow.ellipsis);
+    expect(alpacaLabel.overflow, isNot(TextOverflow.ellipsis));
     expect(kisLabel.maxLines, 1);
-    expect(kisLabel.overflow, TextOverflow.ellipsis);
+    expect(kisLabel.overflow, isNot(TextOverflow.ellipsis));
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const ValueKey('broker-option-kis-label')));
@@ -66,7 +66,7 @@ void main() {
       ..selectedWatchlistMarket = PortfolioMarket.us
       ..selectedOrderMarket = PortfolioMarket.us;
 
-    await tester.pumpWidget(_brokerSelectorHarness(controller, width: 190));
+    await tester.pumpWidget(_brokerSelectorHarness(controller, width: 280));
     await tester.pumpAndSettle();
 
     expect(find.text('Alpaca'), findsOneWidget);
@@ -79,7 +79,7 @@ void main() {
       find.byKey(const ValueKey('broker-option-kis-label')),
     );
     expect(kisLabel.maxLines, 1);
-    expect(kisLabel.overflow, TextOverflow.ellipsis);
+    expect(kisLabel.overflow, isNot(TextOverflow.ellipsis));
     expect(tester.takeException(), isNull);
 
     controller.dispose();

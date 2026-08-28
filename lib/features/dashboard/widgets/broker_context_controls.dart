@@ -14,12 +14,12 @@ class GlobalBrokerSelector extends StatelessWidget {
       key: const ValueKey('global-broker-selector'),
       showSelectedIcon: false,
       style: const ButtonStyle(
-        visualDensity: VisualDensity.compact,
+        visualDensity: VisualDensity.standard,
         tapTargetSize: MaterialTapTargetSize.padded,
         padding: WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         ),
-        minimumSize: WidgetStatePropertyAll(Size(76, 40)),
+        minimumSize: WidgetStatePropertyAll(Size(0, 44)),
       ),
       segments: [
         ButtonSegment(
@@ -62,21 +62,17 @@ class _BrokerOptionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 44, maxWidth: 72),
-      child: Text(
-        text,
-        key: labelKey,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        softWrap: false,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0,
-          height: 1.1,
-        ),
+    return Text(
+      text,
+      key: labelKey,
+      maxLines: 1,
+      softWrap: false,
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0,
+        height: 1.2,
       ),
     );
   }

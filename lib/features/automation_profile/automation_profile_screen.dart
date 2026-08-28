@@ -516,59 +516,74 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         children: [
           Text(_selected == null ? '프로필 생성' : '프로필 편집',
               style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           const _FormSectionHeading(
             icon: Icons.tune_outlined,
             title: '기본 설정',
+            topSpacing: 0,
           ),
-          TextField(
-            key: const ValueKey('automation-profile-name'),
-            controller: _nameController,
-            decoration: const InputDecoration(labelText: '프로필 이름'),
+          _LabeledField(
+            label: '프로필 이름',
+            field: TextField(
+              key: const ValueKey('automation-profile-name'),
+              controller: _nameController,
+              decoration: const InputDecoration(),
+            ),
           ),
+          const SizedBox(height: 16),
           const ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.account_balance_outlined),
             title: Text('증권사 / 시장'),
             subtitle: Text('한국투자증권 · 국내주식'),
           ),
-          Row(
-            children: [
-              Expanded(
-                  child: _DateField(
-                fieldKey: const ValueKey('automation-profile-start-date'),
-                controller: _startController,
+          const SizedBox(height: 12),
+          _ProfileFieldRow(
+            fields: [
+              _LabeledField(
                 label: '시작일',
-                onTap: () => _pickDate(start: true),
-              )),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: _DateField(
-                fieldKey: const ValueKey('automation-profile-end-date'),
-                controller: _endController,
+                field: _DateField(
+                  fieldKey: const ValueKey('automation-profile-start-date'),
+                  controller: _startController,
+                  onTap: () => _pickDate(start: true),
+                ),
+              ),
+              _LabeledField(
                 label: '종료일',
-                onTap: () => _pickDate(start: false),
-              )),
+                field: _DateField(
+                  fieldKey: const ValueKey('automation-profile-end-date'),
+                  controller: _endController,
+                  onTap: () => _pickDate(start: false),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 20),
           const _FormSectionHeading(
             icon: Icons.schedule_outlined,
             title: '실행 일정',
           ),
-          TextField(
+          _LabeledField(
+            label: '일일 신규 진입 횟수',
+            field: TextField(
               controller: _maxEntriesController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '일일 신규 진입 횟수')),
+              decoration: const InputDecoration(),
+            ),
+          ),
+          const SizedBox(height: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                '분석 시각 (KST)',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  const Text("분석 시각 (KST)"),
                   OutlinedButton.icon(
                     key: const ValueKey("automation-profile-add-analysis-time"),
                     onPressed: _busy ? null : _addAnalysisTime,
@@ -579,121 +594,146 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               ),
               Wrap(
                 spacing: 8,
-                runSpacing: 4,
+                runSpacing: 8,
                 children: [
                   for (final value in _analysisTimes)
                     InputChip(
                       label: Text(value),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 8),
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                      materialTapTargetSize: MaterialTapTargetSize.padded,
                       onDeleted: () => _removeAnalysisTime(value),
                     ),
                 ],
               ),
-              const Text("중복 금지 · 최소 1개 · 09:00~15:30 · 신규 진입 마감 14:00 전",
-                  style: TextStyle(color: Colors.white54)),
+              const SizedBox(height: 8),
+              const Text(
+                "중복 금지 · 최소 1개 · 09:00~15:30 · 신규 진입 마감 14:00 전",
+                style: TextStyle(color: Colors.white54, height: 1.4),
+              ),
             ],
           ),
-          const SizedBox(height: 20),
           const _FormSectionHeading(
             icon: Icons.search_outlined,
             title: '탐색 범위',
           ),
-          Row(
-            children: [
-              Expanded(
-                  child: TextField(
-                      controller: _watchlistController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: '관심종목 수'))),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: TextField(
-                      key: const ValueKey('automation-profile-max-positions'),
-                      controller: _maxPositionsController,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setState(() {}),
-                      decoration:
-                          const InputDecoration(labelText: '최대 보유 종목'))),
+          _ProfileFieldRow(
+            fields: [
+              _LabeledField(
+                label: '관심종목 수',
+                field: TextField(
+                  controller: _watchlistController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+              _LabeledField(
+                label: '최대 보유 종목',
+                field: TextField(
+                  key: const ValueKey('automation-profile-max-positions'),
+                  controller: _maxPositionsController,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 20),
           const _FormSectionHeading(
             icon: Icons.account_balance_wallet_outlined,
             title: '자금 관리',
           ),
-          DropdownButtonFormField<String>(
-            key: ValueKey('automation-profile-sizing-mode-$_sizingMode'),
-            initialValue: _sizingMode,
-            items: const [
-              DropdownMenuItem(
-                  key: ValueKey('automation-profile-sizing-equity-pct'),
-                  value: 'equity_pct',
-                  child: Text('자산 비율')),
-              DropdownMenuItem(
-                  key: ValueKey('automation-profile-sizing-fixed-budget'),
-                  value: 'fixed_budget',
-                  child: Text('고정 예산')),
-            ],
-            onChanged: (value) => setState(() => _sizingMode =
-                value == 'fixed_budget' ? 'fixed_budget' : 'equity_pct'),
-            decoration: const InputDecoration(labelText: '자금 배분 방식'),
-          ),
-          Row(
-            children: [
-              Expanded(
-                  child: TextField(
-                      key: const ValueKey('automation-profile-target-pct'),
-                      enabled: _sizingMode == 'equity_pct',
-                      controller: _targetPctController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: '목표 포지션 비율'))),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: TextField(
-                      key: const ValueKey('automation-profile-max-order'),
-                      controller: _maxOrderController,
-                      keyboardType: TextInputType.number,
-                      decoration:
-                          const InputDecoration(labelText: '최대 주문 금액 (원)'))),
-            ],
-          ),
-          if (_sizingMode == 'fixed_budget')
-            const Text(
-              '고정 예산 방식에서는 주문 크기 계산에 목표 자산 비율을 사용하지 않습니다.',
-              key: ValueKey('automation-profile-target-pct-helper'),
-              style: TextStyle(color: Colors.white54),
+          _LabeledField(
+            label: '자금 배분 방식',
+            field: DropdownButtonFormField<String>(
+              key: ValueKey('automation-profile-sizing-mode-$_sizingMode'),
+              initialValue: _sizingMode,
+              items: const [
+                DropdownMenuItem(
+                    key: ValueKey('automation-profile-sizing-equity-pct'),
+                    value: 'equity_pct',
+                    child: Text('자산 비율')),
+                DropdownMenuItem(
+                    key: ValueKey('automation-profile-sizing-fixed-budget'),
+                    value: 'fixed_budget',
+                    child: Text('고정 예산')),
+              ],
+              onChanged: (value) => setState(() => _sizingMode =
+                  value == 'fixed_budget' ? 'fixed_budget' : 'equity_pct'),
+              decoration: const InputDecoration(),
             ),
-          if (_sizingMode == 'equity_pct')
-            const Text(
-              '자산 비율 방식에서는 고정 예산을 사용하지 않습니다.',
-              key: ValueKey('automation-profile-fixed-budget-helper'),
-              style: TextStyle(color: Colors.white54),
-            ),
-          TextField(
+          ),
+          const SizedBox(height: 18),
+          _ProfileFieldRow(
+            fields: [
+              _LabeledField(
+                label: '목표 포지션 비율',
+                helper: _sizingMode == 'fixed_budget'
+                    ? '고정 예산 방식에서는 목표 자산 비율을 사용하지 않습니다.'
+                    : null,
+                helperKey: _sizingMode == 'fixed_budget'
+                    ? const ValueKey('automation-profile-target-pct-helper')
+                    : null,
+                field: TextField(
+                  key: const ValueKey('automation-profile-target-pct'),
+                  enabled: _sizingMode == 'equity_pct',
+                  controller: _targetPctController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+              _LabeledField(
+                label: '최대 주문 금액 (원)',
+                field: TextField(
+                  key: const ValueKey('automation-profile-max-order'),
+                  controller: _maxOrderController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          _LabeledField(
+            label: '고정 예산 (원)',
+            helper: _sizingMode == 'equity_pct'
+                ? '자산 비율 방식에서는 고정 예산을 사용하지 않습니다.'
+                : null,
+            helperKey: _sizingMode == 'equity_pct'
+                ? const ValueKey('automation-profile-fixed-budget-helper')
+                : null,
+            field: TextField(
               key: const ValueKey('automation-profile-fixed-budget'),
               enabled: _sizingMode == 'fixed_budget',
               controller: _fixedBudgetController,
               keyboardType: TextInputType.number,
-              decoration: const InputDecoration(labelText: '고정 예산 (원)')),
-          const SizedBox(height: 20),
+              decoration: const InputDecoration(),
+            ),
+          ),
           const _FormSectionHeading(
             icon: Icons.shield_outlined,
             title: '리스크 관리',
           ),
-          Row(
-            children: [
-              Expanded(
-                  child: TextField(
-                      controller: _stopLossController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: '손절 비율'))),
-              const SizedBox(width: 8),
-              Expanded(
-                  child: TextField(
-                      key: const ValueKey("automation-profile-take-profit"),
-                      controller: _takeProfitController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: '익절 비율'))),
+          _ProfileFieldRow(
+            fields: [
+              _LabeledField(
+                label: '손절 비율',
+                field: TextField(
+                  controller: _stopLossController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+              _LabeledField(
+                label: '익절 비율',
+                field: TextField(
+                  key: const ValueKey("automation-profile-take-profit"),
+                  controller: _takeProfitController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(),
+                ),
+              ),
             ],
           ),
           if ((int.tryParse(_maxPositionsController.text) ?? 1) > 1)
@@ -705,7 +745,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                 style: TextStyle(color: Colors.orangeAccent),
               ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
           Wrap(
             spacing: 8,
             children: [
@@ -729,26 +769,33 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                     child: const Text('사용 중지')),
             ],
           ),
-          const SizedBox(height: 14),
-          TextField(
-            key: const ValueKey('automation-profile-search'),
-            decoration: const InputDecoration(labelText: '종목 검색 (조회 전용)'),
-            onSubmitted: (query) async {
-              if (query.trim().isEmpty) return;
-              final results =
-                  await widget.apiClient.searchSymbols(query, market: 'KR');
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                    content: Text(results
-                        .map((item) => '${item['name']} (${item['symbol']})')
-                        .join(', '))),
-              );
-            },
+          const SizedBox(height: 24),
+          _LabeledField(
+            label: '종목 검색 (조회 전용)',
+            field: TextField(
+              key: const ValueKey('automation-profile-search'),
+              decoration: const InputDecoration(hintText: '종목명 또는 종목코드'),
+              onSubmitted: (query) async {
+                if (query.trim().isEmpty) return;
+                final results =
+                    await widget.apiClient.searchSymbols(query, market: 'KR');
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                      content: Text(results
+                          .map((item) => '${item['name']} (${item['symbol']})')
+                          .join(', '))),
+                );
+              },
+            ),
           ),
-          const SizedBox(height: 6),
-          const Text('종목 검색과 수동 관심종목은 프로필별로 관리되며 주문 제출 권한과는 분리됩니다.',
-              style: TextStyle(color: Colors.white54)),
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Text(
+              '종목 검색과 수동 관심종목은 프로필별로 관리되며 주문 제출 권한과는 분리됩니다.',
+              style: TextStyle(color: Colors.white54, height: 1.4),
+            ),
+          ),
         ],
       ),
     );
@@ -756,15 +803,20 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 }
 
 class _FormSectionHeading extends StatelessWidget {
-  const _FormSectionHeading({required this.icon, required this.title});
+  const _FormSectionHeading({
+    required this.icon,
+    required this.title,
+    this.topSpacing = 24,
+  });
 
   final IconData icon;
   final String title;
+  final double topSpacing;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.only(top: topSpacing, bottom: 12),
       child: Row(
         children: [
           Icon(icon, size: 18, color: AppTheme.primaryAccent),
@@ -779,17 +831,88 @@ class _FormSectionHeading extends StatelessWidget {
   }
 }
 
+class _LabeledField extends StatelessWidget {
+  const _LabeledField({
+    required this.label,
+    required this.field,
+    this.helper,
+    this.helperKey,
+  });
+
+  final String label;
+  final Widget field;
+  final String? helper;
+  final Key? helperKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+        const SizedBox(height: 6),
+        field,
+        if (helper != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 7),
+            child: Text(
+              helper!,
+              key: helperKey,
+              style: const TextStyle(color: Colors.white54, height: 1.4),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ProfileFieldRow extends StatelessWidget {
+  const _ProfileFieldRow({required this.fields});
+
+  final List<Widget> fields;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 640 || fields.length < 2) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < fields.length; index++) ...[
+                if (index > 0) const SizedBox(height: 16),
+                fields[index],
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var index = 0; index < fields.length; index++) ...[
+              if (index > 0) const SizedBox(width: 16),
+              Expanded(child: fields[index]),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
 class _DateField extends StatelessWidget {
   const _DateField({
     required this.fieldKey,
     required this.controller,
-    required this.label,
     required this.onTap,
   });
 
   final Key fieldKey;
   final TextEditingController controller;
-  final String label;
   final VoidCallback onTap;
 
   @override
@@ -800,9 +923,12 @@ class _DateField extends StatelessWidget {
       readOnly: true,
       onTap: onTap,
       decoration: InputDecoration(
-        labelText: label,
         hintText: 'yyyy-MM-dd',
         suffixIcon: const Icon(Icons.calendar_month_outlined),
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 48,
+          minHeight: 48,
+        ),
       ),
     );
   }

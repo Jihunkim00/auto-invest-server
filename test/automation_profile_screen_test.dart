@@ -70,7 +70,7 @@ class _ProfileClient extends http.BaseClient {
 void main() {
   testWidgets('fixed budget profile loads with mode-aware controls',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.physicalSize = const Size(800, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -136,7 +136,7 @@ void main() {
 
   testWidgets('date fields open a calendar and keep API date serialization',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.physicalSize = const Size(800, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -175,7 +175,7 @@ void main() {
   testWidgets(
       'save payload preserves selected sizing mode and unrelated capital settings',
       (tester) async {
-    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.physicalSize = const Size(800, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final client = _ProfileClient();
@@ -222,5 +222,71 @@ void main() {
     expect(equityCapital['sizing_mode'], 'equity_pct');
     expect(equityCapital['target_position_pct'], 12);
     expect(equityCapital['fixed_budget'], 600000);
+  });
+
+  testWidgets('profile fields use external labels and comfortable controls',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final client = _ProfileClient();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('ko', 'KR'), Locale('en', 'US')],
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('automation-profile-1')));
+    await tester.pump();
+
+    for (final key in [
+      'automation-profile-name',
+      'automation-profile-start-date',
+      'automation-profile-end-date',
+      'automation-profile-target-pct',
+      'automation-profile-max-order',
+      'automation-profile-fixed-budget',
+      'automation-profile-take-profit',
+    ]) {
+      final field = tester.widget<TextField>(find.byKey(ValueKey(key)));
+      expect(field.decoration?.labelText, isNull, reason: key);
+      expect(tester.getSize(find.byKey(ValueKey(key))).height,
+          greaterThanOrEqualTo(48),
+          reason: key);
+    }
+    expect(find.text('프로필 이름'), findsOneWidget);
+    expect(find.text('시작일'), findsOneWidget);
+    expect(find.text('종료일'), findsOneWidget);
+    expect(find.text('관심종목 수'), findsOneWidget);
+    expect(find.text('최대 보유 종목'), findsOneWidget);
+    expect(find.text('목표 포지션 비율'), findsOneWidget);
+    expect(find.byType(InputChip), findsOneWidget);
+    expect(find.byIcon(Icons.calendar_month_outlined), findsNWidgets(2));
+  });
+
+  testWidgets('profile controls stack at phone width with larger text',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 2200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final client = _ProfileClient();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('ko', 'KR'), Locale('en', 'US')],
+      builder: (context, child) => MediaQuery(
+        data:
+            MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(1.3)),
+        child: child!,
+      ),
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('automation-profile-1')));
+    await tester.pumpAndSettle();
+
+    final start = find.byKey(const ValueKey('automation-profile-start-date'));
+    final end = find.byKey(const ValueKey('automation-profile-end-date'));
+    expect(tester.getTopLeft(start).dy, lessThan(tester.getTopLeft(end).dy));
+    expect(tester.takeException(), isNull);
   });
 }

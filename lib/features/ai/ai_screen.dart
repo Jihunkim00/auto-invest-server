@@ -248,7 +248,7 @@ class _QuickActions extends StatelessWidget {
       actions.keys.elementAt(4): strings.quickWhyNoBuy,
     };
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -256,6 +256,9 @@ class _QuickActions extends StatelessWidget {
           for (final item in actions.entries)
             ActionChip(
               key: ValueKey('ai-quick-' + item.key),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+              materialTapTargetSize: MaterialTapTargetSize.padded,
               label: Text(labels[item.key] ?? item.key),
               onPressed: () => onSelected(item.value),
             ),
@@ -306,25 +309,33 @@ class _EntryView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (entry.userText != null) {
-      return Align(
-        alignment: Alignment.centerRight,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.sizeOf(context).width * 0.82,
-          ),
-          child: Container(
-            key: const ValueKey('ai-v2-user-message'),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryAccent.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(16),
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.82,
             ),
-            child: Text(entry.userText!, softWrap: true),
+            child: Container(
+              key: const ValueKey('ai-v2-user-message'),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryAccent.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(entry.userText!, softWrap: true),
+            ),
           ),
         ),
       );
     }
-    if (entry.error != null) return _ErrorCard(entry.error!);
+    if (entry.error != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _ErrorCard(entry.error!),
+      );
+    }
     final response = entry.response!;
     final preview = response.orderPreview;
     final action =
@@ -337,16 +348,23 @@ class _EntryView extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
-                  const Icon(Icons.auto_awesome,
-                      size: 16, color: Colors.lightBlueAccent),
-                  const SizedBox(width: 6),
-                  Text(_label(response.intent),
-                      style: const TextStyle(
-                          color: Colors.lightBlueAccent,
-                          fontWeight: FontWeight.w800)),
-                  const Spacer(),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.auto_awesome,
+                          size: 16, color: Colors.lightBlueAccent),
+                      const SizedBox(width: 6),
+                      Text(_label(response.intent),
+                          style: const TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontWeight: FontWeight.w800)),
+                    ],
+                  ),
                   _SafetyBadge(_statusLabel(response.status)),
                 ],
               ),
@@ -357,6 +375,7 @@ class _EntryView extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 10),
         if (response.intent == 'quote') _QuoteCard(response, strings: strings),
         if (response.intent == 'analyze' ||
             response.intent == 'market_analysis')
@@ -568,48 +587,76 @@ class _DataCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < 480;
+        return SectionCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(title,
+              if (narrow) ...[
+                Text(title,
                     style: const TextStyle(fontWeight: FontWeight.w800)),
-              ),
-              Flexible(
-                child: Text(primary,
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                        color: AppTheme.primaryAccent,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w900)),
-              ),
+                const SizedBox(height: 6),
+                Text(
+                  primary,
+                  style: const TextStyle(
+                      color: AppTheme.primaryAccent,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900),
+                ),
+              ] else
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(title,
+                          style: const TextStyle(fontWeight: FontWeight.w800)),
+                    ),
+                    Flexible(
+                      child: Text(primary,
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(
+                              color: AppTheme.primaryAccent,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w900)),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 12),
+              for (final row in rows)
+                Padding(
+                  padding: EdgeInsets.only(top: narrow ? 10 : 4),
+                  child: narrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(row.$1,
+                                style: const TextStyle(color: Colors.white60)),
+                            const SizedBox(height: 4),
+                            Text(row.$2.toString(), softWrap: true),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Flexible(
+                                flex: 2,
+                                child: Text(row.$1,
+                                    style: const TextStyle(
+                                        color: Colors.white60))),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              flex: 3,
+                              child: Text(row.$2.toString(),
+                                  textAlign: TextAlign.right, softWrap: true),
+                            ),
+                          ],
+                        ),
+                ),
             ],
           ),
-          const SizedBox(height: 8),
-          for (final row in rows)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Flexible(
-                      flex: 2,
-                      child: Text(row.$1,
-                          style: const TextStyle(color: Colors.white60))),
-                  const SizedBox(width: 12),
-                  Flexible(
-                    flex: 3,
-                    child: Text(row.$2.toString(),
-                        textAlign: TextAlign.right, softWrap: true),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -680,10 +727,13 @@ class _ErrorCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return SectionCard(
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Icon(Icons.info_outline, color: Colors.orangeAccent),
           const SizedBox(width: 8),
-          Expanded(child: Text(message)),
+          Expanded(
+            child: Text(message, style: const TextStyle(height: 1.4)),
+          ),
         ],
       ),
     );
@@ -698,7 +748,9 @@ class _SafetyBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      constraints: const BoxConstraints(minHeight: 36),
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.lightBlueAccent.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
@@ -709,7 +761,7 @@ class _SafetyBadge extends StatelessWidget {
       child: Text(label.toUpperCase(),
           style: const TextStyle(
               color: Colors.lightBlueAccent,
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: FontWeight.w900)),
     );
   }

@@ -19,6 +19,7 @@ class AppTheme {
 
   static const cardRadius = 20.0;
   static const inputRadius = 12.0;
+  static const inputMinHeight = 52.0;
   static const pagePadding = 16.0;
 
   static ThemeData get darkTheme {
@@ -63,6 +64,7 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: surfaceElevated,
+        constraints: const BoxConstraints(minHeight: inputMinHeight),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
