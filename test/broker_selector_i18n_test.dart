@@ -15,7 +15,7 @@ void main() {
       ..selectedWatchlistMarket = PortfolioMarket.us
       ..selectedOrderMarket = PortfolioMarket.us;
 
-    await tester.pumpWidget(_brokerSelectorHarness(controller, width: 280));
+    await tester.pumpWidget(_brokerSelectorHarness(controller));
     await tester.pumpAndSettle();
 
     expect(
@@ -44,6 +44,18 @@ void main() {
     expect(alpacaLabel.overflow, isNot(TextOverflow.ellipsis));
     expect(kisLabel.maxLines, 1);
     expect(kisLabel.overflow, isNot(TextOverflow.ellipsis));
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('global-broker-selector')))
+          .width,
+      greaterThanOrEqualTo(230),
+    );
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('global-broker-selector')))
+          .height,
+      greaterThanOrEqualTo(40),
+    );
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const ValueKey('broker-option-kis-label')));
@@ -84,20 +96,55 @@ void main() {
 
     controller.dispose();
   });
+
+  testWidgets('Korean broker selector keeps full labels at 1.3 text scale',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..selectedProvider = SelectedProvider.kis
+      ..selectedPortfolioMarket = PortfolioMarket.kr
+      ..selectedWatchlistMarket = PortfolioMarket.kr
+      ..selectedOrderMarket = PortfolioMarket.kr;
+
+    await tester.pumpWidget(
+      _brokerSelectorHarness(controller, textScale: 1.3),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('알파카'), findsOneWidget);
+    expect(find.text('한국투자'), findsOneWidget);
+    expect(find.textContaining('한국투...'), findsNothing);
+    expect(tester.takeException(), isNull);
+    controller.dispose();
+  });
 }
 
 Widget _brokerSelectorHarness(
   DashboardController controller, {
-  required double width,
+  double? width,
+  double? textScale,
 }) {
   return MaterialApp(
     theme: ThemeData.dark(),
+    builder: (context, child) {
+      final scaledChild = textScale == null
+          ? child!
+          : MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.linear(textScale)),
+              child: child!,
+            );
+      return Center(child: scaledChild);
+    },
     home: Scaffold(
       body: Center(
-        child: SizedBox(
-          width: width,
-          child: GlobalBrokerSelector(controller: controller),
-        ),
+        child: width == null
+            ? UnconstrainedBox(
+                child: GlobalBrokerSelector(controller: controller),
+              )
+            : SizedBox(
+                width: width,
+                child: GlobalBrokerSelector(controller: controller),
+              ),
       ),
     ),
   );

@@ -10,42 +10,48 @@ class GlobalBrokerSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    return SegmentedButton<SelectedProvider>(
-      key: const ValueKey('global-broker-selector'),
-      showSelectedIcon: false,
-      style: const ButtonStyle(
-        visualDensity: VisualDensity.standard,
-        tapTargetSize: MaterialTapTargetSize.padded,
-        padding: WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        ),
-        minimumSize: WidgetStatePropertyAll(Size(0, 44)),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        minWidth: 240,
+        minHeight: 44,
       ),
-      segments: [
-        ButtonSegment(
-          value: SelectedProvider.alpaca,
-          tooltip: strings.brokerFullDisplayName('alpaca'),
-          label: _BrokerOptionLabel(
-            key: const ValueKey('broker-option-alpaca'),
-            labelKey: const ValueKey('broker-option-alpaca-label'),
-            text: strings.brokerCompactDisplayName('alpaca'),
+      child: SegmentedButton<SelectedProvider>(
+        key: const ValueKey('global-broker-selector'),
+        showSelectedIcon: false,
+        style: const ButtonStyle(
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.padded,
+          padding: WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           ),
-          icon: const Icon(Icons.public, size: 16),
+          minimumSize: WidgetStatePropertyAll(Size(110, 44)),
         ),
-        ButtonSegment(
-          value: SelectedProvider.kis,
-          tooltip: strings.brokerFullDisplayName('kis'),
-          label: _BrokerOptionLabel(
-            key: const ValueKey('broker-option-kis'),
-            labelKey: const ValueKey('broker-option-kis-label'),
-            text: strings.brokerCompactDisplayName('kis'),
+        segments: [
+          ButtonSegment(
+            value: SelectedProvider.alpaca,
+            tooltip: strings.brokerFullDisplayName('alpaca'),
+            label: _BrokerOptionLabel(
+              key: const ValueKey('broker-option-alpaca'),
+              labelKey: const ValueKey('broker-option-alpaca-label'),
+              text: strings.brokerCompactDisplayName('alpaca'),
+            ),
+            icon: const Icon(Icons.public, size: 16),
           ),
-          icon: const Icon(Icons.account_balance, size: 16),
-        ),
-      ],
-      selected: {controller.selectedProvider},
-      onSelectionChanged: (selection) =>
-          controller.setProvider(selection.first),
+          ButtonSegment(
+            value: SelectedProvider.kis,
+            tooltip: strings.brokerFullDisplayName('kis'),
+            label: _BrokerOptionLabel(
+              key: const ValueKey('broker-option-kis'),
+              labelKey: const ValueKey('broker-option-kis-label'),
+              text: strings.brokerCompactDisplayName('kis'),
+            ),
+            icon: const Icon(Icons.account_balance, size: 16),
+          ),
+        ],
+        selected: {controller.selectedProvider},
+        onSelectionChanged: (selection) =>
+            controller.setProvider(selection.first),
+      ),
     );
   }
 }

@@ -76,6 +76,7 @@ class _HomeHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             GlobalBrokerSelector(controller: controller),
+            const SizedBox(width: 8),
             IconButton(
               key: const ValueKey('home-open-admin'),
               tooltip: strings.adminTooltip,
