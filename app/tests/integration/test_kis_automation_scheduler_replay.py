@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -556,6 +557,8 @@ def test_inactive_or_missing_active_profile_is_a_clean_scheduler_skip(
     "case",
     [
         "insufficient_cash",
+        "dry_run_true",
+        "kill_switch",
         "existing_position",
         "duplicate_open_order",
         "existing_reservation",
@@ -583,6 +586,10 @@ def test_score_pass_safety_matrix_never_submits(
 
     if case == "insufficient_cash":
         harness.client.cash = 1000.0
+    elif case == "dry_run_true":
+        harness.runtime.update_settings(db_session, {"dry_run": True})
+    elif case == "kill_switch":
+        harness.runtime.update_settings(db_session, {"kill_switch": True})
     elif case == "existing_position":
         harness.client.positions = [{"symbol": SYMBOL, "qty": 1}]
     elif case == "duplicate_open_order":
@@ -701,3 +708,135 @@ def test_automation_authority_matrix_controls_scheduler_and_broker(
         assert getattr(result, "reason", None) == "automation_mode_off"
     else:
         assert result["dry_run"]["dry_run_result"]["profile_key"] == CUSTOM_PROFILE_KEY
+
+
+def test_paper_preset_replays_profile_analysis_without_broker_submit(
+    db_session, monkeypatch
+):
+    harness = build_harness(db_session, monkeypatch)
+    harness.runtime.apply_preset(db_session, preset="dry_run_simulation")
+
+    result = run_scheduler(harness)
+
+    authority = AutomationExecutionAuthorityService(harness.runtime).snapshot(db_session)
+    runtime = harness.runtime.get_settings_read_only(db_session)
+    assert runtime["current_operation_mode"] == "dry_run_simulation"
+    assert authority["automation_mode"] == "test"
+    assert result["dry_run"]["analysis_completed"] is True
+    assert result["dry_run"]["dry_run_result"]["final_buy_score"] == 70.0
+    assert result["profile_buy"]["validation_called"] is True
+    assert result["profile_buy"]["broker_submit_called"] is False
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0
+
+
+@pytest.mark.parametrize(
+    ("setting", "value", "expected_reason"),
+    [
+        ("kill_switch", True, "kill_switch_enabled"),
+        ("dry_run", True, "dry_run_true"),
+    ],
+)
+def test_live_preset_blocks_at_custom_profile_scheduler_gate_before_execution_core(
+    db_session, monkeypatch, setting, value, expected_reason
+):
+    harness = build_harness(db_session, monkeypatch)
+    harness.runtime.apply_preset(
+        db_session,
+        preset="full_live_test_mode",
+        confirm_dangerous=True,
+    )
+    preset_runtime = harness.runtime.get_settings_read_only(db_session)
+    assert preset_runtime["current_operation_mode"] == "full_live_test_mode"
+    harness.runtime.update_settings(db_session, {setting: value})
+
+    result = run_scheduler(harness)
+    profile_result = result.get("profile_buy") or {}
+    gate = profile_result.get("live_order_gate") or {}
+    runtime = harness.runtime.get_settings_read_only(db_session)
+
+    # Fault injection changes the computed display mode, while the scheduler
+    # retains the preset-synchronized live execution authority for this gate.
+    assert runtime["automation_mode"] == "live"
+    assert gate["automation_mode"] == "live"
+    assert gate["scheduler_allowed"] is True
+    assert gate["allowed"] is False
+    assert gate["blocking_reasons"] == [expected_reason]
+    assert profile_result["reason"] == expected_reason
+    assert harness.validation.calls == []
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0
+
+def test_stale_paper_requested_mode_cannot_override_live_preset_execution(
+
+    db_session, monkeypatch
+):
+    harness = build_harness(db_session, monkeypatch)
+    harness.runtime.apply_preset(
+        db_session,
+        preset="full_live_test_mode",
+        confirm_dangerous=True,
+    )
+    # This reproduces the old compatibility metadata drift. Execution authority
+    # must remain the preset-synchronized automation_mode, never this field.
+    harness.runtime.update_settings(db_session, {"operation_mode_requested": "paper"})
+
+    result = run_scheduler(harness)
+
+    runtime = harness.runtime.get_settings_read_only(db_session)
+    authority = AutomationExecutionAuthorityService(harness.runtime).snapshot(db_session)
+    assert runtime["current_operation_mode"] == "full_live_test_mode"
+    assert runtime["operation_mode_requested"] == "paper"
+    assert authority["automation_mode"] == "live"
+    assert result["profile_buy"]["broker_submit_called"] is True
+    assert len(harness.broker.buy_calls) == 1
+    assert len(harness.validation.calls) == 1
+    assert harness.client.external_kis_submit_count == 0
+
+
+def test_tomorrow_profile_slots_are_deterministic_and_do_not_duplicate_analysis(
+    db_session, monkeypatch
+):
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        candidates=[candidate(score=62.0)],
+    )
+    row = harness.profiles.get(db_session, CUSTOM_PROFILE_KEY)
+    settings = json.loads(row.settings_json or "{}")
+    settings["entry"]["analysis_times"] = ["09:30", "11:30", "13:30"]
+    settings["entry"]["min_final_score"] = 65.0
+    settings["entry"]["max_new_entries_per_day"] = 1
+    settings["entry"]["max_entries_per_scan"] = 1
+    settings["entry"]["no_new_entry_after"] = "14:00"
+    settings["operation"].update(
+        {
+            "start_date": "2026-08-31",
+            "end_date": "2026-09-04",
+            "weekdays_only": True,
+            "timezone": "Asia/Seoul",
+        }
+    )
+    row.settings_json = json.dumps(settings)
+    db_session.commit()
+    harness.runtime.apply_preset(db_session, preset="dry_run_simulation")
+
+    for slot in ("09:30", "11:30", "13:30"):
+        hour, minute = (int(value) for value in slot.split(":"))
+        now = datetime(2026, 9, 1, hour - 9, minute, tzinfo=UTC)
+        harness.clock.current = now
+        result = harness.scheduler._run_strategy_auto_buy_dry_run_scheduled_once(
+            slot,
+            now=now,
+        )
+        assert result["dry_run"]["scheduled_slot_key"] == (
+            f"{CUSTOM_PROFILE_KEY}:2026-09-01:{slot}"
+        )
+        assert result["dry_run"]["analysis_completed"] is True
+        assert result["dry_run"]["dry_run_result"]["required_entry_score"] == 65.0
+        assert result["profile_buy"]["reason"] == "below_profile_buy_threshold"
+        assert result["profile_buy"]["broker_submit_called"] is False
+
+    assert len(harness.preview.calls) == 3
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0

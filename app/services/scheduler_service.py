@@ -574,6 +574,7 @@ class SchedulerService:
                     scheduler_slot=self._profile_scheduler_slot(slot_name),
                     trigger_source='automation_profile_scheduler',
                     now=now,
+                    enforce_custom_profile_live_guard=True,
                 )
                 return {
                     'position_management': position_result,

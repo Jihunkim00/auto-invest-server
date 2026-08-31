@@ -448,6 +448,25 @@ def test_full_live_test_mode_sets_buy_and_sell_after_confirmation(
     assert body["warning_level"] == "dangerous_mixed"
 
 
+def test_preset_persists_custom_profile_execution_authority(client, db_session):
+    response = client.post(
+        "/ops/settings/apply-preset",
+        json={"preset": "full_live_test_mode", "confirm_dangerous": True},
+    )
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["current_operation_mode"] == "full_live_test_mode"
+    assert settings["operation_mode_requested"] == "live"
+    assert settings["automation_mode"] == "live"
+    assert settings["dry_run"] is False
+
+    restarted = RuntimeSettingService().get_settings(db_session)
+    assert restarted["current_operation_mode"] == "full_live_test_mode"
+    assert restarted["operation_mode_requested"] == "live"
+    assert restarted["automation_mode"] == "live"
+    assert restarted["dry_run"] is False
+
 def test_settings_catalog_returns_grouped_metadata(client):
     response = client.get("/ops/settings/catalog")
 

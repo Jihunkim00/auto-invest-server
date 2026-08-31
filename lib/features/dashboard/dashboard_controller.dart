@@ -1168,9 +1168,14 @@ class DashboardController extends ChangeNotifier {
 
     try {
       await apiClient.updateOpsSettings(values);
+      // Re-render only the state returned by the server. The compatibility
+      // /app/operation-mode facade is intentionally not a Home preset source.
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshSchedulerStatus(silent: true);
+      await refreshAutomationModeStatus(silent: true);
+      await refreshAutomationReleaseStatus(silent: true);
+      await refreshStrategyProfiles(silent: true);
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
       _recordSettingsChangeEvent(label, values);
       _rebuildAutomationRuntimeMonitorFromCurrentState();
@@ -1188,6 +1193,9 @@ class DashboardController extends ChangeNotifier {
         settings = await apiClient.getOpsSettings();
         kisSafetyStatus = kisSafetyStatusFromSettings();
         await refreshSchedulerStatus(silent: true);
+        await refreshAutomationModeStatus(silent: true);
+        await refreshAutomationReleaseStatus(silent: true);
+        await refreshStrategyProfiles(silent: true);
       } catch (_) {
         // Keep the rollback state when the backend refresh is unavailable.
       }
@@ -1212,9 +1220,8 @@ class DashboardController extends ChangeNotifier {
 
     try {
       operationModeStatus = await apiClient.fetchOperationMode();
-      settings = settings.copyWith(
-        currentOperationMode: operationModeStatus.effectiveMode,
-      );
+      // The facade only models paper/live/paused. Keep it separate from the
+      // authoritative /ops/settings current_operation_mode preset.
       operationModeError = null;
       return const ActionResult(
         success: true,
@@ -1247,6 +1254,8 @@ class DashboardController extends ChangeNotifier {
     final previousSettings = settings;
     operationModeUpdating = true;
     operationModeError = null;
+    // This legacy Settings facade is retained for its own screen. Home always
+    // renders the fresh /ops/settings value after a preset change or reload.
     settings = settings.copyWith(currentOperationMode: normalizedMode);
     notifyListeners();
 
@@ -1306,9 +1315,14 @@ class DashboardController extends ChangeNotifier {
           message: 'Full Live Test Mode requires confirmation.',
         );
       }
+      // Re-render only the state returned by the server. The compatibility
+      // /app/operation-mode facade is intentionally not a Home preset source.
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshSchedulerStatus(silent: true);
+      await refreshAutomationModeStatus(silent: true);
+      await refreshAutomationReleaseStatus(silent: true);
+      await refreshStrategyProfiles(silent: true);
       await _refreshKisSchedulerGuardedStatusesAfterSettingsUpdate();
       _recordSettingsChangeEvent(_operationModeLabel(preset), {
         'operation_mode': preset,
@@ -1329,6 +1343,9 @@ class DashboardController extends ChangeNotifier {
         settings = await apiClient.getOpsSettings();
         kisSafetyStatus = kisSafetyStatusFromSettings();
         await refreshSchedulerStatus(silent: true);
+        await refreshAutomationModeStatus(silent: true);
+        await refreshAutomationReleaseStatus(silent: true);
+        await refreshStrategyProfiles(silent: true);
       } catch (_) {
         // Keep the rollback state when backend refresh is unavailable.
       }

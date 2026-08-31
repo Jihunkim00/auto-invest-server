@@ -145,26 +145,43 @@ class AutomationProfileBuySchedulerService:
                 return reader()
         return {}
 
-    def live_order_gate(self, db: Session) -> dict[str, Any]:
+    def live_order_gate(
+        self,
+        db: Session,
+        *,
+        enforce_custom_profile_live_guard: bool = False,
+    ) -> dict[str, Any]:
         authority_reader = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
         if authority_reader:
-            authority = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+            authority = dict(authority_reader)
             runtime = self.runtime_settings.get_settings_read_only(db)
-            scheduler_allowed = bool(authority.get('scheduler_allowed'))
+            scheduler_allowed = bool(authority.get("scheduler_allowed"))
+            execution_mode = str(authority.get("automation_mode") or "off")
+            # This opt-in is supplied exclusively by SchedulerService for a
+            # scheduled Custom Profile callback. Direct service/core callers
+            # retain the existing fake/test invocation contract.
+            blocking_reasons: list[str] = []
+            if enforce_custom_profile_live_guard and execution_mode == "live":
+                if bool(runtime.get("dry_run", True)):
+                    blocking_reasons.append("dry_run_true")
+                elif bool(runtime.get("kill_switch")):
+                    blocking_reasons.append("kill_switch_enabled")
+            allowed = scheduler_allowed and not blocking_reasons
             return {
                 **authority,
-                'allowed': scheduler_allowed,
-                'scheduler_allowed': scheduler_allowed,
-                'simulation_allowed': bool(authority.get('simulation_allowed')),
-                'broker_submit_allowed': bool(authority.get('broker_submit_allowed')),
-                'dry_run': bool(runtime.get('dry_run', True)),
-                'kill_switch': bool(runtime.get('kill_switch', True)),
+                "allowed": allowed,
+                "scheduler_allowed": scheduler_allowed,
+                "simulation_allowed": bool(authority.get("simulation_allowed")),
+                "broker_submit_allowed": bool(authority.get("broker_submit_allowed")),
+                "dry_run": bool(runtime.get("dry_run", True)),
+                "kill_switch": bool(runtime.get("kill_switch", True)),
                 'kis_real_order_enabled': bool(getattr(getattr(self.runtime_settings, 'settings', None), 'kis_real_order_enabled', False)),
                 'runtime_authorized': bool(authority.get('broker_submit_allowed')),
                 'live_order_possible': bool(authority.get('broker_submit_allowed')),
-                'blocking_reasons': [] if scheduler_allowed else ['automation_mode_off'],
-                'source_of_truth': 'automation_mode',
-                'legacy_flags_ignored': authority.get('legacy_flags_ignored', []),
+                "legacy_flags_ignored": authority.get("legacy_flags_ignored", []),
+                "blocking_reasons": blocking_reasons if blocking_reasons else ([] if scheduler_allowed else ["automation_mode_off"]),
+                "source_of_truth": "automation_mode",
+                "current_operation_mode": runtime.get("current_operation_mode"),
             }
         reader = getattr(self.runtime_settings, 'get_automation_profile_live_order_gate_read_only', None)
         if callable(reader):
@@ -267,6 +284,7 @@ class AutomationProfileBuySchedulerService:
         scheduler_slot: str | None = None,
         trigger_source: str = TRIGGER_SOURCE,
         now: datetime | None = None,
+        enforce_custom_profile_live_guard: bool = False,
     ) -> dict[str, Any]:
         now_utc = _utc(now)
         profile = self._active_profile(db)
@@ -275,7 +293,10 @@ class AutomationProfileBuySchedulerService:
         if not profile.get('profile_key') or profile.get('status') != 'active':
             return self._blocked('profile_status_not_active', profile=profile)
         runtime = self.runtime_settings.get_settings(db)
-        gate = self.live_order_gate(db)
+        gate = self.live_order_gate(
+            db,
+            enforce_custom_profile_live_guard=enforce_custom_profile_live_guard,
+        )
         runtime['automation_profile_scheduler_enabled'] = bool(gate.get('scheduler_allowed', gate.get('allowed')))
         if not gate.get('allowed'):
             return self._blocked((gate.get('blocking_reasons') or ['automation_mode_off'])[0], profile=profile, live_order_gate=gate)

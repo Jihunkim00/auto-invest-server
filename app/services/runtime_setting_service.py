@@ -42,6 +42,18 @@ OPERATION_MODE_PRESETS = {
     "kis_sell_only_automation",
     "full_live_test_mode",
 }
+# The preset endpoint is the operator-facing authority for the Home mode
+# selector. Custom Profile scheduling resolves execution permission from
+# `automation_mode`; keeping the two values in this table makes the handoff
+# explicit and prevents a stale compatibility value from quietly retaining a
+# previous dry-run authority.
+_PRESET_EXECUTION_AUTHORITY = {
+    "safe_mode": ("off", "paused"),
+    "dry_run_simulation": ("test", "paper"),
+    "manual_live_trading": ("off", "live"),
+    "kis_sell_only_automation": ("off", "live"),
+    "full_live_test_mode": ("live", "live"),
+}
 OPERATION_TEST4_SAFE_SETTINGS = {
     "operation_test4_enabled": False,
     "operation_test4_scheduler_enabled": False,
@@ -1887,6 +1899,16 @@ class RuntimeSettingService:
             raise ValueError(f"unsupported operation mode preset: {preset}")
 
         preset_payload = self._preset_payload(normalized)
+        automation_mode, requested_mode = _PRESET_EXECUTION_AUTHORITY[normalized]
+        # `operation_mode_requested` remains the compatibility input for
+        # /app/operation-mode. It is synchronized here, but never used to
+        # derive the authoritative current_operation_mode.
+        preset_payload.update(
+            {
+                "automation_mode": automation_mode,
+                "operation_mode_requested": requested_mode,
+            }
+        )
         preset_payload.update(OPERATION_TEST4_SAFE_SETTINGS)
         if normalized == "full_live_test_mode" and not confirm_dangerous:
             settings = self.get_settings(db)
@@ -2797,6 +2819,10 @@ class RuntimeSettingService:
             "automation_mode_updated_by",
             "automation_mode_reason",
             "automation_mode_requires_manual_review",
+            "operation_mode_requested",
+            "operation_mode_changed_at",
+            "operation_mode_changed_by",
+            "operation_mode_reason",
             "default_symbol",
             "default_gate_level",
             "max_trades_per_day",
