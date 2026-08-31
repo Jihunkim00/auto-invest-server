@@ -17,6 +17,7 @@ from app.routes.agent_schedules import router as agent_schedules_router
 from app.routes.app_facade import router as app_facade_router
 from app.routes.brokers import router as brokers_router
 from app.routes.broker_sync_watchdog import router as broker_sync_watchdog_router
+from app.routes.canonical_trading import router as canonical_trading_router
 from app.routes.health import router as health_router
 from app.routes.history import router as history_router
 from app.routes.kis import router as kis_router
@@ -98,6 +99,7 @@ app.include_router(broker_sync_watchdog_router)
 app.include_router(kis_router)
 app.include_router(account_router)
 app.include_router(automation_router)
+app.include_router(canonical_trading_router)
 app.include_router(automation_profiles_router)
 app.include_router(symbol_router)
 app.include_router(positions_router)

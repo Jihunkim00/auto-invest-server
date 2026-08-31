@@ -4,15 +4,19 @@ from typing import Any
 
 AUTOMATION_MODE_OFF = 'off'
 AUTOMATION_MODE_TEST = 'test'
+AUTOMATION_MODE_PAPER = 'paper'
 AUTOMATION_MODE_LIVE = 'live'
 
 CANONICAL_AUTOMATION_MODES = {
-    AUTOMATION_MODE_OFF,
     AUTOMATION_MODE_TEST,
+    AUTOMATION_MODE_PAPER,
     AUTOMATION_MODE_LIVE,
 }
 
 LEGACY_AUTOMATION_MODE_ALIASES = {
+    # OFF remains readable for existing rows. Automation enablement is a
+    # separate toggle; execution decisions use only test/paper/live.
+    AUTOMATION_MODE_OFF: AUTOMATION_MODE_OFF,
     'monitor_only': AUTOMATION_MODE_OFF,
     'dry_run_auto': AUTOMATION_MODE_TEST,
     'phase1_live_ready': AUTOMATION_MODE_LIVE,
@@ -47,8 +51,8 @@ def automation_mode_authority(value: Any) -> dict[str, Any]:
         'configured_mode': configured,
         'automation_mode': effective,
         'execution_authority': effective.upper(),
-        'scheduler_allowed': effective in {AUTOMATION_MODE_TEST, AUTOMATION_MODE_LIVE},
-        'simulation_allowed': effective in {AUTOMATION_MODE_TEST, AUTOMATION_MODE_LIVE},
+        'scheduler_allowed': effective in CANONICAL_AUTOMATION_MODES,
+        'simulation_allowed': effective in {AUTOMATION_MODE_TEST, AUTOMATION_MODE_PAPER},
         'broker_submit_allowed': effective == AUTOMATION_MODE_LIVE,
         'read_only_allowed': True,
         'legacy_alias': configured if configured != effective else None,

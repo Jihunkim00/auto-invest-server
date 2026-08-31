@@ -1037,4 +1037,8 @@ class SchedulerService:
             db.close()
 
 
-scheduler_service = SchedulerService()
+# Import at module end to preserve SchedulerService as a compatibility adapter
+# while starting only the canonical Custom Profile scheduler in production.
+from app.services.automation_scheduler_service import AutomationSchedulerService
+
+scheduler_service = AutomationSchedulerService()
