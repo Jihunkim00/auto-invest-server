@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -44,6 +45,11 @@ REQUIRED_KR_SYMBOL_FALLBACKS = {
         "market": "KOSPI",
     },
 }
+AUTOMATION_WATCHLIST_SOURCE_FILE = 'config/watchlist_kr_test4_universe.yaml'
+AUTOMATION_WATCHLIST_TARGET_COUNT = 50
+AUTOMATION_KOSPI_LIMIT = 40
+AUTOMATION_KOSDAQ_LIMIT = 10
+AUTOMATION_WATCHLIST_MODE = 'automation_daily_kr_watchlist_refresh'
 
 
 class KisWatchlistUpdateError(ValueError):
@@ -174,6 +180,78 @@ class KisWatchlistUpdateService:
                 "real_order_submitted": False,
                 "broker_submit_called": False,
                 "manual_submit_called": False,
+            }
+        )
+
+    def build_automation_watchlist(
+        self,
+        profile: dict[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        '''Build the daily Automation KR watchlist without writing a file.'''
+        return _build_automation_watchlist(
+            self.client,
+            profile,
+            profile_service=self.profile_service,
+            now=now,
+        )
+
+    def update_automation_watchlist(
+        self,
+        profile: dict[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        '''Safely apply one Automation daily KR watchlist candidate.'''
+        built = self.build_automation_watchlist(profile, now=now)
+        symbols = list(built.get('symbols') or [])
+        if not symbols:
+            raise KisWatchlistUpdateError(
+                'Automation KR watchlist refresh aborted: zero usable symbols.'
+            )
+
+        watchlist_path = _resolve_project_path(
+            self.profile_service.get_watchlist_path('KR')
+        )
+        try:
+            backup_path = _replace_watchlist_atomically(
+                watchlist_path,
+                _watchlist_payload(symbols),
+            )
+        except Exception as exc:
+            raise KisWatchlistUpdateError(
+                f'Automation KR watchlist refresh file update failed: {exc}.'
+            ) from exc
+
+        degraded = bool(
+            built.get('price_lookup_failure_count')
+            or built.get('final_watchlist_count', 0)
+            < AUTOMATION_WATCHLIST_TARGET_COUNT
+        )
+        return sanitize_kis_payload(
+            {
+                **built,
+                'mode': AUTOMATION_WATCHLIST_MODE,
+                'status': 'degraded' if degraded else 'success',
+                'result': 'degraded' if degraded else 'success',
+                'reason': (
+                    'price_lookup_failures'
+                    if built.get('price_lookup_failure_count')
+                    else (
+                        'market_quota_shortage'
+                        if degraded
+                        else 'automation_watchlist_refreshed'
+                    )
+                ),
+                'watchlist_file': str(watchlist_path),
+                'backup_file': (
+                    str(backup_path) if backup_path is not None else None
+                ),
+                'updated': True,
+                'real_order_submitted': False,
+                'broker_submit_called': False,
+                'manual_submit_called': False,
             }
         )
 
@@ -517,3 +595,344 @@ def _resolve_project_path(path_value: str) -> Path:
     if path.is_absolute():
         return path
     return Path(__file__).resolve().parents[2] / path
+
+
+def _watchlist_payload(symbols: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        'market': 'KR',
+        'currency': 'KRW',
+        'timezone': 'Asia/Seoul',
+        'symbols': [
+            {
+                'symbol': str(item['symbol']).zfill(6),
+                'name': item.get('name') or '',
+                'market': item.get('market') or 'KR',
+            }
+            for item in symbols
+        ],
+    }
+
+
+def _replace_watchlist_atomically(
+    watchlist_path: Path,
+    payload: dict[str, Any],
+) -> Path | None:
+    '''Back up then atomically replace a local watchlist file.'''
+    watchlist_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = watchlist_path.with_name(
+        f'{watchlist_path.stem}.backup.{timestamp}{watchlist_path.suffix}'
+    )
+    temp_path = watchlist_path.with_name(
+        f'.{watchlist_path.name}.tmp.{timestamp}'
+    )
+    if watchlist_path.exists():
+        shutil.copy2(watchlist_path, backup_path)
+    try:
+        serialized = yaml.safe_dump(
+            payload,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+        temp_path.write_text(serialized, encoding='utf-8')
+        temp_path.replace(watchlist_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    return backup_path if backup_path.exists() else None
+
+
+def _build_automation_watchlist(
+    client: KisClient,
+    profile: dict[str, Any],
+    *,
+    profile_service: MarketProfileService,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    del now
+    profile_payload = (
+        profile.get('profile') if isinstance(profile, dict) else None
+    )
+    profile_payload = (
+        profile_payload if isinstance(profile_payload, dict) else profile
+    )
+    if not isinstance(profile_payload, dict):
+        raise KisWatchlistUpdateError('Automation profile payload is invalid.')
+
+    settings = profile_payload.get('settings')
+    effective_settings = profile_payload.get('effective_settings')
+    settings = settings if isinstance(settings, dict) else profile_payload
+    effective_settings = (
+        effective_settings
+        if isinstance(effective_settings, dict)
+        else settings
+    )
+    capital = (
+        settings.get('capital')
+        if isinstance(settings.get('capital'), dict)
+        else {}
+    )
+    effective_capital = (
+        effective_settings.get('capital')
+        if isinstance(effective_settings.get('capital'), dict)
+        else capital
+    )
+    universe = (
+        settings.get('universe')
+        if isinstance(settings.get('universe'), dict)
+        else {}
+    )
+    effective_universe = (
+        effective_settings.get('universe')
+        if isinstance(effective_settings.get('universe'), dict)
+        else universe
+    )
+    configured_max_price = _optional_price_value(
+        universe.get('max_price_krw')
+        if 'max_price_krw' in universe
+        else effective_universe.get('max_price_krw'),
+        field='universe.max_price_krw',
+        allow_zero=False,
+    )
+    configured_min_price = _optional_price_value(
+        universe.get('min_price_krw')
+        if 'min_price_krw' in universe
+        else effective_universe.get('min_price_krw'),
+        field='universe.min_price_krw',
+        allow_zero=True,
+    )
+
+    sizing_mode = str(
+        capital.get('sizing_mode')
+        or effective_capital.get('sizing_mode')
+        or 'equity_pct'
+    ).strip().lower()
+    if sizing_mode not in {'equity_pct', 'fixed_budget'}:
+        raise KisWatchlistUpdateError(
+            f'Automation profile budget is invalid: unsupported sizing mode {sizing_mode}.'
+        )
+
+    raw_max_order = (
+        capital.get('max_order_notional_krw')
+        if 'max_order_notional_krw' in capital
+        else effective_capital.get('max_order_notional_krw')
+    )
+    if 'max_order_notional_krw' in capital and raw_max_order is None:
+        max_order_notional = None
+    else:
+        effective_max_order = (
+            effective_capital.get('max_order_notional_krw')
+            if 'max_order_notional_krw' in effective_capital
+            else raw_max_order
+        )
+        _optional_price_value(
+            raw_max_order,
+            field='capital.max_order_notional_krw',
+            allow_zero=False,
+        )
+        max_order_notional = _optional_price_value(
+            effective_max_order,
+            field='capital.max_order_notional_krw',
+            allow_zero=False,
+        )
+
+    fixed_budget = None
+    if sizing_mode == 'fixed_budget':
+        fixed_value = (
+            capital.get('fixed_budget')
+            if 'fixed_budget' in capital
+            else effective_capital.get('fixed_budget')
+        )
+        fixed_budget = _optional_price_value(
+            fixed_value,
+            field='capital.fixed_budget',
+            allow_zero=False,
+        )
+
+    cap_components = [
+        value
+        for value in (configured_max_price, max_order_notional, fixed_budget)
+        if value is not None
+    ]
+    if not cap_components:
+        raise KisWatchlistUpdateError(
+            'Automation profile budget is invalid: no usable price cap.'
+        )
+    effective_max_price = min(cap_components)
+
+    source_path = _resolve_project_path(AUTOMATION_WATCHLIST_SOURCE_FILE)
+    source_rows = _load_automation_source_universe(source_path)
+    source_counts = {
+        'KOSPI': sum(item['market'] == 'KOSPI' for item in source_rows),
+        'KOSDAQ': sum(item['market'] == 'KOSDAQ' for item in source_rows),
+    }
+    eligible_by_market: dict[str, list[dict[str, Any]]] = {
+        'KOSPI': [],
+        'KOSDAQ': [],
+    }
+    price_lookup_success_count = 0
+    price_lookup_failure_count = 0
+    price_lookup_failures: list[dict[str, str]] = []
+    for source_item in source_rows:
+        symbol = source_item['symbol']
+        try:
+            quote = client.get_domestic_stock_price(symbol)
+            price = _quote_price(quote)
+            if price is None:
+                raise ValueError('current_price_unavailable')
+        except Exception as exc:
+            price_lookup_failure_count += 1
+            if len(price_lookup_failures) < 20:
+                price_lookup_failures.append(
+                    {'symbol': symbol, 'reason': _price_lookup_reason(exc)}
+                )
+            continue
+        price_lookup_success_count += 1
+        if configured_min_price is not None and price < configured_min_price:
+            continue
+        if price > effective_max_price:
+            continue
+        eligible_by_market[source_item['market']].append(
+            {
+                **source_item,
+                'current_price': price,
+            }
+        )
+
+    selected_by_market = {
+        'KOSPI': eligible_by_market['KOSPI'][:AUTOMATION_KOSPI_LIMIT],
+        'KOSDAQ': eligible_by_market['KOSDAQ'][:AUTOMATION_KOSDAQ_LIMIT],
+    }
+    selected = selected_by_market['KOSPI'] + selected_by_market['KOSDAQ']
+    if not selected:
+        raise KisWatchlistUpdateError(
+            'Automation KR watchlist refresh aborted: zero usable symbols.'
+        )
+    max_final_price = max(
+        (float(item['current_price']) for item in selected),
+        default=None,
+    )
+    over_budget_count = sum(
+        float(item['current_price']) > effective_max_price
+        for item in selected
+    )
+    budget_values = [
+        value for value in (max_order_notional, fixed_budget)
+        if value is not None
+    ]
+    return {
+        'provider': 'kis',
+        'market': 'KR',
+        'mode': AUTOMATION_WATCHLIST_MODE,
+        'source_universe_file': AUTOMATION_WATCHLIST_SOURCE_FILE,
+        'source_universe_count': len(source_rows),
+        'source_kospi_count': source_counts['KOSPI'],
+        'source_kosdaq_count': source_counts['KOSDAQ'],
+        'configured_min_price_krw': configured_min_price,
+        'configured_max_price_krw': configured_max_price,
+        'budget_max_price_krw': min(budget_values) if budget_values else None,
+        'effective_max_price_krw': effective_max_price,
+        'price_lookup_success_count': price_lookup_success_count,
+        'price_lookup_failure_count': price_lookup_failure_count,
+        'price_lookup_failures': price_lookup_failures,
+        'eligible_kospi_count': len(eligible_by_market['KOSPI']),
+        'eligible_kosdaq_count': len(eligible_by_market['KOSDAQ']),
+        'selected_kospi_count': len(selected_by_market['KOSPI']),
+        'selected_kosdaq_count': len(selected_by_market['KOSDAQ']),
+        'final_watchlist_count': len(selected),
+        'target_watchlist_count': AUTOMATION_WATCHLIST_TARGET_COUNT,
+        'max_price_in_final_watchlist': max_final_price,
+        'over_budget_price_count': over_budget_count,
+        'symbols': selected,
+        'updated': False,
+        'real_order_submitted': False,
+        'broker_submit_called': False,
+        'manual_submit_called': False,
+    }
+
+
+def _load_automation_source_universe(path: Path) -> list[dict[str, Any]]:
+    try:
+        payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+    except Exception as exc:
+        raise KisWatchlistUpdateError(
+            f'Automation source universe load failed: {path}.'
+        ) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get('symbols'), list):
+        raise KisWatchlistUpdateError(
+            f'Automation source universe is malformed: {path}.'
+        )
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(payload['symbols']):
+        if not isinstance(raw, dict):
+            raise KisWatchlistUpdateError(
+                f'Automation source universe row {index + 1} is malformed.'
+            )
+        symbol = _normalize_symbol(raw.get('symbol'))
+        market = _normalize_market(raw.get('market'))
+        if not symbol or market not in {'KOSPI', 'KOSDAQ'}:
+            raise KisWatchlistUpdateError(
+                f'Automation source universe row {index + 1} has invalid symbol or market.'
+            )
+        if symbol in seen:
+            raise KisWatchlistUpdateError(
+                f'Automation source universe contains duplicate symbol {symbol}.'
+            )
+        seen.add(symbol)
+        rows.append(
+            {
+                'symbol': symbol,
+                'name': str(raw.get('name') or raw.get('source_name') or ''),
+                'market': market,
+                'source_index': index,
+            }
+        )
+    return rows
+
+
+def _optional_price_value(
+    value: Any,
+    *,
+    field: str,
+    allow_zero: bool,
+) -> float | None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise KisWatchlistUpdateError(
+            f'Automation profile value is invalid: {field}.'
+        )
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise KisWatchlistUpdateError(
+            f'Automation profile value is invalid: {field}.'
+        ) from exc
+    if not math.isfinite(number) or (number < 0 if allow_zero else number <= 0):
+        raise KisWatchlistUpdateError(
+            f'Automation profile value is invalid: {field}.'
+        )
+    return number
+
+
+def _quote_price(payload: Any) -> float | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ('current_price', 'price', 'stck_prpr'):
+        value = payload.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number) and number > 0:
+            return number
+    return None
+
+
+def _price_lookup_reason(exc: Exception) -> str:
+    text = str(exc).strip()
+    return f'{exc.__class__.__name__}:{text}' if text else exc.__class__.__name__

@@ -12,6 +12,9 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 from app.db.database import SessionLocal
 from app.db.models import PositionLifecycle
 from app.schemas.strategy_dry_run_auto_buy import ProfileAwareDryRunAutoBuyRequest
@@ -21,6 +24,11 @@ from app.services.automation_execution_authority_service import (
 from app.services.profile_aware_dry_run_auto_buy_factory import (
     build_profile_aware_dry_run_auto_buy_service,
 )
+from app.services.kis_watchlist_update_service import (
+    AUTOMATION_WATCHLIST_SOURCE_FILE,
+    KisWatchlistUpdateService,
+)
+from app.services.market_profile_service import MarketProfileService
 from app.services.scheduler_service import SchedulerService
 
 
@@ -30,6 +38,10 @@ CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"
 
 CANONICAL_TRIGGER_SOURCE = 'automation_scheduler'
 CANONICAL_JOB_ID = 'automation_scheduler.kis.profile_tick'
+AUTOMATION_WATCHLIST_REFRESH_JOB_ID = (
+    'automation_scheduler.kis.automation_watchlist_refresh'
+)
+AUTOMATION_WATCHLIST_REFRESH_SLOT = '09:05'
 CANONICAL_STAGES = [
     'profile_slot_resolution',
     'broker_account_sync',
@@ -50,6 +62,32 @@ class AutomationSchedulerService(SchedulerService):
         super().__init__()
         self.profile_aware_dry_run_auto_buy_service = None
         self._canonical_slot_lock = threading.Lock()
+        self.automation_watchlist_update_service = None
+        self._automation_watchlist_refresh_lock = threading.Lock()
+        self._automation_watchlist_refresh_dates: set[str] = set()
+        self._automation_watchlist_status: dict[str, Any] = {
+            'last_watchlist_refresh_at': None,
+            'last_watchlist_refresh_result': None,
+            'last_watchlist_refresh_reason': None,
+            'source_universe_file': AUTOMATION_WATCHLIST_SOURCE_FILE,
+            'source_universe_count': 0,
+            'source_kospi_count': 0,
+            'source_kosdaq_count': 0,
+            'configured_max_price_krw': None,
+            'budget_max_price_krw': None,
+            'effective_max_price_krw': None,
+            'price_lookup_success_count': 0,
+            'price_lookup_failure_count': 0,
+            'eligible_kospi_count': 0,
+            'eligible_kosdaq_count': 0,
+            'selected_kospi_count': 0,
+            'selected_kosdaq_count': 0,
+            'final_watchlist_count': 0,
+            'max_price_in_final_watchlist': None,
+            'over_budget_price_count': 0,
+            'watchlist_file': 'config/watchlist_kr.yaml',
+            'backup_file': None,
+        }
 
     def production_trading_jobs(self) -> list[dict[str, object]]:
         return [
@@ -63,6 +101,35 @@ class AutomationSchedulerService(SchedulerService):
                 'stages': list(CANONICAL_STAGES),
             }
         ]
+
+    def maintenance_jobs(self) -> list[dict[str, object]]:
+        return [
+            {
+                'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+                'authority': self.__class__.__name__,
+                'provider': 'kis',
+                'market': 'KR',
+                'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+                'timezone': 'Asia/Seoul',
+                'recurring': True,
+                'automatic': True,
+                'trading': False,
+                'order_submission': False,
+            }
+        ]
+
+    def runtime_status(self) -> dict[str, object]:
+        status = super().runtime_status()
+        maintenance = self.maintenance_jobs()
+        status.update(self._automation_watchlist_status)
+        status.update(
+            {
+                'maintenance_jobs': maintenance,
+                'maintenance_job_count': len(maintenance),
+            }
+        )
+        return status
+
     def _safe_call(self, callback, *args):
         result = super()._safe_call(callback, *args)
         if callback.__name__ == '_run_automation_tick':
@@ -91,6 +158,16 @@ class AutomationSchedulerService(SchedulerService):
             self._slot_runs = {
                 key for key in self._slot_runs if key.startswith(f"{day_key}:KR:")
             }
+            self._automation_watchlist_refresh_dates = {
+                value
+                for value in self._automation_watchlist_refresh_dates
+                if value == day_key
+            }
+            if now_kst.hour == 9 and now_kst.minute == 5:
+                self._safe_call(
+                    self._run_automation_watchlist_refresh_scheduled_once,
+                    now_kst,
+                )
             for slot, hour, minute in self._profile_slots(now_kst):
                 if now_kst.hour != hour or now_kst.minute != minute:
                     continue
@@ -289,6 +366,230 @@ class AutomationSchedulerService(SchedulerService):
             }
         finally:
             db.close()
+
+    def run_automation_watchlist_refresh_once(
+        self,
+        *,
+        now: datetime | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        '''Run the non-trading daily Automation watchlist maintenance job.'''
+        current = now or datetime.now(KST)
+        now_kst = (
+            current.astimezone(KST)
+            if current.tzinfo is not None
+            else current.replace(tzinfo=KST)
+        )
+        day_key = now_kst.date().isoformat()
+        if not force:
+            with self._automation_watchlist_refresh_lock:
+                if day_key in self._automation_watchlist_refresh_dates:
+                    return {
+                        'scheduler': self.__class__.__name__,
+                        'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+                        'job_type': 'maintenance',
+                        'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+                        'status': 'skipped',
+                        'result': 'skipped',
+                        'reason': 'automation_watchlist_refresh_already_run',
+                        'updated': False,
+                        'real_order_submitted': False,
+                        'broker_submit_called': False,
+                    }
+                self._automation_watchlist_refresh_dates.add(day_key)
+        return self._execute_automation_watchlist_refresh(now_kst)
+
+    def _run_automation_watchlist_refresh_scheduled_once(
+        self,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        return self.run_automation_watchlist_refresh_once(now=now)
+
+    def _run_automation_watchlist_maintenance_once(
+        self,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        '''Compatibility name for the same canonical maintenance job.'''
+        return self._run_automation_watchlist_refresh_scheduled_once(now=now)
+
+    def _execute_automation_watchlist_refresh(
+        self,
+        now_kst: datetime,
+    ) -> dict[str, Any]:
+        db = SessionLocal()
+        try:
+            authority = AutomationExecutionAuthorityService(
+                self.runtime_settings
+            ).snapshot(db)
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            schedule = self.automation_profiles.selected_profile_schedule(
+                db,
+                now=now_kst,
+            )
+            if not schedule:
+                return self._automation_watchlist_skip(
+                    now_kst,
+                    'no_active_profile',
+                )
+            profile = schedule.get('profile') or {}
+            if (
+                str(profile.get('provider') or '').lower() != 'kis'
+                or str(profile.get('market') or '').upper() != 'KR'
+            ):
+                return self._automation_watchlist_skip(
+                    now_kst,
+                    'automation_not_active',
+                )
+            if not authority.get('scheduler_allowed'):
+                return self._automation_watchlist_skip(
+                    now_kst,
+                    'automation_not_active',
+                )
+            if not runtime.get('automation_profile_scheduler_enabled'):
+                return self._automation_watchlist_skip(
+                    now_kst,
+                    'automation_not_active',
+                )
+            if schedule.get('status') != 'active':
+                reason = (
+                    'profile_outside_operation_window'
+                    if schedule.get('status') in {'scheduled', 'ended'}
+                    else 'automation_not_active'
+                )
+                return self._automation_watchlist_skip(now_kst, reason)
+
+            updater = self._automation_watchlist_updater(db)
+            result = updater.update_automation_watchlist(
+                profile,
+                now=now_kst,
+            )
+            result = {
+                **result,
+                'scheduler': self.__class__.__name__,
+                'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+                'job_type': 'maintenance',
+                'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+                'refresh_at': now_kst.isoformat(),
+            }
+            self._record_automation_watchlist_status(result)
+            return result
+        except Exception as exc:
+            return self._automation_watchlist_failure(
+                now_kst,
+                self._automation_watchlist_failure_reason(exc),
+                exc,
+            )
+        finally:
+            db.close()
+
+    def _automation_watchlist_updater(self, db):
+        if self.automation_watchlist_update_service is None:
+            settings_obj = get_settings()
+            client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+            self.automation_watchlist_update_service = KisWatchlistUpdateService(
+                client,
+                profile_service=MarketProfileService(),
+            )
+        return self.automation_watchlist_update_service
+
+    def _automation_watchlist_skip(
+        self,
+        now_kst: datetime,
+        reason: str,
+    ) -> dict[str, Any]:
+        result = {
+            'scheduler': self.__class__.__name__,
+            'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+            'job_type': 'maintenance',
+            'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+            'status': 'skipped',
+            'result': 'skipped',
+            'reason': reason,
+            'refresh_at': now_kst.isoformat(),
+            'updated': False,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+            'manual_submit_called': False,
+        }
+        self._record_automation_watchlist_status(result)
+        return result
+
+    def _automation_watchlist_failure(
+        self,
+        now_kst: datetime,
+        reason: str,
+        exc: Exception,
+    ) -> dict[str, Any]:
+        result = {
+            'scheduler': self.__class__.__name__,
+            'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+            'job_type': 'maintenance',
+            'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+            'status': 'failed',
+            'result': 'failed',
+            'reason': reason,
+            'error': f'{exc.__class__.__name__}: {exc}',
+            'refresh_at': now_kst.isoformat(),
+            'updated': False,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+            'manual_submit_called': False,
+        }
+        self._record_automation_watchlist_status(result)
+        return result
+
+    @staticmethod
+    def _automation_watchlist_failure_reason(exc: Exception) -> str:
+        message = str(exc).lower()
+        if 'source universe' in message:
+            return 'source_universe_load_failed'
+        if 'profile' in message and 'budget' in message:
+            return 'invalid_profile_budget'
+        if 'file update' in message or 'watchlist refresh file' in message:
+            return 'watchlist_file_write_failed'
+        if 'zero usable' in message:
+            return 'zero_usable_symbols'
+        return 'automation_watchlist_refresh_failed'
+
+    def _record_automation_watchlist_status(
+        self,
+        result: dict[str, Any],
+    ) -> None:
+        field_names = (
+            'refresh_at',
+            'source_universe_file',
+            'source_universe_count',
+            'source_kospi_count',
+            'source_kosdaq_count',
+            'configured_max_price_krw',
+            'budget_max_price_krw',
+            'effective_max_price_krw',
+            'price_lookup_success_count',
+            'price_lookup_failure_count',
+            'eligible_kospi_count',
+            'eligible_kosdaq_count',
+            'selected_kospi_count',
+            'selected_kosdaq_count',
+            'final_watchlist_count',
+            'max_price_in_final_watchlist',
+            'over_budget_price_count',
+            'watchlist_file',
+            'backup_file',
+        )
+        for field_name in field_names:
+            if field_name in result:
+                target_name = (
+                    'last_watchlist_refresh_at'
+                    if field_name == 'refresh_at'
+                    else field_name
+                )
+                self._automation_watchlist_status[target_name] = result[field_name]
+        self._automation_watchlist_status['last_watchlist_refresh_result'] = (
+            result.get('result') or result.get('status')
+        )
+        self._automation_watchlist_status['last_watchlist_refresh_reason'] = (
+            result.get('reason')
+        )
 
     def _run_profile_analysis(
         self,

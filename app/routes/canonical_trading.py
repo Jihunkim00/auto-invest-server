@@ -56,7 +56,35 @@ def automation_status(db: Session = Depends(get_db)):
     profile = AutomationProfileService(runtime_settings=runtime).selected_profile_schedule(db)
     settings = runtime.get_settings_read_only(db)
     scheduler_runtime = scheduler_service.runtime_status()
+    watchlist_refresh_status = {
+        key: scheduler_runtime.get(key)
+        for key in (
+            'last_watchlist_refresh_at',
+            'last_watchlist_refresh_result',
+            'last_watchlist_refresh_reason',
+            'source_universe_file',
+            'source_universe_count',
+            'source_kospi_count',
+            'source_kosdaq_count',
+            'configured_max_price_krw',
+            'budget_max_price_krw',
+            'effective_max_price_krw',
+            'price_lookup_success_count',
+            'price_lookup_failure_count',
+            'eligible_kospi_count',
+            'eligible_kosdaq_count',
+            'selected_kospi_count',
+            'selected_kosdaq_count',
+            'final_watchlist_count',
+            'max_price_in_final_watchlist',
+            'over_budget_price_count',
+            'watchlist_file',
+            'backup_file',
+            'maintenance_job_count',
+        )
+    }
     return {
+        **watchlist_refresh_status,
         "scheduler": "AutomationSchedulerService",
         "enabled": bool(settings.get("automation_profile_scheduler_enabled")),
         "mode": authority.get("automation_mode"),
