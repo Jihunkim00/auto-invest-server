@@ -285,10 +285,16 @@ class AutomationProfileBuySchedulerService:
         trigger_source: str = TRIGGER_SOURCE,
         now: datetime | None = None,
         enforce_custom_profile_live_guard: bool = False,
+        trusted_scheduler_authority: bool = False,
     ) -> dict[str, Any]:
         now_utc = _utc(now)
         profile = self._active_profile(db)
-        if not str(trigger_source).lower().startswith(('scheduler', 'automation_profile_scheduler')):
+        if (
+            not trusted_scheduler_authority
+            and not str(trigger_source).lower().startswith(
+                ('scheduler', 'automation_profile_scheduler')
+            )
+        ):
             return self._blocked('manual_execution_isolation', profile=profile)
         if not profile.get('profile_key') or profile.get('status') != 'active':
             return self._blocked('profile_status_not_active', profile=profile)

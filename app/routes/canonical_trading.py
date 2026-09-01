@@ -55,14 +55,19 @@ def automation_status(db: Session = Depends(get_db)):
     authority = AutomationExecutionAuthorityService(runtime).snapshot(db)
     profile = AutomationProfileService(runtime_settings=runtime).selected_profile_schedule(db)
     settings = runtime.get_settings_read_only(db)
+    scheduler_runtime = scheduler_service.runtime_status()
     return {
         "scheduler": "AutomationSchedulerService",
         "enabled": bool(settings.get("automation_profile_scheduler_enabled")),
         "mode": authority.get("automation_mode"),
         "authority": authority,
         "active_profile": profile,
-        "next_scheduled_run": scheduler_service.runtime_status().get("next_profile_run_at"),
-        "latest_decision": scheduler_service.runtime_status().get("last_profile_run_result"),
+        "next_scheduled_run": scheduler_runtime.get("next_profile_run_at"),
+        "latest_decision": scheduler_runtime.get("last_profile_run_result"),
+        "production_trading_jobs": scheduler_runtime.get("production_trading_jobs", []),
+        "production_trading_job_count": scheduler_runtime.get(
+            "production_trading_job_count", 0
+        ),
         "kill_switch": bool(settings.get("kill_switch")),
     }
 

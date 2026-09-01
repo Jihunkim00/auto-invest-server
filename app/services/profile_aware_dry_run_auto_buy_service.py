@@ -33,9 +33,27 @@ from app.services.target_aware_risk_service import TargetAwareRiskService
 
 MODE = "strategy_dry_run_auto_buy"
 TRIGGER_SOURCE = "profile_aware_dry_run_auto_buy"
+CANONICAL_TRIGGER_SOURCE = "automation_scheduler"
+CANONICAL_MODE = "automation_scheduler_profile_analysis"
 PROVIDER = "kis"
 MARKET = "KR"
 _KST = ZoneInfo("Asia/Seoul")
+_CANONICAL_EXECUTION_MODES = {"test", "paper", "live"}
+_LEGACY_LIVE_RISK_FLAGS = {
+    "dry_run_only",
+    "kr_trading_disabled",
+    "preview_only",
+}
+_LEGACY_LIVE_NOTE_MARKERS = (
+    "dry-run",
+    "dry run",
+    "dry_run",
+    "preview-only",
+    "preview only",
+    "preview_only",
+    "kis validation and broker submit were not called",
+    "trading is disabled",
+)
 
 
 class ProfileAwareDryRunAutoBuyService:
@@ -63,6 +81,7 @@ class ProfileAwareDryRunAutoBuyService:
         *,
         preview_override: dict[str, Any] | None = None,
         now: datetime | None = None,
+        execution_mode: str | None = None,
     ) -> dict[str, Any]:
         payload = (
             request
@@ -70,6 +89,13 @@ class ProfileAwareDryRunAutoBuyService:
             else ProfileAwareDryRunAutoBuyRequest.model_validate(request)
         )
         now_utc = _utc_now(now)
+        trigger_source = _effective_trigger_source(payload)
+        canonical_execution_mode = _normalize_execution_mode(execution_mode)
+        mode = (
+            CANONICAL_MODE
+            if trigger_source == CANONICAL_TRIGGER_SOURCE
+            else MODE
+        )
         # Custom automation settings are the source of truth. ``profile_name``
         # remains the compatible legacy strategy/risk preset identity.
         profile_row = (
@@ -96,6 +122,7 @@ class ProfileAwareDryRunAutoBuyService:
             request=payload,
             preview_override=preview_override,
             profile=profile,
+            trigger_source=trigger_source,
         )
         preview = self._apply_profile_universe(preview, profile=profile)
         candidates = self._candidate_list(
@@ -114,6 +141,7 @@ class ProfileAwareDryRunAutoBuyService:
                 candidate,
                 profile=profile,
                 profile_name=risk_profile_name,
+                trigger_source=trigger_source,
             )
             for candidate in candidates
         ]
@@ -141,6 +169,9 @@ class ProfileAwareDryRunAutoBuyService:
             legacy_profile_name=legacy_profile_name,
             automation_profile_key=automation_profile_key,
             automation_profile_name=automation_profile_name,
+            trigger_source=trigger_source,
+            mode=mode,
+            execution_mode=canonical_execution_mode,
             now_utc=now_utc,
         )
 
@@ -152,7 +183,10 @@ class ProfileAwareDryRunAutoBuyService:
                     response=response,
                     signal_id=signal.id,
                 )
-                if response["action"] == "would_buy"
+                if (
+                    response["action"] == "would_buy"
+                    and response.get("execution_mode") != "live"
+                )
                 else None
             )
             if order is not None:
@@ -267,6 +301,7 @@ class ProfileAwareDryRunAutoBuyService:
         request: ProfileAwareDryRunAutoBuyRequest,
         preview_override: dict[str, Any] | None,
         profile: dict[str, Any],
+        trigger_source: str,
     ) -> dict[str, Any]:
         if preview_override is not None:
             return _normalize_preview_payload(preview_override, status="override")
@@ -292,7 +327,7 @@ class ProfileAwareDryRunAutoBuyService:
                     include_gpt=True,
                     db=db,
                     record_run=False,
-                    trigger_source=TRIGGER_SOURCE,
+                    trigger_source=trigger_source,
                     min_price_krw=min_price_krw,
                     max_price_krw=max_price_krw,
                 )
@@ -504,6 +539,7 @@ class ProfileAwareDryRunAutoBuyService:
         *,
         profile: dict[str, Any],
         profile_name: str,
+        trigger_source: str,
     ) -> dict[str, Any]:
         symbol = _symbol(candidate)
         buy_score = _score(
@@ -533,7 +569,7 @@ class ProfileAwareDryRunAutoBuyService:
                 "buy_score": buy_score,
                 "sell_score": _score(candidate, "final_sell_score", "quant_sell_score"),
                 "confidence": _score(candidate, "confidence"),
-                "trigger_source": TRIGGER_SOURCE,
+                "trigger_source": trigger_source,
                 "dry_run": True,
             },
             profile_name=profile_name,
@@ -687,6 +723,9 @@ class ProfileAwareDryRunAutoBuyService:
         legacy_profile_name: str,
         automation_profile_key: str | None,
         automation_profile_name: str | None,
+        trigger_source: str,
+        mode: str,
+        execution_mode: str | None,
         now_utc: datetime,
     ) -> dict[str, Any]:
         target = selected.get("target_risk_result") if selected else {}
@@ -698,24 +737,65 @@ class ProfileAwareDryRunAutoBuyService:
             if selected
             else {}
         )
+        effective_min_entry_score = float(profile.get("buy_score_threshold") or 0)
+        legacy_risk_flags = _strings(preview.get("risk_flags")) + _strings(
+            selected.get("risk_flags") if selected else []
+        )
+        legacy_gating_notes = _strings(preview.get("gating_notes")) + _strings(
+            selected.get("gating_notes") if selected else []
+        )
+        if execution_mode == "live":
+            legacy_risk_flags = [
+                value
+                for value in legacy_risk_flags
+                if value.strip().lower() not in _LEGACY_LIVE_RISK_FLAGS
+            ]
+            legacy_gating_notes = [
+                value
+                for value in legacy_gating_notes
+                if not _is_legacy_live_note(value)
+            ]
         risk_flags = _dedupe(
             [
-                "dry_run_only",
                 "profile_aware",
                 "target_aware",
-                *_strings(preview.get("risk_flags")),
-                *_strings(selected.get("risk_flags") if selected else []),
+                *(["dry_run_only"] if execution_mode != "live" else []),
+                *legacy_risk_flags,
                 *(([decision["reason"]]) if decision["action"] != "would_buy" else []),
             ]
         )
-        gating_notes = _dedupe(
-            [
+        if execution_mode == "live":
+            mode_gating_notes = [
+                "Canonical LIVE profile analysis completed; guarded submission remains subject to execution checks."
+            ]
+        elif execution_mode == "paper":
+            mode_gating_notes = [
+                "Paper/simulation mode; no broker submit."
+            ]
+        elif execution_mode == "test":
+            mode_gating_notes = [
+                "Test mode; no broker submit."
+            ]
+        else:
+            mode_gating_notes = [
                 "Profile-aware dry-run simulation only; no real order submitted.",
                 "KIS validation and broker submit were not called.",
-                *_strings(preview.get("gating_notes")),
-                *_strings(selected.get("gating_notes") if selected else []),
+            ]
+        gating_notes = _dedupe(
+            [
+                *mode_gating_notes,
+                *legacy_gating_notes,
             ]
         )
+        analysis_approved = decision["action"] == "would_buy"
+        result = _mode_result(decision["action"], execution_mode)
+        risk_decision = {
+            "approved": analysis_approved,
+            "reason": decision["reason"],
+            "final_buy_score": selected.get("final_score") if selected else None,
+            "effective_min_entry_score": effective_min_entry_score,
+            "target_risk_approved": bool(decision["target_risk_approved"]),
+        }
         target_quality_notes = (
             _strings((target or {}).get("data_quality_notes"))
             if isinstance(target, dict)
@@ -752,13 +832,27 @@ class ProfileAwareDryRunAutoBuyService:
             "automation_profile_key": automation_profile_key,
             "automation_profile_name": automation_profile_name,
             "legacy_profile_name": legacy_profile_name,
+            "trigger_source": trigger_source,
+            "mode": mode,
+            "execution_mode": execution_mode,
+            "execution_authority": (
+                execution_mode.upper() if execution_mode else None
+            ),
+            "result": result,
+            "risk_decision": risk_decision,
+            "submission_eligible": bool(
+                execution_mode == "live" and analysis_approved
+            ),
             "profile_provider": profile.get("provider") or request.provider,
             "profile_market": profile.get("market") or request.market,
             "selected_symbol": selected.get("symbol") if selected else None,
             "selected_symbol_name": selected.get("name") if selected else None,
             "candidate_count": len(evaluated),
             **_preview_observability(preview, evaluated_count=len(evaluated)),
-            "candidates": [_public_candidate(item) for item in evaluated],
+            "candidates": [
+                _public_candidate(item, execution_mode=execution_mode)
+                for item in evaluated
+            ],
             "buy_score": selected.get("buy_score") if selected else None,
             "final_buy_score": selected.get("final_score") if selected else None,
             "sell_score": selected.get("sell_score") if selected else None,
@@ -781,6 +875,7 @@ class ProfileAwareDryRunAutoBuyService:
             "selected_confidence": selected_observability.get("confidence"),
             "selected_candidate_observability": selected_observability,
             "required_entry_score": float(profile.get("buy_score_threshold") or 0),
+            "effective_min_entry_score": effective_min_entry_score,
             "confidence": selected.get("confidence") if selected else None,
             "target_risk_approved": decision["target_risk_approved"],
             "target_risk_result": target or {},
@@ -851,7 +946,9 @@ class ProfileAwareDryRunAutoBuyService:
             "order_cap_source": (target or {}).get("order_cap_source", "equity_pct")
             if isinstance(target, dict)
             else "equity_pct",
-            "safety": _safety(),
+            "dry_run_only": execution_mode != "live",
+            "preview_only": execution_mode != "live",
+            "safety": _safety(dry_run_only=execution_mode != "live"),
             "created_at": now_utc.isoformat(),
         }
 
@@ -897,7 +994,7 @@ class ProfileAwareDryRunAutoBuyService:
             approved_by_risk=response["target_risk_approved"],
             position_size_pct=response["recommended_notional_pct"],
             signal_status=response["action"],
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=str(response.get("trigger_source") or TRIGGER_SOURCE),
             # Keep the legacy signal column compatible; custom identity is
             # persisted in the run/order payload fields above.
             gate_profile_name=response["legacy_profile_name"],
@@ -935,8 +1032,8 @@ class ProfileAwareDryRunAutoBuyService:
             submitted_at=datetime.now(UTC),
             request_payload=_json(
                 {
-                    "mode": MODE,
-                    "trigger_source": TRIGGER_SOURCE,
+                    "mode": response.get("mode") or MODE,
+                    "trigger_source": response.get("trigger_source") or TRIGGER_SOURCE,
                     "signal_id": signal_id,
                     "active_profile": response["active_profile"],
                     "profile_key": response.get("profile_key"),
@@ -979,18 +1076,18 @@ class ProfileAwareDryRunAutoBuyService:
     ) -> TradeRunLog:
         run = TradeRunLog(
             run_key=f"strategy_dry_buy_{uuid.uuid4().hex[:12]}",
-            trigger_source=TRIGGER_SOURCE,
+            trigger_source=response.get("trigger_source") or TRIGGER_SOURCE,
             symbol=str(response.get("selected_symbol") or "WATCHLIST"),
-            mode=MODE,
+            mode=response.get("mode") or MODE,
             stage="done",
-            result=response["action"],
+            result=response.get("result") or response["action"],
             reason=response["reason"],
             signal_id=signal_id,
             order_id=order_id,
             request_payload=_json(
                 {
                     **request.model_dump(mode="json"),
-                    "mode": MODE,
+                    "mode": response.get("mode") or MODE,
                     "active_profile": response["active_profile"],
                     "profile_key": response.get("profile_key"),
                     "profile_name": response.get("profile_name"),
@@ -999,7 +1096,12 @@ class ProfileAwareDryRunAutoBuyService:
                     "legacy_profile_name": response.get("legacy_profile_name"),
                     "profile_provider": response.get("profile_provider"),
                     "profile_market": response.get("profile_market"),
-                    "dry_run": True,
+                    "dry_run": bool(response.get("dry_run_only", True)),
+                    "execution_mode": response.get("execution_mode"),
+                    "execution_authority": response.get("execution_authority"),
+                    "effective_min_entry_score": response.get(
+                        "effective_min_entry_score"
+                    ),
                     "real_order_submitted": False,
                     "validation_called": False,
                     "broker_submit_called": False,
@@ -1013,6 +1115,41 @@ class ProfileAwareDryRunAutoBuyService:
         return run
 
 
+def _effective_trigger_source(
+    request: ProfileAwareDryRunAutoBuyRequest,
+) -> str:
+    # The canonical scheduler is the only caller allowed to change the
+    # persisted identity. All compatibility/manual requests retain the
+    # historical profile-aware trigger source.
+    if str(request.trigger_source or '').strip() == CANONICAL_TRIGGER_SOURCE:
+        return CANONICAL_TRIGGER_SOURCE
+    return TRIGGER_SOURCE
+
+
+def _normalize_execution_mode(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower()
+    return normalized if normalized in _CANONICAL_EXECUTION_MODES else "test"
+
+
+def _mode_result(action: str, execution_mode: str | None) -> str:
+    if action != "would_buy":
+        return "blocked" if action == "blocked" else action
+    if execution_mode == "live":
+        return "LIVE_READY"
+    if execution_mode == "paper":
+        return "PAPER_SIMULATED"
+    if execution_mode == "test":
+        return "TEST_SIMULATED"
+    return action
+
+
+def _is_legacy_live_note(value: str) -> bool:
+    normalized = str(value or "").strip().lower()
+    return any(marker in normalized for marker in _LEGACY_LIVE_NOTE_MARKERS)
+
+
 def _candidate_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     return (
         0 if item.get("target_risk_approved") else 1,
@@ -1024,8 +1161,23 @@ def _candidate_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def _public_candidate(item: dict[str, Any]) -> dict[str, Any]:
+def _public_candidate(
+    item: dict[str, Any],
+    *,
+    execution_mode: str | None = None,
+) -> dict[str, Any]:
     public = candidate_gpt_quant_observability(item.get("raw"), evaluated=item)
+    risk_flags = _strings(item.get("risk_flags"))
+    gating_notes = _strings(item.get("gating_notes"))
+    if execution_mode == "live":
+        risk_flags = [
+            value
+            for value in risk_flags
+            if value.strip().lower() not in _LEGACY_LIVE_RISK_FLAGS
+        ]
+        gating_notes = [
+            value for value in gating_notes if not _is_legacy_live_note(value)
+        ]
     public.update(
         {
             "entry_ready": item.get("entry_ready"),
@@ -1033,8 +1185,8 @@ def _public_candidate(item: dict[str, Any]) -> dict[str, Any]:
             "volume_ratio": item.get("volume_ratio"),
             "data_sufficient": item.get("data_sufficient"),
             "target_risk_approved": item.get("target_risk_approved"),
-            "risk_flags": item.get("risk_flags") or [],
-            "gating_notes": item.get("gating_notes") or [],
+            "risk_flags": risk_flags,
+            "gating_notes": gating_notes,
         }
     )
     return public
@@ -1098,9 +1250,9 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _safety() -> dict[str, Any]:
+def _safety(*, dry_run_only: bool = True) -> dict[str, Any]:
     return {
-        "dry_run_only": True,
+        "dry_run_only": dry_run_only,
         "read_only": False,
         "real_order_submitted": False,
         "validation_called": False,

@@ -65,6 +65,12 @@ KR_TZ = ZoneInfo("Asia/Seoul")
 
 
 class SchedulerService:
+    # This class remains available as a compatibility adapter for the
+    # historical one-shot callbacks below. It is deliberately not a
+    # recurring production scheduler. The canonical subclass opts in to
+    # recurring startup explicitly.
+    _is_production_scheduler_authority = False
+
     def __init__(self):
         self.orchestrator = TradingOrchestratorService()
         self.runtime_settings = RuntimeSettingService()
@@ -134,8 +140,14 @@ class SchedulerService:
         ]
 
     def start(self):
+        if not self._is_production_scheduler_authority:
+            # Compatibility instances may still be used by tests, scripts,
+            # and explicit operator endpoints, but can never register the
+            # legacy recurring loop during application startup.
+            self._last_scheduler_error = 'compatibility_scheduler_not_registered'
+            return False
         if self._thread and self._thread.is_alive():
-            return
+            return True
         self._stop_event.clear()
         self._started_at = datetime.now(UTC)
         self._last_heartbeat_at = self._started_at
@@ -143,6 +155,7 @@ class SchedulerService:
         self._startup_reconciliation_result = None
         self._thread = threading.Thread(target=self._run_loop, daemon=True, name="trading-scheduler")
         self._thread.start()
+        return True
 
     def stop(self):
         self._stop_event.set()
@@ -155,7 +168,15 @@ class SchedulerService:
     def runtime_status(self) -> dict[str, object]:
         def iso(value: datetime | None) -> str | None:
             return value.isoformat() if value is not None else None
+        production_jobs = self.production_trading_jobs()
         return {
+            'scheduler_authority': (
+                'AutomationSchedulerService'
+                if self._is_production_scheduler_authority
+                else None
+            ),
+            'production_trading_jobs': production_jobs,
+            'production_trading_job_count': len(production_jobs),
             "scheduler_engine_running": self.is_running(),
             "scheduler_started_at": iso(self._started_at),
             "scheduler_last_heartbeat_at": iso(self._last_heartbeat_at),
@@ -167,7 +188,14 @@ class SchedulerService:
             "startup_reconciliation": self._startup_reconciliation_result,
         }
 
+    def production_trading_jobs(self) -> list[dict[str, object]]:
+        return []
+
     def _run_loop(self):
+        if not self._is_production_scheduler_authority:
+            # Guard the loop itself as well as start(). This prevents a
+            # legacy recurring loop if a caller constructs a thread manually.
+            return
         self._safe_call(self._run_startup_reconciliation)
         while not self._stop_event.is_set():
             self._last_heartbeat_at = datetime.now(UTC)

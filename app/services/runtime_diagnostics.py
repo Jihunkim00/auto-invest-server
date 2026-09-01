@@ -57,7 +57,14 @@ def log_startup_state(settings: Any, scheduler_service: Any) -> None:
     state = {
         "scheduler_enabled": None,
         "kis_scheduler_effective": None,
+        "production_trading_jobs": [],
     }
+    jobs_reader = getattr(scheduler_service, "production_trading_jobs", None)
+    if callable(jobs_reader):
+        try:
+            state["production_trading_jobs"] = jobs_reader()
+        except Exception as exc:
+            LOGGER.warning("production scheduler registration unavailable: %s", exc)
     try:
         with SessionLocal() as db:
             runtime_service = RuntimeSettingService()
@@ -67,27 +74,32 @@ def log_startup_state(settings: Any, scheduler_service: Any) -> None:
             and runtime_state["kis_scheduler_enabled"]
             and runtime_state["kis_scheduler_dry_run"]
         )
-        state = {
-            "scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
-            "kis_scheduler_effective": bool(
-                runtime_state["scheduler_enabled"]
-                and (
-                    runtime_state["real_order_scheduler_enabled"]
-                    or kr_dry_run_effective
-                )
-            ),
-        }
+        state.update(
+            {
+                "scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
+                "kis_scheduler_effective": bool(
+                    runtime_state["scheduler_enabled"]
+                    and (
+                        runtime_state["real_order_scheduler_enabled"]
+                        or kr_dry_run_effective
+                    )
+                ),
+            }
+        )
     except Exception as exc:
         LOGGER.warning("startup runtime state unavailable: %s", exc)
 
     LOGGER.info(
         "startup app_env=%s database_url=%s scheduler_enabled=%s "
-        "kis_scheduler_effective=%s scheduler_thread_alive=%s",
+        "kis_scheduler_effective=%s scheduler_thread_alive=%s "
+        "scheduler_authority=%s production_trading_job_count=%s",
         getattr(settings, "app_env", None),
         sanitized_database_url(str(getattr(settings, "database_url", ""))),
         state["scheduler_enabled"],
         state["kis_scheduler_effective"],
         _scheduler_thread_alive(scheduler_service),
+        getattr(scheduler_service, "__class__", type(scheduler_service)).__name__,
+        len(state["production_trading_jobs"]),
     )
 
 

@@ -60,6 +60,15 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     automation_profile_key: str | None = None
     automation_profile_name: str | None = None
     legacy_profile_name: StrategyProfileName | None = None
+    trigger_source: str | None = None
+    mode: str | None = None
+    execution_mode: str | None = None
+    execution_authority: str | None = None
+    result: str | None = None
+    risk_decision: dict[str, Any] = Field(default_factory=dict)
+    submission_eligible: bool = False
+    dry_run_only: bool | None = None
+    preview_only: bool | None = None
     profile_provider: str | None = None
     profile_market: str | None = None
     selected_symbol: str | None = None
@@ -99,6 +108,7 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     selected_confidence: float | None = None
     selected_candidate_observability: dict[str, Any] = Field(default_factory=dict)
     required_entry_score: float = 0
+    effective_min_entry_score: float | None = None
     confidence: float | None = None
     target_risk_approved: bool
     target_risk_result: dict[str, Any] = Field(default_factory=dict)
