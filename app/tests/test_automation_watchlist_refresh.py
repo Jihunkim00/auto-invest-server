@@ -167,6 +167,32 @@ def test_automation_refresh_applies_inclusive_price_boundary_and_budget_cap(
     assert result['over_budget_price_count'] == 0
 
 
+def test_next_automation_refresh_reflects_changed_automation_max(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, _client, _source_path = _service(
+        monkeypatch,
+        tmp_path,
+        prices={'100000': 250000},
+    )
+
+    high_budget = service.build_automation_watchlist(
+        _profile(fixed_budget=300000.0, max_order_notional=300000.0)
+    )
+    lower_budget = service.build_automation_watchlist(
+        _profile(fixed_budget=300000.0, max_order_notional=200000.0)
+    )
+
+    assert high_budget['effective_max_price_krw'] == 300000
+    assert lower_budget['effective_max_price_krw'] == 200000
+    assert high_budget['symbols'][0]['symbol'] == '100000'
+    assert lower_budget['symbols'][0]['symbol'] == '100001'
+    assert high_budget['final_watchlist_count'] == 50
+    assert lower_budget['final_watchlist_count'] == 50
+    assert lower_budget['max_price_in_final_watchlist'] <= 200000
+
+
 def test_automation_refresh_preserves_order_and_does_not_cross_fill_shortage(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -238,6 +264,49 @@ def test_automation_refresh_backups_and_replaces_only_after_success(
     assert target_path.read_text(encoding='utf-8') == before_failed_refresh
 
 
+def test_manual_balanced_update_does_not_use_automation_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, client, _source_path = _service(monkeypatch, tmp_path)
+    rankings = {
+        'KOSPI': [
+            {'symbol': '005930', 'name': 'Samsung', 'market': 'KOSPI'},
+            {'symbol': '035420', 'name': 'NAVER', 'market': 'KOSPI'},
+            *[
+                {
+                    'symbol': str(300000 + index),
+                    'name': f'KOSPI {index}',
+                    'market': 'KOSPI',
+                }
+                for index in range(28)
+            ],
+        ],
+        'KOSDAQ': [
+            {
+                'symbol': str(400000 + index),
+                'name': f'KOSDAQ {index}',
+                'market': 'KOSDAQ',
+            }
+            for index in range(20)
+        ],
+    }
+    monkeypatch.setattr(
+        service,
+        '_fetch_balanced_rankings',
+        lambda: rankings,
+    )
+
+    result = service.update_balanced_kr_watchlist()
+
+    assert result['mode'] == 'kr_watchlist_balanced_update_applied'
+    assert result['count'] == 50
+    assert result['groups'][0]['count'] == 30
+    assert result['groups'][1]['count'] == 20
+    assert result['backup_file'] is None
+    assert client.submit_calls == 0
+
+
 def test_automation_scheduler_is_idempotent_non_trading_and_separate_from_trade_job(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
@@ -287,19 +356,30 @@ def test_automation_scheduler_is_idempotent_non_trading_and_separate_from_trade_
         lambda: db_session,
     )
 
+    maintenance_now = harness.clock.now().replace(hour=9, minute=5)
     first = scheduler.run_automation_watchlist_refresh_once(
-        now=harness.clock.now(),
+        now=maintenance_now,
     )
     second = scheduler.run_automation_watchlist_refresh_once(
-        now=harness.clock.now(),
+        now=maintenance_now,
     )
 
     assert first['job_id'] == AUTOMATION_WATCHLIST_REFRESH_JOB_ID
     assert first['job_type'] == 'maintenance'
+    assert first['slot'] == '09:05'
+    assert first['real_order_submitted'] is False
     assert first['broker_submit_called'] is False
     assert second['reason'] == 'automation_watchlist_refresh_already_run'
     assert len(calls) == 1
     assert harness.broker.buy_calls == []
+    assert harness.broker.sell_calls == []
+    assert harness.client.external_kis_submit_count == 0
+    assert harness.validation.calls == []
+    jobs = scheduler.production_trading_jobs()
+    assert len(jobs) == 1
+    assert jobs[0]['authority'] == 'AutomationSchedulerService'
+    assert jobs[0]['provider'] == 'kis'
+    assert jobs[0]['market'] == 'KR'
     assert scheduler.runtime_status()['production_trading_job_count'] == 1
     assert scheduler.runtime_status()['maintenance_job_count'] == 1
     assert scheduler.runtime_status()['last_watchlist_refresh_result'] == 'success'
