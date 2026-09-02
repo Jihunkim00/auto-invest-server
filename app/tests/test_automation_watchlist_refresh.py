@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from zoneinfo import ZoneInfo
 
 from app.services.kis_watchlist_update_service import (
     KisWatchlistUpdateError,
     KisWatchlistUpdateService,
 )
 import app.services.scheduler_service
-from app.services.automation_scheduler_service import (
-    AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
-    AutomationSchedulerService,
-)
+from app.services.automation_scheduler_service import AutomationSchedulerService
 import app.services.automation_scheduler_service as automation_scheduler_module
 import app.services.kis_watchlist_update_service as watchlist_module
 
@@ -356,7 +355,15 @@ def test_automation_scheduler_is_idempotent_non_trading_and_separate_from_trade_
         lambda: db_session,
     )
 
-    maintenance_now = harness.clock.now().replace(hour=9, minute=5)
+    profile = harness.profiles.get(db_session, 'aut_pr110_replay')
+    settings = json.loads(profile.settings_json or '{}')
+    settings['entry']['analysis_times'] = ['09:30', '11:30', '13:30']
+    profile.settings_json = json.dumps(settings)
+    db_session.commit()
+
+    maintenance_now = harness.clock.now().astimezone(
+        ZoneInfo('Asia/Seoul')
+    ).replace(hour=9, minute=20)
     first = scheduler.run_automation_watchlist_refresh_once(
         now=maintenance_now,
     )
@@ -364,9 +371,12 @@ def test_automation_scheduler_is_idempotent_non_trading_and_separate_from_trade_
         now=maintenance_now,
     )
 
-    assert first['job_id'] == AUTOMATION_WATCHLIST_REFRESH_JOB_ID
+    jobs = scheduler.maintenance_jobs(now=maintenance_now)
+    first_job = next(job for job in jobs if job['analysis_slot'] == '09:30')
+    assert first['job_id'] == first_job['job_id']
     assert first['job_type'] == 'maintenance'
-    assert first['slot'] == '09:05'
+    assert first['slot'] == '09:20'
+    assert first['analysis_slot'] == '09:30'
     assert first['real_order_submitted'] is False
     assert first['broker_submit_called'] is False
     assert second['reason'] == 'automation_watchlist_refresh_already_run'
@@ -381,5 +391,156 @@ def test_automation_scheduler_is_idempotent_non_trading_and_separate_from_trade_
     assert jobs[0]['provider'] == 'kis'
     assert jobs[0]['market'] == 'KR'
     assert scheduler.runtime_status()['production_trading_job_count'] == 1
-    assert scheduler.runtime_status()['maintenance_job_count'] == 1
+    assert scheduler.runtime_status()['maintenance_job_count'] == 3
     assert scheduler.runtime_status()['last_watchlist_refresh_result'] == 'success'
+def _canonical_watchlist_scheduler(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+    analysis_times: list[str],
+):
+    from app.tests.integration.test_kis_automation_scheduler_replay import (
+        build_harness,
+    )
+
+    harness = build_harness(db_session, monkeypatch)
+    profile = harness.profiles.get(db_session, 'aut_pr110_replay')
+    settings = json.loads(profile.settings_json or '{}')
+    settings['entry']['analysis_times'] = analysis_times
+    profile.settings_json = json.dumps(settings)
+    db_session.commit()
+
+    scheduler = AutomationSchedulerService()
+    scheduler.runtime_settings = harness.runtime
+    scheduler.automation_profiles = harness.profiles
+    monkeypatch.setattr(
+        automation_scheduler_module,
+        'SessionLocal',
+        lambda: db_session,
+    )
+    return scheduler, harness
+
+
+def test_refresh_slots_follow_canonical_analysis_schedule_and_next_status(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler, harness = _canonical_watchlist_scheduler(
+        db_session,
+        monkeypatch,
+        ['09:30', '11:30', '13:30'],
+    )
+    morning = harness.clock.now().astimezone(
+        ZoneInfo('Asia/Seoul')
+    ).replace(hour=8, minute=0)
+
+    jobs = scheduler.maintenance_jobs(now=morning)
+    assert [
+        (job['analysis_slot'], job['slot'])
+        for job in jobs
+    ] == [
+        ('09:30', '09:20'),
+        ('11:30', '11:20'),
+        ('13:30', '13:20'),
+    ]
+    assert all(
+        job['trading'] is False
+        and job['order_submission'] is False
+        and job['scheduler_authority'] == 'AutomationSchedulerService'
+        for job in jobs
+    )
+
+    profile = harness.profiles.get(db_session, 'aut_pr110_replay')
+    settings = json.loads(profile.settings_json or '{}')
+    settings['entry']['analysis_times'] = ['10:15']
+    profile.settings_json = json.dumps(settings)
+    db_session.commit()
+
+    changed_jobs = scheduler.maintenance_jobs(now=morning)
+    assert [(job['analysis_slot'], job['slot']) for job in changed_jobs] == [
+        ('10:15', '10:05')
+    ]
+    assert scheduler.runtime_status(now=morning)['next_watchlist_refresh_at'] == (
+        morning.replace(hour=10, minute=5).isoformat()
+    )
+
+
+def test_each_derived_refresh_slot_is_independently_idempotent(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scheduler, harness = _canonical_watchlist_scheduler(
+        db_session,
+        monkeypatch,
+        ['09:30', '11:30', '13:30'],
+    )
+    calls: list[Any] = []
+
+    class FakeUpdater:
+        def update_automation_watchlist(
+            self,
+            profile: dict[str, Any],
+            *,
+            now: Any,
+        ) -> dict[str, Any]:
+            calls.append(now)
+            return {
+                'result': 'success',
+                'status': 'success',
+                'reason': 'automation_watchlist_refreshed',
+                'updated': True,
+                'real_order_submitted': False,
+                'broker_submit_called': False,
+            }
+
+    scheduler.automation_watchlist_update_service = FakeUpdater()
+    morning = harness.clock.now().astimezone(
+        ZoneInfo('Asia/Seoul')
+    )
+    first = scheduler.run_automation_watchlist_refresh_once(
+        now=morning.replace(hour=9, minute=20),
+    )
+    duplicate = scheduler.run_automation_watchlist_refresh_once(
+        now=morning.replace(hour=9, minute=21),
+    )
+    second = scheduler.run_automation_watchlist_refresh_once(
+        now=morning.replace(hour=11, minute=20),
+    )
+
+    assert first['slot'] == '09:20'
+    assert duplicate['reason'] == 'automation_watchlist_refresh_already_run'
+    assert second['slot'] == '11:20'
+    assert calls == [
+        morning.replace(hour=9, minute=20),
+        morning.replace(hour=11, minute=20),
+    ]
+
+
+def test_failed_refresh_keeps_previous_watchlist_and_records_slot_failure(
+    db_session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    scheduler, harness = _canonical_watchlist_scheduler(
+        db_session,
+        monkeypatch,
+        ['09:30'],
+    )
+    service, _client, source_path = _service(monkeypatch, tmp_path)
+    target_path = tmp_path / 'watchlist_kr.yaml'
+    original = 'market: KR\ncurrency: KRW\ntimezone: Asia/Seoul\nsymbols: []\n'
+    target_path.write_text(original, encoding='utf-8')
+    source_path.write_text('symbols: [malformed', encoding='utf-8')
+    scheduler.automation_watchlist_update_service = service
+
+    refresh_now = harness.clock.now().astimezone(
+        ZoneInfo('Asia/Seoul')
+    ).replace(hour=9, minute=20)
+    result = scheduler.run_automation_watchlist_refresh_once(now=refresh_now)
+
+    assert result['status'] == 'failed'
+    assert result['slot'] == '09:20'
+    assert target_path.read_text(encoding='utf-8') == original
+    status = scheduler.runtime_status(now=refresh_now)
+    assert status['last_watchlist_refresh_result'] == 'failed'
+    assert status['last_watchlist_refresh_slot'] == '09:20'
+    assert status['last_watchlist_refresh_reason'] == 'source_universe_load_failed'

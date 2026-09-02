@@ -8,7 +8,7 @@ routes, but are intentionally never started by the application.
 
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -38,10 +38,12 @@ CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"
 
 CANONICAL_TRIGGER_SOURCE = 'automation_scheduler'
 CANONICAL_JOB_ID = 'automation_scheduler.kis.profile_tick'
-AUTOMATION_WATCHLIST_REFRESH_JOB_ID = (
-    'automation_scheduler.kis.automation_watchlist_refresh'
+AUTOMATION_WATCHLIST_REFRESH_JOB_ID_PREFIX = (
+    'automation_scheduler.kis.watchlist_refresh'
 )
-AUTOMATION_WATCHLIST_REFRESH_SLOT = '09:05'
+# Compatibility alias. Registered job ids are derived from the refresh slot.
+AUTOMATION_WATCHLIST_REFRESH_JOB_ID = AUTOMATION_WATCHLIST_REFRESH_JOB_ID_PREFIX
+AUTOMATION_WATCHLIST_REFRESH_LEAD = timedelta(minutes=10)
 CANONICAL_STAGES = [
     'profile_slot_resolution',
     'broker_account_sync',
@@ -64,9 +66,12 @@ class AutomationSchedulerService(SchedulerService):
         self._canonical_slot_lock = threading.Lock()
         self.automation_watchlist_update_service = None
         self._automation_watchlist_refresh_lock = threading.Lock()
-        self._automation_watchlist_refresh_dates: set[str] = set()
+        self._automation_watchlist_refresh_slots: set[str] = set()
+        self._automation_watchlist_refresh_inflight: set[str] = set()
         self._automation_watchlist_status: dict[str, Any] = {
             'last_watchlist_refresh_at': None,
+            'last_watchlist_refresh_slot': None,
+            'last_watchlist_refresh_analysis_slot': None,
             'last_watchlist_refresh_result': None,
             'last_watchlist_refresh_reason': None,
             'source_universe_file': AUTOMATION_WATCHLIST_SOURCE_FILE,
@@ -102,30 +107,48 @@ class AutomationSchedulerService(SchedulerService):
             }
         ]
 
-    def maintenance_jobs(self) -> list[dict[str, object]]:
+    def maintenance_jobs(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        now_kst = self._as_kst(now)
+        schedule = self._selected_profile_schedule(now_kst)
+        if not self._is_kis_kr_schedule(schedule):
+            return []
         return [
             {
-                'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
+                'job_id': self._automation_watchlist_job_id(context['refresh_slot']),
                 'authority': self.__class__.__name__,
+                'scheduler_authority': self.__class__.__name__,
                 'provider': 'kis',
                 'market': 'KR',
-                'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+                'slot': context['refresh_slot'],
+                'analysis_slot': context['analysis_slot'],
+                'scheduled_refresh_at': context['refresh_at'].isoformat(),
                 'timezone': 'Asia/Seoul',
                 'recurring': True,
                 'automatic': True,
                 'trading': False,
                 'order_submission': False,
             }
+            for context in self._derived_watchlist_refresh_slots(
+                schedule,
+                now_kst,
+
+            )
         ]
 
-    def runtime_status(self) -> dict[str, object]:
+    def runtime_status(self, *, now: datetime | None = None) -> dict[str, object]:
         status = super().runtime_status()
-        maintenance = self.maintenance_jobs()
+        now_kst = self._as_kst(now)
+        maintenance = self.maintenance_jobs(now=now_kst)
         status.update(self._automation_watchlist_status)
         status.update(
             {
                 'maintenance_jobs': maintenance,
                 'maintenance_job_count': len(maintenance),
+                'next_watchlist_refresh_at': self._next_watchlist_refresh_at(now_kst),
             }
         )
         return status
@@ -158,14 +181,24 @@ class AutomationSchedulerService(SchedulerService):
             self._slot_runs = {
                 key for key in self._slot_runs if key.startswith(f"{day_key}:KR:")
             }
-            self._automation_watchlist_refresh_dates = {
+            self._automation_watchlist_refresh_slots = {
                 value
-                for value in self._automation_watchlist_refresh_dates
-                if value == day_key
+                for value in self._automation_watchlist_refresh_slots
+                if value.startswith(f'{day_key}:')
             }
-            if now_kst.hour == 9 and now_kst.minute == 5:
+            schedule = self._selected_profile_schedule(now_kst)
+            for context in self._derived_watchlist_refresh_slots(
+                schedule,
+                now_kst,
+                include_next_day=True,
+            ):
+                if not (
+                    context['refresh_at'] <= now_kst < context['analysis_at']
+                ):
+                    continue
                 self._safe_call(
                     self._run_automation_watchlist_refresh_scheduled_once,
+                    context['analysis_slot'],
                     now_kst,
                 )
             for slot, hour, minute in self._profile_slots(now_kst):
@@ -180,33 +213,147 @@ class AutomationSchedulerService(SchedulerService):
             time.sleep(20)
 
     def _profile_slots(self, now_kst: datetime) -> list[tuple[str, int, int]]:
+        schedule = self._selected_profile_schedule(now_kst)
+        if not self._is_kis_kr_schedule(schedule):
+            return []
         db = SessionLocal()
         try:
-            schedule = self.automation_profiles.selected_profile_schedule(db, now=now_kst)
-            if schedule and (
-                (schedule.get('profile') or {}).get('provider') != 'kis'
-                or (schedule.get('profile') or {}).get('market') != 'KR'
-            ):
-                return []
-            authority = AutomationExecutionAuthorityService(self.runtime_settings).snapshot(db)
+            authority = AutomationExecutionAuthorityService(
+                self.runtime_settings
+            ).snapshot(db)
             runtime = self.runtime_settings.get_settings_read_only(db)
             if (
-                not schedule
-                or schedule.get("status") != "active"
-                or not authority.get("scheduler_allowed")
-                or not runtime.get("automation_profile_scheduler_enabled")
+                schedule.get('status') != 'active'
+                or not authority.get('scheduler_allowed')
+                or not runtime.get('automation_profile_scheduler_enabled')
             ):
                 return []
-            result: list[tuple[str, int, int]] = []
-            for value in schedule.get("analysis_times") or []:
-                slot = self._profile_scheduler_slot(str(value))
-                if slot is None:
-                    continue
-                hour, minute = (int(item) for item in slot.split(":"))
-                result.append((slot, hour, minute))
-            return result
         finally:
             db.close()
+        return [
+            (
+                context['analysis_slot'],
+                context['analysis_at'].hour,
+                context['analysis_at'].minute,
+            )
+            for context in self._derived_watchlist_analysis_slots(
+                schedule,
+                now_kst,
+            )
+        ]
+
+    @staticmethod
+    def _as_kst(value: datetime | None) -> datetime:
+        if value is None:
+            return datetime.now(KST)
+        if value.tzinfo is None:
+            return value.replace(tzinfo=KST)
+        return value.astimezone(KST)
+
+    def _selected_profile_schedule(
+        self,
+        now_kst: datetime,
+    ) -> dict[str, Any] | None:
+        db = SessionLocal()
+        try:
+            return self.automation_profiles.selected_profile_schedule(
+                db,
+                now=now_kst,
+            )
+        finally:
+            db.close()
+
+    @staticmethod
+    def _is_kis_kr_schedule(schedule: dict[str, Any] | None) -> bool:
+        if not isinstance(schedule, dict):
+            return False
+        profile = schedule.get('profile')
+        if not isinstance(profile, dict):
+            return False
+        return (
+            str(profile.get('provider') or '').lower() == 'kis'
+            and str(profile.get('market') or '').upper() == 'KR'
+        )
+
+    @staticmethod
+    def _automation_watchlist_job_id(refresh_slot: str) -> str:
+        return f'{AUTOMATION_WATCHLIST_REFRESH_JOB_ID_PREFIX}.{refresh_slot}'
+
+    def _derived_watchlist_refresh_slots(
+        self,
+        schedule: dict[str, Any] | None,
+        now_kst: datetime,
+        *,
+        include_next_day: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not self._is_kis_kr_schedule(schedule):
+            return []
+        contexts: list[dict[str, Any]] = []
+        day_offsets = range(2) if include_next_day else range(1)
+        for value in schedule.get('analysis_times') or []:
+            slot = self._profile_scheduler_slot(str(value))
+            if slot is None:
+                continue
+            try:
+                hour, minute = (int(part) for part in slot.split(':', 1))
+            except (TypeError, ValueError):
+                continue
+            for day_offset in day_offsets:
+                try:
+                    analysis_at = now_kst.replace(
+                        hour=hour,
+                        minute=minute,
+                        second=0,
+                        microsecond=0,
+                    ) + timedelta(days=day_offset)
+                except (TypeError, ValueError):
+                    continue
+                refresh_at = analysis_at - AUTOMATION_WATCHLIST_REFRESH_LEAD
+                contexts.append(
+                    {
+                        'analysis_slot': slot,
+                        'refresh_slot': refresh_at.strftime('%H:%M'),
+                        'analysis_at': analysis_at,
+                        'refresh_at': refresh_at,
+                        'idempotency_key': (
+                            f'{analysis_at.date().isoformat()}:{slot}'
+                        ),
+                    }
+                )
+        return contexts
+
+    def _derived_watchlist_analysis_slots(
+        self,
+        schedule: dict[str, Any] | None,
+        now_kst: datetime,
+    ) -> list[dict[str, Any]]:
+        return self._derived_watchlist_refresh_slots(schedule, now_kst)
+
+    def _next_watchlist_refresh_at(self, now_kst: datetime) -> str | None:
+        schedule = self._selected_profile_schedule(now_kst)
+        if not self._is_kis_kr_schedule(schedule):
+            return None
+        next_run = schedule.get('next_run_at')
+        if not isinstance(next_run, datetime):
+            return None
+        next_run = self._as_kst(next_run)
+        candidate = next_run - AUTOMATION_WATCHLIST_REFRESH_LEAD
+        if candidate <= now_kst:
+            # At the refresh minute itself the profile service quite correctly
+            # still reports that analysis as the next run. Probe after that
+            # analysis to move to the following canonical slot.
+            next_schedule = self._selected_profile_schedule(
+                now_kst + AUTOMATION_WATCHLIST_REFRESH_LEAD,
+            )
+            next_run = (
+                next_schedule.get('next_run_at')
+                if self._is_kis_kr_schedule(next_schedule)
+                else None
+            )
+            if not isinstance(next_run, datetime):
+                return None
+            candidate = self._as_kst(next_run) - AUTOMATION_WATCHLIST_REFRESH_LEAD
+        return candidate.isoformat() if candidate > now_kst else None
 
     def _next_automation_run_at(self, now_kst: datetime) -> datetime | None:
         slots = self._profile_slots(now_kst)
@@ -217,8 +364,10 @@ class AutomationSchedulerService(SchedulerService):
         if not slots:
             return None
         _, hour, minute = slots[0]
-        return (now_kst.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                + __import__("datetime").timedelta(days=1))
+        return (
+            now_kst.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
 
     def run_once(self, *, slot: str | None = None, now: datetime | None = None) -> dict[str, Any]:
         current = now.astimezone(KST) if now and now.tzinfo else (now or datetime.now(KST))
@@ -371,39 +520,70 @@ class AutomationSchedulerService(SchedulerService):
         self,
         *,
         now: datetime | None = None,
+        analysis_slot: str | None = None,
         force: bool = False,
     ) -> dict[str, Any]:
-        '''Run the non-trading daily Automation watchlist maintenance job.'''
-        current = now or datetime.now(KST)
-        now_kst = (
-            current.astimezone(KST)
-            if current.tzinfo is not None
-            else current.replace(tzinfo=KST)
+        '''Run one derived, non-trading Automation watchlist maintenance job.'''
+        now_kst = self._as_kst(now)
+        schedule = self._selected_profile_schedule(now_kst)
+        context = self._resolve_watchlist_refresh_context(
+            schedule,
+            now_kst,
+            analysis_slot=analysis_slot,
         )
-        day_key = now_kst.date().isoformat()
+        if context is None:
+            reason = (
+                'no_active_profile'
+                if schedule is None
+                else 'automation_watchlist_refresh_slot_unavailable'
+            )
+            return self._automation_watchlist_skip(now_kst, reason)
+
+        refresh_key = context['idempotency_key']
         if not force:
             with self._automation_watchlist_refresh_lock:
-                if day_key in self._automation_watchlist_refresh_dates:
-                    return {
-                        'scheduler': self.__class__.__name__,
-                        'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
-                        'job_type': 'maintenance',
-                        'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
-                        'status': 'skipped',
-                        'result': 'skipped',
-                        'reason': 'automation_watchlist_refresh_already_run',
-                        'updated': False,
-                        'real_order_submitted': False,
-                        'broker_submit_called': False,
-                    }
-                self._automation_watchlist_refresh_dates.add(day_key)
-        return self._execute_automation_watchlist_refresh(now_kst)
+                if (
+                    refresh_key in self._automation_watchlist_refresh_slots
+                    or refresh_key in self._automation_watchlist_refresh_inflight
+                ):
+                    return self._automation_watchlist_already_run(
+                        now_kst,
+                        context,
+                    )
+                self._automation_watchlist_refresh_inflight.add(refresh_key)
+        try:
+            result = self._execute_automation_watchlist_refresh(
+                now_kst,
+                context=context,
+            )
+            outcome = str(
+                result.get('result') or result.get('status') or ''
+            ).lower()
+            if not force and outcome in {'success', 'degraded'}:
+                with self._automation_watchlist_refresh_lock:
+                    self._automation_watchlist_refresh_slots.add(refresh_key)
+            return result
+        finally:
+            if not force:
+                with self._automation_watchlist_refresh_lock:
+                    self._automation_watchlist_refresh_inflight.discard(refresh_key)
 
     def _run_automation_watchlist_refresh_scheduled_once(
         self,
+        analysis_slot: str | datetime | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        return self.run_automation_watchlist_refresh_once(now=now)
+        # Preserve the old private callback shape where now was the only
+        # positional argument.
+        if isinstance(analysis_slot, datetime) and now is None:
+            now = analysis_slot
+            analysis_slot = None
+        return self.run_automation_watchlist_refresh_once(
+            now=now,
+            analysis_slot=(
+                str(analysis_slot) if analysis_slot is not None else None
+            ),
+        )
 
     def _run_automation_watchlist_maintenance_once(
         self,
@@ -412,9 +592,85 @@ class AutomationSchedulerService(SchedulerService):
         '''Compatibility name for the same canonical maintenance job.'''
         return self._run_automation_watchlist_refresh_scheduled_once(now=now)
 
+    def _resolve_watchlist_refresh_context(
+        self,
+        schedule: dict[str, Any] | None,
+        now_kst: datetime,
+        *,
+        analysis_slot: str | None,
+    ) -> dict[str, Any] | None:
+        contexts = self._derived_watchlist_refresh_slots(
+            schedule,
+            now_kst,
+            include_next_day=True,
+        )
+        if analysis_slot is not None:
+            normalized_slot = self._profile_scheduler_slot(analysis_slot)
+            return next(
+                (
+                    context
+                    for context in contexts
+                    if context['analysis_slot'] == normalized_slot
+                ),
+                None,
+            )
+        return next(
+            (
+                context
+                for context in contexts
+                if context['refresh_at'] <= now_kst < context['analysis_at']
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _automation_watchlist_metadata(
+        now_kst: datetime,
+        context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if not context:
+            return {
+                'scheduler': 'AutomationSchedulerService',
+                'job_type': 'maintenance',
+                'refresh_at': now_kst.isoformat(),
+            }
+        return {
+            'scheduler': 'AutomationSchedulerService',
+            'job_id': AutomationSchedulerService._automation_watchlist_job_id(
+                context['refresh_slot']
+            ),
+            'job_type': 'maintenance',
+            'slot': context['refresh_slot'],
+            'analysis_slot': context['analysis_slot'],
+            'scheduled_refresh_at': context['refresh_at'].isoformat(),
+            'refresh_at': now_kst.isoformat(),
+            'scheduler_authority': 'AutomationSchedulerService',
+            'trading': False,
+            'order_submission': False,
+        }
+
+    def _automation_watchlist_already_run(
+        self,
+        now_kst: datetime,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = {
+            **self._automation_watchlist_metadata(now_kst, context),
+            'status': 'skipped',
+            'result': 'skipped',
+            'reason': 'automation_watchlist_refresh_already_run',
+            'updated': False,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+            'manual_submit_called': False,
+        }
+        return result
+
     def _execute_automation_watchlist_refresh(
         self,
         now_kst: datetime,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         db = SessionLocal()
         try:
@@ -430,6 +686,7 @@ class AutomationSchedulerService(SchedulerService):
                 return self._automation_watchlist_skip(
                     now_kst,
                     'no_active_profile',
+                    context=context,
                 )
             profile = schedule.get('profile') or {}
             if (
@@ -439,16 +696,19 @@ class AutomationSchedulerService(SchedulerService):
                 return self._automation_watchlist_skip(
                     now_kst,
                     'automation_not_active',
+                    context=context,
                 )
             if not authority.get('scheduler_allowed'):
                 return self._automation_watchlist_skip(
                     now_kst,
                     'automation_not_active',
+                    context=context,
                 )
             if not runtime.get('automation_profile_scheduler_enabled'):
                 return self._automation_watchlist_skip(
                     now_kst,
                     'automation_not_active',
+                    context=context,
                 )
             if schedule.get('status') != 'active':
                 reason = (
@@ -456,7 +716,11 @@ class AutomationSchedulerService(SchedulerService):
                     if schedule.get('status') in {'scheduled', 'ended'}
                     else 'automation_not_active'
                 )
-                return self._automation_watchlist_skip(now_kst, reason)
+                return self._automation_watchlist_skip(
+                    now_kst,
+                    reason,
+                    context=context,
+                )
 
             updater = self._automation_watchlist_updater(db)
             result = updater.update_automation_watchlist(
@@ -465,11 +729,7 @@ class AutomationSchedulerService(SchedulerService):
             )
             result = {
                 **result,
-                'scheduler': self.__class__.__name__,
-                'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
-                'job_type': 'maintenance',
-                'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
-                'refresh_at': now_kst.isoformat(),
+                **self._automation_watchlist_metadata(now_kst, context),
             }
             self._record_automation_watchlist_status(result)
             return result
@@ -478,10 +738,10 @@ class AutomationSchedulerService(SchedulerService):
                 now_kst,
                 self._automation_watchlist_failure_reason(exc),
                 exc,
+                context=context,
             )
         finally:
             db.close()
-
     def _automation_watchlist_updater(self, db):
         if self.automation_watchlist_update_service is None:
             settings_obj = get_settings()
@@ -496,16 +756,14 @@ class AutomationSchedulerService(SchedulerService):
         self,
         now_kst: datetime,
         reason: str,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result = {
-            'scheduler': self.__class__.__name__,
-            'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
-            'job_type': 'maintenance',
-            'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+            **self._automation_watchlist_metadata(now_kst, context),
             'status': 'skipped',
             'result': 'skipped',
             'reason': reason,
-            'refresh_at': now_kst.isoformat(),
             'updated': False,
             'real_order_submitted': False,
             'broker_submit_called': False,
@@ -519,17 +777,15 @@ class AutomationSchedulerService(SchedulerService):
         now_kst: datetime,
         reason: str,
         exc: Exception,
+        *,
+        context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result = {
-            'scheduler': self.__class__.__name__,
-            'job_id': AUTOMATION_WATCHLIST_REFRESH_JOB_ID,
-            'job_type': 'maintenance',
-            'slot': AUTOMATION_WATCHLIST_REFRESH_SLOT,
+            **self._automation_watchlist_metadata(now_kst, context),
             'status': 'failed',
             'result': 'failed',
             'reason': reason,
             'error': f'{exc.__class__.__name__}: {exc}',
-            'refresh_at': now_kst.isoformat(),
             'updated': False,
             'real_order_submitted': False,
             'broker_submit_called': False,
@@ -537,7 +793,6 @@ class AutomationSchedulerService(SchedulerService):
         }
         self._record_automation_watchlist_status(result)
         return result
-
     @staticmethod
     def _automation_watchlist_failure_reason(exc: Exception) -> str:
         message = str(exc).lower()
@@ -557,6 +812,8 @@ class AutomationSchedulerService(SchedulerService):
     ) -> None:
         field_names = (
             'refresh_at',
+            'slot',
+            'analysis_slot',
             'source_universe_file',
             'source_universe_count',
             'source_kospi_count',
@@ -578,11 +835,11 @@ class AutomationSchedulerService(SchedulerService):
         )
         for field_name in field_names:
             if field_name in result:
-                target_name = (
-                    'last_watchlist_refresh_at'
-                    if field_name == 'refresh_at'
-                    else field_name
-                )
+                target_name = {
+                    'refresh_at': 'last_watchlist_refresh_at',
+                    'slot': 'last_watchlist_refresh_slot',
+                    'analysis_slot': 'last_watchlist_refresh_analysis_slot',
+                }.get(field_name, field_name)
                 self._automation_watchlist_status[target_name] = result[field_name]
         self._automation_watchlist_status['last_watchlist_refresh_result'] = (
             result.get('result') or result.get('status')

@@ -60,6 +60,8 @@ def automation_status(db: Session = Depends(get_db)):
         key: scheduler_runtime.get(key)
         for key in (
             'last_watchlist_refresh_at',
+            'last_watchlist_refresh_slot',
+            'last_watchlist_refresh_analysis_slot',
             'last_watchlist_refresh_result',
             'last_watchlist_refresh_reason',
             'source_universe_file',
@@ -80,7 +82,9 @@ def automation_status(db: Session = Depends(get_db)):
             'over_budget_price_count',
             'watchlist_file',
             'backup_file',
+            'maintenance_jobs',
             'maintenance_job_count',
+            'next_watchlist_refresh_at',
         )
     }
     return {

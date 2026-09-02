@@ -40,7 +40,7 @@ KIS_WATCHLIST_NEXT_MANUAL_ACTION_HINT = (
 )
 
 KR_PREVIEW_GPT_MARKET_CONTEXT = """
-KR/KIS market risk checklist for advisory-only preview:
+KR/KIS market risk checklist for market advisory analysis:
 - USD/KRW FX risk and KRW weakness, including foreign outflow pressure.
 - Previous US market session spillover from S&P 500, Nasdaq, Dow, and US growth sentiment.
 - SOX semiconductor sentiment for Samsung Electronics, SK Hynix, equipment, and materials.
@@ -1438,8 +1438,8 @@ class KisPreviewGptAdvisor:
 
         system_prompt = (
             "You are the same conservative, quant-first market advisory layer "
-            "used by the US/Alpaca watchlist flow, with KR/KIS market context. "
-            "This is read-only preview analysis only.\n"
+            "for KR/KIS stock analysis. "
+            "Evaluate only the quality and risk of the current market setup.\n"
             f"{KR_PREVIEW_GPT_MARKET_CONTEXT}\n"
             "Quant indicators are primary. GPT only explains or contextualizes "
             "the available data. Do not produce numeric scores unless real "
@@ -1458,8 +1458,9 @@ class KisPreviewGptAdvisor:
             "accounting fraud, severe regulatory action, stale/invalid price "
             "data, circuit-breaker-level panic, or infrastructure issues.\n"
             "If indicators are missing, say analysis is limited. If market is "
-            "closed or holiday, mention it. Since KR trading is disabled, "
-            "entry_ready and trade_allowed must be false.\n"
+            "closed or holiday, mention it. Do not lower ai_buy_score or confidence "
+            "because broker execution, trading permissions, cash checks, position limits, "
+            "or risk approval are handled by separate execution and risk layers.\n"
             "Respond in Korean. Return reason and gpt_reason in Korean. "
             "Do not mix English and Korean except unavoidable technical terms "
             "like EMA20, RSI, VWAP, ATR, KRW, KIS, KRX, OpenDART, and KIND. "
@@ -1495,8 +1496,6 @@ class KisPreviewGptAdvisor:
                 "current_price": current_price,
                 "indicator_status": indicator_status,
                 "indicator_payload": indicator_payload,
-                "trading_enabled": False,
-                "preview_only": True,
                 "market_session": market_session,
                 "reference_sources": reference_context,
                 "instructions": [
@@ -1505,7 +1504,8 @@ class KisPreviewGptAdvisor:
                     "Keep ai_buy_score, ai_sell_score, and confidence null when indicators are missing.",
                     "Default action to hold and action_hint to watch unless there is strong avoid risk.",
                     "Never output executable buy/sell instructions.",
-                    "entry_ready and trade_allowed are false because KR trading is disabled.",
+                    "Evaluate market and symbol quality independently of execution permissions.",
+                    "The risk engine and execution layer are the final authority for actual orders.",
                     "Respond in Korean.",
                     "Return gpt_reason in Korean.",
                     "Keep risk_flags, gating_notes, hard_block_reason, action, and action_hint machine-readable in English.",
@@ -1600,8 +1600,8 @@ def _korean_advisory_fallback(
 ) -> str:
     if market_session.get("is_market_open") is not True:
         return (
-            "현재 한국장은 휴장 또는 장외 시간으로 신규 진입을 평가하지 않습니다. "
-            "지표는 참고용이며 실제 주문은 실행되지 않습니다."
+            "현재 한국장은 휴장 또는 장외 시간입니다. "
+            "현재 시장 상태를 반영해 신규 진입 판단은 보수적으로 해석해야 합니다."
         )
 
     if (
@@ -1610,8 +1610,7 @@ def _korean_advisory_fallback(
     ):
         return (
             "현재가만 확인 가능하고 EMA, RSI, VWAP, ATR, 거래량 비율 등 핵심 지표가 "
-            "부족해 정량 점수는 계산하지 않았습니다. KR 실거래가 비활성화되어 "
-            "있으므로 관찰 대상으로만 표시합니다."
+            "부족해 정량적 시장 판단의 신뢰도가 제한됩니다."
         )
 
     price = _safe_float(indicator_payload.get("price"), 0.0)
@@ -1633,13 +1632,13 @@ def _korean_advisory_fallback(
         else "RSI는 과열권에서 벗어나 있지만 단독 매수 근거로 보기는 어렵습니다."
     )
     volume_text = (
-        "거래량 확인이 약해 추가 확인이 필요합니다."
+         "거래량이 평균보다 낮아 추가 확인이 필요합니다."
         if volume_ratio < 1.0
-        else "거래량은 평균 이상이지만 KR 실거래는 비활성화되어 있습니다."
+        else "거래량은 평균 이상으로 확인됩니다."
     )
     return (
         f"{trend_text} {rsi_text} {volume_text} "
-        "이 결과는 정량 지표 우선의 참고용 preview이며 실제 주문은 실행되지 않습니다."
+         "정량 지표를 우선으로 현재 시장 setup의 위험과 강도를 평가합니다."
     )
 
 
