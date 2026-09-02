@@ -67,6 +67,9 @@ class OperatorAlertsService:
             runtime_settings=self.runtime_settings,
         )
 
+    def _now(self) -> datetime:
+        return datetime.now(UTC)
+
     def alerts(
         self,
         db: Session,
@@ -82,7 +85,7 @@ class OperatorAlertsService:
         normalized_market = self._market(market, normalized_provider)
         normalized_severity = str(severity or "all").strip().lower()
         normalized_status = str(status or "active").strip().lower()
-        generated_at = datetime.now(UTC)
+        generated_at = self._now()
         settings = self.runtime_settings.get_settings_read_only(db)
         app_settings = get_app_settings()
         target_date = generated_at.astimezone(KST).date()
@@ -768,7 +771,7 @@ class OperatorAlertsService:
     ) -> dict[str, Any]:
         clean_related_id = self._string_or_none(related_id)
         clean_symbol = self._string_or_none(symbol)
-        created = self._iso(created_at) or self._iso(datetime.now(UTC))
+        created = self._iso(created_at) or self._iso(self._now())
         updated = self._iso(updated_at) or created
         payload = {
             "alert_id": self._alert_id(

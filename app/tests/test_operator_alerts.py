@@ -25,6 +25,7 @@ from app.services.agent_chat_tool_registry import AgentChatToolRegistry
 from app.services.kis_manual_order_service import KisManualOrderService
 from app.services.kis_order_sync_service import KisOrderSyncService
 from app.services.order_sync_service import OrderSyncService
+from app.services.operator_alerts_service import OperatorAlertsService
 
 
 def test_alerts_endpoint_returns_runtime_order_promotion_and_pnl_alerts(
@@ -32,7 +33,13 @@ def test_alerts_endpoint_returns_runtime_order_promotion_and_pnl_alerts(
     monkeypatch,
 ):
     _forbid_mutating_paths(monkeypatch)
-    now = _now()
+    fixed_now = datetime(2026, 9, 2, 12, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        OperatorAlertsService,
+        "_now",
+        lambda self: fixed_now,
+    )
+    now = fixed_now
     db_session.add(
         RuntimeSetting(
             dry_run=True,
