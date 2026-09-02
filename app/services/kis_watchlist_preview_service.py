@@ -17,6 +17,7 @@ from app.services.automation_observability import (
     gpt_result_counts,
 )
 from app.services.market_profile_service import MarketProfileService
+from app.services.kr_market_context_service import KrMarketContextService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.profile_universe_service import profile_price_exclusion_reason
@@ -90,6 +91,7 @@ class KisWatchlistPreviewService:
         indicator_service: TechnicalIndicatorService | None = None,
         quant_signal_service: QuantSignalService | None = None,
         event_risk_service: EventRiskService | None = None,
+        market_context_service: KrMarketContextService | None = None,
         db=None,
         limit: int = KR_PREVIEW_LIMIT,
         gpt_candidate_limit: int = KR_PREVIEW_TOP_GPT_CANDIDATES,
@@ -102,6 +104,9 @@ class KisWatchlistPreviewService:
         self.indicator_service = indicator_service or TechnicalIndicatorService()
         self.quant_signal_service = quant_signal_service or QuantSignalService()
         self.event_risk_service = event_risk_service or EventRiskService()
+        self.market_context_service = market_context_service or KrMarketContextService(
+            kis_client=client,
+        )
         self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
         self.gpt_candidate_limit = max(
@@ -140,6 +145,7 @@ class KisWatchlistPreviewService:
         managed_symbols = [position["symbol"] for position in managed_positions]
 
         quant_items = []
+        quote_snapshots: dict[str, dict[str, Any]] = {}
         profile_exclusion_counts: dict[str, int] = {}
         profile_filtered_symbols: set[str] = set()
         for raw in configured_symbols:
@@ -152,6 +158,9 @@ class KisWatchlistPreviewService:
                 include_gpt=False,
                 db=db,
             )
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if symbol:
+                quote_snapshots[symbol] = item
             reason = profile_price_exclusion_reason(
                 item.get('current_price'),
                 min_price_krw=min_price_krw,
@@ -167,6 +176,12 @@ class KisWatchlistPreviewService:
                 continue
             quant_items.append(item)
 
+        market_context = self.market_context_service.snapshot(
+            db=db,
+            symbols=configured_symbols,
+            quote_snapshots=quote_snapshots,
+        )
+        market_context_summary = self.market_context_service.summary(market_context)
         quant_ranked_candidates = self._rank_quant_candidates(quant_items)
         gpt_target_symbols = []
         if include_gpt and self.gpt_candidate_limit > 0:
@@ -194,6 +209,12 @@ class KisWatchlistPreviewService:
                 reference_sources=references.get("sources") or [],
                 include_gpt=True,
                 db=db,
+                market_context=market_context,
+                disclosure_context=self.market_context_service.get_disclosures(
+                    symbol,
+                    as_of=market_context.get("as_of"),
+                    limit=5,
+                ),
             )
             gpt_used = gpt_used or bool(item.get("gpt_used"))
             items_by_symbol[symbol] = item
@@ -421,8 +442,11 @@ class KisWatchlistPreviewService:
             "result": "preview_only",
             "reason": "kr_trading_disabled",
             "trade_result": trade_result,
+            "market_context": market_context,
+            "market_context_summary": market_context_summary,
+            "market_context_as_of": market_context.get("as_of"),
             "market_session": self._public_session(market_session),
-            "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings + position_warnings),
+            "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings + position_warnings + _string_list(market_context.get("warnings"))),
             "top_quant_candidates": quant_candidates,
             "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
@@ -644,6 +668,8 @@ class KisWatchlistPreviewService:
         reference_sources: list[dict[str, Any]],
         include_gpt: bool,
         db,
+        market_context: dict[str, Any] | None = None,
+        disclosure_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
         name = str(raw.get("name") or "")
@@ -658,11 +684,13 @@ class KisWatchlistPreviewService:
             "No real KIS order submitted.",
         ]
         current_price: float | None = None
+        previous_close: float | None = None
         price_error: str | None = None
 
         try:
             price = self._get_normalized_price_snapshot(symbol)
             current_price = to_float(price.get("current_price"))
+            previous_close = price.get("previous_close")
             if not name:
                 name = str(price.get("name") or "")
             if current_price <= 0:
@@ -763,6 +791,14 @@ class KisWatchlistPreviewService:
                     market_session=market_session,
                     reference_sources=reference_sources,
                     event_context=event_risk if event_risk.get("has_near_event") else None,
+                    market_context=market_context,
+                    disclosure_context=disclosure_context,
+                    execution_context={
+                        "preview_only": True,
+                        "trading_enabled": False,
+                        "kr_trading_disabled": True,
+                        "broker_submit_permission": False,
+                    },
                 )
                 gpt = self._ensure_korean_gpt_preview(
                     gpt,
@@ -862,6 +898,9 @@ class KisWatchlistPreviewService:
             "market_label": listing_market_label or listing_market,
             "currency": "KRW",
             "current_price": current_price,
+            "previous_close": previous_close,
+            "market_context": market_context,
+            "disclosure_context": disclosure_context or {"available": False, "items": [], "warnings": ["not_requested"]},
             "score": final_buy_score,
             "final_entry_score": final_buy_score,
             "quant_score": quant_buy_score,
@@ -1187,6 +1226,9 @@ def _preview_log_payload(
             "operator_summary": payload.get("operator_summary"),
             "risk_flags": _string_list(payload.get("risk_flags")),
             "gating_notes": _string_list(payload.get("gating_notes")),
+            "market_context": payload.get("market_context"),
+            "market_context_summary": payload.get("market_context_summary"),
+            "market_context_as_of": payload.get("market_context_as_of"),
         }
     )
 
@@ -1367,6 +1409,9 @@ class KisPreviewGptAdvisor:
         market_session: dict[str, Any],
         reference_sources: list[dict[str, Any]],
         event_context: dict[str, Any] | None = None,
+        market_context: dict[str, Any] | None = None,
+        disclosure_context: dict[str, Any] | None = None,
+        execution_context: dict[str, Any] | None = None,
     ) -> KisGptPreview:
         if self.client is None:
             fallback_scope = (
@@ -1396,6 +1441,9 @@ class KisPreviewGptAdvisor:
                 market_session=market_session,
                 reference_sources=reference_sources,
                 event_context=event_context,
+                market_context=market_context,
+                disclosure_context=disclosure_context,
+                execution_context=execution_context,
             )
             return self._normalize_payload(
                 payload,
@@ -1432,6 +1480,9 @@ class KisPreviewGptAdvisor:
         market_session: dict[str, Any],
         reference_sources: list[dict[str, Any]],
         event_context: dict[str, Any] | None = None,
+        market_context: dict[str, Any] | None = None,
+        disclosure_context: dict[str, Any] | None = None,
+        execution_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.client is None:
             raise ValueError("OpenAI client is not initialized.")
@@ -1461,6 +1512,12 @@ class KisPreviewGptAdvisor:
             "closed or holiday, mention it. Do not lower ai_buy_score or confidence "
             "because broker execution, trading permissions, cash checks, position limits, "
             "or risk approval are handled by separate execution and risk layers.\n"
+            "Use only the supplied market_context for factual market-state claims. "
+            "If a market_context field is unavailable, explicitly state the limitation. "
+             "Never invent missing market data. "
+             "Execution permission, cash checks, position limits, risk approval, and "
+             "broker submission are separate from market analysis and must not change "
+             "ai_buy_score merely because execution is restricted.\n"
             "Respond in Korean. Return reason and gpt_reason in Korean. "
             "Do not mix English and Korean except unavoidable technical terms "
             "like EMA20, RSI, VWAP, ATR, KRW, KIS, KRX, OpenDART, and KIND. "
@@ -1486,32 +1543,49 @@ class KisPreviewGptAdvisor:
             for source in reference_sources
             if isinstance(source, dict)
         ]
+        execution_context_payload = execution_context or {
+            "preview_only": True,
+            "trading_enabled": False,
+            "kr_trading_disabled": True,
+            "broker_submit_permission": False,
+        }
         prompt_payload = {
-                "market": "KR",
-                "provider": "kis",
-                "currency": "KRW",
-                "timezone": "Asia/Seoul",
-                "symbol": symbol,
-                "name": name,
-                "current_price": current_price,
-                "indicator_status": indicator_status,
-                "indicator_payload": indicator_payload,
-                "market_session": market_session,
-                "reference_sources": reference_context,
-                "instructions": [
-                    "Prefer quant indicators and KIS data.",
-                    "If indicators are null, do not create a score.",
-                    "Keep ai_buy_score, ai_sell_score, and confidence null when indicators are missing.",
-                    "Default action to hold and action_hint to watch unless there is strong avoid risk.",
-                    "Never output executable buy/sell instructions.",
-                    "Evaluate market and symbol quality independently of execution permissions.",
-                    "The risk engine and execution layer are the final authority for actual orders.",
-                    "Respond in Korean.",
-                    "Return gpt_reason in Korean.",
-                    "Keep risk_flags, gating_notes, hard_block_reason, action, and action_hint machine-readable in English.",
-                    "Do not treat upcoming earnings as bullish.",
-                    "Do not set hard_block_reason for broad macro, FX, geopolitical, energy, volatility, or risk-off caution.",
-                ],
+            "market": "KR",
+            "provider": "kis",
+            "currency": "KRW",
+            "timezone": "Asia/Seoul",
+            "symbol": symbol,
+            "name": name,
+            "current_price": current_price,
+            "market_context": market_context or {},
+            "disclosure_context": disclosure_context or {"available": False, "items": [], "warnings": ["not_requested"]},
+            "execution_context": execution_context_payload,
+            "preview_only": bool(execution_context_payload.get("preview_only", True)),
+            "trading_enabled": bool(execution_context_payload.get("trading_enabled", False)),
+            "kr_trading_disabled": bool(execution_context_payload.get("kr_trading_disabled", True)),
+            "broker_submit_permission": bool(execution_context_payload.get("broker_submit_permission", False)),
+            "indicator_status": indicator_status,
+            "indicator_payload": indicator_payload,
+            "market_session": market_session,
+            "reference_sources": reference_context,
+            "instructions": [
+                "Prefer quant indicators and KIS data.",
+                "If indicators are null, do not create a score.",
+                "Keep ai_buy_score, ai_sell_score, and confidence null when indicators are missing.",
+                "Default action to hold and action_hint to watch unless there is strong avoid risk.",
+                "Never output executable buy/sell instructions.",
+                "Evaluate market and symbol quality independently of execution permissions.",
+                "Use only the supplied market_context for factual market-state claims.",
+                "If a market_context field is unavailable, explicitly state the limitation.",
+                "Never invent missing market data.",
+                "Execution permission, cash checks, position limits, risk approval, and broker submission are separate from market analysis and must not change ai_buy_score.",
+                "The risk engine and execution layer are the final authority for actual orders.",
+                "Respond in Korean.",
+                "Return gpt_reason in Korean.",
+                "Keep risk_flags, gating_notes, hard_block_reason, action, and action_hint machine-readable in English.",
+                "Do not treat upcoming earnings as bullish.",
+                "Do not set hard_block_reason for broad macro, FX, geopolitical, energy, volatility, or risk-off caution.",
+            ],
         }
         if event_context:
             prompt_payload["event_context"] = _prompt_event_context(event_context)

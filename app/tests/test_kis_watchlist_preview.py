@@ -1001,3 +1001,87 @@ def test_kis_gpt_english_response_uses_korean_fallback():
     assert result.gating_notes == ["kr_trading_disabled"]
     assert result.action == "hold"
     assert result.action_hint == "watch"
+
+def test_kis_preview_shares_one_market_context_snapshot_with_gpt_candidates(
+    monkeypatch,
+    client,
+):
+    context = {
+        "as_of": "2026-09-02T12:00:00+00:00",
+        "timezone": "Asia/Seoul",
+        "fx": {"available": False},
+        "us_market": {"available": False},
+        "kr_breadth": {"available": False},
+        "investor_flow": {"available": False},
+        "disclosures": {"available": True, "items": [], "source": "kis"},
+        "commodities": {"available": False},
+        "geopolitical": {"available": False},
+        "warnings": [],
+    }
+    snapshot_calls = []
+    disclosure_symbols = []
+    captured = []
+
+    def fake_snapshot(self, **kwargs):
+        snapshot_calls.append(kwargs)
+        return context
+
+    def fake_disclosures(self, symbol, *, as_of=None, limit=5):
+        disclosure_symbols.append((symbol, as_of, limit))
+        return {
+            "symbol": symbol,
+            "available": True,
+            "items": [{"title": f"{symbol} title"}],
+            "source": "kis",
+        }
+
+    def fake_bars(self, symbol, limit=120):
+        return _daily_bars(60)
+
+    def fake_gpt(self, **kwargs):
+        captured.append(kwargs)
+        return KisGptPreview(
+            gpt_used=True,
+            action_hint="candidate",
+            gpt_reason="공통 시장 컨텍스트를 반영한 자문입니다.",
+            warnings=[],
+            ai_buy_score=66.0,
+            ai_sell_score=18.0,
+            confidence=0.72,
+        )
+
+    monkeypatch.setattr(
+        "app.services.kr_market_context_service.KrMarketContextService.snapshot",
+        fake_snapshot,
+    )
+    monkeypatch.setattr(
+        "app.services.kr_market_context_service.KrMarketContextService.get_disclosures",
+        fake_disclosures,
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        fake_bars,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        fake_gpt,
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(snapshot_calls) == 1
+    assert len(captured) == 5
+    assert len(disclosure_symbols) == 5
+    assert all(kwargs["market_context"] is context for kwargs in captured)
+    assert all(
+        kwargs["execution_context"]["preview_only"] is True
+        and kwargs["execution_context"]["trading_enabled"] is False
+        and kwargs["execution_context"]["kr_trading_disabled"] is True
+        and kwargs["execution_context"]["broker_submit_permission"] is False
+        for kwargs in captured
+    )
+    assert all(limit == 5 for _, _, limit in disclosure_symbols)
+    assert body["market_context"] == context
+    assert body["market_context_summary"]["market_context_as_of"] == context["as_of"]

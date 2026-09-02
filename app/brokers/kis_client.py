@@ -24,8 +24,20 @@ from app.services.kis_payload_sanitizer import (
 # - examples_llm/domestic_stock/inquire_psbl_rvsecncl/inquire_psbl_rvsecncl.py
 KIS_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_PRICE_TR_ID = "FHKST01010100"
+KIS_DOMESTIC_QUOTE_MARKET_CODE = "J"
 KIS_DAILY_BARS_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
 KIS_DAILY_BARS_TR_ID = "FHKST03010100"
+KIS_INDEX_DAILY_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice"
+KIS_INDEX_DAILY_TR_ID = "FHKUP03500100"
+KIS_INVESTOR_DAILY_BY_MARKET_PATH = "/uapi/domestic-stock/v1/quotations/inquire-investor-daily-by-market"
+KIS_INVESTOR_DAILY_BY_MARKET_TR_ID = "FHPTJ04040000"
+KIS_NEWS_TITLE_PATH = "/uapi/domestic-stock/v1/quotations/news-title"
+KIS_NEWS_TITLE_TR_ID = "FHKST01011800"
+KIS_OVERSEAS_DAILY_CHART_PATH = "/uapi/overseas-price/v1/quotations/inquire-daily-chartprice"
+KIS_OVERSEAS_DAILY_CHART_TR_ID = "FHKST03030100"
+KIS_FX_MARKET_DIVISION = "X"
+KIS_USDKRW_ISCD = "FX@KRWKFTC"
+KIS_USDKRW_IDENTIFIER_NAME = "\uC6D0/\uB2EC\uB7EC"
 KIS_MARKET_CAP_RANKING_PATH = "/uapi/domestic-stock/v1/ranking/market-cap"
 KIS_MARKET_CAP_RANKING_TR_ID = "FHPST01740000"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
@@ -130,7 +142,7 @@ class KisClient:
             KIS_PRICE_PATH,
             tr_id=KIS_PRICE_TR_ID,
             params={
-                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_COND_MRKT_DIV_CODE": KIS_DOMESTIC_QUOTE_MARKET_CODE,
                 "FID_INPUT_ISCD": normalized_symbol,
             },
         )
@@ -143,11 +155,263 @@ class KisClient:
             "current_price": to_float(output.get("stck_prpr")),
             "change": to_float(output.get("prdy_vrss")),
             "change_rate": normalize_percent(output.get("prdy_ctrt")),
+            "previous_close": _previous_close_from_output(output),
+            "market": _normalize_domestic_market_label(
+                output.get("rprs_mrkt_kor_name")
+                or output.get("rprs_mrkt_name")
+                or output.get("market")
+            ),
             "timestamp": self._timestamp_from_output(output),
             "raw_status": "ok",
             "raw": _safe_raw(response),
         }
 
+    def get_overseas_daily_chartprice(
+        self,
+        *,
+        market_division: str,
+        symbol: str,
+        as_of: date | datetime | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return normalized read-only overseas index/FX daily rows."""
+        safe_limit = max(1, min(int(limit or 5), 30))
+        end_date = _as_date(as_of) or datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=max(safe_limit * 4, 14))
+        response = self.request_get(
+            KIS_OVERSEAS_DAILY_CHART_PATH,
+            tr_id=KIS_OVERSEAS_DAILY_CHART_TR_ID,
+            params={
+                "FID_COND_MRKT_DIV_CODE": str(market_division).strip().upper(),
+                "FID_INPUT_ISCD": str(symbol).strip(),
+                "FID_INPUT_DATE_1": start_date.strftime("%Y%m%d"),
+                "FID_INPUT_DATE_2": end_date.strftime("%Y%m%d"),
+                "FID_PERIOD_DIV_CODE": "D",
+            },
+        )
+
+        normalized_by_date: dict[str, dict] = {}
+
+        def add_row(raw_row, *, freshness: str, fallback_date: date):
+            item = _as_dict(raw_row)
+            if not item:
+                return
+            session_date = _normalize_kis_date(
+                first_present(item, ["stck_bsop_date", "xymd", "date"])
+            ) or fallback_date.isoformat()
+            close = first_float(
+                item,
+                [
+                    "ovrs_nmix_prpr",
+                    "ovrs_prod_prpr",
+                    "stck_clpr",
+                    "close",
+                    "price",
+                    "deal_bas_r",
+                    "clos",
+                ],
+            )
+            previous_close = first_float(
+                item,
+                [
+                    "ovrs_nmix_prdy_clpr",
+                    "ovrs_prod_prdy_clpr",
+                    "prdy_clpr",
+                    "previous_close",
+                    "prev_close",
+                ],
+            )
+            change_amount = first_float(
+                item,
+                [
+                    "ovrs_nmix_prdy_vrss",
+                    "ovrs_prod_prdy_vrss",
+                    "prdy_vrss",
+                    "change",
+                ],
+                default=None,
+            )
+            if previous_close <= 0 and close > 0 and change_amount is not None:
+                previous_close = close - change_amount
+            if close <= 0 and previous_close <= 0:
+                return
+            normalized = {
+                "symbol": str(symbol).strip(),
+                "date": session_date,
+                "close": close if close > 0 else previous_close,
+                "previous_close": (
+                    previous_close if previous_close > 0 else None
+                ),
+                "change_pct": _normalize_percent_value(
+                    first_present(
+                        item,
+                        ["prdy_ctrt", "change_pct", "change_rate"],
+                    )
+                ),
+                "freshness": freshness,
+            }
+            existing = normalized_by_date.get(session_date)
+            if existing is None:
+                normalized_by_date[session_date] = normalized
+                return
+            for key, value in normalized.items():
+                if value is not None:
+                    existing[key] = value
+            if freshness == "current":
+                existing["freshness"] = freshness
+
+        output1 = _as_list(response.get("output1"))
+        for row in output1:
+            add_row(row, freshness="current", fallback_date=end_date)
+
+        output2 = _as_list(response.get("output2") or response.get("output"))
+        for row in output2:
+            add_row(row, freshness="latest_completed", fallback_date=end_date)
+
+        normalized = sorted(
+            normalized_by_date.values(),
+            key=lambda item: str(item.get("date") or ""),
+        )
+        for index, row in enumerate(normalized):
+            if row.get("previous_close") is None and index > 0:
+                previous_close = to_float(normalized[index - 1].get("close"))
+                if previous_close > 0:
+                    row["previous_close"] = previous_close
+            if row.get("change_pct") is None:
+                current = to_float(row.get("close"))
+                previous_close = to_float(row.get("previous_close"))
+                if current > 0 and previous_close > 0:
+                    row["change_pct"] = round(
+                        ((current - previous_close) / previous_close) * 100.0,
+                        10,
+                    )
+        return normalized[-safe_limit:]
+    def get_usdkrw_daily_chart(
+        self,
+        *,
+        as_of: date | datetime | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return USD/KRW daily FX rows using KIS's read-only FX feed."""
+        return self.get_overseas_daily_chartprice(
+            market_division=KIS_FX_MARKET_DIVISION,
+            symbol=KIS_USDKRW_ISCD,
+            as_of=as_of,
+            limit=limit,
+        )
+
+    def get_domestic_index_daily_bars(
+        self,
+        index_code: str,
+        *,
+        as_of: date | datetime | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return normalized read-only KOSPI/KOSDAQ index daily bars."""
+        safe_limit = max(1, min(int(limit or 5), 30))
+        end_date = _as_date(as_of) or datetime.now(UTC).date()
+        start_date = end_date - timedelta(days=max(safe_limit * 4, 14))
+        response = self.request_get(
+            KIS_INDEX_DAILY_PATH,
+            tr_id=KIS_INDEX_DAILY_TR_ID,
+            params={
+                "FID_COND_MRKT_DIV_CODE": "U",
+                "FID_INPUT_ISCD": str(index_code).strip(),
+                "FID_INPUT_DATE_1": start_date.strftime("%Y%m%d"),
+                "FID_INPUT_DATE_2": end_date.strftime("%Y%m%d"),
+                "FID_PERIOD_DIV_CODE": "D",
+            },
+        )
+        rows = _as_list(response.get("output2") or response.get("output"))
+        result = []
+        for row in rows:
+            item = _as_dict(row)
+            session_date = _normalize_kis_date(
+                first_present(item, ["stck_bsop_date", "date"])
+            )
+            close = first_float(item, ["bstp_nmix_prpr", "close"])
+            previous_close = first_float(
+                item,
+                ["bstp_nmix_prdy_clpr", "previous_close", "prev_close"],
+            )
+            if close <= 0 and previous_close <= 0:
+                continue
+            result.append(
+                {
+                    "date": session_date,
+                    "close": close if close > 0 else previous_close,
+                    "previous_close": previous_close if previous_close > 0 else None,
+                    "change_pct": _normalize_percent_value(
+                        first_present(item, ["prdy_ctrt", "change_pct"])
+                    ),
+                }
+            )
+        result.sort(key=lambda item: str(item.get("date") or ""))
+        return result[-safe_limit:]
+
+    def get_domestic_investor_daily_by_market(
+        self,
+        market: str,
+        *,
+        as_of: date | datetime | None = None,
+    ) -> list[dict]:
+        """Return read-only daily foreign/institutional flow by KR market."""
+        normalized_market = _normalize_domestic_ranking_market(market)
+        session_date = _as_date(as_of) or datetime.now(UTC).date()
+        market_code = "KSP" if normalized_market == "KOSPI" else "KSQ"
+        index_code = "0001" if normalized_market == "KOSPI" else "1001"
+        date_value = session_date.strftime("%Y%m%d")
+        request_params = {
+            "FID_COND_MRKT_DIV_CODE": "U",
+            "FID_INPUT_ISCD": index_code,
+            "FID_INPUT_DATE_1": date_value,
+            "FID_INPUT_ISCD_1": market_code,
+            "FID_INPUT_DATE_2": date_value,
+            "FID_INPUT_ISCD_2": index_code,
+        }
+        response = self.request_get(
+            KIS_INVESTOR_DAILY_BY_MARKET_PATH,
+            tr_id=KIS_INVESTOR_DAILY_BY_MARKET_TR_ID,
+            params=request_params,
+        )
+        rows = []
+        for raw_row in _as_list(response.get("output")):
+            row = _as_dict(raw_row)
+            if not row:
+                continue
+            row.setdefault("market", normalized_market)
+            row.setdefault("market_code", market_code)
+            row.setdefault("scope", "market_wide")
+            row.setdefault("requested_date", date_value)
+            row.setdefault("source", "kis")
+            rows.append(row)
+        return rows
+
+    def get_domestic_news_titles(
+        self,
+        symbol: str,
+        *,
+        as_of: date | datetime | None = None,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Return recent read-only KIS news/disclosure titles for a symbol."""
+        safe_limit = max(1, min(int(limit or 5), 10))
+        session_date = _as_date(as_of) or datetime.now(UTC).date()
+        response = self.request_get(
+            KIS_NEWS_TITLE_PATH,
+            tr_id=KIS_NEWS_TITLE_TR_ID,
+            params={
+                "FID_NEWS_OFER_ENTP_CODE": "2",
+                "FID_COND_MRKT_CLS_CODE": "00",
+                "FID_INPUT_ISCD": str(symbol).strip(),
+                "FID_TITL_CNTT": "",
+                "FID_INPUT_DATE_1": session_date.strftime("%Y%m%d"),
+                "FID_INPUT_HOUR_1": "235959",
+                "FID_RANK_SORT_CLS_CODE": "01",
+                "FID_INPUT_SRNO": "1",
+            },
+        )
+        return [_as_dict(row) for row in _as_list(response.get("output"))][:safe_limit]
     def get_domestic_daily_bars(self, symbol: str, limit: int = 120) -> list[dict]:
         """Return normalized read-only KIS daily OHLCV bars, oldest first."""
         normalized_symbol = symbol.strip()
@@ -1175,6 +1439,50 @@ def _normalize_domestic_ranking_market(value: str) -> str:
 def _ranking_market_code(market: str) -> str:
     return "1001" if market == "KOSDAQ" else "0001"
 
+
+def _as_date(value) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def _normalize_percent_value(value) -> float | None:
+    if value is None or str(value).strip() == "":
+        return None
+    numeric = to_float(value, float("nan"))
+    if numeric != numeric:
+        return None
+    # KIS prdy_ctrt is already expressed as a percentage, not a ratio.
+    return numeric
+
+
+def _previous_close_from_output(output: dict) -> float | None:
+    current = to_float(output.get("stck_prpr"))
+    baseline = to_float(output.get("stck_sdpr"))
+    if baseline > 0:
+        return baseline
+    raw_change = output.get("prdy_vrss")
+    change = to_float(raw_change)
+    if current > 0 and raw_change is not None and str(raw_change).strip():
+        return current - change
+    return None
+
+
+def _normalize_domestic_market_label(value) -> str | None:
+    text = str(value or "").strip().upper()
+    if "KOSDAQ" in text or "\ucf54\uc2a4\ub2e5" in text:
+        return "KOSDAQ"
+    if "KOSPI" in text or "\ucf54\uc2a4\ud53c" in text:
+        return "KOSPI"
+    return None
 
 def _normalize_kis_date(value) -> str | None:
     if value is None:

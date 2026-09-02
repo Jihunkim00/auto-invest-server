@@ -65,8 +65,11 @@ class AlpacaClient:
         start = end - timedelta(days=5)
 
         tf = TimeFrame(amount=1, unit=TimeFrameUnit.Minute)
-        if timeframe.lower() in ("5min", "5m"):
+        normalized_timeframe = str(timeframe or "1Min").strip().lower()
+        if normalized_timeframe in ("5min", "5m"):
             tf = TimeFrame(amount=5, unit=TimeFrameUnit.Minute)
+        elif normalized_timeframe in ("1day", "1d", "day", "d"):
+            tf = TimeFrame(amount=1, unit=TimeFrameUnit.Day)
 
         request = StockBarsRequest(
             symbol_or_symbols=symbol,

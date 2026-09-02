@@ -178,6 +178,10 @@ def test_kr_watchlist_loading_returns_six_digit_symbols():
     assert "035420" in symbols
     assert symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
+    listing_markets = [item["listing_market"] for item in payload["symbols"]]
+    assert listing_markets[:40] == ["KOSPI"] * 40
+    assert listing_markets[40:] == ["KOSDAQ"] * 10
+    assert all(item["market"] == "KR" for item in payload["symbols"])
 
 
 def test_kr_watchlist_service_can_load_profile_symbols_without_analysis():

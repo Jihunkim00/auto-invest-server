@@ -212,6 +212,12 @@ class MarketProfileService:
                 return None
             symbol = self.normalize_symbol(raw_symbol, profile.market)
             item = dict(raw)
+            if profile.market == "KR":
+                listing_market = _normalize_kr_listing_market(
+                    raw.get("listing_market") or raw.get("market")
+                )
+                if listing_market:
+                    item["listing_market"] = listing_market
             item["symbol"] = symbol
             if profile.market == "US":
                 item = enrich_us_symbol_metadata(item)
@@ -250,6 +256,12 @@ class MarketProfileService:
 def _market_label(market: Any) -> str:
     normalized = str(market or "").strip().upper()
     return MARKET_LABELS.get(normalized, normalized)
+
+def _normalize_kr_listing_market(value: Any) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if normalized in {"KOSPI", "KOSDAQ"}:
+        return normalized
+    return None
 
 
 def _watchlist_company_name(raw: dict[str, Any], symbol: str) -> str:
