@@ -27,17 +27,45 @@ from app.config import get_settings
 
 get_settings.cache_clear()
 
-from app.db.database import Base
+from app.db.database import Base, engine
 from app.db import models  # noqa: F401
 from app.db.init_db import init_db
 
+def _assert_safe_test_database() -> None:
+    raw_path = engine.url.database
+
+    if engine.url.get_backend_name() != "sqlite":
+        raise RuntimeError(
+            f"REFUSING pytest DB access: unexpected database={engine.url}"
+        )
+
+    if not raw_path or raw_path == ":memory:":
+        raise RuntimeError(
+            f"REFUSING pytest DB access: invalid database={engine.url}"
+        )
+
+    db_path = Path(raw_path).resolve()
+    test_root = _TEST_DB_ROOT.resolve()
+
+    try:
+        db_path.relative_to(test_root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"REFUSING destructive pytest access outside test DB: {db_path}"
+        ) from exc
+
+    if db_path.name != "test_auto_invest.db":
+        raise RuntimeError(
+            f"REFUSING unexpected pytest DB file: {db_path}"
+        )
+
+_assert_safe_test_database()
 init_db()
 
 
 def pytest_sessionfinish(session, exitstatus):
     try:
-        from app.db.database import engine
-
+        
         engine.dispose()
     except Exception:
         pass
@@ -46,11 +74,12 @@ def pytest_sessionfinish(session, exitstatus):
 
 @pytest.fixture(autouse=True)
 def _isolate_file_backed_test_database():
-    from app.db.database import engine
+    _assert_safe_test_database()
 
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
             conn.execute(table.delete())
+
     yield
 
 
