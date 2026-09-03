@@ -72,6 +72,7 @@ from app.services.kis_single_symbol_trading_service import (
 from app.services.kis_position_management_service import KisPositionManagementService
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.kis_manual_cancel_service import KisManualCancelService
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.kis_order_sync_service import (
     KisOrderSyncError,
     KisOrderSyncService,
@@ -288,7 +289,10 @@ def list_kis_open_orders(db: Session = Depends(get_db)):
 @router.get("/positions/manage")
 def manage_kis_positions(db: Session = Depends(get_db)):
     client = _client(db)
-    service = KisPositionManagementService(client)
+    service = KisPositionManagementService(
+        client,
+        automation_profiles=AutomationProfileService(),
+    )
     try:
         return service.positions_manage(db)
     except KisConfigurationError as exc:
@@ -308,7 +312,10 @@ def manage_kis_positions(db: Session = Depends(get_db)):
 @router.post("/positions/{symbol}/prepare-manual-sell")
 def prepare_kis_position_manual_sell(symbol: str, db: Session = Depends(get_db)):
     client = _client(db)
-    service = KisPositionManagementService(client)
+    service = KisPositionManagementService(
+        client,
+        automation_profiles=AutomationProfileService(),
+    )
     try:
         return service.prepare_manual_sell(db, symbol=symbol)
     except ValueError as exc:

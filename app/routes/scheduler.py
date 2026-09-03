@@ -20,15 +20,117 @@ from app.services.operation_test3_position_management_service import (
     TRADE_RUN_PREFLIGHT_MODE,
     TRADE_RUN_RUN_MODE,
 )
+from app.services.automation_execution_authority_service import (
+    AutomationExecutionAuthorityService,
+)
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.scheduler_service import scheduler_service
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
 
+_CANONICAL_IGNORED_KIS_SCHEDULER_FLAGS = (
+    "kis_scheduler_enabled",
+    "kis_scheduler_live_enabled",
+    "kis_scheduler_allow_real_orders",
+    "kr_scheduler_enabled",
+    "kr_scheduler_allow_real_orders",
+    "kis_scheduler_buy_enabled",
+    "kis_scheduler_sell_enabled",
+    "kis_scheduler_allow_limited_auto_buy",
+    "kis_scheduler_allow_limited_auto_sell",
+    "scheduler_real_orders_disabled",
+    "kr_scheduler_session_disabled",
+)
+
+
+def _canonical_scheduler_state(
+    *,
+    runtime: dict[str, Any],
+    authority: dict[str, Any],
+    profile_schedule: dict[str, Any] | None,
+    scheduler_runtime: dict[str, Any],
+    app_settings: Any,
+) -> dict[str, Any]:
+    profile = (profile_schedule or {}).get("profile") or {}
+    profile_is_kis_kr = (
+        str(profile.get("provider") or "").lower() == "kis"
+        and str(profile.get("market") or "").upper() == "KR"
+    )
+    profile_active = bool(
+        profile_schedule
+        and profile_schedule.get("status") == "active"
+        and profile.get("enabled") is True
+        and profile_is_kis_kr
+    )
+    scheduler_registered = bool(
+        scheduler_runtime.get("scheduler_authority")
+        == "AutomationSchedulerService"
+        and int(scheduler_runtime.get("production_trading_job_count") or 0) == 1
+    )
+    mode = str(authority.get("automation_mode") or "off").lower()
+    canonical_active = bool(
+        scheduler_registered
+        and runtime.get("automation_profile_scheduler_enabled")
+        and authority.get("scheduler_allowed")
+        and profile_active
+    )
+    live_order_submission_enabled = bool(
+        canonical_active
+        and mode == "live"
+        and authority.get("broker_submit_allowed")
+        and not runtime.get("dry_run")
+        and not runtime.get("kill_switch")
+        and getattr(app_settings, "kis_enabled", False)
+        and getattr(app_settings, "kis_real_order_enabled", False)
+    )
+    return {
+        "scheduler": "AutomationSchedulerService",
+        "authority": "AutomationSchedulerService",
+        "registered": scheduler_registered,
+        "active": canonical_active,
+        "enabled": canonical_active,
+        "mode": mode,
+        "profile_key": profile_schedule.get("profile_key") if profile_schedule else None,
+        "scheduler_allowed": bool(authority.get("scheduler_allowed")),
+        "broker_submit_allowed": bool(authority.get("broker_submit_allowed")),
+        "live_order_submission_enabled": live_order_submission_enabled,
+        "legacy_readiness_diagnostic_only": True,
+        "legacy_kis_scheduler_flags_ignored": list(
+            _CANONICAL_IGNORED_KIS_SCHEDULER_FLAGS
+        ),
+        "blocking_reasons": [] if canonical_active else [
+            "canonical_scheduler_inactive"
+        ],
+        "live_order_blocking_reasons": (
+            []
+            if live_order_submission_enabled
+            else [
+                reason
+                for reason, blocked in (
+                    ("automation_mode_not_live", mode != "live"),
+                    ("dry_run_true", bool(runtime.get("dry_run"))),
+                    ("kill_switch_enabled", bool(runtime.get("kill_switch"))),
+                    (
+                        "kis_disabled",
+                        not bool(getattr(app_settings, "kis_enabled", False)),
+                    ),
+                    (
+                        "kis_real_order_disabled",
+                        not bool(
+                            getattr(app_settings, "kis_real_order_enabled", False)
+                        ),
+                    ),
+                )
+                if blocked
+            ]
+        ),
+    }
+
+
 @router.get("/status")
 def get_scheduler_status(db: Session = Depends(get_db)):
-    get_settings()
+    app_settings = get_settings()
     session_service = MarketSessionService()
     runtime_service = RuntimeSettingService()
 
@@ -66,15 +168,46 @@ def get_scheduler_status(db: Session = Depends(get_db)):
     us_last_run = _latest_scheduler_run(db, market="US")
     kr_last_run = _latest_scheduler_run(db, market="KR")
     runtime_settings = runtime_service.get_settings_read_only(db)
-    automation_profiles = AutomationProfileService()
+    automation_profiles = AutomationProfileService(runtime_settings=runtime_service)
     profile_state = automation_profiles.list_profiles(db)
     selected_profile = profile_state.get("selected_profile") or {}
     active_profile = profile_state.get("active_profile") or {}
     selected_profile_status = profile_state.get("selected_profile_status")
     profile_schedule = automation_profiles.selected_profile_schedule(db)
     scheduler_runtime = scheduler_service.runtime_status()
+    canonical_authority = AutomationExecutionAuthorityService(
+        runtime_service
+    ).snapshot(db)
+    canonical_scheduler = _canonical_scheduler_state(
+        runtime=runtime_settings,
+        authority=canonical_authority,
+        profile_schedule=profile_schedule,
+        scheduler_runtime=scheduler_runtime,
+        app_settings=app_settings,
+    )
+    profile_effective_settings = selected_profile.get("effective_settings")
+    if not isinstance(profile_effective_settings, dict):
+        profile_effective_settings = selected_profile.get("settings") or {}
+    profile_entry = profile_effective_settings.get("entry")
+    if not isinstance(profile_entry, dict):
+        profile_entry = {}
+    profile_analysis_times = list(
+        (profile_schedule or {}).get("analysis_times")
+        or profile_entry.get("analysis_times")
+        or []
+    )
+    effective_profile_analysis_times = list(
+        profile_entry.get("analysis_times") or profile_analysis_times
+    )
+    profile_no_new_entry_after = str(
+        profile_entry.get("no_new_entry_after") or "14:00"
+    )
+    profile_next_run_at = (profile_schedule or {}).get("next_run_at")
+    profile_next_slot = _profile_next_slot(profile_next_run_at)
     kr_risk_summary = runtime_service.get_kis_risk_summary_read_only(db)
+    legacy_risk_summary = kr_risk_summary
     current_operation_mode = runtime_service.current_operation_mode_read_only(db)
+    legacy_current_operation_mode = current_operation_mode
     daily_live_order_remaining = kr_risk_summary.get("daily_live_order_remaining")
     daily_live_order_limit = kr_risk_summary.get("daily_live_order_limit")
     daily_order_count = (
@@ -112,6 +245,12 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         or runtime_settings.get("kis_limited_auto_buy_no_new_entry_after")
         or "14:50"
     )
+    legacy_kr_no_new_entry_after = kr_no_new_entry_after
+    legacy_kr_next_slot = dict(kr_next_slot)
+    effective_kr_next_slot = kr_next_slot
+    if canonical_scheduler["active"]:
+        kr_no_new_entry_after = profile_no_new_entry_after
+        effective_kr_next_slot = profile_next_slot
 
     kr_dry_run_scheduler_enabled_effective = bool(
         runtime_state["scheduler_enabled"]
@@ -184,8 +323,78 @@ def get_scheduler_status(db: Session = Depends(get_db)):
                     "no_limited_auto_scheduler_path_enabled"
                 )
 
+    # The values above describe the historical KIS scheduler and are retained
+    # for diagnostics. Once the canonical AutomationSchedulerService is
+    # active, those values must not be allowed to become the effective KR
+    # scheduler state shown by this compatibility endpoint.
+    legacy_kr_scheduler_state = {
+        "enabled_for_scheduler": kr_enabled_for_scheduler,
+        "kr_scheduler_any_enabled": kr_scheduler_any_enabled,
+        "kr_live_scheduler_enabled_effective": kr_live_scheduler_enabled_effective,
+        "kr_dry_run_scheduler_enabled_effective": kr_dry_run_scheduler_enabled_effective,
+        "real_orders_allowed": real_orders_allowed,
+        "real_order_scheduler_enabled": real_order_scheduler_enabled,
+        "live_scheduler_ready": live_scheduler_ready,
+        "block_reasons": list(kr_enabled_for_scheduler_block_reasons),
+        "schedule": {
+            "slots": kr.get("entry_slots", []),
+            "next_run": legacy_kr_next_slot,
+            "no_new_entry_after": legacy_kr_no_new_entry_after,
+        },
+    }
+    if canonical_scheduler["active"]:
+        canonical_live = bool(canonical_scheduler["live_order_submission_enabled"])
+        canonical_simulation = str(canonical_scheduler["mode"]) in {"test", "paper"}
+        kr_live_scheduler_enabled_effective = canonical_live
+        kr_dry_run_scheduler_enabled_effective = canonical_simulation
+        kr_scheduler_any_enabled = True
+        kr_enabled_for_scheduler = True
+        kr_enabled_for_scheduler_block_reasons = []
+        live_scheduler_ready = canonical_live
+        real_orders_allowed = canonical_live
+        real_order_scheduler_enabled = canonical_live
+        live_buy_possible = canonical_live
+        live_sell_possible = canonical_live
+        if canonical_live:
+            warning_level = "canonical_live"
+            user_friendly_summary = (
+                "Canonical AutomationSchedulerService is active for LIVE KIS "
+                "automation. Legacy KIS scheduler readiness is diagnostic-only."
+            )
+            warning_message = (
+                "Canonical AutomationSchedulerService is authoritative for LIVE "
+                "KIS automation; legacy KIS scheduler flags are ignored."
+            )
+        else:
+            warning_level = "canonical_active"
+            user_friendly_summary = (
+                "Canonical AutomationSchedulerService is active for canonical "
+                f"{canonical_scheduler['mode'].upper()} KIS automation."
+            )
+            warning_message = (
+                "Canonical AutomationSchedulerService is authoritative; legacy "
+                "KIS scheduler readiness is diagnostic-only."
+            )
+        current_operation_mode = str(canonical_scheduler["mode"])
+        kr_risk_summary = {
+            **legacy_risk_summary,
+            "live_buy_armed": canonical_live,
+            "live_sell_armed": canonical_live,
+            "blocking_flags": [],
+            "warning_level": warning_level,
+            "canonical_scheduler_active": True,
+            "legacy_readiness_diagnostic_only": True,
+        }
+
     return {
         **scheduler_runtime,
+        "canonical_scheduler": canonical_scheduler,
+        "canonical_scheduler_active": bool(canonical_scheduler["active"]),
+        "canonical_automation_mode": canonical_scheduler["mode"],
+        "legacy_kis_scheduler_state": {
+            **legacy_kr_scheduler_state,
+            "diagnostic_only": True,
+        },
         "active_profile_key": active_profile.get("profile_key"),
         "active_profile_name": active_profile.get("name") or active_profile.get("display_name"),
         "active_profile_provider": active_profile.get("provider") or "kis",
@@ -213,25 +422,39 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "daily_order_limit": daily_live_order_limit,
         "active_position_count": int(active_position_count),
         "active_profile": active_profile or None,
-        "profile_analysis_times": (profile_schedule or {}).get("analysis_times") or [],
-        "effective_profile_analysis_times": (((selected_profile.get("effective_settings") or {}).get("entry") or {}).get("analysis_times") or (((selected_profile.get("settings") or {}).get("entry") or {}).get("analysis_times") or [])),
-        "profile_next_run_at": ((profile_schedule or {}).get("next_run_at").isoformat() if (profile_schedule or {}).get("next_run_at") is not None else None),
-        "next_profile_run_at": ((profile_schedule or {}).get("next_run_at").isoformat() if (profile_schedule or {}).get("next_run_at") is not None else None),
-        "profile_stop_loss_pct": (((selected_profile.get("effective_settings") or {}).get("exit") or {}).get("stop_loss_pct")),
-        "profile_take_profit_pct": (((selected_profile.get("effective_settings") or {}).get("exit") or {}).get("take_profit_pct")),
+        "legacy_current_operation_mode": legacy_current_operation_mode,
+        "profile_analysis_times": profile_analysis_times,
+        "effective_profile_analysis_times": effective_profile_analysis_times,
+        "profile_no_new_entry_after": profile_no_new_entry_after,
+        "profile_next_run_at": profile_next_run_at.isoformat() if profile_next_run_at is not None else None,
+        "next_profile_run_at": profile_next_run_at.isoformat() if profile_next_run_at is not None else None,
+        "display_next_run": _display_next_run(effective_kr_next_slot, "KST"),
+        "profile_stop_loss_pct": (((profile_effective_settings.get("exit") or {}).get("stop_loss_pct"))),
+        "profile_take_profit_pct": (((profile_effective_settings.get("exit") or {}).get("take_profit_pct"))),
         "current_operation_mode": current_operation_mode,
-        "display_mode_label": _display_mode_label(current_operation_mode),
+        "display_mode_label": (
+            f"Canonical {current_operation_mode.upper()} Automation"
+            if canonical_scheduler["active"]
+            else _display_mode_label(current_operation_mode)
+        ),
         "display_warning_level": warning_level,
         "user_friendly_summary": user_friendly_summary,
         "risk_summary": kr_risk_summary,
+        "legacy_risk_summary": legacy_risk_summary,
         "global": {
-            "scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
+            "scheduler_enabled": bool(
+                runtime_state["scheduler_enabled"] or canonical_scheduler["active"]
+            ),
             "dry_run": bool(runtime_state["dry_run"]),
             "kill_switch": bool(runtime_state["kill_switch"]),
             "safe_mode_active": bool(
-                kr_risk_summary.get("safe_mode_active")
-                or current_operation_mode == "safe_mode"
+                not canonical_scheduler["active"]
+                and (
+                    kr_risk_summary.get("safe_mode_active")
+                    or current_operation_mode == "safe_mode"
+                )
             ),
+            "canonical_scheduler_active": bool(canonical_scheduler["active"]),
         },
         "alpaca": {
             "market": "US",
@@ -252,11 +475,17 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "kis": {
             "market": "KR",
             "timezone": kr.get("timezone", "Asia/Seoul"),
+            "canonical_scheduler": canonical_scheduler,
+            "canonical_scheduler_active": bool(canonical_scheduler["active"]),
             "scheduler_enabled": kr_enabled_for_scheduler,
-            "next_run": kr_next_slot["time_local"],
-            "next_slot_name": kr_next_slot["name"],
+            "next_run": effective_kr_next_slot["time_local"],
+            "next_slot_name": effective_kr_next_slot["name"],
             "kr_no_new_entry_after": kr_no_new_entry_after,
-            "display_next_run": _display_next_run(kr_next_slot, "KST"),
+            "profile_analysis_times": profile_analysis_times,
+            "effective_profile_analysis_times": effective_profile_analysis_times,
+            "profile_no_new_entry_after": profile_no_new_entry_after,
+            "next_profile_run_at": profile_next_run_at.isoformat() if profile_next_run_at is not None else None,
+            "display_next_run": _display_next_run(effective_kr_next_slot, "KST"),
             "display_no_new_entry_after": f"{kr_no_new_entry_after} KST",
             "live_buy_armed": bool(kr_risk_summary.get("live_buy_armed")),
             "live_sell_armed": bool(kr_risk_summary.get("live_sell_armed")),
@@ -266,7 +495,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         },
         "next_run": {
             "US": us_next_slot,
-            "KR": kr_next_slot,
+            "KR": effective_kr_next_slot,
         },
         "live_order_possible": bool(live_buy_possible or live_sell_possible),
         "live_buy_possible": live_buy_possible,
@@ -274,7 +503,9 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         "operation_test3": operation_test3,
         "daily_live_order_remaining": daily_live_order_remaining,
         "warning_message": warning_message,
-        "runtime_scheduler_enabled": bool(runtime_state["scheduler_enabled"]),
+        "runtime_scheduler_enabled": bool(
+            runtime_state["scheduler_enabled"] or canonical_scheduler["active"]
+        ),
         "US": {
             "enabled_for_scheduler": bool(us.get("enabled_for_scheduler", False)),
             "timezone": us.get("timezone", "America/New_York"),
@@ -293,28 +524,41 @@ def get_scheduler_status(db: Session = Depends(get_db)):
         },
         "KR": {
             "enabled_for_scheduler": kr_enabled_for_scheduler,
+            "canonical_scheduler": canonical_scheduler,
+            "canonical_scheduler_active": bool(canonical_scheduler["active"]),
+            "legacy_readiness_diagnostic_only": True,
+            "legacy_enabled_for_scheduler": legacy_kr_scheduler_state[
+                "enabled_for_scheduler"
+            ],
+            "legacy_enabled_for_scheduler_block_reasons": legacy_kr_scheduler_state[
+                "block_reasons"
+            ],
             "kr_scheduler_any_enabled": kr_scheduler_any_enabled,
             "kr_live_scheduler_enabled_effective": kr_live_scheduler_enabled_effective,
             "kr_dry_run_scheduler_enabled_effective": kr_dry_run_scheduler_enabled_effective,
             "enabled_for_scheduler_block_reasons": kr_enabled_for_scheduler_block_reasons,
             "timezone": kr.get("timezone", "Asia/Seoul"),
-            "slots": kr.get("entry_slots", []),
+            "slots": profile_analysis_times if canonical_scheduler["active"] else kr.get("entry_slots", []),
             "market": "KR",
             "broker": "kis",
             "kr_no_new_entry_after": kr_no_new_entry_after,
             "no_new_entry_after": kr_no_new_entry_after,
+            "profile_analysis_times": profile_analysis_times,
+            "effective_profile_analysis_times": effective_profile_analysis_times,
+            "profile_no_new_entry_after": profile_no_new_entry_after,
+            "next_profile_run_at": profile_next_run_at.isoformat() if profile_next_run_at is not None else None,
             "display_no_new_entry_after": f"{kr_no_new_entry_after} KST",
-            "next_slot_name": kr_next_slot["name"],
-            "next_slot_time_local": kr_next_slot["time_local"],
-            "display_next_run": _display_next_run(kr_next_slot, "KST"),
+            "next_slot_name": effective_kr_next_slot["name"],
+            "next_slot_time_local": effective_kr_next_slot["time_local"],
+            "display_next_run": _display_next_run(effective_kr_next_slot, "KST"),
             "last_scheduler_run_at": kr_last_run["created_at"],
             "last_scheduler_run_result": kr_last_run["result"],
             "last_scheduler_run_reason": kr_last_run["reason"],
             "last_scheduler_run_id": kr_last_run["id"],
             "last_scheduler_run_mode": kr_last_run["mode"],
             "last_scheduler_run_trigger_source": kr_last_run["trigger_source"],
-            "preview_only": True,
-            "simulation_first": True,
+            "preview_only": not bool(canonical_scheduler["active"]),
+            "simulation_first": not bool(canonical_scheduler["active"]),
             "kis_scheduler_enabled": kr_scheduler_enabled,
             "kis_scheduler_dry_run": kr_scheduler_dry_run,
             "kis_scheduler_allow_real_orders": kr_scheduler_allow_real_orders,
@@ -335,9 +579,7 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "configured_live_order_prereqs_met": real_orders_allowed,
             "dry_run_validation_scheduler_enabled": kr_dry_run_scheduler_enabled_effective,
             "real_orders_allowed": real_orders_allowed,
-            "real_order_scheduler_enabled": bool(
-                runtime_state["real_order_scheduler_enabled"]
-            ),
+            "real_order_scheduler_enabled": real_order_scheduler_enabled,
             "risk_summary": kr_risk_summary,
             "current_operation_mode": current_operation_mode,
             "user_friendly_summary": user_friendly_summary,
@@ -478,6 +720,13 @@ def _display_next_run(slot: dict[str, str | None], timezone_label: str) -> str |
     name = slot.get("name")
     prefix = f"{name} " if name else ""
     return f"{prefix}{time_local} {timezone_label}"
+
+
+def _profile_next_slot(value: datetime | None) -> dict[str, str | None]:
+    return {
+        "name": "automation_profile" if value is not None else None,
+        "time_local": value.isoformat(timespec="minutes") if value is not None else None,
+    }
 
 
 def _next_slot(slots: Any, timezone: str) -> dict[str, str | None]:

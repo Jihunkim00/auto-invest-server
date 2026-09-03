@@ -264,13 +264,26 @@ class KisAutomationExecutionCore:
             qty=qty,
         )
 
+        effective_qty = int(guard.get('effective_quantity') or qty)
+        if guard.get('allowed') and effective_qty <= 0:
+            guard = {
+                **guard,
+                'allowed': False,
+                'reason': 'insufficient_holdings',
+            }
+        if guard.get('allowed') and effective_qty != int(qty):
+            order.qty = effective_qty
+            order.requested_qty = effective_qty
+            order.remaining_qty = effective_qty
+            db.flush()
+
         if guard.get("allowed") and authority.get("automation_mode") == "test":
             return self._simulate_market(
                 db,
                 order=order,
                 side="sell",
                 symbol=symbol,
-                qty=qty,
+                qty=effective_qty,
                 now=now,
                 guard=guard,
             )
@@ -283,8 +296,8 @@ class KisAutomationExecutionCore:
                 order=order,
                 side="sell",
                 symbol=symbol,
-                qty=qty,
-                submitter=submitter or self._broker_sell(symbol, qty),
+                qty=effective_qty,
+                submitter=submitter or self._broker_sell(symbol, effective_qty),
                 now=now,
                 guard=guard,
             )
@@ -939,10 +952,12 @@ class KisAutomationExecutionCore:
             ),
             None,
         )
+        held_qty = int(_position_qty(held)) if held is not None else 0
 
         if (
             held is None
-            or _position_qty(held) < int(qty)
+            or held_qty <= 0
+            or int(qty) <= 0
         ):
             return {
                 "allowed": False,
@@ -972,8 +987,13 @@ class KisAutomationExecutionCore:
 
         return {
             "allowed": True,
+            "held_quantity": held_qty,
+            "effective_quantity": min(int(qty), held_qty),
+            "quantity_reconciled": min(int(qty), held_qty) != int(qty),
             "checks": [
                 "held_position_reconciled",
+                "current_broker_quantity",
+                "sell_quantity_reconciled",
                 "duplicate_protection",
             ],
         }

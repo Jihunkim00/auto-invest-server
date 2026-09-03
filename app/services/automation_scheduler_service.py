@@ -29,6 +29,9 @@ from app.services.kis_watchlist_update_service import (
     KisWatchlistUpdateService,
 )
 from app.services.market_profile_service import MarketProfileService
+from app.services.profile_aware_guarded_live_auto_exit_service import (
+    ProfileAwareGuardedLiveAutoExitService,
+)
 from app.services.scheduler_service import SchedulerService
 
 
@@ -63,6 +66,7 @@ class AutomationSchedulerService(SchedulerService):
     def __init__(self):
         super().__init__()
         self.profile_aware_dry_run_auto_buy_service = None
+        self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
         self.automation_watchlist_update_service = None
         self._automation_watchlist_refresh_lock = threading.Lock()
@@ -410,11 +414,81 @@ class AutomationSchedulerService(SchedulerService):
                 )
 
             portfolio = self._manage_portfolio_first(db, slot=slot, now=now_kst)
-            if self._critical_exit(portfolio):
-                return self._create_scheduler_skip_log(
-                    db, slot_name, "position_management_priority_buy_skipped",
-                    market="KR", provider="kis",
+            held_positions = list((portfolio or {}).get('broker_positions') or [])
+            critical_item = next(
+                (
+                    item
+                    for item in (portfolio or {}).get('items', [])
+                    if isinstance(item, dict)
+                    and str(item.get('action') or '').upper() in CRITICAL_EXIT_ACTIONS
+                ),
+                None,
+            )
+            effective_profile = (schedule.get('profile') or {}).get('effective_settings') or {}
+            max_open_positions = int(effective_profile.get('max_open_positions') or 1)
+            position_capacity_reached = len(held_positions) >= max_open_positions
+            if critical_item is not None or position_capacity_reached:
+                exit_result = None
+                if critical_item is not None or held_positions:
+                    exit_service = self._profile_guarded_live_auto_exit_service(db)
+                    exit_result = exit_service.run_scheduler_once(
+                        db,
+                        scheduler_slot=slot,
+                        symbol=(critical_item or {}).get('symbol') if critical_item else None,
+                        now=now_kst,
+                    )
+                portfolio = {
+                    **(portfolio or {}),
+                    'sell_result': exit_result,
+                    'buy_blocked': True,
+                    'buy_block_reason': 'position_management_priority_buy_skipped',
+                }
+                sell_submitted = bool((exit_result or {}).get('submitted'))
+                exit_block_reason = str((exit_result or {}).get('block_reason') or '')
+                sell_status = (
+                    'SELL_SUBMITTED'
+                    if sell_submitted
+                    else (
+                        'blocked'
+                        if exit_block_reason not in {'', 'no_exit_candidate', 'no_exit_trigger'}
+                        else 'HOLD'
+                    )
                 )
+                sell_reason = str(
+                    (exit_result or {}).get('exit_reason')
+                    or (exit_result or {}).get('block_reason')
+                    or (exit_result or {}).get('reason')
+                    or 'position_management_priority_buy_skipped'
+                )
+                return {
+                    'scheduler': self.__class__.__name__,
+                    'mode': str(authority.get('automation_mode') or 'test'),
+                    'execution_mode': str(authority.get('automation_mode') or 'test'),
+                    'execution_authority': str(
+                        authority.get('execution_authority')
+                        or str(authority.get('automation_mode') or 'test').upper()
+                    ),
+                    'profile_key': schedule.get('profile_key'),
+                    'slot': slot,
+                    'result': sell_status,
+                    'reason': sell_reason,
+                    'submission_eligible': False,
+                    'real_order_submitted': sell_submitted,
+                    'validation_called': bool((exit_result or {}).get('safety', {}).get('validation_called')),
+                    'broker_submit_called': bool((exit_result or {}).get('safety', {}).get('broker_submit_called')),
+                    'manual_submit_called': False,
+                    'portfolio': portfolio,
+                    'position_management': portfolio,
+                    'dry_run': None,
+                    'profile_buy': {
+                        'status': 'blocked',
+                        'action': 'hold',
+                        'reason': 'position_management_priority_buy_skipped',
+                        'broker_submit_called': False,
+                        'broker_buy_call_count': 0,
+                        'real_external_kis_submit_count': 0,
+                    },
+                }
 
             mode = str(authority.get("automation_mode") or "test").strip().lower()
             execution_authority = str(
@@ -929,22 +1003,61 @@ class AutomationSchedulerService(SchedulerService):
             self._slot_runs.add(run_key)
             return True
 
+    def _profile_guarded_live_auto_exit_service(self, db):
+        if self.profile_aware_guarded_live_auto_exit_service is not None:
+            return self.profile_aware_guarded_live_auto_exit_service
+        profile_buy = self._profile_buy_scheduler_service(db)
+        client = getattr(profile_buy, 'client', None)
+        self.profile_aware_guarded_live_auto_exit_service = (
+            ProfileAwareGuardedLiveAutoExitService(
+                client=client,
+                broker=getattr(profile_buy, 'broker', None),
+                validation_service=getattr(profile_buy, 'validation_service', None),
+                order_sync_service=getattr(profile_buy, 'order_sync_service', None),
+                runtime_settings=self.runtime_settings,
+                strategy_profiles=self.automation_profiles,
+                positions_loader=getattr(profile_buy, 'positions_loader', None),
+                open_orders_loader=getattr(profile_buy, 'open_orders_loader', None),
+                execution_core=getattr(profile_buy, 'execution_core', None),
+            )
+        )
+        return self.profile_aware_guarded_live_auto_exit_service
+
     def _manage_portfolio_first(self, db, *, slot: str, now: datetime) -> dict[str, Any] | None:
-        if not db.query(PositionLifecycle).filter(
-            PositionLifecycle.status.in_(["open", "closing"])
-        ).count():
-            return {"managed_count": 0, "items": []}
         service = self._profile_buy_scheduler_service(db)
         lifecycle = getattr(service, "lifecycle_service", None)
-        if lifecycle is None:
-            return {"managed_count": 0, "items": [], "reason": "portfolio_service_unavailable"}
-        return lifecycle.run_management_once(
-            db,
-            execute=False,
-            trigger_source="automation_scheduler",
-            scheduler_slot=slot,
-            now=now,
-        )
+        if lifecycle is not None and db.query(PositionLifecycle).filter(
+            PositionLifecycle.status.in_(["open", "closing"])
+        ).count():
+            result = lifecycle.run_management_once(
+                db,
+                execute=False,
+                trigger_source="automation_scheduler",
+                scheduler_slot=slot,
+                now=now,
+            )
+        else:
+            result = {
+                'managed_count': 0,
+                'items': [],
+                'reason': 'no_open_lifecycle',
+            }
+        positions_loader = getattr(service, 'positions_loader', None)
+        try:
+            positions = positions_loader(db) if callable(positions_loader) else service.client.list_positions()
+        except Exception:
+            positions = []
+        held_positions = [
+            item
+            for item in (positions if isinstance(positions, list) else [])
+            if isinstance(item, dict)
+            and float(item.get('qty') or item.get('quantity') or item.get('hold_qty') or 0) > 0
+        ]
+        return {
+            **(result or {}),
+            'broker_positions': held_positions,
+            'broker_held_count': len(held_positions),
+        }
 
     @staticmethod
     def _critical_exit(result: dict[str, Any] | None) -> bool:

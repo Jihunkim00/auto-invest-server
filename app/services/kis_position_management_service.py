@@ -22,6 +22,7 @@ from app.services.market_profile_service import MarketProfileError, MarketProfil
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import TechnicalIndicatorService
+from app.services.automation_profile_service import AutomationProfileService
 
 
 HOLD = "HOLD"
@@ -47,12 +48,16 @@ class KisPositionManagementService:
         session_service: MarketSessionService | None = None,
         runtime_settings: RuntimeSettingService | None = None,
         indicators: TechnicalIndicatorService | None = None,
+        automation_profiles: AutomationProfileService | None = None,
     ):
         self.client = client
         self.profile_service = profile_service or MarketProfileService()
         self.session_service = session_service or MarketSessionService()
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.indicators = indicators or TechnicalIndicatorService()
+        self.automation_profiles = automation_profiles or AutomationProfileService(
+            runtime_settings=self.runtime_settings,
+        )
 
     def positions_manage(self, db: Session) -> dict[str, Any]:
         settings = self.client.settings
@@ -63,6 +68,7 @@ class KisPositionManagementService:
         raw_positions = self._held_positions()
         open_orders = self._open_orders()
         checked_at = datetime.now(UTC).isoformat()
+        profile_exit = self._active_profile_exit(db)
 
         positions = [
             self._managed_position(
@@ -74,6 +80,7 @@ class KisPositionManagementService:
                 name_map=name_map,
                 open_orders=open_orders,
                 checked_at=checked_at,
+                profile_exit=profile_exit,
             )
             for raw in raw_positions
         ]
@@ -86,6 +93,11 @@ class KisPositionManagementService:
                 "mode": "position_management",
                 "source": "kis_position_management",
                 "read_only": True,
+                "profile_key": (profile_exit or {}).get("profile_key"),
+                "profile_stop_loss_pct": (profile_exit or {}).get("stop_loss_pct"),
+                "profile_take_profit_pct": (profile_exit or {}).get("take_profit_pct"),
+                "threshold_source": (profile_exit or {}).get("threshold_source", "legacy_defaults"),
+                "active_automation_profile": bool(profile_exit),
                 "count": len(positions),
                 "positions": positions,
                 "market_session": _public_market_session(market_session),
@@ -225,6 +237,7 @@ class KisPositionManagementService:
         name_map: dict[str, str],
         open_orders: list[dict[str, Any]],
         checked_at: str,
+        profile_exit: dict[str, Any] | None,
     ) -> dict[str, Any]:
         position = _normalize_position(raw)
         symbol = str(position.get("symbol") or "")
@@ -234,8 +247,26 @@ class KisPositionManagementService:
             symbol,
             current_price=_safe_float_or_none(position.get("current_price")),
         )
-        diagnostics = position_pl_diagnostics(position)
-        threshold_reasons, diagnostics = position_exit_threshold_reasons(position)
+        profile_stop = (profile_exit or {}).get("stop_loss_pct")
+        profile_take = (profile_exit or {}).get("take_profit_pct")
+        diagnostics = position_pl_diagnostics(
+            position,
+            take_profit_threshold=profile_take,
+            stop_loss_threshold=profile_stop,
+        )
+        threshold_reasons, diagnostics = position_exit_threshold_reasons(
+            position,
+            take_profit_threshold=profile_take,
+            stop_loss_threshold=profile_stop,
+        )
+        if profile_exit:
+            diagnostics.update(
+                {
+                    "profile_stop_loss_pct": float(profile_stop),
+                    "profile_take_profit_pct": float(profile_take),
+                    "threshold_source": profile_exit["threshold_source"],
+                }
+            )
         weak_trend = _weak_trend_triggered(technical)
         sell_pressure = _sell_pressure_triggered(position)
         duplicate_sell = _has_duplicate_open_sell(
@@ -317,6 +348,9 @@ class KisPositionManagementService:
             "broker_unrealized_pl_pct": _safe_float_or_none(
                 position.get("unrealized_plpc")
             ),
+            "profile_stop_loss_pct": (profile_exit or {}).get("stop_loss_pct"),
+            "profile_take_profit_pct": (profile_exit or {}).get("take_profit_pct"),
+            "threshold_source": (profile_exit or {}).get("threshold_source", "legacy_defaults"),
             "pl_diagnostics": diagnostics,
             "holding_status": status,
             "status": status,
@@ -352,6 +386,28 @@ class KisPositionManagementService:
             "checked_at": checked_at,
         }
         return sanitize_kis_payload(payload)
+
+    def _active_profile_exit(self, db: Session) -> dict[str, Any] | None:
+        profile = self.automation_profiles.get_active_profile(db)
+        if not isinstance(profile, dict):
+            return None
+        if (
+            str(profile.get("provider") or "").lower() != PROVIDER
+            or str(profile.get("market") or "").upper() != MARKET
+        ):
+            return None
+        effective = profile.get("effective_settings")
+        if not isinstance(effective, dict):
+            effective = profile.get("settings")
+        exit_settings = effective.get("exit") if isinstance(effective, dict) else None
+        if not isinstance(exit_settings, dict):
+            return None
+        return {
+            "profile_key": profile.get("profile_key"),
+            "stop_loss_pct": abs(_safe_float(exit_settings.get("stop_loss_pct"), 2.0)),
+            "take_profit_pct": abs(_safe_float(exit_settings.get("take_profit_pct"), 8.0)),
+            "threshold_source": "active_automation_profile",
+        }
 
     def _held_positions(self) -> list[dict[str, Any]]:
         positions = []
@@ -540,7 +596,7 @@ def _gating_notes(*, status: str, block_reasons: list[str]) -> list[str]:
     notes = [
         "Read-only position management view.",
         "Manual sell must use /kis/orders/validate and /kis/orders/manual-submit.",
-        "No auto sell execution was enabled.",
+        "This endpoint is read-only; canonical AutomationSchedulerService owns LIVE exit execution.",
     ]
     if status == HOLD:
         notes.append("No sell-ready trigger was detected.")

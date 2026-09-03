@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.brokers.kis_broker import KisBroker
+from app.config import get_settings
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
     OrderLog,
@@ -27,7 +28,9 @@ from app.services.kis_order_validation_service import (
     KisOrderValidationService,
     record_kis_order_validation,
 )
+from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_profile_service import StrategyProfileService
 
@@ -76,6 +79,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         strategy_profiles: StrategyProfileService | None = None,
         positions_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         open_orders_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
+        session_service: MarketSessionService | None = None,
         execution_core: KisAutomationExecutionCore | None = None,
     ) -> None:
         self.client = client
@@ -90,6 +94,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.positions_loader = positions_loader
         self.open_orders_loader = open_orders_loader
+        self.session_service = session_service or MarketSessionService()
         self.execution_core = execution_core or KisAutomationExecutionCore(
             client,
             broker=self.broker,
@@ -98,6 +103,38 @@ class ProfileAwareGuardedLiveAutoExitService:
             runtime_settings=self.runtime_settings,
             positions_loader=self.positions_loader,
             open_orders_loader=self.open_orders_loader,
+        )
+
+    def run_scheduler_once(
+        self,
+        db: Session,
+        *,
+        scheduler_slot: str,
+        symbol: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        profile = self._active_profile(db)
+        profile_key = str(profile.get('profile_key') or profile.get('profile_name') or 'active')
+        now_utc = _utc_now(now)
+        local_date = now_utc.astimezone(KR_TZ).date().isoformat()
+        symbol_key = str(symbol or 'portfolio').upper()
+        request = ProfileAwareGuardedLiveAutoExitRunRequest(
+            provider=PROVIDER,
+            market=MARKET,
+            symbol=symbol,
+            confirm_operator_ack=True,
+            trigger_source='automation_scheduler',
+            client_request_id=(
+                f'automation_scheduler:sell:{profile_key}:{local_date}:'
+                f'{scheduler_slot}:{symbol_key}'
+            )[:120],
+        )
+        return self.run_once(
+            db,
+            request,
+            now=now_utc,
+            trusted_scheduler_authority=True,
+            full_exit=True,
         )
 
     def readiness(
@@ -113,7 +150,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         settings = self.runtime_settings.get_settings_read_only(db)
         global_settings = self._global_settings()
         profile = self._active_profile(db)
-        profile_name = str(profile.get("profile_name") or "")
+        profile_name = _profile_name(profile) if profile else ""
         allowed_profiles = _allowed_profiles(settings)
         orders_used_today = self._orders_used_today(db, now_utc=now_utc)
         max_orders = max(0, int(settings.get("strategy_live_auto_exit_max_orders_per_day") or 0))
@@ -263,6 +300,8 @@ class ProfileAwareGuardedLiveAutoExitService:
         request: ProfileAwareGuardedLiveAutoExitRunRequest | dict[str, Any],
         *,
         now: datetime | None = None,
+        trusted_scheduler_authority: bool = False,
+        full_exit: bool = False,
     ) -> dict[str, Any]:
         payload = (
             request
@@ -278,13 +317,53 @@ class ProfileAwareGuardedLiveAutoExitService:
         settings = self.runtime_settings.get_settings(db)
         global_settings = self._global_settings()
         profile = self._active_profile(db)
-        profile_name = str(profile.get("profile_name") or "safe")
+        profile_name = _profile_name(profile)
         allowed_profiles = _allowed_profiles(settings)
         request_payload = payload.model_dump(mode="json")
 
-        if bool(settings.get("strategy_live_auto_exit_requires_operator_confirm")) and payload.confirm_operator_ack is not True:
+        def canonical_block(reason: str) -> dict[str, Any]:
+            return self._blocked(
+                db,
+                request_payload=request_payload,
+                status='blocked',
+                block_reason=reason,
+                safety=safety,
+                active_profile=profile_name,
+                trigger_source=payload.trigger_source,
+                client_request_id=payload.client_request_id,
+            )
+
+        if trusted_scheduler_authority:
+            authority = AutomationExecutionAuthorityService(
+                self.runtime_settings,
+            ).snapshot(db)
+            if authority.get('automation_mode') != 'live':
+                return canonical_block('automation_mode_not_live')
+            if not authority.get('scheduler_allowed'):
+                return canonical_block('automation_scheduler_not_allowed')
+            if not authority.get('broker_submit_allowed'):
+                return canonical_block('broker_submit_not_allowed')
+            if profile.get('status') != 'active' or profile.get('enabled') is not True:
+                return canonical_block('active_automation_profile_unavailable')
+            if str(profile.get('provider') or PROVIDER).lower() != PROVIDER:
+                return canonical_block('active_profile_provider_not_kis')
+            if str(profile.get('market') or MARKET).upper() != MARKET:
+                return canonical_block('active_profile_market_not_kr')
+            try:
+                session_status = self.session_service.get_session_status(
+                    MARKET,
+                    now=now_utc,
+                )
+            except Exception:
+                return canonical_block('market_session_unavailable')
+            if not session_status.get('is_market_open'):
+                return canonical_block(
+                    str(session_status.get('closure_reason') or 'market_session_closed'),
+                )
+
+        if (not trusted_scheduler_authority and bool(settings.get("strategy_live_auto_exit_requires_operator_confirm"))) and payload.confirm_operator_ack is not True:
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="confirm_operator_ack_required", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
-        if not bool(settings.get("strategy_live_auto_exit_enabled")):
+        if not trusted_scheduler_authority and not bool(settings.get("strategy_live_auto_exit_enabled")):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="strategy_live_auto_exit_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
         if bool(settings.get("dry_run")):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="dry_run_enabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
@@ -294,12 +373,12 @@ class ProfileAwareGuardedLiveAutoExitService:
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="kis_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
         if not bool(getattr(global_settings, "kis_real_order_enabled", False)):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="kis_real_order_disabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
-        if bool(settings.get("strategy_live_auto_exit_scheduler_enabled")):
+        if not trusted_scheduler_authority and bool(settings.get("strategy_live_auto_exit_scheduler_enabled")):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="strategy_live_auto_exit_scheduler_enabled", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
-        if profile_name not in allowed_profiles or (
+        if not trusted_scheduler_authority and (profile_name not in allowed_profiles or (
             profile_name == "aggressive"
             and not bool(settings.get("strategy_live_auto_exit_allow_aggressive"))
-        ):
+        )):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="active_profile_not_allowed", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
 
         try:
@@ -319,14 +398,36 @@ class ProfileAwareGuardedLiveAutoExitService:
         if candidate is None:
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason=_candidate_block_reason(candidates), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, candidates=candidates)
 
-        orders_used_today = self._orders_used_today(db, now_utc=now_utc)
-        max_orders = max(0, int(settings.get("strategy_live_auto_exit_max_orders_per_day") or 0))
+        orders_used_today = (
+            self._canonical_orders_used_today(db, now_utc=now_utc)
+            if trusted_scheduler_authority
+            else self._orders_used_today(db, now_utc=now_utc)
+        )
+        if trusted_scheduler_authority:
+            max_orders = max(
+                0,
+                int(
+                    settings.get("kis_limited_auto_sell_max_orders_per_day")
+                    or settings.get("automation_release_max_daily_auto_sells")
+                    or 0
+                ),
+            )
+        else:
+            max_orders = max(
+                0,
+                int(settings.get("strategy_live_auto_exit_max_orders_per_day") or 0),
+            )
         if orders_used_today >= max_orders:
-            return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="daily_live_auto_exit_limit_reached", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, candidate=candidate, candidates=candidates)
+            return self._blocked(db, request_payload=request_payload, status="blocked", block_reason=("daily_auto_sell_limit_reached" if trusted_scheduler_authority else "daily_live_auto_exit_limit_reached"), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, candidate=candidate, candidates=candidates)
         if self._has_open_sell_order(db, candidate["symbol"], open_orders):
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason="duplicate_open_sell_order", safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, candidate=candidate, candidates=candidates)
 
-        plan = self._exit_plan(settings=settings, candidate=candidate, requested_quantity=payload.quantity)
+        plan = self._exit_plan(
+            settings=settings,
+            candidate=candidate,
+            requested_quantity=payload.quantity,
+            full_exit=full_exit,
+        )
         if int(plan.get("quantity") or 0) <= 0:
             return self._blocked(db, request_payload=request_payload, status="blocked", block_reason=str(plan.get("block_reason") or "quantity_zero"), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id, candidate=candidate, candidates=candidates, plan=plan)
 
@@ -550,8 +651,18 @@ class ProfileAwareGuardedLiveAutoExitService:
             else None
         )
         position_age_days = _position_age_days(position, now_utc=now_utc)
-        stop_loss_pct = _negative_threshold(profile.get("stop_loss_pct"), -0.012)
-        take_profit_pct = _positive_threshold(profile.get("take_profit_pct"), 0.02)
+        canonical_profile = _is_active_automation_profile(profile)
+        stop_loss_pct, take_profit_pct = _profile_exit_thresholds(profile)
+        allow_stop_loss = (
+            _profile_exit_enabled(profile, 'stop_loss_enabled', True)
+            if canonical_profile
+            else bool(settings.get('strategy_live_auto_exit_allow_stop_loss'))
+        )
+        allow_take_profit = (
+            _profile_exit_enabled(profile, 'take_profit_enabled', True)
+            if canonical_profile
+            else bool(settings.get('strategy_live_auto_exit_allow_take_profit'))
+        )
         max_holding_days = int(profile.get("max_holding_days") or 0)
         duplicate_open_sell = self._has_open_sell_order(db, symbol, open_orders)
         requires_cost_basis = bool(settings.get("strategy_live_auto_exit_requires_cost_basis"))
@@ -587,7 +698,7 @@ class ProfileAwareGuardedLiveAutoExitService:
 
         if block_reason is None:
             if (
-                bool(settings.get("strategy_live_auto_exit_allow_stop_loss"))
+                allow_stop_loss
                 and unrealized_pnl_pct is not None
                 and unrealized_pnl_pct <= stop_loss_pct
             ):
@@ -614,7 +725,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                 trigger = "take_profit"
                 reason = "take_profit_threshold_reached"
                 risk_flags.append("take_profit_triggered")
-                if not bool(settings.get("strategy_live_auto_exit_allow_take_profit")):
+                if not allow_take_profit:
                     block_reason = "take_profit_disabled"
                     gating_notes.append("Take-profit auto exit is disabled by default.")
             elif (
@@ -644,6 +755,11 @@ class ProfileAwareGuardedLiveAutoExitService:
             "unrealized_pnl_pct": _round_ratio(unrealized_pnl_pct),
             "stop_loss_pct": stop_loss_pct,
             "take_profit_pct": take_profit_pct,
+            "threshold_source": (
+                'active_automation_profile' if canonical_profile else 'legacy_strategy_profile'
+            ),
+            "active_profile": _profile_name(profile),
+            "profile_key": profile.get('profile_key') or _profile_name(profile),
             "position_age_days": _round_ratio(position_age_days),
             "max_holding_days": max_holding_days,
             "trigger": trigger,
@@ -667,6 +783,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         settings: dict[str, Any],
         candidate: dict[str, Any],
         requested_quantity: int | None,
+        full_exit: bool = False,
     ) -> dict[str, Any]:
         held_qty = int(candidate.get("quantity") or 0)
         current_price = _float(candidate.get("current_price"))
@@ -674,6 +791,16 @@ class ProfileAwareGuardedLiveAutoExitService:
             return {"quantity": 0, "block_reason": "quantity_zero"}
         if current_price is None or current_price <= 0:
             return {"quantity": 0, "block_reason": "current_price_unavailable"}
+        if full_exit:
+            return {
+                "quantity": held_qty,
+                "held_quantity": held_qty,
+                "current_price": current_price,
+                "requested_quantity": requested_quantity,
+                "approved_notional_krw": round(held_qty * current_price, 2),
+                "full_exit": True,
+                "block_reason": None,
+            }
         max_position_pct = max(
             0.0,
             min(float(settings.get("strategy_live_auto_exit_max_position_pct") or 0), 1.0),
@@ -751,6 +878,19 @@ class ProfileAwareGuardedLiveAutoExitService:
             .count()
         )
 
+    def _canonical_orders_used_today(self, db: Session, *, now_utc: datetime) -> int:
+        start_utc, end_utc = _kr_day_bounds_utc(now_utc)
+        return (
+            db.query(OrderLog)
+            .filter(OrderLog.broker == PROVIDER)
+            .filter(OrderLog.market == MARKET)
+            .filter(OrderLog.side == SELL)
+            .filter(OrderLog.created_at >= start_utc)
+            .filter(OrderLog.created_at < end_utc)
+            .filter(OrderLog.internal_status.in_(sorted(OPEN_ORDER_STATUSES | {InternalOrderStatus.FILLED.value})))
+            .count()
+        )
+
     def _has_open_sell_order(
         self,
         db: Session,
@@ -778,11 +918,37 @@ class ProfileAwareGuardedLiveAutoExitService:
         )
 
     def _active_profile(self, db: Session) -> dict[str, Any]:
-        row = self.strategy_profiles.selected_profile(db) or self.strategy_profiles.active_profile(db)
-        return self.strategy_profiles.serialize_profile(row)
+        active_reader = getattr(self.strategy_profiles, 'get_active_profile', None)
+        if callable(active_reader):
+            profile = active_reader(db)
+            if isinstance(profile, dict) and profile:
+                return profile
+        selected_reader = getattr(self.strategy_profiles, 'selected_profile', None)
+        row = selected_reader(db) if callable(selected_reader) else None
+        if row is None:
+            active_reader = getattr(self.strategy_profiles, 'active_profile', None)
+            row = active_reader(db) if callable(active_reader) else None
+        if row is None:
+            return {}
+        serializer = getattr(self.strategy_profiles, 'serialize', None)
+        if callable(serializer):
+            return serializer(row)
+        serializer = getattr(self.strategy_profiles, 'serialize_profile', None)
+        if callable(serializer):
+            return serializer(row)
+        return {}
 
     def _global_settings(self) -> Any:
-        return getattr(self.runtime_settings, "settings", None)
+        settings = getattr(self.runtime_settings, 'settings', None)
+        if settings is not None:
+            return settings
+        settings = getattr(self.client, 'settings', None)
+        if settings is not None:
+            return settings
+        try:
+            return get_settings()
+        except Exception:
+            return None
 
     def _idempotent_attempt(
         self,
@@ -885,7 +1051,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                     "automation_profile_key": profile.get("profile_key"),
                     "trigger_source": TRIGGER_SOURCE,
                     "operator_trigger_source": run_request.trigger_source,
-                    "active_profile": profile.get("profile_name"),
+                    "active_profile": _profile_name(profile),
                     "profile_key": profile.get("profile_key") or profile.get("profile_name"),
                     "profile_name": profile.get("display_name") or profile.get("profile_name"),
                     "profile_provider": profile.get("provider") or PROVIDER,
@@ -934,7 +1100,7 @@ class ProfileAwareGuardedLiveAutoExitService:
             related_order_id=order_id,
             signal_status="submitted",
             trigger_source=TRIGGER_SOURCE,
-            gate_profile_name=str(profile.get("profile_name") or ""),
+            gate_profile_name=_profile_name(profile),
             hard_blocked=False,
             gating_notes=_json(_strings(candidate.get("gating_notes"))),
         )
@@ -969,7 +1135,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                     **request_payload,
                     "mode": MODE,
                     "source_type": SOURCE_TYPE,
-                    "active_profile": profile.get("profile_name"),
+                    "active_profile": _profile_name(profile),
                     "profile_key": profile.get("profile_key") or profile.get("profile_name"),
                     "profile_name": profile.get("display_name") or profile.get("profile_name"),
                     "profile_provider": profile.get("provider") or PROVIDER,
@@ -1016,6 +1182,9 @@ class ProfileAwareGuardedLiveAutoExitService:
             "symbol_name": kwargs.get("symbol_name") or candidate.get("symbol_name"),
             "exit_trigger": kwargs.get("exit_trigger") or candidate.get("trigger"),
             "exit_reason": kwargs.get("exit_reason") or candidate.get("reason"),
+            "stop_loss_pct": candidate.get('stop_loss_pct'),
+            "take_profit_pct": candidate.get('take_profit_pct'),
+            "threshold_source": candidate.get('threshold_source'),
             "submitted": bool(kwargs.get("submitted")),
             "quantity": kwargs.get("quantity"),
             "current_price": kwargs.get("current_price") or candidate.get("current_price"),
@@ -1024,6 +1193,18 @@ class ProfileAwareGuardedLiveAutoExitService:
             "broker_order_id": kwargs.get("broker_order_id"),
             "broker_status": kwargs.get("broker_status"),
             "internal_status": kwargs.get("internal_status"),
+            "validation_called": bool(
+                kwargs.get('validation_called')
+                or (kwargs.get('safety') or {}).get('validation_called')
+            ),
+            "broker_submit_called": bool(
+                kwargs.get('broker_submit_called')
+                or (kwargs.get('safety') or {}).get('broker_submit_called')
+            ),
+            "manual_submit_called": bool(
+                kwargs.get('manual_submit_called')
+                or (kwargs.get('safety') or {}).get('manual_submit_called')
+            ),
             "block_reason": kwargs.get("block_reason"),
             "risk_flags": _dedupe(kwargs.get("risk_flags") or []),
             "gating_notes": _dedupe(kwargs.get("gating_notes") or []),
@@ -1093,8 +1274,9 @@ class ProfileAwareGuardedLiveAutoExitService:
         safety: dict[str, Any],
         now_utc: datetime,
     ) -> dict[str, Any]:
+        profile_name = _profile_name(profile)
         if self.broker is None:
-            return self._blocked(db, request_payload=request_payload, status="failed", block_reason="kis_broker_unavailable", safety=safety, active_profile=profile.get("profile_name"), trigger_source=run_request.trigger_source, client_request_id=run_request.client_request_id, candidate=candidate, candidates=candidates, validation=validation, plan=plan)
+            return self._blocked(db, request_payload=request_payload, status="failed", block_reason="kis_broker_unavailable", safety=safety, active_profile=profile_name, trigger_source=run_request.trigger_source, client_request_id=run_request.client_request_id, candidate=candidate, candidates=candidates, validation=validation, plan=plan)
 
         order = self._create_order_log(
             db,
@@ -1110,7 +1292,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         attempt_response = self._run_response(
             status="submitting",
             action="submitting",
-            active_profile=profile.get("profile_name"),
+            active_profile=profile_name,
             candidate=candidate,
             validation_approved=True,
             submitted=False,
@@ -1140,6 +1322,26 @@ class ProfileAwareGuardedLiveAutoExitService:
             qty=int(plan["quantity"]),
             now=now_utc,
         )
+        execution_guard = execution.get('guard')
+        effective_quantity = int(
+            (execution_guard or {}).get('effective_quantity')
+            or getattr(order, 'qty', 0)
+            or plan['quantity']
+        )
+        if effective_quantity > 0 and effective_quantity != int(plan['quantity']):
+            plan = {
+                **plan,
+                'quantity': effective_quantity,
+                'approved_notional_krw': round(
+                    effective_quantity * float(plan['current_price']),
+                    2,
+                ),
+                'held_quantity': (execution_guard or {}).get(
+                    'held_quantity',
+                    plan.get('held_quantity'),
+                ),
+                'quantity_reconciled': True,
+            }
         safety["broker_submit_called"] = bool(execution.get("broker_submit_called"))
         safety["real_order_submitted"] = bool(execution.get("real_order_submitted"))
         if execution.get("submitted") is not True:
@@ -1157,7 +1359,7 @@ class ProfileAwareGuardedLiveAutoExitService:
             response = self._run_response(
                 status=status,
                 action="sync_required" if status == "sync_required" else "blocked",
-                active_profile=profile.get("profile_name"),
+                active_profile=profile_name,
                 candidate=candidate,
                 validation_approved=True,
                 submitted=False,
@@ -1201,7 +1403,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         response = self._run_response(
             status="submitted",
             action="submitted",
-            active_profile=profile.get("profile_name"),
+            active_profile=profile_name,
             candidate=candidate,
             validation_approved=True,
             submitted=True,
@@ -1242,6 +1444,15 @@ def _allowed_profiles(settings: dict[str, Any]) -> list[str]:
     else:
         profiles = []
     return profiles or ["safe", "balanced"]
+
+
+def _profile_name(profile: dict[str, Any]) -> str:
+    return str(
+        profile.get('profile_key')
+        or profile.get('profile_name')
+        or profile.get('display_name')
+        or 'safe'
+    )
 
 
 def _safety(*, read_only: bool = False) -> dict[str, Any]:
@@ -1358,7 +1569,15 @@ def _position_current_price(item: dict[str, Any]) -> float | None:
         value = _float(item.get(key))
         if value is not None and value > 0:
             return value
-    current_value = _position_current_value(item)
+    current_value = next(
+        (
+            value
+            for key in ("current_value", "market_value", "evaluation_amount", "evlu_amt")
+            for value in [_float(item.get(key))]
+            if value is not None and value > 0
+        ),
+        None,
+    )
     qty = _position_qty(item)
     if current_value is not None and qty > 0:
         return current_value / qty
@@ -1402,7 +1621,13 @@ def _position_current_value(
         if value is not None and value > 0:
             return value
     qty = float(quantity if quantity is not None else _position_qty(item))
-    price = current_price if current_price is not None else _position_current_price(item)
+    price = current_price
+    if price is None:
+        for key in ("current_price", "last_price", "price", "prpr", "now_pric", "stck_prpr"):
+            value = _float(item.get(key))
+            if value is not None and value > 0:
+                price = value
+                break
     if qty > 0 and price is not None and price > 0:
         return qty * price
     return None
@@ -1465,6 +1690,49 @@ def _truthy(value: Any) -> bool:
     if value is None:
         return False
     return str(value).strip().lower() in {"1", "true", "y", "yes", "on"}
+
+
+def _is_active_automation_profile(profile: dict[str, Any]) -> bool:
+    return bool(
+        profile.get('profile_key')
+        and str(profile.get('status') or '').lower() == 'active'
+        and profile.get('enabled') is True
+        and (
+            isinstance(profile.get('effective_settings'), dict)
+            or isinstance(profile.get('automation_settings'), dict)
+        )
+    )
+
+
+def _profile_exit_settings(profile: dict[str, Any]) -> dict[str, Any]:
+    for key in ('effective_settings', 'automation_settings', 'settings'):
+        settings = profile.get(key)
+        if not isinstance(settings, dict):
+            continue
+        exit_settings = settings.get('exit')
+        if isinstance(exit_settings, dict):
+            return exit_settings
+    return {}
+
+
+def _profile_exit_thresholds(profile: dict[str, Any]) -> tuple[float, float]:
+    exit_settings = _profile_exit_settings(profile)
+    stop_value = exit_settings.get('stop_loss_pct', profile.get('stop_loss_pct'))
+    take_value = exit_settings.get('take_profit_pct', profile.get('take_profit_pct'))
+    return (
+        _negative_threshold(stop_value, -0.012),
+        _positive_threshold(take_value, 0.02),
+    )
+
+
+def _profile_exit_enabled(
+    profile: dict[str, Any],
+    key: str,
+    default: bool,
+) -> bool:
+    exit_settings = _profile_exit_settings(profile)
+    value = exit_settings.get(key)
+    return default if value is None else bool(value)
 
 
 def _negative_threshold(value: Any, default: float | None) -> float | None:

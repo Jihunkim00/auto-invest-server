@@ -862,11 +862,11 @@ def _position_unrealized_pl(
     cost_basis: float | None,
     current_value: float | None,
 ) -> float | None:
+    if cost_basis is not None and current_value is not None:
+        return current_value - cost_basis
     direct = _first_float(position, "unrealized_pl", "evlu_pfls_amt")
     if direct is not None:
         return direct
-    if cost_basis is not None and current_value is not None:
-        return current_value - cost_basis
     return None
 
 

@@ -92,7 +92,9 @@ class AutomationProfileBuySchedulerService:
         self.open_orders_loader = open_orders_loader
         self.candidate_provider = candidate_provider
         self.lifecycle_service = lifecycle_service or KisPositionLifecycleService(
-            client, runtime_settings=self.runtime_settings
+            client,
+            runtime_settings=self.runtime_settings,
+            automation_profiles=self.strategy_profiles,
         )
         self.execution_core = execution_core or KisAutomationExecutionCore(
             client,
@@ -232,6 +234,11 @@ class AutomationProfileBuySchedulerService:
         runtime = self.runtime_settings.get_settings_read_only(db)
         settings = _profile_settings(profile)
         gate = self.live_order_gate(db)
+        entry_accounting = self._daily_new_entry_accounting(
+            db,
+            profile=profile,
+            now=now_utc,
+        )
         runtime['automation_profile_scheduler_enabled'] = bool(gate.get('scheduler_allowed', gate.get('allowed')))
         checks = {
             'scheduler_ready': bool(runtime.get('automation_profile_scheduler_enabled') and profile.get('enabled') and profile.get('status') == 'active'),
@@ -258,6 +265,7 @@ class AutomationProfileBuySchedulerService:
             'buy_ready_except_score': not blocking,
             **checks,
             'next_slot': _iso(_next_slot(now_utc, settings.get('entry', {}).get('analysis_times'))),
+            **entry_accounting,
             'blocking_reasons': blocking,
             'hard_safety': {
                 'min_final_score': 65.0,
@@ -326,7 +334,29 @@ class AutomationProfileBuySchedulerService:
             .first()
         )
         if existing_slot is not None:
-            return self._recovery(db, existing_slot, gate)
+            return self._recovery(
+                db,
+                existing_slot,
+                gate,
+                profile=profile,
+                now=now_utc,
+            )
+        entry_accounting = self._daily_new_entry_accounting(
+            db,
+            profile=profile,
+            now=now_utc,
+        )
+        if (
+            trusted_scheduler_authority
+            and entry_accounting['new_entries_used']
+            >= entry_accounting['max_new_entries_per_day']
+        ):
+            return self._blocked(
+                'daily_new_entry_limit_reached',
+                profile=profile,
+                live_order_gate=gate,
+                **entry_accounting,
+            )
         values = _candidate_values(candidates)
         if not values and self.candidate_provider:
             try:
@@ -371,7 +401,13 @@ class AutomationProfileBuySchedulerService:
         key = ':'.join([str(profile.get('profile_key')), now_utc.astimezone(KST).date().isoformat(), slot, symbol])
         existing = db.query(AutomationProfileBuyReservation).filter(AutomationProfileBuyReservation.reservation_key == key).first()
         if existing:
-            return self._recovery(db, existing, gate)
+            return self._recovery(
+                db,
+                existing,
+                gate,
+                profile=profile,
+                now=now_utc,
+            )
         if self._position_priority(db):
             return self._blocked('position_management_priority', profile=profile, selected_symbol=symbol)
         reservation = AutomationProfileBuyReservation(
@@ -409,7 +445,20 @@ class AutomationProfileBuySchedulerService:
             reservation.status = 'blocked'
             reservation.block_reason = execution.get('reason') or 'execution_core_gate_blocked'
             db.commit()
-            return self._blocked(reservation.block_reason, profile=profile, order_id=order.id, reservation_id=reservation.id, validation_called=True, broker_submit_called=bool(execution.get('broker_submit_called')), live_order_gate=gate)
+            return self._blocked(
+                reservation.block_reason,
+                profile=profile,
+                order_id=order.id,
+                reservation_id=reservation.id,
+                validation_called=True,
+                broker_submit_called=bool(execution.get('broker_submit_called')),
+                live_order_gate=gate,
+                **self._daily_new_entry_accounting(
+                    db,
+                    profile=profile,
+                    now=now_utc,
+                ),
+            )
         reservation.status = 'submitted'
         db.commit()
         if self.execution_core.order_sync_service is not None:
@@ -419,6 +468,11 @@ class AutomationProfileBuySchedulerService:
             reservation.status = 'filled'
         db.commit()
         lifecycle = db.query(PositionLifecycle).filter(PositionLifecycle.entry_order_id == order.id).first()
+        entry_accounting = self._daily_new_entry_accounting(
+            db,
+            profile=profile,
+            now=now_utc,
+        )
         result = {
             'status': reservation.status,
             'action': 'buy',
@@ -429,6 +483,7 @@ class AutomationProfileBuySchedulerService:
             ),
             'final_buy_score': _score(selected, 'final_buy_score', 'final_score', 'buy_score'),
             'required_entry_score': _threshold(profile),
+            **entry_accounting,
             'quantity': int(plan['quantity']),
             'approved_notional_krw': plan['approved_notional_krw'],
             'target_risk_result': target,
@@ -499,6 +554,16 @@ class AutomationProfileBuySchedulerService:
         )
 
     def _blocked(self, reason: str, *, profile: dict[str, Any], **extra: Any) -> dict[str, Any]:
+        daily_fields = {
+            key: extra.pop(key)
+            for key in (
+                'max_new_entries_per_day',
+                'new_entries_used',
+                'new_entries_remaining',
+                'entry_trade_date_kst',
+            )
+            if key in extra
+        }
         return {
             'status': 'blocked',
             'action': 'hold',
@@ -510,7 +575,30 @@ class AutomationProfileBuySchedulerService:
             'broker_buy_call_count': 0,
             'real_external_kis_submit_count': 0,
             'safety': _safety(read_only=False),
+            **daily_fields,
             **extra,
+        }
+
+    def _daily_new_entry_accounting(
+        self,
+        db: Session,
+        *,
+        profile: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, Any]:
+        settings = _profile_settings(profile)
+        entry = settings.get('entry') if isinstance(settings, dict) else {}
+        entry = entry if isinstance(entry, dict) else {}
+        try:
+            maximum = max(1, int(entry.get('max_new_entries_per_day') or 1))
+        except (TypeError, ValueError):
+            maximum = 1
+        used = _persisted_daily_new_entry_count(db, now=now)
+        return {
+            'max_new_entries_per_day': maximum,
+            'new_entries_used': used,
+            'new_entries_remaining': max(0, maximum - used),
+            'entry_trade_date_kst': now.astimezone(KST).date().isoformat(),
         }
 
     def _select_candidate(self, db: Session, profile: dict[str, Any], values: list[dict[str, Any]], account: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], float | None]:
@@ -627,9 +715,22 @@ class AutomationProfileBuySchedulerService:
             'safety': _safety(read_only=False),
         }
 
-    def _recovery(self, db: Session, reservation: AutomationProfileBuyReservation, gate: dict[str, Any]) -> dict[str, Any]:
+    def _recovery(
+        self,
+        db: Session,
+        reservation: AutomationProfileBuyReservation,
+        gate: dict[str, Any],
+        *,
+        profile: dict[str, Any] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         order = db.get(OrderLog, reservation.order_id) if reservation.order_id else None
         lifecycle = db.query(PositionLifecycle).filter(PositionLifecycle.entry_order_id == reservation.order_id).first() if reservation.order_id else None
+        accounting = self._daily_new_entry_accounting(
+            db,
+            profile=profile or {},
+            now=_utc(now),
+        )
         return {
             'status': reservation.status,
             'action': 'buy',
@@ -639,6 +740,7 @@ class AutomationProfileBuySchedulerService:
             'reservation_id': reservation.id,
             'internal_status': order.internal_status if order else None,
             'lifecycle': _lifecycle(lifecycle),
+            **accounting,
             'broker_submit_called': False,
             'broker_buy_call_count': 0,
             'real_external_kis_submit_count': 0,
@@ -738,6 +840,81 @@ def _candidate_values(value: Any) -> list[dict[str, Any]]:
 
 def _profile_settings(profile: dict[str, Any]) -> dict[str, Any]:
     return profile.get('automation_settings') or profile.get('effective_settings') or {}
+
+
+_DAILY_ENTRY_IGNORED_STATUSES = {
+    InternalOrderStatus.CANCELED.value,
+    'CANCELLED',
+    InternalOrderStatus.DRY_RUN_SIMULATED.value,
+    InternalOrderStatus.REJECTED.value,
+    InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+    InternalOrderStatus.FAILED.value,
+}
+
+
+def _persisted_daily_new_entry_count(
+    db: Session,
+    *,
+    now: datetime,
+) -> int:
+    local_now = _utc(now).astimezone(KST)
+    day_start = datetime.combine(
+        local_now.date(),
+        datetime.min.time(),
+        tzinfo=KST,
+    ).astimezone(UTC)
+    day_end = day_start + timedelta(days=1)
+    seen_order_ids: set[int] = set()
+    count = 0
+
+    rows = (
+        db.query(OrderLog)
+        .filter(OrderLog.broker == PROVIDER)
+        .all()
+    )
+    for row in rows:
+        seen_order_ids.add(int(row.id))
+        if str(row.side or '').strip().lower() != 'buy':
+            continue
+        row_market = str(row.market or MARKET).strip().upper()
+        if row_market != MARKET:
+            continue
+        event_at = row.submitted_at or row.created_at
+        if event_at is None:
+            continue
+        event_at = _utc(event_at)
+        if not day_start <= event_at < day_end:
+            continue
+        if str(row.internal_status or '').strip().upper() in _DAILY_ENTRY_IGNORED_STATUSES:
+            continue
+        count += 1
+
+    # The OrderLog is the primary source. TradeRunLog is a durable fallback
+    # for a successful canonical run whose order row was not available to the
+    # reader during restart recovery.
+    run_rows = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.mode == MODE)
+        .filter(TradeRunLog.order_id.isnot(None))
+        .all()
+    )
+    for row in run_rows:
+        if row.order_id is not None and int(row.order_id) in seen_order_ids:
+            continue
+        event_at = row.created_at
+        if event_at is None:
+            continue
+        event_at = _utc(event_at)
+        if not day_start <= event_at < day_end:
+            continue
+        if str(row.result or '').strip().lower() not in {
+            'filled',
+            'submitted',
+            'sync_required',
+        }:
+            continue
+        count += 1
+    return count
 
 
 def _threshold(profile: dict[str, Any]) -> float:

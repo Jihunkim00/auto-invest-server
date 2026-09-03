@@ -20,6 +20,7 @@ from app.services.kis_dry_run_risk_service import (
 )
 from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
@@ -81,13 +82,39 @@ class KisPositionLifecycleService:
         client: Any | None = None,
         *,
         runtime_settings: RuntimeSettingService | None = None,
+        automation_profiles: Any | None = None,
         limited_auto_sell_service: Any | None = None,
         now_provider: Any | None = None,
     ) -> None:
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
+        self.automation_profiles = automation_profiles or AutomationProfileService(
+            runtime_settings=self.runtime_settings,
+        )
         self.limited_auto_sell_service = limited_auto_sell_service
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+
+    def _active_profile_exit(self, db: Session) -> dict[str, Any] | None:
+        reader = getattr(self.automation_profiles, 'get_active_profile', None)
+        profile = reader(db) if callable(reader) else None
+        if not isinstance(profile, dict) or not profile:
+            return None
+        effective = profile.get('effective_settings')
+        if not isinstance(effective, dict):
+            effective = profile.get('automation_settings')
+        exit_settings = effective.get('exit') if isinstance(effective, dict) else None
+        if not isinstance(exit_settings, dict):
+            return None
+        stop = _safe_float(exit_settings.get('stop_loss_pct'), 2.0)
+        take = _safe_float(exit_settings.get('take_profit_pct'), 8.0)
+        return {
+            'profile_key': profile.get('profile_key'),
+            'stop_loss_pct': abs(stop),
+            'take_profit_pct': abs(take),
+            'stop_loss_enabled': bool(exit_settings.get('stop_loss_enabled', True)),
+            'take_profit_enabled': bool(exit_settings.get('take_profit_enabled', True)),
+            'threshold_source': 'active_automation_profile',
+        }
 
     def status(self, db: Session) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
@@ -205,6 +232,7 @@ class KisPositionLifecycleService:
                 or now_utc
             )
         )
+        profile_exit = self._active_profile_exit(db)
         lifecycle = PositionLifecycle(
             symbol=str(row.symbol or "").strip().upper(),
             entry_order_id=int(row.id),
@@ -217,8 +245,16 @@ class KisPositionLifecycleService:
             unrealized_pl=0.0,
             unrealized_pl_pct=0.0,
             max_price_since_entry=float(entry_price),
-            stop_loss_threshold_pct=_profile_exit_threshold(row, "stop_loss_pct", DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL * 100.0),
-            take_profit_threshold_pct=_profile_exit_threshold(row, "take_profit_pct", DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0),
+            stop_loss_threshold_pct=(
+                profile_exit['stop_loss_pct']
+                if profile_exit is not None
+                else _profile_exit_threshold(row, "stop_loss_pct", DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL * 100.0)
+            ),
+            take_profit_threshold_pct=(
+                profile_exit['take_profit_pct']
+                if profile_exit is not None
+                else _profile_exit_threshold(row, "take_profit_pct", DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0)
+            ),
             exit_reason=None,
             exit_order_id=None,
             last_evaluated_at=None,
@@ -271,7 +307,12 @@ class KisPositionLifecycleService:
             }
 
         current_price = _position_current_price(matched)
-        quantity = float(row.quantity or 1.0)
+        quantity = _safe_float(
+            matched.get('qty') or matched.get('quantity') or matched.get('hold_qty'),
+            float(row.quantity or 1.0),
+        )
+        if quantity > 0:
+            row.quantity = quantity
         if current_price is not None and current_price > 0:
             current_value = current_price * quantity
             unrealized_pl = (
@@ -372,6 +413,12 @@ class KisPositionLifecycleService:
         db.refresh(row)
         position = synced.get("position")
         current_price = row.last_price
+        profile_exit = self._active_profile_exit(db)
+        if profile_exit is not None:
+            row.stop_loss_threshold_pct = profile_exit['stop_loss_pct']
+            row.take_profit_threshold_pct = profile_exit['take_profit_pct']
+            db.commit()
+            db.refresh(row)
 
         if row.status == CLOSED:
             return self._decision_payload(
@@ -432,7 +479,11 @@ class KisPositionLifecycleService:
             )
 
         stop_loss_threshold = _stop_loss_threshold_price(row)
-        if stop_loss_threshold is not None and current_price <= stop_loss_threshold:
+        if (
+            (profile_exit is None or profile_exit['stop_loss_enabled'])
+            and stop_loss_threshold is not None
+            and current_price <= stop_loss_threshold
+        ):
             row.exit_reason = "stop_loss_triggered"
             db.commit()
             db.refresh(row)
@@ -445,6 +496,27 @@ class KisPositionLifecycleService:
                 order_id=None,
                 position=position,
                 stop_loss_triggered=True,
+            )
+
+        if (
+            profile_exit is not None
+            and profile_exit['take_profit_enabled']
+            and _take_profit_triggered(row, current_price)
+        ):
+            row.exit_reason = "take_profit_triggered"
+            db.commit()
+            db.refresh(row)
+            return self._decision_payload(
+                lifecycle=row,
+                action=SELL_READY,
+                result=SELL_READY,
+                reason="take_profit_triggered",
+                current_price=current_price,
+                order_id=None,
+                position=position,
+                take_profit_triggered=True,
+                take_profit_execution_enabled=True,
+                threshold_source=profile_exit['threshold_source'],
             )
 
         if _take_profit_triggered(row, current_price):
@@ -460,6 +532,11 @@ class KisPositionLifecycleService:
                 order_id=None,
                 position=position,
                 take_profit_triggered=True,
+                threshold_source=(
+                    profile_exit['threshold_source']
+                    if profile_exit is not None
+                    else None
+                ),
             )
 
         if _weak_trend_triggered(position) or _sell_pressure_triggered(position):
@@ -902,6 +979,8 @@ class KisPositionLifecycleService:
         position: dict[str, Any] | None,
         stop_loss_triggered: bool = False,
         take_profit_triggered: bool = False,
+        take_profit_execution_enabled: bool = False,
+        threshold_source: str | None = None,
     ) -> dict[str, Any]:
         entry_price = lifecycle.entry_price if lifecycle is not None else None
         stop_loss_threshold = (
@@ -934,7 +1013,8 @@ class KisPositionLifecycleService:
             "take_profit_threshold_pct": (
                 lifecycle.take_profit_threshold_pct if lifecycle is not None else None
             ),
-            "take_profit_execution_enabled": False,
+            "take_profit_execution_enabled": take_profit_execution_enabled,
+            "threshold_source": threshold_source,
             "action": action,
             "result": result,
             "reason": reason,

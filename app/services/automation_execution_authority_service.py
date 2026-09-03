@@ -14,6 +14,18 @@ LEGACY_EXECUTION_FLAGS = (
     'strategy_live_auto_buy_enabled',
     'strategy_live_auto_buy_scheduler_enabled',
     'auto_buy_live_phase1_enabled',
+    # Legacy KIS scheduler controls are diagnostic compatibility settings.
+    # They are intentionally not part of consolidated AutomationSchedulerService
+    # authority; live safety remains enforced by the execution core.
+    'kis_scheduler_enabled',
+    'kis_scheduler_live_enabled',
+    'kis_scheduler_allow_real_orders',
+    'kr_scheduler_enabled',
+    'kr_scheduler_allow_real_orders',
+    'kis_scheduler_buy_enabled',
+    'kis_scheduler_sell_enabled',
+    'kis_scheduler_allow_limited_auto_buy',
+    'kis_scheduler_allow_limited_auto_sell',
 )
 
 
