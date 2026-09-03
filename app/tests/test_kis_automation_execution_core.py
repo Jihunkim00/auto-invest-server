@@ -271,3 +271,57 @@ def test_filled_sell_closes_lifecycle_after_position_reconciliation(db_session):
     assert lifecycle.exit_order_id == sell.id
     settings = RuntimeSettingService().get_settings_read_only(db_session)
     assert settings["automation_profile_scheduler_enabled"] is True
+    
+def test_buy_quantity_is_capped_by_kis_orderable_quantity(db_session):
+    client = FakeKisClient()
+
+    def possible_order(**kwargs):
+        return {
+            "raw_status": "ok",
+            "symbol": kwargs["symbol"],
+            "orderable_cash": 309_906,
+            "orderable_quantity": 6,
+            "queried_at": NOW.isoformat(),
+        }
+
+    client.get_domestic_possible_order = possible_order
+
+    order = _order(db_session, side="buy")
+    submitted = []
+
+    core = KisAutomationExecutionCore(
+        client,
+        runtime_settings=RuntimeSettingService(),
+    )
+
+    result = core.submit_market_buy(
+        db_session,
+        order=order,
+        symbol="005930",
+        qty=8,
+        expected_price=34_650,
+        max_positions=1,
+        max_order_notional_krw=300_000,
+        submitter=lambda: (
+            submitted.append(True)
+            or {
+                "order_id": "KIS-QTY-CAP-1",
+                "status": "accepted",
+            }
+        ),
+        now=NOW,
+    )
+
+    assert result["status"] in {"submitted", "filled"}
+    assert result["guard"]["planned_quantity"] == 8
+    assert result["guard"]["orderable_quantity"] == 6
+    assert result["guard"]["effective_quantity"] == 6
+    assert result["guard"]["quantity_adjusted"] is True
+
+    db_session.refresh(order)
+    assert order.qty == 6
+    assert order.requested_qty == 6
+    
+    
+    
+    
