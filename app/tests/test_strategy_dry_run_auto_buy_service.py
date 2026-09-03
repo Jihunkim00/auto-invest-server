@@ -115,6 +115,31 @@ def observed_candidate(**fields) -> dict:
     return item
 
 
+def live_candidate(
+    symbol: str,
+    *,
+    quant_score: float,
+    ai_score: float | None,
+    final_score: float | None,
+    status: str,
+    gpt_used: bool,
+    data_sufficient: bool = True,
+    **fields,
+) -> dict:
+    item = observed_candidate(
+        symbol=symbol,
+        quant_buy_score=quant_score,
+        ai_buy_score=ai_score,
+        final_buy_score=final_score,
+        final_entry_score=final_score,
+        gpt_analysis_status=status,
+        gpt_used=gpt_used,
+        data_sufficient=data_sufficient,
+    )
+    item.update(fields)
+    return item
+
+
 def service(risk: FakeTargetRisk | None = None) -> ProfileAwareDryRunAutoBuyService:
     return ProfileAwareDryRunAutoBuyService(
         target_risk_service=risk or FakeTargetRisk(),
@@ -406,6 +431,177 @@ def test_dry_run_gpt_not_run_exposes_nullable_ai_fields(db_session):
     assert db_session.query(SignalLog).count() == 0
     assert db_session.query(TradeRunLog).count() == 0
     assert db_session.query(OrderLog).count() == 0
+
+
+def test_live_execution_pool_excludes_gpt_not_run_quant_candidate(db_session):
+    raw_quant = live_candidate(
+        "A",
+        quant_score=62.0,
+        ai_score=None,
+        final_score=62.0,
+        status="not_run",
+        gpt_used=False,
+    )
+    completed_b = live_candidate(
+        "B",
+        quant_score=62.0,
+        ai_score=61.0,
+        final_score=61.75,
+        status="completed",
+        gpt_used=True,
+    )
+    completed_c = live_candidate(
+        "C",
+        quant_score=62.0,
+        ai_score=57.0,
+        final_score=60.75,
+        status="completed",
+        gpt_used=True,
+    )
+
+    result = service().run_once(
+        db_session,
+        request(save_logs=False),
+        preview_override=preview(raw_quant, completed_b, completed_c),
+        execution_mode="live",
+    )
+
+    assert result["selected_symbol"] == "B"
+    assert result["selected_gpt_analysis_status"] == "completed"
+    assert result["selected_gpt_used"] is True
+    assert result["reason"] == "below_profile_buy_threshold"
+    assert result["execution_candidate_count"] == 2
+    assert [item["symbol"] for item in result["execution_candidates"]] == [
+        "B",
+        "C",
+    ]
+    assert [item["symbol"] for item in result["candidates"]] == ["A", "B", "C"]
+    assert result["submission_eligible"] is False
+
+
+def test_live_execution_blocks_without_any_completed_gpt_candidate(db_session):
+    failed = live_candidate(
+        "A",
+        quant_score=70.0,
+        ai_score=None,
+        final_score=70.0,
+        status="failed",
+        gpt_used=False,
+    )
+    not_run = live_candidate(
+        "B",
+        quant_score=69.0,
+        ai_score=None,
+        final_score=69.0,
+        status="not_run",
+        gpt_used=False,
+    )
+
+    result = service().run_once(
+        db_session,
+        request(save_logs=False),
+        preview_override=preview(failed, not_run),
+        execution_mode="live",
+    )
+
+    assert result["action"] == "hold"
+    assert result["reason"] == "no_gpt_completed_execution_candidate"
+    assert result["selected_symbol"] is None
+    assert result["execution_candidate_count"] == 0
+    assert result["execution_candidates"] == []
+    assert result["submission_eligible"] is False
+    assert result["safety"]["real_order_submitted"] is False
+
+
+def test_live_execution_pool_keeps_only_completed_gpt_candidates_after_partial_failure(
+    db_session,
+):
+    completed = [
+        live_candidate(
+            symbol,
+            quant_score=70.0 - index,
+            ai_score=68.0 - index,
+            final_score=69.5 - index,
+            status="completed",
+            gpt_used=True,
+        )
+        for index, symbol in enumerate(("A", "B", "C"))
+    ]
+    failed = [
+        live_candidate(
+            symbol,
+            quant_score=90.0,
+            ai_score=None,
+            final_score=90.0,
+            status="failed",
+            gpt_used=False,
+        )
+        for symbol in ("D", "E")
+    ]
+
+    result = service().run_once(
+        db_session,
+        request(save_logs=False),
+        preview_override=preview(*(completed + failed)),
+        execution_mode="live",
+    )
+
+    assert result["execution_candidate_count"] == 3
+    assert {item["symbol"] for item in result["execution_candidates"]} == {
+        "A",
+        "B",
+        "C",
+    }
+    assert all(
+        item["gpt_analysis_status"] == "completed"
+        and item["gpt_used"] is True
+        for item in result["execution_candidates"]
+    )
+    assert result["selected_symbol"] == "A"
+
+
+def test_live_observability_removes_preview_only_vocabulary(db_session):
+    item = live_candidate(
+        "A",
+        quant_score=62.0,
+        ai_score=61.0,
+        final_score=61.75,
+        status="completed",
+        gpt_used=True,
+        risk_flags=["preview_only", "kr_trading_disabled", "operator_review"],
+        gating_notes=[
+            "KIS preview uses the shared risk vocabulary but trading is disabled.",
+            "operator_review",
+        ],
+        why_hold="KIS watchlist preview is advisory-only and KR trading is disabled.",
+        why_not_buy=["preview_only", "kr_trading_disabled", "operator_review"],
+    )
+
+    result = service().run_once(
+        db_session,
+        request(save_logs=False),
+        preview_override=preview(item),
+        execution_mode="live",
+    )
+
+    public = result["candidates"][0]
+    selected = result["selected_candidate_observability"]
+    for payload in (result, public, selected):
+        assert "preview_only" not in [
+            str(value).lower() for value in payload.get("risk_flags", [])
+        ]
+        assert "kr_trading_disabled" not in [
+            str(value).lower() for value in payload.get("risk_flags", [])
+        ]
+        notes = " ".join(str(value) for value in payload.get("gating_notes", []))
+        assert "preview" not in notes.lower()
+        assert "trading is disabled" not in notes.lower()
+    assert public["why_hold"] == "Candidate is below the active profile buy threshold."
+    assert selected["why_hold"] == "Candidate is below the active profile buy threshold."
+    assert "preview_only" not in public["why_not_buy"]
+    assert "kr_trading_disabled" not in public["why_not_buy"]
+    assert result["preview_only"] is False
+    assert result["dry_run_only"] is False
 
 
 def test_dry_run_gpt_failed_preserves_quant_only_final_score(db_session):

@@ -146,13 +146,26 @@ class ProfileAwareDryRunAutoBuyService:
             for candidate in candidates
         ]
         evaluated.sort(key=_candidate_sort_key)
-        selected = _select_executable_candidate(evaluated, profile=profile)
+        execution_candidates = (
+            _get_live_execution_candidates(evaluated)
+            if canonical_execution_mode == "live"
+            else evaluated
+        )
+        selected = _select_executable_candidate(
+            execution_candidates,
+            profile=profile,
+        )
         decision = self._decision(
             selected,
             market_session=market_session,
             profile=profile,
             preview=preview,
         )
+        if canonical_execution_mode == "live" and not execution_candidates:
+            decision = {
+                **decision,
+                "reason": "no_gpt_completed_execution_candidate",
+            }
         preview_failure_reason = self._preview_failure_reason(preview)
         if preview_failure_reason is not None and not evaluated:
             decision = {
@@ -164,6 +177,7 @@ class ProfileAwareDryRunAutoBuyService:
             profile=profile,
             preview=preview,
             evaluated=evaluated,
+            execution_candidates=execution_candidates,
             selected=selected,
             decision=decision,
             legacy_profile_name=legacy_profile_name,
@@ -575,12 +589,18 @@ class ProfileAwareDryRunAutoBuyService:
             profile_name=profile_name,
         )
         indicator_status = str(candidate.get("indicator_status") or "").lower()
-        data_sufficient = (
+        computed_data_sufficient = (
             bool(symbol)
             and buy_score is not None
             and price is not None
             and price > 0
             and indicator_status not in {"insufficient", "price_only", "error"}
+        )
+        source_data_sufficient = candidate.get("data_sufficient")
+        data_sufficient = (
+            computed_data_sufficient
+            if source_data_sufficient is None
+            else source_data_sufficient is True
         )
         return {
             "symbol": symbol,
@@ -654,7 +674,7 @@ class ProfileAwareDryRunAutoBuyService:
             return self._blocked(selected, "market_closed", action="hold")
         if not selected["data_sufficient"]:
             return self._blocked(selected, "data_quality_blocked")
-        threshold = float(profile.get("buy_score_threshold") or 0)
+        threshold = _minimum_entry_score(profile)
         if selected["buy_score"] is None or selected["buy_score"] < threshold:
             return self._blocked(selected, "below_profile_buy_threshold")
         target = selected["target_risk_result"]
@@ -718,6 +738,7 @@ class ProfileAwareDryRunAutoBuyService:
         profile: dict[str, Any],
         preview: dict[str, Any],
         evaluated: list[dict[str, Any]],
+        execution_candidates: list[dict[str, Any]],
         selected: dict[str, Any] | None,
         decision: dict[str, Any],
         legacy_profile_name: str,
@@ -737,7 +758,12 @@ class ProfileAwareDryRunAutoBuyService:
             if selected
             else {}
         )
-        effective_min_entry_score = float(profile.get("buy_score_threshold") or 0)
+        if execution_mode == "live" and selected_observability:
+            selected_observability = _clean_live_candidate_observability(
+                selected_observability,
+                evaluated=selected,
+            )
+        effective_min_entry_score = _minimum_entry_score(profile)
         legacy_risk_flags = _strings(preview.get("risk_flags")) + _strings(
             selected.get("risk_flags") if selected else []
         )
@@ -848,10 +874,18 @@ class ProfileAwareDryRunAutoBuyService:
             "selected_symbol": selected.get("symbol") if selected else None,
             "selected_symbol_name": selected.get("name") if selected else None,
             "candidate_count": len(evaluated),
-            **_preview_observability(preview, evaluated_count=len(evaluated)),
+            **_preview_observability(
+                preview,
+                evaluated_count=len(evaluated),
+                execution_candidate_count=len(execution_candidates),
+            ),
             "candidates": [
                 _public_candidate(item, execution_mode=execution_mode)
                 for item in evaluated
+            ],
+            "execution_candidates": [
+                _public_candidate(item, execution_mode=execution_mode)
+                for item in execution_candidates
             ],
             "buy_score": selected.get("buy_score") if selected else None,
             "final_buy_score": selected.get("final_score") if selected else None,
@@ -874,7 +908,7 @@ class ProfileAwareDryRunAutoBuyService:
             ),
             "selected_confidence": selected_observability.get("confidence"),
             "selected_candidate_observability": selected_observability,
-            "required_entry_score": float(profile.get("buy_score_threshold") or 0),
+            "required_entry_score": _minimum_entry_score(profile),
             "effective_min_entry_score": effective_min_entry_score,
             "confidence": selected.get("confidence") if selected else None,
             "target_risk_approved": decision["target_risk_approved"],
@@ -1170,14 +1204,11 @@ def _public_candidate(
     risk_flags = _strings(item.get("risk_flags"))
     gating_notes = _strings(item.get("gating_notes"))
     if execution_mode == "live":
-        risk_flags = [
-            value
-            for value in risk_flags
-            if value.strip().lower() not in _LEGACY_LIVE_RISK_FLAGS
-        ]
-        gating_notes = [
-            value for value in gating_notes if not _is_legacy_live_note(value)
-        ]
+        public["risk_flags"] = risk_flags
+        public["gating_notes"] = gating_notes
+        public = _clean_live_candidate_observability(public, evaluated=item)
+        risk_flags = public["risk_flags"]
+        gating_notes = public["gating_notes"]
     public.update(
         {
             "entry_ready": item.get("entry_ready"),
@@ -1190,6 +1221,52 @@ def _public_candidate(
         }
     )
     return public
+
+
+def _clean_live_candidate_observability(
+    public: dict[str, Any],
+    *,
+    evaluated: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Remove Preview-only language from the LIVE projection only."""
+
+    cleaned = dict(public)
+    cleaned["risk_flags"] = [
+        value
+        for value in _strings(cleaned.get("risk_flags"))
+        if value.strip().lower() not in _LEGACY_LIVE_RISK_FLAGS
+    ]
+    cleaned["gating_notes"] = [
+        value
+        for value in _strings(cleaned.get("gating_notes"))
+        if not _is_legacy_live_note(value)
+    ]
+    cleaned["why_not_buy"] = [
+        value
+        for value in _strings(cleaned.get("why_not_buy"))
+        if value.strip().lower() not in _LEGACY_LIVE_RISK_FLAGS
+        and not _is_legacy_live_note(value)
+    ]
+    why_hold = cleaned.get("why_hold")
+    if why_hold and _is_legacy_live_note(str(why_hold)):
+        cleaned["why_hold"] = _live_candidate_hold_reason(evaluated)
+    return cleaned
+
+
+def _live_candidate_hold_reason(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    status = str(item.get("gpt_analysis_status") or "").strip().lower()
+    if status != "completed" or not bool(item.get("gpt_used")):
+        return "GPT analysis was not completed; candidate is not eligible for LIVE execution."
+    if item.get("data_sufficient") is not True:
+        return "Candidate data is insufficient for LIVE execution."
+    score = _score(item, "final_score", "final_buy_score")
+    if score is not None and score < _minimum_entry_score({}):
+        return "Candidate is below the active profile buy threshold."
+    if item.get("target_risk_approved") is False:
+        return "Candidate did not pass the active risk gates."
+    return None
 
 
 def _risk_reason(value: str) -> str:
@@ -1320,8 +1397,33 @@ def _unavailable_preview_payload(
     )
 
 
+def _get_live_execution_candidates(
+    evaluated: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return only candidates whose GPT enrichment is complete and usable.
+
+    The full evaluated list remains available for analysis observability. This
+    pool is the only list that may participate in LIVE candidate selection.
+    """
+
+    return [
+        item
+        for item in evaluated
+        if str(item.get("gpt_analysis_status") or "").strip().lower()
+        == "completed"
+        and bool(item.get("gpt_used"))
+        and _score(item, "ai_buy_score") is not None
+        and _score(item, "final_buy_score") is not None
+        and item.get("data_sufficient") is True
+    ]
+
+
+def _minimum_entry_score(profile: dict[str, Any]) -> float:
+    return max(65.0, float(profile.get("buy_score_threshold") or 0.0))
+
+
 def _select_executable_candidate(evaluated: list[dict[str, Any]], *, profile: dict[str, Any]) -> dict[str, Any] | None:
-    threshold = max(65.0, float(profile.get('buy_score_threshold') or 0.0))
+    threshold = _minimum_entry_score(profile)
     for item in evaluated:
         score = item.get('buy_score')
         if score is None or float(score) < threshold:
@@ -1344,6 +1446,7 @@ def _preview_observability(
     preview: dict[str, Any],
     *,
     evaluated_count: int,
+    execution_candidate_count: int | None = None,
 ) -> dict[str, Any]:
     final_candidates = preview.get("final_ranked_candidates")
     if not isinstance(final_candidates, list):
@@ -1392,7 +1495,11 @@ def _preview_observability(
         "final_ranked_count": len(final_candidates),
         "profile_eligible_symbol_count": int(eligible or 0),
         "profile_price_filtered_count": int(filtered or 0),
-        "execution_candidate_count": int(evaluated_count),
+        "execution_candidate_count": int(
+            evaluated_count
+            if execution_candidate_count is None
+            else execution_candidate_count
+        ),
         "profile_exclusion_counts": {
             str(key): int(value)
             for key, value in exclusions.items()

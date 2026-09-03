@@ -233,6 +233,11 @@ def candidate(
         "entry_ready": True,
         "indicator_status": "ok",
         "indicator_payload": {"atr": 800.0, "volume_ratio": 1.4},
+        "quant_buy_score": score,
+        "ai_buy_score": score,
+        "gpt_analysis_status": "completed",
+        "gpt_used": True,
+        "data_sufficient": True,
         "risk_flags": [],
         "gating_notes": [],
     }

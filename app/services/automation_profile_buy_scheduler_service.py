@@ -719,8 +719,15 @@ class AutomationProfileBuySchedulerService:
 
 def _candidate_values(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, dict):
-        values = value.get('candidates') or value.get('final_ranked_candidates') or []
-        if not values and value.get('selected_symbol'):
+        # The canonical LIVE analysis exposes the full analysis list for
+        # observability, but only its explicitly filtered execution pool may
+        # be handed to the broker-facing scheduler.
+        has_execution_pool = 'execution_candidates' in value
+        if has_execution_pool:
+            values = value.get('execution_candidates') or []
+        else:
+            values = value.get('candidates') or value.get('final_ranked_candidates') or []
+        if not values and value.get('selected_symbol') and not has_execution_pool:
             values = [value]
     elif isinstance(value, (list, tuple)):
         values = value

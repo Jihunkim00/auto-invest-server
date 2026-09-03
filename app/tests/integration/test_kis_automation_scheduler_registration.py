@@ -42,6 +42,45 @@ def _canonical_scheduler(harness, monkeypatch):
     return scheduler
 
 
+def test_live_all_gpt_failures_block_before_profile_buy_or_broker_submit(
+    db_session,
+    monkeypatch,
+):
+    failed = []
+    for symbol, score in (("A", 72.0), ("B", 70.0), ("C", 68.0)):
+        item = candidate(symbol=symbol, score=score)
+        item.update(
+            {
+                "ai_buy_score": None,
+                "final_buy_score": score,
+                "final_score": score,
+                "gpt_analysis_status": "failed",
+                "gpt_used": False,
+            }
+        )
+        failed.append(item)
+
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        mode="live",
+        candidates=failed,
+    )
+    scheduler = _canonical_scheduler(harness, monkeypatch)
+
+    result = scheduler.run_once(slot="09:10", now=UTC_NOW)
+    dry_result = result["dry_run"]["dry_run_result"]
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "no_gpt_completed_execution_candidate"
+    assert dry_result["execution_candidate_count"] == 0
+    assert dry_result["execution_candidates"] == []
+    assert result["profile_buy"]["broker_submit_called"] is False
+    assert harness.validation.calls == []
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0
+
+
 def test_startup_registers_only_the_canonical_production_scheduler(
     monkeypatch,
 ):
