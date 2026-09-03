@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, PositionLifecycle
-from app.services.kis_automation_execution_core import KisAutomationExecutionCore
+from app.services.kis_automation_execution_core import KisAutomationExecutionCore, _broker_order_id
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
@@ -322,6 +322,18 @@ def test_buy_quantity_is_capped_by_kis_orderable_quantity(db_session):
     assert order.qty == 6
     assert order.requested_qty == 6
     
-    
+def test_broker_order_id_reads_nested_kis_output():
+    payload = {
+        "rt_cd": "0",
+        "msg_cd": "APBK0013",
+        "msg1": "주문 전송 완료 되었습니다.",
+        "output": {
+            "KRX_FWDG_ORD_ORGNO": "91250",
+            "ODNO": "0017416600",
+            "ORD_TMD": "133420",
+        },
+    }
+
+    assert _broker_order_id(payload) == "0017416600"
     
     

@@ -1143,9 +1143,8 @@ class KisAutomationExecutionCore:
         return None
 
 
-def _broker_order_id(
-    payload: dict[str, Any],
-) -> str | None:
+
+def _broker_order_id(payload: dict[str, Any]) -> str | None:
     for key in (
         "broker_order_id",
         "kis_odno",
@@ -1154,12 +1153,22 @@ def _broker_order_id(
         "ODNO",
     ):
         value = payload.get(key)
-
-        if (
-            value is not None
-            and str(value).strip()
-        ):
+        if value is not None and str(value).strip():
             return str(value).strip()
+
+    output = payload.get("output")
+
+    if isinstance(output, dict):
+        for key in (
+            "broker_order_id",
+            "kis_odno",
+            "odno",
+            "order_id",
+            "ODNO",
+        ):
+            value = output.get(key)
+            if value is not None and str(value).strip():
+                return str(value).strip()
 
     return None
 
