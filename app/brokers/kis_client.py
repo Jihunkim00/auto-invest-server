@@ -5,6 +5,7 @@ import re
 import time
 import threading
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -16,6 +17,9 @@ from app.services.kis_payload_sanitizer import (
     sanitize_kis_payload,
     sanitize_kis_text,
 )
+
+KIS_INTRADAY_BARS_PATH = '/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice'
+KIS_INTRADAY_BARS_TR_ID = 'FHKST03010230'
 
 # Official sample references:
 # - examples_llm/domestic_stock/inquire_price/inquire_price.py
@@ -434,6 +438,84 @@ class KisClient:
         return normalize_domestic_daily_bars(
             normalized_symbol,
             _as_list(response.get("output2")),
+            limit=safe_limit,
+        )
+
+    def get_domestic_intraday_bars(
+        self,
+        symbol: str,
+        *,
+        as_of: date | datetime | None = None,
+        limit: int = 600,
+    ) -> list[dict]:
+        '''Return normalized read-only domestic one-minute bars for one KST date.'''
+        normalized_symbol = str(symbol or '').strip()
+        safe_limit = max(1, min(int(limit or 600), 1200))
+        kst = ZoneInfo('Asia/Seoul')
+        if isinstance(as_of, datetime):
+            local_as_of = (
+                as_of.replace(tzinfo=kst)
+                if as_of.tzinfo is None
+                else as_of.astimezone(kst)
+            )
+            target_date = local_as_of.date()
+            current_time = min(local_as_of.strftime('%H%M%S'), '153000')
+        else:
+            local_now = datetime.now(kst)
+            target_date = _as_date(as_of) or local_now.date()
+            current_time = (
+                min(local_now.strftime('%H%M%S'), '153000')
+                if as_of is None
+                else '153000'
+            )
+        initial_start_time = current_time
+        all_rows: list[dict] = []
+        seen_page_times: set[str] = set()
+        page_count = 0
+
+        # The official endpoint returns at most 120 rows per call and accepts
+        # an earlier FID_INPUT_HOUR_1 for the next page.
+        for _ in range(12):
+            response = self.request_get(
+                KIS_INTRADAY_BARS_PATH,
+                tr_id=KIS_INTRADAY_BARS_TR_ID,
+                params={
+                    'FID_COND_MRKT_DIV_CODE': 'J',
+                    'FID_INPUT_ISCD': normalized_symbol,
+                    'FID_INPUT_HOUR_1': current_time,
+                    'FID_INPUT_DATE_1': target_date.strftime('%Y%m%d'),
+                    'FID_PW_DATA_INCU_YN': 'Y',
+                    'FID_FAKE_TICK_INCU_YN': '',
+                },
+            )
+            page_count += 1
+            rows = [_as_dict(row) for row in _as_list(response.get('output2'))]
+            if not rows:
+                break
+            all_rows.extend(rows)
+            times = sorted(
+                str(row.get('stck_cntg_hour') or '').zfill(6)
+                for row in rows
+                if str(row.get('stck_cntg_hour') or '').strip()
+            )
+            if not times:
+                break
+            earliest = times[0]
+            if earliest in seen_page_times or earliest <= '090000' or len(rows) < 120:
+                break
+            seen_page_times.add(earliest)
+            current_time = earliest
+
+        self._last_intraday_read_metadata = {
+            'intraday_http_request_count': page_count,
+            'intraday_page_count': page_count,
+            'requested_session_date': target_date.isoformat(),
+            'requested_start_time': initial_start_time,
+        }
+        return normalize_domestic_intraday_bars(
+            normalized_symbol,
+            all_rows,
+            trading_date=target_date,
             limit=safe_limit,
         )
 
@@ -1334,6 +1416,72 @@ def normalize_percent(value) -> float:
     if abs(numeric) > 1:
         return numeric / 100
     return numeric
+
+
+def normalize_domestic_intraday_bars(
+    symbol: str,
+    rows: list,
+    *,
+    trading_date: date,
+    limit: int = 600,
+) -> list[dict]:
+    by_timestamp: dict[str, dict] = {}
+    kst = ZoneInfo('Asia/Seoul')
+    for row in rows or []:
+        item = _as_dict(row)
+        source_session_date = first_present(
+            item,
+            ['stck_bsop_date', 'bsop_date', 'session_date', 'date'],
+        )
+        session_date = _normalize_kis_date(source_session_date)
+        if not session_date:
+            continue
+        raw_time = first_present(
+            item,
+            ['stck_cntg_hour', 'cntg_hour', 'time'],
+        )
+        digits = ''.join(ch for ch in str(raw_time or '') if ch.isdigit())
+        if len(digits) < 6:
+            continue
+        raw_time = digits[-6:]
+        try:
+            parsed_time = datetime.strptime(raw_time, '%H%M%S').time()
+        except ValueError:
+            continue
+        try:
+            source_date = date.fromisoformat(session_date)
+        except ValueError:
+            continue
+        timestamp = datetime.combine(
+            source_date,
+            parsed_time,
+            tzinfo=kst,
+        ).isoformat()
+        open_price = first_float(item, ['stck_oprc', 'oprc', 'open'])
+        high = first_float(item, ['stck_hgpr', 'hgpr', 'high'])
+        low = first_float(item, ['stck_lwpr', 'lwpr', 'low'])
+        close = first_float(item, ['stck_prpr', 'stck_clpr', 'prpr', 'close'])
+        raw_volume = first_present(item, ['cntg_vol', 'acml_vol', 'volume'])
+        volume = to_float(raw_volume, -1.0)
+        if min(open_price, high, low, close) <= 0 or high < low or volume < 0:
+            continue
+        by_timestamp[timestamp] = {
+            'symbol': str(symbol).strip(),
+            'session_date': session_date,
+            'time': parsed_time.strftime('%H:%M:%S'),
+            'timestamp': timestamp,
+            'open': float(open_price),
+            'high': float(high),
+            'low': float(low),
+            'close': float(close),
+            'volume': float(max(volume, 0.0)),
+            'source_session_date': str(source_session_date).strip(),
+            'source_time': str(raw_time).strip(),
+        }
+
+    sorted_bars = [by_timestamp[key] for key in sorted(by_timestamp)]
+    safe_limit = max(1, int(limit or 600))
+    return sorted_bars[-safe_limit:]
 
 
 def normalize_domestic_daily_bars(

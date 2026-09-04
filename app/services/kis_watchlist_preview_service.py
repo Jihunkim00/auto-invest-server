@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from openai import OpenAI
 
 from app.brokers.kis_client import KisClient, to_float
 from app.config import get_settings
 from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
-from app.db.models import TradeRunLog
+from app.db.models import QuantABObservation, TradeRunLog
 from app.services.event_risk_service import EventRiskService
+from app.services.entry_timing_quant_service import EntryTimingQuantService
 from app.services.automation_observability import (
     candidate_gpt_quant_observability,
     gpt_result_counts,
 )
 from app.services.market_profile_service import MarketProfileService
+from app.services.market_data_snapshot_service import MarketDataSnapshotService
 from app.services.kr_market_context_service import KrMarketContextService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
@@ -92,6 +97,8 @@ class KisWatchlistPreviewService:
         quant_signal_service: QuantSignalService | None = None,
         event_risk_service: EventRiskService | None = None,
         market_context_service: KrMarketContextService | None = None,
+        market_data_snapshot_service: MarketDataSnapshotService | None = None,
+        entry_timing_quant_service: EntryTimingQuantService | None = None,
         db=None,
         limit: int = KR_PREVIEW_LIMIT,
         gpt_candidate_limit: int = KR_PREVIEW_TOP_GPT_CANDIDATES,
@@ -107,6 +114,13 @@ class KisWatchlistPreviewService:
         self.market_context_service = market_context_service or KrMarketContextService(
             kis_client=client,
         )
+        self.market_data_snapshot_service = market_data_snapshot_service or MarketDataSnapshotService(
+            client,
+            daily_cache_ttl_seconds=float(
+                getattr(get_settings(), "kis_daily_bars_cache_ttl_seconds", 86400.0)
+            ),
+        )
+        self.entry_timing_quant_service = entry_timing_quant_service or EntryTimingQuantService()
         self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
         self.gpt_candidate_limit = max(
@@ -131,6 +145,9 @@ class KisWatchlistPreviewService:
         watchlist = self.profile_service.load_watchlist("KR")
         references = self.profile_service.load_reference_sites("KR")
         market_session = self.session_service.get_session_status("KR")
+        decision_timestamp = datetime.now(ZoneInfo("Asia/Seoul"))
+        preview_started = time.perf_counter()
+        self.market_data_snapshot_service.reset_run_stats()
         session_warnings = self._session_warnings(market_session)
         configured_symbols = watchlist["symbols"][: self.limit]
         runtime_settings = self._runtime_settings(db)
@@ -146,9 +163,16 @@ class KisWatchlistPreviewService:
 
         quant_items = []
         quote_snapshots: dict[str, dict[str, Any]] = {}
+        market_snapshots: dict[str, dict[str, Any]] = {}
         profile_exclusion_counts: dict[str, int] = {}
         profile_filtered_symbols: set[str] = set()
         for raw in configured_symbols:
+            raw_symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
+            market_snapshot = self.market_data_snapshot_service.snapshot(
+                raw_symbol,
+                daily_limit=120,
+            )
+            market_snapshots[raw_symbol] = market_snapshot
             item = self._preview_symbol(
                 raw,
                 gate_level=gate_level,
@@ -157,6 +181,7 @@ class KisWatchlistPreviewService:
                 reference_sources=references.get("sources") or [],
                 include_gpt=False,
                 db=db,
+                market_data_snapshot=market_snapshot,
             )
             symbol = str(item.get("symbol") or "").strip().upper()
             if symbol:
@@ -183,6 +208,7 @@ class KisWatchlistPreviewService:
         )
         market_context_summary = self.market_context_service.summary(market_context)
         quant_ranked_candidates = self._rank_quant_candidates(quant_items)
+        a_quant_scan_finished = time.perf_counter()
         gpt_target_symbols = []
         if include_gpt and self.gpt_candidate_limit > 0:
             gpt_target_symbols = [
@@ -196,7 +222,18 @@ class KisWatchlistPreviewService:
             for item in quant_items
             if item.get("symbol")
         }
+        shadow_b_result = self._run_shadow_b(
+            quant_ranked_candidates=quant_ranked_candidates,
+            market_snapshots=market_snapshots,
+            items_by_symbol=items_by_symbol,
+            runtime_settings=runtime_settings,
+            decision_timestamp=decision_timestamp,
+            market_session=market_session,
+        )
+        b_shadow_scan_finished = time.perf_counter()
         gpt_used = False
+        gpt_reuse_count = 0
+        gpt_started = time.perf_counter()
         for raw in configured_symbols:
             symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
             if symbol not in gpt_target_symbols:
@@ -210,14 +247,21 @@ class KisWatchlistPreviewService:
                 include_gpt=True,
                 db=db,
                 market_context=market_context,
+                market_data_snapshot=market_snapshots.get(symbol),
                 disclosure_context=self.market_context_service.get_disclosures(
                     symbol,
                     as_of=market_context.get("as_of"),
                     limit=5,
                 ),
             )
+            if market_snapshots.get(symbol) is not None:
+                gpt_reuse_count += 1
             gpt_used = gpt_used or bool(item.get("gpt_used"))
+            shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
+            if isinstance(shadow_b, dict):
+                item["shadow_b"] = shadow_b
             items_by_symbol[symbol] = item
+        gpt_finished = time.perf_counter()
 
         items = [
             items_by_symbol[self.profile_service.normalize_symbol(raw.get("symbol"), "KR")]
@@ -352,6 +396,53 @@ class KisWatchlistPreviewService:
         gpt_counts = gpt_result_counts(
             [item for item in items if isinstance(item, dict)]
         )
+        snapshot_stats = self.market_data_snapshot_service.stats()
+        performance = {
+            "scan_total_ms": round((time.perf_counter() - preview_started) * 1000.0, 2),
+            "a_quant_scan_ms": round((a_quant_scan_finished - preview_started) * 1000.0, 2),
+            "b_shadow_scan_ms": round((b_shadow_scan_finished - a_quant_scan_finished) * 1000.0, 2),
+            "gpt_total_ms": round((gpt_finished - gpt_started) * 1000.0, 2),
+            "price_request_count": snapshot_stats["price_request_count"],
+            "daily_bars_request_count": snapshot_stats["daily_bars_request_count"],
+            "intraday_request_count": snapshot_stats["intraday_request_count"],
+            "intraday_http_request_count": snapshot_stats["intraday_http_request_count"],
+            "intraday_page_count": snapshot_stats["intraday_page_count"],
+            "daily_cache_hit_count": snapshot_stats["daily_cache_hit_count"],
+            "daily_cache_miss_count": snapshot_stats["daily_cache_miss_count"],
+            "kis_read_request_count": (
+                snapshot_stats["price_request_count"]
+                + snapshot_stats["daily_bars_request_count"]
+                + snapshot_stats["intraday_request_count"]
+            ),
+            "top5_snapshot_reuse_count": gpt_reuse_count,
+        }
+        quant_ranked_summary = [
+            {
+                "rank": rank,
+                "symbol": item.get("symbol"),
+                "quant_buy_score": item.get("quant_buy_score"),
+                "quant_sell_score": item.get("quant_sell_score"),
+                "final_entry_score": item.get("final_entry_score"),
+            }
+            for rank, item in enumerate(quant_ranked_candidates, start=1)
+        ]
+        quant_experiment = {
+            "selection_mode": str(runtime_settings.get("quant_selection_mode") or "A_ONLY"),
+            "authoritative_variant": "A",
+            "shadow_variant": "B",
+            "shadow_b_enabled": shadow_b_result["enabled"],
+            "shadow_b_candidate_limit": shadow_b_result["candidate_limit"],
+            "shadow_b_analyzed_count": shadow_b_result["analyzed_count"],
+            "shadow_b_partial_count": shadow_b_result["partial_count"],
+            "shadow_b_stale_count": shadow_b_result["stale_count"],
+            "shadow_b_failed_count": shadow_b_result["failed_count"],
+            "shadow_b_disabled_reason": shadow_b_result.get("disabled_reason"),
+            "a_top_symbols": shadow_b_result["a_top_symbols"],
+            "b_shadow_ranked_symbols": shadow_b_result["b_shadow_ranked_symbols"],
+            "b_would_change_top_candidate": shadow_b_result["b_would_change_top_candidate"],
+            "decision_slot": decision_timestamp.isoformat(),
+            "performance": performance,
+        }
 
         trade_result = {
             "action": "hold",
@@ -448,6 +539,9 @@ class KisWatchlistPreviewService:
             "market_session": self._public_session(market_session),
             "warnings": _dedupe(KR_DISABLED_REASONS + session_warnings + position_warnings + _string_list(market_context.get("warnings"))),
             "top_quant_candidates": quant_candidates,
+            "quant_ranked_candidates": quant_ranked_summary,
+            "quant_experiment": quant_experiment,
+            "performance": performance,
             "researched_candidates": researched_candidates,
             "final_ranked_candidates": final_ranked_candidates,
             "items": items,
@@ -461,7 +555,133 @@ class KisWatchlistPreviewService:
                 trigger_source=trigger_source,
             )
             payload["run"] = _serialize_preview_run(run)
+        elif db is not None:
+            _record_quant_ab_observations(
+                db,
+                payload=payload,
+                gate_level=gate_level,
+                trigger_source=trigger_source,
+            )
         return payload
+
+    def _run_shadow_b(
+        self,
+        *,
+        quant_ranked_candidates: list[dict[str, Any]],
+        market_snapshots: dict[str, dict[str, Any]],
+        items_by_symbol: dict[str, dict[str, Any]],
+        runtime_settings: dict[str, Any],
+        decision_timestamp: datetime,
+        market_session: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        enabled = bool(runtime_settings.get('quant_shadow_b_enabled', True))
+        candidate_limit = min(
+            10,
+            max(1, _safe_int(runtime_settings.get('quant_shadow_b_candidate_limit'), 10)),
+        )
+        result = {
+            'enabled': enabled,
+            'candidate_limit': candidate_limit,
+            'analyzed_count': 0,
+            'partial_count': 0,
+            'stale_count': 0,
+            'failed_count': 0,
+            'a_top_symbols': [
+                str(item.get('symbol'))
+                for item in quant_ranked_candidates[:candidate_limit]
+                if item.get('symbol')
+            ],
+            'b_shadow_ranked_symbols': [],
+            'b_would_change_top_candidate': False,
+        }
+        if not enabled:
+            return result
+
+        if not bool(getattr(get_settings(), "kis_enabled", False)):
+            for a_rank, item in enumerate(quant_ranked_candidates[:candidate_limit], start=1):
+                symbol = str(item.get("symbol") or "").strip().upper()
+                shadow = _empty_shadow_b_result(
+                    reason="B shadow read path is disabled with KIS.",
+                )
+                shadow["b_status"] = "failed_soft"
+                shadow["a_rank"] = a_rank
+                item["shadow_b"] = shadow
+                items_by_symbol[symbol] = item
+            result["failed_count"] = len(quant_ranked_candidates[:candidate_limit])
+            result["disabled_reason"] = "kis_disabled"
+            return result
+
+        shadow_ranked: list[tuple[dict[str, Any], float, int]] = []
+        for a_rank, item in enumerate(quant_ranked_candidates[:candidate_limit], start=1):
+            symbol = str(item.get('symbol') or '').strip().upper()
+            snapshot = market_snapshots.get(symbol) or {}
+            try:
+                intraday_bars, intraday_metadata = self.market_data_snapshot_service.get_intraday_bars(
+                    symbol,
+                    as_of=decision_timestamp,
+                    limit=600,
+                    reference_current_price=item.get('current_price'),
+                    previous_close=item.get('previous_close'),
+                    regular_open=str((market_session or {}).get('regular_open') or '09:00'),
+                    regular_close=str(
+                        (market_session or {}).get('effective_close')
+                        or (market_session or {}).get('regular_close')
+                        or '15:30'
+                    ),
+                )
+                if intraday_metadata.get('validation_status') == 'stale_intraday':
+                    b_result = _empty_shadow_b_result(
+                        reason='B shadow intraday snapshot is stale or invalid.',
+                        stale=True,
+                    )
+                    b_result['intraday_snapshot_metadata'] = intraday_metadata
+                    b_result['b_status'] = 'stale_intraday'
+                    result['stale_count'] += 1
+                else:
+                    b_result = self.entry_timing_quant_service.score(
+                        current_price=item.get('current_price'),
+                        daily_bars=snapshot.get('daily_bars') or [],
+                        intraday_bars=intraday_bars,
+                        decision_timestamp=decision_timestamp,
+                    )
+                    b_result['intraday_snapshot_metadata'] = intraday_metadata
+                    is_partial = (
+                        intraday_metadata.get('validation_status') == 'partial'
+                        or _safe_float(b_result.get('data_quality_b'), 0.0) < 1.0
+                        or any(
+                            _safe_int(count, 0) < 2
+                            for count in (b_result.get('timeframe_bar_counts') or {}).values()
+                        )
+                    )
+                    b_result['b_status'] = 'partial' if is_partial else 'analyzed'
+                    if is_partial:
+                        result['partial_count'] += 1
+                    else:
+                        result['analyzed_count'] += 1
+                    shadow_ranked.append((item, float(b_result.get('entry_score_b') or 0.0), a_rank))
+            except Exception as exc:
+                b_result = _empty_shadow_b_result(
+                    reason='B shadow analysis failed softly.',
+                    error=_safe_error(exc),
+                )
+                b_result['b_status'] = 'failed_soft'
+                result['failed_count'] += 1
+            b_result['a_rank'] = a_rank
+            item['shadow_b'] = b_result
+            items_by_symbol[symbol] = item
+
+        shadow_ranked.sort(key=lambda value: (-value[1], -_safe_float(value[0].get('quant_buy_score'), 0.0), value[2]))
+        for b_rank, (item, _score, _a_rank) in enumerate(shadow_ranked, start=1):
+            shadow = item.get('shadow_b') or {}
+            shadow['b_rank_within_shadow_pool'] = b_rank
+            item['shadow_b'] = shadow
+        result['b_shadow_ranked_symbols'] = [
+            str(item.get('symbol')) for item, _score, _rank in shadow_ranked
+        ]
+        a_top = result['a_top_symbols'][0] if result['a_top_symbols'] else None
+        b_top = result['b_shadow_ranked_symbols'][0] if result['b_shadow_ranked_symbols'] else None
+        result['b_would_change_top_candidate'] = bool(a_top and b_top and a_top != b_top)
+        return result
 
     def _runtime_settings(self, db) -> dict[str, Any]:
         try:
@@ -669,6 +889,7 @@ class KisWatchlistPreviewService:
         include_gpt: bool,
         db,
         market_context: dict[str, Any] | None = None,
+        market_data_snapshot: dict[str, Any] | None = None,
         disclosure_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
@@ -686,9 +907,13 @@ class KisWatchlistPreviewService:
         current_price: float | None = None
         previous_close: float | None = None
         price_error: str | None = None
-
+        market_data_snapshot = market_data_snapshot or self.market_data_snapshot_service.snapshot(
+            symbol,
+            daily_limit=120,
+        )
+        price_error = market_data_snapshot.get("quote_error")
+        price = market_data_snapshot.get("quote") or {}
         try:
-            price = self._get_normalized_price_snapshot(symbol)
             current_price = to_float(price.get("current_price"))
             previous_close = price.get("previous_close")
             if not name:
@@ -702,13 +927,10 @@ class KisWatchlistPreviewService:
             block_reasons.append("current_price_unavailable")
             price_error = _safe_error(exc)
 
-        bars: list[dict[str, Any]] = []
-        bar_error: str | None = None
-        try:
-            bars = self.client.get_domestic_daily_bars(symbol, limit=120)
-        except Exception as exc:
+        bars: list[dict[str, Any]] = list(market_data_snapshot.get("daily_bars") or [])
+        bar_error: str | None = market_data_snapshot.get("daily_error")
+        if bar_error:
             warnings.append("ohlcv_unavailable")
-            bar_error = _safe_error(exc)
 
         indicator_result = self.indicator_service.calculate(
             bars,
@@ -952,6 +1174,13 @@ class KisWatchlistPreviewService:
             "error": price_error or bar_error,
             "gpt_used": gpt.gpt_used,
             "gate_level": gate_level,
+            "market_data_snapshot_metadata": {
+                "captured_at": market_data_snapshot.get("captured_at"),
+                "daily_cache_key": market_data_snapshot.get("daily_cache_key"),
+                "daily_cache_hit": bool(market_data_snapshot.get("daily_cache_hit")),
+                "daily_cache_miss": bool(market_data_snapshot.get("daily_cache_miss")),
+                "daily_bars_source": market_data_snapshot.get("daily_bars_source"),
+            },
         }
 
     def _get_normalized_price_snapshot(self, symbol: str) -> dict[str, Any]:
@@ -1140,9 +1369,10 @@ def _record_preview_run(
         or _candidate_symbol(payload.get("final_best_candidate"))
         or "WATCHLIST"
     )
+    run_key = f"kis_preview_{uuid.uuid4().hex[:12]}"
     response_payload = _preview_log_payload(payload, gate_level=gate_level, trigger_source=trigger_source)
     run = TradeRunLog(
-        run_key=f"kis_preview_{uuid.uuid4().hex[:12]}",
+        run_key=run_key,
         trigger_source=trigger_source,
         symbol=symbol,
         mode="kis_watchlist_preview",
@@ -1172,9 +1402,161 @@ def _record_preview_run(
         response_payload=json.dumps(response_payload, ensure_ascii=False, default=str),
     )
     db.add(run)
+    db.flush()
+    _record_quant_ab_observations(
+        db,
+        payload=payload,
+        gate_level=gate_level,
+        trigger_source=trigger_source,
+        run_key=run_key,
+        trade_run_id=run.id,
+        commit=False,
+    )
     db.commit()
     db.refresh(run)
     return run
+
+
+def _empty_shadow_b_result(
+    *,
+    reason: str,
+    error: str | None = None,
+    stale: bool = False,
+) -> dict[str, Any]:
+    notes = ['b_stale_intraday' if stale else 'b_failed_soft']
+    if error:
+        notes.append(error)
+    return {
+        'entry_score_b': None,
+        'future_up_score_b': None,
+        'future_down_score_b': None,
+        'entry_timing_score_b': None,
+        'trend_context_score_b': None,
+        'momentum_score_b': None,
+        'volume_score_b': None,
+        'volatility_fit_score_b': None,
+        'trend_state_b': None,
+        'direction_b': None,
+        'confidence_b': 0.0,
+        'data_quality_b': 0.0,
+        'b_reason': reason,
+        'b_notes': notes,
+        'timeframe_bar_counts': {'15m': 0, '30m': 0, '60m': 0},
+        'indicator_snapshot': {},
+        'intraday_snapshot_metadata': {},
+    }
+
+
+def _record_quant_ab_observations(
+    db,
+    *,
+    payload: dict[str, Any],
+    gate_level: int,
+    trigger_source: str,
+    run_key: str | None = None,
+    trade_run_id: int | None = None,
+    commit: bool = True,
+) -> int:
+    experiment = payload.get("quant_experiment") or {}
+    if not bool(experiment.get("shadow_b_enabled")):
+        return 0
+    observation_run_key = run_key or f"kis_ab_{uuid.uuid4().hex[:20]}"
+    a_rank_by_symbol = {
+        str(item.get("symbol") or "").strip().upper(): int(item.get("rank") or 0)
+        for item in payload.get("quant_ranked_candidates") or []
+        if item.get("symbol")
+    }
+    a_by_symbol = {
+        str(item.get("symbol") or "").strip().upper(): item
+        for item in payload.get("watchlist") or []
+        if item.get("symbol")
+    }
+    b_rank_by_symbol = {
+        str(symbol).strip().upper(): index
+        for index, symbol in enumerate(experiment.get("b_shadow_ranked_symbols") or [], start=1)
+        if symbol
+    }
+    decision_slot = str(experiment.get("decision_slot") or "")
+    try:
+        observed_at = datetime.fromisoformat(decision_slot) if decision_slot else None
+    except ValueError:
+        observed_at = None
+    selected_a = _candidate_symbol(payload.get("final_best_candidate"))
+    inserted = 0
+    for symbol, item in a_by_symbol.items():
+        shadow = item.get("shadow_b")
+        if not isinstance(shadow, dict):
+            continue
+        observation_key = f"{observation_run_key}:{symbol}"
+        if db.query(QuantABObservation).filter_by(observation_key=observation_key).first():
+            continue
+        row = QuantABObservation(
+            observation_key=observation_key,
+            run_key=observation_run_key,
+            trade_run_id=trade_run_id,
+            trigger_source=trigger_source,
+            provider="kis",
+            market="KR",
+            symbol=symbol,
+            observed_at=observed_at,
+            decision_slot=decision_slot or None,
+            gate_level=gate_level,
+            authoritative_variant="A",
+            shadow_variant="B",
+            current_price=_safe_float(item.get("current_price"), 0.0) or None,
+            a_rank=a_rank_by_symbol.get(symbol),
+            a_quant_buy_score=_score_or_none(item.get("quant_buy_score")),
+            a_quant_sell_score=_score_or_none(item.get("quant_sell_score")),
+            a_final_score=_score_or_none(item.get("final_buy_score")),
+            b_rank_within_shadow_pool=b_rank_by_symbol.get(symbol),
+            b_entry_score=_score_or_none(shadow.get("entry_score_b")),
+            b_future_up_score=_score_or_none(shadow.get("future_up_score_b")),
+            b_future_down_score=_score_or_none(shadow.get("future_down_score_b")),
+            b_entry_timing_score=_score_or_none(shadow.get("entry_timing_score_b")),
+            b_trend_context_score=_score_or_none(shadow.get("trend_context_score_b")),
+            b_momentum_score=_score_or_none(shadow.get("momentum_score_b")),
+            b_volume_score=_score_or_none(shadow.get("volume_score_b")),
+            b_volatility_fit_score=_score_or_none(shadow.get("volatility_fit_score_b")),
+            trend_state_b=(
+                str(shadow.get("trend_state_b"))
+                if shadow.get("trend_state_b") is not None
+                else None
+            ),
+            direction_b=(
+                str(shadow.get("direction_b"))
+                if shadow.get("direction_b") is not None
+                else None
+            ),
+            data_quality_b=_safe_float(shadow.get("data_quality_b"), 0.0),
+            indicator_snapshot_json=json.dumps(
+                {
+                    "a": item.get("indicator_payload") or {},
+                    "b": shadow.get("indicator_snapshot") or {},
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+            intraday_snapshot_metadata_json=json.dumps(
+                shadow.get("intraday_snapshot_metadata") or {},
+                ensure_ascii=False,
+                default=str,
+            ),
+            b_reason=str(shadow.get("b_reason") or ""),
+            b_notes_json=json.dumps(shadow.get("b_notes") or [], ensure_ascii=False, default=str),
+            selected_by_a=symbol == selected_a,
+            selected_by_b_shadow=b_rank_by_symbol.get(symbol) == 1,
+            gpt_selected_by_a=symbol in set(payload.get("gpt_target_symbols") or []),
+            outcome_status=(
+                "invalid_stale_intraday"
+                if str(shadow.get("b_status") or "") == "stale_intraday"
+                else "pending"
+            ),
+        )
+        db.add(row)
+        inserted += 1
+    if commit and inserted:
+        db.commit()
+    return inserted
 
 
 def _preview_log_payload(
@@ -1215,6 +1597,9 @@ def _preview_log_payload(
             "gpt_not_run_count": payload.get("gpt_not_run_count"),
             "quant_only_symbols": payload.get("quant_only_symbols") or [],
             "quant_candidates_count": payload.get("quant_candidates_count"),
+            "quant_ranked_candidates": payload.get("quant_ranked_candidates") or [],
+            "quant_experiment": payload.get("quant_experiment") or {},
+            "performance": payload.get("performance") or {},
             "researched_candidates_count": payload.get("researched_candidates_count"),
             "final_best_candidate": final_best,
             "selected_candidate_observability": (

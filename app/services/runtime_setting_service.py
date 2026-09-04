@@ -97,6 +97,9 @@ class RuntimeSettingService:
 
     def _defaults(self) -> dict[str, Any]:
         return {
+            'quant_selection_mode': 'A_ONLY',
+            'quant_shadow_b_enabled': True,
+            'quant_shadow_b_candidate_limit': 10,
             "bot_enabled": True,
             "dry_run": bool(self.settings.dry_run),
             "kill_switch": False,
@@ -397,6 +400,15 @@ class RuntimeSettingService:
 
     def _settings_from_row(self, row: RuntimeSetting) -> dict[str, Any]:
         settings = {
+            'quant_selection_mode': str(
+                getattr(row, 'quant_selection_mode', None) or 'A_ONLY'
+            ).strip().upper(),
+            'quant_shadow_b_enabled': bool(
+                getattr(row, 'quant_shadow_b_enabled', True)
+            ),
+            'quant_shadow_b_candidate_limit': int(
+                getattr(row, 'quant_shadow_b_candidate_limit', 10) or 10
+            ),
             "bot_enabled": bool(row.bot_enabled),
             "dry_run": bool(row.dry_run),
             "kill_switch": bool(row.kill_switch),
@@ -1044,6 +1056,17 @@ class RuntimeSettingService:
         return self._finalize_settings(settings)
 
     def _finalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        selection_mode = str(settings.get('quant_selection_mode') or 'A_ONLY').strip().upper()
+        settings['quant_selection_mode'] = (
+            selection_mode if selection_mode in {'A_ONLY', 'A_THEN_B'} else 'A_ONLY'
+        )
+        settings['quant_shadow_b_enabled'] = bool(
+            settings.get('quant_shadow_b_enabled', True)
+        )
+        settings['quant_shadow_b_candidate_limit'] = min(
+            10,
+            max(1, int(settings.get('quant_shadow_b_candidate_limit') or 10)),
+        )
         settings["strategy_live_auto_buy_allowed_profiles"] = _decode_profiles(
             settings.get("strategy_live_auto_buy_allowed_profiles")
         )
@@ -2808,6 +2831,9 @@ class RuntimeSettingService:
         )
 
         for key in (
+            'quant_selection_mode',
+            'quant_shadow_b_enabled',
+            'quant_shadow_b_candidate_limit',
             "bot_enabled",
             "dry_run",
             "kill_switch",
@@ -3043,6 +3069,13 @@ class RuntimeSettingService:
                 continue
 
             value = payload[key]
+            if key == 'quant_selection_mode':
+                mode = str(value or '').strip().upper()
+                value = mode if mode in {'A_ONLY', 'A_THEN_B'} else 'A_ONLY'
+            if key == 'quant_shadow_b_enabled':
+                value = bool(value)
+            if key == 'quant_shadow_b_candidate_limit':
+                value = min(10, max(1, int(value or 10)))
             if key == "default_symbol" and value:
                 value = str(value).upper()
             if key in {
@@ -3438,6 +3471,9 @@ def _catalog_scope_metadata(
 
 def _advanced_runtime_keys() -> tuple[str, ...]:
     return (
+        'quant_selection_mode',
+        'quant_shadow_b_enabled',
+        'quant_shadow_b_candidate_limit',
         "kis_scheduler_live_enabled",
         "kis_scheduler_allow_real_orders",
         "kis_scheduler_configured_allow_real_orders",

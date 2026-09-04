@@ -527,7 +527,7 @@ def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, clien
     assert non_top["gpt_reason"] is None
     assert captured_symbols == body["gpt_target_symbols"]
     assert len(captured_symbols) == 5
-    assert len(bar_symbols) == 55
+    assert len(bar_symbols) == 50
     assert len(captured_payloads) == 5
     assert body["best_score"] is not None
     assert body["should_trade"] is False

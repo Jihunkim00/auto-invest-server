@@ -76,6 +76,7 @@ class Settings(BaseSettings):
     kis_read_only_min_interval_seconds: float = 1.0
     kis_read_only_rate_limit_retry_seconds: float = 1.2
     kis_account_state_cache_ttl_seconds: float = 2.0
+    kis_daily_bars_cache_ttl_seconds: float = 86400.0
     kis_account_state_max_stale_seconds: float = 5.0
     # Read-only account reads may retry three times: 5 seconds, then 15
     # seconds. Order submission paths never use this retry policy.

@@ -278,6 +278,9 @@ def _create_runtime_settings_table_if_missing():
                     per_symbol_daily_entry_limit INTEGER NOT NULL DEFAULT 1,
                     per_slot_new_entry_limit INTEGER NOT NULL DEFAULT 1,
                     max_open_positions INTEGER NOT NULL DEFAULT 3,
+                    quant_selection_mode VARCHAR(20) NOT NULL DEFAULT 'A_ONLY',
+                    quant_shadow_b_enabled BOOLEAN NOT NULL DEFAULT 1,
+                    quant_shadow_b_candidate_limit INTEGER NOT NULL DEFAULT 10,
                     near_close_block_minutes INTEGER NOT NULL DEFAULT 15,
                     same_direction_cooldown_minutes INTEGER NOT NULL DEFAULT 120,
                     kis_live_auto_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -492,6 +495,12 @@ def _create_runtime_settings_table_if_missing():
                 """
             )
         )
+
+
+def _migrate_quant_selection_runtime_columns_if_needed():
+    _add_column_if_missing('runtime_settings', 'quant_selection_mode', '''VARCHAR(20) NOT NULL DEFAULT 'A_ONLY' ''')
+    _add_column_if_missing('runtime_settings', 'quant_shadow_b_enabled', 'BOOLEAN NOT NULL DEFAULT 1')
+    _add_column_if_missing('runtime_settings', 'quant_shadow_b_candidate_limit', 'INTEGER NOT NULL DEFAULT 10')
 
 
 def _migrate_operation_test4_limits_if_needed():
@@ -1400,6 +1409,59 @@ def _create_trade_run_logs_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trade_run_logs_symbol ON trade_run_logs (symbol)"))
 
 
+def _create_quant_ab_observations_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text('''
+                CREATE TABLE IF NOT EXISTS quant_ab_observations (
+                    id INTEGER PRIMARY KEY,
+                    observation_key VARCHAR(180) NOT NULL UNIQUE,
+                    run_key VARCHAR(64) NOT NULL,
+                    trade_run_id INTEGER,
+                    trigger_source VARCHAR(40) NOT NULL,
+                    provider VARCHAR(20) NOT NULL DEFAULT 'kis',
+                    market VARCHAR(10) NOT NULL DEFAULT 'KR',
+                    symbol VARCHAR(20) NOT NULL,
+                    observed_at DATETIME,
+                    decision_slot VARCHAR(40),
+                    gate_level INTEGER,
+                    authoritative_variant VARCHAR(10) NOT NULL DEFAULT 'A',
+                    shadow_variant VARCHAR(10) NOT NULL DEFAULT 'B',
+                    current_price FLOAT,
+                    a_rank INTEGER,
+                    a_quant_buy_score FLOAT,
+                    a_quant_sell_score FLOAT,
+                    a_final_score FLOAT,
+                    b_rank_within_shadow_pool INTEGER,
+                    b_entry_score FLOAT,
+                    b_future_up_score FLOAT,
+                    b_future_down_score FLOAT,
+                    b_entry_timing_score FLOAT,
+                    b_trend_context_score FLOAT,
+                    b_momentum_score FLOAT,
+                    b_volume_score FLOAT,
+                    b_volatility_fit_score FLOAT,
+                    trend_state_b VARCHAR(40),
+                    direction_b VARCHAR(20),
+                    data_quality_b FLOAT,
+                    indicator_snapshot_json TEXT,
+                    intraday_snapshot_metadata_json TEXT,
+                    b_reason TEXT,
+                    b_notes_json TEXT,
+                    selected_by_a BOOLEAN NOT NULL DEFAULT 0,
+                    selected_by_b_shadow BOOLEAN NOT NULL DEFAULT 0,
+                    gpt_selected_by_a BOOLEAN NOT NULL DEFAULT 0,
+                    outcome_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            ''')
+        )
+        conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ux_quant_ab_observations_observation_key ON quant_ab_observations (observation_key)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_run_key ON quant_ab_observations (run_key)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_symbol ON quant_ab_observations (symbol)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_observed_at ON quant_ab_observations (observed_at)'))
+
+
 def _create_agent_command_logs_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -2071,6 +2133,7 @@ def init_db():
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
+    _migrate_quant_selection_runtime_columns_if_needed()
     _migrate_operation_test4_limits_if_needed()
     _create_strategy_tables_if_missing()
     # This must precede the startup seed: the seed service queries every
@@ -2090,6 +2153,7 @@ def init_db():
     _create_operation_test_live_mode_claims_table_if_missing()
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
+    _create_quant_ab_observations_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()
@@ -2137,6 +2201,9 @@ def init_db():
     }
 
     runtime_setting_columns = {
+        'quant_selection_mode': '''VARCHAR(20) DEFAULT 'A_ONLY' ''',
+        'quant_shadow_b_enabled': 'BOOLEAN DEFAULT 1',
+        'quant_shadow_b_candidate_limit': 'INTEGER DEFAULT 10',
         "bot_enabled": "BOOLEAN DEFAULT 1",
         "dry_run": "BOOLEAN DEFAULT 1",
         "kill_switch": "BOOLEAN DEFAULT 0",

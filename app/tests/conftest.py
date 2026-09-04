@@ -75,6 +75,9 @@ def pytest_sessionfinish(session, exitstatus):
 @pytest.fixture(autouse=True)
 def _isolate_file_backed_test_database():
     _assert_safe_test_database()
+    from app.services.market_data_snapshot_service import MarketDataSnapshotService
+
+    MarketDataSnapshotService.clear_process_cache()
 
     with engine.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):
