@@ -48,6 +48,7 @@ class TargetAwareRiskService:
             provider=payload.provider,
             market=payload.market,
             profile_name=profile_name,
+            symbol=payload.symbol,
         )
         profile = snapshot["_profile"]
         flags = list(snapshot["risk_flags"])
@@ -146,6 +147,7 @@ class TargetAwareRiskService:
             "monthly_target_hit_size_reduced",
             "near_monthly_target_size_reduced",
             "consecutive_loss_size_reduced",
+            "symbol_consecutive_loss_size_reduced",
             "performance_data_quality_limited",
             "notional_capped_by_profile",
         }
@@ -162,6 +164,14 @@ class TargetAwareRiskService:
             "approved_notional_krw": round(approved_notional, 2),
             "recommended_notional_krw": round(recommended, 2),
             "sizing_multiplier": round(multiplier, 4),
+            "global_consecutive_losses": int(
+                snapshot.get("_global_consecutive_losses", snapshot.get("_consecutive_losses"))
+                or 0
+            ),
+            "symbol_consecutive_losses": int(
+                snapshot.get("_symbol_consecutive_losses") or 0
+            ),
+            "risk_symbol": snapshot.get("_risk_symbol"),
             "sizing_mode": snapshot["sizing_mode"],
             "fixed_budget_krw": snapshot["fixed_budget_krw"],
             "capital_state": snapshot.get("capital_state"),
@@ -219,6 +229,17 @@ class TargetAwareRiskService:
                     profile.get("consecutive_loss_reduce_threshold") or 0
                 ),
                 "consecutive_losses": int(snapshot.get("_consecutive_losses") or 0),
+                "global_consecutive_losses": int(
+                    snapshot.get(
+                        "_global_consecutive_losses",
+                        snapshot.get("_consecutive_losses"),
+                    )
+                    or 0
+                ),
+                "symbol_consecutive_losses": int(
+                    snapshot.get("_symbol_consecutive_losses") or 0
+                ),
+                "risk_symbol": snapshot.get("_risk_symbol"),
             },
             "safety": {
                 **snapshot["safety"],

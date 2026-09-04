@@ -144,8 +144,16 @@ def test_balanced_target_near_eighty_percent_reduces_size(db_session):
 
 def test_consecutive_losses_reduce_size(db_session):
     trades = [
-        {"realized_pnl": -100, "closed_at": datetime.now(UTC)},
-        {"realized_pnl": -50, "closed_at": datetime.now(UTC)},
+        {
+            "symbol": "005930",
+            "realized_pnl": -100,
+            "closed_at": datetime.now(UTC),
+        },
+        {
+            "symbol": "005930",
+            "realized_pnl": -50,
+            "closed_at": datetime.now(UTC),
+        },
     ]
     StrategyProfileService().apply_preset(
         db_session,
@@ -159,8 +167,107 @@ def test_consecutive_losses_reduce_size(db_session):
 
     assert result["approved"] is True
     assert result["approved_notional_krw"] == 20_000
-    assert "consecutive_loss_size_reduced" in result["risk_flags"]
+    assert "symbol_consecutive_loss_size_reduced" in result["risk_flags"]
+    assert "consecutive_loss_size_reduced" not in result["risk_flags"]
 
+
+def test_different_symbol_loss_does_not_reduce_new_entry_size(db_session):
+    trades = [
+        {
+            "symbol": "316140",
+            "realized_pnl": -100,
+            "closed_at": datetime.now(UTC),
+        },
+        {
+            "symbol": "316140",
+            "realized_pnl": -50,
+            "closed_at": datetime.now(UTC),
+        },
+    ]
+    StrategyProfileService().apply_preset(
+        db_session,
+        profile_name="balanced",
+        confirm_operator_ack=True,
+    )
+
+    result = _service(_Performance(trades=trades)).evaluate_entry(
+        db_session,
+        _request(
+            symbol="010950",
+            requested_notional_krw=40_000,
+            buy_score=70,
+        ),
+    )
+
+    assert result["approved"] is True
+    assert result["sizing_multiplier"] == 1.0
+    assert result["approved_notional_krw"] == 40_000
+    assert result["global_consecutive_losses"] == 2
+    assert result["symbol_consecutive_losses"] == 0
+    assert "symbol_consecutive_loss_size_reduced" not in result["risk_flags"]
+    assert "consecutive_loss_size_reduced" not in result["risk_flags"]
+
+
+def test_same_symbol_consecutive_losses_reduce_size(db_session):
+    trades = [
+        {
+            "symbol": "010950",
+            "realized_pnl": -100,
+            "closed_at": datetime.now(UTC),
+        },
+        {
+            "symbol": "010950",
+            "realized_pnl": -50,
+            "closed_at": datetime.now(UTC),
+        },
+    ]
+    StrategyProfileService().apply_preset(
+        db_session,
+        profile_name="balanced",
+        confirm_operator_ack=True,
+    )
+
+    result = _service(_Performance(trades=trades)).evaluate_entry(
+        db_session,
+        _request(
+            symbol="010950",
+            requested_notional_krw=40_000,
+            buy_score=70,
+        ),
+    )
+
+    assert result["approved"] is True
+    assert result["sizing_multiplier"] == 0.5
+    assert result["approved_notional_krw"] == 20_000
+    assert result["global_consecutive_losses"] == 2
+    assert result["symbol_consecutive_losses"] == 2
+    assert "symbol_consecutive_loss_size_reduced" in result["risk_flags"]
+    assert "010950" in " ".join(result["gating_notes"])
+    assert "2회" in " ".join(result["gating_notes"])
+
+
+def test_daily_loss_limit_still_blocks_different_symbol(db_session):
+    result = _service(
+        _Performance(
+            daily_return=-0.005,
+            trades=[
+                {
+                    "symbol": "316140",
+                    "realized_pnl": -100,
+                    "closed_at": datetime.now(UTC),
+                }
+            ],
+        )
+    ).evaluate_entry(
+        db_session,
+        _request(symbol="010950"),
+    )
+
+    assert result["approved"] is False
+    assert result["block_reason"] == "daily_loss_limit_hit"
+    assert result["global_consecutive_losses"] == 1
+    assert result["symbol_consecutive_losses"] == 0
+    assert "symbol_consecutive_loss_size_reduced" not in result["risk_flags"]
 
 def test_daily_trade_limit_blocks_new_entries(db_session):
     db_session.add(

@@ -53,9 +53,11 @@ class StrategyRiskBudgetService:
         provider: str = "kis",
         market: str = "KR",
         profile_name: str | None = None,
+        symbol: str | None = None,
     ) -> dict[str, Any]:
         normalized_provider = str(provider or "kis").strip().lower() or "kis"
         normalized_market = str(market or "KR").strip().upper() or "KR"
+        normalized_symbol = str(symbol or "").strip().upper() or None
         active = (
             self.strategy_profiles.get_profile(db, profile_name)
             if profile_name
@@ -108,7 +110,20 @@ class StrategyRiskBudgetService:
         max_trades = max(0, int(profile.get("max_trades_per_day") or 0))
         current_positions = self._position_count(positions)
         max_positions = max(0, int(profile.get("max_positions") or 0))
-        consecutive_losses = self._consecutive_losses(trades.get("items"))
+        trade_items = trades.get("items")
+        global_consecutive_losses = self._consecutive_losses(trade_items)
+        symbol_trade_items = (
+            [
+                item
+                for item in trade_items
+                if isinstance(item, dict)
+                and str(item.get("symbol") or "").strip().upper()
+                == normalized_symbol
+            ]
+            if normalized_symbol and isinstance(trade_items, list)
+            else []
+        )
+        symbol_consecutive_losses = self._consecutive_losses(symbol_trade_items)
         total_assets = self._total_assets(balance, positions)
         capital = _capital_settings(profile)
         sizing_mode = capital["sizing_mode"]
@@ -288,16 +303,17 @@ class StrategyRiskBudgetService:
             int(profile.get("consecutive_loss_reduce_threshold") or 0),
         )
         if (
-            bool(profile.get("reduce_size_after_loss"))
+            normalized_symbol
+            and bool(profile.get("reduce_size_after_loss"))
             and threshold > 0
-            and consecutive_losses >= threshold
+            and symbol_consecutive_losses >= threshold
         ):
             sizing_multiplier = min(sizing_multiplier, 0.5)
-            risk_flags.append("consecutive_loss_size_reduced")
+            risk_flags.append("symbol_consecutive_loss_size_reduced")
             gating_notes.append(
-                f"최근 연속 손실 {consecutive_losses}회로 권장 주문 크기를 50%로 축소합니다."
+                f"{normalized_symbol} 동일 종목 최근 연속 손실 "
+                f"{symbol_consecutive_losses}회로 권장 주문 크기를 50%로 축소합니다."
             )
-
         if quality_limited:
             sizing_multiplier = min(sizing_multiplier, 0.5)
             risk_flags.append("performance_data_quality_limited")
@@ -341,6 +357,9 @@ class StrategyRiskBudgetService:
             "daily_max_loss_pct": daily_max_loss,
             "current_daily_return_pct": daily_return,
             "daily_loss_limit_hit": daily_loss_hit,
+            "global_consecutive_losses": global_consecutive_losses,
+            "symbol_consecutive_losses": symbol_consecutive_losses,
+            "risk_symbol": normalized_symbol,
             "max_order_notional_pct": max_order_pct,
             "max_order_notional_krw": profile_max_krw,
             "sizing_mode": sizing_mode,
@@ -383,7 +402,10 @@ class StrategyRiskBudgetService:
             "_sizing_multiplier": sizing_multiplier,
             "_sizing_mode": sizing_mode,
             "_order_cap_source": order_cap_source,
-            "_consecutive_losses": consecutive_losses,
+            "_consecutive_losses": global_consecutive_losses,
+            "_global_consecutive_losses": global_consecutive_losses,
+            "_symbol_consecutive_losses": symbol_consecutive_losses,
+            "_risk_symbol": normalized_symbol,
         }
 
     def state(
