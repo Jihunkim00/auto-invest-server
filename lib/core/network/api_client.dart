@@ -462,6 +462,11 @@ class ApiClient {
     final payload = await _getJsonNoCache('/strategy-profiles/$profileId');
     return AutomationStrategyProfile.fromJson(payload);
   }
+  Future<Map<String, dynamic>> fetchAutomationCapitalState(int profileId) async {
+    final payload = await _getJsonNoCache('/strategy-profiles/$profileId/capital-state');
+    final state = payload['capital_state'];
+    return state is Map ? Map<String, dynamic>.from(state) : <String, dynamic>{};
+  }
 
   Future<AutomationStrategyProfile> createAutomationProfile(
       Map<String, dynamic> body) async {

@@ -1050,6 +1050,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                     "automation_profile": True,
                     "automation_profile_key": profile.get("profile_key"),
                     "trigger_source": TRIGGER_SOURCE,
+                    "source_context": run_request.trigger_source,
                     "operator_trigger_source": run_request.trigger_source,
                     "active_profile": _profile_name(profile),
                     "profile_key": profile.get("profile_key") or profile.get("profile_name"),
@@ -1186,6 +1187,11 @@ class ProfileAwareGuardedLiveAutoExitService:
             "take_profit_pct": candidate.get('take_profit_pct'),
             "threshold_source": candidate.get('threshold_source'),
             "submitted": bool(kwargs.get("submitted")),
+            "real_order_submitted": bool(
+                kwargs.get("real_order_submitted") or kwargs.get("submitted")
+            ),
+            "source_context": kwargs.get("source_context"),
+            "source_type": kwargs.get("source_type") or SOURCE_TYPE,
             "quantity": kwargs.get("quantity"),
             "current_price": kwargs.get("current_price") or candidate.get("current_price"),
             "submitted_notional_krw": kwargs.get("submitted_notional_krw"),
@@ -1407,6 +1413,9 @@ class ProfileAwareGuardedLiveAutoExitService:
             candidate=candidate,
             validation_approved=True,
             submitted=True,
+            real_order_submitted=True,
+            source_context=run_request.trigger_source,
+            source_type=SOURCE_TYPE,
             quantity=int(plan["quantity"]),
             submitted_notional_krw=plan.get("approved_notional_krw"),
             related_order_id=order.id,
@@ -1434,6 +1443,27 @@ class ProfileAwareGuardedLiveAutoExitService:
         attempt.submitted_at = now_utc
         attempt.response_payload = _json(response)
         db.commit()
+        if self.execution_core.order_sync_service is not None:
+            synced_order = self.execution_core.sync_order(db, order.id)
+            db.refresh(order)
+            synced_status = _attempt_status_from_order(synced_order)
+            attempt.status = synced_status
+            attempt.broker_order_id = order.broker_order_id or order.kis_odno
+            attempt.synced_at = datetime.now(UTC)
+            response.update(
+                {
+                    "status": synced_status,
+                    "action": "filled" if synced_status == "filled" else "submitted",
+                    "broker_order_id": attempt.broker_order_id,
+                    "broker_status": order.broker_status or order.broker_order_status,
+                    "internal_status": order.internal_status,
+                    "real_order_submitted": True,
+                }
+            )
+            attempt.response_payload = _json(response)
+            run.response_payload = _json(response)
+            order.response_payload = _json({**response, "kis_response": broker_response})
+            db.commit()
         return sanitize_kis_payload(response)
 
 

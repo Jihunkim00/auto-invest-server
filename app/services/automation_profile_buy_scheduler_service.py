@@ -464,6 +464,8 @@ class AutomationProfileBuySchedulerService:
         if self.execution_core.order_sync_service is not None:
             self.execution_core.sync_order(db, order.id)
         db.refresh(order)
+        actual_quantity = int(float(order.qty or plan['quantity']))
+        actual_notional = round(float(order.notional or (actual_quantity * float(plan['price']))), 2)
         if str(order.internal_status).upper() == InternalOrderStatus.FILLED.value:
             reservation.status = 'filled'
         db.commit()
@@ -484,9 +486,10 @@ class AutomationProfileBuySchedulerService:
             'final_buy_score': _score(selected, 'final_buy_score', 'final_score', 'buy_score'),
             'required_entry_score': _threshold(profile),
             **entry_accounting,
-            'quantity': int(plan['quantity']),
-            'approved_notional_krw': plan['approved_notional_krw'],
+            'quantity': actual_quantity,
+            'approved_notional_krw': actual_notional,
             'target_risk_result': target,
+            'capital_state': target.get('capital_state'),
             'sizing_mode': target.get('sizing_mode', 'equity_pct'),
             'fixed_budget_krw': target.get('fixed_budget_krw'),
             'target_position_pct': target.get('target_position_pct'),
@@ -506,6 +509,7 @@ class AutomationProfileBuySchedulerService:
             'validation_called': True,
             'validation_call_count': 1,
             'broker_submit_called': bool(execution.get('broker_submit_called')),
+            'real_order_submitted': bool(execution.get('real_order_submitted')),
             'broker_buy_call_count': 1 if execution.get('broker_submit_called') else 0,
             'real_external_kis_submit_count': 0,
             'lifecycle': _lifecycle(lifecycle),
@@ -633,9 +637,6 @@ class AutomationProfileBuySchedulerService:
                 continue
             quantity = math.floor(approved / price)
             if quantity < 1:
-                continue
-            cash = _score(account.get('balance') or {}, 'cash', 'available_cash', 'orderable_cash')
-            if cash is not None and cash < quantity * price:
                 continue
             return candidate, target, {'quantity': quantity, 'price': price, 'approved_notional_krw': round(approved, 2)}, top_score
         return None, {}, {}, top_score

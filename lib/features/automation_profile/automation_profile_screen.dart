@@ -27,6 +27,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 
   AutomationStrategyProfileList? _list;
   AutomationStrategyProfile? _selected;
+  Map<String, dynamic> _capitalState = <String, dynamic>{};
+  bool _compoundEnabled = false;
   String? _error;
   bool _busy = false;
   final _nameController = TextEditingController();
@@ -90,9 +92,23 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
+  Future<void> _loadCapitalState(AutomationStrategyProfile profile) async {
+    try {
+      final state = await widget.apiClient.fetchAutomationCapitalState(profile.id);
+      if (!mounted || _selected?.id != profile.id) return;
+      setState(() => _capitalState = state);
+    } catch (_) {
+      if (mounted && _selected?.id == profile.id) {
+        setState(() => _capitalState = <String, dynamic>{});
+      }
+    }
+  }
+
   void _newProfile() {
     setState(() {
       _selected = null;
+      _capitalState = <String, dynamic>{};
+      _compoundEnabled = false;
       _nameController.text = '';
       _startController.text = _defaultStartDate;
       _endController.text = _defaultEndDate;
@@ -125,6 +141,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           '${profile.capital['target_position_pct'] ?? 10}';
       _fixedBudgetController.text =
           '${profile.capital['fixed_budget'] ?? 500000}';
+      _compoundEnabled = profile.capital['compound_enabled'] == true;
       _maxOrderController.text =
           '${profile.capital['max_order_notional_krw'] ?? 500000}';
       _stopLossController.text = '${profile.exit['stop_loss_pct'] ?? 2}';
@@ -138,6 +155,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _maxTotalExposurePct =
           _asDouble(profile.capital['max_total_exposure_pct'], 30);
     });
+    _loadCapitalState(profile);
   }
 
   Future<void> _addAnalysisTime() async {
@@ -282,6 +300,10 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         'max_order_notional_krw':
             double.tryParse(_maxOrderController.text) ?? 500000,
         'fixed_budget': double.tryParse(_fixedBudgetController.text) ?? 500000,
+        'initial_budget_krw':
+            double.tryParse(_fixedBudgetController.text) ?? 500000,
+        'compound_enabled': _compoundEnabled,
+        'compound_basis': 'realized_pnl',
         'cash_only': true,
       },
       'universe': {
@@ -508,6 +530,53 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
+  String _capitalValue(String key) {
+    final value = _capitalState[key];
+    if (value == null) return '—';
+    if (value is num) return value.toStringAsFixed(2);
+    return value.toString();
+  }
+
+  Widget _capitalStateView() {
+    if (_capitalState.isEmpty) return const SizedBox.shrink();
+    const rows = <MapEntry<String, String>>[
+      MapEntry('Initial budget (KRW)', 'initial_budget_krw'),
+      MapEntry('Cumulative realized P/L (KRW)', 'cumulative_realized_pnl_krw'),
+      MapEntry('Current strategy budget (KRW)', 'current_strategy_budget_krw'),
+      MapEntry('Broker orderable cash (KRW)', 'broker_orderable_cash_krw'),
+      MapEntry('Effective next entry budget (KRW)', 'effective_next_entry_budget_krw'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Backend capital state'),
+              const SizedBox(height: 8),
+              for (final row in rows)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(row.key, style: const TextStyle(color: Colors.white70)),
+                      Text(_capitalValue(row.value)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   Widget _editor(BuildContext context) {
     return SectionCard(
       key: const ValueKey('automation-profile-editor'),
@@ -517,6 +586,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           Text(_selected == null ? '프로필 생성' : '프로필 편집',
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 16),
+          _capitalStateView(),
           const _FormSectionHeading(
             icon: Icons.tune_outlined,
             title: '기본 설정',
@@ -710,6 +780,16 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(),
             ),
+          ),
+          CheckboxListTile(
+            key: const ValueKey('automation-profile-compound-enabled'),
+            contentPadding: EdgeInsets.zero,
+            value: _compoundEnabled,
+            onChanged: (value) =>
+                setState(() => _compoundEnabled = value == true),
+            title: const Text('Compound realized P/L'),
+            subtitle: const Text('초기 예산에 프로필별 확정 실현손익을 반영합니다.'),
+            controlAffinity: ListTileControlAffinity.leading,
           ),
           const _FormSectionHeading(
             icon: Icons.shield_outlined,

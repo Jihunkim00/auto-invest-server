@@ -23,6 +23,9 @@ from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.technical_indicator_service import TechnicalIndicatorService
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.automation_execution_authority_service import (
+    AutomationExecutionAuthorityService,
+)
 
 
 HOLD = "HOLD"
@@ -69,6 +72,16 @@ class KisPositionManagementService:
         open_orders = self._open_orders()
         checked_at = datetime.now(UTC).isoformat()
         profile_exit = self._active_profile_exit(db)
+        authority = AutomationExecutionAuthorityService(
+            self.runtime_settings
+        ).snapshot(db)
+        canonical_live_exit_enabled = bool(
+            profile_exit
+            and authority.get('scheduler_allowed')
+            and authority.get('broker_submit_allowed')
+            and str(authority.get('automation_mode') or '').lower() == 'live'
+            and runtime.get('automation_profile_scheduler_enabled')
+        )
 
         positions = [
             self._managed_position(
@@ -93,6 +106,8 @@ class KisPositionManagementService:
                 "mode": "position_management",
                 "source": "kis_position_management",
                 "read_only": True,
+                "endpoint_read_only": True,
+                "canonical_live_exit_enabled": canonical_live_exit_enabled,
                 "profile_key": (profile_exit or {}).get("profile_key"),
                 "profile_stop_loss_pct": (profile_exit or {}).get("stop_loss_pct"),
                 "profile_take_profit_pct": (profile_exit or {}).get("take_profit_pct"),
@@ -111,6 +126,7 @@ class KisPositionManagementService:
                     "final_confirmation_required": True,
                     "auto_sell_enabled": False,
                     "scheduler_real_order_enabled": False,
+                    "canonical_live_exit_enabled": canonical_live_exit_enabled,
                     "real_order_submitted": False,
                     "broker_submit_called": False,
                     "manual_submit_called": False,

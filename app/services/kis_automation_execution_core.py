@@ -872,10 +872,26 @@ class KisAutomationExecutionCore:
         # planned_qty = 8
         # available_qty = 6
         # effective_qty = 6
+        strategy_budget = _number(max_order_notional_krw)
+        if strategy_budget is None or strategy_budget <= 0:
+            strategy_budget = self.HARD_MAX_NOTIONAL_KRW
+        effective_budget = min(
+            max(0.0, strategy_budget),
+            max(0.0, cash),
+            self.HARD_MAX_NOTIONAL_KRW,
+        )
         effective_qty = min(
             planned_qty,
             available_qty,
+            max(0, int(effective_budget / price)),
         )
+        if effective_qty <= 0:
+            return {
+                "allowed": False,
+                "reason": "possible_order_quantity_unavailable",
+                "possible_order": possible,
+                "effective_budget_krw": effective_budget,
+            }
 
         cap = min(
             self.HARD_MAX_NOTIONAL_KRW,
@@ -903,6 +919,8 @@ class KisAutomationExecutionCore:
             "allowed": True,
             "current_price": price,
             "orderable_cash": cash,
+            "strategy_budget_krw": strategy_budget,
+            "effective_budget_krw": effective_budget,
             "orderable_quantity": available_qty,
             "planned_quantity": planned_qty,
             "effective_quantity": effective_qty,

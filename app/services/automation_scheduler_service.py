@@ -28,6 +28,8 @@ from app.services.kis_watchlist_update_service import (
     AUTOMATION_WATCHLIST_SOURCE_FILE,
     KisWatchlistUpdateService,
 )
+
+from app.services.market_session_service import MarketSessionService
 from app.services.market_profile_service import MarketProfileService
 from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
@@ -68,6 +70,11 @@ class AutomationSchedulerService(SchedulerService):
         self.profile_aware_dry_run_auto_buy_service = None
         self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
+        self._monitoring_due_at: datetime | None = None
+        self._last_monitoring_run_at: datetime | None = None
+        self._last_monitoring_result: str | None = None
+        self._last_automatic_sync_at: datetime | None = None
+        self._automatic_sync_due_at: datetime | None = None
         self.automation_watchlist_update_service = None
         self._automation_watchlist_refresh_lock = threading.Lock()
         self._automation_watchlist_refresh_slots: set[str] = set()
@@ -153,6 +160,12 @@ class AutomationSchedulerService(SchedulerService):
                 'maintenance_jobs': maintenance,
                 'maintenance_job_count': len(maintenance),
                 'next_watchlist_refresh_at': self._next_watchlist_refresh_at(now_kst),
+                'last_monitoring_run_at': self._last_monitoring_run_at.isoformat() if self._last_monitoring_run_at else None,
+                'last_monitoring_result': self._last_monitoring_result,
+                'monitoring_due_at': self._monitoring_due_at.isoformat() if self._monitoring_due_at else None,
+                'last_automatic_sync_at': self._last_automatic_sync_at.isoformat() if self._last_automatic_sync_at else None,
+                'automatic_sync_due_at': self._automatic_sync_due_at.isoformat() if self._automatic_sync_due_at else None,
+                'automatic_order_sync_enabled': True,
             }
         )
         return status
@@ -191,6 +204,13 @@ class AutomationSchedulerService(SchedulerService):
                 if value.startswith(f'{day_key}:')
             }
             schedule = self._selected_profile_schedule(now_kst)
+            if self._automatic_sync_due_at is None or now_kst >= self._automatic_sync_due_at:
+                self._automatic_sync_due_at = now_kst + timedelta(seconds=20)
+                self._safe_call(self._run_automatic_order_sync_once, now_kst)
+            if self._monitoring_due_at is None or now_kst >= self._monitoring_due_at:
+                interval = self._monitoring_interval_seconds(schedule)
+                self._monitoring_due_at = now_kst + timedelta(seconds=interval)
+                self._safe_call(self._run_automation_monitoring_tick, now_kst)
             for context in self._derived_watchlist_refresh_slots(
                 schedule,
                 now_kst,
@@ -215,6 +235,87 @@ class AutomationSchedulerService(SchedulerService):
                 self._safe_call(self._run_automation_tick, slot, now_kst, True)
             self._last_tick_at = datetime.now(UTC)
             time.sleep(20)
+
+    def _run_automatic_order_sync_once(self, now_kst: datetime | None = None) -> dict[str, Any]:
+        db = SessionLocal()
+        try:
+            service = self._profile_buy_scheduler_service(db)
+            sync_service = getattr(service, 'order_sync_service', None)
+            if not callable(getattr(sync_service, 'sync_submitted_orders', None)):
+                return {'status': 'skipped', 'reason': 'order_sync_unavailable', 'synced_count': 0}
+            rows = sync_service.sync_submitted_orders(db, limit=20)
+            self._last_automatic_sync_at = datetime.now(UTC)
+            return {
+                'status': 'ok',
+                'reason': 'bounded_submitted_order_reconciliation',
+                'synced_count': len(rows),
+            }
+        except Exception as exc:
+            self._last_automatic_sync_at = datetime.now(UTC)
+            return {
+                'status': 'error',
+                'reason': f'automatic_order_sync_failed:{exc.__class__.__name__}',
+                'synced_count': 0,
+            }
+        finally:
+            db.close()
+
+
+    def _run_automation_monitoring_tick(
+        self,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Publish a monitoring heartbeat without any broker side effect."""
+        db = SessionLocal()
+        now_kst = self._as_kst(now)
+        self._last_monitoring_run_at = datetime.now(UTC)
+        try:
+            authority = AutomationExecutionAuthorityService(
+                self.runtime_settings
+            ).snapshot(db)
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            schedule = self.automation_profiles.selected_profile_schedule(
+                db,
+                now=now_kst,
+            )
+            session = MarketSessionService().get_session_status('KR')
+            if not schedule or schedule.get('status') != 'active':
+                status = 'skipped'
+                reason = 'active_profile_unavailable'
+            elif not authority.get('scheduler_allowed'):
+                status = 'blocked'
+                reason = 'automation_mode_off'
+            elif not runtime.get('automation_profile_scheduler_enabled'):
+                status = 'blocked'
+                reason = 'automation_disabled'
+            elif not session.get('is_market_open'):
+                status = 'skipped'
+                reason = 'market_session_closed'
+            else:
+                status = 'evaluated'
+                reason = 'monitoring_heartbeat_only'
+            self._last_monitoring_result = status
+            return {
+                'scheduler': self.__class__.__name__,
+                'trigger_source': CANONICAL_TRIGGER_SOURCE,
+                'status': status,
+                'reason': reason,
+                'market_session': session,
+                'buy_execution_allowed': False,
+                'broker_submit_called': False,
+                'manual_submit_called': False,
+                'real_order_submitted': False,
+            }
+        finally:
+            db.close()
+
+    def _monitoring_interval_seconds(self, schedule: dict[str, Any] | None) -> int:
+        settings = ((schedule or {}).get('profile') or {}).get('effective_settings') or {}
+        monitoring = settings.get('monitoring') if isinstance(settings, dict) else {}
+        try:
+            return max(30, int((monitoring or {}).get('interval_seconds') or 60))
+        except (TypeError, ValueError):
+            return 60
 
     def _profile_slots(self, now_kst: datetime) -> list[tuple[str, int, int]]:
         schedule = self._selected_profile_schedule(now_kst)

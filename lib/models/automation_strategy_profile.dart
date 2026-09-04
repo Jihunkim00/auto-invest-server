@@ -22,6 +22,7 @@ class AutomationStrategyProfile {
   final Map<String, dynamic> raw;
 
   Map<String, dynamic> get capital => _map(settings['capital']);
+  Map<String, dynamic> get capitalState => _map(raw['capital_state']);
   Map<String, dynamic> get universe => _map(settings['universe']);
   Map<String, dynamic> get entry => _map(settings['entry']);
   Map<String, dynamic> get monitoring => _map(settings['monitoring']);

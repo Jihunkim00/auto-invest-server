@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import OrderLog
 from app.services.automation_profile_safety import TEST4_HARD_SAFETY
+from app.services.compound_capital_service import CompoundCapitalService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_performance_service import StrategyPerformanceService
 from app.services.strategy_profile_service import StrategyProfileService
@@ -116,9 +117,23 @@ class StrategyRiskBudgetService:
         max_order_pct = capital["max_order_notional_pct"]
         profile_max_krw = capital["configured_max_order_notional_krw"]
         available_cash = self._available_cash(balance)
+        capital_state = CompoundCapitalService(
+            performance_service=self.performance_service,
+        ).calculate(
+            db,
+            profile_key=str(profile.get("profile_key") or ""),
+            initial_budget_krw=capital["initial_budget_krw"],
+            fixed_budget_krw=capital["fixed_budget_krw"] or profile_max_krw,
+            compound_enabled=capital["compound_enabled"],
+            compound_basis=capital["compound_basis"],
+            provider=normalized_provider,
+            market=normalized_market,
+            broker_orderable_cash_krw=available_cash,
+            configured_max_order_notional_krw=profile_max_krw,
+        )
         hard_max_krw = float(TEST4_HARD_SAFETY["max_order_notional_krw"])
         if sizing_mode == "fixed_budget":
-            sizing_budget_krw = fixed_budget_krw or profile_max_krw
+            sizing_budget_krw = capital_state["current_strategy_budget_krw"] or profile_max_krw
         elif total_assets is not None and total_assets > 0:
             sizing_budget_krw = total_assets * target_position_pct / 100.0
         else:
@@ -330,6 +345,7 @@ class StrategyRiskBudgetService:
             "max_order_notional_krw": profile_max_krw,
             "sizing_mode": sizing_mode,
             "fixed_budget_krw": fixed_budget_krw,
+            "capital_state": capital_state,
             "target_position_pct": target_position_pct,
             "available_cash_krw": available_cash,
             "total_assets_krw": total_assets,
@@ -560,6 +576,12 @@ def _capital_settings(profile: dict[str, Any]) -> dict[str, Any]:
             ),
             "target_position_pct": target_pct,
             "fixed_budget_krw": max(0.0, _float(capital.get("fixed_budget"))),
+            "initial_budget_krw": max(
+                0.0,
+                _float(capital.get("initial_budget_krw") or capital.get("fixed_budget")),
+            ),
+            "compound_enabled": bool(capital.get("compound_enabled", False)),
+            "compound_basis": str(capital.get("compound_basis") or "realized_pnl").strip().lower(),
             "configured_max_order_notional_krw": configured_max,
             "max_order_notional_pct": target_pct / 100.0,
         }
@@ -568,6 +590,9 @@ def _capital_settings(profile: dict[str, Any]) -> dict[str, Any]:
         "sizing_mode": "equity_pct",
         "target_position_pct": legacy_pct * 100.0,
         "fixed_budget_krw": 0.0,
+        "initial_budget_krw": 0.0,
+        "compound_enabled": False,
+        "compound_basis": "realized_pnl",
         "configured_max_order_notional_krw": max(
             0.0, _float(profile.get("max_order_notional_krw"))
         ),

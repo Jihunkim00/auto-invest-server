@@ -162,6 +162,40 @@ class KisOrderSyncService:
                 synced.append(order)
         return synced
 
+    def sync_submitted_orders(
+        self,
+        db: Session,
+        *,
+        limit: int = 20,
+    ) -> list[OrderLog]:
+        """Reconcile a bounded set of pending KIS orders without submitting."""
+        statuses = OPEN_KIS_INTERNAL_STATUSES - {
+            InternalOrderStatus.REQUESTED.value,
+            "PENDING_SUBMIT",
+        }
+        orders = (
+            db.query(OrderLog)
+            .filter(OrderLog.broker == "kis")
+            .filter(OrderLog.internal_status.in_(sorted(statuses)))
+            .filter(
+                or_(
+                    OrderLog.kis_odno.isnot(None),
+                    OrderLog.broker_order_id.isnot(None),
+                )
+            )
+            .order_by(OrderLog.created_at.asc(), OrderLog.id.asc())
+            .limit(max(1, min(int(limit or 20), 100)))
+            .all()
+        )
+        synced: list[OrderLog] = []
+        for order in orders:
+            try:
+                synced.append(self.sync_order(db, int(order.id)))
+            except KisOrderSyncError:
+                db.refresh(order)
+                synced.append(order)
+        return synced
+
     @staticmethod
     def recent_orders(
         db: Session,

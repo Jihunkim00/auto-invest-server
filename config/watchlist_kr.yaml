@@ -11,6 +11,9 @@ symbols:
 - symbol: '000270'
   name: 기아
   market: KOSPI
+- symbol: 032830
+  name: 삼성생명
+  market: KOSPI
 - symbol: '034020'
   name: 두산에너빌리티
   market: KOSPI
@@ -118,9 +121,6 @@ symbols:
   market: KOSPI
 - symbol: 005830
   name: DB손해보험
-  market: KOSPI
-- symbol: 078930
-  name: GS
   market: KOSPI
 - symbol: '196170'
   name: 알테오젠

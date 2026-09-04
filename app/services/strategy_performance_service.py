@@ -210,6 +210,62 @@ class StrategyPerformanceService:
             "safety": _safety(),
         }
 
+    def profile_realized_pnl(
+        self,
+        db: Session,
+        *,
+        profile_key: str,
+        provider: str = "kis",
+        market: str = "KR",
+    ) -> dict[str, Any]:
+        """Return restart-stable, profile-scoped realized P/L."""
+        profile = self._performance_profile(db, profile_key)
+        positions, _ = self._load_positions(db, provider, market)
+        orders = self._orders(db, provider=provider, market=market)
+        provenance = self._order_provenance(db, orders)
+        orders = [
+            order
+            for order in orders
+            if _is_live_automation_order(
+                order,
+                provenance.get(order.id or -1, {}),
+            )
+        ]
+        items, quality = self._match_profile_orders(
+            db,
+            orders=orders,
+            provider=provider,
+            market=market,
+            positions=positions,
+            profile=profile,
+            include_ignored=True,
+        )
+        eligible = [
+            item
+            for item in items
+            if item.get("status") == "closed"
+            and item.get("realized_pnl") is not None
+            and (item.get("data_quality") or {}).get("profile_scope")
+            != "informational_only"
+        ]
+        unresolved = [
+            item
+            for item in items
+            if str(item.get("status") or "")
+            in {"average_price_missing", "unmatched_sell"}
+            and (item.get("data_quality") or {}).get("profile_scope")
+            != "informational_only"
+        ]
+        return {
+            "profile_key": profile_key,
+            "cumulative_realized_pnl_krw": _round_money(
+                sum(float(item["realized_pnl"]) for item in eligible)
+            ),
+            "eligible_closed_trade_count": len(eligible),
+            "unresolved_realized_pnl_count": len(unresolved),
+            "data_quality": quality,
+            "calculation_source": "strategy_performance_fifo_profile_scope",
+        }
     def snapshot(
         self,
         db: Session,
@@ -1146,6 +1202,30 @@ def _json_provenance(value: Any) -> dict[str, Any]:
     walk(parsed)
     return result
 
+
+_LIVE_AUTOMATION_MARKERS = {
+    "strategy_live_auto_buy",
+    "strategy_live_auto_exit",
+    "profile_aware_guarded_live_auto_buy",
+    "profile_aware_guarded_live_auto_exit",
+    "guarded_profile_exit",
+    "automation_profile_scheduler_buy",
+}
+
+
+def _is_live_automation_order(
+    order: OrderLog,
+    provenance: dict[str, Any],
+) -> bool:
+    """Keep compound P/L limited to persisted, live profile automation fills."""
+    if provenance.get("manual"):
+        return False
+    markers = {str(value).strip().lower() for value in provenance.get("markers") or set()}
+    if any("dry" in marker or "preview" in marker for marker in markers):
+        return False
+    if not markers.intersection(_LIVE_AUTOMATION_MARKERS):
+        return False
+    return bool(provenance.get("automation_profile") or provenance.get("profile_keys"))
 
 def _is_custom_provenance(provenance: dict[str, Any]) -> bool:
     if provenance.get("automation_profile"):

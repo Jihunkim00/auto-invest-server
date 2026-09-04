@@ -96,6 +96,7 @@ class CompoundCapitalService:
 def _money(value: Any) -> float:
     try:
         if value is None or isinstance(value, bool):
+            return 0.0
         return max(0.0, float(value))
     except (TypeError, ValueError):
         return 0.0

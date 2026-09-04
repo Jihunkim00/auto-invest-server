@@ -952,6 +952,51 @@ def _seed_strategy_profiles_if_needed():
         db.close()
 
 
+def _migrate_active_kis_compound_profile_if_needed():
+    """Enable PR118 compound capital on the existing active KIS profile only."""
+    from app.db.models import StrategyProfile
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(StrategyProfile)
+            .filter(StrategyProfile.profile_key == "aut_kis_eec5f898")
+            .first()
+        )
+        if row is None:
+            return
+        try:
+            settings = json.loads(row.settings_json or "{}")
+        except (TypeError, ValueError):
+            settings = {}
+        if not isinstance(settings, dict):
+            settings = {}
+        capital = settings.get("capital")
+        if not isinstance(capital, dict):
+            capital = {}
+        fixed_budget = capital.get("fixed_budget")
+        if fixed_budget is None:
+            fixed_budget = row.max_order_notional_krw or 0
+        try:
+            initial_budget = float(fixed_budget or 0)
+        except (TypeError, ValueError):
+            initial_budget = 0.0
+        changed = (
+            capital.get("initial_budget_krw") != initial_budget
+            or capital.get("compound_enabled") is not True
+            or capital.get("compound_basis") != "realized_pnl"
+        )
+        if not changed:
+            return
+        capital["initial_budget_krw"] = initial_budget
+        capital["compound_enabled"] = True
+        capital["compound_basis"] = "realized_pnl"
+        settings["capital"] = capital
+        row.settings_json = json.dumps(settings, ensure_ascii=False, default=str)
+
+        db.commit()
+    finally:
+        db.close()
 def _create_kis_shadow_exit_review_queue_state_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -2037,6 +2082,7 @@ def init_db():
     _create_strategy_auto_buy_promotions_table_if_missing()
     _create_strategy_live_auto_exit_attempts_table_if_missing()
     _seed_strategy_profiles_if_needed()
+    _migrate_active_kis_compound_profile_if_needed()
     _create_kis_shadow_exit_review_queue_state_table_if_missing()
     _create_position_lifecycles_table_if_missing()
     _create_operation_test_cycles_table_if_missing()

@@ -5,6 +5,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.brokers.kis_auth_manager import KisAuthManager
+from app.brokers.kis_client import KisClient
+from app.config import get_settings
 from app.db.database import get_db
 from app.schemas.automation_profile import (
     AutomationProfileActionRequest,
@@ -57,6 +60,30 @@ def create_profile(
     except (AutomationProfileValidationError, AutomationProfileConflict) as exc:
         raise _service_error(exc) from exc
 
+
+@router.get('/{profile_id}/capital-state')
+def profile_capital_state(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    service: AutomationProfileService = Depends(get_automation_profile_service),
+):
+    try:
+        row = service.get(db, profile_id)
+        broker_cash = None
+        if str(row.provider or '').lower() == 'kis' and str(row.market or '').upper() == 'KR':
+            try:
+                client = KisClient(get_settings(), KisAuthManager(get_settings(), db))
+                balance = client.get_account_balance() or {}
+                if isinstance(balance, dict):
+                    for cash_key in ('orderable_cash', 'available_cash', 'cash'):
+                        if cash_key in balance and balance.get(cash_key) is not None:
+                            broker_cash = balance.get(cash_key)
+                            break
+            except Exception:
+                broker_cash = None
+        return {'capital_state': service.capital_state(db, profile_id, broker_orderable_cash_krw=broker_cash)}
+    except AutomationProfileNotFound as exc:
+        raise _service_error(exc) from exc
 
 @router.get('/{profile_id}')
 def get_profile(

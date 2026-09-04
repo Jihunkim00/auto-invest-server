@@ -16,6 +16,7 @@ from app.db.models import StrategyProfile
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.automation_profile_safety import TEST4_HARD_SAFETY, effective_profile_settings
+from app.services.compound_capital_service import CompoundCapitalService
 from app.services.strategy_profile_sizing_service import StrategyProfileSizingService
 
 
@@ -34,6 +35,9 @@ DEFAULT_PROFILE_SETTINGS: dict[str, Any] = {
         'max_total_exposure_pct': 30.0,
         'max_order_notional_krw': 500000.0,
         'fixed_budget': 0.0,
+        'initial_budget_krw': 0.0,
+        'compound_enabled': False,
+        'compound_basis': 'realized_pnl',
         'cash_only': True,
     },
     'universe': {
@@ -400,6 +404,30 @@ class AutomationProfileService:
         result = StrategyProfileSizingService.calculate(self._settings(row), **request)
         return {'profile': self.serialize(row), 'sizing': result, 'safety': _profile_safety(setting_changed=False, read_only=True)}
 
+    def capital_state(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        broker_orderable_cash_krw: float | None = None,
+    ) -> dict[str, Any]:
+        row = self.get(db, profile_id)
+        settings = self._settings(row)
+        capital = settings['capital']
+        return CompoundCapitalService().calculate(
+            db,
+            profile_key=str(row.profile_key or ''),
+            initial_budget_krw=float(capital.get('initial_budget_krw') or 0),
+            fixed_budget_krw=float(capital.get('fixed_budget') or 0),
+            compound_enabled=bool(capital.get('compound_enabled', False)),
+            compound_basis=str(capital.get('compound_basis') or 'realized_pnl'),
+            provider=str(row.provider or 'kis').lower(),
+            market=str(row.market or 'KR').upper(),
+            broker_orderable_cash_krw=broker_orderable_cash_krw,
+            configured_max_order_notional_krw=float(
+                capital.get('max_order_notional_krw') or 0
+            ),
+        )
     def watchlist(self, db: Session, profile_id: str) -> dict[str, Any]:
         row = self.get(db, profile_id)
         settings = self._settings(row)
@@ -491,6 +519,10 @@ class AutomationProfileService:
             errors.append({'field': 'capital.max_total_exposure_pct', 'message': 'must be >= max_position_pct'})
         if float(capital['max_order_notional_krw']) <= 0:
             errors.append({'field': 'capital.max_order_notional_krw', 'message': 'must be positive'})
+        if str(capital.get('compound_basis') or 'realized_pnl').strip().lower() not in {'realized_pnl'}:
+            errors.append({'field': 'capital.compound_basis', 'message': 'must be realized_pnl'})
+        if bool(capital.get('compound_enabled')) and float(capital.get('initial_budget_krw') or 0) <= 0:
+            errors.append({'field': 'capital.initial_budget_krw', 'message': 'must be positive when compound is enabled'})
         if (
             capital['sizing_mode'] == 'fixed_budget'
             and float(capital.get('fixed_budget') or 0) <= 0
@@ -599,6 +631,16 @@ class AutomationProfileService:
         merged['universe']['manual_symbols'] = _symbols(merged['universe'].get('manual_symbols'))
         merged['universe']['favorites'] = _symbols(merged['universe'].get('favorites'))
         merged['max_open_positions'] = int(merged.get('max_open_positions') or 1)
+        capital = merged['capital']
+        if 'initial_budget_krw' not in settings or float(capital.get('initial_budget_krw') or 0) <= 0:
+            capital['initial_budget_krw'] = max(
+                0.0,
+                float(capital.get('fixed_budget') or 0),
+            )
+        capital['compound_enabled'] = bool(capital.get('compound_enabled', False))
+        capital['compound_basis'] = str(
+            capital.get('compound_basis') or 'realized_pnl'
+        ).strip().lower()
         return merged
 
     def _settings(self, row: StrategyProfile) -> dict[str, Any]:
