@@ -1461,6 +1461,12 @@ def _record_quant_ab_observations(
     if not bool(experiment.get("shadow_b_enabled")):
         return 0
     observation_run_key = run_key or f"kis_ab_{uuid.uuid4().hex[:20]}"
+    experiment_cohort_key = str(
+        experiment.get('experiment_cohort_key')
+        or experiment.get('cohort_key')
+        or payload.get('experiment_cohort_key')
+        or observation_run_key
+    ).strip()[:180]
     a_rank_by_symbol = {
         str(item.get("symbol") or "").strip().upper(): int(item.get("rank") or 0)
         for item in payload.get("quant_ranked_candidates") or []
@@ -1493,6 +1499,7 @@ def _record_quant_ab_observations(
         row = QuantABObservation(
             observation_key=observation_key,
             run_key=observation_run_key,
+            experiment_cohort_key=experiment_cohort_key,
             trade_run_id=trade_run_id,
             trigger_source=trigger_source,
             provider="kis",
@@ -1517,6 +1524,7 @@ def _record_quant_ab_observations(
             b_momentum_score=_score_or_none(shadow.get("momentum_score_b")),
             b_volume_score=_score_or_none(shadow.get("volume_score_b")),
             b_volatility_fit_score=_score_or_none(shadow.get("volatility_fit_score_b")),
+            confidence_b=_confidence_or_none(shadow.get("confidence_b")),
             trend_state_b=(
                 str(shadow.get("trend_state_b"))
                 if shadow.get("trend_state_b") is not None
@@ -1549,7 +1557,15 @@ def _record_quant_ab_observations(
             outcome_status=(
                 "invalid_stale_intraday"
                 if str(shadow.get("b_status") or "") == "stale_intraday"
-                else "pending"
+                else (
+                    "invalid_data_quality"
+                    if _safe_float(shadow.get("data_quality_b"), 0.0) <= 0.0
+                    else (
+                        "invalid_missing_entry_price"
+                        if _safe_float(item.get("current_price"), 0.0) <= 0.0
+                        else "pending"
+                    )
+                )
             ),
         )
         db.add(row)

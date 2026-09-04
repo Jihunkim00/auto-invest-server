@@ -7,7 +7,7 @@ from app.brokers.kis_client import (
     KisClient,
     normalize_domestic_intraday_bars,
 )
-from app.db.models import QuantABObservation
+from app.db.models import QuantABObservation, QuantABOutcome
 from app.services.entry_timing_quant_service import (
     EntryTimingQuantService,
     resample_intraday_bars,
@@ -420,6 +420,7 @@ def test_quant_ab_observation_persistence_is_idempotent(db_session):
                     'volatility_fit_score_b': 60.0,
                     'trend_state_b': 'bullish_continuation',
                     'direction_b': 'bullish',
+                    'confidence_b': 0.6191,
                     'data_quality_b': 0.9,
                     'indicator_snapshot': {'15m': {'bar_count': 4}},
                     'intraday_snapshot_metadata': {'raw_timeframe_minutes': 1},
@@ -451,6 +452,7 @@ def test_quant_ab_observation_persistence_is_idempotent(db_session):
     assert row.shadow_variant == 'B'
     assert row.selected_by_a is True
     assert row.selected_by_b_shadow is True
+    assert row.confidence_b == 0.6191
 
     payload['quant_experiment'] = {
         **payload['quant_experiment'],
@@ -486,3 +488,47 @@ def test_quant_ab_observation_persistence_is_idempotent(db_session):
     assert stale_row.trend_state_b is None
     assert stale_row.direction_b is None
     assert stale_row.selected_by_b_shadow is False
+
+
+def test_quant_ab_recent_serializer_preserves_confidence_and_legacy_null(db_session):
+    from app.services.quant_ab_evaluation_service import QuantABEvaluationService
+
+    observations = []
+    for symbol, confidence in (("SERIALIZE", 0.6191), ("LEGACY", None)):
+        observation = QuantABObservation(
+            observation_key=f"serializer:{symbol}",
+            run_key="serializer-run",
+            experiment_cohort_key="serializer-cohort",
+            trigger_source="test",
+            provider="kis",
+            market="KR",
+            symbol=symbol,
+            observed_at=datetime(2026, 9, 4, 9, 10, tzinfo=KST),
+            decision_slot="2026-09-04T09:10:00+09:00",
+            current_price=100.0,
+            b_entry_score=80.0,
+            confidence_b=confidence,
+            data_quality_b=1.0,
+            outcome_status="pending",
+        )
+        db_session.add(observation)
+        observations.append(observation)
+    db_session.commit()
+    for observation in observations:
+        db_session.add(
+            QuantABOutcome(
+                observation_id=observation.id,
+                cohort_key="serializer-cohort",
+                symbol=observation.symbol,
+                outcome_status="pending",
+                data_quality=1.0,
+            )
+        )
+    db_session.commit()
+
+    result = QuantABEvaluationService().recent(db_session)
+    items = {item["observation"]["symbol"]: item for item in result["items"]}
+    assert items["SERIALIZE"]["observation"]["confidence_b"] == 0.6191
+    assert items["SERIALIZE"]["confidence_b"] == 0.6191
+    assert items["LEGACY"]["observation"]["confidence_b"] is None
+    assert items["LEGACY"]["confidence_b"] is None

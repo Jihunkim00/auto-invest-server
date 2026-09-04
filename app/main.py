@@ -31,6 +31,7 @@ from app.routes.operation_test4 import router as operation_test4_router
 from app.routes.orders import router as orders_router
 from app.routes.positions import router as positions_router
 from app.routes.portfolio import router as portfolio_router
+from app.routes.quant_ab import router as quant_ab_router
 from app.routes.scheduler import router as scheduler_router
 from app.routes.signals import router as signals_router
 from app.routes.strategy import router as strategy_router
@@ -104,6 +105,7 @@ app.include_router(automation_profiles_router)
 app.include_router(symbol_router)
 app.include_router(positions_router)
 app.include_router(portfolio_router)
+app.include_router(quant_ab_router)
 app.include_router(market_router)
 app.include_router(market_profiles_router)
 app.include_router(market_sessions_router)

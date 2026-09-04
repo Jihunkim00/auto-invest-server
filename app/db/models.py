@@ -795,6 +795,8 @@ class QuantABObservation(Base):
     id = Column(Integer, primary_key=True, index=True)
     observation_key = Column(String(180), nullable=False, unique=True, index=True)
     run_key = Column(String(64), nullable=False, index=True)
+    # Stable experiment unit, kept separate from legacy run identity.
+    experiment_cohort_key = Column(String(180), nullable=True, index=True)
     trade_run_id = Column(Integer, nullable=True, index=True)
     trigger_source = Column(String(40), nullable=False, index=True)
     provider = Column(String(20), nullable=False, default='kis', index=True)
@@ -819,6 +821,7 @@ class QuantABObservation(Base):
     b_momentum_score = Column(Float, nullable=True)
     b_volume_score = Column(Float, nullable=True)
     b_volatility_fit_score = Column(Float, nullable=True)
+    confidence_b = Column(Float, nullable=True)
     trend_state_b = Column(String(40), nullable=True)
     direction_b = Column(String(20), nullable=True)
     data_quality_b = Column(Float, nullable=True)
@@ -831,6 +834,54 @@ class QuantABObservation(Base):
     gpt_selected_by_a = Column(Boolean, nullable=False, default=False)
     outcome_status = Column(String(30), nullable=False, default='pending', index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+class QuantABOutcome(Base):
+    """Mutable, independently labelable outcome for one observation."""
+
+    __tablename__ = 'quant_ab_outcomes'
+
+    id = Column(Integer, primary_key=True, index=True)
+    # A logical FK preserves compatibility with legacy SQLite migrations;
+    # uniqueness supplies the labeler's idempotency guarantee.
+    observation_id = Column(Integer, nullable=False, unique=True, index=True)
+    cohort_key = Column(String(180), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    observed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    entry_price = Column(Float, nullable=True)
+    horizon_slot_1_at = Column(DateTime(timezone=True), nullable=True)
+    horizon_slot_2_at = Column(DateTime(timezone=True), nullable=True)
+    horizon_slot_3_at = Column(DateTime(timezone=True), nullable=True)
+    slot_1_price = Column(Float, nullable=True)
+    slot_2_price = Column(Float, nullable=True)
+    slot_3_price = Column(Float, nullable=True)
+    return_next_slot_pct = Column(Float, nullable=True)
+    return_second_slot_pct = Column(Float, nullable=True)
+    return_third_slot_pct = Column(Float, nullable=True)
+    max_favorable_excursion_pct = Column(Float, nullable=True)
+    max_adverse_excursion_pct = Column(Float, nullable=True)
+    tp_pct = Column(Float, nullable=True)
+    sl_pct = Column(Float, nullable=True)
+    tp_hit = Column(Boolean, nullable=False, default=False)
+    sl_hit = Column(Boolean, nullable=False, default=False)
+    tp_hit_at = Column(DateTime(timezone=True), nullable=True)
+    sl_hit_at = Column(DateTime(timezone=True), nullable=True)
+    first_barrier_hit = Column(String(20), nullable=True)
+    simulated_exit_reason = Column(String(60), nullable=True)
+    simulated_exit_at = Column(DateTime(timezone=True), nullable=True)
+    simulated_exit_price = Column(Float, nullable=True)
+    simulated_return_pct = Column(Float, nullable=True)
+    holding_minutes = Column(Float, nullable=True)
+    holding_decision_slots = Column(Integer, nullable=True)
+    outcome_status = Column(String(40), nullable=False, default='pending', index=True)
+    data_quality = Column(Float, nullable=True, index=True)
+    label_version = Column(String(40), nullable=False, default='pr120-v1')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 class AgentCommandLog(Base):

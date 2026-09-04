@@ -35,6 +35,7 @@ from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
 )
 from app.services.scheduler_service import SchedulerService
+from app.services.quant_ab_outcome_label_service import QuantABOutcomeLabelService
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -75,6 +76,11 @@ class AutomationSchedulerService(SchedulerService):
         self._last_monitoring_result: str | None = None
         self._last_automatic_sync_at: datetime | None = None
         self._automatic_sync_due_at: datetime | None = None
+        self._outcome_labeling_due_at: datetime | None = None
+        self._outcome_labeling_lock = threading.Lock()
+        self._outcome_labeling_inflight = False
+        self._last_outcome_labeling_at: datetime | None = None
+        self._last_outcome_labeling_result: str | None = None
         self.automation_watchlist_update_service = None
         self._automation_watchlist_refresh_lock = threading.Lock()
         self._automation_watchlist_refresh_slots: set[str] = set()
@@ -166,6 +172,10 @@ class AutomationSchedulerService(SchedulerService):
                 'last_automatic_sync_at': self._last_automatic_sync_at.isoformat() if self._last_automatic_sync_at else None,
                 'automatic_sync_due_at': self._automatic_sync_due_at.isoformat() if self._automatic_sync_due_at else None,
                 'automatic_order_sync_enabled': True,
+                'quant_ab_auto_labeling_enabled': bool(getattr(get_settings(), 'quant_ab_auto_labeling_enabled', False)),
+                'last_quant_ab_labeling_at': self._last_outcome_labeling_at.isoformat() if self._last_outcome_labeling_at else None,
+                'last_quant_ab_labeling_result': self._last_outcome_labeling_result,
+                'quant_ab_labeling_due_at': self._outcome_labeling_due_at.isoformat() if self._outcome_labeling_due_at else None,
             }
         )
         return status
@@ -211,6 +221,9 @@ class AutomationSchedulerService(SchedulerService):
                 interval = self._monitoring_interval_seconds(schedule)
                 self._monitoring_due_at = now_kst + timedelta(seconds=interval)
                 self._safe_call(self._run_automation_monitoring_tick, now_kst)
+            if self._outcome_labeling_due_at is None or now_kst >= self._outcome_labeling_due_at:
+                self._outcome_labeling_due_at = now_kst + timedelta(minutes=1)
+                self._safe_call(self._schedule_quant_ab_labeling, now_kst)
             for context in self._derived_watchlist_refresh_slots(
                 schedule,
                 now_kst,
@@ -235,6 +248,81 @@ class AutomationSchedulerService(SchedulerService):
                 self._safe_call(self._run_automation_tick, slot, now_kst, True)
             self._last_tick_at = datetime.now(UTC)
             time.sleep(20)
+
+    def _schedule_quant_ab_labeling(self, now_kst: datetime) -> dict[str, Any]:
+        """Start a bounded analytics job without blocking the trading loop."""
+        if not bool(getattr(get_settings(), 'quant_ab_auto_labeling_enabled', False)):
+            self._last_outcome_labeling_result = 'disabled_by_default'
+            return {
+                'status': 'disabled',
+                'reason': 'quant_ab_auto_labeling_disabled',
+                'broker_submit_called': False,
+                'real_order_submitted': False,
+            }
+        with self._outcome_labeling_lock:
+            if self._outcome_labeling_inflight:
+                return {'status': 'skipped', 'reason': 'quant_ab_labeling_inflight'}
+            self._outcome_labeling_inflight = True
+        thread = threading.Thread(
+            target=self._run_quant_ab_labeling_background,
+            args=(now_kst,),
+            daemon=True,
+            name='quant-ab-outcome-labeler',
+        )
+        thread.start()
+        return {'status': 'started', 'reason': 'quant_ab_labeling_background_started'}
+
+    def _run_quant_ab_labeling_background(self, now_kst: datetime) -> None:
+        try:
+            self.run_quant_ab_labeling_once(now=now_kst)
+        finally:
+            with self._outcome_labeling_lock:
+                self._outcome_labeling_inflight = False
+
+    def run_quant_ab_labeling_once(
+        self,
+        *,
+        now: datetime | None = None,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Run read-only outcome labeling; errors are fail-soft."""
+        if not bool(getattr(get_settings(), 'quant_ab_auto_labeling_enabled', False)):
+            self._last_outcome_labeling_result = 'disabled_by_default'
+            return {
+                'status': 'disabled',
+                'reason': 'quant_ab_auto_labeling_disabled',
+                'safety': {
+                    'analytics_only': True,
+                    'broker_submit_called': False,
+                    'real_order_submitted': False,
+                },
+            }
+        db = SessionLocal()
+        try:
+            settings = get_settings()
+            client = KisClient(settings, KisAuthManager(settings, db))
+            result = QuantABOutcomeLabelService(client=client).label_mature_observations(
+                db,
+                now=now,
+                limit=limit,
+            )
+            self._last_outcome_labeling_at = datetime.now(UTC)
+            self._last_outcome_labeling_result = str(result.get('status') or 'ok')
+            return result
+        except Exception as exc:
+            self._last_outcome_labeling_at = datetime.now(UTC)
+            self._last_outcome_labeling_result = 'fail_soft_error'
+            return {
+                'status': 'error',
+                'reason': f'quant_ab_labeling_failed:{exc.__class__.__name__}',
+                'safety': {
+                    'analytics_only': True,
+                    'broker_submit_called': False,
+                    'real_order_submitted': False,
+                },
+            }
+        finally:
+            db.close()
 
     def _run_automatic_order_sync_once(self, now_kst: datetime | None = None) -> dict[str, Any]:
         db = SessionLocal()

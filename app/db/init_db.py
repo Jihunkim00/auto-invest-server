@@ -1417,6 +1417,7 @@ def _create_quant_ab_observations_table_if_missing():
                     id INTEGER PRIMARY KEY,
                     observation_key VARCHAR(180) NOT NULL UNIQUE,
                     run_key VARCHAR(64) NOT NULL,
+                    experiment_cohort_key VARCHAR(180),
                     trade_run_id INTEGER,
                     trigger_source VARCHAR(40) NOT NULL,
                     provider VARCHAR(20) NOT NULL DEFAULT 'kis',
@@ -1441,6 +1442,7 @@ def _create_quant_ab_observations_table_if_missing():
                     b_momentum_score FLOAT,
                     b_volume_score FLOAT,
                     b_volatility_fit_score FLOAT,
+                    confidence_b FLOAT,
                     trend_state_b VARCHAR(40),
                     direction_b VARCHAR(20),
                     data_quality_b FLOAT,
@@ -1460,8 +1462,100 @@ def _create_quant_ab_observations_table_if_missing():
         conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_run_key ON quant_ab_observations (run_key)'))
         conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_symbol ON quant_ab_observations (symbol)'))
         conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_observed_at ON quant_ab_observations (observed_at)'))
+    _add_column_if_missing('quant_ab_observations', 'experiment_cohort_key', 'VARCHAR(180)')
+    _add_column_if_missing('quant_ab_observations', 'confidence_b', 'FLOAT')
+    with engine.begin() as conn:
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_experiment_cohort_key ON quant_ab_observations (experiment_cohort_key)'))
 
+def _create_quant_ab_outcomes_table_if_missing():
+    with engine.begin() as conn:
+        conn.execute(
+            text('''
+                CREATE TABLE IF NOT EXISTS quant_ab_outcomes (
+                    id INTEGER PRIMARY KEY,
+                    observation_id INTEGER NOT NULL UNIQUE,
+                    cohort_key VARCHAR(180) NOT NULL,
+                    symbol VARCHAR(20) NOT NULL,
+                    observed_at DATETIME,
+                    entry_price FLOAT,
+                    horizon_slot_1_at DATETIME,
+                    horizon_slot_2_at DATETIME,
+                    horizon_slot_3_at DATETIME,
+                    slot_1_price FLOAT,
+                    slot_2_price FLOAT,
+                    slot_3_price FLOAT,
+                    return_next_slot_pct FLOAT,
+                    return_second_slot_pct FLOAT,
+                    return_third_slot_pct FLOAT,
+                    max_favorable_excursion_pct FLOAT,
+                    max_adverse_excursion_pct FLOAT,
+                    tp_pct FLOAT,
+                    sl_pct FLOAT,
+                    tp_hit BOOLEAN NOT NULL DEFAULT 0,
+                    sl_hit BOOLEAN NOT NULL DEFAULT 0,
+                    tp_hit_at DATETIME,
+                    sl_hit_at DATETIME,
+                    first_barrier_hit VARCHAR(20),
+                    simulated_exit_reason VARCHAR(60),
+                    simulated_exit_at DATETIME,
+                    simulated_exit_price FLOAT,
+                    simulated_return_pct FLOAT,
+                    holding_minutes FLOAT,
+                    holding_decision_slots INTEGER,
+                    outcome_status VARCHAR(40) NOT NULL DEFAULT 'pending',
+                    data_quality FLOAT,
+                    label_version VARCHAR(40) NOT NULL DEFAULT 'pr120-v1',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+            ''')
+        )
 
+    outcome_columns = {
+        'observation_id': 'INTEGER DEFAULT 0',
+        'cohort_key': "VARCHAR(180) DEFAULT ''",
+        'symbol': "VARCHAR(20) DEFAULT ''",
+        'observed_at': 'DATETIME',
+        'entry_price': 'FLOAT',
+        'horizon_slot_1_at': 'DATETIME',
+        'horizon_slot_2_at': 'DATETIME',
+        'horizon_slot_3_at': 'DATETIME',
+        'slot_1_price': 'FLOAT',
+        'slot_2_price': 'FLOAT',
+        'slot_3_price': 'FLOAT',
+        'return_next_slot_pct': 'FLOAT',
+        'return_second_slot_pct': 'FLOAT',
+        'return_third_slot_pct': 'FLOAT',
+        'max_favorable_excursion_pct': 'FLOAT',
+        'max_adverse_excursion_pct': 'FLOAT',
+        'tp_pct': 'FLOAT',
+        'sl_pct': 'FLOAT',
+        'tp_hit': 'BOOLEAN DEFAULT 0',
+        'sl_hit': 'BOOLEAN DEFAULT 0',
+        'tp_hit_at': 'DATETIME',
+        'sl_hit_at': 'DATETIME',
+        'first_barrier_hit': 'VARCHAR(20)',
+        'simulated_exit_reason': 'VARCHAR(60)',
+        'simulated_exit_at': 'DATETIME',
+        'simulated_exit_price': 'FLOAT',
+        'simulated_return_pct': 'FLOAT',
+        'holding_minutes': 'FLOAT',
+        'holding_decision_slots': 'INTEGER',
+        'outcome_status': "VARCHAR(40) DEFAULT 'pending'",
+        'data_quality': 'FLOAT',
+        'label_version': "VARCHAR(40) DEFAULT 'pr120-v1'",
+        'created_at': 'DATETIME',
+        'updated_at': 'DATETIME',
+    }
+    for column_name, column_sql in outcome_columns.items():
+        _add_column_if_missing('quant_ab_outcomes', column_name, column_sql)
+    with engine.begin() as conn:
+        conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ux_quant_ab_outcomes_observation_id ON quant_ab_outcomes (observation_id)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_outcomes_cohort_key ON quant_ab_outcomes (cohort_key)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_outcomes_symbol ON quant_ab_outcomes (symbol)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_outcomes_observed_at ON quant_ab_outcomes (observed_at)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_outcomes_status ON quant_ab_outcomes (outcome_status)'))
+        conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_outcomes_quality ON quant_ab_outcomes (data_quality)'))
 def _create_agent_command_logs_table_if_missing():
     with engine.begin() as conn:
         conn.execute(
@@ -2154,6 +2248,7 @@ def init_db():
     _create_broker_auth_tokens_table_if_missing()
     _create_trade_run_logs_table_if_missing()
     _create_quant_ab_observations_table_if_missing()
+    _create_quant_ab_outcomes_table_if_missing()
     _create_agent_command_logs_table_if_missing()
     _create_agent_chat_tables_if_missing()
     _create_agent_chat_order_actions_table_if_missing()

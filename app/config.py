@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     kis_scheduler_allow_real_orders: bool = False
     kr_scheduler_enabled: bool = False
     kr_scheduler_allow_real_orders: bool = False
+    # Outcome labeling is analytics-only and opt-in for the scheduler.
+    quant_ab_auto_labeling_enabled: bool = False
+
 
     database_url: str = "sqlite:///./auto_invest.db"
     log_dir: str = "logs"
