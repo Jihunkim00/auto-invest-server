@@ -128,6 +128,75 @@ class PortfolioSnapshotSection extends StatelessWidget {
         const SizedBox(height: 14),
         LayoutBuilder(builder: (context, constraints) {
           final tileWidth = _metricTileWidth(constraints.maxWidth);
+          if (isKr) {
+            final detailTileWidth =
+                _detailMetricTileWidth(constraints.maxWidth);
+            final stockEvaluationAmount = _krStockEvaluationAmount(summary);
+            final cashBalance = _krCashBalance(summary);
+            return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    _MetricTile(
+                        width: tileWidth,
+                        label: strings.isKorean ? '총자산' : 'Total Asset Value',
+                        value: _nullableMoney(summary.totalAssetValue,
+                            currency: summary.currency, nullDisplay: '--'),
+                        color: Colors.white),
+                    _MetricTile(
+                        width: tileWidth,
+                        label:
+                            strings.isKorean ? '보유주식 평가액' : 'Stock Evaluation',
+                        value: _money(stockEvaluationAmount,
+                            currency: summary.currency),
+                        color: Colors.white),
+                    _MetricTile(
+                        width: tileWidth,
+                        label: strings.isKorean ? '예수금' : 'Cash Balance',
+                        value: !summary.cashKnown
+                            ? 'Unavailable'
+                            : _nullableMoney(cashBalance,
+                                currency: summary.currency, nullDisplay: '--'),
+                        color: Colors.white70),
+                    _MetricTile(
+                        width: tileWidth,
+                        label: strings.isKorean ? '주문가능금액' : 'Orderable Cash',
+                        value: _orderableCashDisplay(summary,
+                            isKorean: strings.isKorean),
+                        color: Colors.white70),
+                    _MetricTile(
+                        width: tileWidth,
+                        label: strings.isKorean ? '평가손익' : 'Unrealized P/L',
+                        value: _money(summary.totalUnrealizedPl,
+                            currency: summary.currency, signed: true),
+                        color: plColor),
+                  ]),
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 8, runSpacing: 8, children: [
+                    _MetricTile(
+                        width: detailTileWidth,
+                        label:
+                            strings.isKorean ? '출금가능금액' : 'Withdrawable Cash',
+                        value: _nullableMoney(summary.withdrawableCash,
+                            currency: summary.currency, nullDisplay: '--'),
+                        color: Colors.white70),
+                    _MetricTile(
+                        width: detailTileWidth,
+                        label: strings.isKorean ? 'D+1 정산금액' : 'D+1 Settlement',
+                        value: _nullableMoney(summary.d1Cash,
+                            currency: summary.currency, nullDisplay: '--'),
+                        color: Colors.white70),
+                    _MetricTile(
+                        width: detailTileWidth,
+                        label: strings.isKorean ? '수익률' : 'Profit %',
+                        value: _percentOrDash(
+                            _portfolioProfitPercent(summary, isKr: true),
+                            signed: true),
+                        color: plColor),
+                  ]),
+                ]);
+          }
+
           return Wrap(spacing: 8, runSpacing: 8, children: [
             _MetricTile(
                 width: tileWidth,
@@ -247,6 +316,12 @@ class PortfolioSnapshotSection extends StatelessWidget {
     if (maxWidth < 420) return maxWidth;
     if (maxWidth < 760) return math.max(0, (maxWidth - 8) / 2);
     return math.max(0, (maxWidth - 32) / 5);
+  }
+
+  double _detailMetricTileWidth(double maxWidth) {
+    if (maxWidth < 420) return maxWidth;
+    if (maxWidth < 760) return math.max(0, (maxWidth - 8) / 2);
+    return math.max(0, (maxWidth - 16) / 3);
   }
 }
 
@@ -1153,9 +1228,42 @@ Color _valueColor(double value) {
 }
 
 String _nullableMoney(double? value,
-    {required String currency, bool signed = false}) {
-  if (value == null) return 'n/a';
+    {required String currency,
+    bool signed = false,
+    String nullDisplay = 'n/a'}) {
+  if (value == null) return nullDisplay;
   return _money(value, currency: currency, signed: signed);
+}
+
+double _krStockEvaluationAmount(PortfolioSummary summary) {
+  final explicitValue = summary.stockEvaluationAmount;
+  if (explicitValue != null) return explicitValue;
+  return summary.positions
+      .fold<double>(0, (total, position) => total + position.marketValue);
+}
+
+double? _krCashBalance(PortfolioSummary summary) {
+  final explicitValue = summary.cashBalance;
+  if (explicitValue != null) return explicitValue;
+
+  // Keep older in-memory summaries readable without turning a missing API
+  // cash value (represented by the default zero) into a known balance.
+  return summary.cash == 0 ? null : summary.cash;
+}
+
+String _orderableCashDisplay(
+  PortfolioSummary summary, {
+  required bool isKorean,
+}) {
+  final value = summary.orderableCash;
+  if (value != null) {
+    return _money(value, currency: summary.currency);
+  }
+  if (summary.orderableCashStatus?.trim().toLowerCase() ==
+      'candidate_required') {
+    return isKorean ? '종목 선택 후 계산' : 'Calculated per order';
+  }
+  return '--';
 }
 
 String _money(double value, {required String currency, bool signed = false}) {

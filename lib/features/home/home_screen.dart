@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/section_card.dart';
+import '../../models/portfolio_summary.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 
@@ -665,8 +666,10 @@ class _PortfolioCard extends StatelessWidget {
         ),
       );
     }
-    final total =
-        summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
+    final isKis = controller.isKisSelected;
+    final total = isKis
+        ? summary.totalAssetValue ?? summary.totalMarketValue + summary.cash
+        : summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
     return SectionCard(
       key: const ValueKey('home-portfolio-card'),
       child: Column(
@@ -680,22 +683,97 @@ class _PortfolioCard extends StatelessWidget {
               message: strings.unavailablePortfolio,
               color: AppTheme.warning,
             ),
-          Wrap(
-            spacing: 24,
-            runSpacing: 14,
-            children: [
-              _Metric(strings.value, _money(summary.currency, total)),
-              _Metric(
-                  strings.cash,
-                  summary.cashKnown
-                      ? _money(summary.currency, summary.cash)
-                      : strings.unknownValue),
-              _Metric(strings.pnl,
-                  _signedMoney(summary.currency, summary.totalUnrealizedPl)),
-            ],
-          ),
+          if (isKis)
+            _KisPortfolioMetrics(
+              summary: summary,
+              totalAssets: total,
+              isKorean: strings.isKorean,
+              unknownValue: strings.unknownValue,
+            )
+          else
+            Wrap(
+              spacing: 24,
+              runSpacing: 14,
+              children: [
+                _Metric(strings.value, _money(summary.currency, total)),
+                _Metric(
+                    strings.cash,
+                    summary.cashKnown
+                        ? _money(summary.currency, summary.cash)
+                        : strings.unknownValue),
+                _Metric(strings.pnl,
+                    _signedMoney(summary.currency, summary.totalUnrealizedPl)),
+              ],
+            ),
         ],
       ),
+    );
+  }
+}
+
+class _KisPortfolioMetrics extends StatelessWidget {
+  const _KisPortfolioMetrics({
+    required this.summary,
+    required this.totalAssets,
+    required this.isKorean,
+    required this.unknownValue,
+  });
+
+  final PortfolioSummary summary;
+  final double totalAssets;
+  final bool isKorean;
+  final String unknownValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final stockValue = summary.stockEvaluationAmount ??
+        summary.positions.fold<double>(
+          0,
+          (total, position) => total + position.marketValue,
+        );
+    final cashBalance = summary.cashBalance ?? summary.cash;
+    final cashKnown = summary.cashBalance != null || summary.cashKnown;
+    final plLabel = isKorean ? '평가손익' : 'Unrealized P/L';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 24,
+          runSpacing: 14,
+          children: [
+            _Metric(
+              isKorean ? '총자산' : 'Total Assets',
+              _kisMoney(summary.currency, totalAssets),
+            ),
+            _Metric(
+              isKorean ? '보유주식 평가액' : 'Stock Value',
+              _kisMoney(summary.currency, stockValue),
+            ),
+            _Metric(
+              isKorean ? '예수금' : 'Cash Balance',
+              cashKnown
+                  ? _kisMoney(summary.currency, cashBalance)
+                  : unknownValue,
+            ),
+            _Metric(
+              isKorean ? '주문가능' : 'Orderable Cash',
+              _kisOrderableCash(summary, isKorean: isKorean),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 24,
+          runSpacing: 14,
+          children: [
+            _Metric(
+              plLabel,
+              _signedKisMoney(summary.currency, summary.totalUnrealizedPl),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -868,6 +946,49 @@ String _money(String currency, double value) {
 String _signedMoney(String currency, double value) {
   final sign = value > 0 ? '+' : '';
   return '$sign${_money(currency, value)}';
+}
+
+String _kisMoney(String currency, double value) {
+  final normalizedCurrency = currency.trim().toUpperCase();
+  if (normalizedCurrency != 'KRW') return _money(currency, value);
+
+  const won = '\u20a9';
+  final sign = value < 0 ? '-' : '';
+  return '$sign$won${_groupedWhole(value.abs())}';
+}
+
+String _signedKisMoney(String currency, double value) {
+  if (currency.trim().toUpperCase() != 'KRW') {
+    return _signedMoney(currency, value);
+  }
+
+  final sign = value > 0
+      ? '+'
+      : value < 0
+          ? '-'
+          : '';
+  return '$sign${_kisMoney(currency, value.abs())}';
+}
+
+String _kisOrderableCash(
+  PortfolioSummary summary, {
+  required bool isKorean,
+}) {
+  final value = summary.orderableCash;
+  if (value != null) return _kisMoney(summary.currency, value);
+  if (summary.orderableCashStatus?.trim().toLowerCase() ==
+      'candidate_required') {
+    return isKorean ? '종목 선택 후 계산' : 'Calculated per order';
+  }
+  return '--';
+}
+
+String _groupedWhole(double value) {
+  final digits = value.round().toString();
+  return digits.replaceAllMapped(
+    RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+    (match) => '${match[1]},',
+  );
 }
 
 String _number(double value) {

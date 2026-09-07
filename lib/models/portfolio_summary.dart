@@ -10,6 +10,15 @@ class PortfolioSummary {
     required this.cash,
     required this.positions,
     required this.pendingOrders,
+    this.totalAssetValue,
+    this.stockEvaluationAmount,
+    this.cashBalance,
+    this.withdrawableCash,
+    this.orderableCash,
+    this.orderableCashStatus,
+    this.orderableCashSource,
+    this.d1Cash,
+    this.d2Cash,
     this.cashKnown = true,
     this.balanceUnavailable = false,
     this.positionsUnavailable = false,
@@ -73,6 +82,17 @@ class PortfolioSummary {
           .map((item) => PendingOrderSummary.fromJson(
               Map<String, dynamic>.from(item.cast<String, dynamic>())))
           .toList(),
+      totalAssetValue: _readNullableDouble(json['total_asset_value']),
+      stockEvaluationAmount:
+          _readNullableDouble(json['stock_evaluation_amount']),
+      cashBalance: _readNullableDouble(json['cash_balance']) ??
+          _readNullableDouble(json['cash']),
+      withdrawableCash: _readNullableDouble(json['withdrawable_cash']),
+      orderableCash: _readNullableDouble(json['orderable_cash']),
+      orderableCashStatus: _readNullableString(json['orderable_cash_status']),
+      orderableCashSource: _readNullableString(json['orderable_cash_source']),
+      d1Cash: _readNullableDouble(json['d1_cash']),
+      d2Cash: _readNullableDouble(json['d2_cash']),
       cashKnown: _readBool(json['cash_known'], true),
       balanceUnavailable: _readBool(json['balance_unavailable'], false),
       positionsUnavailable: _readBool(json['positions_unavailable'], false),
@@ -94,6 +114,15 @@ class PortfolioSummary {
   final double cash;
   final List<PositionSummary> positions;
   final List<PendingOrderSummary> pendingOrders;
+  final double? totalAssetValue;
+  final double? stockEvaluationAmount;
+  final double? cashBalance;
+  final double? withdrawableCash;
+  final double? orderableCash;
+  final String? orderableCashStatus;
+  final String? orderableCashSource;
+  final double? d1Cash;
+  final double? d2Cash;
   final bool cashKnown;
   final bool balanceUnavailable;
   final bool positionsUnavailable;

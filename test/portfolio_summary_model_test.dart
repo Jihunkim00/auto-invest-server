@@ -24,6 +24,34 @@ void main() {
     expect(summary.cash, 0);
   });
 
+  test('PortfolioSummary.fromJson parses nullable KIS asset fields', () {
+    final summary = PortfolioSummary.fromJson({
+      'currency': 'KRW',
+      'cash': 103455,
+      'cash_balance': 103455,
+      'withdrawable_cash': null,
+      'd1_cash': 306130,
+      'd2_cash': null,
+      'orderable_cash': null,
+      'orderable_cash_status': 'candidate_required',
+      'orderable_cash_source': null,
+      'total_asset_value': 306130,
+      'stock_evaluation_amount': 0,
+      'positions': const [],
+      'pending_orders': const [],
+    });
+
+    expect(summary.totalAssetValue, 306130);
+    expect(summary.stockEvaluationAmount, 0);
+    expect(summary.cashBalance, 103455);
+    expect(summary.withdrawableCash, isNull);
+    expect(summary.orderableCash, isNull);
+    expect(summary.orderableCashStatus, 'candidate_required');
+    expect(summary.orderableCashSource, isNull);
+    expect(summary.d1Cash, 306130);
+    expect(summary.d2Cash, isNull);
+  });
+
   test('PositionSummary parses company-name aliases', () {
     final summary = PortfolioSummary.fromJson({
       'currency': 'USD',

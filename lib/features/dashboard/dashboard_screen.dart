@@ -254,9 +254,11 @@ class _CompactPortfolioSummaryCard extends StatelessWidget {
     final summary = controller.isKisSelected
         ? controller.krPortfolioSummary
         : controller.usPortfolioSummary;
-    final market = controller.isKisSelected ? 'KR' : 'US';
-    final totalAssets =
-        summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
+    final isKis = controller.isKisSelected;
+    final market = isKis ? 'KR' : 'US';
+    final totalAssets = isKis
+        ? summary.totalAssetValue ?? summary.totalMarketValue + summary.cash
+        : summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
     final unavailable = controller.isKisSelected &&
         (controller.krPortfolioUnavailable || summary.hasUnavailableKisData);
 
@@ -295,37 +297,105 @@ class _CompactPortfolioSummaryCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 12),
-        Wrap(spacing: 10, runSpacing: 10, children: [
-          _CompactMetric(
-            label: 'Assets',
-            value: _formatMoney(summary.currency, totalAssets),
-          ),
-          _CompactMetric(
-            label: 'Cash',
-            value: summary.cashKnown
-                ? _formatMoney(summary.currency, summary.cash)
-                : 'Unknown',
-          ),
-          _CompactMetric(
-            label: 'P&L',
-            value: _formatSignedMoney(
-              summary.currency,
-              summary.totalUnrealizedPl,
+        if (isKis)
+          _KisCompactPortfolioMetrics(
+            summary: summary,
+            totalAssets: totalAssets,
+            isKorean: controller.strings.isKorean,
+          )
+        else
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            _CompactMetric(
+              label: 'Assets',
+              value: _formatMoney(summary.currency, totalAssets),
             ),
-            color: summary.totalUnrealizedPl >= 0
-                ? Colors.greenAccent
-                : Colors.redAccent,
-          ),
-          _CompactMetric(
-            label: 'P&L %',
-            value: _formatPercent(summary.totalUnrealizedPlpc),
-            color: summary.totalUnrealizedPl >= 0
-                ? Colors.greenAccent
-                : Colors.redAccent,
-          ),
-        ]),
+            _CompactMetric(
+              label: 'Cash',
+              value: summary.cashKnown
+                  ? _formatMoney(summary.currency, summary.cash)
+                  : 'Unknown',
+            ),
+            _CompactMetric(
+              label: 'P&L',
+              value: _formatSignedMoney(
+                summary.currency,
+                summary.totalUnrealizedPl,
+              ),
+              color: summary.totalUnrealizedPl >= 0
+                  ? Colors.greenAccent
+                  : Colors.redAccent,
+            ),
+            _CompactMetric(
+              label: 'P&L %',
+              value: _formatPercent(summary.totalUnrealizedPlpc),
+              color: summary.totalUnrealizedPl >= 0
+                  ? Colors.greenAccent
+                  : Colors.redAccent,
+            ),
+          ]),
       ]),
     );
+  }
+}
+
+class _KisCompactPortfolioMetrics extends StatelessWidget {
+  const _KisCompactPortfolioMetrics({
+    required this.summary,
+    required this.totalAssets,
+    required this.isKorean,
+  });
+
+  final PortfolioSummary summary;
+  final double totalAssets;
+  final bool isKorean;
+
+  @override
+  Widget build(BuildContext context) {
+    final stockValue =
+        summary.stockEvaluationAmount ?? summary.totalMarketValue;
+    final cashBalance = summary.cashBalance ?? summary.cash;
+    final plColor = summary.totalUnrealizedPl >= 0
+        ? Colors.greenAccent
+        : Colors.redAccent;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Wrap(spacing: 10, runSpacing: 10, children: [
+        _CompactMetric(
+          label: isKorean ? '총자산' : 'Total Assets',
+          value: _formatKisCompactMoney(summary.currency, totalAssets),
+        ),
+        _CompactMetric(
+          label: isKorean ? '보유주식 평가액' : 'Stock Value',
+          value: _formatKisCompactMoney(summary.currency, stockValue),
+        ),
+        _CompactMetric(
+          label: isKorean ? '예수금' : 'Cash Balance',
+          value: summary.cashKnown
+              ? _formatKisCompactMoney(summary.currency, cashBalance)
+              : 'Unknown',
+        ),
+        _CompactMetric(
+          label: isKorean ? '주문가능' : 'Orderable Cash',
+          value: _formatKisOrderableCash(summary, isKorean: isKorean),
+        ),
+      ]),
+      const SizedBox(height: 10),
+      Wrap(spacing: 10, runSpacing: 10, children: [
+        _CompactMetric(
+          label: 'P&L',
+          value: _formatSignedKisCompactMoney(
+            summary.currency,
+            summary.totalUnrealizedPl,
+          ),
+          color: plColor,
+        ),
+        _CompactMetric(
+          label: 'P&L %',
+          value: _formatPercent(summary.totalUnrealizedPlpc),
+          color: plColor,
+        ),
+      ]),
+    ]);
   }
 }
 
@@ -1572,6 +1642,54 @@ String _formatMoney(String currency, double value) {
   if (code == 'KRW') return 'KRW ${_formatWhole(value)}';
   final prefix = code == 'USD' || code.isEmpty ? '\$' : '$code ';
   return '$prefix${value.toStringAsFixed(2)}';
+}
+
+String _formatKisCompactMoney(String currency, double value) {
+  if (currency.trim().toUpperCase() != 'KRW') {
+    return _formatMoney(currency, value);
+  }
+  final sign = value < 0 ? '-' : '';
+  return '${sign}₩${_formatGroupedWhole(value.abs())}';
+}
+
+String _formatSignedKisCompactMoney(String currency, double value) {
+  if (currency.trim().toUpperCase() != 'KRW') {
+    return _formatSignedMoney(currency, value);
+  }
+  final sign = value > 0
+      ? '+'
+      : value < 0
+          ? '-'
+          : '';
+  return '${sign}₩${_formatGroupedWhole(value.abs())}';
+}
+
+String _formatKisOrderableCash(
+  PortfolioSummary summary, {
+  required bool isKorean,
+}) {
+  final value = summary.orderableCash;
+  if (value != null) {
+    return _formatKisCompactMoney(summary.currency, value);
+  }
+  if (summary.orderableCashStatus?.trim().toLowerCase() ==
+      'candidate_required') {
+    return isKorean ? '종목 선택 후 계산' : 'Calculated per order';
+  }
+  return '--';
+}
+
+String _formatGroupedWhole(double value) {
+  final whole = _formatWhole(value);
+  final buffer = StringBuffer();
+  for (var i = 0; i < whole.length; i += 1) {
+    final remaining = whole.length - i;
+    buffer.write(whole[i]);
+    if (remaining > 1 && remaining % 3 == 1) {
+      buffer.write(',');
+    }
+  }
+  return buffer.toString();
 }
 
 String _formatSignedMoney(String currency, double value) {

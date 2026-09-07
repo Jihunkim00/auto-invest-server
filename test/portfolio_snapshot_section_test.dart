@@ -31,11 +31,40 @@ void main() {
     expect(find.text('전역: 한국투자 / 국내'), findsOneWidget);
     expect(find.text('READ-ONLY'), findsOneWidget);
     expect(find.text('TRADING DISABLED'), findsOneWidget);
-    expect(find.text('AVAILABLE CASH'), findsOneWidget);
+    expect(find.text('예수금'), findsOneWidget);
     expect(find.text('₩30,000'), findsOneWidget);
     expect(find.textContaining('005930 ·'), findsOneWidget);
     expect(find.text('₩1,200,000'), findsWidgets);
     expect(find.text(r'$1,000.00'), findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets(
+      'KIS Snapshot keeps account, settlement, and orderable meanings separate',
+      (tester) async {
+    final controller = await _pumpSnapshot(
+      tester,
+      krSummary: _krNormalizedBalanceSummary,
+    );
+
+    controller.selectedProvider = SelectedProvider.kis;
+    controller.selectedPortfolioMarket = PortfolioMarket.kr;
+    controller.notifyListeners();
+    await tester.pumpAndSettle();
+
+    expect(find.text('총자산'), findsOneWidget);
+    expect(find.text('보유주식 평가액'), findsOneWidget);
+    expect(find.text('예수금'), findsOneWidget);
+    expect(find.text('주문가능금액'), findsOneWidget);
+    expect(find.text('평가손익'), findsOneWidget);
+    expect(find.text('출금가능금액'), findsOneWidget);
+    expect(find.text('D+1 정산금액'), findsOneWidget);
+    expect(find.text('₩306,130'), findsNWidgets(2));
+    expect(find.text('₩103,455'), findsOneWidget);
+    expect(find.text('₩0'), findsNWidgets(2));
+    expect(find.text('종목 선택 후 계산'), findsOneWidget);
+    expect(find.text('--'), findsNWidgets(2));
 
     controller.dispose();
   });
@@ -154,7 +183,7 @@ void main() {
 
     expect(find.text('₩9,867'), findsWidgets);
     expect(find.text('+₩37'), findsWidgets);
-    expect(find.text('--'), findsNWidgets(2));
+    expect(find.text('--'), findsNWidgets(6));
     expect(find.text('+37.00%'), findsNothing);
 
     controller.dispose();
@@ -663,6 +692,24 @@ const _krSummary = PortfolioSummary(
       submittedAt: '09:30:00',
     ),
   ],
+);
+
+const _krNormalizedBalanceSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 0,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 0,
+  totalUnrealizedPl: 0,
+  totalUnrealizedPlpc: 0,
+  cash: 103455,
+  positions: [],
+  pendingOrders: [],
+  totalAssetValue: 306130,
+  stockEvaluationAmount: 0,
+  cashBalance: 103455,
+  orderableCashStatus: 'candidate_required',
+  d1Cash: 306130,
 );
 
 const _krTokenExpiredSummary = PortfolioSummary(

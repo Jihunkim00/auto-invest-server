@@ -263,16 +263,18 @@ class ApiClient {
 
     final totalCostBasis =
         _readNullableDouble(balance?['purchase_amount']) ?? summedCostBasis;
-    final totalMarketValue =
-        _readNullableDouble(balance?['stock_evaluation_amount']) ??
-            _readNullableDouble(balance?['total_market_value']) ??
-            _readNullableDouble(balance?['total_asset_value']) ??
-            summedMarketValue;
+    final totalAssetValue = _readNullableDouble(balance?['total_asset_value']);
+    final stockEvaluationAmount =
+        _readNullableDouble(balance?['stock_evaluation_amount']);
+    final totalMarketValue = stockEvaluationAmount ??
+        _readNullableDouble(balance?['total_market_value']) ??
+        summedMarketValue;
     final totalUnrealizedPl =
         _readNullableDouble(balance?['unrealized_pl']) ?? summedUnrealizedPl;
     final totalUnrealizedPlpc =
         totalCostBasis > 0 ? totalUnrealizedPl / totalCostBasis : 0.0;
-    final cashValue = _readNullableDouble(balance?['cash']) ??
+    final cashBalance = _readNullableDouble(balance?['cash_balance']) ??
+        _readNullableDouble(balance?['cash']) ??
         _readNullableDouble(balance?['dnca_tot_amt']);
     final authDetails = _krPortfolioAuthDetails([
       balanceResult.error,
@@ -289,9 +291,20 @@ class ApiClient {
       totalMarketValue: totalMarketValue,
       totalUnrealizedPl: totalUnrealizedPl,
       totalUnrealizedPlpc: totalUnrealizedPlpc,
-      cash: cashValue ?? 0,
+      cash: cashBalance ?? 0,
       positions: positions,
       pendingOrders: pendingOrders,
+      totalAssetValue: totalAssetValue,
+      stockEvaluationAmount: stockEvaluationAmount,
+      cashBalance: cashBalance,
+      withdrawableCash: _readNullableDouble(balance?['withdrawable_cash']),
+      orderableCash: _readNullableDouble(balance?['orderable_cash']),
+      orderableCashStatus:
+          _readNullableString(balance?['orderable_cash_status']),
+      orderableCashSource:
+          _readNullableString(balance?['orderable_cash_source']),
+      d1Cash: _readNullableDouble(balance?['d1_cash']),
+      d2Cash: _readNullableDouble(balance?['d2_cash']),
       cashKnown: balance != null,
       balanceUnavailable: balance == null,
       positionsUnavailable: positionsPayload == null,

@@ -39,12 +39,70 @@ void main() {
     await tester.pumpWidget(_app(HomeScreen(controller: controller)));
 
     expect(find.text('한국투자증권 연결됨'), findsOneWidget);
-    expect(find.text('₩1734567'), findsOneWidget);
-    expect(find.text('평가금액'), findsOneWidget);
+    expect(find.text('₩1,734,567'), findsOneWidget);
+    expect(find.text('총자산'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pump();
     expect(find.textContaining('삼성전자 장기 투자 포지션'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    controller.dispose();
+  });
+
+  testWidgets('Home KIS portfolio card uses semantic asset fields',
+      (tester) async {
+    final controller = _controller()
+      ..portfolioLoaded = true
+      ..krPortfolioSummary = _kisSemanticSummary;
+
+    await tester.pumpWidget(_app(HomeScreen(controller: controller)));
+
+    final card = find.byKey(const ValueKey('home-portfolio-card'));
+    expect(find.descendant(of: card, matching: find.text('총자산')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩306,130')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('보유주식 평가액')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩0')),
+        findsNWidgets(2));
+    expect(find.descendant(of: card, matching: find.text('예수금')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩103,455')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('주문가능')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('종목 선택 후 계산')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('평가손익')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩203,454')),
+        findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Home Alpaca portfolio card keeps legacy display',
+      (tester) async {
+    final controller = _controller()
+      ..setAppLanguage(AppLanguage.english)
+      ..selectedProvider = SelectedProvider.alpaca
+      ..portfolioLoaded = true
+      ..usPortfolioSummary = _alpacaSummary;
+
+    expect(controller.isKisSelected, isFalse);
+    expect(controller.strings.isKorean, isFalse);
+
+    await tester.pumpWidget(_app(HomeScreen(controller: controller)));
+    await tester.drag(find.byType(ListView), const Offset(0, -500));
+    await tester.pump();
+
+    expect(find.text('Value'), findsOneWidget);
+    expect(find.text('\$1700.00'), findsOneWidget);
+    expect(find.text('Cash'), findsOneWidget);
+    expect(find.text('\$500.00'), findsOneWidget);
+    expect(find.text('P/L'), findsOneWidget);
+    expect(find.text(r'+$200.00'), findsOneWidget);
 
     controller.dispose();
   });
@@ -168,6 +226,36 @@ const _summary = PortfolioSummary(
       unrealizedPlpc: 2.88,
     ),
   ],
+  pendingOrders: [],
+);
+
+const _kisSemanticSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 0,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 99999,
+  totalUnrealizedPl: 0,
+  totalUnrealizedPlpc: 0,
+  cash: 103455,
+  positions: [],
+  pendingOrders: [],
+  totalAssetValue: 306130,
+  stockEvaluationAmount: 0,
+  cashBalance: 103455,
+  orderableCashStatus: 'candidate_required',
+);
+
+const _alpacaSummary = PortfolioSummary(
+  currency: 'USD',
+  positionsCount: 1,
+  pendingOrdersCount: 0,
+  totalCostBasis: 1000,
+  totalMarketValue: 1200,
+  totalUnrealizedPl: 200,
+  totalUnrealizedPlpc: 0.2,
+  cash: 500,
+  positions: [],
   pendingOrders: [],
 );
 

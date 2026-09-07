@@ -7,12 +7,26 @@ import 'package:http/testing.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 
 void main() {
-  test('fetchKrPortfolioSummary maps balance cash to summary cash', () async {
+  test('fetchKrPortfolioSummary maps normalized KIS asset fields semantically',
+      () async {
     final client = ApiClient(
       client: MockClient((request) async {
         if (request.url.path == '/kis/account/balance') {
           return http.Response(
-              jsonEncode({'cash': 30000.0, 'stock_evaluation_amount': 0.0}),
+              jsonEncode({
+                'cash': 103455,
+                'cash_balance': 103455,
+                'withdrawable_cash': null,
+                'd1_cash': 306130,
+                'd2_cash': null,
+                'orderable_cash': null,
+                'orderable_cash_source': null,
+                'orderable_cash_status': 'candidate_required',
+                'total_asset_value': 306130,
+                'stock_evaluation_amount': 0,
+                'purchase_amount': 0,
+                'unrealized_pl': 0,
+              }),
               200);
         }
         if (request.url.path == '/kis/account/positions') {
@@ -30,7 +44,17 @@ void main() {
     final summary = await client.fetchKrPortfolioSummary();
 
     expect(summary.currency, 'KRW');
-    expect(summary.cash, 30000.0);
+    expect(summary.totalAssetValue, 306130.0);
+    expect(summary.stockEvaluationAmount, 0.0);
+    expect(summary.totalMarketValue, 0.0);
+    expect(summary.cash, 103455.0);
+    expect(summary.cashBalance, 103455.0);
+    expect(summary.withdrawableCash, isNull);
+    expect(summary.orderableCash, isNull);
+    expect(summary.orderableCashStatus, 'candidate_required');
+    expect(summary.orderableCashSource, isNull);
+    expect(summary.d1Cash, 306130.0);
+    expect(summary.d2Cash, isNull);
   });
 
   test('fetchKrPortfolioSummary falls back to dnca_tot_amt for cash', () async {

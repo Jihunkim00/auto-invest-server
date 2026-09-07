@@ -1279,6 +1279,80 @@ void main() {
     expect(find.textContaining('Samsung Electronics'), findsOneWidget);
   });
 
+  testWidgets('Home compact KIS summary uses semantic asset fields',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..usPortfolioSummary = _usSummary
+      ..krPortfolioSummary = _krCompactSummary
+      ..selectedProvider = SelectedProvider.kis
+      ..selectedPortfolioMarket = PortfolioMarket.kr;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: DashboardScreen(controller: controller),
+      ),
+    ));
+
+    await _showDashboardSection(
+        tester, const Key('home_compact_portfolio_summary_card'));
+
+    final card = find.byKey(const Key('home_compact_portfolio_summary_card'));
+    expect(find.descendant(of: card, matching: find.text('총자산')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('보유주식 평가액')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('예수금')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('주문가능')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩306,130')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩0')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩103,455')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('종목 선택 후 계산')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('₩203,454')),
+        findsNothing);
+
+    controller.dispose();
+  });
+
+  testWidgets('Home compact Alpaca summary keeps legacy metrics',
+      (tester) async {
+    final controller = DashboardController(FakeKisApiClient(), autoload: false)
+      ..usPortfolioSummary = _usSummary
+      ..krPortfolioSummary = _krSummary
+      ..selectedProvider = SelectedProvider.alpaca
+      ..selectedPortfolioMarket = PortfolioMarket.us;
+
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData.dark(),
+      home: Scaffold(
+        body: DashboardScreen(controller: controller),
+      ),
+    ));
+
+    await _showDashboardSection(
+        tester, const Key('home_compact_portfolio_summary_card'));
+
+    final card = find.byKey(const Key('home_compact_portfolio_summary_card'));
+    expect(find.descendant(of: card, matching: find.text('Assets')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text(r'$1700.00')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text(r'$500.00')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text(r'+$200.00')),
+        findsOneWidget);
+    expect(find.descendant(of: card, matching: find.text('+0.20%')),
+        findsOneWidget);
+
+    controller.dispose();
+  });
+
   testWidgets(
       'Prepare Sell Ticket on Home portfolio pre-fills manual order only',
       (tester) async {
@@ -1728,6 +1802,23 @@ const _krSummary = PortfolioSummary(
     ),
   ],
   pendingOrders: [],
+);
+
+const _krCompactSummary = PortfolioSummary(
+  currency: 'KRW',
+  positionsCount: 0,
+  pendingOrdersCount: 0,
+  totalCostBasis: 0,
+  totalMarketValue: 99999,
+  totalUnrealizedPl: 2500,
+  totalUnrealizedPlpc: 0.025,
+  cash: 103455,
+  positions: [],
+  pendingOrders: [],
+  totalAssetValue: 306130,
+  stockEvaluationAmount: 0,
+  cashBalance: 103455,
+  orderableCashStatus: 'candidate_required',
 );
 
 Map<String, dynamic> _liveExitPreflightJson() {
