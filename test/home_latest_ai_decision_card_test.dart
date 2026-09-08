@@ -10,9 +10,14 @@ import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await KrStockCatalog.shared.load();
+  });
+
   testWidgets('Home detail resolves a known KR symbol from the catalog',
       (tester) async {
-    await KrStockCatalog.shared.load();
     final controller = DashboardController(ApiClient(), autoload: false)
       ..runResult = WatchlistRunResult.fromJson({
         'final_ranked_candidates': [
@@ -30,7 +35,8 @@ void main() {
     await tester.tap(
       find.byKey(const ValueKey('home-latest-ai-decision-card-surface')),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     expect(find.text('삼성전자 (005930)'), findsWidgets);
     controller.dispose();
@@ -65,7 +71,8 @@ void main() {
     expect(tester.getSize(card).height, lessThan(180));
 
     await tester.tap(card);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     expect(find.byKey(const ValueKey('home-ai-decision-detail-dialog')),
         findsOneWidget);
@@ -122,7 +129,8 @@ void main() {
     await tester.tap(
       find.byKey(const ValueKey('home-latest-ai-decision-card-surface')),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     expect(find.textContaining('AAPL'), findsWidgets);
     expect(find.textContaining('삼성전자'), findsNothing);

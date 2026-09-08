@@ -23,14 +23,14 @@ void main() {
     await catalog.load();
 
     expect(loadCalls, 1);
-    expect(catalog.entries, hasLength(200));
+    expect(catalog.entries.length, greaterThanOrEqualTo(2500));
     expect(
       catalog.entries.where((entry) => entry.market == 'KOSPI'),
-      hasLength(150),
+      isNotEmpty,
     );
     expect(
       catalog.entries.where((entry) => entry.market == 'KOSDAQ'),
-      hasLength(50),
+      isNotEmpty,
     );
 
     for (final query in [

@@ -16,9 +16,14 @@ import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await KrStockCatalog.shared.load();
+  });
+
   testWidgets('real Home latest AI card opens its detail dialog',
       (tester) async {
-    await KrStockCatalog.shared.load();
     final controller = _controller()
       ..krWatchlist = MarketWatchlist.fromJson({
         'market': 'KR',
@@ -80,7 +85,8 @@ void main() {
     );
     expect(card, findsOneWidget);
     await tester.tap(card);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
 
     expect(find.byKey(const ValueKey('home-ai-decision-detail-dialog')),
         findsOneWidget);

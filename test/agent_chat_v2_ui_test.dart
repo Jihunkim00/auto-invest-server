@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
+import 'package:auto_invest_dashboard/core/utils/kr_stock_catalog.dart';
 import 'package:auto_invest_dashboard/features/ai/ai_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_v2_response.dart';
@@ -9,6 +10,12 @@ import 'package:auto_invest_dashboard/models/automation_strategy_profile.dart';
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(() async {
+    await KrStockCatalog.shared.load();
+  });
+
   testWidgets('AI quick action renders analysis card from V2 response',
       (tester) async {
     final api = _FakeV2Api();
@@ -20,7 +27,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('ai-quick-종목 분석')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.messages, hasLength(1));
     expect(api.messages.single, startsWith('삼성전자 분석해줘'));
@@ -45,7 +53,8 @@ void main() {
       '삼성전자 3주 사고 싶어',
     );
     await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.byKey(const ValueKey('agent-chat-live-order-card')),
         findsOneWidget);
@@ -87,7 +96,8 @@ void main() {
       '긴 한국어 질문도 화면 밖으로 잘리지 않아야 합니다.',
     );
     await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     final userMessage = find.byKey(const ValueKey('ai-v2-user-message'));
     expect(userMessage, findsOneWidget);
@@ -118,7 +128,8 @@ void main() {
       'SK하이닉스 현재가 알려줘',
     );
     await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.priceSymbols, ['000660']);
     expect(api.messages, isEmpty);
@@ -151,7 +162,8 @@ void main() {
       '현대건설 가격 알려줘',
     );
     await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(api.priceSymbols, ['000720']);
     expect(api.messages, isEmpty);
@@ -171,7 +183,8 @@ void main() {
       '현재 자동화 프로필 상태 알려줘',
     );
     await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
 
     expect(find.byKey(const ValueKey('ai-local-assistant-message')),
         findsOneWidget);
