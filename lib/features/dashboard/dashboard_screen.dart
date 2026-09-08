@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/utils/timestamp_formatter.dart';
+import '../../core/utils/kr_symbol.dart';
 import '../../core/widgets/section_card.dart';
 import '../../core/widgets/status_badge.dart';
 import '../../models/agent_chat_message.dart';
@@ -29,6 +30,7 @@ import 'widgets/strategy_dry_run_auto_buy_card.dart';
 import 'widgets/strategy_live_auto_buy_card.dart';
 import 'widgets/strategy_live_auto_exit_card.dart';
 import 'widgets/strategy_trade_performance_list.dart';
+import 'widgets/home_latest_ai_decision_card.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({
@@ -103,6 +105,8 @@ class DashboardScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     _HomeAutomationProfileCard(controller: controller),
+                    const SizedBox(height: 12),
+                    HomeLatestAiDecisionCard(controller: controller),
                     const SizedBox(height: 12),
                     _CompactPortfolioSummaryCard(
                       controller: controller,
@@ -354,9 +358,8 @@ class _KisCompactPortfolioMetrics extends StatelessWidget {
     final stockValue =
         summary.stockEvaluationAmount ?? summary.totalMarketValue;
     final cashBalance = summary.cashBalance ?? summary.cash;
-    final plColor = summary.totalUnrealizedPl >= 0
-        ? Colors.greenAccent
-        : Colors.redAccent;
+    final plColor =
+        summary.totalUnrealizedPl >= 0 ? Colors.greenAccent : Colors.redAccent;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Wrap(spacing: 10, runSpacing: 10, children: [
@@ -451,7 +454,7 @@ class _RecentTradesCompactCard extends StatelessWidget {
             _CompactRecentLine(
               key: ValueKey('home-recent-compact-item-$i'),
               title:
-                  '${orders[i].side.toUpperCase()} ${orders[i].symbol} - ${orders[i].statusLabel}',
+                  '${orders[i].side.toUpperCase()} ${_homeStockDisplay(controller, orders[i].symbol)} - ${orders[i].statusLabel}',
               subtitle: _recentOrderSubtitle(orders[i]),
               badge: orders[i].sourceLabel,
             )
@@ -460,7 +463,7 @@ class _RecentTradesCompactCard extends StatelessWidget {
             _CompactRecentLine(
               key: ValueKey('home-recent-compact-item-$i'),
               title:
-                  '${runs[i].action.isEmpty ? 'HOLD' : runs[i].action.toUpperCase()} ${runs[i].symbol}',
+                  '${runs[i].action.isEmpty ? 'HOLD' : runs[i].action.toUpperCase()} ${_homeStockDisplay(controller, runs[i].symbol)}',
               subtitle: _recentRunSubtitle(runs[i]),
               badge: runs[i].triggerSource,
             ),
@@ -494,129 +497,132 @@ class _HomeAdvancedDetailsSection extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: Material(type: MaterialType.transparency, child: ExpansionTile(
-          key: const ValueKey('home-advanced-details-toggle'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          leading: const Icon(Icons.tune_outlined, size: 20),
-          title: const Text(
-            'Advanced Details',
-            style: TextStyle(fontWeight: FontWeight.w800),
-          ),
-          children: [
-            _OperationalReadinessCard(
-              controller: controller,
-              onOpenSettings: onOpenSettings,
-            ),
-            const SizedBox(height: 12),
-            StrategyProfileCard(
-              profiles: controller.strategyProfiles,
-              activeProfile: controller.activeStrategyProfile,
-              loading: controller.strategyProfilesLoading,
-              error: controller.strategyProfileError,
-              applyingProfileName: controller.applyingStrategyProfileName,
-              onRefresh: controller.refreshStrategyProfiles,
-              onApply: controller.applyStrategyProfilePreset,
-            ),
-            const SizedBox(height: 12),
-            StrategyRiskStateCard(
-              riskState: controller.strategyRiskState,
-              loading: controller.strategyRiskLoading,
-              error: controller.strategyRiskError,
-              onRefresh: controller.refreshStrategyRiskState,
-            ),
-            const SizedBox(height: 12),
-            StrategyDryRunAutoBuyCard(
-              result: controller.strategyDryRunAutoBuyResult,
-              loading: controller.strategyDryRunAutoBuyLoading,
-              error: controller.strategyDryRunAutoBuyError,
-              onRun: controller.runStrategyDryRunAutoBuy,
-              onRefresh: controller.refreshStrategyDryRunAutoBuy,
-            ),
-            const SizedBox(height: 12),
-            StrategyLiveAutoBuyCard(
-              readiness: controller.strategyLiveAutoBuyReadiness,
-              latest: controller.strategyLiveAutoBuyResult,
-              recent: controller.strategyLiveAutoBuyRecent,
-              loading: controller.strategyLiveAutoBuyLoading,
-              error: controller.strategyLiveAutoBuyError,
-              onRun: controller.runStrategyLiveAutoBuyOnce,
-              onRefresh: controller.refreshStrategyLiveAutoBuy,
-            ),
-            const SizedBox(height: 12),
-            AgentChatLiveAutoBuyStatusCard(
-              readiness: controller.strategyLiveAutoBuyReadiness,
-              recent: controller.strategyLiveAutoBuyRecent,
-              loading: controller.strategyLiveAutoBuyLoading,
-              error: controller.strategyLiveAutoBuyError,
-              onRefresh: controller.refreshStrategyLiveAutoBuy,
-            ),
-            const SizedBox(height: 12),
-            StrategyLiveAutoExitCard(
-              readiness: controller.strategyLiveAutoExitReadiness,
-              latest: controller.strategyLiveAutoExitResult,
-              recent: controller.strategyLiveAutoExitRecent,
-              loading: controller.strategyLiveAutoExitLoading,
-              error: controller.strategyLiveAutoExitError,
-              onRun: controller.runStrategyLiveAutoExitOnce,
-              onRefresh: controller.refreshStrategyLiveAutoExit,
-            ),
-            const SizedBox(height: 12),
-            AgentChatLiveAutoExitStatusCard(
-              readiness: controller.strategyLiveAutoExitReadiness,
-              recent: controller.strategyLiveAutoExitRecent,
-              loading: controller.strategyLiveAutoExitLoading,
-              error: controller.strategyLiveAutoExitError,
-              onRefresh: controller.refreshStrategyLiveAutoExit,
-            ),
-            const SizedBox(height: 12),
-            StrategyMonthlyProgressCard(
-              performance: controller.strategyMonthlyPerformance,
-              loading: controller.strategyPerformanceLoading,
-              error: controller.strategyPerformanceError,
-              onRefresh: controller.refreshStrategyPerformance,
-            ),
-            const SizedBox(height: 12),
-            StrategyDailyPnlCard(
-              performance: controller.strategyDailyPerformance,
-              loading: controller.strategyPerformanceLoading,
-              error: controller.strategyPerformanceError,
-            ),
-            const SizedBox(height: 12),
-            StrategyTradePerformanceListCard(
-              performance: controller.strategyTradePerformance,
-              loading: controller.strategyPerformanceLoading,
-            ),
-            const SizedBox(height: 12),
-            AgentOperationsSummaryCard(controller: controller),
-            const SizedBox(height: 12),
-            AgentReviewQueuePanel(controller: controller),
-            const SizedBox(height: 12),
-            _PreLiveOperationsCard(
-              controller: controller,
-              onOpenManualOrder: onOpenManualOrder,
-            ),
-            const SizedBox(height: 12),
-            _SafetySummary(controller: controller),
-            const SizedBox(height: 12),
-            AutomationRuntimeMonitorCard(controller: controller),
-            const SizedBox(height: 12),
-            OperationRehearsalPanel(controller: controller),
-            const SizedBox(height: 12),
-            AutomationEventTimelineCard(controller: controller),
-            const SizedBox(height: 12),
-            PortfolioSnapshotSection(
-              controller: controller,
-              managementMode: true,
-              onOpenManualOrder: onOpenManualOrder,
-              onReviewPosition: onReviewPosition,
-            ),
-            const SizedBox(height: 12),
-            _NextActionCard(controller: controller),
-            const SizedBox(height: 12),
-            _RecentActivityCard(controller: controller),
-          ],
-        )),
+        child: Material(
+            type: MaterialType.transparency,
+            child: ExpansionTile(
+              key: const ValueKey('home-advanced-details-toggle'),
+              tilePadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+              childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              leading: const Icon(Icons.tune_outlined, size: 20),
+              title: const Text(
+                'Advanced Details',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              children: [
+                _OperationalReadinessCard(
+                  controller: controller,
+                  onOpenSettings: onOpenSettings,
+                ),
+                const SizedBox(height: 12),
+                StrategyProfileCard(
+                  profiles: controller.strategyProfiles,
+                  activeProfile: controller.activeStrategyProfile,
+                  loading: controller.strategyProfilesLoading,
+                  error: controller.strategyProfileError,
+                  applyingProfileName: controller.applyingStrategyProfileName,
+                  onRefresh: controller.refreshStrategyProfiles,
+                  onApply: controller.applyStrategyProfilePreset,
+                ),
+                const SizedBox(height: 12),
+                StrategyRiskStateCard(
+                  riskState: controller.strategyRiskState,
+                  loading: controller.strategyRiskLoading,
+                  error: controller.strategyRiskError,
+                  onRefresh: controller.refreshStrategyRiskState,
+                ),
+                const SizedBox(height: 12),
+                StrategyDryRunAutoBuyCard(
+                  result: controller.strategyDryRunAutoBuyResult,
+                  loading: controller.strategyDryRunAutoBuyLoading,
+                  error: controller.strategyDryRunAutoBuyError,
+                  onRun: controller.runStrategyDryRunAutoBuy,
+                  onRefresh: controller.refreshStrategyDryRunAutoBuy,
+                ),
+                const SizedBox(height: 12),
+                StrategyLiveAutoBuyCard(
+                  readiness: controller.strategyLiveAutoBuyReadiness,
+                  latest: controller.strategyLiveAutoBuyResult,
+                  recent: controller.strategyLiveAutoBuyRecent,
+                  loading: controller.strategyLiveAutoBuyLoading,
+                  error: controller.strategyLiveAutoBuyError,
+                  onRun: controller.runStrategyLiveAutoBuyOnce,
+                  onRefresh: controller.refreshStrategyLiveAutoBuy,
+                ),
+                const SizedBox(height: 12),
+                AgentChatLiveAutoBuyStatusCard(
+                  readiness: controller.strategyLiveAutoBuyReadiness,
+                  recent: controller.strategyLiveAutoBuyRecent,
+                  loading: controller.strategyLiveAutoBuyLoading,
+                  error: controller.strategyLiveAutoBuyError,
+                  onRefresh: controller.refreshStrategyLiveAutoBuy,
+                ),
+                const SizedBox(height: 12),
+                StrategyLiveAutoExitCard(
+                  readiness: controller.strategyLiveAutoExitReadiness,
+                  latest: controller.strategyLiveAutoExitResult,
+                  recent: controller.strategyLiveAutoExitRecent,
+                  loading: controller.strategyLiveAutoExitLoading,
+                  error: controller.strategyLiveAutoExitError,
+                  onRun: controller.runStrategyLiveAutoExitOnce,
+                  onRefresh: controller.refreshStrategyLiveAutoExit,
+                ),
+                const SizedBox(height: 12),
+                AgentChatLiveAutoExitStatusCard(
+                  readiness: controller.strategyLiveAutoExitReadiness,
+                  recent: controller.strategyLiveAutoExitRecent,
+                  loading: controller.strategyLiveAutoExitLoading,
+                  error: controller.strategyLiveAutoExitError,
+                  onRefresh: controller.refreshStrategyLiveAutoExit,
+                ),
+                const SizedBox(height: 12),
+                StrategyMonthlyProgressCard(
+                  performance: controller.strategyMonthlyPerformance,
+                  loading: controller.strategyPerformanceLoading,
+                  error: controller.strategyPerformanceError,
+                  onRefresh: controller.refreshStrategyPerformance,
+                ),
+                const SizedBox(height: 12),
+                StrategyDailyPnlCard(
+                  performance: controller.strategyDailyPerformance,
+                  loading: controller.strategyPerformanceLoading,
+                  error: controller.strategyPerformanceError,
+                ),
+                const SizedBox(height: 12),
+                StrategyTradePerformanceListCard(
+                  performance: controller.strategyTradePerformance,
+                  loading: controller.strategyPerformanceLoading,
+                ),
+                const SizedBox(height: 12),
+                AgentOperationsSummaryCard(controller: controller),
+                const SizedBox(height: 12),
+                AgentReviewQueuePanel(controller: controller),
+                const SizedBox(height: 12),
+                _PreLiveOperationsCard(
+                  controller: controller,
+                  onOpenManualOrder: onOpenManualOrder,
+                ),
+                const SizedBox(height: 12),
+                _SafetySummary(controller: controller),
+                const SizedBox(height: 12),
+                AutomationRuntimeMonitorCard(controller: controller),
+                const SizedBox(height: 12),
+                OperationRehearsalPanel(controller: controller),
+                const SizedBox(height: 12),
+                AutomationEventTimelineCard(controller: controller),
+                const SizedBox(height: 12),
+                PortfolioSnapshotSection(
+                  controller: controller,
+                  managementMode: true,
+                  onOpenManualOrder: onOpenManualOrder,
+                  onReviewPosition: onReviewPosition,
+                ),
+                const SizedBox(height: 12),
+                _NextActionCard(controller: controller),
+                const SizedBox(height: 12),
+                _RecentActivityCard(controller: controller),
+              ],
+            )),
       ),
     );
   }
@@ -634,12 +640,16 @@ class _HomeAutomationProfileCard extends StatelessWidget {
     final activeName = status.activeProfileName?.trim();
     final profile = selectedName != null && selectedName.isNotEmpty
         ? selectedName
-        : (activeName != null && activeName.isNotEmpty ? activeName : "선택된 자동화 프로필 없음");
+        : (activeName != null && activeName.isNotEmpty
+            ? activeName
+            : "선택된 자동화 프로필 없음");
     final profileStatus = status.selectedProfileStatus ?? "disabled";
     final nextRun = status.nextProfileRunAt ?? "예정 없음";
     final schedule = status.effectiveProfileAnalysisTimes.isNotEmpty
         ? status.effectiveProfileAnalysisTimes.join(" · ")
-        : (status.profileAnalysisTimes.isEmpty ? "예정 없음" : status.profileAnalysisTimes.join(" · "));
+        : (status.profileAnalysisTimes.isEmpty
+            ? "예정 없음"
+            : status.profileAnalysisTimes.join(" · "));
     final tp = status.profileTakeProfitPct == null
         ? "-"
         : status.profileTakeProfitPct!.toString() + "%";
@@ -649,7 +659,8 @@ class _HomeAutomationProfileCard extends StatelessWidget {
     final dates = (status.selectedProfileStartDate == null &&
             status.selectedProfileEndDate == null)
         ? "-"
-        : (status.selectedProfileStartDate ?? "-") + " ~ " +
+        : (status.selectedProfileStartDate ?? "-") +
+            " ~ " +
             (status.selectedProfileEndDate ?? "-");
     final heartbeat = status.schedulerHeartbeatHealthy ? "정상" : "확인 필요";
     return SectionCard(
@@ -660,38 +671,55 @@ class _HomeAutomationProfileCard extends StatelessWidget {
           const Icon(Icons.auto_awesome_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text("자동화 프로필 운용 상태", style: Theme.of(context).textTheme.titleMedium),
+            child: Text("자동화 프로필 운용 상태",
+                style: Theme.of(context).textTheme.titleMedium),
           ),
           _SafetyPill(
             text: status.schedulerEngineRunning ? "엔진 실행 중" : "엔진 중지",
-            color: status.schedulerEngineRunning ? Colors.greenAccent : Colors.orangeAccent,
+            color: status.schedulerEngineRunning
+                ? Colors.greenAccent
+                : Colors.orangeAccent,
           ),
         ]),
         const SizedBox(height: 10),
-        Text("선택 프로필: " + profile, style: const TextStyle(fontWeight: FontWeight.w800)),
+        Text("선택 프로필: " + profile,
+            style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           _CompactMetric(label: "상태", value: profileStatus),
-          _CompactMetric(label: "브로커/시장", value: status.selectedProfileProvider.toUpperCase() + " · " + status.selectedProfileMarket),
+          _CompactMetric(
+              label: "브로커/시장",
+              value: status.selectedProfileProvider.toUpperCase() +
+                  " · " +
+                  status.selectedProfileMarket),
           _CompactMetric(label: "운용 기간", value: dates),
           _CompactMetric(label: "분석 스케줄(KST)", value: schedule),
           _CompactMetric(label: "Take Profit", value: tp),
           _CompactMetric(label: "Stop Loss", value: sl),
           _CompactMetric(label: "다음 실행", value: nextRun),
-          _CompactMetric(label: "프로필 스케줄러", value: status.profileSchedulerEnabled ? "활성" : "중지"),
-          _CompactMetric(label: "runtime 권한", value: status.runtimeAuthorized ? "허용" : "차단"),
+          _CompactMetric(
+              label: "프로필 스케줄러",
+              value: status.profileSchedulerEnabled ? "활성" : "중지"),
+          _CompactMetric(
+              label: "runtime 권한",
+              value: status.runtimeAuthorized ? "허용" : "차단"),
           _CompactMetric(label: "heartbeat", value: heartbeat),
-          _CompactMetric(label: "dry-run", value: status.global.dryRun ? "ON" : "OFF"),
-          _CompactMetric(label: "kill switch", value: status.global.killSwitch ? "ON" : "OFF"),
+          _CompactMetric(
+              label: "dry-run", value: status.global.dryRun ? "ON" : "OFF"),
+          _CompactMetric(
+              label: "kill switch",
+              value: status.global.killSwitch ? "ON" : "OFF"),
         ]),
         if (status.schedulerLastError?.trim().isNotEmpty == true) ...[
           const SizedBox(height: 8),
-          Text("엔진 오류: " + status.schedulerLastError!, style: const TextStyle(color: Colors.orangeAccent)),
+          Text("엔진 오류: " + status.schedulerLastError!,
+              style: const TextStyle(color: Colors.orangeAccent)),
         ],
       ]),
     );
   }
 }
+
 class _CompactMetric extends StatelessWidget {
   const _CompactMetric({
     required this.label,
@@ -1635,6 +1663,17 @@ String _recentRunSubtitle(TradingRun run) {
   final reason = run.reason.trim().isEmpty ? run.result : run.reason;
   final order = run.orderId == null ? 'No order' : 'Order ${run.orderId}';
   return '${formatTimestampWithKst(run.timestamp)} - $order - $reason';
+}
+
+String _homeStockDisplay(DashboardController controller, String symbol) {
+  final text = symbol.trim();
+  if (!controller.isKisSelected && !RegExp(r'^\d{1,6}$').hasMatch(text)) {
+    return text;
+  }
+  return formatKrStockDisplay(
+    text,
+    watchlist: controller.isKisSelected ? controller.krWatchlist : null,
+  );
 }
 
 String _formatMoney(String currency, double value) {

@@ -31,6 +31,7 @@ class WatchlistRunResult {
     required this.reason,
     required this.triggerSource,
     this.operatorSummary,
+    this.createdAt,
   });
 
   final int configuredSymbolCount;
@@ -61,6 +62,7 @@ class WatchlistRunResult {
   final String reason;
   final String triggerSource;
   final WatchlistOperatorSummary? operatorSummary;
+  final String? createdAt;
 
   factory WatchlistRunResult.fromJson(Map<String, dynamic> json) {
     final run = parseMap(json['run']);
@@ -187,6 +189,12 @@ class WatchlistRunResult {
           'manual',
       operatorSummary: WatchlistOperatorSummary.fromJson(
         json['operator_summary'] ?? json['operatorSummary'],
+      ),
+      createdAt: parseNullableString(
+        run?['created_at'] ??
+            run?['timestamp'] ??
+            json['created_at'] ??
+            json['timestamp'],
       ),
     );
   }

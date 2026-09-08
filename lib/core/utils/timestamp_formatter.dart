@@ -15,6 +15,19 @@ String formatTimestampWithKst(String? value, {String fallback = '-'}) {
   return '${parsed.originalDisplay} (KST ${_twoDigits(kst.hour)}:${_twoDigits(kst.minute)})';
 }
 
+/// Parses a backend timestamp as a KST wall-clock value.
+///
+/// Backend timestamps without an explicit offset are UTC-like values. This
+/// keeps the conversion consistent with [formatTimestampWithKst].
+DateTime? parseTimestampToKst(String? value) {
+  final raw = value?.trim() ?? '';
+  if (raw.isEmpty || raw == 'null') return null;
+  final parsed = _ParsedTimestamp.tryParse(raw);
+  return parsed?.utc.add(_kstOffset);
+}
+
+DateTime currentKst() => DateTime.now().toUtc().add(_kstOffset);
+
 class _ParsedTimestamp {
   const _ParsedTimestamp({
     required this.month,

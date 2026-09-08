@@ -25,6 +25,21 @@ void main() {
     );
   });
 
+  test('parses scheduler timestamps into KST for slot matching', () {
+    expect(
+      parseTimestampToKst('2026-09-08T00:34:38'),
+      DateTime.utc(2026, 9, 8, 9, 34, 38),
+    );
+    expect(
+      parseTimestampToKst('2026-09-08T03:03:25'),
+      DateTime.utc(2026, 9, 8, 12, 3, 25),
+    );
+    expect(
+      parseTimestampToKst('2026-09-08T04:33:47'),
+      DateTime.utc(2026, 9, 8, 13, 33, 47),
+    );
+  });
+
   test('keeps fallback behavior for missing or unparseable values', () {
     expect(formatTimestampWithKst(''), '-');
     expect(formatTimestampWithKst(null), '-');

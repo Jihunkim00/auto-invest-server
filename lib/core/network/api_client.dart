@@ -471,14 +471,20 @@ class ApiClient {
     return AutomationStrategyProfileList.fromJson(payload);
   }
 
-  Future<AutomationStrategyProfile> fetchAutomationProfile(int profileId) async {
+  Future<AutomationStrategyProfile> fetchAutomationProfile(
+      int profileId) async {
     final payload = await _getJsonNoCache('/strategy-profiles/$profileId');
     return AutomationStrategyProfile.fromJson(payload);
   }
-  Future<Map<String, dynamic>> fetchAutomationCapitalState(int profileId) async {
-    final payload = await _getJsonNoCache('/strategy-profiles/$profileId/capital-state');
+
+  Future<Map<String, dynamic>> fetchAutomationCapitalState(
+      int profileId) async {
+    final payload =
+        await _getJsonNoCache('/strategy-profiles/$profileId/capital-state');
     final state = payload['capital_state'];
-    return state is Map ? Map<String, dynamic>.from(state) : <String, dynamic>{};
+    return state is Map
+        ? Map<String, dynamic>.from(state)
+        : <String, dynamic>{};
   }
 
   Future<AutomationStrategyProfile> createAutomationProfile(
@@ -493,7 +499,8 @@ class ApiClient {
     return AutomationStrategyProfile.fromJson(payload);
   }
 
-  Future<AutomationStrategyProfile> archiveAutomationProfile(int profileId) async {
+  Future<AutomationStrategyProfile> archiveAutomationProfile(
+      int profileId) async {
     final payload = await _deleteJson('/strategy-profiles/$profileId');
     return AutomationStrategyProfile.fromJson(payload);
   }
@@ -1864,6 +1871,17 @@ class ApiClient {
     } catch (_) {
       return MarketWatchlist.empty(normalizedMarket);
     }
+  }
+
+  /// Read-only current KIS price lookup for a single domestic symbol.
+  Future<Map<String, dynamic>> fetchKisMarketPrice(String symbol) async {
+    final normalized = symbol.trim();
+    if (normalized.isEmpty) {
+      throw const ApiRequestException('A KIS symbol is required.');
+    }
+    return _getJsonNoCache(
+      '/kis/market/price/${Uri.encodeComponent(normalized)}',
+    );
   }
 
   Future<KisManualOrderSafetyStatus> fetchKisManualOrderSafetyStatus() async {

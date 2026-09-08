@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../core/utils/kr_symbol.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/automation_runtime_monitor.dart';
 import '../../../models/portfolio_summary.dart';
@@ -430,136 +431,149 @@ class _PositionTile extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: Material(type: MaterialType.transparency, child: ExpansionTile(
-          key: ValueKey('portfolio-position-card-${position.symbol}'),
-          tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          title: Row(children: [
-            Expanded(
-              child: Text(title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w800)),
-            ),
-            const SizedBox(width: 8),
-            _SoftBadge(text: status, color: _positionStatusColor(status)),
-            if (managedPosition != null &&
-                managedPosition!.statusLabel != status) ...[
-              const SizedBox(width: 6),
-              _SoftBadge(
-                text: managedPosition!.statusLabel,
-                color: _positionStatusColor(managedPosition!.statusLabel),
-              ),
-            ],
-          ]),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Wrap(spacing: 8, runSpacing: 6, children: [
-              _SoftBadge(
-                  text: position.side.toUpperCase(), color: Colors.white70),
-              _SoftBadge(
-                  text: 'Qty ${_quantity(position.qty)}',
-                  color: Colors.white70),
-              _DataPair(
-                  label: 'Current Value',
-                  value: _money(
-                      managedPosition?.currentValue ?? position.marketValue,
-                      currency: currency)),
-              _DataPair(
-                  label: 'P/L',
-                  value: _money(unrealizedPl, currency: currency, signed: true),
-                  color: plColor),
-              _DataPair(
-                  label: 'Profit',
-                  value: _percentOrDash(
-                      managedPosition?.unrealizedPlPct ??
-                          _positionProfitPercent(position, isKr: isKr),
-                      signed: true),
-                  color: plColor),
-              _DataPair(label: 'Main reason', value: reason),
-            ]),
-          ),
-          children: [
-            _PositionDetail(
-              controller: controller,
-              position: position,
-              managementItem: managementItem,
-              managedPosition: managedPosition,
-              currency: currency,
-              isKr: isKr,
-            ),
-            if (managementMode) ...[
-              const SizedBox(height: 12),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                OutlinedButton.icon(
-                  key: ValueKey('refresh-position-${position.symbol}'),
-                  onPressed: controller.portfolioManagementLoading
-                      ? null
-                      : () async {
-                          final result =
-                              await controller.refreshPortfolioManagement();
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                            content: Text(result.message),
-                            backgroundColor:
-                                result.success ? Colors.green : Colors.orange,
-                          ));
-                        },
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('Refresh Positions'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: onReviewPosition,
-                  icon: const Icon(Icons.rate_review_outlined, size: 18),
-                  label: const Text('Review'),
-                ),
-                if (canPrepareManualSell && managedPosition != null)
-                  OutlinedButton.icon(
-                    key: ValueKey('prepare-manual-sell-${position.symbol}'),
-                    onPressed: () async {
-                      final result = await controller
-                          .prepareKisManualSellFromManagedPosition(
-                              managedPosition!);
-                      if (result.success) onOpenManualOrder?.call();
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(result.message),
-                        backgroundColor:
-                            result.success ? Colors.green : Colors.redAccent,
-                      ));
-                    },
-                    icon: const Icon(Icons.request_quote_outlined, size: 18),
-                    label: const Text('Prepare Manual Sell Ticket'),
-                  )
-                else if (isKr &&
-                    managementMode &&
-                    managementItem.manualSellAvailable &&
-                    managedPosition == null)
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      final result =
-                          controller.prepareKisManualSellFromPosition(position);
-                      if (result.success) onOpenManualOrder?.call();
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(result.message),
-                        backgroundColor:
-                            result.success ? Colors.green : Colors.redAccent,
-                      ));
-                    },
-                    icon: const Icon(Icons.request_quote_outlined, size: 18),
-                    label: const Text('Prepare Manual Sell Ticket'),
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: Material(
+              type: MaterialType.transparency,
+              child: ExpansionTile(
+                key: ValueKey('portfolio-position-card-${position.symbol}'),
+                tilePadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                title: Row(children: [
+                  Expanded(
+                    child: Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800)),
                   ),
-              ]),
-              const SizedBox(height: 8),
-              const _StateNote(
-                text:
-                    'Ticket prefill does not validate, check confirm_live, or submit.',
-              ),
-            ],
-          ],
-        )),
+                  const SizedBox(width: 8),
+                  _SoftBadge(text: status, color: _positionStatusColor(status)),
+                  if (managedPosition != null &&
+                      managedPosition!.statusLabel != status) ...[
+                    const SizedBox(width: 6),
+                    _SoftBadge(
+                      text: managedPosition!.statusLabel,
+                      color: _positionStatusColor(managedPosition!.statusLabel),
+                    ),
+                  ],
+                ]),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Wrap(spacing: 8, runSpacing: 6, children: [
+                    _SoftBadge(
+                        text: position.side.toUpperCase(),
+                        color: Colors.white70),
+                    _SoftBadge(
+                        text: 'Qty ${_quantity(position.qty)}',
+                        color: Colors.white70),
+                    _DataPair(
+                        label: 'Current Value',
+                        value: _money(
+                            managedPosition?.currentValue ??
+                                position.marketValue,
+                            currency: currency)),
+                    _DataPair(
+                        label: 'P/L',
+                        value: _money(unrealizedPl,
+                            currency: currency, signed: true),
+                        color: plColor),
+                    _DataPair(
+                        label: 'Profit',
+                        value: _percentOrDash(
+                            managedPosition?.unrealizedPlPct ??
+                                _positionProfitPercent(position, isKr: isKr),
+                            signed: true),
+                        color: plColor),
+                    _DataPair(label: 'Main reason', value: reason),
+                  ]),
+                ),
+                children: [
+                  _PositionDetail(
+                    controller: controller,
+                    position: position,
+                    managementItem: managementItem,
+                    managedPosition: managedPosition,
+                    currency: currency,
+                    isKr: isKr,
+                  ),
+                  if (managementMode) ...[
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 8, runSpacing: 8, children: [
+                      OutlinedButton.icon(
+                        key: ValueKey('refresh-position-${position.symbol}'),
+                        onPressed: controller.portfolioManagementLoading
+                            ? null
+                            : () async {
+                                final result = await controller
+                                    .refreshPortfolioManagement();
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content: Text(result.message),
+                                  backgroundColor: result.success
+                                      ? Colors.green
+                                      : Colors.orange,
+                                ));
+                              },
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('Refresh Positions'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: onReviewPosition,
+                        icon: const Icon(Icons.rate_review_outlined, size: 18),
+                        label: const Text('Review'),
+                      ),
+                      if (canPrepareManualSell && managedPosition != null)
+                        OutlinedButton.icon(
+                          key: ValueKey(
+                              'prepare-manual-sell-${position.symbol}'),
+                          onPressed: () async {
+                            final result = await controller
+                                .prepareKisManualSellFromManagedPosition(
+                                    managedPosition!);
+                            if (result.success) onOpenManualOrder?.call();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(result.message),
+                              backgroundColor: result.success
+                                  ? Colors.green
+                                  : Colors.redAccent,
+                            ));
+                          },
+                          icon: const Icon(Icons.request_quote_outlined,
+                              size: 18),
+                          label: const Text('Prepare Manual Sell Ticket'),
+                        )
+                      else if (isKr &&
+                          managementMode &&
+                          managementItem.manualSellAvailable &&
+                          managedPosition == null)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final result = controller
+                                .prepareKisManualSellFromPosition(position);
+                            if (result.success) onOpenManualOrder?.call();
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text(result.message),
+                              backgroundColor: result.success
+                                  ? Colors.green
+                                  : Colors.redAccent,
+                            ));
+                          },
+                          icon: const Icon(Icons.request_quote_outlined,
+                              size: 18),
+                          label: const Text('Prepare Manual Sell Ticket'),
+                        ),
+                    ]),
+                    const SizedBox(height: 8),
+                    const _StateNote(
+                      text:
+                          'Ticket prefill does not validate, check confirm_live, or submit.',
+                    ),
+                  ],
+                ],
+              )),
         ),
       ),
     );
@@ -1113,31 +1127,35 @@ class _DeveloperPayload extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(type: MaterialType.transparency, child: ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: EdgeInsets.zero,
-      title: const Text('Developer Raw Payload',
-          style: TextStyle(
-              color: Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w800)),
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.22),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: SelectableText(
-            const JsonEncoder.withIndent('  ').convert(payload),
-            style: const TextStyle(
-                color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
-          ),
-        ),
-      ],
-    ));
+    return Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: EdgeInsets.zero,
+          title: const Text('Developer Raw Payload',
+              style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800)),
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: SelectableText(
+                const JsonEncoder.withIndent('  ').convert(payload),
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontFamily: 'monospace'),
+              ),
+            ),
+          ],
+        ));
   }
 }
 
@@ -1210,13 +1228,16 @@ String _positionTitle({
       cleanCompany.toUpperCase() != cleanSymbol.toUpperCase() &&
       cleanCompany.toLowerCase() != 'unknown company';
   if (!hasDistinctCompany) {
-    return cleanSymbol.isNotEmpty ? cleanSymbol : 'Unknown Company';
+    return isKr
+        ? formatKrStockDisplay(cleanSymbol, name: cleanCompany)
+        : (cleanSymbol.isNotEmpty ? cleanSymbol : 'Unknown Company');
   }
 
   final normalizedMarket = market.trim().toUpperCase();
   final normalizedBroker = broker.trim().toLowerCase();
   final isUsAlpaca =
       !isKr && (normalizedMarket == 'US' || normalizedBroker == 'alpaca');
+  if (!isUsAlpaca) return '$cleanCompany ($cleanSymbol)';
   final separator = isUsAlpaca ? ' - ' : ' · ';
   return '$cleanSymbol$separator$cleanCompany';
 }

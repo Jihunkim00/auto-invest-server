@@ -48,6 +48,7 @@ class WatchlistSymbol {
     required this.market,
     this.companyName = '',
     this.marketLabel = '',
+    this.aliases = const [],
   });
 
   factory WatchlistSymbol.fromJson(Map<String, dynamic> json) {
@@ -62,12 +63,20 @@ class WatchlistSymbol {
       symbol,
       'Unknown Company',
     ], symbol: symbol);
+    final aliases = _readStringList([
+      json['aliases'],
+      json['alias'],
+      json['short_name'],
+      json['korean_name'],
+      json['symbol_name'],
+    ]);
     return WatchlistSymbol(
       symbol: symbol,
       name: companyName,
       market: _readString(json['market'], ''),
       companyName: companyName,
       marketLabel: _readString(json['market_label'], ''),
+      aliases: aliases,
     );
   }
 
@@ -76,6 +85,7 @@ class WatchlistSymbol {
   final String market;
   final String companyName;
   final String marketLabel;
+  final List<String> aliases;
 }
 
 int _readInt(Object? value, int fallback) {
@@ -103,4 +113,20 @@ String _firstString(List<Object?> values, {String symbol = ''}) {
     if (text.isNotEmpty) return text;
   }
   return fallback;
+}
+
+List<String> _readStringList(List<Object?> values) {
+  final result = <String>[];
+  for (final value in values) {
+    if (value is List) {
+      for (final item in value) {
+        final text = item?.toString().trim() ?? '';
+        if (text.isNotEmpty && !result.contains(text)) result.add(text);
+      }
+      continue;
+    }
+    final text = value?.toString().trim() ?? '';
+    if (text.isNotEmpty && !result.contains(text)) result.add(text);
+  }
+  return result;
 }

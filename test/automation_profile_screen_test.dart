@@ -58,6 +58,16 @@ class _ProfileClient extends http.BaseClient {
           {'symbol': '005930', 'name': '삼성전자'}
         ]
       };
+    } else if (request.url.path == '/strategy-profiles/1/capital-state') {
+      body = {
+        'capital_state': {
+          'initial_budget_krw': 500000,
+          'cumulative_realized_pnl_krw': -12000,
+          'current_strategy_budget_krw': 488000,
+          'broker_orderable_cash_krw': 450000,
+          'effective_next_entry_budget_krw': 300000,
+        },
+      };
     } else {
       body = profile;
     }
@@ -293,5 +303,40 @@ void main() {
     final end = find.byKey(const ValueKey('automation-profile-end-date'));
     expect(tester.getTopLeft(start).dy, lessThan(tester.getTopLeft(end).dy));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('profile page exposes Korean capital labels and aligned controls',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final client = _ProfileClient();
+    await tester.pumpWidget(MaterialApp(
+      home: AutomationProfileScreen(apiClient: ApiClient(client: client)),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('automation-profile-scroll-view')),
+        findsOneWidget);
+    expect(find.byType(Scrollbar), findsOneWidget);
+    expect(find.byKey(const ValueKey('automation-profile-chevron-1')),
+        findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('automation-profile-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('백엔드 자본 상태'), findsOneWidget);
+    expect(find.text('초기 운용 예산 (KRW)'), findsOneWidget);
+    expect(find.text('누적 실현 손익 (KRW)'), findsOneWidget);
+    expect(find.text('현재 전략 예산 (KRW)'), findsOneWidget);
+    expect(find.text('증권사 주문가능금액 (KRW)'), findsOneWidget);
+    expect(find.text('다음 진입 가능 예산 (KRW)'), findsOneWidget);
+    expect(find.text('₩500,000'), findsOneWidget);
+    expect(find.text('-₩12,000'), findsOneWidget);
+
+    final chevron = find.byKey(const ValueKey('automation-profile-chevron-1'));
+    final play = find.byKey(const ValueKey('automation-profile-activate-1'));
+    final pause = find.byKey(const ValueKey('automation-profile-pause-1'));
+    expect(tester.getSize(chevron), tester.getSize(play));
+    expect(tester.getSize(chevron), tester.getSize(pause));
   });
 }

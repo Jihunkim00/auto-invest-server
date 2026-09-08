@@ -4,9 +4,12 @@ import '../../core/i18n/app_language.dart';
 import '../../core/i18n/app_strings.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/kr_symbol.dart';
+import '../../core/utils/kr_stock_catalog.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_v2_response.dart';
+import '../../models/automation_strategy_profile.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/agent_chat_live_order_confirmation_card.dart';
 
@@ -104,6 +107,7 @@ class _AiScreenState extends State<AiScreen> {
                     _EntryView(
                       entry: entry,
                       strings: strings,
+                      controller: widget.controller,
                       onConfirm: _confirm,
                       onCancel: _cancel,
                     ),
@@ -140,6 +144,17 @@ class _AiScreenState extends State<AiScreen> {
   Future<void> _send() async {
     final text = _input.text.trim();
     if (text.isEmpty || _loading) return;
+    KrStockMatch? resolved;
+    try {
+      await KrStockCatalog.shared.load();
+      resolved = KrStockCatalog.shared.resolve(text);
+    } catch (_) {
+      // Direct lookup is optional UI enrichment; never fall back to the
+      // active automation watchlist as a catalog.
+    }
+    final requestText = resolved == null
+        ? text
+        : '$text\n(종목코드: ${resolved.symbol}, 종목명: ${resolved.name})';
     _input.clear();
     setState(() {
       _error = null;
@@ -147,14 +162,35 @@ class _AiScreenState extends State<AiScreen> {
       _entries.add(_AiEntry.user(text));
     });
     try {
+      final localQuote = await _lookupKrQuote(text, resolved);
+      if (localQuote != null) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _entries.add(_AiEntry.quote(localQuote));
+        });
+        return;
+      }
+
+      final localProfileAnswer = await _lookupAutomationProfile(text);
+      if (localProfileAnswer != null) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _entries.add(_AiEntry.local(localProfileAnswer));
+        });
+        return;
+      }
       final kis = widget.controller.selectedProvider == SelectedProvider.kis;
       final response = await widget.controller.apiClient.sendAgentChatV2Message(
-        message: text,
+        message: requestText,
         conversationKey: _conversationKey,
         context: {
           'default_market': kis ? 'KR' : 'US',
           'default_provider': kis ? 'kis' : 'alpaca',
           'source': 'flutter_ai_v2',
+          if (resolved != null) 'resolved_symbol': resolved.symbol,
+          if (resolved != null) 'resolved_symbol_name': resolved.name,
         },
         language: widget.controller.appLanguage.code,
         locale: widget.controller.appLanguage.localeCode,
@@ -181,6 +217,215 @@ class _AiScreenState extends State<AiScreen> {
         _error = message;
         _entries.add(_AiEntry.error(message));
       });
+    }
+  }
+
+  Future<_LocalQuote?> _lookupKrQuote(
+    String text,
+    KrStockMatch? resolved,
+  ) async {
+    if (resolved == null || !_isClearKrQuoteIntent(text)) return null;
+    try {
+      final data = await widget.controller.apiClient
+          .fetchKisMarketPrice(resolved.symbol);
+      return _LocalQuote(
+        symbol: resolved.symbol,
+        name: _textValue(data['name']) ?? resolved.name,
+        data: data,
+      );
+    } catch (error) {
+      return _LocalQuote(
+        symbol: resolved.symbol,
+        name: resolved.name,
+        error: _formatError(error),
+      );
+    }
+  }
+
+  bool _isClearKrQuoteIntent(String text) {
+    final normalized = text.toLowerCase();
+    const quoteWords = <String>[
+      '\uD604\uC7AC\uAC00',
+      '\uAC00\uACA9',
+      '\uC8FC\uAC00',
+      '\uC2DC\uC138',
+      '\uC5BC\uB9C8',
+      'quote',
+      'price',
+    ];
+    const nonQuoteWords = <String>[
+      '\uBD84\uC11D',
+      '\uD310\uB2E8',
+      '\uB9E4\uC218',
+      '\uB9E4\uB3C4',
+      '\uC8FC\uBB38',
+      '\uC0AC\uC918',
+      '\uC0AC\uACE0 \uC2F6',
+      '\uD314\uC544',
+      'buy',
+      'sell',
+      'order',
+      'analy',
+    ];
+    return quoteWords.any(normalized.contains) &&
+        !nonQuoteWords.any(normalized.contains);
+  }
+
+  String? _textValue(Object? value) {
+    final text = value?.toString().trim();
+    return text == null || text.isEmpty || text == 'null' ? null : text;
+  }
+
+  Future<String?> _lookupAutomationProfile(String text) async {
+    final normalized = text.toLowerCase();
+    final mentionsProfile = normalized.contains('프로필') ||
+        normalized.contains('자동화 프로필') ||
+        normalized.contains('automation profile') ||
+        normalized.contains('automation');
+    final asksReadOnly = normalized.contains('현재') ||
+        normalized.contains('상태') ||
+        normalized.contains('알려') ||
+        normalized.contains('보여') ||
+        normalized.contains('일정') ||
+        normalized.contains('list') ||
+        normalized.contains('status');
+    if (!_isAutomationProfileQuery(text) &&
+        (!mentionsProfile || !asksReadOnly)) {
+      return null;
+    }
+    try {
+      final result =
+          await widget.controller.apiClient.fetchAutomationProfiles();
+      return _formatAutomationProfileAnswer(result, text);
+    } catch (error) {
+      return '\uC790\uB3D9\uD654 \uD504\uB85C\uD544 \uC870\uD68C \uC2E4\uD328: ${_formatError(error)}';
+    }
+  }
+
+  bool _isAutomationProfileQuery(String text) {
+    final normalized = text.toLowerCase();
+    const profileWords = <String>[
+      '\uD504\uB85C\uD544',
+      '\uC790\uB3D9\uD654',
+      '\uC6B4\uC6A9\uD14C\uC2A4\uD2B8',
+      'automation',
+      'profile',
+    ];
+    const lookupWords = <String>[
+      '\uD604\uC7AC',
+      '\uC0C1\uD0DC',
+      '\uC54C\uB824',
+      '\uC870\uD68C',
+      '\uC77C\uC815',
+      '\uAE30\uAC04',
+      '\uBB50\uC57C',
+      'list',
+      'status',
+      'schedule',
+    ];
+    return profileWords.any(normalized.contains) &&
+        lookupWords.any(normalized.contains);
+  }
+
+  String _formatAutomationProfileAnswer(
+    AutomationStrategyProfileList result,
+    String query,
+  ) {
+    final requested = query.toLowerCase();
+    final profiles = result.profiles;
+    final selected = result.selectedProfile ??
+        result.activeProfile ??
+        _firstActiveProfile(profiles);
+    final statusOnly = requested.contains('상태') ||
+        requested.contains('status') ||
+        requested.contains('현재');
+    final named = _findNamedProfile(profiles, requested);
+    if (_looksLikeNamedProfileQuery(requested) && named == null) {
+      return '\uD574\uB2F9 \uC774\uB984\uC758 \uC790\uB3D9\uD654 \uD504\uB85C\uD544\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.';
+    }
+    final items = named != null
+        ? <AutomationStrategyProfile>[named]
+        : statusOnly && selected != null
+            ? <AutomationStrategyProfile>[selected]
+            : profiles;
+    if (items.isEmpty) return '조회된 자동화 프로필이 없습니다.';
+    final lines = <String>['자동화 프로필 조회 결과입니다.'];
+    for (final profile in items) {
+      final operation = profile.operation;
+      final entry = profile.entry;
+      final schedule = entry['analysis_times'];
+      final scheduleText =
+          schedule is List && schedule.isNotEmpty ? schedule.join(', ') : null;
+      final dates = [
+        operation['start_date']?.toString(),
+        operation['end_date']?.toString(),
+      ].where((value) => value?.trim().isNotEmpty == true).join(' ~ ');
+      final details = <String>[
+        '\uC2DC\uC7A5: ${profile.provider.toUpperCase()} / ${profile.market}',
+        '상태: ${_profileStatusLabel(profile.status)}',
+        if (dates.isNotEmpty) '운영 기간: $dates',
+        if (scheduleText != null) '분석 시간: $scheduleText',
+        '최대 보유: ${profile.maxOpenPositions}종목',
+        if (entry['max_new_entries_per_day'] != null)
+          '일일 진입 한도: ${entry['max_new_entries_per_day']}',
+      ];
+      lines.add('${profile.name}: ${details.join(' · ')}');
+    }
+    return lines.join('\n');
+  }
+
+  AutomationStrategyProfile? _firstActiveProfile(
+    List<AutomationStrategyProfile> profiles,
+  ) {
+    for (final profile in profiles) {
+      if (profile.enabled && profile.status.toLowerCase() == 'active') {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  AutomationStrategyProfile? _findNamedProfile(
+    List<AutomationStrategyProfile> profiles,
+    String query,
+  ) {
+    final compactQuery = _compactLookupText(query);
+    for (final profile in profiles) {
+      for (final value in [profile.name, profile.profileKey]) {
+        final compactName = _compactLookupText(value);
+        if (compactName.isNotEmpty && compactQuery.contains(compactName)) {
+          return profile;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _looksLikeNamedProfileQuery(String query) {
+    final compact = _compactLookupText(query);
+    return (compact.contains('profile') ||
+            compact.contains('\uD504\uB85C\uD544')) &&
+        !compact.contains('automationprofile') &&
+        !compact.contains('\uC790\uB3D9\uD654\uD504\uB85C\uD544') &&
+        !compact.contains('status') &&
+        !compact.contains('schedule') &&
+        !compact.contains('\uC0C1\uD0DC') &&
+        !compact.contains('\uC77C\uC815');
+  }
+
+  String _compactLookupText(String value) =>
+      value.toLowerCase().replaceAll(RegExp(r'[\s\-_()./]'), '');
+
+  String _profileStatusLabel(String status) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return '활성';
+      case 'paused':
+        return '일시정지';
+      case 'archived':
+        return '보관';
+      default:
+        return '비활성';
     }
   }
 
@@ -213,16 +458,40 @@ class _AiScreenState extends State<AiScreen> {
   }
 }
 
+class _LocalQuote {
+  const _LocalQuote({
+    required this.symbol,
+    required this.name,
+    this.data = const <String, dynamic>{},
+    this.error,
+  });
+
+  final String symbol;
+  final String name;
+  final Map<String, dynamic> data;
+  final String? error;
+}
+
 class _AiEntry {
-  const _AiEntry({this.userText, this.response, this.error});
+  const _AiEntry({
+    this.userText,
+    this.response,
+    this.error,
+    this.localText,
+    this.localQuote,
+  });
 
   const _AiEntry.user(String value) : this(userText: value);
   const _AiEntry.assistant(AgentChatV2Response value) : this(response: value);
   const _AiEntry.error(String value) : this(error: value);
+  const _AiEntry.local(String value) : this(localText: value);
+  const _AiEntry.quote(_LocalQuote value) : this(localQuote: value);
 
   final String? userText;
   final AgentChatV2Response? response;
   final String? error;
+  final String? localText;
+  final _LocalQuote? localQuote;
 }
 
 class _QuickActions extends StatelessWidget {
@@ -250,17 +519,31 @@ class _QuickActions extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+        spacing: 10,
+        runSpacing: 10,
         children: [
           for (final item in actions.entries)
-            ActionChip(
-              key: ValueKey('ai-quick-' + item.key),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-              materialTapTargetSize: MaterialTapTargetSize.padded,
-              label: Text(labels[item.key] ?? item.key),
-              onPressed: () => onSelected(item.value),
+            SizedBox(
+              height: 46,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: OutlinedButton(
+                  key: ValueKey('ai-quick-' + item.key),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.white.withValues(alpha: 0.07),
+                    side: const BorderSide(color: Colors.white30),
+                    textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    shape: const StadiumBorder(),
+                  ),
+                  onPressed: () => onSelected(item.value),
+                  child: Text(labels[item.key] ?? item.key),
+                ),
+              ),
             ),
         ],
       ),
@@ -297,12 +580,14 @@ class _EntryView extends StatelessWidget {
   const _EntryView({
     required this.entry,
     required this.strings,
+    required this.controller,
     required this.onConfirm,
     required this.onCancel,
   });
 
   final _AiEntry entry;
   final AppStrings strings;
+  final DashboardController controller;
   final Future<void> Function(AgentChatLiveOrderAction) onConfirm;
   final Future<void> Function(AgentChatLiveOrderAction) onCancel;
 
@@ -334,6 +619,25 @@ class _EntryView extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.only(bottom: 10),
         child: _ErrorCard(entry.error!),
+      );
+    }
+    if (entry.localQuote != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _LocalQuoteCard(
+          quote: entry.localQuote!,
+          controller: controller,
+          strings: strings,
+        ),
+      );
+    }
+    if (entry.localText != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: SectionCard(
+          key: const ValueKey('ai-local-assistant-message'),
+          child: Text(entry.localText!, style: const TextStyle(height: 1.4)),
+        ),
       );
     }
     final response = entry.response!;
@@ -376,10 +680,19 @@ class _EntryView extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        if (response.intent == 'quote') _QuoteCard(response, strings: strings),
+        if (response.intent == 'quote')
+          _QuoteCard(
+            response,
+            strings: strings,
+            controller: controller,
+          ),
         if (response.intent == 'analyze' ||
             response.intent == 'market_analysis')
-          _AnalysisCard(response, strings: strings),
+          _AnalysisCard(
+            response,
+            strings: strings,
+            controller: controller,
+          ),
         if (response.intent == 'explain')
           _DecisionCard(response, strings: strings),
         if (response.intent == 'portfolio')
@@ -444,11 +757,60 @@ class _EntryView extends StatelessWidget {
   }
 }
 
+class _LocalQuoteCard extends StatelessWidget {
+  const _LocalQuoteCard({
+    required this.quote,
+    required this.controller,
+    required this.strings,
+  });
+
+  final _LocalQuote quote;
+  final DashboardController controller;
+  final AppStrings strings;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = formatKrStockDisplay(
+      quote.symbol,
+      name: quote.name.isNotEmpty
+          ? quote.name
+          : KrStockCatalog.shared.displayName(quote.symbol),
+    );
+    final price = quote.data['current_price'] ?? quote.data['price'];
+    final rows = <(String, Object)>[
+      (strings.symbolLabel, quote.symbol),
+      if (quote.error != null) ('\uC624\uB958', quote.error!),
+      if (quote.data['change'] != null)
+        ('\uC804\uC77C \uB300\uBE44', _formatKrw(quote.data['change']!)),
+      if (quote.data['change_rate'] != null)
+        ('\uBCC0\uB3D9\uB960', '${quote.data['change_rate']}%'),
+      if (quote.data['timestamp'] != null)
+        (strings.updated, quote.data['timestamp'].toString()),
+      (strings.readOnly, strings.noOrderSubmit),
+    ];
+    return _DataCard(
+      key: const ValueKey('ai-local-quote-card'),
+      title: '$display ${strings.quickQuote}',
+      primary: quote.error == null && price != null
+          ? _formatKrw(price)
+          : quote.error == null
+              ? '\uAC00\uACA9 \uB370\uC774\uD130 \uC5C6\uC74C'
+              : '\uC870\uD68C \uC2E4\uD328',
+      rows: rows,
+    );
+  }
+}
+
 class _QuoteCard extends StatelessWidget {
-  const _QuoteCard(this.response, {required this.strings});
+  const _QuoteCard(
+    this.response, {
+    required this.strings,
+    required this.controller,
+  });
 
   final AgentChatV2Response response;
   final AppStrings strings;
+  final DashboardController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -462,9 +824,16 @@ class _QuoteCard extends StatelessWidget {
         : currency == 'KRW'
             ? '${_group(value)}원'
             : '\$${value.toString()}';
+    final stockDisplay = response.symbol == null
+        ? (response.symbolName ?? '종목')
+        : formatKrStockDisplay(
+            response.symbol!,
+            name: response.symbolName ??
+                KrStockCatalog.shared.displayName(response.symbol!),
+          );
     return _DataCard(
       key: const ValueKey('ai-v2-quote-card'),
-      title: '${response.symbolName ?? response.symbol ?? '종목'} 현재가',
+      title: '$stockDisplay 현재가',
       primary: formatted,
       rows: [
         (strings.symbolLabel, response.symbol ?? '-'),
@@ -487,10 +856,15 @@ class _QuoteCard extends StatelessWidget {
 }
 
 class _AnalysisCard extends StatelessWidget {
-  const _AnalysisCard(this.response, {required this.strings});
+  const _AnalysisCard(
+    this.response, {
+    required this.strings,
+    required this.controller,
+  });
 
   final AgentChatV2Response response;
   final AppStrings strings;
+  final DashboardController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -502,7 +876,13 @@ class _AnalysisCard extends StatelessWidget {
             : 'No additional risk';
     return _DataCard(
       key: const ValueKey('ai-v2-analysis-card'),
-      title: (response.symbolName ?? response.symbol ?? '종목') +
+      title: (response.symbol == null
+              ? (response.symbolName ?? '종목')
+              : formatKrStockDisplay(
+                  response.symbol!,
+                  name: response.symbolName ??
+                      KrStockCatalog.shared.displayName(response.symbol!),
+                )) +
           ' ${strings.analysis}',
       primary: strings.decisionLabel(response.action ?? 'hold'),
       rows: [
@@ -571,6 +951,16 @@ class _PortfolioCard extends StatelessWidget {
       ],
     );
   }
+}
+
+String _formatKrw(Object value) {
+  final number = double.tryParse(value.toString().replaceAll(',', ''));
+  if (number == null) return value.toString();
+  final whole = number.round().toString().replaceAllMapped(
+        RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+        (match) => '${match.group(1)},',
+      );
+  return '\u20a9$whole';
 }
 
 class _DataCard extends StatelessWidget {

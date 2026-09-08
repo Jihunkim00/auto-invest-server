@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_language.dart';
@@ -31,6 +32,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   bool _compoundEnabled = false;
   String? _error;
   bool _busy = false;
+  final _pageScrollController = ScrollController();
   final _nameController = TextEditingController();
   final _startController = TextEditingController(text: _defaultStartDate);
   final _endController = TextEditingController(text: _defaultEndDate);
@@ -70,6 +72,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     ]) {
       controller.dispose();
     }
+    _pageScrollController.dispose();
     super.dispose();
   }
 
@@ -94,7 +97,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 
   Future<void> _loadCapitalState(AutomationStrategyProfile profile) async {
     try {
-      final state = await widget.apiClient.fetchAutomationCapitalState(profile.id);
+      final state =
+          await widget.apiClient.fetchAutomationCapitalState(profile.id);
       if (!mounted || _selected?.id != profile.id) return;
       setState(() => _capitalState = state);
     } catch (_) {
@@ -452,65 +456,103 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1100),
-                child: ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (_error != null)
-                      Text(
-                        _error!,
-                        key: const ValueKey('automation-profile-error'),
-                        style: const TextStyle(color: Colors.orangeAccent),
-                      ),
-                    const Text(
-                      '자동화 프로필은 종목 탐색, 자금 배분, 분석, 모니터링을 정의합니다. 주문 권한과 기존 안전 게이트는 별도로 유지됩니다.',
-                      style: TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 12),
-                    for (final profile in _list?.profiles ??
-                        const <AutomationStrategyProfile>[])
-                      SectionCard(
-                        key: ValueKey('automation-profile-${profile.id}'),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          title: Text(profile.name),
-                          subtitle: Text(
-                              '${profile.provider.toLowerCase() == 'kis' ? '한국투자증권' : '알파카'} / ${profile.market.toUpperCase()} · ${_statusLabel(profile.status)} · 최대 보유 ${profile.maxOpenPositions}종목'),
-                          trailing: Wrap(
-                            spacing: 0,
-                            children: [
-                              IconButton(
-                                key: ValueKey(
-                                    'automation-profile-activate-${profile.id}'),
-                                tooltip: '프로필 활성화',
-                                onPressed: _busy ||
-                                        profile.status == 'active' ||
-                                        _isArmed(profile)
-                                    ? null
-                                    : () => _activate(profile),
-                                icon: const Icon(Icons.play_arrow_outlined),
-                              ),
-                              IconButton(
-                                key: ValueKey(
-                                    'automation-profile-pause-${profile.id}'),
-                                tooltip: '프로필 일시정지',
-                                onPressed: _busy ||
-                                        (!_isSelected(profile) &&
-                                            profile.status != 'active')
-                                    ? null
-                                    : () => _pause(profile),
-                                icon: const Icon(Icons.pause_outlined),
-                              ),
-                              const Icon(Icons.chevron_right),
-                            ],
-                          ),
-                          onTap: () => _edit(profile),
+                child: Scrollbar(
+                  controller: _pageScrollController,
+                  thumbVisibility: kIsWeb ||
+                      defaultTargetPlatform == TargetPlatform.windows ||
+                      defaultTargetPlatform == TargetPlatform.macOS ||
+                      defaultTargetPlatform == TargetPlatform.linux,
+                  child: ListView(
+                    key: const ValueKey('automation-profile-scroll-view'),
+                    controller: _pageScrollController,
+                    primary: false,
+                    padding: const EdgeInsets.all(16),
+                    children: [
+                      if (_error != null)
+                        Text(
+                          _error!,
+                          key: const ValueKey('automation-profile-error'),
+                          style: const TextStyle(color: Colors.orangeAccent),
                         ),
+                      const Text(
+                        '자동화 프로필은 종목 탐색, 자금 배분, 분석, 모니터링을 정의합니다. 주문 권한과 기존 안전 게이트는 별도로 유지됩니다.',
+                        style: TextStyle(color: Colors.white70),
                       ),
-                    const SizedBox(height: 16),
-                    _editor(context),
-                  ],
+                      const SizedBox(height: 12),
+                      for (final profile in _list?.profiles ??
+                          const <AutomationStrategyProfile>[])
+                        SectionCard(
+                          key: ValueKey('automation-profile-${profile.id}'),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(profile.name),
+                            subtitle: Text(
+                                '${profile.provider.toLowerCase() == 'kis' ? '한국투자증권' : '알파카'} / ${profile.market.toUpperCase()} · ${_statusLabel(profile.status)} · 최대 보유 ${profile.maxOpenPositions}종목'),
+                            trailing: Wrap(
+                              spacing: 0,
+                              children: [
+                                SizedBox.square(
+                                    dimension: 40,
+                                    child: IconButton(
+                                      key: ValueKey(
+                                          'automation-profile-activate-${profile.id}'),
+                                      tooltip: '프로필 활성화',
+                                      onPressed: _busy ||
+                                              profile.status == 'active' ||
+                                              _isArmed(profile)
+                                          ? null
+                                          : () => _activate(profile),
+                                      icon:
+                                          const Icon(Icons.play_arrow_outlined),
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                              width: 40, height: 40),
+                                      visualDensity: VisualDensity.standard,
+                                    )),
+                                SizedBox.square(
+                                    dimension: 40,
+                                    child: IconButton(
+                                      key: ValueKey(
+                                          'automation-profile-pause-${profile.id}'),
+                                      tooltip: '프로필 일시정지',
+                                      onPressed: _busy ||
+                                              (!_isSelected(profile) &&
+                                                  profile.status != 'active')
+                                          ? null
+                                          : () => _pause(profile),
+                                      icon: const Icon(Icons.pause_outlined),
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                              width: 40, height: 40),
+                                      visualDensity: VisualDensity.standard,
+                                    )),
+                                SizedBox.square(
+                                  dimension: 40,
+                                  child: IconButton(
+                                    key: ValueKey(
+                                        'automation-profile-chevron-${profile.id}'),
+                                    tooltip: '프로필 편집',
+                                    onPressed: () => _edit(profile),
+                                    icon: const Icon(Icons.chevron_right),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints.tightFor(
+                                        width: 40, height: 40),
+                                    visualDensity: VisualDensity.standard,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            onTap: () => _edit(profile),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      _editor(context),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -532,19 +574,31 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 
   String _capitalValue(String key) {
     final value = _capitalState[key];
-    if (value == null) return '—';
-    if (value is num) return value.toStringAsFixed(2);
+    if (value == null) return '-';
+    if (value is num) return _formatKrw(value);
+    final parsed = double.tryParse(value.toString().replaceAll(',', ''));
+    if (parsed != null) return _formatKrw(parsed);
     return value.toString();
+  }
+
+  String _formatKrw(num value) {
+    final digits = value.round().abs().toString();
+    final grouped = digits.replaceAllMapped(
+      RegExp(r'\B(?=(\d{3})+(?!\d))'),
+      (_) => ',',
+    );
+    final sign = value < 0 ? '-' : '';
+    return '$sign₩$grouped';
   }
 
   Widget _capitalStateView() {
     if (_capitalState.isEmpty) return const SizedBox.shrink();
     const rows = <MapEntry<String, String>>[
-      MapEntry('Initial budget (KRW)', 'initial_budget_krw'),
-      MapEntry('Cumulative realized P/L (KRW)', 'cumulative_realized_pnl_krw'),
-      MapEntry('Current strategy budget (KRW)', 'current_strategy_budget_krw'),
-      MapEntry('Broker orderable cash (KRW)', 'broker_orderable_cash_krw'),
-      MapEntry('Effective next entry budget (KRW)', 'effective_next_entry_budget_krw'),
+      MapEntry('초기 운용 예산 (KRW)', 'initial_budget_krw'),
+      MapEntry('누적 실현 손익 (KRW)', 'cumulative_realized_pnl_krw'),
+      MapEntry('현재 전략 예산 (KRW)', 'current_strategy_budget_krw'),
+      MapEntry('증권사 주문가능금액 (KRW)', 'broker_orderable_cash_krw'),
+      MapEntry('다음 진입 가능 예산 (KRW)', 'effective_next_entry_budget_krw'),
     ];
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -558,16 +612,26 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Backend capital state'),
+              const Text('백엔드 자본 상태'),
               const SizedBox(height: 8),
               for (final row in rows)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(row.key, style: const TextStyle(color: Colors.white70)),
-                      Text(_capitalValue(row.value)),
+                      Expanded(
+                        child: Text(
+                          row.key,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          _capitalValue(row.value),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -577,6 +641,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       ),
     );
   }
+
   Widget _editor(BuildContext context) {
     return SectionCard(
       key: const ValueKey('automation-profile-editor'),

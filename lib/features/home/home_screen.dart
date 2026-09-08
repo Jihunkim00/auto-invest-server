@@ -6,6 +6,7 @@ import '../../core/widgets/section_card.dart';
 import '../../models/portfolio_summary.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
+import '../dashboard/widgets/home_latest_ai_decision_card.dart';
 
 /// User-facing Home surface. Advanced diagnostics and raw runtime controls stay
 /// behind Admin; this screen only reports the effective operation state.
@@ -15,11 +16,13 @@ class HomeScreen extends StatelessWidget {
     required this.controller,
     this.onOpenAdmin,
     this.onOpenAutomationProfile,
+    this.nowKst,
   });
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
   final VoidCallback? onOpenAutomationProfile;
+  final DateTime Function()? nowKst;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +50,7 @@ class HomeScreen extends StatelessWidget {
               const SizedBox(height: 12),
               _PositionsCard(controller: controller),
               const SizedBox(height: 12),
-              _DecisionCard(controller: controller),
+              _DecisionCard(controller: controller, nowKst: nowKst),
               if (controller.error != null) ...[
                 const SizedBox(height: 12),
                 _InlineNotice(
@@ -850,47 +853,14 @@ class _PositionsCard extends StatelessWidget {
 }
 
 class _DecisionCard extends StatelessWidget {
-  const _DecisionCard({required this.controller});
+  const _DecisionCard({required this.controller, this.nowKst});
 
   final DashboardController controller;
+  final DateTime Function()? nowKst;
 
   @override
   Widget build(BuildContext context) {
-    final strings = controller.strings;
-    final run = controller.runResult;
-    final action = strings.decisionLabel(run.action);
-    final candidate = run.finalBestCandidate.trim().isEmpty
-        ? strings.noCandidateYet
-        : run.finalBestCandidate;
-    final reason = run.triggerBlockReason.trim().isEmpty
-        ? run.reason.trim().isEmpty
-            ? strings.askAiForAnalysis
-            : run.reason
-        : run.triggerBlockReason;
-    return SectionCard(
-      key: const ValueKey('home-decision-card'),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(strings.latestDecision,
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(action,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w900)),
-              const SizedBox(width: 10),
-              Expanded(child: Text(candidate, softWrap: true)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(reason,
-              style: const TextStyle(color: Colors.white70, height: 1.35)),
-        ],
-      ),
-    );
+    return HomeLatestAiDecisionCard(controller: controller, nowKst: nowKst);
   }
 }
 

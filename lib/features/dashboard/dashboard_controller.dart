@@ -8,6 +8,7 @@ import '../../core/network/api_client.dart';
 import '../../core/network/api_error_formatter.dart';
 import '../../core/storage_provider_preference.dart';
 import '../../core/utils/kr_symbol.dart';
+import '../../core/utils/kr_stock_catalog.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_live_order_readiness.dart';
@@ -181,6 +182,8 @@ class DashboardController extends ChangeNotifier {
   List<TradingLogItem> automationRecentRuns = const [];
   List<OrderLogItem> automationRecentOrders = const [];
   List<SignalLogItem> automationRecentSignals = const [];
+  bool homeRecentActivityLoaded = false;
+  String? homeRecentActivityError;
   List<AutomationEvent> localAutomationEvents = const [];
   List<PortfolioPositionManagementItem> portfolioManagementItems = const [];
   bool portfolioManagementLoading = false;
@@ -633,6 +636,12 @@ class DashboardController extends ChangeNotifier {
     loading = true;
     notifyListeners();
     try {
+      try {
+        await KrStockCatalog.shared.load();
+      } catch (_) {
+        // The lookup catalog is a UI convenience; automation loading remains
+        // independent if the local asset is unavailable.
+      }
       await _restoreProviderPreference();
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
@@ -678,11 +687,13 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<void> _loadHomeRecentActivity() async {
+    var hadError = false;
     try {
       final runs = await apiClient.fetchRecentRuns(limit: 3);
       automationRecentRuns = runs;
       recentRuns = runs.map(_tradingRunFromLog).toList();
     } catch (_) {
+      hadError = true;
       automationRecentRuns = const [];
       recentRuns = const [];
     }
@@ -690,8 +701,13 @@ class DashboardController extends ChangeNotifier {
     try {
       automationRecentOrders = await apiClient.fetchRecentOrders(limit: 3);
     } catch (_) {
+      hadError = true;
       automationRecentOrders = const [];
     }
+
+    homeRecentActivityLoaded = true;
+    homeRecentActivityError =
+        hadError ? 'Recent scheduler activity could not be loaded.' : null;
   }
 
   Future<ActionResult> refreshSchedulerStatus({bool silent = false}) async {
@@ -1494,6 +1510,20 @@ class DashboardController extends ChangeNotifier {
     await loadMarketWatchlists(contextVersion: version);
     await _refreshPortfolioSummaries(contextVersion: version);
     if (version != _providerContextVersion) return;
+    try {
+      final latestRun = await apiClient.fetchLatestWatchlistRunResult();
+      if (version != _providerContextVersion) return;
+      if (latestRun == null) {
+        runResult = _emptyRunResult;
+        hasLatestRunResult = false;
+      } else {
+        runResult = latestRun;
+        hasLatestRunResult = true;
+        showingOfflineFallback = false;
+      }
+    } catch (_) {
+      // Keep the last result when a provider switch races a transient refresh.
+    }
     _rebuildPortfolioManagementItems();
     notifyListeners();
   }

@@ -33,7 +33,7 @@ void main() {
     expect(find.text('TRADING DISABLED'), findsOneWidget);
     expect(find.text('예수금'), findsOneWidget);
     expect(find.text('₩30,000'), findsOneWidget);
-    expect(find.textContaining('005930 ·'), findsOneWidget);
+    expect(find.textContaining('(005930)'), findsOneWidget);
     expect(find.text('₩1,200,000'), findsWidgets);
     expect(find.text(r'$1,000.00'), findsNothing);
 
@@ -204,7 +204,7 @@ void main() {
     controller.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(find.text('005930 · Samsung Electronics'), findsOneWidget);
+    expect(find.text('Samsung Electronics (005930)'), findsOneWidget);
     expect(find.text('SELL READY'), findsOneWidget);
     expect(find.text('Technical Snapshot'), findsNothing);
     expect(find.textContaining('raw_marker'), findsNothing);
@@ -380,7 +380,7 @@ void main() {
     controller.notifyListeners();
     await tester.pumpAndSettle();
 
-    expect(find.text('091810'), findsOneWidget);
+    expect(find.text('종목명 미확인 (091810)'), findsOneWidget);
     expect(find.textContaining('091810 · 091810'), findsNothing);
     expect(find.textContaining('Unknown Company'), findsNothing);
 

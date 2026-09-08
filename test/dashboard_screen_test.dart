@@ -1275,7 +1275,7 @@ void main() {
     expect(find.text('Current Holdings'), findsOneWidget);
     expect(find.byKey(const ValueKey('portfolio-position-card-005930')),
         findsOneWidget);
-    expect(find.textContaining('005930 · Samsung Electronics'), findsOneWidget);
+    expect(find.textContaining('Samsung Electronics (005930)'), findsOneWidget);
     expect(find.textContaining('Samsung Electronics'), findsOneWidget);
   });
 
@@ -1298,18 +1298,18 @@ void main() {
         tester, const Key('home_compact_portfolio_summary_card'));
 
     final card = find.byKey(const Key('home_compact_portfolio_summary_card'));
-    expect(find.descendant(of: card, matching: find.text('총자산')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('총자산')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('보유주식 평가액')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('예수금')),
-        findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('주문가능')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('예수금')), findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('주문가능')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('₩306,130')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('₩0')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('₩0')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('₩103,455')),
         findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('종목 선택 후 계산')),

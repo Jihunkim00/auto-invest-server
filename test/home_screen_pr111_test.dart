@@ -5,12 +5,101 @@ import 'package:http/http.dart' as http;
 import 'package:auto_invest_dashboard/core/i18n/app_language.dart';
 import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/core/theme/app_theme.dart';
+import 'package:auto_invest_dashboard/core/utils/kr_stock_catalog.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/features/home/home_screen.dart';
 import 'package:auto_invest_dashboard/models/ops_settings.dart';
+import 'package:auto_invest_dashboard/models/market_watchlist.dart';
+import 'package:auto_invest_dashboard/models/log_items.dart';
 import 'package:auto_invest_dashboard/models/portfolio_summary.dart';
+import 'package:auto_invest_dashboard/models/scheduler_status.dart';
+import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 
 void main() {
+  testWidgets('real Home latest AI card opens its detail dialog',
+      (tester) async {
+    await KrStockCatalog.shared.load();
+    final controller = _controller()
+      ..krWatchlist = MarketWatchlist.fromJson({
+        'market': 'KR',
+        'symbols': [
+          {'symbol': '267250', 'name': 'HD현대일렉트릭'},
+        ],
+      })
+      ..runResult = WatchlistRunResult.fromJson({
+        'final_ranked_candidates': [
+          {
+            'symbol': '267250',
+            'company_name': 'HD현대일렉트릭',
+            'gpt_buy_score': 79,
+            'quant_score': 61.8,
+            'final_entry_score': 62,
+            'reason': '프로필 최소 매수 점수 미달',
+            'block_reason': 'below_profile_buy_threshold',
+          },
+        ],
+        'trigger_block_reason': 'below_profile_buy_threshold',
+        'run': {
+          'created_at': '2026-09-08T04:33:47',
+        },
+      })
+      ..schedulerStatus = SchedulerStatus.fromJson({
+        'profile_analysis_times': ['09:30', '12:00', '13:30'],
+      })
+      ..automationRecentRuns = [
+        _homeRun(
+          symbol: '005930',
+          createdAt: '2026-09-08T00:34:38',
+          reason: 'morning candidate',
+        ),
+        _homeRun(
+          symbol: '000660',
+          createdAt: '2026-09-08T03:03:25',
+          reason: 'midday candidate',
+        ),
+        _homeRun(
+          symbol: '267250',
+          createdAt: '2026-09-08T04:33:47',
+          reason: 'below_profile_buy_threshold',
+        ),
+      ]
+      ..homeRecentActivityLoaded = true;
+
+    await tester.pumpWidget(_app(HomeScreen(
+      controller: controller,
+      nowKst: () => DateTime(2026, 9, 8, 13, 40),
+    )));
+    await tester.pumpAndSettle();
+
+    final card =
+        find.byKey(const ValueKey('home-latest-ai-decision-card-surface'));
+    await tester.dragUntilVisible(
+      card,
+      find.byKey(const ValueKey('home-simple-scroll-view')),
+      const Offset(0, -500),
+    );
+    expect(card, findsOneWidget);
+    await tester.tap(card);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('home-ai-decision-detail-dialog')),
+        findsOneWidget);
+    expect(find.textContaining('(267250)'), findsWidgets);
+    await tester.tap(
+      find.byKey(const ValueKey('home-ai-slot-13:30')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('(267250)'), findsWidgets);
+    expect(
+        find.byKey(const ValueKey('home-ai-blocked-reason')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('home-ai-detail-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('home-ai-decision-detail-dialog')),
+        findsNothing);
+    controller.dispose();
+  });
+
   testWidgets('home exposes an explicit account loading state', (tester) async {
     final controller = _controller();
 
@@ -58,24 +147,24 @@ void main() {
     await tester.pumpWidget(_app(HomeScreen(controller: controller)));
 
     final card = find.byKey(const ValueKey('home-portfolio-card'));
-    expect(find.descendant(of: card, matching: find.text('총자산')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('총자산')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('₩306,130')),
         findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('보유주식 평가액')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('₩0')),
-        findsNWidgets(2));
-    expect(find.descendant(of: card, matching: find.text('예수금')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('₩0')), findsNWidgets(2));
+    expect(
+        find.descendant(of: card, matching: find.text('예수금')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('₩103,455')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('주문가능')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('주문가능')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('종목 선택 후 계산')),
         findsOneWidget);
-    expect(find.descendant(of: card, matching: find.text('평가손익')),
-        findsOneWidget);
+    expect(
+        find.descendant(of: card, matching: find.text('평가손익')), findsOneWidget);
     expect(find.descendant(of: card, matching: find.text('₩203,454')),
         findsNothing);
 
@@ -202,6 +291,28 @@ Widget _app(Widget child) {
 
 DashboardController _controller() =>
     DashboardController(_FakeApiClient(), autoload: false);
+
+TradingLogItem _homeRun({
+  required String symbol,
+  required String createdAt,
+  required String reason,
+}) {
+  return TradingLogItem(
+    id: symbol.hashCode,
+    runKey: 'home-$symbol-$createdAt',
+    provider: 'kis',
+    market: 'KR',
+    symbol: symbol,
+    triggerSource: 'scheduler',
+    mode: 'watchlist_trade_trigger',
+    action: 'hold',
+    result: 'skipped',
+    reason: reason,
+    relatedOrderId: null,
+    createdAt: createdAt,
+    gateLevel: 2,
+  );
+}
 
 const _summary = PortfolioSummary(
   currency: 'KRW',

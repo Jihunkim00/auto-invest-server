@@ -5,6 +5,8 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/ai/ai_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/agent_chat_v2_response.dart';
+import 'package:auto_invest_dashboard/models/automation_strategy_profile.dart';
+import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 
 void main() {
   testWidgets('AI quick action renders analysis card from V2 response',
@@ -20,7 +22,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('ai-quick-종목 분석')));
     await tester.pumpAndSettle();
 
-    expect(api.messages, ['삼성전자 분석해줘']);
+    expect(api.messages, hasLength(1));
+    expect(api.messages.single, startsWith('삼성전자 분석해줘'));
     expect(
         find.byKey(const ValueKey('ai-v2-assistant-message')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-v2-analysis-card')), findsOneWidget);
@@ -70,7 +73,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(ActionChip), findsNWidgets(5));
+    expect(find.byType(ActionChip), findsNothing);
+    expect(find.byType(OutlinedButton), findsNWidgets(5));
+    for (var index = 0; index < 5; index++) {
+      expect(
+        tester.getSize(find.byType(OutlinedButton).at(index)).height,
+        greaterThanOrEqualTo(46),
+      );
+    }
     await tester.enterText(
       find.byKey(const ValueKey('ai-v2-input')),
       '삼성전자 최근 실적과 위험 요인을 자세히 설명해 주세요. '
@@ -86,13 +96,144 @@ void main() {
     expect(tester.takeException(), isNull);
     controller.dispose();
   });
+
+  testWidgets('AI resolves catalog Korean names outside the active watchlist',
+      (tester) async {
+    final api = _FakeV2Api(
+      kisPrices: {
+        '000660': {
+          'symbol': '000660',
+          'current_price': 123456,
+          'timestamp': '2026-09-08T13:30:00+09:00',
+        },
+      },
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..krWatchlist = MarketWatchlist.empty('KR');
+
+    await tester
+        .pumpWidget(MaterialApp(home: AiScreen(controller: controller)));
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-v2-input')),
+      'SK하이닉스 현재가 알려줘',
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
+    await tester.pumpAndSettle();
+
+    expect(api.priceSymbols, ['000660']);
+    expect(api.messages, isEmpty);
+    expect(find.byKey(const ValueKey('ai-local-quote-card')), findsOneWidget);
+    expect(find.textContaining('SK'), findsWidgets);
+    expect(find.textContaining('(000660)'), findsWidgets);
+    expect(find.textContaining('123,456'), findsOneWidget);
+    controller.dispose();
+  });
+
+  testWidgets('AI routes Hyundai Construction quotes through KIS directly',
+      (tester) async {
+    final api = _FakeV2Api(
+      kisPrices: {
+        '000720': {'symbol': '000720', 'current_price': 70000},
+      },
+    );
+    final controller = DashboardController(api, autoload: false)
+      ..krWatchlist = MarketWatchlist.fromJson({
+        'market': 'KR',
+        'symbols': [
+          {'symbol': '000720', 'name': '현대건설'},
+        ],
+      });
+
+    await tester
+        .pumpWidget(MaterialApp(home: AiScreen(controller: controller)));
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-v2-input')),
+      '현대건설 가격 알려줘',
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
+    await tester.pumpAndSettle();
+
+    expect(api.priceSymbols, ['000720']);
+    expect(api.messages, isEmpty);
+    expect(find.textContaining('(000720)'), findsWidgets);
+    controller.dispose();
+  });
+
+  testWidgets('AI answers read-only automation profile lookup locally',
+      (tester) async {
+    final api = _FakeV2Api(automationProfiles: true);
+    final controller = DashboardController(api, autoload: false);
+
+    await tester
+        .pumpWidget(MaterialApp(home: AiScreen(controller: controller)));
+    await tester.enterText(
+      find.byKey(const ValueKey('ai-v2-input')),
+      '현재 자동화 프로필 상태 알려줘',
+    );
+    await tester.tap(find.byKey(const ValueKey('ai-v2-send')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('ai-local-assistant-message')),
+        findsOneWidget);
+    expect(find.textContaining('demo profile'), findsOneWidget);
+    expect(api.profileCalls, 1);
+    expect(api.messages, isEmpty);
+    controller.dispose();
+  });
 }
 
 class _FakeV2Api extends ApiClient {
-  _FakeV2Api({this.tradePrepare = false});
+  _FakeV2Api({
+    this.tradePrepare = false,
+    this.automationProfiles = false,
+    this.kisPrices = const {},
+  });
 
   final bool tradePrepare;
+  final bool automationProfiles;
+  final Map<String, Map<String, dynamic>> kisPrices;
   final List<String> messages = [];
+  final List<Map<String, dynamic>> contexts = [];
+  final List<String> priceSymbols = [];
+  int profileCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>> fetchKisMarketPrice(String symbol) async {
+    priceSymbols.add(symbol);
+    final result = kisPrices[symbol];
+    if (result == null) throw const ApiRequestException('missing quote');
+    return Map<String, dynamic>.from(result);
+  }
+
+  @override
+  Future<AutomationStrategyProfileList> fetchAutomationProfiles() async {
+    profileCalls += 1;
+    if (!automationProfiles) throw const ApiRequestException('not configured');
+    return AutomationStrategyProfileList.fromJson({
+      'profiles': [
+        {
+          'id': 1,
+          'profile_key': 'demo',
+          'name': 'demo profile',
+          'provider': 'kis',
+          'market': 'KR',
+          'status': 'active',
+          'enabled': true,
+          'settings': {
+            'max_open_positions': 2,
+            'entry': {
+              'analysis_times': ['09:30', '13:30'],
+              'max_new_entries_per_day': 1,
+            },
+            'operation': {
+              'start_date': '2026-09-01',
+              'end_date': '2026-09-30',
+            },
+          },
+        },
+      ],
+    });
+  }
 
   @override
   Future<AgentChatV2Response> sendAgentChatV2Message({
@@ -104,6 +245,7 @@ class _FakeV2Api extends ApiClient {
     String locale = 'ko-KR',
   }) async {
     messages.add(message);
+    contexts.add(Map<String, dynamic>.from(context ?? const {}));
     return AgentChatV2Response.fromJson(
       tradePrepare
           ? {
