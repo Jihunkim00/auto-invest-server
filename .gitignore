@@ -8,6 +8,8 @@ build/
 auto_invest.db
 *.db
 data/
+!assets/data/
+!assets/data/watchlist_kr_all.json
 logs/
 artifacts/
 .tmp_pytest*/
@@ -30,6 +32,7 @@ config/watchlist_kr.backup*.yaml
 config/watchlist_kr.stage3.*.yaml
 config/watchlist_kr.stage3.before_*.yaml
 config/watchlist_kr.stage3.universe100.yaml
+config/watchlist*.yaml
 
 # Keep Flutter Logs feature source tracked
 !lib/features/logs/
