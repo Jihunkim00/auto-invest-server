@@ -1,6 +1,42 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, Text, Boolean, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from app.db.database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(80), nullable=False, unique=True, index=True)
+    password_hash = Column(Text, nullable=True)
+    role = Column(String(30), nullable=False, default="admin", index=True)
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    setup_completed = Column(Boolean, nullable=False, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class BrokerAuthToken(Base):

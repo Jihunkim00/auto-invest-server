@@ -1,3 +1,4 @@
+from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
 
@@ -56,6 +57,17 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./auto_invest.db"
     log_dir: str = "logs"
     config_dir: str = DEFAULT_CONFIG_DIR
+
+    # PR122-A admin shell authentication. The setup code is accepted only by
+    # /auth/setup and is never persisted in the database.
+    initial_user_setup_code: str = "autoinvest테스터"
+    session_cookie_name: str = "auto_invest_session"
+    session_cookie_secure: bool = False
+    session_ttl_seconds: int = 60 * 60 * 24 * 7
+
+    @property
+    def session_ttl(self) -> timedelta:
+        return timedelta(seconds=max(60, self.session_ttl_seconds))
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.6-luna"

@@ -9,9 +9,14 @@ import '../logs/logs_screen.dart';
 import '../settings/settings_screen.dart';
 
 class AdminScreen extends StatelessWidget {
-  const AdminScreen({super.key, required this.controller});
+  const AdminScreen({
+    super.key,
+    required this.controller,
+    this.onLogout,
+  });
 
   final DashboardController controller;
+  final Future<void> Function()? onLogout;
 
   void _open(BuildContext context, Widget screen) {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
@@ -102,7 +107,10 @@ class AdminScreen extends StatelessWidget {
                 title: 'Settings',
                 onTap: () => _open(
                   context,
-                  SettingsScreen(controller: controller),
+                  SettingsScreen(
+                    controller: controller,
+                    onLogout: onLogout,
+                  ),
                 ),
               ),
             ],

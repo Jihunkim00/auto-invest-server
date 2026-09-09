@@ -115,7 +115,12 @@ class AutomationProfileService:
             .first()
         )
 
-    def get_active_profile(self, db: Session) -> dict[str, Any] | None:
+    def get_active_profile(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
         runtime = self.runtime_settings.get_settings_read_only(db)
         active_key = str(runtime.get('active_automation_profile_key') or '').strip().lower()
         if not active_key:
@@ -124,7 +129,7 @@ class AutomationProfileService:
             row = self.get(db, active_key)
         except AutomationProfileNotFound:
             return None
-        profile = self.serialize(row)
+        profile = self.serialize(row, now=now)
         if profile.get('status') != 'active' or profile.get('enabled') is not True:
             return None
         return profile
@@ -186,7 +191,7 @@ class AutomationProfileService:
                 cursor += timedelta(days=1)
         return {
             "selected": True,
-            "profile": self.serialize(row),
+            "profile": self.serialize(row, now=local_now),
             "profile_key": row.profile_key,
             "status": status,
             "timezone": timezone_name,
@@ -450,7 +455,12 @@ class AutomationProfileService:
         db.refresh(row)
         return {'profile': self.serialize(row), 'universe': candidate['universe'], 'safety': _profile_safety(setting_changed=True)}
 
-    def serialize(self, row: StrategyProfile) -> dict[str, Any]:
+    def serialize(
+        self,
+        row: StrategyProfile,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         settings = self._settings(row)
         effective = effective_profile_settings(settings, provider=row.provider or 'kis', market=row.market or 'KR')
         return {
@@ -461,7 +471,7 @@ class AutomationProfileService:
             'provider': row.provider or 'kis',
             'market': row.market or 'KR',
             'enabled': bool(row.enabled),
-            'status': self._status(row),
+            'status': self._status(row, now=now),
             'settings': settings,
             'effective_settings': effective,
             'safety_hard_floors': TEST4_HARD_SAFETY,

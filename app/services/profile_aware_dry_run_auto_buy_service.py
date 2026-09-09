@@ -104,10 +104,10 @@ class ProfileAwareDryRunAutoBuyService:
             else (
                 self.strategy_profiles.get_profile(db, payload.profile_name)
                 if payload.profile_name
-                else self.strategy_profiles.active_profile(db)
+                else self.strategy_profiles.active_profile(db, now=now_utc)
             )
         )
-        profile = self.strategy_profiles.serialize_profile(profile_row)
+        profile = self.strategy_profiles.serialize_profile(profile_row, now=now_utc)
         legacy_profile_name = (
             payload.profile_name
             or self.strategy_profiles.legacy_active_profile(db).profile_name

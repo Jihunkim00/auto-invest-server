@@ -217,8 +217,13 @@ class AutomationProfileBuySchedulerService:
             'source_of_truth': 'automation_profile_live_order_gate',
         }
 
-    def _active_profile(self, db: Session) -> dict[str, Any]:
-        profile = self.strategy_profiles.get_active_profile(db)
+    def _active_profile(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        profile = self.strategy_profiles.get_active_profile(db, now=now)
         return dict(profile) if isinstance(profile, dict) else {}
 
     def _position_priority(self, db: Session) -> bool:
@@ -230,7 +235,7 @@ class AutomationProfileBuySchedulerService:
 
     def readiness(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _utc(now)
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now=now_utc)
         runtime = self.runtime_settings.get_settings_read_only(db)
         settings = _profile_settings(profile)
         gate = self.live_order_gate(db)
@@ -296,7 +301,7 @@ class AutomationProfileBuySchedulerService:
         trusted_scheduler_authority: bool = False,
     ) -> dict[str, Any]:
         now_utc = _utc(now)
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now=now_utc)
         if (
             not trusted_scheduler_authority
             and not str(trigger_source).lower().startswith(

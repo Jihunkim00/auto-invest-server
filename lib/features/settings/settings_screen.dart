@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/i18n/app_language.dart';
+import '../../core/network/api_client.dart';
 import '../../core/widgets/confirm_action_dialog.dart';
 import '../../core/widgets/section_card.dart';
 import '../dashboard/dashboard_controller.dart';
@@ -10,9 +11,14 @@ import 'widgets/automation_mode_control_panel.dart';
 import 'widgets/automation_release_control_panel.dart';
 
 class SettingsScreen extends StatelessWidget {
-  const SettingsScreen({super.key, required this.controller});
+  const SettingsScreen({
+    super.key,
+    required this.controller,
+    this.onLogout,
+  });
 
   final DashboardController controller;
+  final Future<void> Function()? onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -63,10 +69,218 @@ class SettingsScreen extends StatelessWidget {
               _ExitRulesCard(controller: controller),
               const SizedBox(height: 12),
               _AdvancedFlagsCard(controller: controller),
+              if (onLogout != null) ...[
+                const SizedBox(height: 12),
+                _AccountCard(
+                  controller: controller,
+                  onLogout: onLogout!,
+                ),
+              ],
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _AccountCard extends StatelessWidget {
+  const _AccountCard({
+    required this.controller,
+    required this.onLogout,
+  });
+
+  final DashboardController controller;
+  final Future<void> Function() onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    return SectionCard(
+      key: const ValueKey('settings-account-card'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const _CardHeader(
+            icon: Icons.account_circle_outlined,
+            title: '계정',
+          ),
+          const SizedBox(height: 10),
+          const Text('ID', style: TextStyle(color: Colors.white70)),
+          const SizedBox(height: 2),
+          const Text(
+            'admin',
+            key: ValueKey('settings-admin-id'),
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              OutlinedButton.icon(
+                key: const ValueKey('settings-change-password-button'),
+                onPressed: () => _openPasswordDialog(context),
+                icon: const Icon(Icons.lock_reset_outlined),
+                label: const Text('비밀번호 변경'),
+              ),
+              FilledButton.icon(
+                key: const ValueKey('settings-logout-button'),
+                onPressed: () => onLogout(),
+                icon: const Icon(Icons.logout),
+                label: const Text('로그아웃'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openPasswordDialog(BuildContext context) async {
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _PasswordChangeDialog(apiClient: controller.apiClient),
+    );
+    if (changed == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('비밀번호가 변경되었습니다.')),
+      );
+    }
+  }
+}
+
+class _PasswordChangeDialog extends StatefulWidget {
+  const _PasswordChangeDialog({required this.apiClient});
+
+  final ApiClient apiClient;
+
+  @override
+  State<_PasswordChangeDialog> createState() => _PasswordChangeDialogState();
+}
+
+class _PasswordChangeDialogState extends State<_PasswordChangeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _currentPassword = TextEditingController();
+  final _newPassword = TextEditingController();
+  final _confirmPassword = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _currentPassword.dispose();
+    _newPassword.dispose();
+    _confirmPassword.dispose();
+    super.dispose();
+  }
+
+  String _errorMessage(Object error) {
+    if (error is ApiRequestException) {
+      if (error.statusCode == 401) {
+        return '현재 비밀번호가 올바르지 않거나 로그인 세션이 만료되었습니다.';
+      }
+      if (error.statusCode == 400) {
+        return '새 비밀번호 확인이 일치하지 않습니다.';
+      }
+    }
+    return '비밀번호 변경에 실패했습니다. 다시 시도해 주세요.';
+  }
+
+  Future<void> _submit() async {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.apiClient.changeAdminPassword(
+        currentPassword: _currentPassword.text,
+        newPassword: _newPassword.text,
+        confirmPassword: _confirmPassword.text,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = _errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: const ValueKey('settings-password-dialog'),
+      title: const Text('비밀번호 변경'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                key: const ValueKey('settings-current-password-field'),
+                controller: _currentPassword,
+                obscureText: true,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: '현재 비밀번호'),
+                validator: (value) => value == null || value.isEmpty
+                    ? '현재 비밀번호를 입력해 주세요.'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const ValueKey('settings-new-password-field'),
+                controller: _newPassword,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '새 비밀번호'),
+                validator: (value) => value == null || value.isEmpty
+                    ? '새 비밀번호를 입력해 주세요.'
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const ValueKey('settings-confirm-password-field'),
+                controller: _confirmPassword,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: '새 비밀번호 확인'),
+                validator: (value) => value == null || value.isEmpty
+                    ? '새 비밀번호 확인을 입력해 주세요.'
+                    : value != _newPassword.text
+                        ? '새 비밀번호가 일치하지 않습니다.'
+                        : null,
+                onFieldSubmitted: (_) => _submit(),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  key: const ValueKey('settings-password-change-error'),
+                  style: const TextStyle(color: Colors.redAccent),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _loading ? null : () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          key: const ValueKey('settings-password-change-submit'),
+          onPressed: _loading ? null : _submit,
+          child: _loading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('변경'),
+        ),
+      ],
     );
   }
 }

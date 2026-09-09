@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import 'default_http_client.dart';
 import '../../models/agent_chat_conversation.dart';
 import '../../models/agent_chat_live_order_action.dart';
 import '../../models/agent_chat_live_order_readiness.dart';
@@ -74,6 +75,7 @@ import '../../models/strategy_live_auto_buy.dart';
 import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
+import '../../models/auth_session.dart';
 
 class ApiRequestException implements Exception {
   const ApiRequestException(this.message, {this.statusCode, this.detail});
@@ -87,7 +89,8 @@ class ApiRequestException implements Exception {
 }
 
 class ApiClient {
-  ApiClient({http.Client? client}) : _client = client ?? http.Client();
+  ApiClient({http.Client? client})
+      : _client = client ?? createDefaultHttpClient();
 
   final http.Client _client;
   static const _kisLiveConfirmationPhrase =
@@ -188,6 +191,73 @@ class ApiClient {
   Future<void> _post(String path) async {
     final r = await _client.post(Uri.parse('${AppConfig.baseUrl}$path'));
     if (r.statusCode >= 400) throw _apiRequestExceptionFromResponse(r);
+  }
+
+  Future<AuthSessionState> fetchAuthMe() async {
+    final payload = await _getJsonNoCache('/auth/me');
+    return AuthSessionState.fromJson(payload);
+  }
+
+  Future<AuthSessionState> fetchAuthState() => fetchAuthMe();
+
+  Future<void> setupAdmin({
+    required String username,
+    required String setupCode,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    await _postJsonBody('/auth/setup', {
+      'username': username,
+      'setup_code': setupCode,
+      'new_password': newPassword,
+      'confirm_password': confirmPassword,
+    });
+  }
+
+  Future<void> resetAdminPassword({
+    required String username,
+    required String setupCode,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    await _postJsonBody('/auth/reset-password', {
+      'username': username,
+      'setup_code': setupCode,
+      'new_password': newPassword,
+      'confirm_password': confirmPassword,
+    });
+  }
+
+  Future<void> loginAdmin({
+    required String username,
+    required String password,
+  }) async {
+    await _postJsonBody('/auth/login', {
+      'username': username,
+      'password': password,
+    });
+  }
+
+  Future<void> login({
+    required String username,
+    required String password,
+  }) =>
+      loginAdmin(username: username, password: password);
+
+  Future<void> logout() async {
+    await _postJson('/auth/logout');
+  }
+
+  Future<void> changeAdminPassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    await _putJsonBody('/auth/password', {
+      'current_password': currentPassword,
+      'new_password': newPassword,
+      'confirm_password': confirmPassword,
+    });
   }
 
   Future<PortfolioSummary> fetchPortfolioSummary() async {

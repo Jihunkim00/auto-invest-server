@@ -168,13 +168,18 @@ class StrategyProfileService:
             .first()
         )
 
-    def active_profile(self, db: Session) -> StrategyProfile:
+    def active_profile(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> StrategyProfile:
         self.ensure_seeded(db)
         custom = self.selected_profile(db)
         if custom is not None:
             from app.services.automation_profile_service import AutomationProfileService
 
-            if AutomationProfileService()._status(custom) == "active":
+            if AutomationProfileService()._status(custom, now=now) == "active":
                 return custom
         row = (
             db.query(StrategyProfile)
@@ -303,7 +308,12 @@ class StrategyProfileService:
             "safety": _profile_safety(setting_changed=False, read_only=True),
         }
 
-    def serialize_profile(self, row: StrategyProfile) -> dict[str, Any]:
+    def serialize_profile(
+        self,
+        row: StrategyProfile,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         payload = StrategyProfilePayload.model_validate(row).model_dump(mode="json")
         if row.profile_key:
             try:
@@ -318,7 +328,7 @@ class StrategyProfileService:
                 market=market,
             )
             from app.services.automation_profile_service import AutomationProfileService
-            profile_status = AutomationProfileService()._status(row)
+            profile_status = AutomationProfileService()._status(row, now=now)
             payload.update({
                 "profile_name": row.profile_key,
                 "display_name": row.custom_name or row.display_name,

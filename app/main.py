@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db.init_db import init_db
 from app.routes.account import router as account_router
+from app.routes.auth import router as auth_router
 from app.routes.automation import router as automation_router
 from app.routes.automation_profiles import router as automation_profiles_router
 from app.routes.automation_profiles import symbol_router as symbol_router
@@ -87,6 +88,7 @@ def on_shutdown():
 
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(agent_router)
 app.include_router(agent_chat_router)
 app.include_router(agent_plans_router)

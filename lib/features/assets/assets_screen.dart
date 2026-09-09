@@ -7,9 +7,14 @@ import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/portfolio_snapshot_section.dart';
 
 class AssetsScreen extends StatelessWidget {
-  const AssetsScreen({super.key, required this.controller});
+  const AssetsScreen({
+    super.key,
+    required this.controller,
+    this.onLogout,
+  });
 
   final DashboardController controller;
+  final Future<void> Function()? onLogout;
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +39,10 @@ class AssetsScreen extends StatelessWidget {
                     tooltip: 'Advanced / Admin',
                     onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
-                        builder: (_) => AdminScreen(controller: controller),
+                        builder: (_) => AdminScreen(
+                          controller: controller,
+                          onLogout: onLogout,
+                        ),
                       ),
                     ),
                     icon: const Icon(Icons.admin_panel_settings_outlined),

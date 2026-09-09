@@ -63,7 +63,7 @@ class StrategyAutoBuySchedulerService:
     ) -> dict[str, Any]:
         now_utc = _aware_utc(now)
         settings = self.runtime_settings.get_settings_read_only(db)
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now_utc=now_utc)
         latest = self._latest_run(db)
         metrics = self._run_metrics(db, now_utc=now_utc)
         current_scheduler_slot = self._current_profile_scheduler_slot(
@@ -161,7 +161,7 @@ class StrategyAutoBuySchedulerService:
         )
         now_utc = _aware_utc(now)
         settings = self.runtime_settings.get_settings(db)
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now_utc=now_utc)
         metrics = self._run_metrics(db, now_utc=now_utc)
         market_session = self._market_session(now_utc)
         scheduled_slot_key = self._scheduled_slot_key(
@@ -406,11 +406,16 @@ class StrategyAutoBuySchedulerService:
                 "error": exc.__class__.__name__,
             }
 
-    def _active_profile(self, db: Session) -> dict[str, Any]:
+    def _active_profile(
+        self,
+        db: Session,
+        *,
+        now_utc: datetime | None = None,
+    ) -> dict[str, Any]:
         row = self.strategy_profiles.selected_profile(db)
         if row is None:
-            row = self.strategy_profiles.active_profile(db)
-        return self.strategy_profiles.serialize_profile(row)
+            row = self.strategy_profiles.active_profile(db, now=now_utc)
+        return self.strategy_profiles.serialize_profile(row, now=now_utc)
 
     def _current_profile_scheduler_slot(
         self,

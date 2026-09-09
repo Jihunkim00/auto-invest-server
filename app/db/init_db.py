@@ -2222,8 +2222,18 @@ def _create_agent_review_queue_state_table_if_missing():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_schedule_jobs_created_at ON agent_schedule_jobs (created_at)"))
 
 
+def _ensure_admin_user_bootstrap():
+    # Keep bootstrap limited to the two auth tables. Existing operational data
+    # is intentionally neither queried nor migrated by this step.
+    from app.services.auth_service import ensure_admin_user
+
+    with SessionLocal() as db:
+        ensure_admin_user(db)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_admin_user_bootstrap()
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()
