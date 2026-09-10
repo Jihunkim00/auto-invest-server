@@ -63,6 +63,40 @@ class UserWatchlist(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class UserBrokerCredential(Base):
+    """Encrypted broker credentials owned by a regular application user.
+
+    Admin broker credentials deliberately remain environment-backed and are
+    not copied into this table.
+    """
+
+    __tablename__ = "user_broker_credentials"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "provider",
+            name="uq_user_broker_credentials_user_provider",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    environment = Column(String(20), nullable=False)
+    encrypted_payload = Column(Text, nullable=False)
+    encryption_version = Column(Integer, nullable=False, default=1)
+    last_validated_at = Column(DateTime(timezone=True), nullable=True)
+    last_validation_status = Column(String(20), nullable=True)
+    last_validation_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
 class WatchlistSnapshotRun(Base):
     '''One market/quant snapshot refresh, kept separate from trading runs.'''
 

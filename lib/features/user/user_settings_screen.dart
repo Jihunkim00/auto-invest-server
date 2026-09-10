@@ -1,9 +1,10 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../../core/network/api_client.dart';
 import '../../models/auth_session.dart';
+import '../../models/user_broker_credential.dart';
 import '../../models/user_watchlist_item.dart';
 
 class UserSettingsScreen extends StatefulWidget {
@@ -291,6 +292,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _UserBrokerConnectionsCard(apiClient: widget.apiClient),
+                const SizedBox(height: 12),
                 Card(
                   key: const ValueKey('user-watchlist-card'),
                   child: Padding(
@@ -374,5 +377,523 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
               ],
             ),
     );
+  }
+}
+
+class _UserBrokerConnectionsCard extends StatefulWidget {
+  const _UserBrokerConnectionsCard({required this.apiClient});
+
+  final ApiClient apiClient;
+
+  @override
+  State<_UserBrokerConnectionsCard> createState() =>
+      _UserBrokerConnectionsCardState();
+}
+
+class _UserBrokerConnectionsCardState
+    extends State<_UserBrokerConnectionsCard> {
+  final _kisAppKey = TextEditingController();
+  final _kisAppSecret = TextEditingController();
+  final _kisHtsId = TextEditingController();
+  final _kisAccountNo = TextEditingController();
+  final _kisProductCode = TextEditingController();
+  final _alpacaApiKey = TextEditingController();
+  final _alpacaSecretKey = TextEditingController();
+
+  final Map<String, UserBrokerCredential> _brokers = {};
+  String _kisEnvironment = 'paper';
+  String _alpacaEnvironment = 'paper';
+  String? _busyProvider;
+  String? _busyOperation;
+  String? _message;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _kisAppKey.dispose();
+    _kisAppSecret.dispose();
+    _kisHtsId.dispose();
+    _kisAccountNo.dispose();
+    _kisProductCode.dispose();
+    _alpacaApiKey.dispose();
+    _alpacaSecretKey.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final values = await widget.apiClient.fetchUserBrokers();
+      if (!mounted) return;
+      setState(() {
+        _brokers
+          ..clear()
+          ..addEntries(values.map((item) => MapEntry(item.provider, item)));
+        _kisEnvironment = _status('kis').environment ?? 'paper';
+        _alpacaEnvironment = _status('alpaca').environment ?? 'paper';
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _message = _safeError(error);
+      });
+    }
+  }
+
+  UserBrokerCredential _status(String provider) {
+    return _brokers[provider] ??
+        UserBrokerCredential(
+          provider: provider,
+          configured: false,
+        );
+  }
+
+  Future<void> _saveKis() async {
+    await _save(
+      'kis',
+      {
+        'environment': _kisEnvironment,
+        'app_key': _kisAppKey.text.trim(),
+        'app_secret': _kisAppSecret.text,
+        'hts_id': _kisHtsId.text.trim(),
+        'account_no': _kisAccountNo.text.trim(),
+        'account_product_code': _kisProductCode.text.trim(),
+      },
+    );
+  }
+
+  Future<void> _saveAlpaca() async {
+    await _save(
+      'alpaca',
+      {
+        'environment': _alpacaEnvironment,
+        'api_key': _alpacaApiKey.text.trim(),
+        'secret_key': _alpacaSecretKey.text,
+      },
+    );
+  }
+
+  Future<void> _save(
+    String provider,
+    Map<String, dynamic> values,
+  ) async {
+    if (values.values.any((value) => value.toString().trim().isEmpty)) {
+      _showMessage('모든 입력 항목을 입력한 후 저장하세요.', error: true);
+      return;
+    }
+    setState(() {
+      _busyProvider = provider;
+      _busyOperation = 'save';
+      _message = null;
+    });
+    try {
+      final saved = await widget.apiClient.saveUserBroker(provider, values);
+      if (!mounted) return;
+      setState(() {
+        _brokers[provider] = saved;
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = '${_providerLabel(provider)} 정보가 저장되었습니다.';
+      });
+      _clearSecretInputs(provider);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = _safeError(error);
+      });
+    }
+  }
+
+  Future<void> _validate(String provider) async {
+    setState(() {
+      _busyProvider = provider;
+      _busyOperation = 'validate';
+      _message = null;
+    });
+    try {
+      final result = await widget.apiClient.validateUserBroker(provider);
+      final valid = result['valid'] == true;
+      final status = _status(provider);
+      if (!mounted) return;
+      setState(() {
+        _brokers[provider] = status.withValidation(
+          status: result['status']?.toString(),
+          error: valid
+              ? null
+              : result['message']?.toString() ?? 'validation_failed',
+        );
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = valid
+            ? '${_providerLabel(provider)} 연결이 확인되었습니다.'
+            : '연결 확인 실패: ${_validationMessage(result['message'])}';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = _safeError(error);
+      });
+    }
+  }
+
+  Future<void> _remove(String provider) async {
+    setState(() {
+      _busyProvider = provider;
+      _busyOperation = 'remove';
+      _message = null;
+    });
+    try {
+      await widget.apiClient.removeUserBroker(provider);
+      if (!mounted) return;
+      setState(() {
+        _brokers.remove(provider);
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = '${_providerLabel(provider)} 정보가 삭제되었습니다.';
+      });
+      _clearInputs(provider);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _busyProvider = null;
+        _busyOperation = null;
+        _message = _safeError(error);
+      });
+    }
+  }
+
+  void _clearSecretInputs(String provider) {
+    if (provider == 'kis') {
+      _kisAppKey.clear();
+      _kisAppSecret.clear();
+      _kisHtsId.clear();
+      _kisAccountNo.clear();
+      _kisProductCode.clear();
+    } else {
+      _alpacaApiKey.clear();
+      _alpacaSecretKey.clear();
+    }
+  }
+
+  void _clearInputs(String provider) {
+    _clearSecretInputs(provider);
+    setState(() {
+      if (provider == 'kis') {
+        _kisEnvironment = 'paper';
+      } else {
+        _alpacaEnvironment = 'paper';
+      }
+    });
+  }
+
+  void _showMessage(String message, {bool error = false}) {
+    setState(() => _message = message);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? Colors.redAccent : Colors.green,
+      ),
+    );
+  }
+
+  String _safeError(Object error) {
+    if (error is ApiRequestException) return '브로커 요청에 실패했습니다.';
+    return '브로커 요청에 실패했습니다.';
+  }
+
+  String _validationMessage(Object? message) {
+    switch (message?.toString()) {
+      case 'invalid_credentials':
+        return '입력 정보를 확인하세요.';
+      case 'authentication_failed':
+        return '인증에 실패했습니다.';
+      case 'account_query_failed':
+        return '계좌 정보를 확인하지 못했습니다.';
+      case 'network_error':
+        return '네트워크 오류가 발생했습니다.';
+      default:
+        return '알 수 없는 오류입니다.';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: const ValueKey('user-broker-connections-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              '증권사 연결',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '입력 정보는 서버에서 암호화되며 전체 값은 다시 표시되지 않습니다.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else ...[
+              const SizedBox(height: 16),
+              _buildKis(),
+              const Divider(height: 32),
+              _buildAlpaca(),
+              if (_message != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _message!,
+                  key: const ValueKey('user-broker-message'),
+                  style: TextStyle(
+                    color: _message!.contains('실패') ||
+                            _message!.contains('입력')
+                        ? Colors.orangeAccent
+                        : Colors.greenAccent,
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildKis() {
+    final status = _status('kis');
+    final busy = _busyProvider == 'kis';
+    return _providerSection(
+      provider: 'kis',
+      title: '한국투자증권',
+      helpText: '한국투자증권 Open API에서 발급받은 정보를 입력하세요.',
+      status: status,
+      busy: busy,
+      environment: _kisEnvironment,
+      onEnvironmentChanged: (value) => setState(() => _kisEnvironment = value),
+      children: [
+        _credentialField(
+          key: const ValueKey('user-broker-kis-app-key'),
+          controller: _kisAppKey,
+          label: '앱 키',
+          helperText: status.configured
+              ? '저장된 정보를 변경하려면 모든 값을 새로 입력하세요.'
+              : null,
+        ),
+        _credentialField(
+          key: const ValueKey('user-broker-kis-app-secret'),
+          controller: _kisAppSecret,
+          label: '앱 시크릿',
+          obscureText: true,
+        ),
+        _credentialField(
+          key: const ValueKey('user-broker-kis-hts-id'),
+          controller: _kisHtsId,
+          label: 'HTS ID',
+        ),
+        _credentialField(
+          key: const ValueKey('user-broker-kis-account-no'),
+          controller: _kisAccountNo,
+          label: '계좌번호',
+        ),
+        _credentialField(
+          key: const ValueKey('user-broker-kis-product-code'),
+          controller: _kisProductCode,
+          label: '계좌 상품코드',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAlpaca() {
+    final status = _status('alpaca');
+    final busy = _busyProvider == 'alpaca';
+    return _providerSection(
+      provider: 'alpaca',
+      title: 'Alpaca',
+      helpText: 'Alpaca에서 발급받은 API 정보를 입력하세요.',
+      status: status,
+      busy: busy,
+      environment: _alpacaEnvironment,
+      onEnvironmentChanged: (value) =>
+          setState(() => _alpacaEnvironment = value),
+      children: [
+        _credentialField(
+          key: const ValueKey('user-broker-alpaca-api-key'),
+          controller: _alpacaApiKey,
+          label: 'API 키',
+          helperText: status.configured
+              ? '저장된 정보를 변경하려면 두 값을 모두 새로 입력하세요.'
+              : null,
+        ),
+        _credentialField(
+          key: const ValueKey('user-broker-alpaca-secret-key'),
+          controller: _alpacaSecretKey,
+          label: '시크릿 키',
+          obscureText: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _providerSection({
+    required String provider,
+    required String title,
+    required UserBrokerCredential status,
+    required bool busy,
+    required String environment,
+    required String helpText,
+    required ValueChanged<String> onEnvironmentChanged,
+    required List<Widget> children,
+  }) {
+    final color = status.validated
+        ? Colors.greenAccent
+        : status.configured
+            ? Colors.lightBlueAccent
+            : Colors.white70;
+    final statusLabel = !status.configured
+        ? '미설정'
+        : status.validated
+            ? '연결 확인됨'
+            : '설정됨';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+              ),
+            ),
+            Chip(
+              key: ValueKey('user-broker-$provider-status'),
+              label: Text(statusLabel),
+              labelStyle: TextStyle(color: color),
+            ),
+          ],
+        ),
+        Text(helpText, style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 4),
+        if (status.configured) ...[
+          if (provider == 'kis') ...[
+            Text('앱 키: ${status.appKeyMasked ?? '설정됨'}'),
+            Text('HTS ID: ${status.htsIdMasked ?? '설정됨'}'),
+            Text('계좌번호: ${status.accountNoMasked ?? '설정됨'}'),
+            const Text('앱 시크릿: 시크릿 설정됨'),
+          ] else ...[
+            Text('API 키: ${status.apiKeyMasked ?? '설정됨'}'),
+            const Text('시크릿 키: 시크릿 설정됨'),
+          ],
+          if (status.lastValidationError != null)
+            Text(
+              '연결 확인 오류: ${_validationMessage(status.lastValidationError)}',
+              style: const TextStyle(color: Colors.orangeAccent),
+            ),
+          const SizedBox(height: 8),
+        ],
+        DropdownButtonFormField<String>(
+          key: ValueKey('user-broker-$provider-environment'),
+          initialValue: environment,
+          decoration: const InputDecoration(labelText: '거래 환경'),
+          items: const [
+            DropdownMenuItem(value: 'paper', child: Text('모의투자')),
+            DropdownMenuItem(value: 'live', child: Text('실거래')),
+          ],
+          onChanged: busy
+              ? null
+              : (value) {
+                  if (value != null) onEnvironmentChanged(value);
+                },
+        ),
+        Text(
+          environment == 'live'
+              ? '실거래 환경입니다. API 정보를 정확히 확인하세요.'
+              : '모의투자 환경입니다.',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        ...children,
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            FilledButton.icon(
+              key: ValueKey('user-broker-$provider-save'),
+              onPressed: busy
+                  ? null
+                  : () => provider == 'kis' ? _saveKis() : _saveAlpaca(),
+              icon: const Icon(Icons.save_outlined),
+              label: Text(
+                busy && _busyOperation == 'save' ? '저장 중...' : '저장',
+              ),
+            ),
+            OutlinedButton.icon(
+              key: ValueKey('user-broker-$provider-validate'),
+              onPressed:
+                  busy || !status.configured ? null : () => _validate(provider),
+              icon: const Icon(Icons.verified_outlined),
+              label: Text(
+                busy && _busyOperation == 'validate' ? '확인 중...' : '연결 확인',
+              ),
+            ),
+            if (status.configured)
+              OutlinedButton.icon(
+                key: ValueKey('user-broker-$provider-remove'),
+                onPressed: busy ? null : () => _remove(provider),
+                icon: const Icon(Icons.delete_outline),
+                label: Text(
+                  busy && _busyOperation == 'remove' ? '삭제 중...' : '삭제',
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _credentialField({
+    required Key key,
+    required TextEditingController controller,
+    required String label,
+    bool obscureText = false,
+    String? helperText,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: TextField(
+        key: key,
+        controller: controller,
+        obscureText: obscureText,
+        enableSuggestions: !obscureText,
+        autocorrect: !obscureText,
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: helperText,
+        ),
+      ),
+    );
+  }
+
+  String _providerLabel(String provider) {
+    return provider == 'kis' ? '한국투자증권' : 'Alpaca';
   }
 }

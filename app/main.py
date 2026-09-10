@@ -17,6 +17,7 @@ from app.routes.agent_plans import router as agent_plans_router
 from app.routes.agent_schedules import router as agent_schedules_router
 from app.routes.app_facade import router as app_facade_router
 from app.routes.brokers import router as brokers_router
+from app.routes.user_brokers import router as user_brokers_router
 from app.routes.broker_sync_watchdog import router as broker_sync_watchdog_router
 from app.routes.canonical_trading import router as canonical_trading_router
 from app.routes.health import router as health_router
@@ -134,6 +135,7 @@ app.include_router(operation_test4_router)
 app.include_router(scheduler_router)
 app.include_router(admin_users_router)
 app.include_router(user_data_router)
+app.include_router(user_brokers_router)
 
 
 @app.get("/")

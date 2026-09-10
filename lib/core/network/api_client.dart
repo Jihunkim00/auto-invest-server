@@ -76,6 +76,7 @@ import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 import '../../models/auth_session.dart';
+import '../../models/user_broker_credential.dart';
 import '../../models/user_watchlist_item.dart';
 
 class ApiRequestException implements Exception {
@@ -356,6 +357,42 @@ class ApiClient {
 
   Future<void> removeUserWatchlist(String symbol) async {
     await _deleteJson('/users/me/watchlist/${Uri.encodeComponent(symbol)}');
+  }
+
+  Future<List<UserBrokerCredential>> fetchUserBrokers() async {
+    final payload = await _getJsonNoCache('/users/me/brokers');
+    final raw = payload['brokers'] ?? payload['items'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => UserBrokerCredential.fromJson(
+              Map<String, dynamic>.from(item),
+            ))
+        .toList();
+  }
+
+  Future<UserBrokerCredential> fetchUserBroker(String provider) async {
+    final payload = await _getJsonNoCache('/users/me/brokers/$provider');
+    return UserBrokerCredential.fromJson(payload);
+  }
+
+  Future<UserBrokerCredential> saveUserBroker(
+    String provider,
+    Map<String, dynamic> credentials,
+  ) async {
+    final payload = await _putJsonBody(
+      '/users/me/brokers/$provider',
+      credentials,
+    );
+    return UserBrokerCredential.fromJson(payload);
+  }
+
+  Future<Map<String, dynamic>> validateUserBroker(String provider) async {
+    return _postJson('/users/me/brokers/$provider/validate');
+  }
+
+  Future<void> removeUserBroker(String provider) async {
+    await _deleteJson('/users/me/brokers/$provider');
   }
 
   Future<PortfolioSummary> fetchPortfolioSummary() async {

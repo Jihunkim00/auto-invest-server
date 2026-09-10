@@ -19,3 +19,18 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != 'admin':
         raise HTTPException(status_code=403, detail='Administrator permission is required.')
     return user
+
+
+def require_regular_user(user: User = Depends(get_current_user)) -> User:
+    """Require a regular user for user-owned data endpoints.
+
+    The admin account deliberately keeps using environment-backed broker
+    credentials and must never be routed through this DB credential surface.
+    """
+
+    if user.role != 'user':
+        raise HTTPException(
+            status_code=403,
+            detail='admin_uses_env_broker_credentials',
+        )
+    return user

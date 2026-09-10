@@ -25,6 +25,11 @@ class Settings(BaseSettings):
 
     broker_provider: str = "alpaca"
 
+    # User-owned broker credentials are encrypted at rest. This key is
+    # intentionally optional so the existing admin .env broker runtime keeps
+    # working when user credential storage is not configured.
+    broker_credential_master_key: str | None = None
+
     alpaca_api_key: str
     alpaca_secret_key: str
     alpaca_base_url: str
