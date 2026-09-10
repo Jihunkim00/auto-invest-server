@@ -1,4 +1,5 @@
 import json
+import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -18,6 +19,12 @@ from app.services.quant_signal_service import QuantSignalService
 from app.services.reference_site_cache_service import ReferenceSiteCacheService
 from app.services.reference_site_service import ReferenceSiteService
 from app.services.watchlist_service import WatchlistService
+from app.services.watchlist_snapshot_scheduler import WatchlistSnapshotScheduler
+from app.services.watchlist_snapshot_selection_service import (
+    WatchlistSnapshotNotFoundError,
+    WatchlistSnapshotSelectionService,
+)
+from app.services.watchlist_snapshot_service import WatchlistSnapshotService
 from app.services.web_content_service import WebContentService
 
 router = APIRouter(prefix="/market-analysis", tags=["market-analysis"])
@@ -206,3 +213,71 @@ def list_market_analysis(
 
     rows = query.order_by(MarketAnalysis.created_at.desc()).limit(limit).all()
     return [_serialize_market_analysis_row(row) for row in rows]
+
+
+watchlist_snapshot_service = WatchlistSnapshotService()
+watchlist_snapshot_selection_service = WatchlistSnapshotSelectionService()
+watchlist_snapshot_scheduler = WatchlistSnapshotScheduler(watchlist_snapshot_service)
+
+
+@router.get('/watchlist/snapshot/status')
+def get_watchlist_snapshot_status(db: Session = Depends(get_db)):
+    return watchlist_snapshot_selection_service.status(
+        db,
+        market='KR',
+        refresh_running=WatchlistSnapshotService.is_refresh_running(),
+    )
+
+
+@router.get('/watchlist/snapshot/latest')
+def get_latest_watchlist_snapshot(db: Session = Depends(get_db)):
+    return watchlist_snapshot_selection_service.latest(db, market='KR')
+
+
+@router.post('/watchlist/snapshot/refresh')
+def refresh_watchlist_snapshot(db: Session = Depends(get_db)):
+    try:
+        result = watchlist_snapshot_service.refresh(db, market='KR')
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail={
+            'error': 'watchlist_snapshot_refresh_failed',
+            'message': str(exc) or exc.__class__.__name__,
+        }) from exc
+    if result.get('status') == 'already_running':
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.get('/watchlist/snapshot/select')
+def select_watchlist_snapshot_candidates(
+    snapshot_id: int | None = Query(default=None, ge=1),
+    price_cap_krw: float = Query(default=300000, ge=0),
+    min_quant_buy_score: float = Query(default=0, ge=0),
+    kospi_limit: int = Query(default=40, ge=0, le=200),
+    kosdaq_limit: int = Query(default=10, ge=0, le=200),
+    db: Session = Depends(get_db),
+):
+    try:
+        return watchlist_snapshot_selection_service.select_candidates(
+            db,
+            snapshot_id=snapshot_id,
+            price_cap_krw=price_cap_krw,
+            min_quant_buy_score=min_quant_buy_score,
+            kospi_limit=kospi_limit,
+            kosdaq_limit=kosdaq_limit,
+            market='KR',
+        )
+    except WatchlistSnapshotNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.on_event('startup')
+def start_watchlist_snapshot_scheduler():
+    if os.getenv('PYTEST_CURRENT_TEST'):
+        return
+    watchlist_snapshot_scheduler.start()
+
+
+@router.on_event('shutdown')
+def stop_watchlist_snapshot_scheduler():
+    watchlist_snapshot_scheduler.stop()

@@ -63,6 +63,52 @@ class UserWatchlist(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class WatchlistSnapshotRun(Base):
+    '''One market/quant snapshot refresh, kept separate from trading runs.'''
+
+    __tablename__ = 'watchlist_snapshot_runs'
+
+    id = Column(Integer, primary_key=True, index=True)
+    market = Column(String(10), nullable=False, default='KR', index=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    source_count = Column(Integer, nullable=False, default=0)
+    scored_count = Column(Integer, nullable=False, default=0)
+    error_count = Column(Integer, nullable=False, default=0)
+    elapsed_seconds = Column(Float, nullable=True)
+    status = Column(String(20), nullable=False, default='running', index=True)
+
+
+class WatchlistSnapshotItem(Base):
+    '''Per-symbol data belonging to a watchlist snapshot run.'''
+
+    __tablename__ = 'watchlist_snapshot_items'
+    __table_args__ = (
+        UniqueConstraint(
+            'run_id',
+            'symbol',
+            name='uq_watchlist_snapshot_items_run_symbol',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(
+        Integer,
+        ForeignKey('watchlist_snapshot_runs.id'),
+        nullable=False,
+        index=True,
+    )
+    symbol = Column(String(20), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    market = Column(String(10), nullable=False, index=True)
+    current_price = Column(Float, nullable=True)
+    quant_buy_score = Column(Float, nullable=False, default=0.0)
+    quant_sell_score = Column(Float, nullable=False, default=0.0)
+    indicators_json = Column(Text, nullable=False, default='{}')
+    quant_reason = Column(Text, nullable=True)
+    captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
 class BrokerAuthToken(Base):
     __tablename__ = "broker_auth_tokens"
 
