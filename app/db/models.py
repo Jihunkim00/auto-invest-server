@@ -39,6 +39,30 @@ class AuthSession(Base):
     last_seen_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
 
+class UserSettings(Base):
+    __tablename__ = 'user_settings'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    settings_json = Column(Text, nullable=False, default='{}')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class UserWatchlist(Base):
+    __tablename__ = 'user_watchlists'
+    __table_args__ = (
+        UniqueConstraint('user_id', 'symbol', 'provider', name='uq_user_watchlists_user_symbol_provider'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    symbol = Column(String(40), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, default='kis', index=True)
+    market = Column(String(10), nullable=False, default='KR', index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class BrokerAuthToken(Base):
     __tablename__ = "broker_auth_tokens"
 
@@ -501,6 +525,7 @@ class StrategyProfile(Base):
     enabled = Column(Boolean, nullable=True, default=False, index=True)
     custom_status = Column(String(20), nullable=True, index=True)
     settings_json = Column(Text, nullable=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

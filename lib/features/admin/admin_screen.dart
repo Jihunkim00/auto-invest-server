@@ -7,6 +7,7 @@ import '../dashboard/test_lab_screen.dart';
 import '../dashboard/watchlist_screen.dart';
 import '../logs/logs_screen.dart';
 import '../settings/settings_screen.dart';
+import 'admin_user_management_panel.dart';
 
 class AdminScreen extends StatelessWidget {
   const AdminScreen({
@@ -33,6 +34,8 @@ class AdminScreen extends StatelessWidget {
             '운영 도구와 진단 화면입니다. 일반 사용자 화면에는 노출하지 않습니다.',
             style: TextStyle(color: Colors.white70),
           ),
+          const SizedBox(height: 14),
+          AdminUserManagementPanel(apiClient: controller.apiClient),
           const SizedBox(height: 14),
           _AdminGroup(
             title: 'Analysis & trading',

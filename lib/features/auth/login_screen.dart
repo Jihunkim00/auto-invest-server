@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/network/api_client.dart';
 import 'admin_password_reset_screen.dart';
 import 'auth_screen_frame.dart';
+import 'user_registration_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
@@ -53,6 +54,23 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _openRegistration() async {
+    final registered = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => UserRegistrationScreen(
+          apiClient: widget.apiClient,
+        ),
+      ),
+    );
+    if (!mounted || registered != true) return;
+    _usernameController.clear();
+    _passwordController.clear();
+    setState(() => _error = null);
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(content: Text('등록이 완료되었습니다. 새 비밀번호로 로그인해 주세요.')),
+    );
+  }
+
   Future<void> _openPasswordReset() async {
     final reset = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -76,7 +94,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return AuthScreenFrame(
       key: const ValueKey('auth-login-screen'),
       title: '로그인',
-      subtitle: 'admin 계정으로 Auto Invest에 접속합니다.',
+      subtitle: '관리자 또는 일반 사용자 계정으로 Auto Invest에 접속합니다.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -135,6 +153,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           const SizedBox(height: 20),
+          OutlinedButton.icon(
+            key: const ValueKey('auth-user-registration-link'),
+            onPressed: _loading ? null : _openRegistration,
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('일반 사용자 등록'),
+          ),
           const Text(
             '비밀번호를 잊으셨나요?',
             textAlign: TextAlign.center,

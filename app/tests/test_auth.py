@@ -111,6 +111,7 @@ def test_login_session_me_and_logout_use_hashed_db_token(db_session):
             "authenticated": True,
             "setup_required": False,
             "user": {
+                "id": 1,
                 "username": "admin",
                 "role": "admin",
                 "enabled": True,

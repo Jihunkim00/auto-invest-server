@@ -12,15 +12,23 @@ typedef AuthenticatedAppBuilder = Widget Function(
   Future<void> Function(BuildContext originContext) onLogout,
 );
 
+typedef AuthenticatedRoleAppBuilder = Widget Function(
+  BuildContext context,
+  Future<void> Function(BuildContext originContext) onLogout,
+  AuthUser user,
+);
+
 class AuthGate extends StatefulWidget {
   const AuthGate({
     super.key,
     required this.apiClient,
     required this.authenticatedBuilder,
+    this.roleAuthenticatedBuilder,
   });
 
   final ApiClient apiClient;
   final AuthenticatedAppBuilder authenticatedBuilder;
+  final AuthenticatedRoleAppBuilder? roleAuthenticatedBuilder;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -93,6 +101,10 @@ class _AuthGateState extends State<AuthGate> {
         apiClient: widget.apiClient,
         onLoginCompleted: _refresh,
       );
+    }
+    final roleBuilder = widget.roleAuthenticatedBuilder;
+    if (roleBuilder != null && state.user != null) {
+      return roleBuilder(context, _logout, state.user!);
     }
     return widget.authenticatedBuilder(context, _logout);
   }

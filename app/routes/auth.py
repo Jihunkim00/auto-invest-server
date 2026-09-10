@@ -10,7 +10,9 @@ from app.schemas.auth import (
     LoginRequest,
     PasswordChangeRequest,
     PasswordResetRequest,
+    UserRegistrationRequest,
 )
+from app.db.models import User
 from app.services.auth_service import (
     ADMIN_USERNAME,
     create_session,
@@ -90,6 +92,51 @@ def setup_admin(
     }
 
 
+def register_user(
+    payload: UserRegistrationRequest,
+    db: Session = Depends(get_db),
+):
+    username = payload.username.strip()
+    if not username or username.lower() == ADMIN_USERNAME:
+        raise HTTPException(status_code=400, detail='A regular username is required.')
+    ensure_admin_user(db)
+    setup_code = get_settings().initial_user_setup_code
+    if not setup_code or not hmac.compare_digest(
+        payload.setup_code.encode('utf-8'), setup_code.encode('utf-8')
+    ):
+        raise HTTPException(status_code=400, detail='Invalid setup code.')
+    if payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail='Password confirmation does not match.')
+
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        total_users = db.query(User).count()
+        regular_users = db.query(User).filter(User.role == 'user').count()
+        if total_users >= 5 or regular_users >= 4:
+            raise HTTPException(status_code=409, detail='The maximum number of users has been reached.')
+        raise HTTPException(status_code=404, detail='This username has not been created by an administrator.')
+    if user.role != 'user':
+        raise HTTPException(status_code=400, detail='Only regular users can register.')
+    if not user.enabled:
+        raise HTTPException(status_code=403, detail='This user is inactive.')
+    if user.setup_completed or user.password_hash:
+        raise HTTPException(status_code=409, detail='This user has already been registered.')
+
+    user.password_hash = hash_password(payload.new_password)
+    user.setup_completed = True
+    db.commit()
+    db.refresh(user)
+    return {
+        'ok': True,
+        'authenticated': False,
+        'setup_required': False,
+        'user': user_payload(user),
+    }
+
+
+router.add_api_route('/register', register_user, methods=['POST'], status_code=200)
+
+
 @router.post("/reset-password")
 def reset_password(
     payload: PasswordResetRequest,
@@ -146,15 +193,18 @@ def login_admin(
     db: Session = Depends(get_db),
 ):
     user = ensure_admin_user(db)
-    if not user.setup_completed:
+    username = payload.username.strip()
+    if username == ADMIN_USERNAME and not user.setup_completed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin setup is required before login.",
         )
 
+    user = db.query(User).filter(User.username == username).first()
     if (
-        payload.username.strip() != ADMIN_USERNAME
+        user is None
         or not user.enabled
+        or not user.setup_completed
         or not verify_password(payload.password, user.password_hash)
     ):
         raise HTTPException(
@@ -181,7 +231,7 @@ def change_password(
     settings = get_settings()
     current_token = request.cookies.get(settings.session_cookie_name)
     user = get_session_user(db, current_token)
-    if user is None or user.role != "admin":
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication is required.",

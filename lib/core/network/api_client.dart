@@ -76,6 +76,7 @@ import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 import '../../models/auth_session.dart';
+import '../../models/user_watchlist_item.dart';
 
 class ApiRequestException implements Exception {
   const ApiRequestException(this.message, {this.statusCode, this.detail});
@@ -228,6 +229,20 @@ class ApiClient {
     });
   }
 
+  Future<void> registerUser({
+    required String username,
+    required String setupCode,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    await _postJsonBody('/auth/register', {
+      'username': username,
+      'setup_code': setupCode,
+      'new_password': newPassword,
+      'confirm_password': confirmPassword,
+    });
+  }
+
   Future<void> loginAdmin({
     required String username,
     required String password,
@@ -258,6 +273,89 @@ class ApiClient {
       'new_password': newPassword,
       'confirm_password': confirmPassword,
     });
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+    required String confirmPassword,
+  }) =>
+      changeAdminPassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+        confirmPassword: confirmPassword,
+      );
+
+  Future<List<AuthUser>> fetchAdminUsers() async {
+    final payload = await _getJsonNoCache('/admin/users');
+    final raw = payload['users'] ?? payload['items'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => AuthUser.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<AuthUser> createAdminUser({required String username}) async {
+    final payload = await _postJsonBody('/admin/users', {'username': username});
+    return AuthUser.fromJson(payload);
+  }
+
+  Future<AuthUser> updateAdminUserStatus({
+    required int userId,
+    required bool enabled,
+  }) async {
+    final payload = await _putJsonBody(
+      '/admin/users/$userId/status',
+      {'enabled': enabled},
+    );
+    return AuthUser.fromJson(payload);
+  }
+
+  Future<Map<String, dynamic>> fetchUserSettings() async {
+    final payload = await _getJsonNoCache('/users/me/settings');
+    final raw = payload['settings'] ?? payload['settings_json'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> updateUserSettings(
+    Map<String, dynamic> settings,
+  ) async {
+    final payload = await _putJsonBody(
+      '/users/me/settings',
+      {'settings': settings},
+    );
+    final raw = payload['settings'] ?? payload['settings_json'];
+    return raw is Map ? Map<String, dynamic>.from(raw) : settings;
+  }
+
+  Future<List<UserWatchlistItem>> fetchUserWatchlist() async {
+    final payload = await _getJsonNoCache('/users/me/watchlist');
+    final raw = payload['watchlist'] ?? payload['items'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => UserWatchlistItem.fromJson(
+              Map<String, dynamic>.from(item),
+            ))
+        .toList();
+  }
+
+  Future<UserWatchlistItem> addUserWatchlist({
+    required String symbol,
+    String provider = 'kis',
+    String market = 'KR',
+  }) async {
+    final payload = await _postJsonBody('/users/me/watchlist', {
+      'symbol': symbol,
+      'provider': provider,
+      'market': market,
+    });
+    return UserWatchlistItem.fromJson(payload);
+  }
+
+  Future<void> removeUserWatchlist(String symbol) async {
+    await _deleteJson('/users/me/watchlist/${Uri.encodeComponent(symbol)}');
   }
 
   Future<PortfolioSummary> fetchPortfolioSummary() async {

@@ -1,11 +1,13 @@
 class AuthUser {
   const AuthUser({
+    this.id,
     required this.username,
     required this.role,
     required this.enabled,
     required this.setupCompleted,
   });
 
+  final int? id;
   final String username;
   final String role;
   final bool enabled;
@@ -13,6 +15,9 @@ class AuthUser {
 
   factory AuthUser.fromJson(Map<String, dynamic> json) {
     return AuthUser(
+      id: json['id'] is num
+          ? (json['id'] as num).toInt()
+          : int.tryParse(json['id']?.toString() ?? ''),
       username: json['username']?.toString() ?? '',
       role: json['role']?.toString() ?? '',
       enabled: json['enabled'] == true,

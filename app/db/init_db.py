@@ -145,6 +145,28 @@ def _migrate_strategy_profile_columns_if_needed():
         )
 
 
+def _migrate_strategy_profile_owner_column_if_needed():
+    if 'strategy_profiles' not in inspect(engine).get_table_names():
+        return
+    _add_column_if_missing('strategy_profiles', 'owner_user_id', 'INTEGER')
+    with engine.begin() as conn:
+        admin_id = conn.execute(
+            text('SELECT id FROM users WHERE role = :role ORDER BY id ASC LIMIT 1'),
+            {'role': 'admin'},
+        ).scalar()
+        if admin_id is None:
+            return
+        conn.execute(
+            text(
+                'UPDATE strategy_profiles SET owner_user_id = :admin_id '
+                'WHERE owner_user_id IS NULL '
+                'AND COALESCE(is_builtin, 0) = 0 '
+                'AND profile_key IS NOT NULL'
+            ),
+            {'admin_id': admin_id},
+        )
+
+
 def _create_trade_run_logs_optional_indexes_if_possible():
     inspector = inspect(engine)
     if "trade_run_logs" not in inspector.get_table_names():
@@ -2243,6 +2265,7 @@ def init_db():
     # This must precede the startup seed: the seed service queries every
     # StrategyProfile column through the ORM.
     _migrate_strategy_profile_columns_if_needed()
+    _migrate_strategy_profile_owner_column_if_needed()
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()

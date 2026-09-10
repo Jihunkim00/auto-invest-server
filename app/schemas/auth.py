@@ -20,6 +20,13 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class UserRegistrationRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    setup_code: str = Field(min_length=1)
+    new_password: str = Field(min_length=1)
+    confirm_password: str = Field(min_length=1)
+
+
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=1)

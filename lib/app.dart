@@ -13,6 +13,9 @@ import 'features/auth/auth_gate.dart';
 import 'features/automation_profile/automation_profile_screen.dart';
 import 'features/dashboard/dashboard_controller.dart';
 import 'features/home/home_screen.dart';
+import 'features/user/user_home_screen.dart';
+import 'features/user/user_settings_screen.dart';
+import 'models/auth_session.dart';
 
 class AutoInvestApp extends StatefulWidget {
   const AutoInvestApp({
@@ -75,6 +78,13 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                     onLogout: onLogout,
                     loadOnMount: true,
                   ),
+                  roleAuthenticatedBuilder: (context, onLogout, user) =>
+                      _RoleAwareAuthenticatedHome(
+                    controller: _controller,
+                    apiClient: _apiClient,
+                    user: user,
+                    onLogout: onLogout,
+                  ),
                 )
               : _ExistingAutoInvestHome(
                   controller: _controller,
@@ -82,6 +92,88 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                 ),
         );
       },
+    );
+  }
+}
+
+class _RoleAwareAuthenticatedHome extends StatelessWidget {
+  const _RoleAwareAuthenticatedHome({
+    required this.controller,
+    required this.apiClient,
+    required this.user,
+    required this.onLogout,
+  });
+
+  final DashboardController controller;
+  final ApiClient apiClient;
+  final AuthUser user;
+  final Future<void> Function(BuildContext originContext) onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    if (user.role == 'admin') {
+      return _ExistingAutoInvestHome(
+        controller: controller,
+        onLogout: onLogout,
+        loadOnMount: true,
+      );
+    }
+    return _RegularUserHome(
+      apiClient: apiClient,
+      user: user,
+      onLogout: onLogout,
+    );
+  }
+}
+
+class _RegularUserHome extends StatefulWidget {
+  const _RegularUserHome({
+    required this.apiClient,
+    required this.user,
+    required this.onLogout,
+  });
+
+  final ApiClient apiClient;
+  final AuthUser user;
+  final Future<void> Function(BuildContext originContext) onLogout;
+
+  @override
+  State<_RegularUserHome> createState() => _RegularUserHomeState();
+}
+
+class _RegularUserHomeState extends State<_RegularUserHome> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(
+        index: _index,
+        children: [
+          UserHomeScreen(user: widget.user),
+          UserSettingsScreen(
+            apiClient: widget.apiClient,
+            user: widget.user,
+            onLogout: () => widget.onLogout(context),
+          ),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _index,
+        onDestinationSelected: (value) => setState(() => _index = value),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: 'Settings',
+          ),
+        ],
+      ),
     );
   }
 }

@@ -104,11 +104,16 @@ def ensure_admin_user(db: Session) -> User:
 
 def user_payload(user: User) -> dict[str, object]:
     return {
+        'id': int(user.id),
         "username": user.username,
         "role": user.role,
         "enabled": bool(user.enabled),
         "setup_completed": bool(user.setup_completed),
     }
+
+
+def user_payload_with_id(user: User) -> dict[str, object]:
+    return {'id': int(user.id), **user_payload(user)}
 
 
 def hash_session_token(token: str) -> str:
