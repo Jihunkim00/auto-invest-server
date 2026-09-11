@@ -55,6 +55,7 @@ from app.routes.strategy_risk import router as strategy_risk_router
 from app.routes.trading import router as trading_router
 from app.routes.users import admin_router as admin_users_router
 from app.routes.users import user_router as user_data_router
+from app.routes.user_trading import router as user_trading_router
 from app.services.runtime_diagnostics import (
     configure_runtime_logging,
     log_startup_state,
@@ -135,6 +136,7 @@ app.include_router(operation_test4_router)
 app.include_router(scheduler_router)
 app.include_router(admin_users_router)
 app.include_router(user_data_router)
+app.include_router(user_trading_router)
 app.include_router(user_brokers_router)
 
 

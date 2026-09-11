@@ -49,6 +49,51 @@ class UserSettings(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class UserTradingSettings(Base):
+    '''Conservative, configuration-only limits owned by one regular user.'''
+
+    __tablename__ = 'user_trading_settings'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, unique=True, index=True)
+    enabled = Column(Boolean, nullable=False, default=False, server_default='0', index=True)
+    paper_trading_enabled = Column(Boolean, nullable=False, default=False, server_default='0')
+    live_trading_enabled = Column(Boolean, nullable=False, default=False, server_default='0')
+    max_daily_trades = Column(Integer, nullable=False, default=2, server_default='2')
+    max_daily_loss_pct = Column(Float, nullable=False, default=0.02, server_default='0.02')
+    max_position_pct = Column(Float, nullable=False, default=10.0, server_default='10.0')
+    max_open_positions = Column(Integer, nullable=False, default=1, server_default='1')
+    same_direction_reentry_limit = Column(Integer, nullable=False, default=0, server_default='0')
+    no_new_entry_after = Column(String(5), nullable=False, default='14:00', server_default='''14:00''')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class UserTradingRiskState(Base):
+    '''Optional provider/market/day snapshot for future user execution.'''
+
+    __tablename__ = 'user_trading_risk_states'
+    __table_args__ = (
+        UniqueConstraint(
+            'user_id', 'provider', 'market', 'trading_date',
+            name='uq_user_trading_risk_states_scope_date',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    currency = Column(String(10), nullable=True, index=True)
+    trading_date = Column(Date, nullable=False, index=True)
+    daily_trade_count = Column(Integer, nullable=False, default=0, server_default='0')
+    daily_realized_pl = Column(Float, nullable=False, default=0, server_default='0')
+    daily_loss_pct = Column(Float, nullable=True)
+    risk_flags_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class UserWatchlist(Base):
     __tablename__ = 'user_watchlists'
     __table_args__ = (
@@ -158,6 +203,7 @@ class BrokerAuthToken(Base):
 
 
 class OrderLog(Base):
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -187,6 +233,8 @@ class OrderLog(Base):
     remaining_qty = Column(Float, nullable=True)
     filled_avg_price = Column(Float, nullable=True)
     avg_fill_price = Column(Float, nullable=True)
+    realized_pl = Column(Float, nullable=True)
+    currency = Column(String(10), nullable=True, index=True)
 
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     filled_at = Column(DateTime(timezone=True), nullable=True)
@@ -278,6 +326,7 @@ class CompanyEvent(Base):
 
 
 class SignalLog(Base):
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     __tablename__ = "signals"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -811,6 +860,7 @@ class KisShadowExitReviewQueueState(Base):
 
 
 class PositionLifecycle(Base):
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     __tablename__ = "position_lifecycles"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -910,6 +960,7 @@ class OperationTestLiveModeClaim(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 class TradeRunLog(Base):
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     __tablename__ = "trade_run_logs"
 
     id = Column(Integer, primary_key=True, index=True)

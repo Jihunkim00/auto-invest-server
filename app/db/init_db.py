@@ -22,6 +22,40 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _migrate_user_trading_ownership_columns_if_needed():
+    '''Add nullable owner fields without rewriting historical admin rows.'''
+
+    columns = {
+        'orders': {
+            'owner_user_id': 'INTEGER',
+            'realized_pl': 'FLOAT',
+            'currency': 'VARCHAR(10)',
+        },
+        'signals': {'owner_user_id': 'INTEGER'},
+        'trade_run_logs': {'owner_user_id': 'INTEGER'},
+        'position_lifecycles': {'owner_user_id': 'INTEGER'},
+    }
+    for table_name, table_columns in columns.items():
+        for column_name, column_sql in table_columns.items():
+            _add_column_if_missing(table_name, column_name, column_sql)
+
+    indexes = {
+        'orders': ('ix_orders_owner_user_id_created_at', '(owner_user_id, broker, market, created_at)'),
+        'signals': ('ix_signals_owner_user_id_created_at', '(owner_user_id, created_at)'),
+        'trade_run_logs': ('ix_trade_run_logs_owner_user_id_created_at', '(owner_user_id, created_at)'),
+        'position_lifecycles': ('ix_position_lifecycles_owner_user_id_created_at', '(owner_user_id, created_at)'),
+    }
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table_name, (index_name, index_columns) in indexes.items():
+            if table_name in table_names:
+                conn.execute(text(
+                    f'CREATE INDEX IF NOT EXISTS {index_name} '
+                    f'ON {table_name} {index_columns}'
+                ))
+
+
 def _backfill_automation_profile_scheduler_enabled_if_needed():
     """Arm legacy PR110 selections after adding the profile scheduler flag."""
     inspector = inspect(engine)
@@ -2256,6 +2290,7 @@ def _ensure_admin_user_bootstrap():
 def init_db():
     Base.metadata.create_all(bind=engine)
     _ensure_admin_user_bootstrap()
+    _migrate_user_trading_ownership_columns_if_needed()
     _create_reference_site_cache_table_if_missing()
     _create_company_events_table_if_missing()
     _create_runtime_settings_table_if_missing()

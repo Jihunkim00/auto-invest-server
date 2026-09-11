@@ -39,3 +39,17 @@ class UserWatchlistCreateRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=40)
     provider: str = Field(default='kis', min_length=1, max_length=20)
     market: str = Field(default='KR', min_length=1, max_length=10)
+
+
+class UserTradingSettingsUpdateRequest(BaseModel):
+    '''Only non-execution risk limits may be changed in PR126.'''
+
+    max_daily_trades: int | None = Field(default=None, ge=0, le=100)
+    max_daily_loss_pct: float | None = Field(default=None, ge=0, le=1)
+    max_position_pct: float | None = Field(default=None, ge=0, le=100)
+    max_open_positions: int | None = Field(default=None, ge=0, le=100)
+
+    model_config = {'extra': 'forbid'}
+
+    def values(self) -> dict[str, object]:
+        return self.model_dump(exclude_none=True)
