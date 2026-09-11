@@ -15,6 +15,7 @@ import 'features/dashboard/dashboard_controller.dart';
 import 'features/home/home_screen.dart';
 import 'features/user/user_home_screen.dart';
 import 'features/user/user_assets_screen.dart';
+import 'features/user/user_settings_screen.dart';
 import 'models/auth_session.dart';
 
 class AutoInvestApp extends StatefulWidget {
@@ -146,6 +147,18 @@ class _RegularUserHome extends StatefulWidget {
 class _RegularUserHomeState extends State<_RegularUserHome> {
   int _index = 0;
 
+  void _openSettings(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => UserSettingsScreen(
+          apiClient: widget.apiClient,
+          user: widget.user,
+          onLogout: () => widget.onLogout(context),
+        ),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -165,6 +178,7 @@ class _RegularUserHomeState extends State<_RegularUserHome> {
           UserHomeScreen(
             controller: widget.controller,
             user: widget.user,
+            onOpenSettings: () => _openSettings(context),
           ),
           AiScreen(
             controller: widget.controller,

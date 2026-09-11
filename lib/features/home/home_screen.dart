@@ -16,6 +16,7 @@ class HomeScreen extends StatelessWidget {
     super.key,
     required this.controller,
     this.onOpenAdmin,
+    this.onOpenSettings,
     this.onOpenAutomationProfile,
     this.nowKst,
     this.readOnlyUser = false,
@@ -23,6 +24,7 @@ class HomeScreen extends StatelessWidget {
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
+  final VoidCallback? onOpenSettings;
   final VoidCallback? onOpenAutomationProfile;
   final DateTime Function()? nowKst;
   final bool readOnlyUser;
@@ -52,7 +54,11 @@ class HomeScreen extends StatelessWidget {
               key: const ValueKey('home-simple-scroll-view'),
               padding: const EdgeInsets.all(AppTheme.pagePadding),
               children: [
-                _HomeHeader(controller: controller, onOpenAdmin: onOpenAdmin),
+                _HomeHeader(
+                  controller: controller,
+                  onOpenAdmin: onOpenAdmin,
+                  onOpenSettings: onOpenSettings,
+                ),
                 const SizedBox(height: 16),
                 _AccountConnectionCard(
                   controller: controller,
@@ -109,10 +115,15 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader({required this.controller, required this.onOpenAdmin});
+  const _HomeHeader({
+    required this.controller,
+    required this.onOpenAdmin,
+    required this.onOpenSettings,
+  });
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -123,6 +134,15 @@ class _HomeHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             GlobalBrokerSelector(controller: controller),
+            if (onOpenSettings != null) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                key: const ValueKey('home-open-settings'),
+                tooltip: '\uC124\uC815',
+                onPressed: onOpenSettings,
+                icon: const Icon(Icons.settings_outlined),
+              ),
+            ],
             if (onOpenAdmin != null) ...[
               const SizedBox(width: 8),
               IconButton(
@@ -251,8 +271,8 @@ class _AccountConnectionCard extends StatelessWidget {
                       : readOnlyUser
                           ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
                           : strings.isKorean
-                          ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
-                          : 'Connected means broker account and portfolio data was fetched successfully.',
+                              ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
+                              : 'Connected means broker account and portfolio data was fetched successfully.',
                   style: const TextStyle(color: Colors.white60, height: 1.35),
                 ),
                 if (!readOnlyUser &&
