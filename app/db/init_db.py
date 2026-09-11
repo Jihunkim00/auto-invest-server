@@ -2621,6 +2621,7 @@ def init_db():
         "last_synced_at": "DATETIME",
         "sync_error": "TEXT",
     }
+    user_trading_settings_columns = {"trading_mode": "VARCHAR(10)"}
 
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)
@@ -2640,6 +2641,18 @@ def init_db():
         _add_column_if_missing("position_lifecycles", name, ddl)
     for name, ddl in order_columns.items():
         _add_column_if_missing("orders", name, ddl)
+
+    for name, ddl in user_trading_settings_columns.items():
+        _add_column_if_missing("user_trading_settings", name, ddl)
+    if "user_trading_settings" in inspect(engine).get_table_names():
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE user_trading_settings "
+                    "SET trading_mode = 'paper' "
+                    "WHERE trading_mode IS NULL OR trading_mode NOT IN ('paper', 'live')"
+                )
+            )
 
     _create_trade_run_logs_optional_indexes_if_possible()
     _create_order_optional_indexes_if_possible()

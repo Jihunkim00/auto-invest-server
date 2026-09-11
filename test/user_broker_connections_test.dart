@@ -49,11 +49,10 @@ void main() {
     await _pumpScreen(tester, api);
 
     for (final provider in const ['kis', 'alpaca']) {
-      await tester.ensureVisible(
+      await tapVisible(
+        tester,
         find.byKey(ValueKey('user-broker-$provider-validate')),
       );
-      await tester.tap(find.byKey(ValueKey('user-broker-$provider-validate')));
-      await tester.pumpAndSettle();
     }
 
     expect(api.validationCalls, 2);
@@ -66,11 +65,10 @@ void main() {
     await _pumpScreen(tester, api);
 
     await _fillKis(tester);
-    await tester.ensureVisible(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('user-broker-kis-save')),
     );
-    await tester.tap(find.byKey(const ValueKey('user-broker-kis-save')));
-    await tester.pumpAndSettle();
     _expectFieldsEmpty(tester, const [
       'user-broker-kis-app-key',
       'user-broker-kis-app-secret',
@@ -81,11 +79,10 @@ void main() {
     expect(_validateButton(tester, 'kis').onPressed, isNotNull);
 
     await _fillAlpaca(tester);
-    await tester.ensureVisible(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('user-broker-alpaca-save')),
     );
-    await tester.tap(find.byKey(const ValueKey('user-broker-alpaca-save')));
-    await tester.pumpAndSettle();
     _expectFieldsEmpty(tester, const [
       'user-broker-alpaca-api-key',
       'user-broker-alpaca-secret-key',
@@ -100,11 +97,10 @@ void main() {
     await _pumpScreen(tester, api);
 
     for (final provider in const ['kis', 'alpaca']) {
-      await tester.ensureVisible(
+      await tapVisible(
+        tester,
         find.byKey(ValueKey('user-broker-$provider-remove')),
       );
-      await tester.tap(find.byKey(ValueKey('user-broker-$provider-remove')));
-      await tester.pumpAndSettle();
       expect(_validateButton(tester, provider).onPressed, isNull);
     }
 
@@ -208,11 +204,10 @@ void main() {
       find.byKey(const ValueKey('user-broker-kis-product-code')),
       '01',
     );
-    await tester.ensureVisible(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('user-broker-kis-save')),
     );
-    await tester.tap(find.byKey(const ValueKey('user-broker-kis-save')));
-    await tester.pumpAndSettle();
 
     expect(api.savedProviders, contains('kis'));
     expect(api.savedCredentials.single['hts_id'], 'user-hts-id');
@@ -228,24 +223,53 @@ void main() {
       isEmpty,
     );
 
-    await tester.ensureVisible(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('user-broker-kis-validate')),
     );
-    await tester.tap(find.byKey(const ValueKey('user-broker-kis-validate')));
-    await tester.pumpAndSettle();
 
     expect(api.validationCalls, 1);
     expect(find.text('연결 확인됨'), findsOneWidget);
 
-    await tester.ensureVisible(
+    await tapVisible(
+      tester,
       find.byKey(const ValueKey('user-broker-kis-remove')),
     );
-    await tester.tap(find.byKey(const ValueKey('user-broker-kis-remove')));
-    await tester.pumpAndSettle();
 
     expect(api.removeCalls, 1);
     expect(find.text('미설정'), findsNWidgets(2));
   });
+}
+
+Future<void> tapVisible(WidgetTester tester, Finder finder) async {
+  final scrollable = _verticalSettingsScrollable();
+  final viewport = tester.getRect(scrollable);
+  for (var attempt = 0; attempt < 20; attempt++) {
+    final target = tester.getRect(finder);
+    if (target.top >= viewport.top && target.bottom <= viewport.bottom) {
+      break;
+    }
+
+    final delta = target.bottom > viewport.bottom ? -500.0 : 500.0;
+    await tester.drag(scrollable, Offset(0, delta));
+    await tester.pumpAndSettle();
+  }
+
+  final target = tester.getRect(finder);
+  expect(
+    target.top >= viewport.top && target.bottom <= viewport.bottom,
+    isTrue,
+    reason: 'The target should be inside the scroll viewport',
+  );
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
+}
+
+Finder _verticalSettingsScrollable() {
+  return find.byWidgetPredicate(
+    (widget) =>
+        widget is Scrollable && widget.axisDirection == AxisDirection.down,
+  ).first;
 }
 
 Future<void> _pumpScreen(WidgetTester tester, _BrokerSettingsApi api) async {

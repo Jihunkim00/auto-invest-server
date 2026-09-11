@@ -20,6 +20,7 @@ class HomeScreen extends StatelessWidget {
     this.onOpenAutomationProfile,
     this.nowKst,
     this.readOnlyUser = false,
+    this.userTradingMode = 'paper',
   });
 
   final DashboardController controller;
@@ -28,6 +29,7 @@ class HomeScreen extends StatelessWidget {
   final VoidCallback? onOpenAutomationProfile;
   final DateTime Function()? nowKst;
   final bool readOnlyUser;
+  final String userTradingMode;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +70,10 @@ class HomeScreen extends StatelessWidget {
                   userError: userError,
                 ),
                 const SizedBox(height: 12),
+                if (readOnlyUser) ...[
+                  _UserTradingModeCard(mode: userTradingMode),
+                  const SizedBox(height: 12),
+                ],
                 if (!readOnlyUser) ...[
                   _OperationModeCard(controller: controller),
                   const SizedBox(height: 12),
@@ -110,6 +116,53 @@ class HomeScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _UserTradingModeCard extends StatelessWidget {
+  const _UserTradingModeCard({required this.mode});
+
+  final String mode;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = mode == 'live';
+    return SectionCard(
+      key: const ValueKey('user-trading-mode-card'),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(live ? Icons.warning_amber_outlined : Icons.science_outlined,
+              color: live ? Colors.orangeAccent : AppTheme.positive),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('거래 모드', style: TextStyle(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text(
+                  live ? '실거래' : '모의투자',
+                  style: TextStyle(
+                    color: live ? Colors.orangeAccent : AppTheme.positive,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (live) ...[
+                  const SizedBox(height: 4),
+                  const Text(
+                    '실거래 주문 비활성화',
+                    key: ValueKey('user-live-disabled-home'),
+                    style: TextStyle(color: Colors.orangeAccent),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

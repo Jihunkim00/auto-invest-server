@@ -380,7 +380,11 @@ class OperatorForcedOneShareBuyService:
 
         post_submit_settings = self._disable_buy_enable_position_management(db)
         order_id = _safe_int(manual_response.get("order_id") or manual_response.get("order_log_id"))
-        sync_summary = self._sync_submitted_order(db, order_id=order_id)
+        sync_summary = self._sync_submitted_order(
+            db,
+            order_id=order_id,
+            now=now_utc,
+        )
         lifecycle = sync_summary.get("lifecycle")
         lifecycle_created = bool(
             isinstance(lifecycle, dict) and lifecycle.get("created") is True
@@ -554,11 +558,16 @@ class OperatorForcedOneShareBuyService:
         db: Session,
         *,
         order_id: int | None,
+        now: datetime | None = None,
     ) -> dict[str, Any]:
         if order_id is None:
             return {"attempted": False, "reason": "order_id_missing"}
         try:
-            order = KisOrderSyncService(self.client).sync_order(db, order_id)
+            now_provider = (lambda: now) if now is not None else None
+            order = KisOrderSyncService(
+                self.client,
+                now_provider=now_provider,
+            ).sync_order(db, order_id)
         except Exception as exc:
             return {
                 "attempted": True,

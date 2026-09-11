@@ -59,6 +59,7 @@ class UserTradingSettings(Base):
     enabled = Column(Boolean, nullable=False, default=False, server_default='0', index=True)
     paper_trading_enabled = Column(Boolean, nullable=False, default=False, server_default='0')
     live_trading_enabled = Column(Boolean, nullable=False, default=False, server_default='0')
+    trading_mode = Column(String(10), nullable=False, default='paper', server_default='paper', index=True)
     max_daily_trades = Column(Integer, nullable=False, default=2, server_default='2')
     max_daily_loss_pct = Column(Float, nullable=False, default=0.02, server_default='0.02')
     max_position_pct = Column(Float, nullable=False, default=10.0, server_default='10.0')

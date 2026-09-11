@@ -13,6 +13,7 @@ from app.services.gpt_risk_context import (
     gpt_context_from_market_analysis,
     has_observed_gpt_context,
 )
+from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
@@ -692,6 +693,7 @@ def get_recent_runs(
     symbol: str | None = Query(default=None, min_length=1),
     trigger_source: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
 ):
     query = db.query(TradeRunLog)
     if symbol:
@@ -708,6 +710,7 @@ def get_recent_orders(
     limit: int = Query(default=20, ge=1, le=200),
     symbol: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
 ):
     query = db.query(OrderLog)
     if symbol:
@@ -722,6 +725,7 @@ def get_recent_signals(
     limit: int = Query(default=20, ge=1, le=200),
     symbol: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
 ):
     query = db.query(SignalLog)
     if symbol:
@@ -732,7 +736,10 @@ def get_recent_signals(
 
 
 @router.get("/logs/summary")
-def get_logs_summary(db: Session = Depends(get_db)):
+def get_logs_summary(
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+):
     latest_run = db.query(TradeRunLog).order_by(TradeRunLog.created_at.desc()).first()
     latest_order = db.query(OrderLog).order_by(OrderLog.created_at.desc()).first()
     latest_signal = db.query(SignalLog).order_by(SignalLog.created_at.desc()).first()

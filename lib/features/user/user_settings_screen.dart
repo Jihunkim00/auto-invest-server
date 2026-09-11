@@ -292,6 +292,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                _UserTradingSettingsCard(apiClient: widget.apiClient),
+                const SizedBox(height: 12),
                 _UserBrokerConnectionsCard(apiClient: widget.apiClient),
                 const SizedBox(height: 12),
                 Card(
@@ -376,6 +378,192 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+class _UserTradingSettingsCard extends StatefulWidget {
+  const _UserTradingSettingsCard({required this.apiClient});
+
+  final ApiClient apiClient;
+
+  @override
+  State<_UserTradingSettingsCard> createState() =>
+      _UserTradingSettingsCardState();
+}
+
+class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
+  final _dailyTrades = TextEditingController();
+  final _dailyLoss = TextEditingController();
+  final _positionPct = TextEditingController();
+  final _openPositions = TextEditingController();
+  String _mode = 'paper';
+  String? _error;
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    _dailyTrades.dispose();
+    _dailyLoss.dispose();
+    _positionPct.dispose();
+    _openPositions.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final values = await widget.apiClient.fetchUserTradingSettings();
+      if (!mounted) return;
+      setState(() {
+        _mode = values['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _dailyTrades.text = '${values['max_daily_trades'] ?? 2}';
+        _dailyLoss.text = '${values['max_daily_loss_pct'] ?? 0.02}';
+        _positionPct.text = '${values['max_position_pct'] ?? 10}';
+        _openPositions.text = '${values['max_open_positions'] ?? 1}';
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '거래 설정을 불러오지 못했습니다.';
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final saved = await widget.apiClient.updateUserTradingSettings(
+        tradingMode: _mode,
+        maxDailyTrades: int.tryParse(_dailyTrades.text.trim()),
+        maxDailyLossPct: double.tryParse(_dailyLoss.text.trim()),
+        maxPositionPct: double.tryParse(_positionPct.text.trim()),
+        maxOpenPositions: int.tryParse(_openPositions.text.trim()),
+      );
+      if (!mounted) return;
+      setState(() {
+        _mode = saved['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('거래 설정이 저장되었습니다.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '거래 설정을 저장하지 못했습니다.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: const ValueKey('user-trading-settings-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    '거래 모드',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  ToggleButtons(
+                    isSelected: [_mode == 'paper', _mode == 'live'],
+                    onPressed: _saving
+                        ? null
+                        : (index) => setState(
+                              () => _mode = index == 0 ? 'paper' : 'live',
+                            ),
+                    children: const [
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Text('모의투자'),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Text('실거래'),
+                      ),
+                    ],
+                  ),
+                  if (_mode == 'live') ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      '실거래 주문은 아직 비활성화되어 있습니다.',
+                      key: ValueKey('user-live-disabled-notice'),
+                      style: TextStyle(color: Colors.orangeAccent),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  const Text(
+                    '리스크 설정',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 8),
+                  _riskField(
+                    key: const ValueKey('user-max-daily-trades'),
+                    controller: _dailyTrades,
+                    label: '일일 최대 거래 횟수',
+                  ),
+                  _riskField(
+                    key: const ValueKey('user-max-daily-loss-pct'),
+                    controller: _dailyLoss,
+                    label: '일일 최대 손실률',
+                  ),
+                  _riskField(
+                    key: const ValueKey('user-max-position-pct'),
+                    controller: _positionPct,
+                    label: '최대 포지션 비중',
+                  ),
+                  _riskField(
+                    key: const ValueKey('user-max-open-positions'),
+                    controller: _openPositions,
+                    label: '최대 보유 종목 수',
+                  ),
+                  if (_error != null)
+                    Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    key: const ValueKey('user-trading-settings-save'),
+                    onPressed: _saving ? null : _save,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(_saving ? '저장 중...' : '거래 설정 저장'),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _riskField({
+    required Key key,
+    required TextEditingController controller,
+    required String label,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextField(
+        key: key,
+        controller: controller,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(labelText: label),
+      ),
     );
   }
 }

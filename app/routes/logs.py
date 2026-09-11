@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import MarketAnalysis, OrderLog, SignalLog
 from app.services.gpt_risk_context import gpt_context_from_market_analysis
+from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
@@ -54,6 +55,7 @@ def get_order_logs(
     symbol: str | None = None,
     limit: int = Query(default=50, le=200),
     db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
 ):
     query = db.query(OrderLog)
 
@@ -99,6 +101,7 @@ def get_signal_logs(
     symbol: str | None = None,
     limit: int = Query(default=50, le=200),
     db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
 ):
     query = db.query(SignalLog)
 

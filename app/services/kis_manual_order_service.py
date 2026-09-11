@@ -563,7 +563,7 @@ class KisManualOrderService:
         order.remaining_qty = float(request.qty)
         order.avg_fill_price = None
         order.sync_error = None
-        order.submitted_at = datetime.now(UTC)
+        order.submitted_at = now_utc
         order.response_payload = json.dumps(
             {
                 **response,

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -11,9 +12,21 @@ from app.routes.history import _serialize_order, _serialize_run, _serialize_sign
 from app.schemas.user_data import UserTradingSettingsUpdateRequest
 from app.services.auth_dependencies import require_regular_user
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
+from app.services.user_trading_execution_service import UserTradingExecutionService
 
 
 router = APIRouter(prefix='/users/me/trading', tags=['user-trading-foundation'])
+
+
+class UserTradingRunOnceRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+
+    provider: Literal['kis', 'alpaca'] = 'kis'
+    symbol: str = Field(min_length=1, max_length=20)
+
+
+def get_user_trading_execution_service() -> UserTradingExecutionService:
+    return UserTradingExecutionService()
 
 
 def _settings_payload(row: UserTradingSettings) -> dict[str, Any]:
@@ -23,6 +36,8 @@ def _settings_payload(row: UserTradingSettings) -> dict[str, Any]:
         'enabled': bool(row.enabled),
         'paper_trading_enabled': bool(row.paper_trading_enabled),
         'live_trading_enabled': bool(row.live_trading_enabled),
+        'trading_mode': str(row.trading_mode or 'paper'),
+        'available_trading_modes': ['paper', 'live'],
         'max_daily_trades': int(row.max_daily_trades),
         'max_daily_loss_pct': float(row.max_daily_loss_pct),
         'max_position_pct': float(row.max_position_pct),
@@ -84,11 +99,46 @@ def update_my_trading_settings(
     user: User = Depends(require_regular_user),
 ):
     row = _get_settings(db, user)
-    for key, value in payload.values().items():
+    values = payload.values()
+    selected_mode = values.pop('trading_mode', None)
+    if selected_mode is not None:
+        if selected_mode == 'paper':
+            row.trading_mode = 'paper'
+            row.enabled = True
+            row.paper_trading_enabled = True
+            row.live_trading_enabled = False
+        elif selected_mode == 'live':
+            row.trading_mode = 'live'
+            row.enabled = True
+            row.paper_trading_enabled = False
+            # PR127 deliberately keeps this permission false. PR128 owns the
+            # future live-execution unlock and its safety confirmation flow.
+            row.live_trading_enabled = False
+        else:
+            raise HTTPException(status_code=422, detail='unsupported_trading_mode')
+    for key, value in values.items():
         setattr(row, key, value)
     db.commit()
     db.refresh(row)
     return _settings_payload(row)
+
+
+@router.post('/run-once')
+def run_my_trading_once(
+    payload: UserTradingRunOnceRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+    service: UserTradingExecutionService = Depends(get_user_trading_execution_service),
+):
+    try:
+        return service.run_once(
+            db,
+            user,
+            provider=payload.provider,
+            symbol=payload.symbol,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get('/risk-status')

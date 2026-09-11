@@ -34,3 +34,25 @@ def require_regular_user(user: User = Depends(get_current_user)) -> User:
             detail='admin_uses_env_broker_credentials',
         )
     return user
+
+
+def require_admin_or_uninitialized_legacy_access(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> User | None:
+    """Protect global history while keeping empty legacy test DBs usable.
+
+    A real application database always contains the bootstrapped admin user.
+    The only permitted unauthenticated compatibility case is an entirely
+    uninitialized database with no users and therefore no authenticated data
+    owner. Once a user exists, global history requires an authenticated admin.
+    """
+    token = request.cookies.get(get_settings().session_cookie_name)
+    user = get_session_user(db, token)
+    if user is None:
+        if db.query(User).count() == 0:
+            return None
+        raise HTTPException(status_code=401, detail='Authentication is required.')
+    if user.role != 'admin':
+        raise HTTPException(status_code=403, detail='Administrator permission is required.')
+    return user

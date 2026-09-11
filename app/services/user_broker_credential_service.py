@@ -109,6 +109,32 @@ class UserBrokerCredentialService:
         db.refresh(row)
         return result
 
+    def get_credentials(
+        self,
+        db: Session,
+        user: User,
+        provider: str,
+    ) -> dict[str, Any]:
+        """Resolve one user's credentials for an authenticated execution path.
+
+        This method is intentionally service-only. Routes must never return
+        the decrypted payload, and callers must enforce their own execution
+        policy before using it.
+        """
+        self.crypto.ensure_configured()
+        normalized_provider = self._provider(provider)
+        row = self._find(db, user, normalized_provider)
+        if row is None:
+            raise LookupError("broker_credential_not_configured")
+        credentials = self.crypto.decrypt(
+            row.encrypted_payload,
+            encryption_version=row.encryption_version,
+        )
+        environment = str(credentials.get("environment") or row.environment or "").strip().lower()
+        if environment not in SUPPORTED_ENVIRONMENTS:
+            raise ValueError("broker_environment_invalid")
+        return {**credentials, "environment": environment}
+
     def delete(
         self,
         db: Session,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -42,7 +42,9 @@ class UserWatchlistCreateRequest(BaseModel):
 
 
 class UserTradingSettingsUpdateRequest(BaseModel):
-    '''Only non-execution risk limits may be changed in PR126.'''
+    '''Safe user trading mode and risk-limit changes for PR127.'''
+
+    trading_mode: Literal['paper', 'live'] | None = None
 
     max_daily_trades: int | None = Field(default=None, ge=0, le=100)
     max_daily_loss_pct: float | None = Field(default=None, ge=0, le=1)

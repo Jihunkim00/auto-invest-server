@@ -97,6 +97,10 @@ class _AiScreenState extends State<AiScreen> {
                 ],
               ),
             ),
+            if (widget.readOnly) ...[
+              _UserManualTradingPanel(controller: widget.controller),
+              const SizedBox(height: 4),
+            ],
             _QuickActions(onSelected: _quickAction, strings: strings),
             if (_error != null)
               Padding(
@@ -500,6 +504,150 @@ class _AiEntry {
   final String? error;
   final String? localText;
   final _LocalQuote? localQuote;
+}
+
+class _UserManualTradingPanel extends StatefulWidget {
+  const _UserManualTradingPanel({required this.controller});
+
+  final DashboardController controller;
+
+  @override
+  State<_UserManualTradingPanel> createState() =>
+      _UserManualTradingPanelState();
+}
+
+class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
+  final _symbolController = TextEditingController();
+  String _mode = 'paper';
+  String? _error;
+  Map<String, dynamic>? _result;
+  bool _loading = true;
+  bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _symbolController.text =
+        widget.controller.selectedProvider == SelectedProvider.kis
+            ? '005930'
+            : 'AAPL';
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _symbolController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final settings = await widget.controller.apiClient
+          .fetchUserTradingSettings();
+      if (!mounted) return;
+      setState(() {
+        _mode = settings['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _run() async {
+    final symbol = _symbolController.text.trim();
+    if (symbol.isEmpty || _running) return;
+    final provider = widget.controller.selectedProvider == SelectedProvider.kis
+        ? 'kis'
+        : 'alpaca';
+    setState(() {
+      _running = true;
+      _error = null;
+      _result = null;
+    });
+    try {
+      final result = await widget.controller.apiClient.runUserTradingOnce(
+        provider: provider,
+        symbol: symbol,
+      );
+      if (!mounted) return;
+      setState(() => _result = result);
+    } catch (error) {
+      if (mounted) setState(() => _error = '수동 실행 요청에 실패했습니다.');
+    } finally {
+      if (mounted) setState(() => _running = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = widget.controller.selectedProvider == SelectedProvider.kis
+        ? 'KIS'
+        : 'Alpaca';
+    final result = _result;
+    final resultText = result == null
+        ? null
+        : '${result['result'] ?? '-'} · ${result['reason'] ?? '-'}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Card(
+        key: const ValueKey('user-manual-trading-panel'),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                '모의매매',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 4),
+              Text('$provider · 요청한 종목만 분석하고 실행합니다.',
+                  style: const TextStyle(color: Colors.white70)),
+              if (_mode == 'live') ...[
+                const SizedBox(height: 6),
+                const Text(
+                  '실거래 주문은 아직 비활성화되어 있습니다.',
+                  key: ValueKey('user-ai-live-disabled'),
+                  style: TextStyle(color: Colors.orangeAccent),
+                ),
+              ],
+              const SizedBox(height: 10),
+              TextField(
+                key: const ValueKey('user-trading-symbol-field'),
+                controller: _symbolController,
+                decoration: const InputDecoration(
+                  labelText: '종목',
+                  hintText: '005930 또는 AAPL',
+                ),
+                enabled: !_running,
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                key: const ValueKey('user-trading-run-once-button'),
+                onPressed: _loading || _running ? null : _run,
+                icon: const Icon(Icons.play_arrow_outlined),
+                label: Text(_running ? '분석 중...' : '분석 및 모의 실행'),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
+              ],
+              if (resultText != null) ...[
+                const SizedBox(height: 8),
+                Text('실행 결과: $resultText', key: const ValueKey('user-trading-result')),
+                if (result?['result'] == 'simulated')
+                  const Text('모의 주문 · 실제 주문 없음',
+                      style: TextStyle(color: Colors.greenAccent)),
+                if (result?['result'] == 'hold')
+                  const Text('주문 없음', style: TextStyle(color: Colors.white70)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _QuickActions extends StatelessWidget {

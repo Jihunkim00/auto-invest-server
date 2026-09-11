@@ -42,8 +42,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('user-settings-screen')), findsOneWidget);
-    expect(find.byKey(const ValueKey('user-broker-connections-card')),
-        findsOneWidget);
+    final brokerCard = find.byKey(
+      const ValueKey('user-broker-connections-card'),
+    );
+    await tester.scrollUntilVisible(
+      brokerCard,
+      500,
+      scrollable: find.byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      ).first,
+    );
+    await tester.pumpAndSettle();
+    expect(brokerCard, findsOneWidget);
     expect(
         find.byKey(const ValueKey('user-broker-kis-app-key')), findsOneWidget);
     expect(find.byKey(const ValueKey('user-broker-alpaca-api-key')),

@@ -180,6 +180,19 @@ class ApiClient {
     return _decodeJsonMapResponse(r);
   }
 
+  Future<Map<String, dynamic>> _patchJsonBody(
+      String path, Map<String, dynamic> body) async {
+    final r = await _client.patch(
+      Uri.parse('${AppConfig.baseUrl}$path'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (r.statusCode >= 400) {
+      throw _apiRequestExceptionFromResponse(r);
+    }
+    return _decodeJsonMapResponse(r);
+  }
+
   Future<Map<String, dynamic>> _deleteJson(String path) async {
     final r = await _client.delete(
       Uri.parse('${AppConfig.baseUrl}$path'),
@@ -329,6 +342,37 @@ class ApiClient {
     );
     final raw = payload['settings'] ?? payload['settings_json'];
     return raw is Map ? Map<String, dynamic>.from(raw) : settings;
+  }
+
+  Future<Map<String, dynamic>> fetchUserTradingSettings() async {
+    return _getJsonNoCache('/users/me/trading/settings');
+  }
+
+  Future<Map<String, dynamic>> updateUserTradingSettings({
+    String? tradingMode,
+    int? maxDailyTrades,
+    double? maxDailyLossPct,
+    double? maxPositionPct,
+    int? maxOpenPositions,
+  }) async {
+    final body = <String, dynamic>{
+      if (tradingMode != null) 'trading_mode': tradingMode,
+      if (maxDailyTrades != null) 'max_daily_trades': maxDailyTrades,
+      if (maxDailyLossPct != null) 'max_daily_loss_pct': maxDailyLossPct,
+      if (maxPositionPct != null) 'max_position_pct': maxPositionPct,
+      if (maxOpenPositions != null) 'max_open_positions': maxOpenPositions,
+    };
+    return _patchJsonBody('/users/me/trading/settings', body);
+  }
+
+  Future<Map<String, dynamic>> runUserTradingOnce({
+    required String provider,
+    required String symbol,
+  }) async {
+    return _postJsonBody('/users/me/trading/run-once', {
+      'provider': provider,
+      'symbol': symbol,
+    });
   }
 
   Future<List<UserWatchlistItem>> fetchUserWatchlist() async {
