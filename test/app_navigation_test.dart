@@ -14,6 +14,20 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final destinations = tester
+        .widgetList<NavigationDestination>(
+          find.byType(NavigationDestination),
+        )
+        .toList();
+    expect(
+      destinations.map((destination) => destination.label).toList(),
+      [
+        controller.strings.home,
+        controller.strings.aiAssistant,
+        controller.strings.assets,
+      ],
+    );
+
     expect(find.text('AI 도우미'), findsOneWidget);
     expect(find.text('자산'), findsOneWidget);
     expect(find.byKey(const ValueKey('home-open-admin')), findsOneWidget);

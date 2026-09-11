@@ -3,9 +3,16 @@ import 'package:flutter/material.dart';
 import '../dashboard_controller.dart';
 
 class GlobalBrokerSelector extends StatelessWidget {
-  const GlobalBrokerSelector({super.key, required this.controller});
+  const GlobalBrokerSelector({
+    super.key,
+    required this.controller,
+    this.selectedProvider,
+    this.onSelectionChanged,
+  });
 
   final DashboardController controller;
+  final SelectedProvider? selectedProvider;
+  final ValueChanged<SelectedProvider>? onSelectionChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -48,9 +55,15 @@ class GlobalBrokerSelector extends StatelessWidget {
             icon: const Icon(Icons.account_balance, size: 16),
           ),
         ],
-        selected: {controller.selectedProvider},
-        onSelectionChanged: (selection) =>
-            controller.setProvider(selection.first),
+        selected: {selectedProvider ?? controller.selectedProvider},
+        onSelectionChanged: (selection) {
+          final provider = selection.first;
+          if (onSelectionChanged != null) {
+            onSelectionChanged!(provider);
+          } else {
+            controller.setProvider(provider);
+          }
+        },
       ),
     );
   }

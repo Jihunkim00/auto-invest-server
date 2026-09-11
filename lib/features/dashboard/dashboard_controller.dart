@@ -79,6 +79,8 @@ import '../../models/strategy_live_auto_buy.dart';
 import '../../models/strategy_live_auto_exit.dart';
 import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
+import '../../models/user_broker_account_snapshot.dart';
+import '../../models/user_broker_credential.dart';
 
 const _emptyRunResult = WatchlistRunResult(
   configuredSymbolCount: 0,
@@ -556,6 +558,45 @@ class DashboardController extends ChangeNotifier {
   PortfolioSummary get selectedPortfolioSummary =>
       isKisSelected ? krPortfolioSummary : usPortfolioSummary;
 
+  UserBrokerAccountSnapshot? userBrokerAccountFor(
+    SelectedProvider provider,
+  ) {
+    return provider == SelectedProvider.kis
+        ? kisUserAccount
+        : alpacaUserAccount;
+  }
+
+  PortfolioSummary? userPortfolioSummaryFor(SelectedProvider provider) {
+    final snapshot = userBrokerAccountFor(provider);
+    return snapshot == null
+        ? null
+        : PortfolioSummary.fromUserBrokerAccount(snapshot);
+  }
+
+  bool userBrokerAccountLoadingFor(SelectedProvider provider) {
+    return provider == SelectedProvider.kis
+        ? kisUserAccountLoading
+        : alpacaUserAccountLoading;
+  }
+
+  String? userBrokerAccountErrorFor(SelectedProvider provider) {
+    return provider == SelectedProvider.kis
+        ? kisUserAccountError
+        : alpacaUserAccountError;
+  }
+
+  UserBrokerAccountSnapshot? get selectedUserBrokerAccount {
+    final selected = userBrokerAccountFor(selectedProvider);
+    return selected ?? kisUserAccount ?? alpacaUserAccount;
+  }
+
+  PortfolioSummary? get selectedUserPortfolioSummary {
+    final snapshot = selectedUserBrokerAccount;
+    return snapshot == null
+        ? null
+        : PortfolioSummary.fromUserBrokerAccount(snapshot);
+  }
+
   List<PortfolioPositionManagementItem> get selectedPortfolioManagementItems =>
       portfolioManagementItemsForMarket(selectedPortfolioMarket);
 
@@ -613,6 +654,16 @@ class DashboardController extends ChangeNotifier {
   bool showingOfflineFallback = false;
   bool loading = false;
 
+  UserBrokerAccountSnapshot? kisUserAccount;
+  UserBrokerAccountSnapshot? alpacaUserAccount;
+  bool kisUserAccountLoading = false;
+  bool alpacaUserAccountLoading = false;
+  String? kisUserAccountError;
+  String? alpacaUserAccountError;
+  List<UserBrokerCredential> userBrokerCredentials = const [];
+  bool userBrokerAccountsLoading = false;
+  String? userBrokerAccountsError;
+
   /// Presentation state for the account/portfolio connection indicator.
   /// This does not alter any broker or order authority.
   bool portfolioLoading = false;
@@ -632,8 +683,100 @@ class DashboardController extends ChangeNotifier {
   String? manualRunSymbol;
   ManualTradingRunResult? manualRunResult;
 
+  Future<void> loadUserBrokerAccounts({bool silent = false}) async {
+    if (userBrokerAccountsLoading) return;
+    userBrokerAccountsLoading = true;
+    userBrokerAccountsError = null;
+    kisUserAccountLoading = true;
+    alpacaUserAccountLoading = true;
+    if (!silent) notifyListeners();
+
+    try {
+      userBrokerCredentials = await apiClient.fetchUserBrokers();
+      final configuredProviders = <String>{
+        for (final credential in userBrokerCredentials)
+          if (credential.configured) credential.provider.trim().toLowerCase(),
+      };
+      await Future.wait([
+        _loadUserBrokerAccount('kis', configuredProviders.contains('kis')),
+        _loadUserBrokerAccount(
+          'alpaca',
+          configuredProviders.contains('alpaca'),
+        ),
+      ]);
+    } catch (error) {
+      userBrokerAccountsError = _userBrokerErrorCode(error);
+      kisUserAccountError ??= userBrokerAccountsError;
+      alpacaUserAccountError ??= userBrokerAccountsError;
+      kisUserAccountLoading = false;
+      alpacaUserAccountLoading = false;
+    } finally {
+      userBrokerAccountsLoading = false;
+      if (!silent) notifyListeners();
+    }
+  }
+
+  Future<void> refreshUserBrokerAccounts() => loadUserBrokerAccounts();
+
+  Future<void> _loadUserBrokerAccount(String provider, bool configured) async {
+    final isKis = provider == 'kis';
+    if (!configured) {
+      if (isKis) {
+        kisUserAccount = null;
+        kisUserAccountError = 'broker_credentials_not_configured';
+        kisUserAccountLoading = false;
+      } else {
+        alpacaUserAccount = null;
+        alpacaUserAccountError = 'broker_credentials_not_configured';
+        alpacaUserAccountLoading = false;
+      }
+      return;
+    }
+
+    try {
+      final snapshot = await apiClient.getMyBrokerAccountSnapshot(provider);
+      if (isKis) {
+        kisUserAccount = snapshot;
+        kisUserAccountError = null;
+      } else {
+        alpacaUserAccount = snapshot;
+        alpacaUserAccountError = null;
+      }
+    } catch (error) {
+      final code = _userBrokerErrorCode(error);
+      if (isKis) {
+        kisUserAccount = null;
+        kisUserAccountError = code;
+      } else {
+        alpacaUserAccount = null;
+        alpacaUserAccountError = code;
+      }
+    } finally {
+      if (isKis) {
+        kisUserAccountLoading = false;
+      } else {
+        alpacaUserAccountLoading = false;
+      }
+    }
+  }
+
+  String _userBrokerErrorCode(Object error) {
+    if (error is ApiRequestException) {
+      final detail = error.detail?['detail'];
+      if (detail is String && detail.trim().isNotEmpty) return detail;
+      if (error.statusCode == 404) return 'broker_credentials_not_configured';
+      if (error.statusCode == 502) return 'broker_unavailable';
+    }
+    final text = error.toString().toLowerCase();
+    if (text.contains('not_configured') || text.contains('not configured')) {
+      return 'broker_credentials_not_configured';
+    }
+    return 'broker_unavailable';
+  }
+
   Future<void> load() async {
     loading = true;
+
     notifyListeners();
     try {
       try {

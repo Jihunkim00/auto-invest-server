@@ -11,6 +11,7 @@ from app.services.broker_credential_crypto_service import (
     BrokerCredentialCryptoService,
 )
 from app.services.user_broker_validation_service import UserBrokerValidationService
+from app.services.user_broker_account_service import invalidate_user_kis_tokens
 
 
 SUPPORTED_PROVIDERS = {"kis", "alpaca"}
@@ -75,6 +76,8 @@ class UserBrokerCredentialService:
         row.last_validated_at = None
         row.last_validation_status = None
         row.last_validation_error = None
+        if normalized_provider == 'kis':
+            invalidate_user_kis_tokens(user.id)
         db.commit()
         db.refresh(row)
         return self._status(row)
@@ -118,6 +121,8 @@ class UserBrokerCredentialService:
         if row is None:
             raise LookupError("broker_credential_not_configured")
         db.delete(row)
+        if normalized_provider == 'kis':
+            invalidate_user_kis_tokens(user.id)
         db.commit()
         return {
             "ok": True,

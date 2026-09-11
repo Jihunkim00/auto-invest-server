@@ -4,6 +4,7 @@ import '../../core/i18n/app_strings.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/section_card.dart';
 import '../../models/portfolio_summary.dart';
+import '../../models/user_broker_account_snapshot.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/home_latest_ai_decision_card.dart';
@@ -17,51 +18,92 @@ class HomeScreen extends StatelessWidget {
     this.onOpenAdmin,
     this.onOpenAutomationProfile,
     this.nowKst,
+    this.readOnlyUser = false,
   });
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
   final VoidCallback? onOpenAutomationProfile;
   final DateTime Function()? nowKst;
+  final bool readOnlyUser;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
-      builder: (context, _) => SafeArea(
-        child: RefreshIndicator(
-          onRefresh: controller.load,
-          child: ListView(
-            key: const ValueKey('home-simple-scroll-view'),
-            padding: const EdgeInsets.all(AppTheme.pagePadding),
-            children: [
-              _HomeHeader(controller: controller, onOpenAdmin: onOpenAdmin),
-              const SizedBox(height: 16),
-              _AccountConnectionCard(controller: controller),
-              const SizedBox(height: 12),
-              _OperationModeCard(controller: controller),
-              const SizedBox(height: 12),
-              _AutomationProfileCard(
-                controller: controller,
-                onOpen: onOpenAutomationProfile,
-              ),
-              const SizedBox(height: 12),
-              _PortfolioCard(controller: controller),
-              const SizedBox(height: 12),
-              _PositionsCard(controller: controller),
-              const SizedBox(height: 12),
-              _DecisionCard(controller: controller, nowKst: nowKst),
-              if (controller.error != null) ...[
-                const SizedBox(height: 12),
-                _InlineNotice(
-                  message: controller.error!,
-                  color: AppTheme.warning,
+      builder: (context, _) {
+        final userSnapshot =
+            readOnlyUser ? controller.selectedUserBrokerAccount : null;
+        final userSummary =
+            readOnlyUser ? controller.selectedUserPortfolioSummary : null;
+        final userLoading = readOnlyUser &&
+            (controller.userBrokerAccountsLoading ||
+                controller
+                    .userBrokerAccountLoadingFor(controller.selectedProvider));
+        final userError = readOnlyUser
+            ? controller.userBrokerAccountErrorFor(controller.selectedProvider)
+            : null;
+        return SafeArea(
+          child: RefreshIndicator(
+            onRefresh: readOnlyUser
+                ? controller.refreshUserBrokerAccounts
+                : controller.load,
+            child: ListView(
+              key: const ValueKey('home-simple-scroll-view'),
+              padding: const EdgeInsets.all(AppTheme.pagePadding),
+              children: [
+                _HomeHeader(controller: controller, onOpenAdmin: onOpenAdmin),
+                const SizedBox(height: 16),
+                _AccountConnectionCard(
+                  controller: controller,
+                  readOnlyUser: readOnlyUser,
+                  userSnapshot: userSnapshot,
+                  userLoading: userLoading,
+                  userError: userError,
                 ),
+                const SizedBox(height: 12),
+                if (!readOnlyUser) ...[
+                  _OperationModeCard(controller: controller),
+                  const SizedBox(height: 12),
+                  _AutomationProfileCard(
+                    controller: controller,
+                    onOpen: onOpenAutomationProfile,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                _PortfolioCard(
+                  controller: controller,
+                  summaryOverride: userSummary,
+                  providerOverride: userSnapshot == null
+                      ? null
+                      : userSnapshot.provider.trim().toLowerCase() == 'kis'
+                          ? SelectedProvider.kis
+                          : SelectedProvider.alpaca,
+                  loadingOverride: userLoading,
+                  userError: userError,
+                ),
+                const SizedBox(height: 12),
+                _PositionsCard(
+                  controller: controller,
+                  summaryOverride: userSummary,
+                  loadingOverride: userLoading,
+                ),
+                if (!readOnlyUser) ...[
+                  const SizedBox(height: 12),
+                  _DecisionCard(controller: controller, nowKst: nowKst),
+                ],
+                if (controller.error != null) ...[
+                  const SizedBox(height: 12),
+                  _InlineNotice(
+                    message: controller.error!,
+                    color: AppTheme.warning,
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -81,13 +123,15 @@ class _HomeHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             GlobalBrokerSelector(controller: controller),
-            const SizedBox(width: 8),
-            IconButton(
-              key: const ValueKey('home-open-admin'),
-              tooltip: strings.adminTooltip,
-              onPressed: onOpenAdmin,
-              icon: const Icon(Icons.admin_panel_settings_outlined),
-            ),
+            if (onOpenAdmin != null) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                key: const ValueKey('home-open-admin'),
+                tooltip: strings.adminTooltip,
+                onPressed: onOpenAdmin,
+                icon: const Icon(Icons.admin_panel_settings_outlined),
+              ),
+            ],
           ],
         );
         final title = Column(
@@ -124,30 +168,58 @@ class _HomeHeader extends StatelessWidget {
 }
 
 class _AccountConnectionCard extends StatelessWidget {
-  const _AccountConnectionCard({required this.controller});
+  const _AccountConnectionCard({
+    required this.controller,
+    this.readOnlyUser = false,
+    this.userSnapshot,
+    this.userLoading = false,
+    this.userError,
+  });
 
   final DashboardController controller;
+  final bool readOnlyUser;
+  final UserBrokerAccountSnapshot? userSnapshot;
+  final bool userLoading;
+  final String? userError;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final broker = controller.selectedProvider == SelectedProvider.kis
-        ? strings.kisBroker
-        : strings.alpacaBroker;
-    final failed = controller.portfolioLoadError != null ||
-        (!controller.portfolioLoaded &&
-            controller.selectedPortfolioUnavailable);
-    final loading = !failed && !controller.portfolioLoaded;
+    final broker = readOnlyUser
+        ? userSnapshot?.provider.trim().toLowerCase() == 'kis'
+            ? 'KIS'
+            : 'Alpaca'
+        : controller.selectedProvider == SelectedProvider.kis
+            ? strings.kisBroker
+            : strings.alpacaBroker;
+    final failed = readOnlyUser
+        ? userError != null && userSnapshot == null
+        : controller.portfolioLoadError != null ||
+            (!controller.portfolioLoaded &&
+                controller.selectedPortfolioUnavailable);
+    final loading =
+        readOnlyUser ? userLoading : !failed && !controller.portfolioLoaded;
+    final connected = readOnlyUser
+        ? userSnapshot?.connected == true
+        : controller.portfolioLoaded && !failed;
     final color = failed
         ? AppTheme.warning
         : loading
             ? AppTheme.primaryAccent
             : AppTheme.positive;
     final label = failed
-        ? strings.connectionError
+        ? readOnlyUser
+            ? '\uC5F0\uACB0 \uC624\uB958'
+            : strings.connectionError
         : loading
-            ? strings.connectionLoading(broker)
-            : strings.connectionSuccess(broker);
+            ? readOnlyUser
+                ? '\uC5F0\uACB0 \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                : strings.connectionLoading(broker)
+            : readOnlyUser
+                ? connected
+                    ? '\uC5F0\uACB0\uB428'
+                    : '\uC870\uD68C \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                : strings.connectionSuccess(broker);
     final icon = failed
         ? Icons.error_outline
         : loading
@@ -173,13 +245,19 @@ class _AccountConnectionCard extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   failed
-                      ? strings.connectionError
-                      : strings.isKorean
+                      ? readOnlyUser
+                          ? '\uACC4\uC88C \uC815\uBCF4 \uC870\uD68C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.'
+                          : strings.connectionError
+                      : readOnlyUser
+                          ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
+                          : strings.isKorean
                           ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
                           : 'Connected means broker account and portfolio data was fetched successfully.',
                   style: const TextStyle(color: Colors.white60, height: 1.35),
                 ),
-                if (!loading && controller.portfolioLoadedAt != null) ...[
+                if (!readOnlyUser &&
+                    !loading &&
+                    controller.portfolioLoadedAt != null) ...[
                   const SizedBox(height: 3),
                   Text(
                     strings
@@ -190,7 +268,7 @@ class _AccountConnectionCard extends StatelessWidget {
               ],
             ),
           ),
-          if (failed)
+          if (failed && !readOnlyUser)
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: OutlinedButton(
@@ -639,17 +717,33 @@ Color _executionStatusColor(DashboardController controller) {
 }
 
 class _PortfolioCard extends StatelessWidget {
-  const _PortfolioCard({required this.controller});
+  const _PortfolioCard({
+    required this.controller,
+    this.summaryOverride,
+    this.providerOverride,
+    this.loadingOverride = false,
+    this.userError,
+  });
 
   final DashboardController controller;
+  final PortfolioSummary? summaryOverride;
+  final SelectedProvider? providerOverride;
+  final bool loadingOverride;
+  final String? userError;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final summary = controller.selectedPortfolioSummary;
-    final unavailable = controller.selectedPortfolioUnavailable ||
-        summary.hasUnavailableKisData;
-    if (!controller.portfolioLoaded) {
+    final summary = summaryOverride ?? controller.selectedPortfolioSummary;
+    final isKis = providerOverride == null
+        ? controller.isKisSelected
+        : providerOverride == SelectedProvider.kis;
+    final unavailable = summaryOverride == null
+        ? controller.selectedPortfolioUnavailable ||
+            summary.hasUnavailableKisData
+        : summary.hasUnavailableKisData;
+    final loaded = summaryOverride != null || controller.portfolioLoaded;
+    if (!loaded || loadingOverride) {
       return SectionCard(
         key: const ValueKey('home-portfolio-card'),
         child: Row(
@@ -661,15 +755,17 @@ class _PortfolioCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Expanded(
-                child: Text(strings.connectionLoading(
-                    controller.selectedProvider == SelectedProvider.kis
-                        ? strings.kisBroker
-                        : strings.alpacaBroker))),
+              child: Text(
+                userError == null
+                    ? strings.connectionLoading(
+                        isKis ? strings.kisBroker : strings.alpacaBroker)
+                    : '\uACC4\uC88C \uC815\uBCF4 \uC870\uD68C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.',
+              ),
+            ),
           ],
         ),
       );
     }
-    final isKis = controller.isKisSelected;
     final total = isKis
         ? summary.totalAssetValue ?? summary.totalMarketValue + summary.cash
         : summary.totalMarketValue + (summary.cashKnown ? summary.cash : 0);
@@ -692,6 +788,7 @@ class _PortfolioCard extends StatelessWidget {
               totalAssets: total,
               isKorean: strings.isKorean,
               unknownValue: strings.unknownValue,
+              readOnlyUser: summaryOverride != null,
             )
           else
             Wrap(
@@ -720,12 +817,14 @@ class _KisPortfolioMetrics extends StatelessWidget {
     required this.totalAssets,
     required this.isKorean,
     required this.unknownValue,
+    this.readOnlyUser = false,
   });
 
   final PortfolioSummary summary;
   final double totalAssets;
   final bool isKorean;
   final String unknownValue;
+  final bool readOnlyUser;
 
   @override
   Widget build(BuildContext context) {
@@ -760,7 +859,11 @@ class _KisPortfolioMetrics extends StatelessWidget {
                   : unknownValue,
             ),
             _Metric(
-              isKorean ? '주문가능' : 'Orderable Cash',
+              readOnlyUser
+                  ? '\uB9E4\uC218\uAC00\uB2A5\uAE08\uC561'
+                  : isKorean
+                      ? '주문가능'
+                      : 'Orderable Cash',
               _kisOrderableCash(summary, isKorean: isKorean),
             ),
           ],
@@ -782,16 +885,24 @@ class _KisPortfolioMetrics extends StatelessWidget {
 }
 
 class _PositionsCard extends StatelessWidget {
-  const _PositionsCard({required this.controller});
+  const _PositionsCard({
+    required this.controller,
+    this.summaryOverride,
+    this.loadingOverride = false,
+  });
 
   final DashboardController controller;
+  final PortfolioSummary? summaryOverride;
+  final bool loadingOverride;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final positions = controller.selectedPortfolioSummary.positions
-        .take(3)
-        .toList(growable: false);
+    final summary = summaryOverride ?? controller.selectedPortfolioSummary;
+    final isKis = summaryOverride == null
+        ? controller.isKisSelected
+        : summary.currency.toUpperCase() == 'KRW';
+    final positions = summary.positions.take(3).toList(growable: false);
     return SectionCard(
       key: const ValueKey('home-positions-card'),
       child: Column(
@@ -800,12 +911,11 @@ class _PositionsCard extends StatelessWidget {
           Text(strings.currentPositions,
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
-          if (!controller.portfolioLoaded)
+          if (loadingOverride ||
+              (summaryOverride == null && !controller.portfolioLoaded))
             Text(
                 strings.connectionLoading(
-                    controller.selectedProvider == SelectedProvider.kis
-                        ? strings.kisBroker
-                        : strings.alpacaBroker),
+                    isKis ? strings.kisBroker : strings.alpacaBroker),
                 style: const TextStyle(color: Colors.white70))
           else if (positions.isEmpty)
             Text(strings.noHeldPositions,
@@ -831,9 +941,7 @@ class _PositionsCard extends StatelessWidget {
                     const SizedBox(width: 10),
                     Flexible(
                       child: Text(
-                        _signedMoney(
-                            controller.selectedPortfolioSummary.currency,
-                            position.unrealizedPl),
+                        _signedMoney(summary.currency, position.unrealizedPl),
                         textAlign: TextAlign.right,
                         style: TextStyle(
                           color: position.unrealizedPl >= 0

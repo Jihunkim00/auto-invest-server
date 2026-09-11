@@ -1,3 +1,5 @@
+import 'user_broker_account_snapshot.dart';
+
 class PortfolioSummary {
   const PortfolioSummary({
     required this.currency,
@@ -101,6 +103,95 @@ class PortfolioSummary {
       nextRefreshAllowedAt:
           _readNullableString(json['next_refresh_allowed_at']),
       tokenExpired: _readBool(json['token_expired'], false),
+    );
+  }
+
+  factory PortfolioSummary.fromUserBrokerAccount(
+    UserBrokerAccountSnapshot snapshot,
+  ) {
+    final account = snapshot.account;
+    final positions = snapshot.positions
+        .map(
+          (position) => PositionSummary(
+            symbol: position.symbol,
+            name: position.name ?? '',
+            broker: snapshot.provider,
+            market:
+                snapshot.provider.trim().toLowerCase() == 'kis' ? 'KR' : 'US',
+            side: 'long',
+            qty: position.quantity ?? 0,
+            avgEntryPrice: position.avgPrice ?? 0,
+            costBasis: position.costBasis ?? 0,
+            currentPrice: position.currentPrice,
+            marketValue: position.marketValue ?? 0,
+            unrealizedPl: position.unrealizedPl ?? 0,
+            unrealizedPlpc: position.unrealizedPlPct ?? 0,
+          ),
+        )
+        .toList();
+    final pendingOrders = snapshot.openOrders
+        .map(
+          (order) => PendingOrderSummary(
+            id: order.brokerOrderId,
+            symbol: order.symbol,
+            name: order.name ?? '',
+            side: order.side,
+            type: order.orderType ?? '',
+            status: order.status,
+            qty: order.quantity,
+            unfilledQty: order.remainingQuantity,
+            notional: order.orderPrice == null || order.quantity == null
+                ? null
+                : order.orderPrice! * order.quantity!,
+            limitPrice: order.orderPrice,
+            price: order.orderPrice,
+            estimatedAmount: order.orderPrice == null || order.quantity == null
+                ? null
+                : order.orderPrice! * order.quantity!,
+            submittedAt: order.submittedAt,
+          ),
+        )
+        .toList();
+    final totalCostBasis = positions.fold<double>(
+      0,
+      (total, position) => total + position.costBasis,
+    );
+    final totalMarketValue = positions.fold<double>(
+      0,
+      (total, position) => total + position.marketValue,
+    );
+    final totalUnrealizedPl = account.unrealizedPl ??
+        positions.fold<double>(
+          0,
+          (total, position) => total + position.unrealizedPl,
+        );
+    final totalUnrealizedPlpc = account.unrealizedPlPct ??
+        (totalCostBasis == 0 ? 0 : totalUnrealizedPl / totalCostBasis * 100);
+    final isKis = snapshot.provider.trim().toLowerCase() == 'kis';
+
+    return PortfolioSummary(
+      currency: account.currency,
+      positionsCount: positions.length,
+      pendingOrdersCount: pendingOrders.length,
+      totalCostBasis: totalCostBasis,
+      totalMarketValue: totalMarketValue,
+      totalUnrealizedPl: totalUnrealizedPl,
+      totalUnrealizedPlpc: totalUnrealizedPlpc,
+      cash: account.cash ?? 0,
+      positions: positions,
+      pendingOrders: pendingOrders,
+      totalAssetValue: account.portfolioValue ?? account.equity,
+      stockEvaluationAmount:
+          account.stockEvaluationAmount ?? (isKis ? totalMarketValue : null),
+      cashBalance: account.cash,
+      withdrawableCash: account.withdrawableCash,
+      orderableCash: account.buyingPower,
+      d1Cash: account.d1Cash,
+      d2Cash: account.d2Cash,
+      cashKnown: account.cash != null,
+      balanceUnavailable: !snapshot.connected,
+      positionsUnavailable: !snapshot.connected,
+      openOrdersUnavailable: !snapshot.connected,
     );
   }
 

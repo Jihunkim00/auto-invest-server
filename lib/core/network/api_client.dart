@@ -77,6 +77,7 @@ import '../../models/trading_run.dart';
 import '../../models/watchlist_run_result.dart';
 import '../../models/auth_session.dart';
 import '../../models/user_broker_credential.dart';
+import '../../models/user_broker_account_snapshot.dart';
 import '../../models/user_watchlist_item.dart';
 
 class ApiRequestException implements Exception {
@@ -374,6 +375,16 @@ class ApiClient {
   Future<UserBrokerCredential> fetchUserBroker(String provider) async {
     final payload = await _getJsonNoCache('/users/me/brokers/$provider');
     return UserBrokerCredential.fromJson(payload);
+  }
+
+  Future<UserBrokerAccountSnapshot> getMyBrokerAccountSnapshot(
+    String provider,
+  ) async {
+    final normalizedProvider = provider.trim().toLowerCase();
+    final payload = await _getJsonNoCache(
+      '/users/me/brokers/${Uri.encodeComponent(normalizedProvider)}/account',
+    );
+    return UserBrokerAccountSnapshot.fromJson(payload);
   }
 
   Future<UserBrokerCredential> saveUserBroker(

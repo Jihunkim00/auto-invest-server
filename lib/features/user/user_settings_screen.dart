@@ -236,7 +236,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: const ValueKey('user-settings-screen'),
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: const Text('\uC124\uC815')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(

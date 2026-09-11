@@ -6,6 +6,7 @@ import 'package:auto_invest_dashboard/core/network/api_client.dart';
 import 'package:auto_invest_dashboard/features/auth/user_registration_screen.dart';
 import 'package:auto_invest_dashboard/features/dashboard/dashboard_controller.dart';
 import 'package:auto_invest_dashboard/models/auth_session.dart';
+import 'package:auto_invest_dashboard/models/user_broker_credential.dart';
 import 'package:auto_invest_dashboard/models/user_watchlist_item.dart';
 
 
@@ -42,7 +43,8 @@ void main() {
     expect(api.registerCalls, 1);
   });
 
-  testWidgets('regular user gets Home and Settings only', (tester) async {
+  testWidgets('regular user gets the shared Home, AI, and Assets shell',
+      (tester) async {
     final api = _UserDataApi(
       state: const AuthSessionState(
         authenticated: true,
@@ -68,9 +70,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('user-home-screen')), findsOneWidget);
-    expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('AI 도우미'), findsNothing);
+    expect(find.text('\uC124\uC815'), findsNothing);
+    expect(find.text('AI 도우미'), findsAtLeastNWidgets(1));
+    expect(find.text('\uC790\uC0B0'), findsAtLeastNWidgets(1));
     expect(find.byKey(const ValueKey('home-open-admin')), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.account_balance_wallet_outlined));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('user-assets-screen')), findsOneWidget);
   });
 }
 
@@ -104,4 +111,7 @@ class _UserDataApi extends ApiClient {
 
   @override
   Future<List<UserWatchlistItem>> fetchUserWatchlist() async => [];
+
+  @override
+  Future<List<UserBrokerCredential>> fetchUserBrokers() async => [];
 }

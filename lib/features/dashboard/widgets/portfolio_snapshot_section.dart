@@ -17,35 +17,83 @@ class PortfolioSnapshotSection extends StatelessWidget {
     this.managementMode = false,
     this.onOpenManualOrder,
     this.onReviewPosition,
+    this.summaryOverride,
+    this.providerOverride,
+    this.koreanLabels = false,
   });
 
   final DashboardController controller;
   final bool managementMode;
   final VoidCallback? onOpenManualOrder;
   final VoidCallback? onReviewPosition;
+  final PortfolioSummary? summaryOverride;
+  final SelectedProvider? providerOverride;
+  final bool koreanLabels;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final summary = controller.selectedPortfolioSummary;
-    final isKr = controller.isKisSelected;
-    final managementItems = controller.selectedPortfolioManagementItems;
-    final marketTitle =
-        isKr ? 'KR Portfolio / KIS Read-only' : 'US Portfolio / Alpaca Paper';
-    final noPositionsText = isKr && summary.positionsUnavailable
-        ? 'KIS positions unavailable'
+    final summary = summaryOverride ?? controller.selectedPortfolioSummary;
+    final isKr = providerOverride == null
+        ? controller.isKisSelected
+        : providerOverride == SelectedProvider.kis;
+    final managementItems = summaryOverride == null
+        ? controller.selectedPortfolioManagementItems
+        : summary.positions
+            .map(
+              (position) => PortfolioPositionManagementItem.fromPosition(
+                position: position,
+                isKr: isKr,
+              ),
+            )
+            .toList();
+    final marketTitle = koreanLabels
+        ? (isKr
+            ? 'KIS / \uAD6D\uB0B4 \uACC4\uC88C'
+            : 'Alpaca / \uBBF8\uAD6D \uACC4\uC88C')
         : isKr
-            ? 'No open KR positions'
-            : 'No open US positions';
-    final noOrdersText = isKr && summary.openOrdersUnavailable
-        ? 'KIS open orders unavailable'
-        : isKr
-            ? 'No pending KR orders'
-            : 'No pending US orders';
-    final plColor = _valueColor(summary.totalUnrealizedPl);
+            ? 'KR Portfolio / KIS Read-only'
+            : 'US Portfolio / Alpaca Paper';
+    final noPositionsText = koreanLabels
+        ? (summary.positionsUnavailable
+            ? '\uBCF4\uC720 \uC885\uBAA9\uC744 \uC870\uD68C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.'
+            : '\uBCF4\uC720 \uC885\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.')
+        : isKr && summary.positionsUnavailable
+            ? 'KIS positions unavailable'
+            : isKr
+                ? 'No open KR positions'
+                : 'No open US positions';
+    final noOrdersText = koreanLabels
+        ? (summary.openOrdersUnavailable
+            ? '\uBBF8\uCCB4\uACB0 \uC8FC\uBB38\uC744 \uC870\uD68C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.'
+            : '\uBBF8\uCCB4\uACB0 \uC8FC\uBB38\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.')
+        : isKr && summary.openOrdersUnavailable
+            ? 'KIS open orders unavailable'
+            : isKr
+                ? 'No pending KR orders'
+                : 'No pending US orders';
+    final heldCount =
+        summary.positionsUnavailable ? '--' : summary.positionsCount.toString();
+    final pendingCount = summary.openOrdersUnavailable
+        ? '--'
+        : summary.pendingOrdersCount.toString();
     final countText = isKr && summary.hasUnavailableKisData
-        ? '${summary.positionsUnavailable ? '--' : summary.positionsCount} held / ${summary.openOrdersUnavailable ? '--' : summary.pendingOrdersCount} pending'
-        : '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending';
+        ? koreanLabels
+            ? heldCount +
+                '\uAC1C \uBCF4\uC720 / ' +
+                pendingCount +
+                '\uAC74 \uB300\uAE30'
+            : heldCount + ' held / ' + pendingCount + ' pending'
+        : koreanLabels
+            ? summary.positionsCount.toString() +
+                '\uAC1C \uBCF4\uC720 / ' +
+                summary.pendingOrdersCount.toString() +
+                '\uAC74 \uB300\uAE30'
+            : summary.positionsCount.toString() +
+                ' held / ' +
+                summary.pendingOrdersCount.toString() +
+                ' pending';
+    final plColor = _valueColor(summary.totalUnrealizedPl);
     final globalBrokerBadge = isKr
         ? strings.isKorean
             ? '전역: ${strings.brokerCompactDisplayName('kis')} / 국내'
@@ -61,7 +109,10 @@ class PortfolioSnapshotSection extends StatelessWidget {
           const Icon(Icons.account_balance_wallet_outlined, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text('Portfolio Snapshot',
+            child: Text(
+                koreanLabels
+                    ? '\uC790\uC0B0 \uD604\uD669'
+                    : 'Portfolio Snapshot',
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           if (managementMode) ...[
@@ -105,10 +156,16 @@ class PortfolioSnapshotSection extends StatelessWidget {
                 color: isKr ? Colors.redAccent : Colors.lightBlueAccent,
               ),
               if (isKr) ...[
-                const _SoftBadge(
-                    text: 'READ-ONLY', color: Colors.lightBlueAccent),
-                const _SoftBadge(
-                    text: 'TRADING DISABLED', color: Colors.amberAccent),
+                _SoftBadge(
+                    text: koreanLabels
+                        ? '\uC870\uD68C \uC804\uC6A9'
+                        : 'READ-ONLY',
+                    color: Colors.lightBlueAccent),
+                _SoftBadge(
+                    text: koreanLabels
+                        ? '\uAC70\uB798 \uBE44\uD65C\uC131'
+                        : 'TRADING DISABLED',
+                    color: Colors.amberAccent),
               ],
             ]),
         if (isKr && summary.tokenExpired) ...[
@@ -120,7 +177,8 @@ class PortfolioSnapshotSection extends StatelessWidget {
                 ? null
                 : 'Token refresh is temporarily blocked until ${summary.nextRefreshAllowedAt}.',
           ),
-        ] else if (controller.selectedPortfolioUnavailable) ...[
+        ] else if (summaryOverride == null &&
+            controller.selectedPortfolioUnavailable) ...[
           const SizedBox(height: 10),
           _EmptyLine(
               text: controller.krPortfolioError ??
@@ -161,7 +219,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
                         color: Colors.white70),
                     _MetricTile(
                         width: tileWidth,
-                        label: strings.isKorean ? '주문가능금액' : 'Orderable Cash',
+                        label: koreanLabels
+                            ? '\uB9E4\uC218\uAC00\uB2A5\uAE08\uC561'
+                            : strings.isKorean
+                                ? '\uC8FC\uBB38\uAC00\uB2A5\uAE08\uC561'
+                                : 'Orderable Cash',
                         value: _orderableCashDisplay(summary,
                             isKorean: strings.isKorean),
                         color: Colors.white70),
@@ -201,32 +263,44 @@ class PortfolioSnapshotSection extends StatelessWidget {
           return Wrap(spacing: 8, runSpacing: 8, children: [
             _MetricTile(
                 width: tileWidth,
-                label: 'Total Market Value',
+                label: koreanLabels
+                    ? '\uCD1D \uD3C9\uAC00\uAE08\uC561'
+                    : 'Total Market Value',
                 value: _money(summary.totalMarketValue,
                     currency: summary.currency),
                 color: Colors.white),
             _MetricTile(
                 width: tileWidth,
-                label: 'Total Cost',
+                label: koreanLabels
+                    ? '\uCD1D \uB9E4\uC218\uAE08\uC561'
+                    : 'Total Cost',
                 value:
                     _money(summary.totalCostBasis, currency: summary.currency),
                 color: Colors.white70),
             _MetricTile(
                 width: tileWidth,
-                label: 'Unrealized P/L',
+                label: koreanLabels
+                    ? '\uD3C9\uAC00\uC190\uC775'
+                    : 'Unrealized P/L',
                 value: _money(summary.totalUnrealizedPl,
                     currency: summary.currency, signed: true),
                 color: plColor),
             _MetricTile(
                 width: tileWidth,
-                label: 'Profit %',
+                label: koreanLabels
+                    ? '\uD3C9\uAC00\uC190\uC775\uB960'
+                    : 'Profit %',
                 value: _percentOrDash(
                     _portfolioProfitPercent(summary, isKr: isKr),
                     signed: true),
                 color: plColor),
             _MetricTile(
                 width: tileWidth,
-                label: isKr ? 'Available Cash' : 'Cash',
+                label: koreanLabels
+                    ? '\uC608\uC218\uAE08'
+                    : isKr
+                        ? 'Available Cash'
+                        : 'Cash',
                 value: isKr && !summary.cashKnown
                     ? 'Unavailable'
                     : _money(summary.cash, currency: summary.currency),
@@ -239,28 +313,40 @@ class PortfolioSnapshotSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _SubsectionTitle('Position Management'),
+              _SubsectionTitle(koreanLabels
+                  ? '\uBCF4\uC720 \uC885\uBAA9'
+                  : 'Position Management'),
               const SizedBox(height: 4),
-              const _StateNote(
-                text:
-                    'Held positions with trigger state. Manual sell actions prefill a ticket only.',
-              ),
+              if (!koreanLabels)
+                const _StateNote(
+                  text:
+                      'Held positions with trigger state. Manual sell actions prefill a ticket only.',
+                ),
               if (isKr) ...[
                 const SizedBox(height: 8),
-                const Wrap(spacing: 8, runSpacing: 8, children: [
+                Wrap(spacing: 8, runSpacing: 8, children: [
                   _SoftBadge(
-                      text: 'HELD POSITIONS', color: Colors.lightBlueAccent),
-                  _SoftBadge(
-                      text: 'EXIT PREFLIGHT FIRST',
+                      text: koreanLabels
+                          ? '\uBCF4\uC720 \uC885\uBAA9'
+                          : 'HELD POSITIONS',
                       color: Colors.lightBlueAccent),
                   _SoftBadge(
-                      text: 'TICKET PREFILL ONLY', color: Colors.greenAccent),
-                  _SoftBadge(
-                      text: 'CONFIRM_LIVE MANUAL', color: Colors.redAccent),
+                      text: koreanLabels
+                          ? '\uC870\uD68C \uC804\uC6A9'
+                          : 'EXIT PREFLIGHT FIRST',
+                      color: Colors.lightBlueAccent),
+                  if (!koreanLabels)
+                    const _SoftBadge(
+                        text: 'TICKET PREFILL ONLY', color: Colors.greenAccent),
+                  if (!koreanLabels)
+                    const _SoftBadge(
+                        text: 'CONFIRM_LIVE MANUAL', color: Colors.redAccent),
                 ]),
               ],
               const SizedBox(height: 8),
-              const _SubsectionTitle('Current Holdings'),
+              _SubsectionTitle(koreanLabels
+                  ? '\uBCF4\uC720 \uC885\uBAA9'
+                  : 'Current Holdings'),
               if (isKr && controller.kisManagedPositionsLoading) ...[
                 const SizedBox(height: 6),
                 const _StateNote(text: 'Loading KIS position management...'),
@@ -289,6 +375,7 @@ class PortfolioSnapshotSection extends StatelessWidget {
                       managementMode: managementMode,
                       onOpenManualOrder: onOpenManualOrder,
                       onReviewPosition: onReviewPosition,
+                      koreanLabels: koreanLabels,
                     ),
                     if (item != managementItems.last) const SizedBox(height: 8),
                   ],
@@ -297,14 +384,20 @@ class PortfolioSnapshotSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        const _SubsectionTitle('Pending Orders'),
+        _SubsectionTitle(koreanLabels
+            ? '\uBBF8\uCCB4\uACB0 \uC8FC\uBB38'
+            : 'Pending Orders'),
         const SizedBox(height: 8),
         if (summary.pendingOrders.isEmpty)
           _EmptyLine(text: noOrdersText)
         else
           Column(children: [
             for (final order in summary.pendingOrders) ...[
-              _PendingOrderTile(order: order, currency: summary.currency),
+              _PendingOrderTile(
+                order: order,
+                currency: summary.currency,
+                koreanLabels: koreanLabels,
+              ),
               if (order != summary.pendingOrders.last)
                 const SizedBox(height: 8),
             ],
@@ -384,6 +477,7 @@ class _PositionTile extends StatelessWidget {
     required this.managementMode,
     this.onOpenManualOrder,
     this.onReviewPosition,
+    this.koreanLabels = false,
   });
 
   final DashboardController controller;
@@ -395,6 +489,7 @@ class _PositionTile extends StatelessWidget {
   final bool managementMode;
   final VoidCallback? onOpenManualOrder;
   final VoidCallback? onReviewPosition;
+  final bool koreanLabels;
 
   @override
   Widget build(BuildContext context) {
@@ -448,7 +543,10 @@ class _PositionTile extends StatelessWidget {
                             fontSize: 16, fontWeight: FontWeight.w800)),
                   ),
                   const SizedBox(width: 8),
-                  _SoftBadge(text: status, color: _positionStatusColor(status)),
+                  _SoftBadge(
+                    text: koreanLabels ? '\uBCF4\uC720 \uC911' : status,
+                    color: _positionStatusColor(status),
+                  ),
                   if (managedPosition != null &&
                       managedPosition!.statusLabel != status) ...[
                     const SizedBox(width: 6),
@@ -462,30 +560,44 @@ class _PositionTile extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 8),
                   child: Wrap(spacing: 8, runSpacing: 6, children: [
                     _SoftBadge(
-                        text: position.side.toUpperCase(),
+                        text: koreanLabels
+                            ? '\uBCF4\uC720'
+                            : position.side.toUpperCase(),
                         color: Colors.white70),
                     _SoftBadge(
-                        text: 'Qty ${_quantity(position.qty)}',
+                        text: koreanLabels
+                            ? '\uBCF4\uC720\uC218\uB7C9 ' +
+                                _quantity(position.qty)
+                            : 'Qty ' + _quantity(position.qty),
                         color: Colors.white70),
                     _DataPair(
-                        label: 'Current Value',
+                        label: koreanLabels
+                            ? '\uD604\uC7AC\uAC00\uCE58'
+                            : 'Current Value',
                         value: _money(
                             managedPosition?.currentValue ??
                                 position.marketValue,
                             currency: currency)),
                     _DataPair(
-                        label: 'P/L',
+                        label:
+                            koreanLabels ? '\uD3C9\uAC00\uC190\uC775' : 'P/L',
                         value: _money(unrealizedPl,
                             currency: currency, signed: true),
                         color: plColor),
                     _DataPair(
-                        label: 'Profit',
+                        label: koreanLabels
+                            ? '\uD3C9\uC190\uC775\uB960'
+                            : 'Profit',
                         value: _percentOrDash(
                             managedPosition?.unrealizedPlPct ??
                                 _positionProfitPercent(position, isKr: isKr),
                             signed: true),
                         color: plColor),
-                    _DataPair(label: 'Main reason', value: reason),
+                    _DataPair(
+                        label: koreanLabels
+                            ? '\uC0C1\uD0DC \uC124\uBA85'
+                            : 'Main reason',
+                        value: reason),
                   ]),
                 ),
                 children: [
@@ -815,14 +927,26 @@ class _PositionDetail extends StatelessWidget {
 }
 
 class _PendingOrderTile extends StatelessWidget {
-  const _PendingOrderTile({required this.order, required this.currency});
+  const _PendingOrderTile({
+    required this.order,
+    required this.currency,
+    this.koreanLabels = false,
+  });
 
   final PendingOrderSummary order;
   final String currency;
+  final bool koreanLabels;
 
   @override
   Widget build(BuildContext context) {
     final side = order.side.toUpperCase();
+    final sideLabel = koreanLabels
+        ? (side == 'BUY'
+            ? '\uB9E4\uC218'
+            : side == 'SELL'
+                ? '\uB9E4\uB3C4'
+                : '\uC8FC\uBB38')
+        : (side.isEmpty ? 'ORDER' : side);
     final sideColor =
         side == 'BUY' ? Colors.greenAccent : Colors.deepOrangeAccent;
 
@@ -836,7 +960,7 @@ class _PendingOrderTile extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          _SoftBadge(text: side.isEmpty ? 'ORDER' : side, color: sideColor),
+          _SoftBadge(text: sideLabel, color: sideColor),
           const SizedBox(width: 8),
           Expanded(
             child:
@@ -856,28 +980,40 @@ class _PendingOrderTile extends StatelessWidget {
               ],
             ]),
           ),
-          Text(_cleanStatus(order.status),
+          Text(koreanLabels ? '\uBBF8\uCCB4\uACB0' : _cleanStatus(order.status),
               style: const TextStyle(
                   color: Colors.white70, fontWeight: FontWeight.w700)),
         ]),
         const SizedBox(height: 10),
         Wrap(spacing: 14, runSpacing: 8, children: [
-          _DataPair(label: 'Quantity', value: _orderQuantity(order)),
+          _DataPair(
+            label: koreanLabels ? '\uC8FC\uBB38 \uC218\uB7C9' : 'Quantity',
+            value: _orderQuantity(order),
+          ),
           if (order.unfilledQty != null)
-            _DataPair(label: 'Unfilled', value: _quantity(order.unfilledQty!)),
+            _DataPair(
+              label: koreanLabels ? '\uC794\uB7C9 \uC218\uB7C9' : 'Unfilled',
+              value: _quantity(order.unfilledQty!),
+            ),
           if (order.price != null)
             _DataPair(
-                label: 'Price',
+                label: koreanLabels ? '\uC8FC\uBB38\uAC00\uACA9' : 'Price',
                 value: _money(order.price!, currency: currency)),
           _DataPair(
-              label: 'Estimated Amount',
+              label: koreanLabels
+                  ? '\uC608\uC0C1 \uAE08\uC561'
+                  : 'Estimated Amount',
               value: order.estimatedAmount == null
                   ? 'n/a'
                   : _money(order.estimatedAmount!, currency: currency)),
           if (order.type.isNotEmpty)
-            _DataPair(label: 'Type', value: _cleanStatus(order.type)),
+            _DataPair(
+                label: koreanLabels ? '\uC8FC\uBB38 \uC720\uD615' : 'Type',
+                value: _cleanStatus(order.type)),
           if (order.submittedAt != null)
-            _DataPair(label: 'Submitted', value: order.submittedAt!),
+            _DataPair(
+                label: koreanLabels ? '\uC8FC\uBB38 \uC2DC\uAC04' : 'Submitted',
+                value: order.submittedAt!),
         ]),
       ]),
     );

@@ -14,10 +14,16 @@ import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/agent_chat_live_order_confirmation_card.dart';
 
 class AiScreen extends StatefulWidget {
-  const AiScreen({super.key, required this.controller, this.onOpenAdmin});
+  const AiScreen({
+    super.key,
+    required this.controller,
+    this.onOpenAdmin,
+    this.readOnly = false,
+  });
 
   final DashboardController controller;
   final VoidCallback? onOpenAdmin;
+  final bool readOnly;
 
   @override
   State<AiScreen> createState() => _AiScreenState();
@@ -73,12 +79,13 @@ class _AiScreenState extends State<AiScreen> {
                           ],
                         ),
                       ),
-                      IconButton(
-                        key: const ValueKey('ai-open-admin'),
-                        tooltip: strings.adminTooltip,
-                        onPressed: widget.onOpenAdmin,
-                        icon: const Icon(Icons.admin_panel_settings_outlined),
-                      ),
+                      if (widget.onOpenAdmin != null)
+                        IconButton(
+                          key: const ValueKey('ai-open-admin'),
+                          tooltip: strings.adminTooltip,
+                          onPressed: widget.onOpenAdmin,
+                          icon: const Icon(Icons.admin_panel_settings_outlined),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -110,6 +117,7 @@ class _AiScreenState extends State<AiScreen> {
                       controller: widget.controller,
                       onConfirm: _confirm,
                       onCancel: _cancel,
+                      readOnly: widget.readOnly,
                     ),
                   if (_loading)
                     Align(
@@ -583,6 +591,7 @@ class _EntryView extends StatelessWidget {
     required this.controller,
     required this.onConfirm,
     required this.onCancel,
+    this.readOnly = false,
   });
 
   final _AiEntry entry;
@@ -590,6 +599,7 @@ class _EntryView extends StatelessWidget {
   final DashboardController controller;
   final Future<void> Function(AgentChatLiveOrderAction) onConfirm;
   final Future<void> Function(AgentChatLiveOrderAction) onCancel;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -697,7 +707,7 @@ class _EntryView extends StatelessWidget {
           _DecisionCard(response, strings: strings),
         if (response.intent == 'portfolio')
           _PortfolioCard(response, strings: strings),
-        if (action != null && response.requiresConfirmation)
+        if (!readOnly && action != null && response.requiresConfirmation)
           AgentChatLiveOrderConfirmationCard(
             action: action,
             busy: false,

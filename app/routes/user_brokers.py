@@ -19,6 +19,13 @@ from app.services.broker_credential_crypto_service import (
 from app.services.user_broker_credential_service import (
     UserBrokerCredentialService,
 )
+from app.services.user_broker_account_service import (
+    UserBrokerAccountService,
+    UserBrokerAuthenticationError,
+    UserBrokerCredentialsUnavailableError,
+    UserBrokerEncryptionUnavailableError,
+    UserBrokerUnavailableError,
+)
 
 
 router = APIRouter(prefix="/users/me/brokers", tags=["user-brokers"])
@@ -26,6 +33,10 @@ router = APIRouter(prefix="/users/me/brokers", tags=["user-brokers"])
 
 def get_user_broker_credential_service() -> UserBrokerCredentialService:
     return UserBrokerCredentialService()
+
+
+def get_user_broker_account_service() -> UserBrokerAccountService:
+    return UserBrokerAccountService()
 
 
 @router.get("")
@@ -132,9 +143,30 @@ def delete_user_alpaca_broker(
     return _run(lambda: service.delete(db, user, "alpaca"))
 
 
+@router.get('/{provider}/account')
+def get_user_broker_account(
+    provider: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+    service: UserBrokerAccountService = Depends(get_user_broker_account_service),
+):
+    return _run(lambda: service.get_broker_snapshot(db, user, provider))
+
+
 def _run(action):
     try:
         return action()
+    except UserBrokerEncryptionUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail='broker_credential_encryption_unavailable',
+        ) from exc
+    except UserBrokerCredentialsUnavailableError as exc:
+        raise HTTPException(status_code=503, detail='broker_credentials_unavailable') from exc
+    except UserBrokerAuthenticationError as exc:
+        raise HTTPException(status_code=502, detail='broker_authentication_failed') from exc
+    except UserBrokerUnavailableError as exc:
+        raise HTTPException(status_code=502, detail='broker_unavailable') from exc
     except BrokerCredentialEncryptionNotConfigured as exc:
         raise HTTPException(status_code=503, detail=ENCRYPTION_NOT_CONFIGURED) from exc
     except BrokerCredentialPayloadError as exc:
@@ -142,5 +174,7 @@ def _run(action):
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        detail = str(exc)
+        status_code = 400 if detail == 'unsupported_broker_provider' else 422
+        raise HTTPException(status_code=status_code, detail=detail) from exc
 
