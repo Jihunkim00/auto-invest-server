@@ -766,6 +766,9 @@ class _UserBrokerConnectionsCardState
         : status.configured
             ? Colors.lightBlueAccent
             : Colors.white70;
+    // Stored credentials are intentionally never restored into the fields.
+    // Validation uses the encrypted credential kept by the backend.
+    final canValidate = status.configured && !busy;
     final statusLabel = !status.configured
         ? '미설정'
         : status.validated
@@ -848,8 +851,7 @@ class _UserBrokerConnectionsCardState
             ),
             OutlinedButton.icon(
               key: ValueKey('user-broker-$provider-validate'),
-              onPressed:
-                  busy || !status.configured ? null : () => _validate(provider),
+              onPressed: canValidate ? () => _validate(provider) : null,
               icon: const Icon(Icons.verified_outlined),
               label: Text(
                 busy && _busyOperation == 'validate' ? '확인 중...' : '연결 확인',
