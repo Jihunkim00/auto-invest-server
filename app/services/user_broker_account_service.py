@@ -240,6 +240,87 @@ class UserKisReadOnlyClient:
         }
 
 
+class UserKisLiveTradingClient(UserKisReadOnlyClient):
+    '''Explicit user-scoped KIS live client; it refuses paper credentials.'''
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.environment != 'live':
+            raise ValueError('broker_environment_invalid')
+
+    def submit_market_buy_qty(self, *, symbol: str, qty: float) -> dict[str, Any]:
+        quantity = int(qty)
+        if quantity <= 0:
+            raise ValueError('invalid_order_quantity')
+        normalized_symbol = str(symbol or '').strip()
+        if len(normalized_symbol) != 6 or not normalized_symbol.isdigit():
+            raise ValueError('invalid_kis_symbol')
+        response = self._post_order(
+            '/uapi/domestic-stock/v1/trading/order-cash',
+            tr_id='TTTC0802U',
+            payload={
+                'CANO': str(self.credentials.get('account_no') or ''),
+                'ACNT_PRDT_CD': str(self.credentials.get('account_product_code') or ''),
+                'PDNO': normalized_symbol,
+                'ORD_DVSN': '01',
+                'ORD_QTY': str(quantity),
+                'ORD_UNPR': '0',
+            },
+        )
+        output = _first_dict(response.get('output'))
+        broker_order_id = _first_text(output, ('ODNO', 'odno', 'order_id'))
+        if not broker_order_id:
+            raise UserBrokerUnavailableError('user KIS order response missing order id')
+        return {
+            'id': broker_order_id,
+            'order_id': broker_order_id,
+            'status': 'submitted',
+            'filled_qty': 0.0,
+            'filled_avg_price': None,
+            'submitted_at': _now(),
+            'kis_odno': broker_order_id,
+        }
+
+    def _post_order(self, path: str, *, tr_id: str, payload: dict[str, str]) -> dict[str, Any]:
+        token = self._token()
+        response = self._send_post(path, tr_id=tr_id, payload=payload, token=token)
+        if _kis_auth_failure(response):
+            self.token_manager.invalidate(
+                user_id=self.user_id,
+                environment=self.environment,
+                credential_identity=self.credential_identity,
+            )
+            token = self._token(force_refresh=True)
+            response = self._send_post(path, tr_id=tr_id, payload=payload, token=token)
+            if _kis_auth_failure(response):
+                raise UserBrokerAuthenticationError('user KIS authentication failed')
+        return _require_kis_order_response(response)
+
+    def _send_post(
+        self,
+        path: str,
+        *,
+        tr_id: str,
+        payload: dict[str, str],
+        token: str,
+    ):
+        url = f'{KIS_BASE_URLS[self.environment]}{path}'
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Accept': 'application/json',
+            'appkey': str(self.credentials.get('app_key') or ''),
+            'appsecret': str(self.credentials.get('app_secret') or ''),
+            'custtype': 'P',
+            'authorization': f'Bearer {token}',
+            'tr_id': tr_id,
+        }
+        try:
+            return self.http_client.post(
+                url, json=payload, headers=headers, timeout=self.timeout_seconds
+            )
+        except Exception as exc:
+            raise UserBrokerUnavailableError('user KIS order request failed') from exc
+
 class UserAlpacaReadOnlyClient:
     '''Alpaca account reader using only one users decrypted credentials.'''
 
@@ -364,6 +445,46 @@ class UserBrokerAccountService:
         })
         return snapshot
 
+    def get_live_trading_client(
+        self,
+        db: Session,
+        user: User,
+        provider: str,
+    ) -> Any:
+        normalized_provider = self._provider(provider)
+        if normalized_provider != 'kis':
+            raise ValueError('unsupported_live_trading_provider')
+        row = (
+            db.query(UserBrokerCredential)
+            .filter(
+                UserBrokerCredential.user_id == user.id,
+                UserBrokerCredential.provider == normalized_provider,
+            )
+            .first()
+        )
+        if row is None:
+            raise LookupError('broker_credentials_not_configured')
+        try:
+            self.crypto.ensure_configured()
+            credentials = self.crypto.decrypt(
+                row.encrypted_payload,
+                encryption_version=row.encryption_version,
+            )
+        except BrokerCredentialEncryptionNotConfigured as exc:
+            raise UserBrokerEncryptionUnavailableError from exc
+        except BrokerCredentialPayloadError as exc:
+            raise UserBrokerCredentialsUnavailableError from exc
+        environment = str(credentials.get('environment') or row.environment or '').strip().lower()
+        if environment != 'live':
+            raise ValueError('broker_environment_invalid')
+        return UserKisLiveTradingClient(
+            user_id=user.id,
+            credentials={**credentials, 'environment': environment},
+            credential_identity=_credential_identity(row),
+            http_client=self.http_client,
+            token_manager=self.token_manager,
+            timeout_seconds=self.timeout_seconds,
+        )
     @classmethod
     def _provider(cls, provider: str) -> str:
         normalized = str(provider or '').strip().lower()
@@ -521,6 +642,24 @@ def _require_kis_read_response(response) -> dict[str, Any]:
         raise UserBrokerUnavailableError('user KIS account request failed')
     return payload
 
+
+def _require_kis_order_response(response) -> dict[str, Any]:
+    status = _status_code(response)
+    if status in {401, 403}:
+        raise UserBrokerAuthenticationError('user KIS authentication failed')
+    if status >= 400:
+        raise UserBrokerUnavailableError('user KIS order request failed')
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise UserBrokerUnavailableError('user KIS order response was invalid') from exc
+    if not isinstance(payload, dict):
+        raise UserBrokerUnavailableError('user KIS order response had an unexpected shape')
+    if str(payload.get('rt_cd', '0') or '0') not in {'', '0'}:
+        if _kis_auth_failure(payload):
+            raise UserBrokerAuthenticationError('user KIS authentication failed')
+        raise UserBrokerUnavailableError('user KIS order request rejected')
+    return payload
 
 def _kis_auth_failure(value: Any) -> bool:
     status = _status_code(value)

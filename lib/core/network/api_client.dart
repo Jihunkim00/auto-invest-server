@@ -354,6 +354,8 @@ class ApiClient {
     double? maxDailyLossPct,
     double? maxPositionPct,
     int? maxOpenPositions,
+    bool? liveTradingEnabled,
+    bool? killSwitch,
   }) async {
     final body = <String, dynamic>{
       if (tradingMode != null) 'trading_mode': tradingMode,
@@ -361,6 +363,9 @@ class ApiClient {
       if (maxDailyLossPct != null) 'max_daily_loss_pct': maxDailyLossPct,
       if (maxPositionPct != null) 'max_position_pct': maxPositionPct,
       if (maxOpenPositions != null) 'max_open_positions': maxOpenPositions,
+      if (liveTradingEnabled != null)
+        'live_trading_enabled': liveTradingEnabled,
+      if (killSwitch != null) 'kill_switch': killSwitch,
     };
     return _patchJsonBody('/users/me/trading/settings', body);
   }
@@ -368,10 +373,12 @@ class ApiClient {
   Future<Map<String, dynamic>> runUserTradingOnce({
     required String provider,
     required String symbol,
+    bool confirmLive = false,
   }) async {
     return _postJsonBody('/users/me/trading/run-once', {
       'provider': provider,
       'symbol': symbol,
+      'confirm_live': confirmLive,
     });
   }
 

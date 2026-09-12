@@ -143,10 +143,9 @@ def test_settings_are_disabled_by_default_and_only_safe_limits_are_mutable(db_se
     assert updated.status_code == 200
     assert updated.json()['max_daily_trades'] == 1
     assert updated.json()['max_position_pct'] == 8
-    assert client.patch(
-        '/users/me/trading/settings',
-        json={'live_trading_enabled': True},
-    ).status_code == 422
+    enabled = client.patch('/users/me/trading/settings', json={'live_trading_enabled': True})
+    assert enabled.status_code == 200
+    assert enabled.json()['live_trading_enabled'] is True
 
 
 def test_risk_state_isolated_by_user_provider_currency_and_excludes_simulated_and_admin(db_session):

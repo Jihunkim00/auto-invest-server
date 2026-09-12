@@ -42,3 +42,31 @@ class UserAlpacaTradingClient:
             time_in_force=TimeInForce.DAY,
         )
         return self.trading_client.submit_order(order_data=order_data)
+
+
+class UserAlpacaLiveTradingClient:
+    """Explicit Alpaca live client; it refuses paper credentials."""
+
+    def __init__(
+        self,
+        credentials: Mapping[str, Any],
+        *,
+        trading_client: Any | None = None,
+    ) -> None:
+        self.environment = str(credentials.get("environment") or "").strip().lower()
+        if self.environment != "live":
+            raise UserAlpacaLiveExecutionBlocked("broker_environment_invalid")
+        self.trading_client = trading_client or TradingClient(
+            api_key=str(credentials.get("api_key") or ""),
+            secret_key=str(credentials.get("secret_key") or ""),
+            paper=False,
+        )
+
+    def submit_market_buy_qty(self, *, symbol: str, qty: float):
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+        )
+        return self.trading_client.submit_order(order_data=order_data)

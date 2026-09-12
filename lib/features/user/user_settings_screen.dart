@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -208,7 +208,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
       await widget.apiClient.removeUserWatchlist(symbol);
       if (mounted) {
         setState(() {
-          _watchlist = _watchlist.where((item) => item.symbol != symbol).toList();
+          _watchlist =
+              _watchlist.where((item) => item.symbol != symbol).toList();
         });
       }
     } catch (error) {
@@ -269,11 +270,13 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                       children: [
                         const Text(
                           '내 설정',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 12),
                         TextField(
-                          key: const ValueKey('user-settings-display-name-field'),
+                          key: const ValueKey(
+                              'user-settings-display-name-field'),
                           controller: _displayNameController,
                           decoration: const InputDecoration(
                             labelText: '표시 이름',
@@ -305,14 +308,16 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                       children: [
                         const Text(
                           '내 관심종목',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w800),
                         ),
                         const SizedBox(height: 10),
                         Row(
                           children: [
                             Expanded(
                               child: TextField(
-                                key: const ValueKey('user-watchlist-symbol-field'),
+                                key: const ValueKey(
+                                    'user-watchlist-symbol-field'),
                                 controller: _symbolController,
                                 decoration: const InputDecoration(
                                   labelText: '종목 코드',
@@ -336,7 +341,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                             title: Text(item.symbol),
                             subtitle: Text('${item.provider} · ${item.market}'),
                             trailing: IconButton(
-                              key: ValueKey('user-watchlist-remove-${item.symbol}'),
+                              key: ValueKey(
+                                  'user-watchlist-remove-${item.symbol}'),
                               onPressed: () => _removeSymbol(item.symbol),
                               icon: const Icon(Icons.remove_circle_outline),
                             ),
@@ -398,6 +404,8 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
   final _positionPct = TextEditingController();
   final _openPositions = TextEditingController();
   String _mode = 'paper';
+  bool _liveTradingEnabled = false;
+  bool _killSwitch = true;
   String? _error;
   bool _loading = true;
   bool _saving = false;
@@ -423,6 +431,8 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
       if (!mounted) return;
       setState(() {
         _mode = values['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _liveTradingEnabled = values['live_trading_enabled'] == true;
+        _killSwitch = values['kill_switch'] != false;
         _dailyTrades.text = '${values['max_daily_trades'] ?? 2}';
         _dailyLoss.text = '${values['max_daily_loss_pct'] ?? 0.02}';
         _positionPct.text = '${values['max_position_pct'] ?? 10}';
@@ -450,10 +460,14 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
         maxDailyLossPct: double.tryParse(_dailyLoss.text.trim()),
         maxPositionPct: double.tryParse(_positionPct.text.trim()),
         maxOpenPositions: int.tryParse(_openPositions.text.trim()),
+        liveTradingEnabled: _liveTradingEnabled,
+        killSwitch: _killSwitch,
       );
       if (!mounted) return;
       setState(() {
         _mode = saved['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _liveTradingEnabled = saved['live_trading_enabled'] == true;
+        _killSwitch = saved['kill_switch'] != false;
         _saving = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -465,6 +479,35 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
         _saving = false;
         _error = '거래 설정을 저장하지 못했습니다.';
       });
+    }
+  }
+
+  Future<void> _toggleLiveTrading(bool value) async {
+    if (!value) {
+      setState(() => _liveTradingEnabled = false);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('실거래 주문 사용'),
+        content: const Text(
+          '실거래를 활성화하면 실제 자금으로 주문이 전송될 수 있습니다.\n계속하시겠습니까?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('실거래 활성화'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() => _liveTradingEnabled = true);
     }
   }
 
@@ -503,11 +546,30 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
                     ],
                   ),
                   if (_mode == 'live') ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      '실거래 주문은 아직 비활성화되어 있습니다.',
-                      key: ValueKey('user-live-disabled-notice'),
-                      style: TextStyle(color: Colors.orangeAccent),
+                    const SizedBox(height: 12),
+                    SwitchListTile(
+                      key: const ValueKey('user-live-trading-enabled'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('실거래 주문 사용'),
+                      subtitle: Text(
+                        _liveTradingEnabled ? '실거래 주문 사용 가능' : '실거래 주문 비활성화',
+                      ),
+                      value: _liveTradingEnabled,
+                      onChanged: _saving
+                          ? null
+                          : (value) => unawaited(_toggleLiveTrading(value)),
+                    ),
+                    SwitchListTile(
+                      key: const ValueKey('user-kill-switch'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('긴급 정지'),
+                      subtitle: Text(
+                        _killSwitch ? '긴급 정지 활성화 · 신규 실거래 차단' : '긴급 정지 해제',
+                      ),
+                      value: _killSwitch,
+                      onChanged: _saving
+                          ? null
+                          : (value) => setState(() => _killSwitch = value),
                     ),
                   ],
                   const SizedBox(height: 16),
@@ -537,7 +599,8 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
                     label: '최대 보유 종목 수',
                   ),
                   if (_error != null)
-                    Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
+                    Text(_error!,
+                        style: const TextStyle(color: Colors.orangeAccent)),
                   const SizedBox(height: 8),
                   FilledButton.icon(
                     key: const ValueKey('user-trading-settings-save'),
@@ -849,8 +912,7 @@ class _UserBrokerConnectionsCardState
                   _message!,
                   key: const ValueKey('user-broker-message'),
                   style: TextStyle(
-                    color: _message!.contains('실패') ||
-                            _message!.contains('입력')
+                    color: _message!.contains('실패') || _message!.contains('입력')
                         ? Colors.orangeAccent
                         : Colors.greenAccent,
                   ),
@@ -879,9 +941,8 @@ class _UserBrokerConnectionsCardState
           key: const ValueKey('user-broker-kis-app-key'),
           controller: _kisAppKey,
           label: '앱 키',
-          helperText: status.configured
-              ? '저장된 정보를 변경하려면 모든 값을 새로 입력하세요.'
-              : null,
+          helperText:
+              status.configured ? '저장된 정보를 변경하려면 모든 값을 새로 입력하세요.' : null,
         ),
         _credentialField(
           key: const ValueKey('user-broker-kis-app-secret'),
@@ -925,9 +986,8 @@ class _UserBrokerConnectionsCardState
           key: const ValueKey('user-broker-alpaca-api-key'),
           controller: _alpacaApiKey,
           label: 'API 키',
-          helperText: status.configured
-              ? '저장된 정보를 변경하려면 두 값을 모두 새로 입력하세요.'
-              : null,
+          helperText:
+              status.configured ? '저장된 정보를 변경하려면 두 값을 모두 새로 입력하세요.' : null,
         ),
         _credentialField(
           key: const ValueKey('user-broker-alpaca-secret-key'),

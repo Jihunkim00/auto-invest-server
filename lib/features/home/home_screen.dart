@@ -140,7 +140,8 @@ class _UserTradingModeCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('거래 모드', style: TextStyle(fontWeight: FontWeight.w800)),
+                const Text('거래 모드',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
                 Text(
                   live ? '실거래' : '모의투자',
@@ -153,7 +154,7 @@ class _UserTradingModeCard extends StatelessWidget {
                 if (live) ...[
                   const SizedBox(height: 4),
                   const Text(
-                    '실거래 주문 비활성화',
+                    '수동 실거래 · 설정에서 명시적으로 활성화',
                     key: ValueKey('user-live-disabled-home'),
                     style: TextStyle(color: Colors.orangeAccent),
                   ),

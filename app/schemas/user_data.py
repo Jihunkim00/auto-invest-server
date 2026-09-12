@@ -45,6 +45,8 @@ class UserTradingSettingsUpdateRequest(BaseModel):
     '''Safe user trading mode and risk-limit changes for PR127.'''
 
     trading_mode: Literal['paper', 'live'] | None = None
+    live_trading_enabled: bool | None = None
+    kill_switch: bool | None = None
 
     max_daily_trades: int | None = Field(default=None, ge=0, le=100)
     max_daily_loss_pct: float | None = Field(default=None, ge=0, le=1)

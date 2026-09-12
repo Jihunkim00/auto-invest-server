@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -23,6 +23,7 @@ class UserTradingRunOnceRequest(BaseModel):
 
     provider: Literal['kis', 'alpaca'] = 'kis'
     symbol: str = Field(min_length=1, max_length=20)
+    confirm_live: StrictBool = False
 
 
 def get_user_trading_execution_service() -> UserTradingExecutionService:
@@ -36,6 +37,7 @@ def _settings_payload(row: UserTradingSettings) -> dict[str, Any]:
         'enabled': bool(row.enabled),
         'paper_trading_enabled': bool(row.paper_trading_enabled),
         'live_trading_enabled': bool(row.live_trading_enabled),
+        'kill_switch': bool(row.kill_switch),
         'trading_mode': str(row.trading_mode or 'paper'),
         'available_trading_modes': ['paper', 'live'],
         'max_daily_trades': int(row.max_daily_trades),
@@ -118,6 +120,12 @@ def update_my_trading_settings(
             raise HTTPException(status_code=422, detail='unsupported_trading_mode')
     for key, value in values.items():
         setattr(row, key, value)
+    # Selecting paper always removes the live permission. Selecting live is
+    # only a mode choice unless this request explicitly carries the opt-in.
+    if selected_mode == 'paper':
+        row.live_trading_enabled = False
+    elif selected_mode == 'live' and 'live_trading_enabled' not in values:
+        row.live_trading_enabled = False
     db.commit()
     db.refresh(row)
     return _settings_payload(row)
@@ -136,6 +144,7 @@ def run_my_trading_once(
             user,
             provider=payload.provider,
             symbol=payload.symbol,
+            confirm_live=payload.confirm_live,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

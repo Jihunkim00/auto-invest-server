@@ -142,7 +142,7 @@ def _service(*, analysis='buy', alpaca_factory=None):
     )
 
 
-def test_user_trading_mode_has_exactly_two_modes_and_live_permission_stays_false(db_session):
+def test_user_trading_mode_has_exactly_two_modes_and_live_permission_requires_explicit_opt_in(db_session):
     user = _user(db_session, 'pr127-mode')
     service = _service()
     client = _client(db_session, user, service)
@@ -164,7 +164,9 @@ def test_user_trading_mode_has_exactly_two_modes_and_live_permission_stays_false
     assert live.json()['live_trading_enabled'] is False
     assert live.json()['paper_trading_enabled'] is False
 
-    assert client.patch('/users/me/trading/settings', json={'live_trading_enabled': True}).status_code == 422
+    enabled = client.patch('/users/me/trading/settings', json={'live_trading_enabled': True})
+    assert enabled.status_code == 200
+    assert enabled.json()['live_trading_enabled'] is True
     assert client.patch('/users/me/trading/settings', json={'trading_mode': 'simulation'}).status_code == 422
 
     back_to_paper = client.patch('/users/me/trading/settings', json={'trading_mode': 'paper'})
@@ -225,7 +227,7 @@ def test_kis_hold_and_live_mode_create_no_order(db_session):
     live_client.patch('/users/me/trading/settings', json={'trading_mode': 'live'})
     live = live_client.post('/users/me/trading/run-once', json={'provider': 'kis', 'symbol': '005930'})
     assert live.json()['result'] == 'blocked'
-    assert live.json()['reason'] == 'regular_user_live_execution_disabled'
+    assert live.json()['reason'] == 'live_trading_disabled'
     assert db_session.query(OrderLog).count() == 0
 
 

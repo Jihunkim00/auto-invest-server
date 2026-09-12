@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.brokers.user_alpaca_client import (
     UserAlpacaLiveExecutionBlocked,
     UserAlpacaTradingClient,
+    UserAlpacaLiveTradingClient,
 )
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
@@ -33,6 +34,9 @@ from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 PAPER_MODE = "paper"
 LIVE_MODE = "live"
 REGULAR_USER_LIVE_BLOCK = "regular_user_live_execution_disabled"
+LIVE_TRADING_DISABLED = "live_trading_disabled"
+LIVE_CONFIRMATION_REQUIRED = "live_confirmation_required"
+USER_KILL_SWITCH_ENABLED = "user_kill_switch_enabled"
 KIS_SIMULATION_MODE = "kis_user_simulation"
 ALPACA_PAPER_MODE = "alpaca_user_paper"
 USER_TRIGGER_SOURCE = "user_run_once"
@@ -59,6 +63,8 @@ class UserTradingExecutionService:
         risk_service: UserRiskStateService | None = None,
         session_service: MarketSessionService | None = None,
         alpaca_client_factory: Callable[[dict[str, Any]], Any] | None = None,
+        alpaca_live_client_factory: Callable[[dict[str, Any]], Any] | None = None,
+        kis_live_client_factory: Callable[[Session, User, dict[str, Any]], Any] | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.account_service = account_service or UserBrokerAccountService()
@@ -69,6 +75,8 @@ class UserTradingExecutionService:
         self.risk_service = risk_service or UserRiskStateService()
         self.session_service = session_service or MarketSessionService()
         self.alpaca_client_factory = alpaca_client_factory or UserAlpacaTradingClient
+        self.alpaca_live_client_factory = alpaca_live_client_factory or UserAlpacaLiveTradingClient
+        self.kis_live_client_factory = kis_live_client_factory or self._default_kis_live_client
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
 
     def run_once(
@@ -78,6 +86,7 @@ class UserTradingExecutionService:
         *,
         provider: str,
         symbol: str,
+        confirm_live: bool = False,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         now_utc = self._utc_now(now)
@@ -103,6 +112,7 @@ class UserTradingExecutionService:
                 "market": market,
                 "requested_symbol": requested_symbol,
                 "trading_mode": selected_mode,
+                "confirm_live": bool(confirm_live),
                 "trigger_source": USER_TRIGGER_SOURCE,
             },
         )
@@ -125,18 +135,7 @@ class UserTradingExecutionService:
             "run_id": run.id,
         }
 
-        if selected_mode == LIVE_MODE:
-            return self._finish_blocked(
-                db,
-                run,
-                user=user,
-                base=base,
-                reason=REGULAR_USER_LIVE_BLOCK,
-                message="실거래 주문은 아직 비활성화되어 있습니다.",
-                analysis={"action": "hold", "reason": REGULAR_USER_LIVE_BLOCK},
-                risk={"risk_allowed": False, "risk_flags": [REGULAR_USER_LIVE_BLOCK]},
-            )
-
+        is_live = selected_mode == LIVE_MODE
         if not bool(settings.enabled):
             return self._finish_blocked(
                 db,
@@ -147,7 +146,38 @@ class UserTradingExecutionService:
                 analysis={"action": "hold", "reason": "user_trading_disabled"},
                 risk={"risk_allowed": False, "risk_flags": ["user_trading_disabled"]},
             )
-        if not bool(settings.paper_trading_enabled):
+        if is_live:
+            if not bool(settings.live_trading_enabled):
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason=LIVE_TRADING_DISABLED,
+                    analysis={"action": "hold", "reason": LIVE_TRADING_DISABLED},
+                    risk={"risk_allowed": False, "risk_flags": [LIVE_TRADING_DISABLED]},
+                )
+            if confirm_live is not True:
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason=LIVE_CONFIRMATION_REQUIRED,
+                    analysis={"action": "hold", "reason": LIVE_CONFIRMATION_REQUIRED},
+                    risk={"risk_allowed": False, "risk_flags": [LIVE_CONFIRMATION_REQUIRED]},
+                )
+            if bool(settings.kill_switch):
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason=USER_KILL_SWITCH_ENABLED,
+                    analysis={"action": "hold", "reason": USER_KILL_SWITCH_ENABLED},
+                    risk={"risk_allowed": False, "risk_flags": [USER_KILL_SWITCH_ENABLED]},
+                )
+        elif not bool(settings.paper_trading_enabled):
             return self._finish_blocked(
                 db,
                 run,
@@ -157,43 +187,43 @@ class UserTradingExecutionService:
                 analysis={"action": "hold", "reason": "paper_trading_disabled"},
                 risk={"risk_allowed": False, "risk_flags": ["paper_trading_disabled"]},
             )
-        if bool(settings.live_trading_enabled):
-            return self._finish_blocked(
-                db,
-                run,
-                user=user,
-                base=base,
-                reason=REGULAR_USER_LIVE_BLOCK,
-                analysis={"action": "hold", "reason": REGULAR_USER_LIVE_BLOCK},
-                risk={"risk_allowed": False, "risk_flags": [REGULAR_USER_LIVE_BLOCK]},
-            )
 
         credentials: dict[str, Any] | None = None
-        if normalized_provider == "alpaca":
+        if normalized_provider == "alpaca" or is_live:
             try:
-                credentials = self.credential_service.get_credentials(db, user, "alpaca")
+                credentials = self.credential_service.get_credentials(db, user, normalized_provider)
             except Exception as exc:
+                reason = self._credential_reason(exc)
                 return self._finish_blocked(
                     db,
                     run,
                     user=user,
                     base=base,
-                    reason=self._credential_reason(exc),
-                    analysis={"action": "hold", "reason": self._credential_reason(exc)},
-                    risk={"risk_allowed": False, "risk_flags": [self._credential_reason(exc)]},
+                    reason=reason,
+                    analysis={"action": "hold", "reason": reason},
+                    risk={"risk_allowed": False, "risk_flags": [reason]},
                 )
-            if str(credentials.get("environment") or "").strip().lower() != PAPER_MODE:
+            credential_environment = str(credentials.get("environment") or "").strip().lower()
+            if is_live and credential_environment != LIVE_MODE:
                 return self._finish_blocked(
                     db,
                     run,
                     user=user,
                     base=base,
-                    reason=REGULAR_USER_LIVE_BLOCK,
-                    message="실거래 주문은 아직 비활성화되어 있습니다.",
-                    analysis={"action": "hold", "reason": REGULAR_USER_LIVE_BLOCK},
-                    risk={"risk_allowed": False, "risk_flags": [REGULAR_USER_LIVE_BLOCK]},
+                    reason="live_credentials_required",
+                    analysis={"action": "hold", "reason": "live_credentials_required"},
+                    risk={"risk_allowed": False, "risk_flags": ["live_credentials_required"]},
                 )
-
+            if not is_live and normalized_provider == "alpaca" and credential_environment != PAPER_MODE:
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason="paper_credentials_required",
+                    analysis={"action": "hold", "reason": "paper_credentials_required"},
+                    risk={"risk_allowed": False, "risk_flags": ["paper_credentials_required"]},
+                )
         try:
             snapshot = self.account_service.get_broker_snapshot(db, user, normalized_provider)
         except Exception as exc:
@@ -207,6 +237,23 @@ class UserTradingExecutionService:
                 analysis={"action": "hold", "reason": reason},
                 risk={"risk_allowed": False, "risk_flags": [reason]},
             )
+
+        if is_live:
+            snapshot_environment = str(snapshot.get("environment") or "").strip().lower() if isinstance(snapshot, dict) else ""
+            if (
+                not isinstance(snapshot, dict)
+                or snapshot.get("connected") is not True
+                or snapshot_environment != LIVE_MODE
+            ):
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason="live_account_snapshot_invalid",
+                    analysis={"action": "hold", "reason": "live_account_snapshot_invalid"},
+                    risk={"risk_allowed": False, "risk_flags": ["live_account_snapshot_invalid"]},
+                )
 
         try:
             market_session = self.session_service.get_session_status(market, now=now_utc)
@@ -311,6 +358,19 @@ class UserTradingExecutionService:
                 risk=risk,
             )
 
+        if is_live and normalized_provider == "kis":
+            return self._submit_kis_live(
+                db,
+                run,
+                user=user,
+                base=base,
+                analysis=analysis,
+                risk=risk,
+                sizing=sizing,
+                credentials=credentials or {},
+                now=now_utc,
+            )
+
         if normalized_provider == "kis":
             return self._simulate_kis(
                 db,
@@ -322,7 +382,7 @@ class UserTradingExecutionService:
                 sizing=sizing,
                 now=now_utc,
             )
-        return self._submit_alpaca_paper(
+        return self._submit_alpaca_order(
             db,
             run,
             user=user,
@@ -332,8 +392,8 @@ class UserTradingExecutionService:
             sizing=sizing,
             credentials=credentials or {},
             now=now_utc,
+            live=is_live,
         )
-
     def _simulate_kis(self, db, run, *, user, base, analysis, risk, sizing, now):
         order = self._create_order(
             db,
@@ -395,7 +455,7 @@ class UserTradingExecutionService:
         }
         return self._finish_run(db, run, response)
 
-    def _submit_alpaca_paper(
+    def _submit_kis_live(
         self,
         db,
         run,
@@ -411,18 +471,19 @@ class UserTradingExecutionService:
         order = self._create_order(
             db,
             user=user,
-            provider="alpaca",
-            market="US",
+            provider="kis",
+            market="KR",
             symbol=base["requested_symbol"],
             qty=sizing["quantity"],
             notional=sizing["notional"],
             internal_status=InternalOrderStatus.REQUESTED.value,
             request_payload={
-                "provider": "alpaca",
-                "market": "US",
-                "mode": ALPACA_PAPER_MODE,
-                "paper": True,
-                "credential_environment": "paper",
+                "provider": "kis",
+                "market": "KR",
+                "mode": "kis_live",
+                "paper": False,
+                "credential_environment": "live",
+                "confirm_live": True,
                 "requested_symbol": base["requested_symbol"],
                 "analyzed_symbol": base["analyzed_symbol"],
                 "returned_symbol": base["returned_symbol"],
@@ -436,7 +497,148 @@ class UserTradingExecutionService:
         )
         broker_called = False
         try:
-            client = self.alpaca_client_factory(credentials)
+            client = self.kis_live_client_factory(db, user, credentials)
+            broker_called = True
+            broker_order = client.submit_market_buy_qty(
+                symbol=base["requested_symbol"],
+                qty=sizing["quantity"],
+            )
+            self._apply_broker_order(db, order, broker_order)
+            status_value = str(order.internal_status or "").upper()
+            real_submitted = status_value not in {
+                InternalOrderStatus.FAILED.value,
+                InternalOrderStatus.REJECTED.value,
+                InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+            }
+            response_payload = {
+                "result": "submitted" if real_submitted else "blocked",
+                "reason": "kis_live_order_submitted" if real_submitted else "kis_live_order_rejected",
+                "provider": "kis",
+                "market": "KR",
+                "paper": False,
+                "real_order_submitted": real_submitted,
+                "broker_submit_called": broker_called,
+                "manual_submit_called": False,
+                "broker_order_id": order.broker_order_id,
+                "kis_odno": order.kis_odno,
+                "broker_status": order.broker_status,
+            }
+            order.response_payload = json.dumps(response_payload, ensure_ascii=False, default=str)
+            self._maybe_create_position_lifecycle(db, user=user, order=order, now=now)
+            signal = self._create_signal(
+                db,
+                user=user,
+                base=base,
+                analysis=analysis,
+                risk=risk,
+                result="submitted" if real_submitted else "blocked",
+                order_id=order.id if real_submitted else None,
+            )
+            order.request_payload = self._json_merge(order.request_payload, {"signal_id": signal.id})
+            run.signal_id = signal.id
+            run.order_id = order.id if real_submitted else None
+            response = {
+                **base,
+                "result": "submitted" if real_submitted else "blocked",
+                "reason": response_payload["reason"],
+                "signal_id": signal.id,
+                "order_id": order.id,
+                "real_order_submitted": real_submitted,
+                "broker_submit_called": broker_called,
+                "manual_submit_called": False,
+                "execution": response_payload,
+            }
+            return self._finish_run(db, run, response)
+        except Exception:
+            order.internal_status = InternalOrderStatus.FAILED.value
+            order.error_message = "user_broker_submit_failed"
+            order.response_payload = json.dumps(
+                {
+                    "reason": "kis_live_submit_failed",
+                    "broker_submit_called": broker_called,
+                    "real_order_submitted": False,
+                },
+                ensure_ascii=False,
+            )
+            db.commit()
+            signal = self._create_signal(
+                db,
+                user=user,
+                base={**base, "broker_submit_called": broker_called},
+                analysis=analysis,
+                risk=risk,
+                result="failed",
+                order_id=None,
+            )
+            run.signal_id = signal.id
+            run.order_id = None
+            response = {
+                **base,
+                "result": "failed",
+                "reason": "kis_live_submit_failed",
+                "signal_id": signal.id,
+                "order_id": order.id,
+                "broker_submit_called": broker_called,
+                "execution": {
+                    "type": "kis_live",
+                    "status": "failed",
+                    "real_order_submitted": False,
+                    "broker_submit_called": broker_called,
+                    "manual_submit_called": False,
+                },
+            }
+            return self._finish_run(db, run, response)
+
+    def _default_kis_live_client(self, db, user, credentials):
+        return self.account_service.get_live_trading_client(db, user, "kis")
+
+    def _submit_alpaca_order(
+        self,
+        db,
+        run,
+        *,
+        user,
+        base,
+        analysis,
+        risk,
+        sizing,
+        credentials,
+        now,
+        live,
+    ):
+        execution_environment = LIVE_MODE if live else PAPER_MODE
+        execution_mode = "alpaca_live" if live else ALPACA_PAPER_MODE
+        client_factory = self.alpaca_live_client_factory if live else self.alpaca_client_factory
+        safety_block_reason = "live_broker_safety_blocked" if live else REGULAR_USER_LIVE_BLOCK
+        order = self._create_order(
+            db,
+            user=user,
+            provider="alpaca",
+            market="US",
+            symbol=base["requested_symbol"],
+            qty=sizing["quantity"],
+            notional=sizing["notional"],
+            internal_status=InternalOrderStatus.REQUESTED.value,
+            request_payload={
+                "provider": "alpaca",
+                "market": "US",
+                "mode": execution_mode,
+                "paper": not live,
+                "credential_environment": execution_environment,
+                "requested_symbol": base["requested_symbol"],
+                "analyzed_symbol": base["analyzed_symbol"],
+                "returned_symbol": base["returned_symbol"],
+                "symbol_match": base["symbol_match"],
+                "qty": sizing["quantity"],
+                "notional": sizing["notional"],
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+            },
+        )
+        broker_called = False
+        try:
+            client = client_factory(credentials)
             broker_called = True
             broker_order = client.submit_market_buy_qty(
                 symbol=base["requested_symbol"],
@@ -447,10 +649,10 @@ class UserTradingExecutionService:
             real_submitted = status_value not in {InternalOrderStatus.FAILED.value, InternalOrderStatus.REJECTED.value}
             response_payload = {
                 "result": "submitted" if real_submitted else "blocked",
-                "reason": "alpaca_paper_order_submitted" if real_submitted else "alpaca_paper_order_rejected",
+                "reason": f"alpaca_{execution_environment}_order_submitted" if real_submitted else f"alpaca_{execution_environment}_order_rejected",
                 "provider": "alpaca",
                 "market": "US",
-                "paper": True,
+                "paper": not live,
                 "real_order_submitted": real_submitted,
                 "broker_submit_called": broker_called,
                 "manual_submit_called": False,
@@ -486,9 +688,9 @@ class UserTradingExecutionService:
 
         except UserAlpacaLiveExecutionBlocked:
             order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
-            order.error_message = REGULAR_USER_LIVE_BLOCK
+            order.error_message = safety_block_reason
             order.response_payload = json.dumps(
-                {"reason": REGULAR_USER_LIVE_BLOCK, "broker_submit_called": False},
+                {"reason": safety_block_reason, "broker_submit_called": False},
                 ensure_ascii=False,
             )
             db.commit()
@@ -497,16 +699,16 @@ class UserTradingExecutionService:
                 run,
                 user=user,
                 base={**base, "broker_submit_called": False},
-                reason=REGULAR_USER_LIVE_BLOCK,
+                reason=safety_block_reason,
                 analysis=analysis,
                 risk=risk,
             )
         except Exception as exc:
             order.internal_status = InternalOrderStatus.FAILED.value
-            order.error_message = self._safe_error(exc)
+            order.error_message = "user_broker_submit_failed"
             order.response_payload = json.dumps(
                 {
-                    "reason": "alpaca_paper_submit_failed",
+                    "reason": f"alpaca_{execution_environment}_submit_failed",
                     "broker_submit_called": broker_called,
                     "real_order_submitted": False,
                 },
@@ -527,12 +729,12 @@ class UserTradingExecutionService:
             response = {
                 **base,
                 "result": "failed",
-                "reason": "alpaca_paper_submit_failed",
+                "reason": f"alpaca_{execution_environment}_submit_failed",
                 "signal_id": signal.id,
                 "order_id": order.id,
                 "broker_submit_called": broker_called,
                 "execution": {
-                    "type": "alpaca_paper",
+                    "type": execution_mode,
                     "status": "failed",
                     "real_order_submitted": False,
                     "broker_submit_called": broker_called,
@@ -555,6 +757,7 @@ class UserTradingExecutionService:
                 enabled=False,
                 paper_trading_enabled=False,
                 live_trading_enabled=False,
+                kill_switch=True,
             )
             db.add(row)
             db.commit()
@@ -691,6 +894,8 @@ class UserTradingExecutionService:
     def _apply_broker_order(db: Session, row: OrderLog, broker_order: Any) -> None:
         status = normalize_broker_status(_broker_value(broker_order, "status"))
         row.broker_order_id = _text(_broker_value(broker_order, "id") or _broker_value(broker_order, "order_id"))
+        if str(row.broker or "").strip().lower() == "kis":
+            row.kis_odno = _text(_broker_value(broker_order, "kis_odno") or row.broker_order_id)
         row.client_order_id = _text(_broker_value(broker_order, "client_order_id"))
         row.broker_status = status
         row.broker_order_status = status

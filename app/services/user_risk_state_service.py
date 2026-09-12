@@ -18,6 +18,7 @@ _DEFAULTS: dict[str, Any] = {
     'enabled': False,
     'paper_trading_enabled': False,
     'live_trading_enabled': False,
+    'kill_switch': True,
     'trading_mode': 'paper',
     'max_daily_trades': 2,
     'max_daily_loss_pct': 0.02,
@@ -359,12 +360,11 @@ class UserRiskStateService:
         risk_flags: list[str] = []
         if not settings['enabled']:
             risk_flags.append('user_trading_disabled')
+        elif str(settings['trading_mode'] or 'paper').strip().lower() == 'live':
+            if not settings['live_trading_enabled']:
+                risk_flags.append('live_trading_disabled')
         elif not settings['paper_trading_enabled']:
             risk_flags.append('paper_trading_disabled')
-            if settings['live_trading_enabled']:
-                risk_flags.append('live_trading_not_available')
-            else:
-                risk_flags.append('no_trading_mode_enabled')
         if daily_trade_count >= max_daily_trades:
             risk_flags.append('max_daily_trades_reached')
         if daily_loss_limit_hit:
@@ -380,6 +380,7 @@ class UserRiskStateService:
             'trading_enabled': bool(settings['enabled']),
             'paper_trading_enabled': bool(settings['paper_trading_enabled']),
             'live_trading_enabled': bool(settings['live_trading_enabled']),
+            'kill_switch': bool(settings['kill_switch']),
             'trading_mode': str(settings['trading_mode'] or 'paper'),
             'daily_trade_count': daily_trade_count,
             'max_daily_trades': max_daily_trades,

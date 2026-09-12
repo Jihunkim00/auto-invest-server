@@ -519,6 +519,8 @@ class _UserManualTradingPanel extends StatefulWidget {
 class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
   final _symbolController = TextEditingController();
   String _mode = 'paper';
+  bool _liveTradingEnabled = false;
+  bool _killSwitch = true;
   String? _error;
   Map<String, dynamic>? _result;
   bool _loading = true;
@@ -542,16 +544,42 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
 
   Future<void> _load() async {
     try {
-      final settings = await widget.controller.apiClient
-          .fetchUserTradingSettings();
+      final settings =
+          await widget.controller.apiClient.fetchUserTradingSettings();
       if (!mounted) return;
       setState(() {
-        _mode = settings['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _mode =
+            settings['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
+        _liveTradingEnabled = settings['live_trading_enabled'] == true;
+        _killSwitch = settings['kill_switch'] != false;
         _loading = false;
       });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<bool> _confirmLiveRun(String provider, String symbol) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('실거래 주문 최종 확인'),
+        content: Text(
+          '$provider · 종목 $symbol\n분석 결과에 따라 실제 자금으로 수동 주문을 제출합니다.\n계속하시겠습니까?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('실거래 주문'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<void> _run() async {
@@ -560,6 +588,16 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
     final provider = widget.controller.selectedProvider == SelectedProvider.kis
         ? 'kis'
         : 'alpaca';
+
+    var confirmLive = false;
+    if (_mode == 'live' && _liveTradingEnabled && !_killSwitch) {
+      confirmLive = await _confirmLiveRun(
+        provider == 'kis' ? 'KIS' : 'Alpaca',
+        symbol,
+      );
+      if (!confirmLive || !mounted) return;
+    }
+
     setState(() {
       _running = true;
       _error = null;
@@ -569,6 +607,7 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
       final result = await widget.controller.apiClient.runUserTradingOnce(
         provider: provider,
         symbol: symbol,
+        confirmLive: confirmLive,
       );
       if (!mounted) return;
       setState(() => _result = result);
@@ -587,7 +626,8 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
     final result = _result;
     final resultText = result == null
         ? null
-        : '${result['result'] ?? '-'} · ${result['reason'] ?? '-'}';
+        : '${result['result'] ?? '-'} · ${_koreanUserTradingReason(result['reason']?.toString())}';
+    final brokerOrderId = _brokerOrderId(result);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       child: Card(
@@ -597,19 +637,24 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                '모의매매',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              Text(
+                _mode == 'live' ? '수동 실거래' : '모의매매',
+                style:
+                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
               ),
               const SizedBox(height: 4),
               Text('$provider · 요청한 종목만 분석하고 실행합니다.',
                   style: const TextStyle(color: Colors.white70)),
               if (_mode == 'live') ...[
                 const SizedBox(height: 6),
-                const Text(
-                  '실거래 주문은 아직 비활성화되어 있습니다.',
-                  key: ValueKey('user-ai-live-disabled'),
-                  style: TextStyle(color: Colors.orangeAccent),
+                Text(
+                  _killSwitch
+                      ? '긴급 정지가 활성화되어 신규 실거래 주문이 차단됩니다.'
+                      : _liveTradingEnabled
+                          ? '실거래 주문 사용 가능 · 실행 전 최종 확인 필요'
+                          : '설정에서 실거래 주문 사용을 켜세요.',
+                  key: const ValueKey('user-ai-live-status'),
+                  style: const TextStyle(color: Colors.orangeAccent),
                 ),
               ],
               const SizedBox(height: 10),
@@ -627,26 +672,80 @@ class _UserManualTradingPanelState extends State<_UserManualTradingPanel> {
                 key: const ValueKey('user-trading-run-once-button'),
                 onPressed: _loading || _running ? null : _run,
                 icon: const Icon(Icons.play_arrow_outlined),
-                label: Text(_running ? '분석 중...' : '분석 및 모의 실행'),
+                label: Text(
+                  _running
+                      ? '분석 중...'
+                      : (_mode == 'live' ? '분석 및 실거래 주문' : '분석 및 모의 실행'),
+                ),
               ),
               if (_error != null) ...[
                 const SizedBox(height: 8),
-                Text(_error!, style: const TextStyle(color: Colors.orangeAccent)),
+                Text(_error!,
+                    style: const TextStyle(color: Colors.orangeAccent)),
               ],
               if (resultText != null) ...[
                 const SizedBox(height: 8),
-                Text('실행 결과: $resultText', key: const ValueKey('user-trading-result')),
+                Text('실행 결과: $resultText',
+                    key: const ValueKey('user-trading-result')),
                 if (result?['result'] == 'simulated')
                   const Text('모의 주문 · 실제 주문 없음',
                       style: TextStyle(color: Colors.greenAccent)),
                 if (result?['result'] == 'hold')
                   const Text('주문 없음', style: TextStyle(color: Colors.white70)),
+                if (_mode == 'live' && result?['result'] == 'submitted')
+                  Text(
+                    '실거래 주문 제출 완료${brokerOrderId == null ? '' : ' · 주문 ID $brokerOrderId'}',
+                    style: const TextStyle(color: Colors.orangeAccent),
+                  ),
+                if (_mode == 'live' && result?['result'] == 'blocked')
+                  Text(
+                    '주문 없음 · ${_koreanUserTradingReason(result?['reason']?.toString())}',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
               ],
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+String? _brokerOrderId(Map<String, dynamic>? result) {
+  final execution = result?['execution'];
+  if (execution is Map) {
+    final value = execution['broker_order_id'];
+    if (value != null && value.toString().trim().isNotEmpty) {
+      return value.toString();
+    }
+  }
+  return null;
+}
+
+String _koreanUserTradingReason(String? reason) {
+  switch (reason) {
+    case 'live_confirmation_required':
+      return '실거래 확인이 필요합니다.';
+    case 'live_trading_disabled':
+      return '실거래 주문 사용이 꺼져 있습니다.';
+    case 'user_kill_switch_enabled':
+      return '긴급 정지가 활성화되어 있습니다.';
+    case 'live_credentials_required':
+      return '실거래용 증권사 인증 정보가 필요합니다.';
+    case 'live_account_snapshot_invalid':
+      return '실거래 계좌 상태를 확인하지 못했습니다.';
+    case 'market_closed':
+      return '시장 운영 시간이 아닙니다.';
+    case 'max_daily_trades_reached':
+      return '일일 거래 한도에 도달했습니다.';
+    case 'daily_loss_limit_reached':
+      return '일일 손실 한도에 도달했습니다.';
+    case 'max_open_positions_reached':
+      return '최대 보유 종목 수에 도달했습니다.';
+    default:
+      return reason == null || reason.trim().isEmpty
+          ? '안전 조건을 통과하지 못했습니다.'
+          : reason;
   }
 }
 
