@@ -124,6 +124,30 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('Home automation configure keeps the supplied Admin callback',
+      (tester) async {
+    var callbackCount = 0;
+    final controller = _controller();
+
+    await tester.pumpWidget(_app(HomeScreen(
+      controller: controller,
+      onOpenAutomationProfile: () => callbackCount += 1,
+    )));
+    final configure =
+        find.byKey(const ValueKey('home-open-automation-profile'));
+    await tester.scrollUntilVisible(
+      configure,
+      500,
+      scrollable: find.byWidgetPredicate(
+        (widget) => widget is Scrollable,
+      ).first,
+    );
+    await tester.tap(configure);
+
+    expect(callbackCount, 1);
+    controller.dispose();
+  });
+
   testWidgets('home exposes connected state and loaded portfolio values',
       (tester) async {
     final controller = _controller()

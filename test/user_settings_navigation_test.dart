@@ -22,6 +22,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('home-open-settings')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('home-open-automation-profile')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('home-open-admin')), findsNothing);
     expect(find.byType(NavigationDestination), findsNWidgets(3));
     expect(
@@ -38,7 +42,7 @@ void main() {
       ],
     );
 
-    await tester.tap(find.byKey(const ValueKey('home-open-settings')));
+    await tester.tap(find.byKey(const ValueKey('home-account-connect')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('user-settings-screen')), findsOneWidget);
@@ -48,10 +52,13 @@ void main() {
     await tester.scrollUntilVisible(
       brokerCard,
       500,
-      scrollable: find.byWidgetPredicate(
-        (widget) =>
-            widget is Scrollable && widget.axisDirection == AxisDirection.down,
-      ).first,
+      scrollable: find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is Scrollable &&
+                widget.axisDirection == AxisDirection.down,
+          )
+          .first,
     );
     await tester.pumpAndSettle();
     expect(brokerCard, findsOneWidget);
@@ -62,6 +69,41 @@ void main() {
     expect(find.text('증권사 연결'), findsOneWidget);
     expect(find.text('한국투자증권'), findsOneWidget);
     expect(find.text('Alpaca'), findsOneWidget);
+
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    final automationButton =
+        find.byKey(const ValueKey('home-open-automation-profile'));
+    await tester.scrollUntilVisible(
+      automationButton,
+      500,
+      scrollable: find
+          .byWidgetPredicate(
+            (widget) => widget is Scrollable,
+          )
+          .first,
+    );
+    await tester.tap(automationButton);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('user-settings-screen')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('automation-profile-editor')),
+      findsOneWidget,
+    );
+    expect(find.text('자동화 프로필'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('automation-profile-name')), findsOneWidget);
+    expect(find.byKey(const ValueKey('automation-profile-start-date')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('automation-profile-max-positions')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('automation-profile-take-profit')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('automation-profile-trading-mode')),
+        findsNothing);
   });
 }
 
@@ -83,6 +125,18 @@ class _RegularUserSettingsApiClient extends ApiClient {
 
   @override
   Future<List<UserWatchlistItem>> fetchUserWatchlist() async => [];
+
+  @override
+  Future<Map<String, dynamic>> fetchUserTradingSettings() async => {
+        'trading_mode': 'paper',
+        'live_trading_enabled': false,
+        'kill_switch': true,
+        'auto_trading_enabled': false,
+        'max_daily_trades': 2,
+        'max_daily_loss_pct': 0.02,
+        'max_position_pct': 10,
+        'max_open_positions': 1,
+      };
 
   @override
   Future<List<UserBrokerCredential>> fetchUserBrokers() async => [

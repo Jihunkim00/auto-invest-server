@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +14,7 @@ from app.schemas.user_data import UserTradingSettingsUpdateRequest
 from app.services.auth_dependencies import require_regular_user
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_trading_execution_service import UserTradingExecutionService
+from app.services.user_auto_trading_scheduler_service import UserAutoTradingSchedulerService
 
 
 router = APIRouter(prefix='/users/me/trading', tags=['user-trading-foundation'])
@@ -39,6 +41,12 @@ def _settings_payload(row: UserTradingSettings) -> dict[str, Any]:
         'live_trading_enabled': bool(row.live_trading_enabled),
         'kill_switch': bool(row.kill_switch),
         'trading_mode': str(row.trading_mode or 'paper'),
+        'auto_trading_enabled': bool(row.auto_trading_enabled),
+        'auto_trading_provider': row.auto_trading_provider,
+        'auto_live_confirmed': row.auto_live_confirmed_at is not None,
+        'auto_live_confirmed_at': row.auto_live_confirmed_at.isoformat()
+        if row.auto_live_confirmed_at
+        else None,
         'available_trading_modes': ['paper', 'live'],
         'max_daily_trades': int(row.max_daily_trades),
         'max_daily_loss_pct': float(row.max_daily_loss_pct),
@@ -102,6 +110,10 @@ def update_my_trading_settings(
 ):
     row = _get_settings(db, user)
     values = payload.values()
+    requested_enabled = values.pop('enabled', None)
+    requested_auto_enabled = values.pop('auto_trading_enabled', None)
+    requested_auto_provider = values.pop('auto_trading_provider', None)
+    requested_auto_live_confirmed = values.pop('auto_live_confirmed', None)
     selected_mode = values.pop('trading_mode', None)
     if selected_mode is not None:
         if selected_mode == 'paper':
@@ -126,9 +138,107 @@ def update_my_trading_settings(
         row.live_trading_enabled = False
     elif selected_mode == 'live' and 'live_trading_enabled' not in values:
         row.live_trading_enabled = False
+    target_mode = str(row.trading_mode or 'paper').strip().lower()
+    if requested_enabled is not None:
+        row.enabled = bool(requested_enabled)
+        if not row.enabled:
+            row.live_trading_enabled = False
+            row.auto_trading_enabled = False
+            row.auto_trading_provider = None
+            row.auto_live_confirmed_at = None
+    target_auto_enabled = (
+        bool(requested_auto_enabled)
+        if requested_auto_enabled is not None
+        else bool(row.auto_trading_enabled)
+    )
+    target_provider = (
+        str(requested_auto_provider).strip().lower()
+        if requested_auto_provider is not None
+        else str(row.auto_trading_provider or '').strip().lower()
+    ) or None
+    if requested_auto_live_confirmed is False:
+        row.auto_live_confirmed_at = None
+    if target_auto_enabled and target_provider not in {'kis', 'alpaca'}:
+        raise HTTPException(status_code=422, detail='auto_trading_provider_required')
+    if requested_auto_provider is not None and requested_auto_provider not in {'kis', 'alpaca'}:
+        raise HTTPException(status_code=422, detail='unsupported_auto_trading_provider')
+    if target_auto_enabled:
+        row.enabled = True
+        if requested_auto_live_confirmed is True:
+            row.auto_live_confirmed_at = datetime.now(UTC)
+        if target_mode == 'paper':
+            row.paper_trading_enabled = True
+        auto_live_activation = (
+            target_mode == 'live'
+            and bool(row.live_trading_enabled)
+            and (
+                requested_auto_enabled is True
+                or selected_mode == 'live'
+                or row.auto_live_confirmed_at is not None
+            )
+        )
+        provider_changed = target_provider != str(row.auto_trading_provider or '').strip().lower()
+        if target_mode == 'live' and (auto_live_activation or provider_changed):
+            if payload.confirm_auto_live is not True and requested_auto_live_confirmed is not True:
+                row.auto_live_confirmed_at = None
+                if auto_live_activation:
+                    raise HTTPException(status_code=422, detail='auto_live_confirmation_required')
+            else:
+                row.auto_live_confirmed_at = datetime.now(UTC)
+    elif requested_auto_provider is not None:
+        row.auto_trading_provider = target_provider
+        row.auto_live_confirmed_at = None
+    else:
+        row.auto_live_confirmed_at = None
+    if target_auto_enabled:
+        row.auto_trading_enabled = True
+        row.auto_trading_provider = target_provider
+    if target_mode != 'live' or not bool(row.live_trading_enabled):
+        row.auto_live_confirmed_at = None
     db.commit()
     db.refresh(row)
     return _settings_payload(row)
+
+
+@router.get('/scheduler/status')
+def get_my_trading_scheduler_status(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    settings = _get_settings(db, user)
+    latest = (
+        db.query(TradeRunLog)
+        .filter(
+            TradeRunLog.owner_user_id == int(user.id),
+            TradeRunLog.trigger_source == 'user_scheduler',
+        )
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .first()
+    )
+    provider = str(settings.auto_trading_provider or '').strip().lower() or None
+    next_slot = None
+    if provider:
+        next_slot = UserAutoTradingSchedulerService().next_slot(
+            db,
+            provider=provider,
+            now=datetime.now(UTC),
+        )
+    return {
+        'auto_trading_enabled': bool(settings.auto_trading_enabled),
+        'auto_trading_provider': provider,
+        'trading_mode': str(settings.trading_mode or 'paper'),
+        'live_trading_enabled': bool(settings.live_trading_enabled),
+        'kill_switch': bool(settings.kill_switch),
+        'auto_live_confirmed': settings.auto_live_confirmed_at is not None,
+        'auto_live_confirmed_at': settings.auto_live_confirmed_at.isoformat()
+        if settings.auto_live_confirmed_at
+        else None,
+        'next_relevant_slot': next_slot,
+        'last_scheduler_run_at': latest.created_at.isoformat() if latest and latest.created_at else None,
+        'last_scheduler_result': latest.result if latest else None,
+        'last_scheduler_reason': latest.reason if latest else None,
+        'last_scheduler_run_id': latest.id if latest else None,
+    }
 
 
 @router.post('/run-once')

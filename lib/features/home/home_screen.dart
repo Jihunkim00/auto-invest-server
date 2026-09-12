@@ -21,6 +21,8 @@ class HomeScreen extends StatelessWidget {
     this.nowKst,
     this.readOnlyUser = false,
     this.userTradingMode = 'paper',
+    this.userTradingModeLoading = false,
+    this.onUserModeChanged,
   });
 
   final DashboardController controller;
@@ -30,16 +32,27 @@ class HomeScreen extends StatelessWidget {
   final DateTime Function()? nowKst;
   final bool readOnlyUser;
   final String userTradingMode;
+  final bool userTradingModeLoading;
+  final Future<void> Function(String mode)? onUserModeChanged;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final userSnapshot =
-            readOnlyUser ? controller.selectedUserBrokerAccount : null;
-        final userSummary =
-            readOnlyUser ? controller.selectedUserPortfolioSummary : null;
+        final userSnapshot = readOnlyUser
+            ? controller.userBrokerAccountFor(controller.selectedProvider)
+            : null;
+        final userSummary = readOnlyUser
+            ? controller.userPortfolioSummaryFor(controller.selectedProvider)
+            : null;
+        final userBrokerConfigured = !readOnlyUser ||
+            controller.userBrokerCredentials.any(
+              (credential) =>
+                  credential.configured &&
+                  credential.provider.trim().toLowerCase() ==
+                      controller.selectedProviderCode,
+            );
         final userLoading = readOnlyUser &&
             (controller.userBrokerAccountsLoading ||
                 controller
@@ -68,21 +81,22 @@ class HomeScreen extends StatelessWidget {
                   userSnapshot: userSnapshot,
                   userLoading: userLoading,
                   userError: userError,
+                  userBrokerConfigured: userBrokerConfigured,
+                  onOpenSettings: readOnlyUser ? onOpenSettings : null,
                 ),
                 const SizedBox(height: 12),
-                if (readOnlyUser) ...[
-                  _UserTradingModeCard(mode: userTradingMode),
-                  const SizedBox(height: 12),
-                ],
-                if (!readOnlyUser) ...[
-                  _OperationModeCard(controller: controller),
-                  const SizedBox(height: 12),
-                  _AutomationProfileCard(
-                    controller: controller,
-                    onOpen: onOpenAutomationProfile,
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                _OperationModeCard(
+                  controller: controller,
+                  userMode: readOnlyUser ? userTradingMode : null,
+                  userLoading: readOnlyUser ? userTradingModeLoading : false,
+                  onUserModeChanged: readOnlyUser ? onUserModeChanged : null,
+                ),
+                const SizedBox(height: 12),
+                _AutomationProfileCard(
+                  controller: controller,
+                  onOpen: onOpenAutomationProfile,
+                ),
+                const SizedBox(height: 12),
                 _PortfolioCard(
                   controller: controller,
                   summaryOverride: userSummary,
@@ -100,10 +114,8 @@ class HomeScreen extends StatelessWidget {
                   summaryOverride: userSummary,
                   loadingOverride: userLoading,
                 ),
-                if (!readOnlyUser) ...[
-                  const SizedBox(height: 12),
-                  _DecisionCard(controller: controller, nowKst: nowKst),
-                ],
+                const SizedBox(height: 12),
+                _DecisionCard(controller: controller, nowKst: nowKst),
                 if (controller.error != null) ...[
                   const SizedBox(height: 12),
                   _InlineNotice(
@@ -116,54 +128,6 @@ class HomeScreen extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _UserTradingModeCard extends StatelessWidget {
-  const _UserTradingModeCard({required this.mode});
-
-  final String mode;
-
-  @override
-  Widget build(BuildContext context) {
-    final live = mode == 'live';
-    return SectionCard(
-      key: const ValueKey('user-trading-mode-card'),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(live ? Icons.warning_amber_outlined : Icons.science_outlined,
-              color: live ? Colors.orangeAccent : AppTheme.positive),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('거래 모드',
-                    style: TextStyle(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 4),
-                Text(
-                  live ? '실거래' : '모의투자',
-                  style: TextStyle(
-                    color: live ? Colors.orangeAccent : AppTheme.positive,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                if (live) ...[
-                  const SizedBox(height: 4),
-                  const Text(
-                    '수동 실거래 · 설정에서 명시적으로 활성화',
-                    key: ValueKey('user-live-disabled-home'),
-                    style: TextStyle(color: Colors.orangeAccent),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -248,6 +212,8 @@ class _AccountConnectionCard extends StatelessWidget {
     this.userSnapshot,
     this.userLoading = false,
     this.userError,
+    this.userBrokerConfigured = true,
+    this.onOpenSettings,
   });
 
   final DashboardController controller;
@@ -255,6 +221,8 @@ class _AccountConnectionCard extends StatelessWidget {
   final UserBrokerAccountSnapshot? userSnapshot;
   final bool userLoading;
   final String? userError;
+  final bool userBrokerConfigured;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -266,8 +234,9 @@ class _AccountConnectionCard extends StatelessWidget {
         : controller.selectedProvider == SelectedProvider.kis
             ? strings.kisBroker
             : strings.alpacaBroker;
+    final notConfigured = readOnlyUser && !userLoading && !userBrokerConfigured;
     final failed = readOnlyUser
-        ? userError != null && userSnapshot == null
+        ? !notConfigured && userError != null && userSnapshot == null
         : controller.portfolioLoadError != null ||
             (!controller.portfolioLoaded &&
                 controller.selectedPortfolioUnavailable);
@@ -276,29 +245,35 @@ class _AccountConnectionCard extends StatelessWidget {
     final connected = readOnlyUser
         ? userSnapshot?.connected == true
         : controller.portfolioLoaded && !failed;
-    final color = failed
-        ? AppTheme.warning
-        : loading
-            ? AppTheme.primaryAccent
-            : AppTheme.positive;
-    final label = failed
-        ? readOnlyUser
-            ? '\uC5F0\uACB0 \uC624\uB958'
-            : strings.connectionError
-        : loading
+    final color = notConfigured
+        ? Colors.white54
+        : failed
+            ? AppTheme.warning
+            : loading
+                ? AppTheme.primaryAccent
+                : AppTheme.positive;
+    final label = notConfigured
+        ? '계좌 미설정'
+        : failed
             ? readOnlyUser
-                ? '\uC5F0\uACB0 \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
-                : strings.connectionLoading(broker)
-            : readOnlyUser
-                ? connected
-                    ? '\uC5F0\uACB0\uB428'
-                    : '\uC870\uD68C \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
-                : strings.connectionSuccess(broker);
-    final icon = failed
-        ? Icons.error_outline
-        : loading
-            ? Icons.sync
-            : Icons.check_circle_outline;
+                ? '\uC5F0\uACB0 \uC624\uB958'
+                : strings.connectionError
+            : loading
+                ? readOnlyUser
+                    ? '\uC5F0\uACB0 \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                    : strings.connectionLoading(broker)
+                : readOnlyUser
+                    ? connected
+                        ? '\uC5F0\uACB0\uB428'
+                        : '\uC870\uD68C \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                    : strings.connectionSuccess(broker);
+    final icon = notConfigured
+        ? Icons.link_off
+        : failed
+            ? Icons.error_outline
+            : loading
+                ? Icons.sync
+                : Icons.check_circle_outline;
 
     return SectionCard(
       key: const ValueKey('home-account-connection-status'),
@@ -318,15 +293,17 @@ class _AccountConnectionCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  failed
-                      ? readOnlyUser
-                          ? '\uACC4\uC88C \uC815\uBCF4 \uC870\uD68C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.'
-                          : strings.connectionError
-                      : readOnlyUser
-                          ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
-                          : strings.isKorean
-                              ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
-                              : 'Connected means broker account and portfolio data was fetched successfully.',
+                  notConfigured
+                      ? '브로커 계좌가 연결되지 않았습니다. 계좌를 연결하면 자산을 조회할 수 있습니다.'
+                      : failed
+                          ? readOnlyUser
+                              ? '\uACC4\uC88C \uC815\uBCF4 \uC870\uD68C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.'
+                              : strings.connectionError
+                          : readOnlyUser
+                              ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
+                              : strings.isKorean
+                                  ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
+                                  : 'Connected means broker account and portfolio data was fetched successfully.',
                   style: const TextStyle(color: Colors.white60, height: 1.35),
                 ),
                 if (!readOnlyUser &&
@@ -342,7 +319,16 @@ class _AccountConnectionCard extends StatelessWidget {
               ],
             ),
           ),
-          if (failed && !readOnlyUser)
+          if (notConfigured && onOpenSettings != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: OutlinedButton(
+                key: const ValueKey('home-account-connect'),
+                onPressed: onOpenSettings,
+                child: const Text('계좌 연결'),
+              ),
+            )
+          else if (failed && !readOnlyUser)
             Padding(
               padding: const EdgeInsets.only(left: 8),
               child: OutlinedButton(
@@ -389,7 +375,7 @@ class _AutomationProfileCard extends StatelessWidget {
                   ],
                 ),
               ),
-              if (!narrow) ...[
+              if (!narrow && onOpen != null) ...[
                 const SizedBox(width: 12),
                 OutlinedButton(
                   key: const ValueKey('home-open-automation-profile'),
@@ -404,12 +390,14 @@ class _AutomationProfileCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               content,
-              const SizedBox(height: 12),
-              OutlinedButton(
-                key: const ValueKey('home-open-automation-profile'),
-                onPressed: onOpen,
-                child: Text(strings.configure),
-              ),
+              if (onOpen != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  key: const ValueKey('home-open-automation-profile'),
+                  onPressed: onOpen,
+                  child: Text(strings.configure),
+                ),
+              ],
             ],
           );
         },
@@ -419,17 +407,31 @@ class _AutomationProfileCard extends StatelessWidget {
 }
 
 class _OperationModeCard extends StatelessWidget {
-  const _OperationModeCard({required this.controller});
+  const _OperationModeCard({
+    required this.controller,
+    this.userMode,
+    this.userLoading = false,
+    this.onUserModeChanged,
+  });
 
   final DashboardController controller;
+  final String? userMode;
+  final bool userLoading;
+  final Future<void> Function(String mode)? onUserModeChanged;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final mode = controller.settings.currentOperationMode;
-    final color = _operationModeColor(mode);
-    final loading = controller.kisAutomationSettingsLoading;
-    final detail = _operationModeDetail(strings, mode);
+    final isUserMode = userMode != null;
+    final mode = userMode ?? controller.settings.currentOperationMode;
+    final color = isUserMode
+        ? (mode == 'live' ? AppTheme.danger : AppTheme.positive)
+        : _operationModeColor(mode);
+    final loading =
+        isUserMode ? userLoading : controller.kisAutomationSettingsLoading;
+    final detail = isUserMode
+        ? _userOperationModeDetail(mode)
+        : _operationModeDetail(strings, mode);
 
     return SectionCard(
       key: const ValueKey('home-operation-mode-card'),
@@ -451,11 +453,13 @@ class _OperationModeCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(strings.operationMode,
+                      Text(isUserMode ? '거래 모드' : strings.operationMode,
                           style: Theme.of(context).textTheme.titleMedium),
                       const SizedBox(height: 4),
                       Text(
-                        _operationModeLabel(strings, mode),
+                        isUserMode
+                            ? _userOperationModeLabel(mode)
+                            : _operationModeLabel(strings, mode),
                         style: TextStyle(
                           color: color,
                           fontSize: 18,
@@ -477,9 +481,13 @@ class _OperationModeCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        _executionStatusLabel(strings, controller),
+                        isUserMode
+                            ? _userExecutionStatus(mode)
+                            : _executionStatusLabel(strings, controller),
                         style: TextStyle(
-                          color: _executionStatusColor(controller),
+                          color: isUserMode
+                              ? color
+                              : _executionStatusColor(controller),
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -487,39 +495,12 @@ class _OperationModeCard extends StatelessWidget {
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
-                        children: [
-                          _ModeStatePill(
-                            label: strings.isKorean ? 'Dry-run' : 'Dry-run',
-                            enabled: controller.settings.dryRun,
-                          ),
-                          _ModeStatePill(
-                            label:
-                                strings.isKorean ? 'KIS 스케줄러' : 'KIS scheduler',
-                            enabled: controller.settings.kisSchedulerEnabled,
-                          ),
-                          _ModeStatePill(
-                            label: strings.isKorean ? '실주문 허용' : 'Real orders',
-                            enabled:
-                                controller.settings.kisSchedulerAllowRealOrders,
-                            alert:
-                                controller.settings.kisSchedulerAllowRealOrders,
-                          ),
-                          _ModeStatePill(
-                            label: strings.isKorean ? '브로커 동기화' : 'Broker sync',
-                            enabled: controller
-                                    .automationModeStatus?.brokerSyncHealth ==
-                                'healthy',
-                            alert: controller.automationModeStatus != null &&
-                                controller.automationModeStatus!
-                                        .brokerSyncHealth !=
-                                    'healthy',
-                          ),
-                          _ModeStatePill(
-                            label: strings.isKorean ? '킬 스위치' : 'Kill switch',
-                            enabled: controller.settings.killSwitch,
-                            alert: controller.settings.killSwitch,
-                          ),
-                        ],
+                        children: _modeStatePills(
+                          strings,
+                          controller,
+                          mode,
+                          isUserMode,
+                        ),
                       ),
                     ],
                   ),
@@ -540,13 +521,64 @@ class _OperationModeCard extends StatelessWidget {
     );
   }
 
+  List<Widget> _modeStatePills(
+    AppStrings strings,
+    DashboardController controller,
+    String mode,
+    bool isUserMode,
+  ) {
+    if (isUserMode) {
+      return [
+        _ModeStatePill(
+          label: '모의투자',
+          enabled: mode == 'paper',
+        ),
+        _ModeStatePill(
+          label: '실거래',
+          enabled: mode == 'live',
+          alert: mode == 'live',
+        ),
+      ];
+    }
+    return [
+      _ModeStatePill(
+        label: strings.isKorean ? 'Dry-run' : 'Dry-run',
+        enabled: controller.settings.dryRun,
+      ),
+      _ModeStatePill(
+        label: strings.isKorean ? 'KIS 스케줄러' : 'KIS scheduler',
+        enabled: controller.settings.kisSchedulerEnabled,
+      ),
+      _ModeStatePill(
+        label: strings.isKorean ? '실주문 허용' : 'Real orders',
+        enabled: controller.settings.kisSchedulerAllowRealOrders,
+        alert: controller.settings.kisSchedulerAllowRealOrders,
+      ),
+      _ModeStatePill(
+        label: strings.isKorean ? '브로커 동기화' : 'Broker sync',
+        enabled: controller.automationModeStatus?.brokerSyncHealth == 'healthy',
+        alert: controller.automationModeStatus != null &&
+            controller.automationModeStatus!.brokerSyncHealth != 'healthy',
+      ),
+      _ModeStatePill(
+        label: strings.isKorean ? '긴급 정지' : 'Kill switch',
+        enabled: controller.settings.killSwitch,
+        alert: controller.settings.killSwitch,
+      ),
+    ];
+  }
+
   Future<void> _selectOperationMode(BuildContext context) async {
+    final isUserMode = userMode != null;
+    final currentMode = userMode ?? controller.settings.currentOperationMode;
+    final options =
+        isUserMode ? _userOperationModeOptions : _homeOperationModeOptions;
     final selected = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppTheme.surface,
       isScrollControlled: true,
       builder: (sheetContext) {
-        var selectedMode = controller.settings.currentOperationMode;
+        var selectedMode = currentMode;
         return StatefulBuilder(
           builder: (context, setState) => SafeArea(
             child: Padding(
@@ -565,29 +597,41 @@ class _OperationModeCard extends StatelessWidget {
                   RadioGroup<String>(
                     groupValue: selectedMode,
                     onChanged: (value) {
-                      if (controller.kisAutomationSettingsLoading) return;
+                      if (isUserMode
+                          ? userLoading
+                          : controller.kisAutomationSettingsLoading) {
+                        return;
+                      }
                       setState(() => selectedMode = value!);
                     },
                     child: Column(
                       children: [
-                        for (final option in _homeOperationModeOptions)
+                        for (final option in options)
                           RadioListTile<String>(
                             key:
                                 ValueKey('home-operation-mode-${option.value}'),
                             value: option.value,
-                            activeColor: _operationModeColor(option.value),
+                            activeColor: isUserMode
+                                ? (option.value == 'live'
+                                    ? AppTheme.danger
+                                    : AppTheme.positive)
+                                : _operationModeColor(option.value),
                             contentPadding: EdgeInsets.zero,
                             title: Text(
-                              _operationModeLabel(
-                                controller.strings,
-                                option.value,
-                              ),
+                              isUserMode
+                                  ? _userOperationModeLabel(option.value)
+                                  : _operationModeLabel(
+                                      controller.strings,
+                                      option.value,
+                                    ),
                             ),
                             subtitle: Text(
-                              _operationModeDetail(
-                                controller.strings,
-                                option.value,
-                              ),
+                              isUserMode
+                                  ? _userOperationModeDetail(option.value)
+                                  : _operationModeDetail(
+                                      controller.strings,
+                                      option.value,
+                                    ),
                               style: const TextStyle(color: Colors.white60),
                             ),
                           ),
@@ -608,10 +652,15 @@ class _OperationModeCard extends StatelessWidget {
                       Expanded(
                         child: FilledButton(
                           key: const ValueKey('home-operation-mode-apply'),
-                          onPressed: controller.kisAutomationSettingsLoading
-                              ? null
-                              : () =>
-                                  Navigator.of(sheetContext).pop(selectedMode),
+                          onPressed: isUserMode
+                              ? userLoading
+                                  ? null
+                                  : () => Navigator.of(sheetContext)
+                                      .pop(selectedMode)
+                              : controller.kisAutomationSettingsLoading
+                                  ? null
+                                  : () => Navigator.of(sheetContext)
+                                      .pop(selectedMode),
                           child: Text(
                               controller.strings.isKorean ? '적용' : 'Apply'),
                         ),
@@ -625,9 +674,14 @@ class _OperationModeCard extends StatelessWidget {
         );
       },
     );
-    if (!context.mounted ||
-        selected == null ||
-        selected == controller.settings.currentOperationMode) {
+    if (!context.mounted || selected == null || selected == currentMode) {
+      return;
+    }
+
+    if (isUserMode) {
+      if (selected == 'live' && !await _confirmUserLiveMode(context)) return;
+      if (!context.mounted) return;
+      await onUserModeChanged?.call(selected);
       return;
     }
 
@@ -680,6 +734,30 @@ class _OperationModeCard extends StatelessWidget {
         ) ??
         false;
   }
+
+  Future<bool> _confirmUserLiveMode(BuildContext context) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('실거래 모드로 변경'),
+            content: const Text(
+              '실거래 모드에서는 안전 조건을 통과한 경우 실제 주문이 제출될 수 있습니다.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                key: const ValueKey('home-operation-mode-live-confirm'),
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('실거래 모드로 변경'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
 }
 
 class _HomeOperationModeOption {
@@ -692,6 +770,11 @@ const _homeOperationModeOptions = [
   _HomeOperationModeOption('safe_mode'),
   _HomeOperationModeOption('dry_run_simulation'),
   _HomeOperationModeOption('full_live_test_mode'),
+];
+
+const _userOperationModeOptions = [
+  _HomeOperationModeOption('paper'),
+  _HomeOperationModeOption('live'),
 ];
 
 class _ModeStatePill extends StatelessWidget {
@@ -756,6 +839,20 @@ String _operationModeDetail(AppStrings strings, String mode) {
         : 'Server settings and safety gates determine current execution.',
   };
 }
+
+String _userOperationModeLabel(String mode) => switch (mode.trim()) {
+      'paper' => '모의투자',
+      'live' => '실거래',
+      _ => '모의투자',
+    };
+
+String _userOperationModeDetail(String mode) => switch (mode.trim()) {
+      'live' => '안전 조건을 통과한 경우 실제 주문이 가능합니다.',
+      _ => '실제 주문 없이 안전하게 시뮬레이션합니다.',
+    };
+
+String _userExecutionStatus(String mode) =>
+    mode.trim() == 'live' ? '실거래 모드 선택됨' : '모의투자 실행 가능';
 
 Color _operationModeColor(String mode) => switch (mode.trim()) {
       'full_live_test_mode' => AppTheme.danger,

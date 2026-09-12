@@ -62,6 +62,11 @@ class UserTradingSettings(Base):
     # User-owned safety switch; live execution requires an explicit opt-out.
     kill_switch = Column(Boolean, nullable=False, default=True, server_default='1')
     trading_mode = Column(String(10), nullable=False, default='paper', server_default='paper', index=True)
+    # PR129: automatic trading is a separate opt-in from trading_mode and
+    # manual live-order confirmation.
+    auto_trading_enabled = Column(Boolean, nullable=False, default=False, server_default='0', index=True)
+    auto_trading_provider = Column(String(20), nullable=True, index=True)
+    auto_live_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     max_daily_trades = Column(Integer, nullable=False, default=2, server_default='2')
     max_daily_loss_pct = Column(Float, nullable=False, default=0.02, server_default='0.02')
     max_position_pct = Column(Float, nullable=False, default=10.0, server_default='10.0')
@@ -982,6 +987,30 @@ class TradeRunLog(Base):
     request_payload = Column(Text, nullable=True)
     response_payload = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserAutoTradingSlotClaim(Base):
+    __tablename__ = 'user_auto_trading_slot_claims'
+
+    __table_args__ = (
+        UniqueConstraint(
+            'user_id', 'provider', 'market', 'trading_date', 'scheduler_slot',
+            name='uq_user_auto_trading_slot_claim',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    trading_date = Column(String(10), nullable=False, index=True)
+    scheduler_slot = Column(String(20), nullable=False, index=True)
+    run_key = Column(String(64), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default='claimed', index=True)
+    result = Column(String(40), nullable=True)
+    reason = Column(String(160), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class QuantABObservation(Base):

@@ -146,14 +146,37 @@ class _RegularUserHome extends StatefulWidget {
 
 class _RegularUserHomeState extends State<_RegularUserHome> {
   int _index = 0;
+  int _userHomeRevision = 0;
 
-  void _openSettings(BuildContext context) {
-    Navigator.of(context).push(
+  Future<void> _openSettings(BuildContext context) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => UserSettingsScreen(
           apiClient: widget.apiClient,
           user: widget.user,
           onLogout: () => widget.onLogout(context),
+          onBrokerConnectionChanged: (_) =>
+              widget.controller.refreshUserBrokerAccounts(),
+        ),
+      ),
+    );
+    if (mounted) {
+      await widget.controller.refreshUserBrokerAccounts();
+    }
+  }
+
+  Future<void> _openAutomationProfile(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AutomationProfileScreen(
+          apiClient: widget.apiClient,
+          appLanguage: widget.controller.appLanguage,
+          userScoped: true,
+          onUserSettingsSaved: () async {
+            if (mounted) {
+              setState(() => _userHomeRevision += 1);
+            }
+          },
         ),
       ),
     );
@@ -176,9 +199,11 @@ class _RegularUserHomeState extends State<_RegularUserHome> {
         index: _index,
         children: [
           UserHomeScreen(
+            key: ValueKey('user-home-screen-$_userHomeRevision'),
             controller: widget.controller,
             user: widget.user,
             onOpenSettings: () => _openSettings(context),
+            onOpenAutomationProfile: () => _openAutomationProfile(context),
           ),
           AiScreen(
             controller: widget.controller,

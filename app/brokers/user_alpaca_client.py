@@ -19,6 +19,15 @@ class UserAlpacaTradingClient:
     constructs the SDK client with ``paper=True``.
     """
 
+    def submit_market_sell_qty(self, *, symbol: str, qty: float):
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        )
+        return self.trading_client.submit_order(order_data=order_data)
+
     def __init__(
         self,
         credentials: Mapping[str, Any],
@@ -46,6 +55,15 @@ class UserAlpacaTradingClient:
 
 class UserAlpacaLiveTradingClient:
     """Explicit Alpaca live client; it refuses paper credentials."""
+
+    def submit_market_sell_qty(self, *, symbol: str, qty: float):
+        order_data = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        )
+        return self.trading_client.submit_order(order_data=order_data)
 
     def __init__(
         self,

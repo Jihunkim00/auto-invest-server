@@ -88,6 +88,11 @@ class UserTradingExecutionService:
         symbol: str,
         confirm_live: bool = False,
         now: datetime | None = None,
+        trigger_source: str = USER_TRIGGER_SOURCE,
+        authorization_mode: str = 'manual',
+        scheduler_slot: str | None = None,
+        snapshot_override: dict[str, Any] | None = None,
+        run_key: str | None = None,
     ) -> dict[str, Any]:
         now_utc = self._utc_now(now)
         normalized_provider, market, currency, _timezone = normalize_trading_scope(
@@ -107,6 +112,9 @@ class UserTradingExecutionService:
             market=market,
             symbol=requested_symbol,
             selected_mode=selected_mode,
+            trigger_source=trigger_source,
+            scheduler_slot=scheduler_slot,
+            run_key=run_key,
             request_payload={
                 "provider": normalized_provider,
                 "market": market,
@@ -116,6 +124,18 @@ class UserTradingExecutionService:
                 "trigger_source": USER_TRIGGER_SOURCE,
             },
         )
+        run.trigger_source = trigger_source
+        if run_key:
+            run.run_key = str(run_key)
+        run.request_payload = self._json_merge(
+            run.request_payload,
+            {
+                'trigger_source': trigger_source,
+                'scheduler_slot': scheduler_slot,
+                'authorization_mode': authorization_mode,
+            },
+        )
+        db.commit()
 
         base = {
             "provider": normalized_provider,
@@ -136,6 +156,12 @@ class UserTradingExecutionService:
         }
 
         is_live = selected_mode == LIVE_MODE
+        is_automatic = str(authorization_mode or 'manual').strip().lower() == 'automatic'
+        base.update({
+            'trigger_source': trigger_source,
+            'authorization_mode': 'automatic' if is_automatic else 'manual',
+            'scheduler_slot': scheduler_slot,
+        })
         if not bool(settings.enabled):
             return self._finish_blocked(
                 db,
@@ -147,6 +173,21 @@ class UserTradingExecutionService:
                 risk={"risk_allowed": False, "risk_flags": ["user_trading_disabled"]},
             )
         if is_live:
+            if is_automatic:
+                automatic_reason = self._automatic_block_reason(
+                    settings,
+                    normalized_provider,
+                )
+                if automatic_reason:
+                    return self._finish_blocked(
+                        db,
+                        run,
+                        user=user,
+                        base=base,
+                        reason=automatic_reason,
+                        analysis={'action': 'hold', 'reason': automatic_reason},
+                        risk={'risk_allowed': False, 'risk_flags': [automatic_reason]},
+                    )
             if not bool(settings.live_trading_enabled):
                 return self._finish_blocked(
                     db,
@@ -157,7 +198,7 @@ class UserTradingExecutionService:
                     analysis={"action": "hold", "reason": LIVE_TRADING_DISABLED},
                     risk={"risk_allowed": False, "risk_flags": [LIVE_TRADING_DISABLED]},
                 )
-            if confirm_live is not True:
+            if not is_automatic and confirm_live is not True:
                 return self._finish_blocked(
                     db,
                     run,
@@ -225,7 +266,11 @@ class UserTradingExecutionService:
                     risk={"risk_allowed": False, "risk_flags": ["paper_credentials_required"]},
                 )
         try:
-            snapshot = self.account_service.get_broker_snapshot(db, user, normalized_provider)
+            snapshot = snapshot_override or self.account_service.get_broker_snapshot(
+                db,
+                user,
+                normalized_provider,
+            )
         except Exception as exc:
             reason = self._account_reason(exc)
             return self._finish_blocked(
@@ -359,6 +404,26 @@ class UserTradingExecutionService:
             )
 
         if is_live and normalized_provider == "kis":
+            if is_automatic:
+                db.refresh(settings)
+                automatic_reason = self._automatic_block_reason(
+                    settings,
+                    normalized_provider,
+                )
+                if automatic_reason:
+                    return self._finish_blocked(
+                        db,
+                        run,
+                        user=user,
+                        base=base,
+                        reason=automatic_reason,
+                        analysis=analysis,
+                        risk={
+                            **risk,
+                            'risk_allowed': False,
+                            'risk_flags': [automatic_reason],
+                        },
+                    )
             return self._submit_kis_live(
                 db,
                 run,
@@ -369,6 +434,7 @@ class UserTradingExecutionService:
                 sizing=sizing,
                 credentials=credentials or {},
                 now=now_utc,
+                authorization_mode=authorization_mode,
             )
 
         if normalized_provider == "kis":
@@ -382,6 +448,26 @@ class UserTradingExecutionService:
                 sizing=sizing,
                 now=now_utc,
             )
+        if is_automatic and is_live:
+            db.refresh(settings)
+            automatic_reason = self._automatic_block_reason(
+                settings,
+                normalized_provider,
+            )
+            if automatic_reason:
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason=automatic_reason,
+                    analysis=analysis,
+                    risk={
+                        **risk,
+                        'risk_allowed': False,
+                        'risk_flags': [automatic_reason],
+                    },
+                )
         return self._submit_alpaca_order(
             db,
             run,
@@ -393,7 +479,344 @@ class UserTradingExecutionService:
             credentials=credentials or {},
             now=now_utc,
             live=is_live,
+            authorization_mode=authorization_mode,
         )
+    def run_exit_once(
+        self,
+        db: Session,
+        user: User,
+        *,
+        provider: str,
+        symbol: str,
+        confirm_live: bool = False,
+        now: datetime | None = None,
+        trigger_source: str = USER_TRIGGER_SOURCE,
+        authorization_mode: str = 'manual',
+        scheduler_slot: str | None = None,
+        snapshot_override: dict[str, Any] | None = None,
+        run_key: str | None = None,
+        exit_reason: str = 'position_exit',
+    ) -> dict[str, Any]:
+        now_utc = self._utc_now(now)
+        normalized_provider, market, currency, _timezone = normalize_trading_scope(provider, None)
+        requested_symbol = self._normalize_symbol(normalized_provider, symbol)
+        settings = self._settings(db, user)
+        selected_mode = str(settings.trading_mode or PAPER_MODE).strip().lower()
+        is_live = selected_mode == LIVE_MODE
+        is_automatic = str(authorization_mode or 'manual').strip().lower() == 'automatic'
+        run = self._create_run(
+            db,
+            user=user,
+            provider=normalized_provider,
+            market=market,
+            symbol=requested_symbol,
+            selected_mode=selected_mode,
+            trigger_source=trigger_source,
+            scheduler_slot=scheduler_slot,
+            run_key=run_key,
+            request_payload={
+                'provider': normalized_provider,
+                'market': market,
+                'requested_symbol': requested_symbol,
+                'trading_mode': selected_mode,
+                'side': 'sell',
+                'exit_reason': exit_reason,
+            },
+        )
+        if run_key:
+            run.run_key = str(run_key)
+        run.trigger_source = trigger_source
+        db.commit()
+        base = {
+            'provider': normalized_provider,
+            'market': market,
+            'currency': currency,
+            'trading_mode': selected_mode,
+            'owner_user_id': int(user.id),
+            'requested_symbol': requested_symbol,
+            'analyzed_symbol': requested_symbol,
+            'returned_symbol': requested_symbol,
+            'symbol_match': True,
+            'side': 'sell',
+            'trigger_source': trigger_source,
+            'authorization_mode': 'automatic' if is_automatic else 'manual',
+            'scheduler_slot': scheduler_slot,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+            'manual_submit_called': False,
+            'order_id': None,
+            'signal_id': None,
+            'run_id': run.id,
+        }
+        if not bool(settings.enabled):
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason='user_trading_disabled',
+                analysis={'action': 'sell', 'reason': 'user_trading_disabled'},
+                risk={'risk_allowed': False, 'risk_flags': ['user_trading_disabled']},
+            )
+        if is_live:
+            if is_automatic:
+                automatic_reason = self._automatic_block_reason(settings, normalized_provider)
+                if automatic_reason:
+                    return self._finish_blocked(
+                        db, run, user=user, base=base, reason=automatic_reason,
+                        analysis={'action': 'sell', 'reason': automatic_reason},
+                        risk={'risk_allowed': False, 'risk_flags': [automatic_reason]},
+                    )
+            elif confirm_live is not True:
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=LIVE_CONFIRMATION_REQUIRED,
+                    analysis={'action': 'sell', 'reason': LIVE_CONFIRMATION_REQUIRED},
+                    risk={'risk_allowed': False, 'risk_flags': [LIVE_CONFIRMATION_REQUIRED]},
+                )
+            if not bool(settings.live_trading_enabled):
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=LIVE_TRADING_DISABLED,
+                    analysis={'action': 'sell', 'reason': LIVE_TRADING_DISABLED},
+                    risk={'risk_allowed': False, 'risk_flags': [LIVE_TRADING_DISABLED]},
+                )
+            if bool(settings.kill_switch):
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=USER_KILL_SWITCH_ENABLED,
+                    analysis={'action': 'sell', 'reason': USER_KILL_SWITCH_ENABLED},
+                    risk={'risk_allowed': False, 'risk_flags': [USER_KILL_SWITCH_ENABLED]},
+                )
+        elif not bool(settings.paper_trading_enabled):
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason='paper_trading_disabled',
+                analysis={'action': 'sell', 'reason': 'paper_trading_disabled'},
+                risk={'risk_allowed': False, 'risk_flags': ['paper_trading_disabled']},
+            )
+
+        credentials: dict[str, Any] | None = None
+        if normalized_provider == 'alpaca' or is_live:
+            try:
+                credentials = self.credential_service.get_credentials(db, user, normalized_provider)
+            except Exception as exc:
+                reason = self._credential_reason(exc)
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=reason,
+                    analysis={'action': 'sell', 'reason': reason},
+                    risk={'risk_allowed': False, 'risk_flags': [reason]},
+                )
+            environment = str(credentials.get('environment') or '').strip().lower()
+            if is_live and environment != LIVE_MODE:
+                reason = 'live_credentials_required'
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=reason,
+                    analysis={'action': 'sell', 'reason': reason},
+                    risk={'risk_allowed': False, 'risk_flags': [reason]},
+                )
+            if not is_live and normalized_provider == 'alpaca' and environment != PAPER_MODE:
+                reason = 'paper_credentials_required'
+                return self._finish_blocked(
+                    db, run, user=user, base=base, reason=reason,
+                    analysis={'action': 'sell', 'reason': reason},
+                    risk={'risk_allowed': False, 'risk_flags': [reason]},
+                )
+        try:
+            snapshot = snapshot_override or self.account_service.get_broker_snapshot(
+                db, user, normalized_provider,
+            )
+        except Exception:
+            reason = 'account_snapshot_unavailable'
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason=reason,
+                analysis={'action': 'sell', 'reason': reason},
+                risk={'risk_allowed': False, 'risk_flags': [reason]},
+            )
+        try:
+            session = self.session_service.get_session_status(market, now=now_utc)
+        except Exception:
+            session = {'is_market_open': False, 'is_entry_allowed_now': False}
+        if session.get('is_market_open') is not True:
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason='market_closed',
+                analysis={'action': 'sell', 'reason': 'market_closed'},
+                risk={'risk_allowed': False, 'risk_flags': ['market_closed']},
+            )
+        position = next(
+            (
+                item for item in (snapshot.get('positions') or [])
+                if isinstance(item, dict)
+                and str(item.get('symbol') or '').strip().upper() == requested_symbol
+                and abs(_number(item.get('quantity') or item.get('qty')) or 0.0) > 0
+            ),
+            None,
+        )
+        if position is None:
+            return self._finish_hold(
+                db, run, user=user, base=base,
+                analysis={'action': 'hold', 'reason': 'position_not_found'},
+                risk={'risk_allowed': True, 'risk_flags': []},
+                reason='position_not_found',
+            )
+        risk = dict(self.risk_service.get_user_risk_state(
+            db, user, provider=normalized_provider, market=market, as_of=now_utc,
+        ) or {})
+        risk_flags = [
+            str(flag) for flag in risk.get('risk_flags') or []
+            if str(flag) != 'max_open_positions_reached'
+        ]
+        risk['risk_flags'] = _dedupe(risk_flags)
+        risk['risk_allowed'] = not risk['risk_flags']
+        if risk['risk_flags']:
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason=risk['risk_flags'][0],
+                analysis={'action': 'sell', 'reason': risk['risk_flags'][0]}, risk=risk,
+            )
+        if any(
+            isinstance(item, dict)
+            and str(item.get('symbol') or '').strip().upper() == requested_symbol
+            and str(item.get('side') or '').strip().lower() == 'sell'
+            and str(item.get('status') or '').strip().upper() not in _TERMINAL_ORDER_STATUSES
+            for item in (snapshot.get('open_orders') or [])
+        ):
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason='duplicate_open_sell_order',
+                analysis={'action': 'sell', 'reason': 'duplicate_open_sell_order'}, risk=risk,
+            )
+        qty = _number(position.get('available_quantity') or position.get('quantity') or position.get('qty'))
+        price = _number(position.get('current_price') or position.get('avg_price') or position.get('average_price'))
+        if qty <= 0 or price <= 0:
+            reason = 'position_quantity_or_price_unavailable'
+            return self._finish_blocked(
+                db, run, user=user, base=base, reason=reason,
+                analysis={'action': 'sell', 'reason': reason}, risk=risk,
+            )
+        analysis = {
+            'action': 'sell',
+            'reason': exit_reason,
+            'current_price': price,
+            'final_sell_score': 100.0,
+            'indicator_payload': {'price': price},
+        }
+        simulated = not is_live and normalized_provider == 'kis'
+        order = self._create_order(
+            db,
+            user=user,
+            provider=normalized_provider,
+            market=market,
+            symbol=requested_symbol,
+            side='sell',
+            qty=qty,
+            notional=round(qty * price, 2),
+            internal_status=InternalOrderStatus.DRY_RUN_SIMULATED.value if simulated else InternalOrderStatus.REQUESTED.value,
+            request_payload={
+                'provider': normalized_provider,
+                'market': market,
+                'side': 'sell',
+                'mode': 'simulation' if simulated else ('alpaca_live' if is_live else 'alpaca_paper'),
+                'paper': not is_live,
+                'trigger_source': trigger_source,
+                'authorization_mode': authorization_mode,
+                'scheduler_slot': scheduler_slot,
+                'exit_reason': exit_reason,
+            },
+        )
+        broker_called = False
+        if simulated:
+            order.response_payload = json.dumps({
+                'result': 'simulated',
+                'reason': 'kis_paper_simulation',
+                'real_order_submitted': False,
+                'broker_submit_called': False,
+            }, ensure_ascii=False)
+            db.commit()
+        else:
+            try:
+                if is_automatic and is_live:
+                    db.refresh(settings)
+                    reason = self._automatic_block_reason(settings, normalized_provider)
+                    if reason:
+                        return self._finish_blocked(
+                            db, run, user=user, base=base, reason=reason,
+                            analysis=analysis, risk={**risk, 'risk_allowed': False, 'risk_flags': [reason]},
+                        )
+                if normalized_provider == 'kis':
+                    client = self.kis_live_client_factory(db, user, credentials or {})
+                else:
+                    factory = self.alpaca_live_client_factory if is_live else self.alpaca_client_factory
+                    client = factory(credentials or {})
+                broker_called = True
+                broker_order = client.submit_market_sell_qty(
+                    symbol=requested_symbol,
+                    qty=qty,
+                )
+                self._apply_broker_order(db, order, broker_order)
+            except Exception:
+                order.internal_status = InternalOrderStatus.FAILED.value
+                order.error_message = 'user_broker_submit_failed'
+                order.response_payload = json.dumps({
+                    'reason': 'user_exit_submit_failed',
+                    'broker_submit_called': broker_called,
+                    'real_order_submitted': False,
+                }, ensure_ascii=False)
+                db.commit()
+                return self._finish_blocked(
+                    db, run, user=user, base={**base, 'broker_submit_called': broker_called},
+                    reason='user_exit_submit_failed', analysis=analysis, risk=risk,
+                )
+        status = str(order.internal_status or '').upper()
+        real_submitted = not simulated and status not in {
+            InternalOrderStatus.FAILED.value,
+            InternalOrderStatus.REJECTED.value,
+            InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value,
+        }
+        signal = self._create_signal(
+            db,
+            user=user,
+            base=base,
+            analysis=analysis,
+            risk=risk,
+            result='simulated' if simulated else ('submitted' if real_submitted else 'blocked'),
+            order_id=order.id if simulated or real_submitted else None,
+        )
+        order.request_payload = self._json_merge(order.request_payload, {'signal_id': signal.id})
+        run.signal_id = signal.id
+        run.order_id = order.id if simulated or real_submitted else None
+        if real_submitted or simulated:
+            self._update_exit_lifecycle(db, user=user, symbol=requested_symbol, order=order, now=now_utc)
+        result = 'simulated' if simulated else ('submitted' if real_submitted else 'blocked')
+        response = {
+            **base,
+            'result': result,
+            'reason': 'kis_paper_simulation' if simulated else ('user_exit_order_submitted' if real_submitted else 'user_exit_order_rejected'),
+            'signal_id': signal.id,
+            'order_id': order.id,
+            'real_order_submitted': real_submitted,
+            'broker_submit_called': broker_called,
+            'execution': {
+                'type': 'simulation' if simulated else ('kis_live' if normalized_provider == 'kis' else ('alpaca_live' if is_live else 'alpaca_paper')),
+                'status': result,
+                'real_order_submitted': real_submitted,
+                'broker_submit_called': broker_called,
+                'manual_submit_called': False,
+            },
+        }
+        return self._finish_run(db, run, response)
+
+    def _update_exit_lifecycle(self, db, *, user, symbol, order, now):
+        lifecycle = (
+            db.query(PositionLifecycle)
+            .filter(
+                PositionLifecycle.owner_user_id == int(user.id),
+                PositionLifecycle.symbol == symbol,
+                PositionLifecycle.status.in_(['open', 'closing']),
+            )
+            .order_by(PositionLifecycle.id.desc())
+            .first()
+        )
+        if lifecycle is None:
+            return
+        lifecycle.exit_order_id = order.id
+        lifecycle.exit_order_status = order.internal_status
+        lifecycle.last_evaluated_at = now
+        if str(order.internal_status or '').upper() == InternalOrderStatus.FILLED.value:
+            lifecycle.status = 'closed'
+            lifecycle.closed_at = order.filled_at or now
+        db.commit()
+
     def _simulate_kis(self, db, run, *, user, base, analysis, risk, sizing, now):
         order = self._create_order(
             db,
@@ -413,6 +836,9 @@ class UserTradingExecutionService:
                 "analyzed_symbol": base["analyzed_symbol"],
                 "returned_symbol": base["returned_symbol"],
                 "symbol_match": base["symbol_match"],
+                "trigger_source": base.get("trigger_source"),
+                "authorization_mode": base.get("authorization_mode"),
+                "scheduler_slot": base.get("scheduler_slot"),
                 "qty": sizing["quantity"],
                 "notional": sizing["notional"],
                 "real_order_submitted": False,
@@ -467,6 +893,7 @@ class UserTradingExecutionService:
         sizing,
         credentials,
         now,
+        authorization_mode,
     ):
         order = self._create_order(
             db,
@@ -488,6 +915,9 @@ class UserTradingExecutionService:
                 "analyzed_symbol": base["analyzed_symbol"],
                 "returned_symbol": base["returned_symbol"],
                 "symbol_match": base["symbol_match"],
+                "trigger_source": base.get("trigger_source"),
+                "authorization_mode": base.get("authorization_mode"),
+                "scheduler_slot": base.get("scheduler_slot"),
                 "qty": sizing["quantity"],
                 "notional": sizing["notional"],
                 "real_order_submitted": False,
@@ -495,6 +925,16 @@ class UserTradingExecutionService:
                 "manual_submit_called": False,
             },
         )
+        order.request_payload = self._json_merge(
+            order.request_payload,
+            {
+                'confirm_live': authorization_mode != 'automatic',
+                'authorization_mode': authorization_mode,
+                'trigger_source': base.get('trigger_source'),
+                'scheduler_slot': base.get('scheduler_slot'),
+            },
+        )
+        db.commit()
         broker_called = False
         try:
             client = self.kis_live_client_factory(db, user, credentials)
@@ -589,6 +1029,23 @@ class UserTradingExecutionService:
             }
             return self._finish_run(db, run, response)
 
+    @staticmethod
+    def _automatic_block_reason(settings: UserTradingSettings, provider: str) -> str | None:
+        if not bool(settings.auto_trading_enabled):
+            return 'auto_trading_disabled'
+        selected_provider = str(settings.auto_trading_provider or '').strip().lower()
+        if selected_provider != str(provider or '').strip().lower():
+            return 'auto_trading_provider_mismatch'
+        if str(settings.trading_mode or PAPER_MODE).strip().lower() != LIVE_MODE:
+            return 'automatic_live_requires_live_mode'
+        if not bool(settings.live_trading_enabled):
+            return LIVE_TRADING_DISABLED
+        if settings.auto_live_confirmed_at is None:
+            return 'auto_live_confirmation_required'
+        if bool(settings.kill_switch):
+            return USER_KILL_SWITCH_ENABLED
+        return None
+
     def _default_kis_live_client(self, db, user, credentials):
         return self.account_service.get_live_trading_client(db, user, "kis")
 
@@ -605,6 +1062,7 @@ class UserTradingExecutionService:
         credentials,
         now,
         live,
+        authorization_mode,
     ):
         execution_environment = LIVE_MODE if live else PAPER_MODE
         execution_mode = "alpaca_live" if live else ALPACA_PAPER_MODE
@@ -625,6 +1083,10 @@ class UserTradingExecutionService:
                 "mode": execution_mode,
                 "paper": not live,
                 "credential_environment": execution_environment,
+                "confirm_live": authorization_mode != "automatic",
+                "authorization_mode": authorization_mode,
+                "trigger_source": base.get("trigger_source"),
+                "scheduler_slot": base.get("scheduler_slot"),
                 "requested_symbol": base["requested_symbol"],
                 "analyzed_symbol": base["analyzed_symbol"],
                 "returned_symbol": base["returned_symbol"],
@@ -784,8 +1246,12 @@ class UserTradingExecutionService:
         market: str,
         symbol: str,
         selected_mode: str,
-        request_payload: dict[str, Any],
+        trigger_source: str = USER_TRIGGER_SOURCE,
+        scheduler_slot: str | None = None,
+        run_key: str | None = None,
+        request_payload: dict[str, Any] | None = None,
     ) -> TradeRunLog:
+        request_payload = dict(request_payload or {})
         row = TradeRunLog(
             owner_user_id=int(user.id),
             run_key=f"user_{uuid.uuid4().hex[:16]}",
@@ -838,8 +1304,8 @@ class UserTradingExecutionService:
             approved_by_risk=bool(risk.get("risk_allowed")) if risk else False,
             related_order_id=order_id,
             signal_status=result,
-            trigger_source=USER_TRIGGER_SOURCE,
-            timeframe="user_run_once",
+            trigger_source=str(base.get('trigger_source') or USER_TRIGGER_SOURCE),
+            timeframe=str(base.get('scheduler_slot') or "user_run_once"),
             gate_level=2,
             hard_block_reason=analysis.get("block_reason") or (risk.get("risk_flags") or [None])[0],
             hard_blocked=bool(analysis.get("hard_blocked")),
@@ -863,13 +1329,14 @@ class UserTradingExecutionService:
         internal_status: str,
         request_payload: dict[str, Any],
         response_payload: dict[str, Any] | None = None,
+        side: str = 'buy',
     ) -> OrderLog:
         row = OrderLog(
             owner_user_id=int(user.id),
             broker=provider,
             market=market,
             symbol=symbol,
-            side="buy",
+            side=side,
             order_type="market",
             time_in_force="day",
             qty=float(qty),

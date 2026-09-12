@@ -281,6 +281,39 @@ class UserKisLiveTradingClient(UserKisReadOnlyClient):
             'kis_odno': broker_order_id,
         }
 
+    def submit_market_sell_qty(self, *, symbol: str, qty: float) -> dict[str, Any]:
+        quantity = int(qty)
+        if quantity <= 0:
+            raise ValueError('invalid_order_quantity')
+        normalized_symbol = str(symbol or '').strip()
+        if len(normalized_symbol) != 6 or not normalized_symbol.isdigit():
+            raise ValueError('invalid_kis_symbol')
+        response = self._post_order(
+            '/uapi/domestic-stock/v1/trading/order-cash',
+            tr_id='TTTC0801U',
+            payload={
+                'CANO': str(self.credentials.get('account_no') or ''),
+                'ACNT_PRDT_CD': str(self.credentials.get('account_product_code') or ''),
+                'PDNO': normalized_symbol,
+                'ORD_DVSN': '01',
+                'ORD_QTY': str(quantity),
+                'ORD_UNPR': '0',
+            },
+        )
+        output = _first_dict(response.get('output'))
+        broker_order_id = _first_text(output, ('ODNO', 'odno', 'order_id'))
+        if not broker_order_id:
+            raise UserBrokerUnavailableError('user KIS order response missing order id')
+        return {
+            'id': broker_order_id,
+            'order_id': broker_order_id,
+            'status': 'submitted',
+            'filled_qty': 0.0,
+            'filled_avg_price': None,
+            'submitted_at': _now(),
+            'kis_odno': broker_order_id,
+        }
+
     def _post_order(self, path: str, *, tr_id: str, payload: dict[str, str]) -> dict[str, Any]:
         token = self._token()
         response = self._send_post(path, tr_id=tr_id, payload=payload, token=token)

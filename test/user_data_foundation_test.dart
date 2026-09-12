@@ -9,7 +9,6 @@ import 'package:auto_invest_dashboard/models/auth_session.dart';
 import 'package:auto_invest_dashboard/models/user_broker_credential.dart';
 import 'package:auto_invest_dashboard/models/user_watchlist_item.dart';
 
-
 void main() {
   testWidgets('registration screen validates and submits user setup',
       (tester) async {
@@ -70,7 +69,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('user-home-screen')), findsOneWidget);
-    expect(find.text('\uC124\uC815'), findsNothing);
+    expect(find.byKey(const ValueKey('home-open-settings')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('home-open-automation-profile')),
+      findsOneWidget,
+    );
     expect(find.text('AI 도우미'), findsAtLeastNWidgets(1));
     expect(find.text('\uC790\uC0B0'), findsAtLeastNWidgets(1));
     expect(find.byKey(const ValueKey('home-open-admin')), findsNothing);
@@ -80,7 +83,6 @@ void main() {
     expect(find.byKey(const ValueKey('user-assets-screen')), findsOneWidget);
   });
 }
-
 
 class _UserDataApi extends ApiClient {
   _UserDataApi({

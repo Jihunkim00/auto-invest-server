@@ -20,10 +20,15 @@ from app.services.automation_profile_service import (
     AutomationProfileService,
     AutomationProfileValidationError,
 )
+from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
 from app.services.symbol_search_service import SymbolSearchService
 
 
-router = APIRouter(prefix='/strategy-profiles', tags=['strategy-profiles'])
+router = APIRouter(
+    prefix='/strategy-profiles',
+    tags=['strategy-profiles'],
+    dependencies=[Depends(require_admin_or_uninitialized_legacy_access)],
+)
 symbol_router = APIRouter(prefix='/symbols', tags=['symbols'])
 
 

@@ -115,6 +115,22 @@ class AutomationProfileService:
             .first()
         )
 
+    def _selected_owned_profile(
+        self,
+        db: Session,
+        owner_user_id: int,
+    ) -> StrategyProfile | None:
+        return (
+            db.query(StrategyProfile)
+            .filter(
+                StrategyProfile.owner_user_id == int(owner_user_id),
+                StrategyProfile.profile_key.isnot(None),
+                StrategyProfile.custom_status == 'active',
+            )
+            .order_by(StrategyProfile.id.asc())
+            .first()
+        )
+
     def get_active_profile(
         self,
         db: Session,
@@ -134,14 +150,24 @@ class AutomationProfileService:
             return None
         return profile
 
-    def list_profiles(self, db: Session) -> dict[str, Any]:
-        rows = (
+    def list_profiles(
+        self,
+        db: Session,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        query = (
             db.query(StrategyProfile)
             .filter(StrategyProfile.profile_key.isnot(None))
-            .order_by(StrategyProfile.id.asc())
-            .all()
         )
-        selected_row = self.selected_profile(db)
+        if owner_user_id is not None:
+            query = query.filter(StrategyProfile.owner_user_id == int(owner_user_id))
+        rows = query.order_by(StrategyProfile.id.asc()).all()
+        selected_row = (
+            self.selected_profile(db)
+            if owner_user_id is None
+            else self._selected_owned_profile(db, owner_user_id)
+        )
         selected = self.serialize(selected_row) if selected_row is not None else None
         selected_status = self._status(selected_row) if selected_row is not None else None
         active = selected if selected_status == "active" else None
@@ -199,7 +225,13 @@ class AutomationProfileService:
             "next_run_at": next_run,
         }
 
-    def create(self, db: Session, request: AutomationProfileWriteRequest) -> dict[str, Any]:
+    def create(
+        self,
+        db: Session,
+        request: AutomationProfileWriteRequest,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
         values = self._normalize_request(request, require_identity=True)
         self.validate_settings(values['settings'])
         generated_key = not values['profile_key']
@@ -241,6 +273,7 @@ class AutomationProfileService:
             enabled=bool(values['enabled']),
             custom_status=values['status'],
             settings_json=_json(values['settings']),
+            owner_user_id=int(owner_user_id) if owner_user_id is not None else None,
         )
         db.add(row)
         db.commit()
@@ -258,8 +291,30 @@ class AutomationProfileService:
             raise AutomationProfileNotFound(value)
         return row
 
-    def update(self, db: Session, profile_id: str, request: AutomationProfileWriteRequest) -> dict[str, Any]:
+    def get_owned(
+        self,
+        db: Session,
+        profile_id: str,
+        owner_user_id: int,
+    ) -> StrategyProfile:
         row = self.get(db, profile_id)
+        if row.owner_user_id != int(owner_user_id):
+            raise AutomationProfileNotFound(str(profile_id))
+        return row
+
+    def update(
+        self,
+        db: Session,
+        profile_id: str,
+        request: AutomationProfileWriteRequest,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         current = self.serialize(row)
         values = self._normalize_request(request, current=current, require_identity=False)
         self.validate_settings(values['settings'])
@@ -300,6 +355,8 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
+        if owner_user_id is not None:
+            return self.serialize(row)
         runtime = self.runtime_settings.get_settings_read_only(db)
         if (runtime.get("active_automation_profile_key") == row.profile_key and self._status(row) in {"paused", "archived", "disabled"}):
             self.runtime_settings.update_settings(
@@ -307,24 +364,48 @@ class AutomationProfileService:
             )
         return self.serialize(row)
 
-    def archive(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def archive(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         row.enabled = False
         row.is_active = False
         row.custom_status = 'archived'
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
-        runtime = self.runtime_settings.get_settings_read_only(db)
-        if runtime.get('active_automation_profile_key') == row.profile_key:
-            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
+        if owner_user_id is None:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if runtime.get('active_automation_profile_key') == row.profile_key:
+                self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
         return self.serialize(row)
 
-    def activate(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def activate(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         settings = self._settings(row)
         self.validate_settings(settings)
-        for other in db.query(StrategyProfile).filter(StrategyProfile.profile_key.isnot(None)).all():
+        query = db.query(StrategyProfile).filter(StrategyProfile.profile_key.isnot(None))
+        if owner_user_id is not None:
+            query = query.filter(StrategyProfile.owner_user_id == int(owner_user_id))
+        for other in query.all():
             if other.id != row.id and other.custom_status == 'active':
                 other.custom_status = 'paused'
         row.enabled = True
@@ -336,32 +417,56 @@ class AutomationProfileService:
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
-        # Select policy at runtime; safety and authorization remain separate.
-        self.runtime_settings.update_settings(
-            db, {'active_automation_profile_key': row.profile_key, 'automation_profile_scheduler_enabled': True},
-        )
+        # Admin activation selects the legacy global runtime profile. A regular
+        # user's activation is deliberately limited to that user's records and
+        # must not change Admin/global runtime state.
+        if owner_user_id is None:
+            self.runtime_settings.update_settings(
+                db, {'active_automation_profile_key': row.profile_key, 'automation_profile_scheduler_enabled': True},
+            )
         return {
             'status': 'active',
             'profile': self.serialize(row),
-            'readiness': self.readiness(db, str(row.id)),
+            'readiness': self.readiness(db, str(row.id), owner_user_id=owner_user_id),
             'safety': _profile_safety(setting_changed=True),
         }
 
-    def pause(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def pause(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         row.enabled = False
         row.is_active = False
         row.custom_status = 'paused'
         row.updated_at = datetime.now(UTC)
         db.commit()
         db.refresh(row)
-        runtime = self.runtime_settings.get_settings_read_only(db)
-        if runtime.get('active_automation_profile_key') == row.profile_key:
-            self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
+        if owner_user_id is None:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            if runtime.get('active_automation_profile_key') == row.profile_key:
+                self.runtime_settings.update_settings(db, {'active_automation_profile_key': None, 'automation_profile_scheduler_enabled': False})
         return {'status': 'paused', 'profile': self.serialize(row), 'safety': _profile_safety(setting_changed=True)}
 
-    def validate_profile(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def validate_profile(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         try:
             self.validate_settings(self._settings(row))
             errors: list[dict[str, str]] = []
@@ -374,8 +479,18 @@ class AutomationProfileService:
             'safety': _profile_safety(setting_changed=False, read_only=True),
         }
 
-    def readiness(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def readiness(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         settings = self._settings(row)
         effective = effective_profile_settings(settings, provider=row.provider or 'kis', market=row.market or 'KR')
         period_status = self._period_status(row, effective)
@@ -404,8 +519,19 @@ class AutomationProfileService:
             'safety': _profile_safety(setting_changed=False, read_only=True),
         }
 
-    def sizing(self, db: Session, profile_id: str, request: dict[str, Any]) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def sizing(
+        self,
+        db: Session,
+        profile_id: str,
+        request: dict[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         result = StrategyProfileSizingService.calculate(self._settings(row), **request)
         return {'profile': self.serialize(row), 'sizing': result, 'safety': _profile_safety(setting_changed=False, read_only=True)}
 
@@ -415,8 +541,13 @@ class AutomationProfileService:
         profile_id: str,
         *,
         broker_orderable_cash_krw: float | None = None,
+        owner_user_id: int | None = None,
     ) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         settings = self._settings(row)
         capital = settings['capital']
         return CompoundCapitalService().calculate(
@@ -433,8 +564,18 @@ class AutomationProfileService:
                 capital.get('max_order_notional_krw') or 0
             ),
         )
-    def watchlist(self, db: Session, profile_id: str) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def watchlist(
+        self,
+        db: Session,
+        profile_id: str,
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         settings = self._settings(row)
         return {
             'profile_id': row.id,
@@ -443,8 +584,19 @@ class AutomationProfileService:
             'safety': _profile_safety(setting_changed=False, read_only=True),
         }
 
-    def update_watchlist(self, db: Session, profile_id: str, universe: dict[str, Any]) -> dict[str, Any]:
-        row = self.get(db, profile_id)
+    def update_watchlist(
+        self,
+        db: Session,
+        profile_id: str,
+        universe: dict[str, Any],
+        *,
+        owner_user_id: int | None = None,
+    ) -> dict[str, Any]:
+        row = (
+            self.get(db, profile_id)
+            if owner_user_id is None
+            else self.get_owned(db, profile_id, owner_user_id)
+        )
         current = self._settings(row)
         current['universe'] = _deep_merge(current['universe'], universe)
         candidate = self._normalize_settings(current)

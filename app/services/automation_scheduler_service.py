@@ -36,6 +36,7 @@ from app.services.profile_aware_guarded_live_auto_exit_service import (
 )
 from app.services.scheduler_service import SchedulerService
 from app.services.quant_ab_outcome_label_service import QuantABOutcomeLabelService
+from app.services.user_auto_trading_scheduler_service import UserAutoTradingSchedulerService
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -82,6 +83,9 @@ class AutomationSchedulerService(SchedulerService):
         self._last_outcome_labeling_at: datetime | None = None
         self._last_outcome_labeling_result: str | None = None
         self.automation_watchlist_update_service = None
+        self.user_auto_trading_scheduler_service = UserAutoTradingSchedulerService(
+            automation_profiles=self.automation_profiles,
+        )
         self._automation_watchlist_refresh_lock = threading.Lock()
         self._automation_watchlist_refresh_slots: set[str] = set()
         self._automation_watchlist_refresh_inflight: set[str] = set()
@@ -124,6 +128,13 @@ class AutomationSchedulerService(SchedulerService):
             }
         ]
 
+    def user_auto_trading_jobs(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        return self.user_auto_trading_scheduler_service.dispatcher_jobs(now=now)
+
     def maintenance_jobs(
         self,
         *,
@@ -158,6 +169,11 @@ class AutomationSchedulerService(SchedulerService):
 
     def runtime_status(self, *, now: datetime | None = None) -> dict[str, object]:
         status = super().runtime_status()
+        user_jobs = self.user_auto_trading_jobs(now=now)
+        status.update({
+            'user_auto_trading_jobs': user_jobs,
+            'user_auto_trading_job_count': len(user_jobs),
+        })
         now_kst = self._as_kst(now)
         maintenance = self.maintenance_jobs(now=now_kst)
         status.update(self._automation_watchlist_status)
@@ -205,8 +221,10 @@ class AutomationSchedulerService(SchedulerService):
             self._last_heartbeat_at = datetime.now(UTC)
             self._next_profile_run_at = self._next_automation_run_at(now_kst)
             day_key = now_kst.date().isoformat()
+            ny_day_key = now_kst.astimezone(ZoneInfo('America/New_York')).date().isoformat()
             self._slot_runs = {
-                key for key in self._slot_runs if key.startswith(f"{day_key}:KR:")
+                key for key in self._slot_runs
+                if key.startswith(f'{day_key}:KR:') or key.startswith(f'{ny_day_key}:US:')
             }
             self._automation_watchlist_refresh_slots = {
                 value
@@ -246,8 +264,57 @@ class AutomationSchedulerService(SchedulerService):
                     continue
                 self._slot_runs.add(run_key)
                 self._safe_call(self._run_automation_tick, slot, now_kst, True)
+            dispatcher_db = SessionLocal()
+            try:
+                for provider in ('kis', 'alpaca'):
+                    for slot, _scheduled_at in self.user_auto_trading_scheduler_service.due_slots(
+                        dispatcher_db,
+                        provider=provider,
+                        now=now_kst,
+                    ):
+                        provider_date = now_kst.astimezone(
+                            ZoneInfo('Asia/Seoul' if provider == 'kis' else 'America/New_York')
+                        ).date().isoformat()
+                        dispatch_key = f'{provider_date}:{provider}:user_auto:{slot}'
+                        if dispatch_key in self._slot_runs:
+                            continue
+                        self._slot_runs.add(dispatch_key)
+                        self._safe_call(
+                            self._run_user_auto_dispatcher,
+                            provider,
+                            slot,
+                            now_kst,
+                        )
+            finally:
+                dispatcher_db.close()
             self._last_tick_at = datetime.now(UTC)
             time.sleep(20)
+
+    def run_user_auto_once(
+        self,
+        *,
+        provider: str,
+        slot: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        db = SessionLocal()
+        try:
+            return self.user_auto_trading_scheduler_service.run_provider_once(
+                db,
+                provider=provider,
+                scheduler_slot=slot,
+                now=now,
+            )
+        finally:
+            db.close()
+
+    def _run_user_auto_dispatcher(
+        self,
+        provider: str,
+        slot: str,
+        now: datetime,
+    ) -> dict[str, Any]:
+        return self.run_user_auto_once(provider=provider, slot=slot, now=now)
 
     def _schedule_quant_ab_labeling(self, now_kst: datetime) -> dict[str, Any]:
         """Start a bounded analytics job without blocking the trading loop."""

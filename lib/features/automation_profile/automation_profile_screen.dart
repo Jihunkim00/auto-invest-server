@@ -12,10 +12,14 @@ class AutomationProfileScreen extends StatefulWidget {
     super.key,
     required this.apiClient,
     this.appLanguage = AppLanguage.korean,
+    this.userScoped = false,
+    this.onUserSettingsSaved,
   });
 
   final ApiClient apiClient;
   final AppLanguage appLanguage;
+  final bool userScoped;
+  final Future<void> Function()? onUserSettingsSaved;
 
   @override
   State<AutomationProfileScreen> createState() =>
@@ -40,6 +44,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   final _watchlistController = TextEditingController(text: '50');
   final _maxPositionsController = TextEditingController(text: '1');
   final _targetPctController = TextEditingController(text: '10');
+  final _maxPositionPctController = TextEditingController(text: '12');
+  final _maxExposurePctController = TextEditingController(text: '30');
   final _fixedBudgetController = TextEditingController(text: '500000');
   final _maxOrderController = TextEditingController(text: '500000');
   final _stopLossController = TextEditingController(text: '2');
@@ -64,6 +70,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _watchlistController,
       _maxPositionsController,
       _targetPctController,
+      _maxPositionPctController,
+      _maxExposurePctController,
       _fixedBudgetController,
       _maxOrderController,
       _stopLossController,
@@ -79,7 +87,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   Future<void> _load() async {
     setState(() => _busy = true);
     try {
-      final result = await widget.apiClient.fetchAutomationProfiles();
+      final result = await _fetchProfiles();
       if (!mounted) return;
       setState(() {
         _list = result;
@@ -97,8 +105,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 
   Future<void> _loadCapitalState(AutomationStrategyProfile profile) async {
     try {
-      final state =
-          await widget.apiClient.fetchAutomationCapitalState(profile.id);
+      final state = widget.userScoped
+          ? await widget.apiClient.fetchUserAutomationCapitalState(profile.id)
+          : await widget.apiClient.fetchAutomationCapitalState(profile.id);
       if (!mounted || _selected?.id != profile.id) return;
       setState(() => _capitalState = state);
     } catch (_) {
@@ -120,6 +129,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _maxPositionsController.text = '1';
       _analysisTimes = <String>['09:10', '11:30', '13:30'];
       _targetPctController.text = '10';
+      _maxPositionPctController.text = '12';
+      _maxExposurePctController.text = '30';
       _fixedBudgetController.text = '500000';
       _maxOrderController.text = '500000';
       _maxPositionPct = 12;
@@ -143,6 +154,10 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       _maxPositionsController.text = '${profile.maxOpenPositions}';
       _targetPctController.text =
           '${profile.capital['target_position_pct'] ?? 10}';
+      _maxPositionPctController.text =
+          '${profile.capital['max_position_pct'] ?? 12}';
+      _maxExposurePctController.text =
+          '${profile.capital['max_total_exposure_pct'] ?? 30}';
       _fixedBudgetController.text =
           '${profile.capital['fixed_budget'] ?? 500000}';
       _compoundEnabled = profile.capital['compound_enabled'] == true;
@@ -289,6 +304,10 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
 
   Map<String, dynamic> _body() {
     final target = double.tryParse(_targetPctController.text) ?? 10;
+    _maxPositionPct =
+        double.tryParse(_maxPositionPctController.text) ?? _maxPositionPct;
+    _maxTotalExposurePct =
+        double.tryParse(_maxExposurePctController.text) ?? _maxTotalExposurePct;
     return {
       // The backend assigns and preserves profile identity; normal UI omits it.
       'name': _nameController.text.trim(),
@@ -350,6 +369,53 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     };
   }
 
+  Future<AutomationStrategyProfileList> _fetchProfiles() {
+    return widget.userScoped
+        ? widget.apiClient.fetchUserAutomationProfiles()
+        : widget.apiClient.fetchAutomationProfiles();
+  }
+
+  Future<AutomationStrategyProfile> _createProfile(Map<String, dynamic> body) {
+    return widget.userScoped
+        ? widget.apiClient.createUserAutomationProfile(body)
+        : widget.apiClient.createAutomationProfile(body);
+  }
+
+  Future<AutomationStrategyProfile> _updateProfile(
+      int profileId, Map<String, dynamic> body) {
+    return widget.userScoped
+        ? widget.apiClient.updateUserAutomationProfile(profileId, body)
+        : widget.apiClient.updateAutomationProfile(profileId, body);
+  }
+
+  Future<Map<String, dynamic>> _activateProfile(int profileId) {
+    return widget.userScoped
+        ? widget.apiClient.activateUserAutomationProfile(profileId)
+        : widget.apiClient.activateAutomationProfile(profileId);
+  }
+
+  Future<Map<String, dynamic>> _pauseProfile(int profileId) {
+    return widget.userScoped
+        ? widget.apiClient.pauseUserAutomationProfile(profileId)
+        : widget.apiClient.pauseAutomationProfile(profileId);
+  }
+
+  Future<Map<String, dynamic>> _validateProfile(int profileId) {
+    return widget.userScoped
+        ? widget.apiClient.validateUserAutomationProfile(profileId)
+        : widget.apiClient.validateAutomationProfile(profileId);
+  }
+
+  Future<void> _notifyUserProfileChanged() async {
+    if (!widget.userScoped) return;
+    try {
+      await widget.onUserSettingsSaved?.call();
+    } catch (_) {
+      // A Home refresh failure must not turn a successful profile mutation
+      // into a failed profile mutation.
+    }
+  }
+
   Future<void> _save() async {
     final validation = _validateEditor();
     if (validation != null) {
@@ -360,11 +426,12 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     try {
       final body = _body();
       if (_selected == null) {
-        await widget.apiClient.createAutomationProfile(body);
+        await _createProfile(body);
       } else {
-        await widget.apiClient.updateAutomationProfile(_selected!.id, body);
+        await _updateProfile(_selected!.id, body);
       }
       await _load();
+      await _notifyUserProfileChanged();
       if (mounted) setState(() => _error = null);
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
@@ -376,8 +443,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   Future<void> _activate(AutomationStrategyProfile profile) async {
     setState(() => _busy = true);
     try {
-      await widget.apiClient.activateAutomationProfile(profile.id);
+      await _activateProfile(profile.id);
       await _load();
+      await _notifyUserProfileChanged();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -393,8 +461,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   Future<void> _pause(AutomationStrategyProfile profile) async {
     setState(() => _busy = true);
     try {
-      await widget.apiClient.pauseAutomationProfile(profile.id);
+      await _pauseProfile(profile.id);
       await _load();
+      await _notifyUserProfileChanged();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('프로필을 일시정지했습니다.')),
@@ -412,8 +481,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
       return;
     }
     try {
-      final result =
-          await widget.apiClient.validateAutomationProfile(_selected!.id);
+      final result = await _validateProfile(_selected!.id);
       if (mounted) {
         setState(() =>
             _error = result['valid'] == true ? null : '${result['errors']}');
@@ -700,6 +768,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           _LabeledField(
             label: '일일 신규 진입 횟수',
             field: TextField(
+              key: const ValueKey('automation-profile-max-daily-trades'),
               controller: _maxEntriesController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(),
@@ -758,6 +827,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               _LabeledField(
                 label: '관심종목 수',
                 field: TextField(
+                  key: const ValueKey('automation-profile-watchlist-size'),
                   controller: _watchlistController,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(),
@@ -830,6 +900,37 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
             ],
           ),
           const SizedBox(height: 18),
+          _ProfileFieldRow(
+            fields: [
+              _LabeledField(
+                label: '최대 포지션 비율',
+                field: TextField(
+                  key: const ValueKey('automation-profile-max-position-pct'),
+                  controller: _maxPositionPctController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (value) => _maxPositionPct =
+                      double.tryParse(value) ?? _maxPositionPct,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+              _LabeledField(
+                label: '최대 총 노출 비율',
+                field: TextField(
+                  key: const ValueKey('automation-profile-max-exposure-pct'),
+                  controller: _maxExposurePctController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (value) => _maxTotalExposurePct =
+                      double.tryParse(value) ?? _maxTotalExposurePct,
+                  decoration: const InputDecoration(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
           _LabeledField(
             label: '고정 예산 (원)',
             helper: _sizingMode == 'equity_pct'
@@ -865,6 +966,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               _LabeledField(
                 label: '손절 비율',
                 field: TextField(
+                  key: const ValueKey('automation-profile-stop-loss'),
                   controller: _stopLossController,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(),

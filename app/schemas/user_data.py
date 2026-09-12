@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 
 class AdminUserCreateRequest(BaseModel):
@@ -45,8 +45,14 @@ class UserTradingSettingsUpdateRequest(BaseModel):
     '''Safe user trading mode and risk-limit changes for PR127.'''
 
     trading_mode: Literal['paper', 'live'] | None = None
+    enabled: bool | None = None
     live_trading_enabled: bool | None = None
     kill_switch: bool | None = None
+    auto_trading_enabled: bool | None = None
+    auto_trading_provider: Literal['kis', 'alpaca'] | None = None
+    auto_live_confirmed: bool | None = None
+    # Transient request field; only the resulting authorization timestamp is persisted.
+    confirm_auto_live: StrictBool = False
 
     max_daily_trades: int | None = Field(default=None, ge=0, le=100)
     max_daily_loss_pct: float | None = Field(default=None, ge=0, le=1)
@@ -56,4 +62,6 @@ class UserTradingSettingsUpdateRequest(BaseModel):
     model_config = {'extra': 'forbid'}
 
     def values(self) -> dict[str, object]:
-        return self.model_dump(exclude_none=True)
+        values = self.model_dump(exclude_none=True)
+        values.pop('confirm_auto_live', None)
+        return values

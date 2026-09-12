@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.orm import Session
 
-from app.db.models import User, UserBrokerCredential
+from app.db.models import User, UserBrokerCredential, UserTradingSettings
 from app.services.broker_credential_crypto_service import (
     ENCRYPTION_VERSION,
     BrokerCredentialCryptoService,
@@ -78,6 +78,13 @@ class UserBrokerCredentialService:
         row.last_validation_error = None
         if normalized_provider == 'kis':
             invalidate_user_kis_tokens(user.id)
+        settings = (
+            db.query(UserTradingSettings)
+            .filter(UserTradingSettings.user_id == int(user.id))
+            .first()
+        )
+        if settings is not None and str(settings.auto_trading_provider or '').strip().lower() == normalized_provider:
+            settings.auto_live_confirmed_at = None
         db.commit()
         db.refresh(row)
         return self._status(row)
@@ -149,6 +156,13 @@ class UserBrokerCredentialService:
         db.delete(row)
         if normalized_provider == 'kis':
             invalidate_user_kis_tokens(user.id)
+        settings = (
+            db.query(UserTradingSettings)
+            .filter(UserTradingSettings.user_id == int(user.id))
+            .first()
+        )
+        if settings is not None and str(settings.auto_trading_provider or '').strip().lower() == normalized_provider:
+            settings.auto_live_confirmed_at = None
         db.commit()
         return {
             "ok": True,

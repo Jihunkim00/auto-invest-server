@@ -356,6 +356,10 @@ class ApiClient {
     int? maxOpenPositions,
     bool? liveTradingEnabled,
     bool? killSwitch,
+    bool? autoTradingEnabled,
+    String? autoTradingProvider,
+    bool? autoLiveConfirmed,
+    bool confirmAutoLive = false,
   }) async {
     final body = <String, dynamic>{
       if (tradingMode != null) 'trading_mode': tradingMode,
@@ -366,6 +370,12 @@ class ApiClient {
       if (liveTradingEnabled != null)
         'live_trading_enabled': liveTradingEnabled,
       if (killSwitch != null) 'kill_switch': killSwitch,
+      if (autoTradingEnabled != null)
+        'auto_trading_enabled': autoTradingEnabled,
+      if (autoTradingProvider != null)
+        'auto_trading_provider': autoTradingProvider,
+      if (autoLiveConfirmed != null) 'auto_live_confirmed': autoLiveConfirmed,
+      if (confirmAutoLive) 'confirm_auto_live': true,
     };
     return _patchJsonBody('/users/me/trading/settings', body);
   }
@@ -738,6 +748,11 @@ class ApiClient {
     return AutomationStrategyProfileList.fromJson(payload);
   }
 
+  Future<AutomationStrategyProfileList> fetchUserAutomationProfiles() async {
+    final payload = await _getJsonNoCache('/users/me/automation-profiles');
+    return AutomationStrategyProfileList.fromJson(payload);
+  }
+
   Future<AutomationStrategyProfile> fetchAutomationProfile(
       int profileId) async {
     final payload = await _getJsonNoCache('/strategy-profiles/$profileId');
@@ -754,9 +769,25 @@ class ApiClient {
         : <String, dynamic>{};
   }
 
+  Future<Map<String, dynamic>> fetchUserAutomationCapitalState(
+      int profileId) async {
+    final payload = await _getJsonNoCache(
+        '/users/me/automation-profiles/$profileId/capital-state');
+    final state = payload['capital_state'];
+    return state is Map
+        ? Map<String, dynamic>.from(state)
+        : <String, dynamic>{};
+  }
+
   Future<AutomationStrategyProfile> createAutomationProfile(
       Map<String, dynamic> body) async {
     final payload = await _postJsonBody('/strategy-profiles', body);
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
+  Future<AutomationStrategyProfile> createUserAutomationProfile(
+      Map<String, dynamic> body) async {
+    final payload = await _postJsonBody('/users/me/automation-profiles', body);
     return AutomationStrategyProfile.fromJson(payload);
   }
 
@@ -766,14 +797,32 @@ class ApiClient {
     return AutomationStrategyProfile.fromJson(payload);
   }
 
+  Future<AutomationStrategyProfile> updateUserAutomationProfile(
+      int profileId, Map<String, dynamic> body) async {
+    final payload =
+        await _putJsonBody('/users/me/automation-profiles/$profileId', body);
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
   Future<AutomationStrategyProfile> archiveAutomationProfile(
       int profileId) async {
     final payload = await _deleteJson('/strategy-profiles/$profileId');
     return AutomationStrategyProfile.fromJson(payload);
   }
 
+  Future<AutomationStrategyProfile> archiveUserAutomationProfile(
+      int profileId) async {
+    final payload =
+        await _deleteJson('/users/me/automation-profiles/$profileId');
+    return AutomationStrategyProfile.fromJson(payload);
+  }
+
   Future<Map<String, dynamic>> validateAutomationProfile(int profileId) {
     return _postJson('/strategy-profiles/$profileId/validate');
+  }
+
+  Future<Map<String, dynamic>> validateUserAutomationProfile(int profileId) {
+    return _postJson('/users/me/automation-profiles/$profileId/validate');
   }
 
   Future<Map<String, dynamic>> activateAutomationProfile(int profileId,
@@ -783,9 +832,23 @@ class ApiClient {
     });
   }
 
+  Future<Map<String, dynamic>> activateUserAutomationProfile(int profileId,
+      {bool confirmOperatorAck = true}) {
+    return _postJsonBody('/users/me/automation-profiles/$profileId/activate', {
+      'confirm_operator_ack': confirmOperatorAck,
+    });
+  }
+
   Future<Map<String, dynamic>> pauseAutomationProfile(int profileId,
       {bool confirmOperatorAck = true}) {
     return _postJsonBody('/strategy-profiles/$profileId/pause', {
+      'confirm_operator_ack': confirmOperatorAck,
+    });
+  }
+
+  Future<Map<String, dynamic>> pauseUserAutomationProfile(int profileId,
+      {bool confirmOperatorAck = true}) {
+    return _postJsonBody('/users/me/automation-profiles/$profileId/pause', {
       'confirm_operator_ack': confirmOperatorAck,
     });
   }

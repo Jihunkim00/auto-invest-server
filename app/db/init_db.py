@@ -2621,7 +2621,13 @@ def init_db():
         "last_synced_at": "DATETIME",
         "sync_error": "TEXT",
     }
-    user_trading_settings_columns = {"trading_mode": "VARCHAR(10)", "kill_switch": "BOOLEAN NOT NULL DEFAULT 1"}
+    user_trading_settings_columns = {
+        "trading_mode": "VARCHAR(10)",
+        "kill_switch": "BOOLEAN NOT NULL DEFAULT 1",
+        "auto_trading_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+        "auto_trading_provider": "VARCHAR(20)",
+        "auto_live_confirmed_at": "DATETIME",
+    }
 
     for name, ddl in signal_columns.items():
         _add_column_if_missing("signals", name, ddl)

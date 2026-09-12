@@ -13,11 +13,13 @@ class UserSettingsScreen extends StatefulWidget {
     required this.apiClient,
     required this.user,
     required this.onLogout,
+    this.onBrokerConnectionChanged,
   });
 
   final ApiClient apiClient;
   final AuthUser user;
   final Future<void> Function() onLogout;
+  final Future<void> Function(String provider)? onBrokerConnectionChanged;
 
   @override
   State<UserSettingsScreen> createState() => _UserSettingsScreenState();
@@ -297,7 +299,10 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                 const SizedBox(height: 12),
                 _UserTradingSettingsCard(apiClient: widget.apiClient),
                 const SizedBox(height: 12),
-                _UserBrokerConnectionsCard(apiClient: widget.apiClient),
+                _UserBrokerConnectionsCard(
+                  apiClient: widget.apiClient,
+                  onChanged: widget.onBrokerConnectionChanged,
+                ),
                 const SizedBox(height: 12),
                 Card(
                   key: const ValueKey('user-watchlist-card'),
@@ -406,6 +411,9 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
   String _mode = 'paper';
   bool _liveTradingEnabled = false;
   bool _killSwitch = true;
+  bool _autoTradingEnabled = false;
+  String _autoTradingProvider = 'kis';
+  bool _autoLiveConfirmed = false;
   String? _error;
   bool _loading = true;
   bool _saving = false;
@@ -425,26 +433,34 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<bool> _load() async {
     try {
       final values = await widget.apiClient.fetchUserTradingSettings();
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _mode = values['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
         _liveTradingEnabled = values['live_trading_enabled'] == true;
         _killSwitch = values['kill_switch'] != false;
+        _autoTradingEnabled = values['auto_trading_enabled'] == true;
+        _autoTradingProvider =
+            values['auto_trading_provider']?.toString() == 'alpaca'
+                ? 'alpaca'
+                : 'kis';
+        _autoLiveConfirmed = values['auto_live_confirmed'] == true;
         _dailyTrades.text = '${values['max_daily_trades'] ?? 2}';
         _dailyLoss.text = '${values['max_daily_loss_pct'] ?? 0.02}';
         _positionPct.text = '${values['max_position_pct'] ?? 10}';
         _openPositions.text = '${values['max_open_positions'] ?? 1}';
         _loading = false;
       });
+      return true;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _loading = false;
         _error = '거래 설정을 불러오지 못했습니다.';
       });
+      return false;
     }
   }
 
@@ -454,7 +470,20 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
       _error = null;
     });
     try {
-      final saved = await widget.apiClient.updateUserTradingSettings(
+      var confirmAutoLive = false;
+      if (_mode == 'live' &&
+          _liveTradingEnabled &&
+          _autoTradingEnabled &&
+          !_autoLiveConfirmed) {
+        final confirmed = await _confirmAutoLive();
+        if (!confirmed) {
+          if (mounted) setState(() => _saving = false);
+          return;
+        }
+        _autoLiveConfirmed = true;
+        confirmAutoLive = true;
+      }
+      await widget.apiClient.updateUserTradingSettings(
         tradingMode: _mode,
         maxDailyTrades: int.tryParse(_dailyTrades.text.trim()),
         maxDailyLossPct: double.tryParse(_dailyLoss.text.trim()),
@@ -462,18 +491,23 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
         maxOpenPositions: int.tryParse(_openPositions.text.trim()),
         liveTradingEnabled: _liveTradingEnabled,
         killSwitch: _killSwitch,
+        autoTradingEnabled: _autoTradingEnabled,
+        autoTradingProvider: _autoTradingEnabled ? _autoTradingProvider : null,
+        autoLiveConfirmed: _autoLiveConfirmed,
+        confirmAutoLive: confirmAutoLive,
       );
+      final reloaded = await _load();
       if (!mounted) return;
       setState(() {
-        _mode = saved['trading_mode']?.toString() == 'live' ? 'live' : 'paper';
-        _liveTradingEnabled = saved['live_trading_enabled'] == true;
-        _killSwitch = saved['kill_switch'] != false;
         _saving = false;
+        if (!reloaded) _error = '거래 설정 상태를 다시 불러오지 못했습니다.';
       });
+      if (!reloaded) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('거래 설정이 저장되었습니다.')),
       );
     } catch (error) {
+      await _load();
       if (!mounted) return;
       setState(() {
         _saving = false;
@@ -482,9 +516,36 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
     }
   }
 
+  Future<bool> _confirmAutoLive() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('자동 실거래 활성화'),
+            content: const Text(
+              '자동매매가 실거래 계좌에서 실행될 수 있습니다. 안전 조건과 계좌 정보를 확인했습니까?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('취소'),
+              ),
+              FilledButton(
+                key: const ValueKey('user-auto-live-confirm'),
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('확인'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> _toggleLiveTrading(bool value) async {
     if (!value) {
-      setState(() => _liveTradingEnabled = false);
+      setState(() {
+        _liveTradingEnabled = false;
+        _autoLiveConfirmed = false;
+      });
       return;
     }
     final confirmed = await showDialog<bool>(
@@ -509,6 +570,13 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
     if (confirmed == true && mounted) {
       setState(() => _liveTradingEnabled = true);
     }
+  }
+
+  void _toggleAutoTrading(bool value) {
+    setState(() {
+      _autoTradingEnabled = value;
+      if (!value) _autoLiveConfirmed = false;
+    });
   }
 
   @override
@@ -572,6 +640,59 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
                           : (value) => setState(() => _killSwitch = value),
                     ),
                   ],
+                  const SizedBox(height: 12),
+                  const Text(
+                    '자동매매 설정',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  ),
+                  SwitchListTile(
+                    key: const ValueKey('user-auto-trading-enabled'),
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('자동매매 사용'),
+                    subtitle: Text(
+                      _autoTradingEnabled
+                          ? '선택한 증권사의 자동매매 스케줄을 사용합니다.'
+                          : '자동매매가 비활성화되어 있습니다.',
+                    ),
+                    value: _autoTradingEnabled,
+                    onChanged: _saving ? null : _toggleAutoTrading,
+                  ),
+                  if (_autoTradingEnabled)
+                    DropdownButtonFormField<String>(
+                      key: const ValueKey('user-auto-trading-provider'),
+                      initialValue: _autoTradingProvider,
+                      decoration: const InputDecoration(
+                        labelText: '자동매매 증권사',
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'kis',
+                          child: Text('한국투자증권'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'alpaca',
+                          child: Text('Alpaca'),
+                        ),
+                      ],
+                      onChanged: _saving
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() => _autoTradingProvider = value);
+                              }
+                            },
+                    ),
+                  if (_autoTradingEnabled && _mode == 'live')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        _autoLiveConfirmed
+                            ? '자동 실거래 확인됨'
+                            : '저장 시 자동 실거래 확인이 필요합니다.',
+                        key: const ValueKey('user-auto-live-status'),
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ),
                   const SizedBox(height: 16),
                   const Text(
                     '리스크 설정',
@@ -632,9 +753,13 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
 }
 
 class _UserBrokerConnectionsCard extends StatefulWidget {
-  const _UserBrokerConnectionsCard({required this.apiClient});
+  const _UserBrokerConnectionsCard({
+    required this.apiClient,
+    this.onChanged,
+  });
 
   final ApiClient apiClient;
+  final Future<void> Function(String provider)? onChanged;
 
   @override
   State<_UserBrokerConnectionsCard> createState() =>
@@ -754,6 +879,7 @@ class _UserBrokerConnectionsCardState
         _message = '${_providerLabel(provider)} 정보가 저장되었습니다.';
       });
       _clearSecretInputs(provider);
+      await _notifyChanged(provider);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -788,6 +914,7 @@ class _UserBrokerConnectionsCardState
             ? '${_providerLabel(provider)} 연결이 확인되었습니다.'
             : '연결 확인 실패: ${_validationMessage(result['message'])}';
       });
+      if (valid) await _notifyChanged(provider);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -814,6 +941,7 @@ class _UserBrokerConnectionsCardState
         _message = '${_providerLabel(provider)} 정보가 삭제되었습니다.';
       });
       _clearInputs(provider);
+      await _notifyChanged(provider);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -856,6 +984,15 @@ class _UserBrokerConnectionsCardState
         backgroundColor: error ? Colors.redAccent : Colors.green,
       ),
     );
+  }
+
+  Future<void> _notifyChanged(String provider) async {
+    try {
+      await widget.onChanged?.call(provider);
+    } catch (_) {
+      // A refresh failure must not turn a successful credential save into a
+      // credential failure. Home will retry when it becomes visible again.
+    }
   }
 
   String _safeError(Object error) {
