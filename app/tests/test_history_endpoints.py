@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -583,3 +584,35 @@ def test_recent_runs_exposes_operation_test4_slot_history(client, db_session):
     assert history["candidate_symbol"] == "005930"
     assert history["final_buy_score"] == 61.5
     assert history["account_state_status"] == "available"
+
+
+def test_admin_home_automation_feed_excludes_newer_regular_user_runs(client, db_session):
+    base = datetime(2026, 9, 11, 0, 30, tzinfo=UTC)
+    for index, (symbol, owner, created_at) in enumerate([
+        ('005930', 2, base + timedelta(hours=4, seconds=1)),
+        ('086790', None, base + timedelta(hours=4)),
+        ('005930', 2, base + timedelta(hours=2, seconds=1)),
+        ('086790', None, base + timedelta(hours=2)),
+        ('005930', 2, base + timedelta(seconds=1)),
+        ('086790', None, base),
+    ]):
+        db_session.add(TradeRunLog(
+            owner_user_id=owner,
+            run_key=f'pr129-home-{index}',
+            trigger_source='automation_scheduler' if owner is None else 'user_scheduler',
+            symbol=symbol,
+            mode='automation_scheduler_profile_analysis' if owner is None else 'paper',
+            stage='done',
+            result='blocked',
+            reason='below_profile_buy_threshold' if owner is None else 'buying_power_unavailable',
+            created_at=created_at,
+        ))
+    db_session.commit()
+
+    response = client.get('/runs/automation/recent?limit=3')
+
+    assert response.status_code == 200
+    items = response.json()['items']
+    assert [item['symbol'] for item in items] == ['086790', '086790', '086790']
+    assert all(item['owner_user_id'] is None for item in items)
+    assert all(item['trigger_source'] == 'automation_scheduler' for item in items)

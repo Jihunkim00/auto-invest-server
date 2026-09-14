@@ -186,6 +186,27 @@ class AutomationProfileService:
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
         row = self.selected_profile(db)
+        return self._profile_schedule(row, now=now)
+
+    def selected_owned_profile_schedule(
+        self,
+        db: Session,
+        *,
+        owner_user_id: int,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve an owned profile with the canonical schedule semantics."""
+        return self._profile_schedule(
+            self._selected_owned_profile(db, owner_user_id),
+            now=now,
+        )
+
+    def _profile_schedule(
+        self,
+        row: StrategyProfile | None,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
         if row is None:
             return None
         settings = self._settings(row)

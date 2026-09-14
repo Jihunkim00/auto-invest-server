@@ -32,6 +32,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   void initState() {
     super.initState();
     unawaited(_loadTradingMode());
+    unawaited(widget.controller.loadUserHomeRecentActivity());
   }
 
   Future<bool> _loadTradingMode() async {

@@ -123,8 +123,8 @@ class ApiClient {
     return text.contains('egw00123') ||
         text.contains('token expired') ||
         text.contains('expired token') ||
-        text.contains('기간이 만료된 token') ||
-        text.contains('만료된 token');
+        text.contains('기간만료 token') ||
+        text.contains('만료 token');
   }
 
   Future<Map<String, dynamic>> _getJson(String path) async {
@@ -3104,6 +3104,26 @@ class ApiClient {
     } catch (_) {
       return mockRuns;
     }
+  }
+
+  Future<List<TradingLogItem>> fetchAdminAutomationRecentRuns({
+    int limit = 20,
+  }) async {
+    final j = await _getJson('/runs/automation/recent?limit=$limit');
+    final items = j['items'] as List<dynamic>? ?? [];
+    return items
+        .whereType<Map>()
+        .map((item) => TradingLogItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<List<TradingLogItem>> fetchUserTradingRuns({int limit = 20}) async {
+    final j = await _getJsonNoCache('/users/me/trading/runs?limit=$limit');
+    final items = j['items'] as List<dynamic>? ?? [];
+    return items
+        .whereType<Map>()
+        .map((item) => TradingLogItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
   }
 
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {

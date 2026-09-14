@@ -12,14 +12,19 @@ from app.db.models import (
     UserAutoTradingSlotClaim,
     UserTradingSettings,
     UserWatchlist,
+    WatchlistSnapshotItem,
+    WatchlistSnapshotRun,
 )
 from app.services.market_session_service import MarketSessionService
+from app.schemas.automation_profile import AutomationProfileWriteRequest
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 from app.services.user_trading_execution_service import UserTradingExecutionService
 from app.services.user_auto_trading_scheduler_service import (
     USER_SCHEDULER_TRIGGER_SOURCE,
+    UserAutoTradingCandidateService,
     UserAutoTradingSchedulerService,
 )
 
@@ -180,6 +185,7 @@ def _configure_user(
     live_enabled=False,
     kill_switch=True,
     confirmed=False,
+    create_profile=True,
 ):
     db.add(UserTradingSettings(
         user_id=user.id,
@@ -205,6 +211,20 @@ def _configure_user(
         market='KR' if provider == 'kis' else 'US',
     ))
     db.commit()
+    if create_profile:
+        profile = AutomationProfileService()
+        created = profile.create(
+            db,
+            AutomationProfileWriteRequest(
+                profile_key=f'user-{user.id}-{provider}',
+                name=f'User {user.id} {provider}',
+                provider=provider,
+                market='KR' if provider == 'kis' else 'US',
+                operation={'start_date': '2026-08-01', 'end_date': '2026-12-31'},
+            ),
+            owner_user_id=user.id,
+        )
+        profile.activate(db, str(created['id']), owner_user_id=user.id)
 
 
 def _harness(*, snapshots=None, fail_user_ids=None, fail_symbols=None):
@@ -227,6 +247,10 @@ def _harness(*, snapshots=None, fail_user_ids=None, fail_symbols=None):
         execution_service=execution,
         account_service=account,
         session_service=session,
+        candidate_service=lambda _db, *, provider, **_kwargs: {
+            'symbol': '005930' if provider == 'kis' else 'AAPL',
+            'candidate_source': 'test_shared_candidate',
+        },
     )
     return scheduler, account, analysis, broker, kis_client
 
@@ -431,3 +455,86 @@ def test_one_user_failure_does_not_stop_other_users(db_session):
     ).one()
     assert failed_run.trigger_source == USER_SCHEDULER_TRIGGER_SOURCE
     assert failed_run.result == 'failed'
+
+
+def test_missing_owned_profile_skips_before_account_candidate_analysis_or_signal(db_session):
+    user = _user(db_session, 'pr129-profile-missing')
+    _configure_user(db_session, user, create_profile=False)
+    scheduler, account, analysis, broker, kis_client = _harness()
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=RUN_AT,
+    )
+
+    assert result['items'][0]['result'] == 'skipped'
+    assert result['items'][0]['reason'] == 'automation_profile_missing'
+    assert account.calls == []
+    assert analysis.calls == []
+    assert broker.buy_calls == []
+    assert kis_client.buy_calls == []
+    assert db_session.query(SignalLog).filter_by(owner_user_id=user.id).count() == 0
+    assert db_session.query(OrderLog).filter_by(owner_user_id=user.id).count() == 0
+    run = db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).one()
+    assert run.reason == 'automation_profile_missing'
+    assert run.signal_id is None
+
+
+def test_admin_null_owner_profile_never_satisfies_regular_user_profile_gate(db_session):
+    user = _user(db_session, 'pr129-no-admin-fallback')
+    _configure_user(db_session, user, create_profile=False)
+    profiles = AutomationProfileService()
+    system = profiles.create(
+        db_session,
+        AutomationProfileWriteRequest(
+            profile_key='pr129-system-profile',
+            name='System profile',
+            provider='kis',
+            market='KR',
+            operation={'start_date': '2026-08-01', 'end_date': '2026-12-31'},
+        ),
+    )
+    profiles.activate(db_session, str(system['id']))
+    scheduler, account, analysis, _broker, _kis_client = _harness()
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=RUN_AT,
+    )
+
+    assert result['items'][0]['reason'] == 'automation_profile_missing'
+    assert account.calls == []
+    assert analysis.calls == []
+    assert db_session.query(SignalLog).filter_by(owner_user_id=user.id).count() == 0
+
+
+def test_personal_watchlist_cannot_override_shared_auto_candidate(db_session):
+    user = _user(db_session, 'pr129-watchlist-not-universe')
+    _configure_user(db_session, user)
+    snapshot = WatchlistSnapshotRun(
+        market='KR',
+        started_at=RUN_AT,
+        completed_at=RUN_AT,
+        status='success',
+    )
+    db_session.add(snapshot)
+    db_session.commit()
+    db_session.add_all([
+        WatchlistSnapshotItem(
+            run_id=snapshot.id, symbol='086790', name='Shared candidate',
+            market='KOSPI', current_price=100.0, quant_buy_score=88.0,
+            quant_sell_score=10.0, indicators_json='{}', captured_at=RUN_AT,
+        ),
+        WatchlistSnapshotItem(
+            run_id=snapshot.id, symbol='005930', name='Favorite only',
+            market='KOSPI', current_price=100.0, quant_buy_score=10.0,
+            quant_sell_score=80.0, indicators_json='{}', captured_at=RUN_AT,
+        ),
+    ])
+    db_session.commit()
+
+    candidate = UserAutoTradingCandidateService().select_candidate(
+        db_session, user=user, provider='kis', now=RUN_AT,
+    )
+
+    assert candidate is not None
+    assert candidate['symbol'] == '086790'
+    assert candidate['candidate_source'] == 'shared_watchlist_snapshot'

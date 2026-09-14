@@ -116,6 +116,38 @@ class UserWatchlist(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class UserWatchlistAnalysis(Base):
+    """Owner-scoped, analytics-only observations for personal favorites."""
+
+    __tablename__ = 'user_watchlist_analyses'
+    __table_args__ = (
+        UniqueConstraint(
+            'user_id', 'symbol', 'provider', 'analysis_date', 'scheduler_slot',
+            name='uq_user_watchlist_analysis_slot',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    symbol = Column(String(40), nullable=False, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    analysis_date = Column(String(10), nullable=False, index=True)
+    scheduler_slot = Column(String(10), nullable=False, index=True)
+    analyzed_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    quant_buy_score = Column(Float, nullable=True)
+    quant_sell_score = Column(Float, nullable=True)
+    ai_buy_score = Column(Float, nullable=True)
+    ai_sell_score = Column(Float, nullable=True)
+    final_buy_score = Column(Float, nullable=True)
+    final_sell_score = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    action = Column(String(30), nullable=False, default='watch')
+    reason = Column(Text, nullable=True)
+    indicator_payload = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class UserBrokerCredential(Base):
     """Encrypted broker credentials owned by a regular application user.
 

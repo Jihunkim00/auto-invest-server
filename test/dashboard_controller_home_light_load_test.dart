@@ -135,6 +135,11 @@ class _HomeLightApiClient extends ApiClient {
   Future<WatchlistRunResult?> fetchLatestWatchlistRunResult() async => null;
 
   @override
+  Future<List<TradingLogItem>> fetchAdminAutomationRecentRuns({
+    int limit = 20,
+  }) => fetchRecentRuns(limit: limit);
+
+  @override
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
     recentRunsLimit = limit;
     return [

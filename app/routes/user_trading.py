@@ -8,13 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import OrderLog, SignalLog, TradeRunLog, User, UserTradingSettings
+from app.db.models import OrderLog, SignalLog, TradeRunLog, User, UserTradingSettings, UserWatchlistAnalysis
 from app.routes.history import _serialize_order, _serialize_run, _serialize_signal
 from app.schemas.user_data import UserTradingSettingsUpdateRequest
 from app.services.auth_dependencies import require_regular_user
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_trading_execution_service import UserTradingExecutionService
 from app.services.user_auto_trading_scheduler_service import UserAutoTradingSchedulerService
+from app.services.user_watchlist_analysis_scheduler_service import (
+    UserWatchlistAnalysisSchedulerService,
+)
 
 
 router = APIRouter(prefix='/users/me/trading', tags=['user-trading-foundation'])
@@ -274,6 +277,29 @@ def get_my_risk_status(
         provider=normalized_provider,
         market=normalized_market,
     )
+
+
+@router.get('/watchlist-analysis')
+def list_my_watchlist_analysis(
+    limit: int = Query(default=50, ge=1, le=200),
+    symbol: str | None = Query(default=None, min_length=1),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    query = db.query(UserWatchlistAnalysis).filter(
+        UserWatchlistAnalysis.user_id == int(user.id),
+    )
+    if symbol:
+        query = query.filter(UserWatchlistAnalysis.symbol == symbol.upper())
+    rows = query.order_by(
+        UserWatchlistAnalysis.analyzed_at.desc(),
+        UserWatchlistAnalysis.id.desc(),
+    ).limit(limit).all()
+    return {
+        'items': [UserWatchlistAnalysisSchedulerService.serialize(row) for row in rows],
+        'analytics_only': True,
+        'trigger_source': 'user_watchlist_analysis',
+    }
 
 
 @router.get('/runs')

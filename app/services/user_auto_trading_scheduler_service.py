@@ -14,11 +14,11 @@ from app.db.models import (
     User,
     UserAutoTradingSlotClaim,
     UserTradingSettings,
-    UserWatchlist,
     WatchlistSnapshotItem,
     WatchlistSnapshotRun,
 )
 from app.services.market_session_service import MarketSessionService
+from app.services.automation_profile_service import AutomationProfileService
 from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
 from app.services.user_trading_execution_service import UserTradingExecutionService
 
@@ -40,6 +40,8 @@ _ACTIVE_ORDER_STATUSES = {
 
 
 class UserAutoTradingCandidateService:
+    """Select from the shared market snapshot, never a personal watchlist."""
+
     def select_candidate(
         self,
         db: Session,
@@ -50,64 +52,44 @@ class UserAutoTradingCandidateService:
     ) -> dict[str, Any] | None:
         normalized_provider = str(provider or '').strip().lower()
         market = _SCOPE[normalized_provider][0]
-        watchlist = (
-            db.query(UserWatchlist)
+        if normalized_provider != 'kis':
+            # There is no shared US snapshot in the canonical Admin pipeline.
+            # Personal favorites cannot substitute for an automation universe.
+            return None
+        snapshot = (
+            db.query(WatchlistSnapshotRun)
             .filter(
-                UserWatchlist.user_id == int(user.id),
-                UserWatchlist.provider == normalized_provider,
+                WatchlistSnapshotRun.market == market,
+                WatchlistSnapshotRun.status == 'success',
             )
-            .order_by(UserWatchlist.id.asc())
-            .all()
+            .order_by(
+                WatchlistSnapshotRun.completed_at.desc(),
+                WatchlistSnapshotRun.id.desc(),
+            )
+            .first()
         )
-        allowed = {str(row.symbol or '').strip().upper() for row in watchlist}
-        rows: list[dict[str, Any]] = []
-
-        if normalized_provider == 'kis':
-            snapshot = (
-                db.query(WatchlistSnapshotRun)
-                .filter(
-                    WatchlistSnapshotRun.market == market,
-                    WatchlistSnapshotRun.status == 'success',
-                )
-                .order_by(
-                    WatchlistSnapshotRun.completed_at.desc(),
-                    WatchlistSnapshotRun.id.desc(),
-                )
-                .first()
+        if snapshot is None:
+            return None
+        rows = [
+            {
+                'symbol': str(row.symbol or '').strip().upper(),
+                'name': row.name,
+                'current_price': row.current_price,
+                'quant_buy_score': row.quant_buy_score,
+                'quant_sell_score': row.quant_sell_score,
+                'indicator_payload': _json_object(row.indicators_json),
+                'candidate_source': 'shared_watchlist_snapshot',
+                'captured_at': row.captured_at.isoformat() if row.captured_at else None,
+            }
+            for row in (
+                db.query(WatchlistSnapshotItem)
+                .filter(WatchlistSnapshotItem.run_id == int(snapshot.id))
+                .all()
             )
-            if snapshot is not None:
-                snapshot_rows = (
-                    db.query(WatchlistSnapshotItem)
-                    .filter(WatchlistSnapshotItem.run_id == int(snapshot.id))
-                    .all()
-                )
-                for row in snapshot_rows:
-                    symbol = str(row.symbol or '').strip().upper()
-                    if allowed and symbol not in allowed:
-                        continue
-                    rows.append({
-                        'symbol': symbol,
-                        'name': row.name,
-                        'current_price': row.current_price,
-                        'quant_buy_score': row.quant_buy_score,
-                        'quant_sell_score': row.quant_sell_score,
-                        'indicator_payload': _json_object(row.indicators_json),
-                        'candidate_source': 'shared_watchlist_snapshot',
-                        'captured_at': row.captured_at.isoformat() if row.captured_at else None,
-                    })
-
-        if not rows:
-            rows = [
-                {
-                    'symbol': str(row.symbol or '').strip().upper(),
-                    'name': row.symbol,
-                    'candidate_source': 'user_watchlist',
-                }
-                for row in watchlist
-                if str(row.market or market).strip().upper() in {market, 'KOSPI', 'KOSDAQ'}
-            ]
-
-        rows = [row for row in rows if row.get('symbol')]
+            if str(row.symbol or '').strip()
+        ]
+        # This is the same score-first ordering used by the shared snapshot
+        # selection pipeline: buy score, sell score, then stable symbol tie-break.
         rows.sort(key=lambda row: (
             -_number(row.get('final_buy_score') or row.get('quant_buy_score')),
             _number(row.get('quant_sell_score')),
@@ -206,7 +188,7 @@ class UserAutoTradingSchedulerService:
         self.position_management_service = position_management_service or UserPositionManagementService()
         self.account_service = account_service or self.execution_service.account_service
         self.session_service = session_service or self.execution_service.session_service
-        self.automation_profiles = automation_profiles
+        self.automation_profiles = automation_profiles or AutomationProfileService()
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
         self._last_status: dict[str, Any] = {}
 
@@ -380,6 +362,26 @@ class UserAutoTradingSchedulerService:
         run_key: str,
         now: datetime,
     ) -> dict[str, Any]:
+        profile_schedule = self.automation_profiles.selected_owned_profile_schedule(
+            db,
+            owner_user_id=int(user.id),
+            now=now,
+        )
+        profile = (profile_schedule or {}).get('profile') or {}
+        if (
+            not profile_schedule
+            or profile_schedule.get('status') != 'active'
+            or str(profile.get('provider') or '').strip().lower() != provider
+            or str(profile.get('market') or '').strip().upper() != market
+        ):
+            return self._record_profile_missing_skip(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                scheduler_slot=scheduler_slot,
+                run_key=run_key,
+            )
         gate_reason = self._live_gate_reason(settings, provider)
         if gate_reason:
             return self._record_result(
@@ -591,6 +593,73 @@ class UserAutoTradingSchedulerService:
         if bool(settings.kill_switch):
             return 'user_kill_switch_enabled'
         return None
+
+    def _record_profile_missing_skip(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        market: str,
+        scheduler_slot: str,
+        run_key: str,
+    ) -> dict[str, Any]:
+        """Record a scheduler outcome without creating a trading SignalLog."""
+        run = db.query(TradeRunLog).filter(
+            TradeRunLog.owner_user_id == int(user.id),
+            TradeRunLog.run_key == run_key,
+        ).first()
+        if run is None:
+            run = TradeRunLog(
+                owner_user_id=int(user.id),
+                run_key=run_key,
+                trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                symbol='NONE',
+                mode='user_scheduler',
+                stage='done',
+                result='skipped',
+                reason='automation_profile_missing',
+            )
+            db.add(run)
+        else:
+            run.trigger_source = USER_SCHEDULER_TRIGGER_SOURCE
+            run.symbol = 'NONE'
+            run.mode = 'user_scheduler'
+            run.stage = 'done'
+            run.result = 'skipped'
+            run.reason = 'automation_profile_missing'
+            run.signal_id = None
+            run.order_id = None
+        run.request_payload = json.dumps({
+            'provider': provider,
+            'market': market,
+            'scheduler_slot': scheduler_slot,
+            'trigger_source': USER_SCHEDULER_TRIGGER_SOURCE,
+            'precondition': 'owner_automation_profile',
+        }, ensure_ascii=False, default=str)
+        run.response_payload = json.dumps({
+            'owner_user_id': int(user.id),
+            'result': 'skipped',
+            'reason': 'automation_profile_missing',
+            'trading_signal_created': False,
+            'execution_service_called': False,
+        }, ensure_ascii=False, default=str)
+        db.commit()
+        return {
+            'owner_user_id': int(user.id),
+            'provider': provider,
+            'market': market,
+            'symbol': 'NONE',
+            'scheduler_slot': scheduler_slot,
+            'trigger_source': USER_SCHEDULER_TRIGGER_SOURCE,
+            'result': 'skipped',
+            'reason': 'automation_profile_missing',
+            'run_id': run.id,
+            'signal_id': None,
+            'order_id': None,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+        }
 
     def _record_result(
         self,

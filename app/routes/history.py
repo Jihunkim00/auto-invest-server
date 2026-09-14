@@ -705,6 +705,31 @@ def get_recent_runs(
     return {"items": [_serialize_run(row) for row in rows]}
 
 
+@router.get('/runs/automation/recent')
+def get_recent_system_automation_runs(
+    limit: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+):
+    """Home-card feed: system-owned canonical automation only.
+
+    The general recent-runs route intentionally remains an operations feed.
+    This feed cannot return a regular user's scheduler or personal analysis.
+    """
+    rows = (
+        db.query(TradeRunLog)
+        .filter(
+            TradeRunLog.owner_user_id.is_(None),
+            TradeRunLog.trigger_source == 'automation_scheduler',
+            TradeRunLog.mode == 'automation_scheduler_profile_analysis',
+        )
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return {'items': [{**_serialize_run(row), 'owner_user_id': None} for row in rows]}
+
+
 @router.get("/orders/recent")
 def get_recent_orders(
     limit: int = Query(default=20, ge=1, le=200),

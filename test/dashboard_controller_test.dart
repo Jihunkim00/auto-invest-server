@@ -49,6 +49,57 @@ void main() {
     controller.dispose();
   });
 
+  test('Home activity uses the scoped Admin automation feed', () async {
+    final admin = TradingLogItem(
+      id: 1,
+      runKey: 'admin',
+      symbol: '086790',
+      provider: 'kis',
+      market: 'KR',
+      triggerSource: 'automation_scheduler',
+      mode: 'automation_scheduler_profile_analysis',
+      action: 'hold',
+      result: 'blocked',
+      reason: 'below_profile_buy_threshold',
+      relatedOrderId: null,
+      gateLevel: 2,
+      createdAt: '2026-09-11T04:30:00Z',
+    );
+    final api = _FakeApiClient(recentRuns: [admin]);
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.load();
+
+    expect(api.fetchAdminAutomationRecentRunsCalls, 1);
+    expect(controller.automationRecentRuns.single.symbol, '086790');
+    controller.dispose();
+  });
+
+  test('regular Home activity uses only the user-scoped run feed', () async {
+    final user = TradingLogItem(
+      id: 2,
+      runKey: 'user',
+      symbol: '005930',
+      provider: 'kis',
+      market: 'KR',
+      triggerSource: 'user_scheduler',
+      mode: 'paper',
+      action: 'hold',
+      result: 'blocked',
+      reason: 'automation_profile_missing',
+      relatedOrderId: null,
+      gateLevel: 2,
+      createdAt: '2026-09-11T04:30:01Z',
+    );
+    final api = _FakeApiClient(userRuns: [user]);
+    final controller = DashboardController(api, autoload: false);
+
+    await controller.loadUserHomeRecentActivity();
+
+    expect(api.fetchUserTradingRunsCalls, 1);
+    expect(controller.automationRecentRuns.single.symbol, '005930');
+    controller.dispose();
+  });
   test('load does not start deferred strategy detail fetches', () async {
     final api = _DeferredStrategyApiClient();
     final controller = DashboardController(api, autoload: false);
@@ -1417,6 +1468,7 @@ class _FakeApiClient extends ApiClient {
     this.kisSingle,
     this.schedulerLive,
     this.recentRuns = const [],
+    this.userRuns = const [],
     this.throwRecentOrders = false,
     this.guardedSell,
     this.guardedBuy,
@@ -1451,6 +1503,7 @@ class _FakeApiClient extends ApiClient {
   final KisSingleSymbolTradingResult? kisSingle;
   final KisSchedulerLiveResult? schedulerLive;
   final List<TradingLogItem> recentRuns;
+  final List<TradingLogItem> userRuns;
   final bool throwRecentOrders;
   final KisSchedulerGuardedSellResult? guardedSell;
   final KisSchedulerGuardedBuyResult? guardedBuy;
@@ -1478,6 +1531,8 @@ class _FakeApiClient extends ApiClient {
   int runKisSingleCalls = 0;
   int runKisSchedulerLiveCalls = 0;
   int fetchRecentRunsCalls = 0;
+  int fetchAdminAutomationRecentRunsCalls = 0;
+  int fetchUserTradingRunsCalls = 0;
   int fetchRecentOrdersCalls = 0;
   int fetchRecentSignalsCalls = 0;
   int fetchKisGuardedSellStatusCalls = 0;
@@ -1579,6 +1634,20 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<StrategyProfileList> fetchStrategyProfiles() async =>
       _safeStrategyProfileList();
+
+  @override
+  Future<List<TradingLogItem>> fetchAdminAutomationRecentRuns({
+    int limit = 20,
+  }) async {
+    fetchAdminAutomationRecentRunsCalls += 1;
+    return recentRuns;
+  }
+
+  @override
+  Future<List<TradingLogItem>> fetchUserTradingRuns({int limit = 20}) async {
+    fetchUserTradingRunsCalls += 1;
+    return userRuns;
+  }
 
   @override
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
