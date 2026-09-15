@@ -8,8 +8,7 @@ build/
 auto_invest.db
 *.db
 data/
-!assets/data/
-!assets/data/watchlist_kr_all.json
+
 logs/
 artifacts/
 .tmp_pytest*/
@@ -28,11 +27,25 @@ scheduled_check_*.log
 scheduled_preview_*.json
 scheduled_preflight_*.json
 stage3_day2_*.json
-config/watchlist_kr.backup*.yaml
-config/watchlist_kr.stage3.*.yaml
-config/watchlist_kr.stage3.before_*.yaml
-config/watchlist_kr.stage3.universe100.yaml
-config/watchlist*.yaml
+
+# Local/generated watchlist data
+*watchlist*.json
+*watchlist*.yaml
+*watchlist*.yml
+*watchlist*.csv
+
+# Local test artifacts
+.local_test_tmp/
+
+# Keep production asset watchlist tracked
+!assets/
+!assets/data/
+!assets/data/watchlist_kr_all.json
+
+!assets/
+!assets/data/
+!assets/data/watchlist_kr_all.json
+
 
 # Keep Flutter Logs feature source tracked
 !lib/features/logs/
@@ -40,4 +53,4 @@ config/watchlist*.yaml
 .tmp/
 config/local-watchlists/
 .flutter-plugins-dependencies
-config/watchlist_kr.yaml
+
