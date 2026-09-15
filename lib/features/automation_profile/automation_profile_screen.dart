@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -33,9 +35,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   AutomationStrategyProfileList? _list;
   AutomationStrategyProfile? _selected;
   Map<String, dynamic> _capitalState = <String, dynamic>{};
+  Map<String, dynamic> _watchlistDiagnostics = <String, dynamic>{};
   bool _compoundEnabled = false;
   String? _error;
   bool _busy = false;
+  String _newProfileRequestId = _newClientRequestId();
   final _pageScrollController = ScrollController();
   final _nameController = TextEditingController();
   final _startController = TextEditingController(text: _defaultStartDate);
@@ -84,22 +88,24 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() => _busy = true);
+  Future<AutomationStrategyProfileList?> _load({bool keepBusy = false}) async {
+    if (!keepBusy) setState(() => _busy = true);
     try {
       final result = await _fetchProfiles();
-      if (!mounted) return;
+      if (!mounted) return result;
       setState(() {
         _list = result;
         _error = null;
-        _busy = false;
+        if (!keepBusy) _busy = false;
       });
+      return result;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _error = error.toString();
-        _busy = false;
+        if (!keepBusy) _busy = false;
       });
+      return null;
     }
   }
 
@@ -117,10 +123,29 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     }
   }
 
+  Future<void> _loadWatchlistDiagnostics(
+      AutomationStrategyProfile profile) async {
+    try {
+      final state = widget.userScoped
+          ? await widget.apiClient
+              .fetchUserAutomationProfileWatchlistDiagnostics(profile.id)
+          : await widget.apiClient
+              .fetchAutomationProfileWatchlistDiagnostics(profile.id);
+      if (!mounted || _selected?.id != profile.id) return;
+      setState(() => _watchlistDiagnostics = state);
+    } catch (_) {
+      if (mounted && _selected?.id == profile.id) {
+        setState(() => _watchlistDiagnostics = <String, dynamic>{});
+      }
+    }
+  }
+
   void _newProfile() {
     setState(() {
       _selected = null;
+      _newProfileRequestId = _newClientRequestId();
       _capitalState = <String, dynamic>{};
+      _watchlistDiagnostics = <String, dynamic>{};
       _compoundEnabled = false;
       _nameController.text = '';
       _startController.text = _defaultStartDate;
@@ -175,6 +200,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
           _asDouble(profile.capital['max_total_exposure_pct'], 30);
     });
     _loadCapitalState(profile);
+    _loadWatchlistDiagnostics(profile);
   }
 
   Future<void> _addAnalysisTime() async {
@@ -366,7 +392,20 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         'end_policy': 'manage_until_exit',
       },
       'max_open_positions': int.tryParse(_maxPositionsController.text) ?? 1,
+      if (_selected == null) 'client_request_id': _newProfileRequestId,
     };
+  }
+
+  static String _newClientRequestId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex =
+        bytes.map((value) => value.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+        '${hex.substring(20)}';
   }
 
   Future<AutomationStrategyProfileList> _fetchProfiles() {
@@ -400,6 +439,12 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         : widget.apiClient.pauseAutomationProfile(profileId);
   }
 
+  Future<AutomationStrategyProfile> _archiveProfile(int profileId) {
+    return widget.userScoped
+        ? widget.apiClient.archiveUserAutomationProfile(profileId)
+        : widget.apiClient.archiveAutomationProfile(profileId);
+  }
+
   Future<Map<String, dynamic>> _validateProfile(int profileId) {
     return widget.userScoped
         ? widget.apiClient.validateUserAutomationProfile(profileId)
@@ -417,6 +462,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   }
 
   Future<void> _save() async {
+    if (_busy) return;
     final validation = _validateEditor();
     if (validation != null) {
       setState(() => _error = validation);
@@ -426,11 +472,26 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     try {
       final body = _body();
       if (_selected == null) {
-        await _createProfile(body);
+        final created = await _createProfile(body);
+        if (!mounted) return;
+        setState(() {
+          _selected = created;
+          _capitalState = <String, dynamic>{};
+        });
+        final refreshed = await _load(keepBusy: true);
+        if (!mounted) return;
+        final refreshedProfiles =
+            refreshed?.profiles ?? const <AutomationStrategyProfile>[];
+        final matches = refreshedProfiles
+            .where((profile) => profile.id == created.id)
+            .toList();
+        final selected = matches.isEmpty ? created : matches.first;
+        setState(() => _selected = selected);
+        _loadCapitalState(selected);
       } else {
         await _updateProfile(_selected!.id, body);
+        await _load(keepBusy: true);
       }
-      await _load();
       await _notifyUserProfileChanged();
       if (mounted) setState(() => _error = null);
     } catch (error) {
@@ -441,10 +502,11 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   }
 
   Future<void> _activate(AutomationStrategyProfile profile) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       await _activateProfile(profile.id);
-      await _load();
+      await _load(keepBusy: true);
       await _notifyUserProfileChanged();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -459,15 +521,65 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   }
 
   Future<void> _pause(AutomationStrategyProfile profile) async {
+    if (_busy) return;
     setState(() => _busy = true);
     try {
       await _pauseProfile(profile.id);
-      await _load();
+      await _load(keepBusy: true);
       await _notifyUserProfileChanged();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('프로필을 일시정지했습니다.')),
       );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _confirmArchive(AutomationStrategyProfile profile) async {
+    if (_busy) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const ValueKey('automation-profile-archive-dialog'),
+        title: const Text('\u{D504}\u{B85C}\u{D544} \u{C0AD}\u{C81C}'),
+        content: Text(
+          '"${profile.name}" \u{D504}\u{B85C}\u{D544}\u{C744} \u{C0AD}\u{C81C}\u{D558}\u{C2DC}\u{ACA0}\u{C2B5}\u{B2C8}\u{AE4C}?\n\n'
+          '\u{AE30}\u{C874} \u{B9E4}\u{B9E4}/\u{BD84}\u{C11D} \u{C774}\u{B825}\u{C740} \u{BCF4}\u{C874}\u{B418}\u{BA70} \u{C774} \u{D504}\u{B85C}\u{D544}\u{C740} \u{B354} \u{C774}\u{C0C1} \u{C0AC}\u{C6A9}\u{B418}\u{C9C0} \u{C54A}\u{C2B5}\u{B2C8}\u{B2E4}.',
+        ),
+        actions: [
+          TextButton(
+            key: const ValueKey('automation-profile-archive-cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('\u{CDE8}\u{C18C}'),
+          ),
+          FilledButton(
+            key: const ValueKey('automation-profile-archive-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('\u{C0AD}\u{C81C}'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await _archive(profile);
+  }
+
+  Future<void> _archive(AutomationStrategyProfile profile) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await _archiveProfile(profile.id);
+      if (!mounted) return;
+      if (_selected?.id == profile.id) {
+        setState(() {
+          _selected = null;
+          _capitalState = <String, dynamic>{};
+        });
+      }
+      await _load(keepBusy: true);
+      await _notifyUserProfileChanged();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -513,7 +625,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
         actions: [
           IconButton(
             key: const ValueKey('automation-profile-create'),
-            onPressed: _newProfile,
+            onPressed: _busy ? null : _newProfile,
             tooltip: '새 프로필',
             icon: const Icon(Icons.add),
           ),
@@ -547,8 +659,9 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                         style: TextStyle(color: Colors.white70),
                       ),
                       const SizedBox(height: 12),
-                      for (final profile in _list?.profiles ??
-                          const <AutomationStrategyProfile>[])
+                      for (final profile in (_list?.profiles ??
+                              const <AutomationStrategyProfile>[])
+                          .where((profile) => profile.status != 'archived'))
                         SectionCard(
                           key: ValueKey('automation-profile-${profile.id}'),
                           padding: const EdgeInsets.symmetric(
@@ -561,6 +674,23 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                             trailing: Wrap(
                               spacing: 0,
                               children: [
+                                SizedBox.square(
+                                    dimension: 40,
+                                    child: IconButton(
+                                      key: ValueKey(
+                                          'automation-profile-archive-${profile.id}'),
+                                      tooltip:
+                                          '\u{D504}\u{B85C}\u{D544} \u{C0AD}\u{C81C}',
+                                      onPressed: _busy
+                                          ? null
+                                          : () => _confirmArchive(profile),
+                                      icon: const Icon(Icons.delete_outline),
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                          const BoxConstraints.tightFor(
+                                              width: 40, height: 40),
+                                      visualDensity: VisualDensity.standard,
+                                    )),
                                 SizedBox.square(
                                     dimension: 40,
                                     child: IconButton(
@@ -604,7 +734,8 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                                     key: ValueKey(
                                         'automation-profile-chevron-${profile.id}'),
                                     tooltip: '프로필 편집',
-                                    onPressed: () => _edit(profile),
+                                    onPressed:
+                                        _busy ? null : () => _edit(profile),
                                     icon: const Icon(Icons.chevron_right),
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints.tightFor(
@@ -614,7 +745,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                                 ),
                               ],
                             ),
-                            onTap: () => _edit(profile),
+                            onTap: _busy ? null : () => _edit(profile),
                           ),
                         ),
                       const SizedBox(height: 16),
@@ -710,6 +841,33 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
     );
   }
 
+  Widget _watchlistDiagnosticsView() {
+    final snapshot = _watchlistDiagnostics['snapshot'];
+    if (snapshot is! Map) return const SizedBox.shrink();
+    final values = Map<String, dynamic>.from(snapshot);
+    final items = _watchlistDiagnostics['items'];
+    final count = items is List ? items.length : values['selected_count'] ?? 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Text(
+            'Profile watchlist: $count ranked symbols · '
+            'eligible ${values['eligible_count'] ?? 0} · '
+            'max price ${_formatKrw(_asDouble(values['effective_max_candidate_price'], 0))}',
+            key: const ValueKey('automation-profile-watchlist-diagnostics'),
+            style: const TextStyle(color: Colors.white70),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _editor(BuildContext context) {
     return SectionCard(
       key: const ValueKey('automation-profile-editor'),
@@ -720,6 +878,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 16),
           _capitalStateView(),
+          _watchlistDiagnosticsView(),
           const _FormSectionHeading(
             icon: Icons.tune_outlined,
             title: '기본 설정',
@@ -1002,7 +1161,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                   child: const Text('저장')),
               OutlinedButton(
                   key: const ValueKey('automation-profile-validate'),
-                  onPressed: _selected == null ? null : _validate,
+                  onPressed: _busy || _selected == null ? null : _validate,
                   child: const Text('검증')),
               if (_selected != null && _selected!.status != 'active')
                 OutlinedButton(

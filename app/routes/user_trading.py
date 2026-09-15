@@ -111,44 +111,52 @@ def update_my_trading_settings(
     db: Session = Depends(get_db),
     user: User = Depends(require_regular_user),
 ):
+    """Update configuration only; live authority has explicit action endpoints."""
+    if payload.live_trading_enabled is True:
+        raise HTTPException(status_code=422, detail='live_order_enable_action_required')
+    if payload.auto_live_confirmed is True or payload.confirm_auto_live is True:
+        raise HTTPException(status_code=422, detail='auto_live_confirmation_action_required')
+
     row = _get_settings(db, user)
     values = payload.values()
     requested_enabled = values.pop('enabled', None)
     requested_auto_enabled = values.pop('auto_trading_enabled', None)
     requested_auto_provider = values.pop('auto_trading_provider', None)
+    requested_live_enabled = values.pop('live_trading_enabled', None)
     requested_auto_live_confirmed = values.pop('auto_live_confirmed', None)
     selected_mode = values.pop('trading_mode', None)
-    if selected_mode is not None:
-        if selected_mode == 'paper':
-            row.trading_mode = 'paper'
-            row.enabled = True
-            row.paper_trading_enabled = True
+
+    if selected_mode == 'paper':
+        row.trading_mode = 'paper'
+        row.enabled = True
+        row.paper_trading_enabled = True
+        row.live_trading_enabled = False
+    elif selected_mode == 'live':
+        # A paper-to-live selection never arms manual or automatic execution.
+        # A later configuration save while already in live mode must not erase
+        # an authority that was granted by the explicit action endpoint.
+        entering_live_mode = str(row.trading_mode or 'paper').strip().lower() != 'live'
+        row.trading_mode = 'live'
+        row.enabled = True
+        row.paper_trading_enabled = False
+        if entering_live_mode:
             row.live_trading_enabled = False
-        elif selected_mode == 'live':
-            row.trading_mode = 'live'
-            row.enabled = True
-            row.paper_trading_enabled = False
-            # PR127 deliberately keeps this permission false. PR128 owns the
-            # future live-execution unlock and its safety confirmation flow.
-            row.live_trading_enabled = False
-        else:
-            raise HTTPException(status_code=422, detail='unsupported_trading_mode')
+    elif selected_mode is not None:
+        raise HTTPException(status_code=422, detail='unsupported_trading_mode')
+
     for key, value in values.items():
         setattr(row, key, value)
-    # Selecting paper always removes the live permission. Selecting live is
-    # only a mode choice unless this request explicitly carries the opt-in.
-    if selected_mode == 'paper':
-        row.live_trading_enabled = False
-    elif selected_mode == 'live' and 'live_trading_enabled' not in values:
-        row.live_trading_enabled = False
-    target_mode = str(row.trading_mode or 'paper').strip().lower()
+
     if requested_enabled is not None:
         row.enabled = bool(requested_enabled)
         if not row.enabled:
             row.live_trading_enabled = False
             row.auto_trading_enabled = False
             row.auto_trading_provider = None
-            row.auto_live_confirmed_at = None
+
+    if requested_live_enabled is False:
+        row.live_trading_enabled = False
+
     target_auto_enabled = (
         bool(requested_auto_enabled)
         if requested_auto_enabled is not None
@@ -159,45 +167,84 @@ def update_my_trading_settings(
         if requested_auto_provider is not None
         else str(row.auto_trading_provider or '').strip().lower()
     ) or None
-    if requested_auto_live_confirmed is False:
-        row.auto_live_confirmed_at = None
     if target_auto_enabled and target_provider not in {'kis', 'alpaca'}:
         raise HTTPException(status_code=422, detail='auto_trading_provider_required')
-    if requested_auto_provider is not None and requested_auto_provider not in {'kis', 'alpaca'}:
+    if requested_auto_provider is not None and target_provider not in {'kis', 'alpaca'}:
         raise HTTPException(status_code=422, detail='unsupported_auto_trading_provider')
+
+    provider_changed = target_provider != str(row.auto_trading_provider or '').strip().lower()
+    if requested_auto_enabled is not None:
+        row.auto_trading_enabled = target_auto_enabled
+    if requested_auto_provider is not None:
+        row.auto_trading_provider = target_provider
     if target_auto_enabled:
         row.enabled = True
-        if requested_auto_live_confirmed is True:
-            row.auto_live_confirmed_at = datetime.now(UTC)
-        if target_mode == 'paper':
+        if str(row.trading_mode or 'paper').strip().lower() == 'paper':
             row.paper_trading_enabled = True
-        auto_live_activation = (
-            target_mode == 'live'
-            and bool(row.live_trading_enabled)
-            and (
-                requested_auto_enabled is True
-                or selected_mode == 'live'
-                or row.auto_live_confirmed_at is not None
-            )
-        )
-        provider_changed = target_provider != str(row.auto_trading_provider or '').strip().lower()
-        if target_mode == 'live' and (auto_live_activation or provider_changed):
-            if payload.confirm_auto_live is not True and requested_auto_live_confirmed is not True:
-                row.auto_live_confirmed_at = None
-                if auto_live_activation:
-                    raise HTTPException(status_code=422, detail='auto_live_confirmation_required')
-            else:
-                row.auto_live_confirmed_at = datetime.now(UTC)
-    elif requested_auto_provider is not None:
-        row.auto_trading_provider = target_provider
+
+    # Any configuration-only disarm, provider change, or non-live state removes
+    # automatic live authority. Timestamps are server-created only below.
+    if (
+        requested_auto_live_confirmed is False
+        or provider_changed
+        or not bool(row.enabled)
+        or not bool(row.auto_trading_enabled)
+        or str(row.trading_mode or 'paper').strip().lower() != 'live'
+        or not bool(row.live_trading_enabled)
+    ):
         row.auto_live_confirmed_at = None
-    else:
-        row.auto_live_confirmed_at = None
-    if target_auto_enabled:
-        row.auto_trading_enabled = True
-        row.auto_trading_provider = target_provider
-    if target_mode != 'live' or not bool(row.live_trading_enabled):
-        row.auto_live_confirmed_at = None
+
+    db.commit()
+    db.refresh(row)
+    return _settings_payload(row)
+
+
+@router.post('/settings/live-order/enable')
+def enable_my_live_orders(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    row = _get_settings(db, user)
+    if str(row.trading_mode or 'paper').strip().lower() != 'live':
+        raise HTTPException(status_code=422, detail='live_trading_mode_required')
+    row.enabled = True
+    row.paper_trading_enabled = False
+    row.live_trading_enabled = True
+    # Manual live-order permission is deliberately not automatic-live authority.
+    row.auto_live_confirmed_at = None
+    db.commit()
+    db.refresh(row)
+    return _settings_payload(row)
+
+
+@router.post('/settings/live-order/disable')
+def disable_my_live_orders(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    row = _get_settings(db, user)
+    row.live_trading_enabled = False
+    row.auto_live_confirmed_at = None
+    db.commit()
+    db.refresh(row)
+    return _settings_payload(row)
+
+
+@router.post('/settings/auto-live/confirm')
+def confirm_my_auto_live_orders(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    row = _get_settings(db, user)
+    if str(row.trading_mode or 'paper').strip().lower() != 'live':
+        raise HTTPException(status_code=422, detail='auto_live_requires_live_mode')
+    if not bool(row.live_trading_enabled):
+        raise HTTPException(status_code=422, detail='live_trading_disabled')
+    if not bool(row.auto_trading_enabled):
+        raise HTTPException(status_code=422, detail='auto_trading_disabled')
+    if str(row.auto_trading_provider or '').strip().lower() != 'kis':
+        raise HTTPException(status_code=422, detail='auto_live_kis_provider_required')
+    row.auto_live_confirmed_at = datetime.now(UTC)
     db.commit()
     db.refresh(row)
     return _settings_payload(row)

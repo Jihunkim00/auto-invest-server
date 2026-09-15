@@ -20,7 +20,9 @@ from app.services.automation_profile_service import (
     AutomationProfileService,
     AutomationProfileValidationError,
 )
+from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
+from app.db.models import User
 from app.services.symbol_search_service import SymbolSearchService
 
 
@@ -34,6 +36,15 @@ symbol_router = APIRouter(prefix='/symbols', tags=['symbols'])
 
 def get_automation_profile_service() -> AutomationProfileService:
     return AutomationProfileService()
+
+
+def _admin_id(user: User | None) -> int | None:
+    return int(user.id) if user is not None else None
+
+
+def _get_admin_profile(service: AutomationProfileService, db: Session, profile_id: str, user: User | None):
+    admin_id = _admin_id(user)
+    return service.get_admin(db, profile_id, admin_id) if admin_id is not None else service.get_system(db, profile_id)
 
 
 def _service_error(exc: Exception) -> HTTPException:
@@ -50,8 +61,9 @@ def _service_error(exc: Exception) -> HTTPException:
 def list_profiles(
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
-    return service.list_profiles(db)
+    return service.list_profiles(db, admin_user_id=_admin_id(user))
 
 
 @router.post('', status_code=201)
@@ -59,21 +71,40 @@ def create_profile(
     payload: AutomationProfileWriteRequest,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.create(db, payload)
+        return service.create(db, payload, owner_user_id=_admin_id(user))
     except (AutomationProfileValidationError, AutomationProfileConflict) as exc:
         raise _service_error(exc) from exc
 
+
+@router.get('/{profile_id}/watchlist-diagnostics')
+def profile_watchlist_diagnostics(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
+):
+    try:
+        profile = service.serialize(_get_admin_profile(service, db, profile_id, user))
+        return AutomationProfileWatchlistService().latest(
+            db,
+            profile_id=int(profile['id']),
+            owner_user_id=profile.get('owner_user_id'),
+        )
+    except AutomationProfileNotFound as exc:
+        raise _service_error(exc) from exc
 
 @router.get('/{profile_id}/capital-state')
 def profile_capital_state(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        row = service.get(db, profile_id)
+        row = _get_admin_profile(service, db, profile_id, user)
         broker_cash = None
         if str(row.provider or '').lower() == 'kis' and str(row.market or '').upper() == 'KR':
             try:
@@ -86,7 +117,7 @@ def profile_capital_state(
                             break
             except Exception:
                 broker_cash = None
-        return {'capital_state': service.capital_state(db, profile_id, broker_orderable_cash_krw=broker_cash)}
+        return {'capital_state': service.capital_state(db, profile_id, broker_orderable_cash_krw=broker_cash, admin_user_id=_admin_id(user))}
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -95,9 +126,10 @@ def get_profile(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.serialize(service.get(db, profile_id))
+        return service.serialize(_get_admin_profile(service, db, profile_id, user))
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -108,9 +140,10 @@ def update_profile(
     payload: AutomationProfileWriteRequest,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.update(db, profile_id, payload)
+        return service.update(db, profile_id, payload, admin_user_id=_admin_id(user))
     except (AutomationProfileNotFound, AutomationProfileValidationError, AutomationProfileConflict) as exc:
         raise _service_error(exc) from exc
 
@@ -120,9 +153,10 @@ def archive_profile(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.archive(db, profile_id)
+        return service.archive(db, profile_id, admin_user_id=_admin_id(user))
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -132,9 +166,10 @@ def validate_profile(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.validate_profile(db, profile_id)
+        return service.validate_profile(db, profile_id, admin_user_id=_admin_id(user))
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -145,11 +180,12 @@ def activate_profile(
     payload: AutomationProfileActionRequest,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     if not payload.confirm_operator_ack:
         raise HTTPException(status_code=409, detail={'code': 'operator_ack_required'})
     try:
-        return service.activate(db, profile_id)
+        return service.activate(db, profile_id, admin_user_id=_admin_id(user))
     except (AutomationProfileNotFound, AutomationProfileValidationError, AutomationProfileConflict) as exc:
         raise _service_error(exc) from exc
 
@@ -160,11 +196,12 @@ def pause_profile(
     payload: AutomationProfileActionRequest,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     if not payload.confirm_operator_ack:
         raise HTTPException(status_code=409, detail={'code': 'operator_ack_required'})
     try:
-        return service.pause(db, profile_id)
+        return service.pause(db, profile_id, admin_user_id=_admin_id(user))
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -174,9 +211,10 @@ def profile_readiness(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.readiness(db, profile_id)
+        return service.readiness(db, profile_id, admin_user_id=_admin_id(user))
     except (AutomationProfileNotFound, AutomationProfileValidationError) as exc:
         raise _service_error(exc) from exc
 
@@ -186,9 +224,10 @@ def get_profile_watchlist(
     profile_id: str,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.watchlist(db, profile_id)
+        return service.watchlist(db, profile_id, admin_user_id=_admin_id(user))
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
@@ -199,12 +238,13 @@ def update_profile_watchlist(
     payload: dict[str, Any],
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
         universe = payload.get('universe', payload)
         if not isinstance(universe, dict):
             raise AutomationProfileValidationError([{'field': 'universe', 'message': 'must be an object'}])
-        return service.update_watchlist(db, profile_id, universe)
+        return service.update_watchlist(db, profile_id, universe, admin_user_id=_admin_id(user))
     except (AutomationProfileNotFound, AutomationProfileValidationError) as exc:
         raise _service_error(exc) from exc
 
@@ -215,9 +255,10 @@ def profile_sizing_preview(
     payload: AutomationProfileSizingRequest,
     db: Session = Depends(get_db),
     service: AutomationProfileService = Depends(get_automation_profile_service),
+    user: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     try:
-        return service.sizing(db, profile_id, payload.model_dump())
+        return service.sizing(db, profile_id, payload.model_dump(), admin_user_id=_admin_id(user))
     except (AutomationProfileNotFound, AutomationProfileValidationError) as exc:
         raise _service_error(exc) from exc
 

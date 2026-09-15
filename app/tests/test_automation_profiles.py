@@ -34,7 +34,7 @@ def test_profile_crud_archive_and_activation_does_not_touch_legacy_state(db_sess
     assert activated['status'] == 'active'
     assert activated['safety']['dry_run_changed'] is False
     assert activated['safety']['kill_switch_changed'] is False
-    row = service.get(db_session, str(created['id']))
+    row = service.get_system(db_session, str(created['id']))
     assert row.is_active is False
     assert row.enabled is True
     assert service.list_profiles(db_session)['active_profile']['profile_key'] == 'pr108-demo'
@@ -176,7 +176,7 @@ def test_profile_key_is_generated_when_omitted_and_stays_immutable(db_session):
         raise AssertionError('generated profile key unexpectedly changed')
 
 
-def test_kis_profile_runtime_uses_test4_hard_safety_floor(db_session):
+def test_kis_profile_runtime_preserves_valid_stop_loss_while_using_other_hard_safety_floors(db_session):
     service = AutomationProfileService()
     created = service.create(
         db_session,
@@ -195,7 +195,7 @@ def test_kis_profile_runtime_uses_test4_hard_safety_floor(db_session):
     assert effective['max_open_positions'] == 1
     assert effective['capital']['max_order_notional_krw'] == 1_000_000
     assert effective['capital']['cash_only'] is True
-    assert effective['exit']['stop_loss_pct'] == 2
+    assert effective['exit']['stop_loss_pct'] == 8
     assert effective['exit']['take_profit_pct'] == 10
 
     readiness = service.readiness(db_session, str(created['id']))

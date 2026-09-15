@@ -89,3 +89,26 @@ def test_favorite_analysis_slots_are_idempotent_per_owner_symbol_and_slot(db_ses
     assert db_session.query(UserWatchlistAnalysis).filter_by(user_id=user.id).count() == 1
     assert db_session.query(OrderLog).count() == 0
     assert db_session.query(SignalLog).count() == 0
+def test_removed_favorite_is_not_analyzed_at_later_slot_and_history_remains(db_session):
+    user = _user(db_session, 'pr129-favorite-removed')
+    favorite = UserWatchlist(user_id=user.id, symbol='005930', provider='kis', market='KR')
+    db_session.add(favorite)
+    db_session.commit()
+    analysis = FakeAnalysisService()
+    scheduler = UserWatchlistAnalysisSchedulerService(analysis_service=analysis)
+    first = scheduler.run_once(db_session, scheduler_slot='09:30', now=RUN_AT)
+
+    db_session.delete(favorite)
+    db_session.commit()
+    later = scheduler.run_once(db_session, scheduler_slot='14:30', now=RUN_AT)
+    history = db_session.query(UserWatchlistAnalysis).filter_by(user_id=user.id).all()
+
+    assert first['stored'] == 1
+    assert later['processed'] == 0
+    assert later['stored'] == 0
+    assert len(history) == 1
+    assert history[0].symbol == '005930'
+    assert analysis.calls == [('kis', '005930')]
+    assert db_session.query(OrderLog).count() == 0
+    assert db_session.query(SignalLog).count() == 0
+    assert later['analytics_only'] is True

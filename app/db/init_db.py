@@ -200,6 +200,19 @@ def _migrate_strategy_profile_owner_column_if_needed():
             {'admin_id': admin_id},
         )
 
+def _migrate_strategy_profile_create_idempotency_if_needed():
+    """Add owner-scoped create retry protection without touching old rows."""
+    if 'strategy_profiles' not in inspect(engine).get_table_names():
+        return
+    _add_column_if_missing('strategy_profiles', 'client_request_id', 'VARCHAR(120)')
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                'CREATE UNIQUE INDEX IF NOT EXISTS '
+                'ix_strategy_profiles_owner_client_request_id '
+                'ON strategy_profiles (owner_user_id, client_request_id)'
+            )
+        )
 
 def _create_trade_run_logs_optional_indexes_if_possible():
     inspector = inspect(engine)
@@ -2301,6 +2314,7 @@ def init_db():
     # StrategyProfile column through the ORM.
     _migrate_strategy_profile_columns_if_needed()
     _migrate_strategy_profile_owner_column_if_needed()
+    _migrate_strategy_profile_create_idempotency_if_needed()
     _create_agent_chat_strategy_actions_table_if_missing()
     _create_strategy_performance_snapshots_table_if_missing()
     _create_strategy_live_auto_buy_attempts_table_if_missing()

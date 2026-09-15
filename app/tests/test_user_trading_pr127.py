@@ -164,9 +164,12 @@ def test_user_trading_mode_has_exactly_two_modes_and_live_permission_requires_ex
     assert live.json()['live_trading_enabled'] is False
     assert live.json()['paper_trading_enabled'] is False
 
-    enabled = client.patch('/users/me/trading/settings', json={'live_trading_enabled': True})
+    rejected = client.patch('/users/me/trading/settings', json={'live_trading_enabled': True})
+    assert rejected.status_code == 422
+    enabled = client.post('/users/me/trading/settings/live-order/enable')
     assert enabled.status_code == 200
     assert enabled.json()['live_trading_enabled'] is True
+    assert enabled.json()['auto_live_confirmed_at'] is None
     assert client.patch('/users/me/trading/settings', json={'trading_mode': 'simulation'}).status_code == 422
 
     back_to_paper = client.patch('/users/me/trading/settings', json={'trading_mode': 'paper'})
@@ -348,3 +351,32 @@ def test_partially_filled_order_counts_once_toward_daily_trade_count(db_session)
         market='KR',
         as_of=as_of,
     ) == 1
+
+
+def test_auto_live_confirmation_is_a_separate_server_timestamped_action(db_session):
+    user = _user(db_session, 'pr129-auto-live-actions')
+    client = _client(db_session, user, _service())
+
+    selected = client.patch(
+        '/users/me/trading/settings',
+        json={'trading_mode': 'live', 'auto_trading_enabled': True, 'auto_trading_provider': 'kis'},
+    )
+    assert selected.status_code == 200
+    assert selected.json()['live_trading_enabled'] is False
+    assert selected.json()['auto_live_confirmed_at'] is None
+    assert client.patch(
+        '/users/me/trading/settings', json={'auto_live_confirmed': True},
+    ).status_code == 422
+    assert client.post('/users/me/trading/settings/auto-live/confirm').status_code == 422
+
+    armed_manual = client.post('/users/me/trading/settings/live-order/enable')
+    assert armed_manual.status_code == 200
+    assert armed_manual.json()['auto_live_confirmed_at'] is None
+    armed_auto = client.post('/users/me/trading/settings/auto-live/confirm')
+    assert armed_auto.status_code == 200
+    assert armed_auto.json()['auto_live_confirmed_at'] is not None
+
+    disarmed = client.post('/users/me/trading/settings/live-order/disable')
+    assert disarmed.status_code == 200
+    assert disarmed.json()['live_trading_enabled'] is False
+    assert disarmed.json()['auto_live_confirmed_at'] is None

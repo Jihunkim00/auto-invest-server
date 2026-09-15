@@ -1034,8 +1034,8 @@ class UserTradingExecutionService:
         if not bool(settings.auto_trading_enabled):
             return 'auto_trading_disabled'
         selected_provider = str(settings.auto_trading_provider or '').strip().lower()
-        if selected_provider != str(provider or '').strip().lower():
-            return 'auto_trading_provider_mismatch'
+        if selected_provider != 'kis' or str(provider or '').strip().lower() != 'kis':
+            return 'auto_live_kis_provider_required'
         if str(settings.trading_mode or PAPER_MODE).strip().lower() != LIVE_MODE:
             return 'automatic_live_requires_live_mode'
         if not bool(settings.live_trading_enabled):

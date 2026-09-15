@@ -380,6 +380,27 @@ class ApiClient {
     return _patchJsonBody('/users/me/trading/settings', body);
   }
 
+  Future<Map<String, dynamic>> enableUserLiveTrading() {
+    return _postJsonBody(
+      '/users/me/trading/settings/live-order/enable',
+      const <String, dynamic>{},
+    );
+  }
+
+  Future<Map<String, dynamic>> disableUserLiveTrading() {
+    return _postJsonBody(
+      '/users/me/trading/settings/live-order/disable',
+      const <String, dynamic>{},
+    );
+  }
+
+  Future<Map<String, dynamic>> confirmUserAutomaticLiveTrading() {
+    return _postJsonBody(
+      '/users/me/trading/settings/auto-live/confirm',
+      const <String, dynamic>{},
+    );
+  }
+
   Future<Map<String, dynamic>> runUserTradingOnce({
     required String provider,
     required String symbol,
@@ -777,6 +798,18 @@ class ApiClient {
     return state is Map
         ? Map<String, dynamic>.from(state)
         : <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> fetchAutomationProfileWatchlistDiagnostics(
+      int profileId) {
+    return _getJsonNoCache(
+        '/strategy-profiles/$profileId/watchlist-diagnostics');
+  }
+
+  Future<Map<String, dynamic>> fetchUserAutomationProfileWatchlistDiagnostics(
+      int profileId) {
+    return _getJsonNoCache(
+        '/users/me/automation-profiles/$profileId/watchlist-diagnostics');
   }
 
   Future<AutomationStrategyProfile> createAutomationProfile(
@@ -3123,6 +3156,15 @@ class ApiClient {
     return items
         .whereType<Map>()
         .map((item) => TradingLogItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<List<SignalLogItem>> fetchUserTradingSignals({int limit = 20}) async {
+    final j = await _getJsonNoCache('/users/me/trading/signals?limit=$limit');
+    final items = j['items'] as List<dynamic>? ?? [];
+    return items
+        .whereType<Map>()
+        .map((item) => SignalLogItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
   }
 

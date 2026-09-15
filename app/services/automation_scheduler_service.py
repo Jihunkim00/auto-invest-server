@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.db.database import SessionLocal
 from app.db.models import PositionLifecycle
 from app.schemas.strategy_dry_run_auto_buy import ProfileAwareDryRunAutoBuyRequest
+from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
 )
@@ -1103,9 +1104,23 @@ class AutomationSchedulerService(SchedulerService):
                 profile,
                 now=now_kst,
             )
+            # Raw market data may be common, but ranked selection is owned by
+            # this exact Admin/system profile and never shared with user rows.
+            profile_watchlist = AutomationProfileWatchlistService().build(
+                db,
+                profile=profile,
+                owner_user_id=(
+                    int(profile.get('owner_user_id'))
+                    if profile.get('owner_user_id') is not None
+                    else None
+                ),
+                scheduler_slot=str((context or {}).get('analysis_slot') or 'refresh'),
+                now=now_kst,
+            )
             result = {
                 **result,
                 **self._automation_watchlist_metadata(now_kst, context),
+                'automation_profile_watchlist_snapshot': profile_watchlist.get('snapshot'),
             }
             self._record_automation_watchlist_status(result)
             return result

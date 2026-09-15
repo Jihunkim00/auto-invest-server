@@ -6,6 +6,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -227,6 +228,69 @@ class WatchlistSnapshotItem(Base):
     quant_reason = Column(Text, nullable=True)
     captured_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
+
+class AutomationProfileWatchlistSnapshot(Base):
+    """Ranked automation universe, isolated by automation-profile ownership."""
+
+    __tablename__ = 'automation_profile_watchlist_snapshots'
+    __table_args__ = (
+        UniqueConstraint(
+            'profile_id', 'snapshot_date', 'scheduler_slot',
+            name='uq_profile_watchlist_snapshot_slot',
+        ),
+        Index(
+            'ix_profile_watchlist_snapshot_owner_created',
+            'owner_user_id', 'profile_id', 'generated_at',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    profile_id = Column(Integer, ForeignKey('strategy_profiles.id'), nullable=False, index=True)
+    # NULL denotes a system/Admin profile; regular-user rows always carry their owner.
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    provider = Column(String(20), nullable=False, index=True)
+    market = Column(String(10), nullable=False, index=True)
+    snapshot_date = Column(String(10), nullable=False, index=True)
+    scheduler_slot = Column(String(10), nullable=False, index=True)
+    source_run_id = Column(Integer, ForeignKey('watchlist_snapshot_runs.id'), nullable=True, index=True)
+    generated_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    source_count = Column(Integer, nullable=False, default=0)
+    eligible_count = Column(Integer, nullable=False, default=0)
+    selected_count = Column(Integer, nullable=False, default=0)
+    effective_entry_budget_krw = Column(Float, nullable=False, default=0.0)
+    effective_max_candidate_price = Column(Float, nullable=False, default=0.0)
+    diagnostics_json = Column(Text, nullable=False, default='{}')
+    status = Column(String(20), nullable=False, default='success', index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AutomationProfileWatchlistItem(Base):
+    __tablename__ = 'automation_profile_watchlist_items'
+    __table_args__ = (
+        UniqueConstraint('snapshot_id', 'symbol', name='uq_profile_watchlist_item_symbol'),
+        Index('ix_profile_watchlist_item_snapshot_rank', 'snapshot_id', 'rank'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_id = Column(
+        Integer,
+        ForeignKey('automation_profile_watchlist_snapshots.id'),
+        nullable=False,
+        index=True,
+    )
+    symbol = Column(String(20), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    market = Column(String(10), nullable=False, index=True)
+    current_price = Column(Float, nullable=True)
+    quant_buy_score = Column(Float, nullable=False, default=0.0)
+    quant_sell_score = Column(Float, nullable=False, default=0.0)
+    rank = Column(Integer, nullable=False, index=True)
+    quant_rank = Column(Integer, nullable=False, index=True)
+    ai_rank = Column(Integer, nullable=True, index=True)
+    eligible = Column(Boolean, nullable=False, default=True)
+    exclusion_reason = Column(String(120), nullable=True)
+    indicators_json = Column(Text, nullable=False, default='{}')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 class BrokerAuthToken(Base):
     __tablename__ = "broker_auth_tokens"
@@ -659,6 +723,17 @@ class RuntimeSetting(Base):
 
 class StrategyProfile(Base):
     __tablename__ = "strategy_profiles"
+    __table_args__ = (
+        # A create retry is idempotent only within the owning user's scope.
+        # Nullable legacy/admin rows remain independent under SQLite and
+        # PostgreSQL unique-index NULL semantics.
+        Index(
+            'ix_strategy_profiles_owner_client_request_id',
+            'owner_user_id',
+            'client_request_id',
+            unique=True,
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     profile_name = Column(String(40), nullable=False, unique=True, index=True)
@@ -694,6 +769,7 @@ class StrategyProfile(Base):
     enabled = Column(Boolean, nullable=True, default=False, index=True)
     custom_status = Column(String(20), nullable=True, index=True)
     settings_json = Column(Text, nullable=True)
+    client_request_id = Column(String(120), nullable=True)
     owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

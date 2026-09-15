@@ -329,6 +329,9 @@ List<Candidate> _latestCandidates(DashboardController controller) {
     snapshots.map((snapshot) => snapshot.candidate),
   );
   if (recent.isNotEmpty) return recent;
+  // Once the owner-scoped activity request completed, an empty feed is an
+  // explicit no-result state; do not resurrect an unrelated/stale run result.
+  if (controller.homeRecentActivityLoaded) return const [];
   return _candidates(controller.runResult);
 }
 
@@ -466,7 +469,7 @@ List<_HomeDecisionSnapshot> _matchingSnapshots(
 
 Candidate? _candidateFromRun(TradingLogItem run) {
   final symbol = run.symbol.trim();
-  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN') return null;
+  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN' || symbol.toUpperCase() == 'NONE') return null;
   final action = run.action.trim().isEmpty ? 'hold' : run.action.trim();
   return Candidate(
     symbol: symbol,
@@ -487,7 +490,7 @@ Candidate? _candidateFromRun(TradingLogItem run) {
 
 Candidate? _candidateFromSignal(SignalLogItem signal) {
   final symbol = signal.symbol.trim();
-  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN') return null;
+  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN' || symbol.toUpperCase() == 'NONE') return null;
   final action = signal.action.trim().isEmpty ? 'hold' : signal.action.trim();
   return Candidate(
     symbol: symbol,

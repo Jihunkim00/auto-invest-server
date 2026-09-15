@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import RuntimeSetting, StrategyProfile, StrategyProfileAudit
+from app.db.models import RuntimeSetting, StrategyProfile, StrategyProfileAudit, User
 from app.schemas.strategy import StrategyProfilePayload
 from app.services.automation_profile_safety import effective_profile_settings
 
@@ -161,12 +161,23 @@ class StrategyProfileService:
         active_key = str(getattr(runtime, "active_automation_profile_key", None) or "").strip().lower()
         if not active_key:
             return None
-        return (
+        rows = (
             db.query(StrategyProfile)
             .filter(StrategyProfile.profile_key == active_key)
             .filter(StrategyProfile.enabled == True)
-            .first()
+            .order_by(StrategyProfile.id.asc())
+            .all()
         )
+        admin_ids = {
+            int(value)
+            for (value,) in db.query(User.id)
+            .filter(User.role == 'admin', User.enabled.is_(True))
+            .all()
+        }
+        for row in rows:
+            if row.owner_user_id is None or int(row.owner_user_id) in admin_ids:
+                return row
+        return None
 
     def active_profile(
         self,
@@ -184,6 +195,7 @@ class StrategyProfileService:
         row = (
             db.query(StrategyProfile)
             .filter(StrategyProfile.is_active == True)
+            .filter(StrategyProfile.owner_user_id.is_(None))
             .order_by(StrategyProfile.id.asc())
             .first()
         )

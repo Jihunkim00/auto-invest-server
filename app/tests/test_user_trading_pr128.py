@@ -226,10 +226,12 @@ def test_live_mode_permission_confirmation_and_user_kill_switch_are_independent(
     assert disabled.json()["reason"] == "live_trading_disabled"
     assert calls == []
 
-    enabled = client.patch(
+    rejected = client.patch(
         "/users/me/trading/settings",
         json={"live_trading_enabled": True},
     )
+    assert rejected.status_code == 422
+    enabled = client.post('/users/me/trading/settings/live-order/enable')
     assert enabled.status_code == 200
     blocked_by_kill = client.post(
         "/users/me/trading/run-once",

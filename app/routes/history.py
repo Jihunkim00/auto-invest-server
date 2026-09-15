@@ -4,10 +4,11 @@ import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import MarketAnalysis, OrderLog, SignalLog, TradeRunLog
+from app.db.models import MarketAnalysis, OrderLog, SignalLog, TradeRunLog, User
 from app.services.gpt_risk_context import (
     build_gpt_context,
     gpt_context_from_market_analysis,
@@ -22,6 +23,12 @@ from app.services.kis_order_audit import (
 )
 
 router = APIRouter(tags=["history"])
+
+
+def _admin_scope_filter(model: Any, user: User | None):
+    if user is None:
+        return model.owner_user_id.is_(None)
+    return or_(model.owner_user_id.is_(None), model.owner_user_id == int(user.id))
 
 
 def _parse_json_object(raw_value: str | None) -> dict[str, Any]:
@@ -693,9 +700,9 @@ def get_recent_runs(
     symbol: str | None = Query(default=None, min_length=1),
     trigger_source: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
-    query = db.query(TradeRunLog)
+    query = db.query(TradeRunLog).filter(_admin_scope_filter(TradeRunLog, _admin))
     if symbol:
         query = query.filter(TradeRunLog.symbol == symbol.upper())
     if trigger_source:
@@ -709,7 +716,7 @@ def get_recent_runs(
 def get_recent_system_automation_runs(
     limit: int = Query(default=20, ge=1, le=200),
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
     """Home-card feed: system-owned canonical automation only.
 
@@ -719,7 +726,8 @@ def get_recent_system_automation_runs(
     rows = (
         db.query(TradeRunLog)
         .filter(
-            TradeRunLog.owner_user_id.is_(None),
+            _admin_scope_filter(TradeRunLog, _admin),
+            TradeRunLog.symbol.notin_(['', 'NONE', 'UNKNOWN']),
             TradeRunLog.trigger_source == 'automation_scheduler',
             TradeRunLog.mode == 'automation_scheduler_profile_analysis',
         )
@@ -727,7 +735,7 @@ def get_recent_system_automation_runs(
         .limit(limit)
         .all()
     )
-    return {'items': [{**_serialize_run(row), 'owner_user_id': None} for row in rows]}
+    return {'items': [{**_serialize_run(row), 'owner_user_id': row.owner_user_id} for row in rows]}
 
 
 @router.get("/orders/recent")
@@ -735,9 +743,9 @@ def get_recent_orders(
     limit: int = Query(default=20, ge=1, le=200),
     symbol: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
-    query = db.query(OrderLog)
+    query = db.query(OrderLog).filter(_admin_scope_filter(OrderLog, _admin))
     if symbol:
         query = query.filter(OrderLog.symbol == symbol.upper())
 
@@ -750,9 +758,9 @@ def get_recent_signals(
     limit: int = Query(default=20, ge=1, le=200),
     symbol: str | None = Query(default=None, min_length=1),
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
-    query = db.query(SignalLog)
+    query = db.query(SignalLog).filter(_admin_scope_filter(SignalLog, _admin))
     if symbol:
         query = query.filter(SignalLog.symbol == symbol.upper())
 
@@ -763,19 +771,19 @@ def get_recent_signals(
 @router.get("/logs/summary")
 def get_logs_summary(
     db: Session = Depends(get_db),
-    _admin=Depends(require_admin_or_uninitialized_legacy_access),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
 ):
-    latest_run = db.query(TradeRunLog).order_by(TradeRunLog.created_at.desc()).first()
-    latest_order = db.query(OrderLog).order_by(OrderLog.created_at.desc()).first()
-    latest_signal = db.query(SignalLog).order_by(SignalLog.created_at.desc()).first()
+    latest_run = db.query(TradeRunLog).filter(_admin_scope_filter(TradeRunLog, _admin)).order_by(TradeRunLog.created_at.desc()).first()
+    latest_order = db.query(OrderLog).filter(_admin_scope_filter(OrderLog, _admin)).order_by(OrderLog.created_at.desc()).first()
+    latest_signal = db.query(SignalLog).filter(_admin_scope_filter(SignalLog, _admin)).order_by(SignalLog.created_at.desc()).first()
 
     return {
         "latest_run": _serialize_run(latest_run) if latest_run else None,
         "latest_order": _serialize_order(latest_order) if latest_order else None,
         "latest_signal": _serialize_signal(latest_signal, db) if latest_signal else None,
         "counts": {
-            "runs": db.query(TradeRunLog).count(),
-            "orders": db.query(OrderLog).count(),
-            "signals": db.query(SignalLog).count(),
+            "runs": db.query(TradeRunLog).filter(_admin_scope_filter(TradeRunLog, _admin)).count(),
+            "orders": db.query(OrderLog).filter(_admin_scope_filter(OrderLog, _admin)).count(),
+            "signals": db.query(SignalLog).filter(_admin_scope_filter(SignalLog, _admin)).count(),
         },
     }

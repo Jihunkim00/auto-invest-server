@@ -832,16 +832,21 @@ class DashboardController extends ChangeNotifier {
   /// Regular-user Home calls the server-owned route; it never receives the
   /// global operations feed or another account's activity.
   Future<void> loadUserHomeRecentActivity() async {
+    var hadError = false;
+    // User Home never reuses the Admin operations signal feed.
+    automationRecentSignals = const [];
     try {
-      final runs = await apiClient.fetchUserTradingRuns(limit: 3);
+      final runs = await apiClient.fetchUserTradingRuns(limit: 50);
       automationRecentRuns = runs;
       recentRuns = runs.map(_tradingRunFromLog).toList();
-      homeRecentActivityError = null;
     } catch (_) {
       automationRecentRuns = const [];
       recentRuns = const [];
-      homeRecentActivityError = 'User recent activity unavailable.';
+      hadError = true;
     }
+
+    homeRecentActivityError =
+        hadError ? 'User recent activity unavailable.' : null;
     homeRecentActivityLoaded = true;
     notifyListeners();
   }

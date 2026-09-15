@@ -468,6 +468,8 @@ def test_missing_owned_profile_skips_before_account_candidate_analysis_or_signal
 
     assert result['items'][0]['result'] == 'skipped'
     assert result['items'][0]['reason'] == 'automation_profile_missing'
+    assert result['items'][0]['signal_id'] is None
+    assert result['items'][0]['order_id'] is None
     assert account.calls == []
     assert analysis.calls == []
     assert broker.buy_calls == []
@@ -476,8 +478,34 @@ def test_missing_owned_profile_skips_before_account_candidate_analysis_or_signal
     assert db_session.query(OrderLog).filter_by(owner_user_id=user.id).count() == 0
     run = db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).one()
     assert run.reason == 'automation_profile_missing'
+    assert run.order_id is None
     assert run.signal_id is None
 
+
+def test_kis_scheduler_honors_the_selected_user_profile_analysis_slots(db_session):
+    user = _user(db_session, 'pr129-profile-slots')
+    _configure_user(db_session, user)
+    profile = AutomationProfileService().selected_owned_profile_schedule(
+        db_session, owner_user_id=user.id, now=RUN_AT,
+    )['profile']
+    AutomationProfileService().update(
+        db_session,
+        str(profile['id']),
+        AutomationProfileWriteRequest(entry={'analysis_times': ['10:00']}),
+        owner_user_id=user.id,
+    )
+    scheduler, account, analysis, broker, kis_client = _harness()
+
+    skipped = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=RUN_AT,
+    )
+
+    assert skipped['completed'] == 1
+    assert skipped['items'][0]['reason'] == 'profile_slot_not_due'
+    assert account.calls == []
+    assert analysis.calls == []
+    assert broker.buy_calls == []
+    assert kis_client.buy_calls == []
 
 def test_admin_null_owner_profile_never_satisfies_regular_user_profile_gate(db_session):
     user = _user(db_session, 'pr129-no-admin-fallback')
@@ -531,10 +559,22 @@ def test_personal_watchlist_cannot_override_shared_auto_candidate(db_session):
     ])
     db_session.commit()
 
+    profile = AutomationProfileService().selected_owned_profile_schedule(
+        db_session, owner_user_id=user.id, now=RUN_AT,
+    )['profile']
+    profile['effective_settings']['capital']['initial_budget_krw'] = 1000.0
+    profile['effective_settings']['capital']['max_order_notional_krw'] = 1000.0
+    profile['effective_settings']['universe']['min_price_krw'] = 1.0
     candidate = UserAutoTradingCandidateService().select_candidate(
-        db_session, user=user, provider='kis', now=RUN_AT,
+        db_session,
+        user=user,
+        provider='kis',
+        profile=profile,
+        scheduler_slot='09:10',
+        now=RUN_AT,
     )
 
     assert candidate is not None
     assert candidate['symbol'] == '086790'
-    assert candidate['candidate_source'] == 'shared_watchlist_snapshot'
+    assert candidate['candidate_source'] == 'automation_profile_watchlist_snapshot'
+    assert candidate['automation_profile_id'] == profile['id']

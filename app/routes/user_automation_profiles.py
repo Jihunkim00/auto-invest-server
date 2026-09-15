@@ -19,6 +19,7 @@ from app.services.automation_profile_service import (
     AutomationProfileService,
     AutomationProfileValidationError,
 )
+from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 
 
 router = APIRouter(
@@ -80,6 +81,23 @@ def get_my_profile(
     except AutomationProfileNotFound as exc:
         raise _service_error(exc) from exc
 
+
+@router.get('/{profile_id}/watchlist-diagnostics')
+def my_profile_watchlist_diagnostics(
+    profile_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+    service: AutomationProfileService = Depends(get_user_automation_profile_service),
+):
+    try:
+        profile = service.serialize(service.get_owned(db, profile_id, int(user.id)))
+        return AutomationProfileWatchlistService().latest(
+            db,
+            profile_id=int(profile['id']),
+            owner_user_id=int(user.id),
+        )
+    except AutomationProfileNotFound as exc:
+        raise _service_error(exc) from exc
 
 @router.get('/{profile_id}/capital-state')
 def my_profile_capital_state(

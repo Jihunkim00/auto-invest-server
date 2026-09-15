@@ -14,11 +14,10 @@ from app.db.models import (
     User,
     UserAutoTradingSlotClaim,
     UserTradingSettings,
-    WatchlistSnapshotItem,
-    WatchlistSnapshotRun,
 )
 from app.services.market_session_service import MarketSessionService
 from app.services.automation_profile_service import AutomationProfileService
+from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
 from app.services.user_trading_execution_service import UserTradingExecutionService
 
@@ -40,7 +39,10 @@ _ACTIVE_ORDER_STATUSES = {
 
 
 class UserAutoTradingCandidateService:
-    """Select from the shared market snapshot, never a personal watchlist."""
+    """Select only from the active profile's persisted ranked universe."""
+
+    def __init__(self, *, profile_watchlists: AutomationProfileWatchlistService | None = None) -> None:
+        self.profile_watchlists = profile_watchlists or AutomationProfileWatchlistService()
 
     def select_candidate(
         self,
@@ -48,54 +50,20 @@ class UserAutoTradingCandidateService:
         *,
         user: User,
         provider: str,
+        profile: dict[str, Any] | None = None,
+        scheduler_slot: str = 'manual',
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
         normalized_provider = str(provider or '').strip().lower()
-        market = _SCOPE[normalized_provider][0]
-        if normalized_provider != 'kis':
-            # There is no shared US snapshot in the canonical Admin pipeline.
-            # Personal favorites cannot substitute for an automation universe.
+        if normalized_provider != 'kis' or not profile:
             return None
-        snapshot = (
-            db.query(WatchlistSnapshotRun)
-            .filter(
-                WatchlistSnapshotRun.market == market,
-                WatchlistSnapshotRun.status == 'success',
-            )
-            .order_by(
-                WatchlistSnapshotRun.completed_at.desc(),
-                WatchlistSnapshotRun.id.desc(),
-            )
-            .first()
+        return self.profile_watchlists.select_candidate(
+            db,
+            profile=profile,
+            owner_user_id=int(user.id),
+            scheduler_slot=scheduler_slot,
+            now=now,
         )
-        if snapshot is None:
-            return None
-        rows = [
-            {
-                'symbol': str(row.symbol or '').strip().upper(),
-                'name': row.name,
-                'current_price': row.current_price,
-                'quant_buy_score': row.quant_buy_score,
-                'quant_sell_score': row.quant_sell_score,
-                'indicator_payload': _json_object(row.indicators_json),
-                'candidate_source': 'shared_watchlist_snapshot',
-                'captured_at': row.captured_at.isoformat() if row.captured_at else None,
-            }
-            for row in (
-                db.query(WatchlistSnapshotItem)
-                .filter(WatchlistSnapshotItem.run_id == int(snapshot.id))
-                .all()
-            )
-            if str(row.symbol or '').strip()
-        ]
-        # This is the same score-first ordering used by the shared snapshot
-        # selection pipeline: buy score, sell score, then stable symbol tie-break.
-        rows.sort(key=lambda row: (
-            -_number(row.get('final_buy_score') or row.get('quant_buy_score')),
-            _number(row.get('quant_sell_score')),
-            str(row.get('symbol') or ''),
-        ))
-        return rows[0] if rows else None
 
 
 class UserPositionManagementService:
@@ -108,6 +76,7 @@ class UserPositionManagementService:
         snapshot: dict[str, Any],
         now: datetime,
         scheduler_slot: str,
+        profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         positions = [
             item for item in (snapshot.get('positions') or [])
@@ -141,9 +110,15 @@ class UserPositionManagementService:
             or position.get('average_price')
             or position.get('pchs_avg_pric'),
         }
+        exit_settings = _profile_exit_settings(profile)
         threshold_reasons, diagnostics = position_exit_threshold_reasons(
             normalized_position,
+            stop_loss_threshold=exit_settings.get('stop_loss_pct'),
+            take_profit_threshold=exit_settings.get('take_profit_pct'),
         )
+        diagnostics['profile_stop_loss_pct'] = exit_settings.get('stop_loss_pct')
+        diagnostics['profile_take_profit_pct'] = exit_settings.get('take_profit_pct')
+        diagnostics['threshold_source'] = 'active_automation_profile' if profile else 'legacy_defaults'
         if 'stop_loss_triggered' in threshold_reasons:
             return {
                 'action': 'sell',
@@ -382,6 +357,25 @@ class UserAutoTradingSchedulerService:
                 scheduler_slot=scheduler_slot,
                 run_key=run_key,
             )
+        if provider == 'kis':
+            effective = profile.get('effective_settings')
+            effective = effective if isinstance(effective, dict) else profile.get('settings')
+            entry = effective.get('entry') if isinstance(effective, dict) else {}
+            profile_slots = {
+                str(value) for value in (entry.get('analysis_times') or [])
+            } if isinstance(entry, dict) else set()
+            if profile_slots and str(scheduler_slot) not in profile_slots:
+                return self._record_result(
+                    db,
+                    user=user,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    run_key=run_key,
+                    result='SKIPPED',
+                    reason='profile_slot_not_due',
+                    symbol='NONE',
+                )
         gate_reason = self._live_gate_reason(settings, provider)
         if gate_reason:
             return self._record_result(
@@ -416,6 +410,7 @@ class UserAutoTradingSchedulerService:
             snapshot=snapshot,
             scheduler_slot=scheduler_slot,
             now=now,
+            profile=profile,
         )
         action = str(position_result.get('action') or '').strip().lower()
         if action == 'sell':
@@ -453,6 +448,8 @@ class UserAutoTradingSchedulerService:
             db,
             user=user,
             provider=provider,
+            profile=profile,
+            scheduler_slot=scheduler_slot,
             now=now,
         )
         if not candidate or not candidate.get('symbol'):
@@ -482,11 +479,26 @@ class UserAutoTradingSchedulerService:
         )
         return {**result, 'candidate': candidate}
 
-    def _select_candidate(self, db: Session, *, user: User, provider: str, now: datetime):
+    def _select_candidate(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        profile: dict[str, Any],
+        scheduler_slot: str,
+        now: datetime,
+    ):
         selector = self.candidate_service
         if callable(selector):
-            return selector(db, user=user, provider=provider, now=now)
-        return selector.select_candidate(db, user=user, provider=provider, now=now)
+            return selector(
+                db, user=user, provider=provider, profile=profile,
+                scheduler_slot=scheduler_slot, now=now,
+            )
+        return selector.select_candidate(
+            db, user=user, provider=provider, profile=profile,
+            scheduler_slot=scheduler_slot, now=now,
+        )
 
     def _manage_positions(self, db: Session, **kwargs: Any) -> dict[str, Any]:
         manager = self.position_management_service
@@ -588,6 +600,11 @@ class UserAutoTradingSchedulerService:
             return None
         if not bool(settings.live_trading_enabled):
             return 'live_trading_disabled'
+        if (
+            str(provider or '').strip().lower() != 'kis'
+            or str(settings.auto_trading_provider or '').strip().lower() != 'kis'
+        ):
+            return 'auto_live_kis_provider_required'
         if settings.auto_live_confirmed_at is None:
             return 'auto_live_confirmation_required'
         if bool(settings.kill_switch):
@@ -754,6 +771,18 @@ class UserAutoTradingSchedulerService:
             reason='user_scheduler_processing_failed',
             symbol='NONE',
         )
+
+
+def _profile_exit_settings(profile: dict[str, Any] | None) -> dict[str, float | None]:
+    source = profile if isinstance(profile, dict) else {}
+    settings = source.get('effective_settings')
+    settings = settings if isinstance(settings, dict) else source.get('settings')
+    settings = settings if isinstance(settings, dict) else {}
+    exit_settings = settings.get('exit') if isinstance(settings.get('exit'), dict) else {}
+    return {
+        'stop_loss_pct': _number(exit_settings.get('stop_loss_pct')) or None,
+        'take_profit_pct': _number(exit_settings.get('take_profit_pct')) or None,
+    }
 
 
 def _json_object(raw: str | None) -> dict[str, Any]:

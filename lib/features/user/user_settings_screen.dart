@@ -470,48 +470,34 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
       _error = null;
     });
     try {
-      var confirmAutoLive = false;
-      if (_mode == 'live' &&
-          _liveTradingEnabled &&
-          _autoTradingEnabled &&
-          !_autoLiveConfirmed) {
-        final confirmed = await _confirmAutoLive();
-        if (!confirmed) {
-          if (mounted) setState(() => _saving = false);
-          return;
-        }
-        _autoLiveConfirmed = true;
-        confirmAutoLive = true;
-      }
+      // Settings PATCH updates configuration only. Both live authorities use
+      // their dedicated server-side confirmation actions.
       await widget.apiClient.updateUserTradingSettings(
         tradingMode: _mode,
         maxDailyTrades: int.tryParse(_dailyTrades.text.trim()),
         maxDailyLossPct: double.tryParse(_dailyLoss.text.trim()),
         maxPositionPct: double.tryParse(_positionPct.text.trim()),
         maxOpenPositions: int.tryParse(_openPositions.text.trim()),
-        liveTradingEnabled: _liveTradingEnabled,
         killSwitch: _killSwitch,
         autoTradingEnabled: _autoTradingEnabled,
         autoTradingProvider: _autoTradingEnabled ? _autoTradingProvider : null,
-        autoLiveConfirmed: _autoLiveConfirmed,
-        confirmAutoLive: confirmAutoLive,
       );
       final reloaded = await _load();
       if (!mounted) return;
       setState(() {
         _saving = false;
-        if (!reloaded) _error = '거래 설정 상태를 다시 불러오지 못했습니다.';
+        if (!reloaded) _error = 'Unable to reload trading settings.';
       });
       if (!reloaded) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('거래 설정이 저장되었습니다.')),
+        const SnackBar(content: Text('Trading settings saved.')),
       );
-    } catch (error) {
+    } catch (_) {
       await _load();
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = '거래 설정을 저장하지 못했습니다.';
+        _error = 'Unable to save trading settings.';
       });
     }
   }
@@ -542,33 +528,75 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
 
   Future<void> _toggleLiveTrading(bool value) async {
     if (!value) {
-      setState(() {
-        _liveTradingEnabled = false;
-        _autoLiveConfirmed = false;
-      });
+      setState(() => _saving = true);
+      try {
+        await widget.apiClient.disableUserLiveTrading();
+        await _load();
+      } catch (_) {
+        await _load();
+        if (mounted) setState(() => _error = 'Unable to disable live orders.');
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
       return;
     }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('실거래 주문 사용'),
+        key: const ValueKey('user-live-enable-dialog'),
+        title: const Text('Live order permission'),
         content: const Text(
-          '실거래를 활성화하면 실제 자금으로 주문이 전송될 수 있습니다.\n계속하시겠습니까?',
+          'Enable manual live orders? Automatic live trading remains disabled until separately confirmed.',
         ),
         actions: [
           TextButton(
+            key: const ValueKey('user-live-enable-cancel'),
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('취소'),
+            child: const Text('Cancel'),
           ),
           FilledButton(
+            key: const ValueKey('user-live-enable-confirm'),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('실거래 활성화'),
+            child: const Text('Enable'),
           ),
         ],
       ),
     );
-    if (confirmed == true && mounted) {
-      setState(() => _liveTradingEnabled = true);
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      // Persist the live mode choice first; the endpoint is the sole grant.
+      await widget.apiClient.updateUserTradingSettings(tradingMode: 'live');
+      await widget.apiClient.enableUserLiveTrading();
+      await _load();
+    } catch (_) {
+      await _load();
+      if (mounted) setState(() => _error = 'Unable to enable live orders.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _armAutomaticLiveTrading() async {
+    if (_saving ||
+        _mode != 'live' ||
+        !_liveTradingEnabled ||
+        !_autoTradingEnabled) {
+      return;
+    }
+    final confirmed = await _confirmAutoLive();
+    if (!confirmed || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await widget.apiClient.confirmUserAutomaticLiveTrading();
+      await _load();
+    } catch (_) {
+      await _load();
+      if (mounted) {
+        setState(() => _error = 'Unable to authorize automatic live trading.');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -682,17 +710,34 @@ class _UserTradingSettingsCardState extends State<_UserTradingSettingsCard> {
                               }
                             },
                     ),
-                  if (_autoTradingEnabled && _mode == 'live')
+                  if (_autoTradingEnabled && _mode == 'live') ...[
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: Text(
                         _autoLiveConfirmed
-                            ? '자동 실거래 확인됨'
-                            : '저장 시 자동 실거래 확인이 필요합니다.',
+                            ? 'Automatic live trading authorized'
+                            : 'Automatic live trading needs final confirmation',
                         key: const ValueKey('user-auto-live-status'),
                         style: const TextStyle(color: Colors.white70),
                       ),
                     ),
+                    const SizedBox(height: 6),
+                    OutlinedButton.icon(
+                      key: const ValueKey('user-auto-live-arm'),
+                      onPressed: _saving ||
+                              !_liveTradingEnabled ||
+                              _autoTradingProvider != 'kis' ||
+                              _autoLiveConfirmed
+                          ? null
+                          : _armAutomaticLiveTrading,
+                      icon: const Icon(Icons.verified_user_outlined),
+                      label: Text(
+                        _autoLiveConfirmed
+                            ? 'Automatic live authorized'
+                            : 'Confirm automatic live',
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   const Text(
                     '리스크 설정',

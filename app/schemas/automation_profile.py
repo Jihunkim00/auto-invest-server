@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic import field_validator
 
 
 class AutomationProfileWriteRequest(BaseModel):
@@ -14,6 +15,7 @@ class AutomationProfileWriteRequest(BaseModel):
     market: str | None = Field(default=None, max_length=10)
     enabled: bool | None = None
     status: str | None = Field(default=None, max_length=20)
+    client_request_id: str | None = Field(default=None, min_length=1, max_length=120)
     capital: dict[str, Any] = Field(default_factory=dict)
     universe: dict[str, Any] = Field(default_factory=dict)
     entry: dict[str, Any] = Field(default_factory=dict)
@@ -21,6 +23,14 @@ class AutomationProfileWriteRequest(BaseModel):
     exit: dict[str, Any] = Field(default_factory=dict)
     operation: dict[str, Any] = Field(default_factory=dict)
     settings: dict[str, Any] = Field(default_factory=dict)
+    @field_validator('client_request_id', mode='before')
+    @classmethod
+    def normalize_client_request_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
+
 
 
 class AutomationProfileActionRequest(BaseModel):
