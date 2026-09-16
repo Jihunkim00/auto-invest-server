@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from app.db.models import (
+    AutomationProfileWatchlistSnapshot,
     OrderLog,
     SignalLog,
     TradeRunLog,
@@ -227,6 +228,61 @@ def _configure_user(
         profile.activate(db, str(created['id']), owner_user_id=user.id)
 
 
+def _set_profile_schedule(
+    db,
+    user,
+    times,
+    *,
+    fixed_budget=None,
+    max_order_notional=None,
+    no_new_entry_after=None,
+):
+    profiles = AutomationProfileService()
+    current = profiles.selected_owned_profile_schedule(
+        db, owner_user_id=user.id, now=RUN_AT,
+    )['profile']
+    values = {'entry': {'analysis_times': list(times)}}
+    if no_new_entry_after is not None:
+        values['entry']['no_new_entry_after'] = no_new_entry_after
+    if fixed_budget is not None:
+        values['capital'] = {
+            'sizing_mode': 'fixed_budget',
+            'fixed_budget': fixed_budget,
+            'initial_budget_krw': fixed_budget,
+            'max_order_notional_krw': max_order_notional or fixed_budget,
+        }
+    profiles.update(
+        db,
+        str(current['id']),
+        AutomationProfileWriteRequest(**values),
+        owner_user_id=user.id,
+    )
+
+
+def _raw_profile_snapshot(db):
+    raw = WatchlistSnapshotRun(
+        market='KR',
+        started_at=RUN_AT,
+        completed_at=RUN_AT,
+        status='success',
+    )
+    db.add(raw)
+    db.commit()
+    db.add(WatchlistSnapshotItem(
+        run_id=raw.id,
+        symbol='005930',
+        name='Profile candidate',
+        market='KOSPI',
+        current_price=100.0,
+        quant_buy_score=90.0,
+        quant_sell_score=5.0,
+        indicators_json='{}',
+        captured_at=RUN_AT,
+    ))
+    db.commit()
+    return raw
+
+
 def _harness(*, snapshots=None, fail_user_ids=None, fail_symbols=None):
     account = FakeAccountService(snapshots=snapshots, fail_user_ids=fail_user_ids)
     credentials = FakeCredentialService()
@@ -269,6 +325,81 @@ def test_dispatcher_jobs_are_provider_scoped_and_have_separate_ids(db_session):
     assert len({job['job_id'] for job in jobs}) == len(jobs)
     assert all(not job['job_id'].startswith('automation_scheduler') for job in jobs)
 
+
+def test_user_dispatcher_slots_are_the_exact_owner_union_not_admin_schedule(db_session):
+    admin = _user(db_session, 'pr129-slot-admin', role='admin')
+    test01 = _user(db_session, 'pr129-slot-test01')
+    test02 = _user(db_session, 'pr129-slot-test02')
+    _configure_user(db_session, admin, provider='kis')
+    _configure_user(db_session, test01, provider='kis')
+    _configure_user(db_session, test02, provider='kis')
+    _set_profile_schedule(db_session, admin, ['09:30', '12:00', '13:30'])
+    _set_profile_schedule(db_session, test01, ['09:10', '11:30', '13:30'])
+    _set_profile_schedule(
+        db_session, test02, ['10:00', '12:30', '14:00'], no_new_entry_after='15:00',
+    )
+    scheduler, *_ = _harness()
+
+    slots = {
+        job['slot']
+        for job in scheduler.dispatcher_jobs(db_session, now=RUN_AT)
+        if job['provider'] == 'kis'
+    }
+    assert slots == {'09:10', '10:00', '11:30', '12:30', '13:30', '14:00'}
+
+    _set_profile_schedule(db_session, admin, ['09:20', '10:20'])
+    unchanged = {
+        job['slot']
+        for job in scheduler.dispatcher_jobs(db_session, now=RUN_AT)
+        if job['provider'] == 'kis'
+    }
+    assert unchanged == slots
+
+
+def test_shared_profile_slot_runs_each_regular_user_with_its_own_snapshot(db_session):
+    admin = _user(db_session, 'pr129-same-slot-admin', role='admin')
+    test01 = _user(db_session, 'pr129-same-slot-test01')
+    test02 = _user(db_session, 'pr129-same-slot-test02')
+    _configure_user(db_session, admin, provider='kis')
+    _configure_user(db_session, test01, provider='kis')
+    _configure_user(db_session, test02, provider='kis')
+    _set_profile_schedule(db_session, admin, ['13:30'])
+    _set_profile_schedule(
+        db_session, test01, ['13:30'], fixed_budget=50000, max_order_notional=48000,
+    )
+    _set_profile_schedule(
+        db_session, test02, ['13:30'], fixed_budget=70000, max_order_notional=65000,
+    )
+    _raw_profile_snapshot(db_session)
+    scheduler, account, _analysis, _broker, _kis_client = _harness()
+    scheduler.candidate_service = UserAutoTradingCandidateService()
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='13:30', now=RUN_AT,
+    )
+
+    assert result['processed'] == 2
+    assert result['completed'] == 2
+    assert {call[0] for call in account.calls} == {test01.id, test02.id}
+    snapshots = db_session.query(AutomationProfileWatchlistSnapshot).all()
+    assert {(row.profile_id, row.owner_user_id, row.scheduler_slot) for row in snapshots} == {
+        (
+            AutomationProfileService().selected_owned_profile_schedule(
+                db_session, owner_user_id=test01.id, now=RUN_AT,
+            )['profile']['id'],
+            test01.id,
+            '13:30',
+        ),
+        (
+            AutomationProfileService().selected_owned_profile_schedule(
+                db_session, owner_user_id=test02.id, now=RUN_AT,
+            )['profile']['id'],
+            test02.id,
+            '13:30',
+        ),
+    }
+    assert {row.effective_entry_budget_krw for row in snapshots} == {48000.0, 65000.0}
+    assert db_session.query(UserAutoTradingSlotClaim).filter_by(user_id=admin.id).count() == 0
 
 def test_kis_paper_scheduler_is_user_owned_and_slot_idempotent(db_session):
     user = _user(db_session, 'pr129-paper')
@@ -323,7 +454,7 @@ def test_alpaca_paper_scheduler_uses_paper_fake_broker(db_session):
     result = scheduler.run_provider_once(
         db_session,
         provider='alpaca',
-        scheduler_slot='09:35',
+        scheduler_slot='09:10',
         now=RUN_AT,
     )
 
@@ -466,20 +597,17 @@ def test_missing_owned_profile_skips_before_account_candidate_analysis_or_signal
         db_session, provider='kis', scheduler_slot='09:10', now=RUN_AT,
     )
 
-    assert result['items'][0]['result'] == 'skipped'
+    assert result['items'][0]['result'] == 'SKIPPED'
     assert result['items'][0]['reason'] == 'automation_profile_missing'
-    assert result['items'][0]['signal_id'] is None
-    assert result['items'][0]['order_id'] is None
+
     assert account.calls == []
     assert analysis.calls == []
     assert broker.buy_calls == []
     assert kis_client.buy_calls == []
     assert db_session.query(SignalLog).filter_by(owner_user_id=user.id).count() == 0
     assert db_session.query(OrderLog).filter_by(owner_user_id=user.id).count() == 0
-    run = db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).one()
-    assert run.reason == 'automation_profile_missing'
-    assert run.order_id is None
-    assert run.signal_id is None
+    assert db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).count() == 0
+    assert db_session.query(UserAutoTradingSlotClaim).filter_by(user_id=user.id).count() == 0
 
 
 def test_kis_scheduler_honors_the_selected_user_profile_analysis_slots(db_session):
@@ -500,12 +628,17 @@ def test_kis_scheduler_honors_the_selected_user_profile_analysis_slots(db_sessio
         db_session, provider='kis', scheduler_slot='09:10', now=RUN_AT,
     )
 
-    assert skipped['completed'] == 1
+    assert skipped['processed'] == 0
+    assert skipped['completed'] == 0
+    assert skipped['ignored'] >= 1
     assert skipped['items'][0]['reason'] == 'profile_slot_not_due'
     assert account.calls == []
     assert analysis.calls == []
     assert broker.buy_calls == []
     assert kis_client.buy_calls == []
+    assert db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).count() == 0
+    assert db_session.query(SignalLog).filter_by(owner_user_id=user.id).count() == 0
+    assert db_session.query(UserAutoTradingSlotClaim).filter_by(user_id=user.id).count() == 0
 
 def test_admin_null_owner_profile_never_satisfies_regular_user_profile_gate(db_session):
     user = _user(db_session, 'pr129-no-admin-fallback')

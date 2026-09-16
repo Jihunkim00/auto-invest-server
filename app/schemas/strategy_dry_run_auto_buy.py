@@ -18,6 +18,7 @@ class ProfileAwareDryRunAutoBuyRequest(BaseModel):
     profile_name: StrategyProfileName | None = None
     automation_profile_key: str | None = Field(default=None, max_length=80)
     automation_profile_name: str | None = Field(default=None, max_length=120)
+    scheduler_slot: str | None = Field(default=None, max_length=10)
     symbol: str | None = None
     max_candidates: int = Field(default=5, ge=1, le=20)
     trigger_source: str = Field(
@@ -55,6 +56,8 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     provider: str
     market: str
     active_profile: str
+    profile_id: int | None = None
+    owner_user_id: int | None = None
     profile_key: str | None = None
     profile_name: str | None = None
     automation_profile_key: str | None = None
@@ -88,6 +91,21 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     profile_eligible_symbol_count: int = 0
     profile_price_filtered_count: int = 0
     execution_candidate_count: int = 0
+    snapshot_id: int | None = None
+    scheduler_slot: str | None = None
+    runtime_quant_candidate_count: int = 0
+    runtime_quant_top5_symbols: list[str] = Field(default_factory=list)
+    gpt_target_symbols: list[str] = Field(default_factory=list)
+    gpt_requested_count: int = 0
+    gpt_attempted_count: int = 0
+    gpt_attempted_symbols: list[str] = Field(default_factory=list)
+    gpt_completed_symbols: list[str] = Field(default_factory=list)
+    gpt_failed_symbols: list[str] = Field(default_factory=list)
+    gpt_replacement_count: int = 0
+    final_candidate_symbols: list[str] = Field(default_factory=list)
+    final_ranked_top5: list[dict[str, Any]] = Field(default_factory=list)
+    selected_final_symbol: str | None = None
+    gpt_top5_candidates: list[dict[str, Any]] = Field(default_factory=list)
     profile_exclusion_counts: dict[str, int] = Field(default_factory=dict)
     preview_status: str = "unknown"
     preview_error: str | None = None

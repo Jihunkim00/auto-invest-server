@@ -93,6 +93,8 @@ class UserTradingExecutionService:
         scheduler_slot: str | None = None,
         snapshot_override: dict[str, Any] | None = None,
         run_key: str | None = None,
+        analysis_override: dict[str, Any] | None = None,
+        profile_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now_utc = self._utc_now(now)
         normalized_provider, market, currency, _timezone = normalize_trading_scope(
@@ -122,6 +124,7 @@ class UserTradingExecutionService:
                 "trading_mode": selected_mode,
                 "confirm_live": bool(confirm_live),
                 "trigger_source": USER_TRIGGER_SOURCE,
+                "profile_context": profile_context,
             },
         )
         run.trigger_source = trigger_source
@@ -133,6 +136,7 @@ class UserTradingExecutionService:
                 'trigger_source': trigger_source,
                 'scheduler_slot': scheduler_slot,
                 'authorization_mode': authorization_mode,
+                'profile_context': profile_context,
             },
         )
         db.commit()
@@ -162,6 +166,8 @@ class UserTradingExecutionService:
             'authorization_mode': 'automatic' if is_automatic else 'manual',
             'scheduler_slot': scheduler_slot,
         })
+        if isinstance(profile_context, dict):
+            base["profile_context"] = dict(profile_context)
         if not bool(settings.enabled):
             return self._finish_blocked(
                 db,
@@ -305,21 +311,24 @@ class UserTradingExecutionService:
         except Exception:
             market_session = {"market": market, "is_market_open": False, "is_entry_allowed_now": False}
 
-        try:
-            analysis = self.analysis_service.analyze(
-                db,
-                provider=normalized_provider,
-                symbol=requested_symbol,
-                gate_level=2,
-                now=now_utc,
-            )
-        except Exception as exc:
-            analysis = {
-                "action": "hold",
-                "reason": "analysis_unavailable",
-                "gating_notes": [f"{exc.__class__.__name__}: {str(exc)[:160]}"],
-                "hard_blocked": True,
-            }
+        if analysis_override is not None:
+            analysis = dict(analysis_override or {})
+        else:
+            try:
+                analysis = self.analysis_service.analyze(
+                    db,
+                    provider=normalized_provider,
+                    symbol=requested_symbol,
+                    gate_level=2,
+                    now=now_utc,
+                )
+            except Exception as exc:
+                analysis = {
+                    "action": "hold",
+                    "reason": "analysis_unavailable",
+                    "gating_notes": [f"{exc.__class__.__name__}: {str(exc)[:160]}"],
+                    "hard_blocked": True,
+                }
         analysis = dict(analysis or {})
         analyzed_symbol = str(analysis.get("analyzed_symbol") or analysis.get("symbol") or "").strip().upper()
         returned_symbol = str(analysis.get("returned_symbol") or analysis.get("symbol") or "").strip().upper()

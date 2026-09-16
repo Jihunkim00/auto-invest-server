@@ -23,6 +23,7 @@ import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
 import '../../models/automation_release.dart';
+import '../../models/automation_today_decisions.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/automation_soak_test.dart';
 import '../../models/auto_buy_live_phase1.dart';
@@ -149,6 +150,8 @@ class DashboardController extends ChangeNotifier {
   final bool _persistProvider;
   final ProviderPreferenceStore _providerPreferenceStore;
   int _providerContextVersion = 0;
+  int _todayAiDecisionRequestVersion = 0;
+  bool _disposed = false;
 
   AppStrings get strings => AppStrings(appLanguage);
 
@@ -186,6 +189,10 @@ class DashboardController extends ChangeNotifier {
   List<SignalLogItem> automationRecentSignals = const [];
   bool homeRecentActivityLoaded = false;
   String? homeRecentActivityError;
+  AutomationTodayDecisions todayAiDecisions = AutomationTodayDecisions.empty;
+  bool todayAiDecisionsLoaded = false;
+  bool todayAiDecisionsRequested = false;
+  String? todayAiDecisionsError;
   List<AutomationEvent> localAutomationEvents = const [];
   List<PortfolioPositionManagementItem> portfolioManagementItems = const [];
   bool portfolioManagementLoading = false;
@@ -835,6 +842,7 @@ class DashboardController extends ChangeNotifier {
     var hadError = false;
     // User Home never reuses the Admin operations signal feed.
     automationRecentSignals = const [];
+    _startTodayAiDecisionLoad(userScoped: true);
     try {
       final runs = await apiClient.fetchUserTradingRuns(limit: 50);
       automationRecentRuns = runs;
@@ -853,6 +861,7 @@ class DashboardController extends ChangeNotifier {
 
   Future<void> _loadHomeRecentActivity() async {
     var hadError = false;
+    _startTodayAiDecisionLoad(userScoped: false);
     try {
       final runs = await apiClient.fetchAdminAutomationRecentRuns(limit: 3);
       automationRecentRuns = runs;
@@ -875,6 +884,46 @@ class DashboardController extends ChangeNotifier {
         hadError ? 'Recent scheduler activity could not be loaded.' : null;
   }
 
+  void _startTodayAiDecisionLoad({required bool userScoped}) {
+    final version = ++_todayAiDecisionRequestVersion;
+    todayAiDecisionsLoaded = false;
+    todayAiDecisionsRequested = true;
+    todayAiDecisionsError = null;
+    unawaited(
+      _loadTodayAiDecisions(
+        userScoped: userScoped,
+        version: version,
+      ),
+    );
+  }
+
+  Future<void> _loadTodayAiDecisions({
+    required bool userScoped,
+    required int version,
+  }) async {
+    try {
+      final result = userScoped
+          ? await apiClient.fetchUserTodayAiDecisions()
+          : await apiClient.fetchAdminTodayAiDecisions();
+      if (_disposed || version != _todayAiDecisionRequestVersion) return;
+      todayAiDecisions = result;
+      todayAiDecisionsLoaded = true;
+    } catch (_) {
+      if (_disposed || version != _todayAiDecisionRequestVersion) return;
+      todayAiDecisions = AutomationTodayDecisions.empty;
+      todayAiDecisionsError = '오늘 AI 판단을 불러오지 못했습니다.';
+    }
+    if (!_disposed && version == _todayAiDecisionRequestVersion) {
+      notifyListeners();
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _todayAiDecisionRequestVersion += 1;
+    super.dispose();
+  }
   Future<ActionResult> refreshSchedulerStatus({bool silent = false}) async {
     if (schedulerStatusLoading) {
       return const ActionResult(
@@ -7440,6 +7489,7 @@ class DashboardController extends ChangeNotifier {
   int _safeGateLevel(int value) => (value >= 1 && value <= 4) ? value : 2;
 
   Future<void> refreshKisOrderMonitoring({bool silent = false}) async {
+    if (_disposed) return;
     if (kisOrdersLoading) return;
     kisOrdersLoading = true;
     kisManualOrderError = null;
@@ -7457,7 +7507,7 @@ class DashboardController extends ChangeNotifier {
       kisManualOrderErrorRaw = e.toString();
     } finally {
       kisOrdersLoading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 

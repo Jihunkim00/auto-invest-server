@@ -804,6 +804,7 @@ class AutomationProfileService:
             'provider': row.provider or 'kis',
             'market': row.market or 'KR',
             'enabled': bool(row.enabled),
+            'custom_status': row.custom_status,
             'status': self._status(row, now=now),
             'settings': settings,
             'effective_settings': effective,

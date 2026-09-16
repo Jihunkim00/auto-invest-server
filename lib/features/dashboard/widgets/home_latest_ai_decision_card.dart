@@ -5,6 +5,7 @@ import '../../../core/utils/kr_symbol.dart';
 import '../../../core/utils/timestamp_formatter.dart';
 import '../../../core/widgets/section_card.dart';
 import '../../../models/candidate.dart';
+import '../../../models/automation_today_decisions.dart';
 import '../../../models/log_items.dart';
 import '../../../models/watchlist_run_result.dart';
 import '../dashboard_controller.dart';
@@ -14,13 +15,21 @@ class HomeLatestAiDecisionCard extends StatelessWidget {
     super.key,
     required this.controller,
     this.nowKst,
+    this.userScoped = false,
   });
 
   final DashboardController controller;
   final DateTime Function()? nowKst;
+  final bool userScoped;
 
   @override
   Widget build(BuildContext context) {
+    if (userScoped ||
+        controller.todayAiDecisionsRequested ||
+        controller.todayAiDecisionsLoaded ||
+        controller.todayAiDecisionsError != null) {
+      return _TodayDecisionSurface(controller: controller, nowKst: nowKst);
+    }
     final candidates = _latestCandidates(controller);
     final candidate = candidates.isEmpty ? null : candidates.first;
     final symbol = candidate?.symbol.isNotEmpty == true
@@ -119,6 +128,179 @@ class HomeLatestAiDecisionCard extends StatelessWidget {
   }
 }
 
+class _TodayDecisionSurface extends StatelessWidget {
+  const _TodayDecisionSurface({
+    required this.controller,
+    this.nowKst,
+  });
+
+  final DashboardController controller;
+  final DateTime Function()? nowKst;
+
+  @override
+  Widget build(BuildContext context) {
+    final feed = controller.todayAiDecisions;
+    final slots = feed.slots;
+    final message = controller.todayAiDecisionsError ??
+        (slots.isEmpty ? '오늘의 프로필 슬롯 결과가 없습니다.' : null);
+    return SectionCard(
+      key: const ValueKey('home-latest-ai-decision-card-surface'),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_outlined, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  '오늘의 AI 판단',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              if (feed.profileName?.trim().isNotEmpty == true)
+                Text(
+                  feed.profileName!,
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (!controller.todayAiDecisionsLoaded)
+            const Text(
+              '오늘의 슬롯 분석 결과를 불러오는 중...',
+              style: TextStyle(color: Colors.white60),
+            )
+          else if (message != null)
+            Text(
+              message,
+              key: const ValueKey('home-ai-today-empty'),
+              style: const TextStyle(color: Colors.white60),
+            )
+          else
+            for (final slot in slots) ...[
+              _TodayDecisionSlot(
+                controller: controller,
+                slot: slot,
+              ),
+              if (slot != slots.last) const SizedBox(height: 8),
+            ],
+        ],
+      ),
+    );
+  }
+}
+
+class _TodayDecisionSlot extends StatelessWidget {
+  const _TodayDecisionSlot({
+    required this.controller,
+    required this.slot,
+  });
+
+  final DashboardController controller;
+  final AutomationTodayDecisionSlot slot;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = slot.hasResult
+        ? (slot.signalStatus ?? slot.action ?? 'HOLD').toUpperCase()
+        : slot.isPending
+            ? '분석 전'
+            : '분석 결과 없음';
+    final symbol = slot.symbol?.trim() ?? '';
+    final display = slot.hasResult
+        ? _displaySymbol(controller, symbol, slot.symbolName)
+        : slot.isPending
+            ? '분석 대기'
+            : '분석 결과 없음';
+    final score = slot.hasResult
+        ? [
+            if (slot.finalBuyScore != null) 'Final Buy ${slot.finalBuyScore!}',
+            if (slot.finalSellScore != null) 'Sell ${slot.finalSellScore!}',
+            if (slot.confidence != null)
+              'Confidence ${_number(slot.confidence!)}',
+          ].join(' · ')
+        : slot.isPending
+            ? '이 슬롯은 분석 대기 중입니다.'
+            : '이 슬롯의 분석 결과가 없습니다.';
+    final reason = (slot.aiReason ?? slot.reason ?? '').trim();
+    final timestamp = parseTimestampToKst(slot.createdAtKst ?? slot.createdAt);
+    final timeText = timestamp == null
+        ? ''
+        : ' · ${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')} KST';
+
+    return Container(
+      key: ValueKey('home-ai-slot-card-${slot.schedulerSlot}'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.045),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${slot.schedulerSlot} · ${status}${timeText}',
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            display,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            score,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              reason,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+          ],
+          if (slot.finalRankedTop5.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Runtime Quant ${slot.runtimeQuantCandidateCount} · GPT ${slot.gptCompletedSymbols.length}/${slot.gptTargetSymbols.length} · Final #1 ${slot.finalSelectedSymbol ?? '-'}',
+              style: const TextStyle(color: Colors.white54, fontSize: 11),
+            ),
+            ExpansionTile(
+              key: ValueKey('home-ai-final-top5-${slot.schedulerSlot}'),
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: const Text(
+                '최종 Top5',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              children: [
+                for (var i = 0; i < slot.finalRankedTop5.length; i++)
+                  _CandidateDetailRow(
+                    rank: i + 1,
+                    candidate: slot.finalRankedTop5[i],
+                    controller: controller,
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _HomeAiDecisionDialog extends StatefulWidget {
   const _HomeAiDecisionDialog({required this.controller, this.nowKst});
 
@@ -140,15 +322,29 @@ class _HomeAiDecisionDialogState extends State<_HomeAiDecisionDialog> {
         ? 0
         : (_selectedSlot >= slots.length ? slots.length - 1 : _selectedSlot);
     final selectedSlot = slots.isEmpty ? null : slots[selectedSlotIndex];
-    final candidates = (selectedSlot == null
-            ? _latestCandidates(controller)
-            : _candidatesForSlot(
-                controller,
-                selectedSlot,
-                nowKst: widget.nowKst,
-              ))
-        .take(5)
-        .toList();
+    final todayFeedActive = controller.todayAiDecisionsRequested ||
+        controller.todayAiDecisionsLoaded ||
+        controller.todayAiDecisionsError != null;
+    AutomationTodayDecisionSlot? selectedTodaySlot;
+    if (todayFeedActive && selectedSlot != null) {
+      for (final slot in controller.todayAiDecisions.slots) {
+        if (slot.schedulerSlot == selectedSlot) {
+          selectedTodaySlot = slot;
+          break;
+        }
+      }
+    }
+    final candidates = todayFeedActive
+        ? (selectedTodaySlot?.finalRankedTop5 ?? const <Candidate>[])
+        : (selectedSlot == null
+                ? _latestCandidates(controller)
+                : _candidatesForSlot(
+                    controller,
+                    selectedSlot,
+                    nowKst: widget.nowKst,
+                  ))
+            .take(5)
+            .toList();
     final blockReason = _blockReasonForSlot(
       controller,
       selectedSlot,
@@ -469,7 +665,9 @@ List<_HomeDecisionSnapshot> _matchingSnapshots(
 
 Candidate? _candidateFromRun(TradingLogItem run) {
   final symbol = run.symbol.trim();
-  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN' || symbol.toUpperCase() == 'NONE') return null;
+  if (symbol.isEmpty ||
+      symbol.toUpperCase() == 'UNKNOWN' ||
+      symbol.toUpperCase() == 'NONE') return null;
   final action = run.action.trim().isEmpty ? 'hold' : run.action.trim();
   return Candidate(
     symbol: symbol,
@@ -490,7 +688,9 @@ Candidate? _candidateFromRun(TradingLogItem run) {
 
 Candidate? _candidateFromSignal(SignalLogItem signal) {
   final symbol = signal.symbol.trim();
-  if (symbol.isEmpty || symbol.toUpperCase() == 'UNKNOWN' || symbol.toUpperCase() == 'NONE') return null;
+  if (symbol.isEmpty ||
+      symbol.toUpperCase() == 'UNKNOWN' ||
+      symbol.toUpperCase() == 'NONE') return null;
   final action = signal.action.trim().isEmpty ? 'hold' : signal.action.trim();
   return Candidate(
     symbol: symbol,

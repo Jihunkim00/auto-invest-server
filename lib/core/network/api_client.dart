@@ -17,6 +17,7 @@ import '../../models/agent_plan.dart';
 import '../../models/agent_review_queue.dart';
 import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
+import '../../models/automation_today_decisions.dart';
 import '../../models/automation_release.dart';
 import '../../models/automation_soak_test.dart';
 import '../../models/auto_exit_candidate.dart';
@@ -3148,6 +3149,18 @@ class ApiClient {
         .whereType<Map>()
         .map((item) => TradingLogItem.fromJson(Map<String, dynamic>.from(item)))
         .toList();
+  }
+
+  Future<AutomationTodayDecisions> fetchUserTodayAiDecisions() async {
+    final payload =
+        await _getJsonNoCache('/users/me/trading/ai-decisions/today');
+    return AutomationTodayDecisions.fromJson(payload);
+  }
+
+  Future<AutomationTodayDecisions> fetchAdminTodayAiDecisions() async {
+    final payload =
+        await _getJsonNoCache('/runs/automation/ai-decisions/today');
+    return AutomationTodayDecisions.fromJson(payload);
   }
 
   Future<List<TradingLogItem>> fetchUserTradingRuns({int limit = 20}) async {

@@ -63,7 +63,12 @@ class HomeScreen extends StatelessWidget {
         return SafeArea(
           child: RefreshIndicator(
             onRefresh: readOnlyUser
-                ? controller.refreshUserBrokerAccounts
+                ? () async {
+                    await Future.wait([
+                      controller.refreshUserBrokerAccounts(),
+                      controller.loadUserHomeRecentActivity(),
+                    ]);
+                  }
                 : controller.load,
             child: ListView(
               key: const ValueKey('home-simple-scroll-view'),
@@ -115,7 +120,10 @@ class HomeScreen extends StatelessWidget {
                   loadingOverride: userLoading,
                 ),
                 const SizedBox(height: 12),
-                _DecisionCard(controller: controller, nowKst: nowKst),
+                _DecisionCard(
+                    controller: controller,
+                    nowKst: nowKst,
+                    userScoped: readOnlyUser),
                 if (controller.error != null) ...[
                   const SizedBox(height: 12),
                   _InlineNotice(
@@ -1132,14 +1140,17 @@ class _PositionsCard extends StatelessWidget {
 }
 
 class _DecisionCard extends StatelessWidget {
-  const _DecisionCard({required this.controller, this.nowKst});
+  const _DecisionCard(
+      {required this.controller, this.nowKst, this.userScoped = false});
 
   final DashboardController controller;
   final DateTime Function()? nowKst;
+  final bool userScoped;
 
   @override
   Widget build(BuildContext context) {
-    return HomeLatestAiDecisionCard(controller: controller, nowKst: nowKst);
+    return HomeLatestAiDecisionCard(
+        controller: controller, nowKst: nowKst, userScoped: userScoped);
   }
 }
 

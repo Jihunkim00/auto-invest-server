@@ -10,12 +10,21 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.core.enums import InternalOrderStatus
-from app.db.models import OrderLog, SignalLog, TradeRunLog
+from app.db.models import (
+    AutomationProfileAiCandidateResult,
+    OrderLog,
+    SignalLog,
+    TradeRunLog,
+)
 from app.schemas.strategy_dry_run_auto_buy import (
     ProfileAwareDryRunAutoBuyRequest,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
-from app.services.kis_watchlist_preview_service import KisWatchlistPreviewService
+from app.services.kis_watchlist_preview_service import (
+    KisWatchlistPreviewService,
+    normalize_symbol_identity,
+)
+from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.automation_observability import (
     candidate_gpt_quant_observability,
     gpt_result_counts,
@@ -34,6 +43,7 @@ from app.services.target_aware_risk_service import TargetAwareRiskService
 MODE = "strategy_dry_run_auto_buy"
 TRIGGER_SOURCE = "profile_aware_dry_run_auto_buy"
 CANONICAL_TRIGGER_SOURCE = "automation_scheduler"
+SHADOW_TRIGGER_SOURCE = "automation_shadow_cli"
 CANONICAL_MODE = "automation_scheduler_profile_analysis"
 PROVIDER = "kis"
 MARKET = "KR"
@@ -56,6 +66,12 @@ _LEGACY_LIVE_NOTE_MARKERS = (
 )
 
 
+def _is_canonical_profile_pipeline(trigger_source: str, scheduler_slot: str | None) -> bool:
+    return bool(
+        scheduler_slot is not None
+        and trigger_source in {CANONICAL_TRIGGER_SOURCE, SHADOW_TRIGGER_SOURCE}
+    )
+
 class ProfileAwareDryRunAutoBuyService:
     """Profile-aware KIS buy simulation with no validation or broker submit."""
 
@@ -67,12 +83,14 @@ class ProfileAwareDryRunAutoBuyService:
         target_risk_service: TargetAwareRiskService | None = None,
         market_profiles: MarketProfileService | None = None,
         market_sessions: MarketSessionService | None = None,
+        profile_watchlists: AutomationProfileWatchlistService | None = None,
     ) -> None:
         self.preview_service = preview_service
         self.strategy_profiles = strategy_profiles or StrategyProfileService()
         self.target_risk_service = target_risk_service or TargetAwareRiskService()
         self.market_profiles = market_profiles or MarketProfileService()
         self.market_sessions = market_sessions or MarketSessionService()
+        self.profile_watchlists = profile_watchlists or AutomationProfileWatchlistService()
 
     def run_once(
         self,
@@ -123,6 +141,7 @@ class ProfileAwareDryRunAutoBuyService:
             preview_override=preview_override,
             profile=profile,
             trigger_source=trigger_source,
+            now_utc=now_utc,
         )
         preview = self._apply_profile_universe(preview, profile=profile)
         candidates = self._candidate_list(
@@ -189,8 +208,13 @@ class ProfileAwareDryRunAutoBuyService:
             now_utc=now_utc,
         )
 
+        canonical_profile_pipeline = bool(preview.get("canonical_profile_pipeline"))
         if payload.save_logs:
-            signal = self._save_signal(db, response=response, selected=selected)
+            signal = (
+                self._save_signal(db, response=response, selected=selected)
+                if (not canonical_profile_pipeline or selected is not None)
+                else None
+            )
             order = (
                 self._save_simulated_order(
                     db,
@@ -198,24 +222,34 @@ class ProfileAwareDryRunAutoBuyService:
                     signal_id=signal.id,
                 )
                 if (
-                    response["action"] == "would_buy"
+                    signal is not None
+                    and response["action"] == "would_buy"
                     and response.get("execution_mode") != "live"
                 )
                 else None
             )
-            if order is not None:
+            if order is not None and signal is not None:
                 signal.related_order_id = order.id
             run = self._save_run(
                 db,
                 response=response,
                 request=payload,
-                signal_id=signal.id,
+                signal_id=signal.id if signal is not None else None,
                 order_id=order.id if order is not None else None,
             )
             db.commit()
-            response["signal_id"] = signal.id
+            response["signal_id"] = signal.id if signal is not None else None
             response["trade_run_id"] = run.id
             response["simulated_order_id"] = order.id if order is not None else None
+            if canonical_profile_pipeline:
+                self._save_candidate_results(
+                    db,
+                    response=response,
+                    preview=preview,
+                    run_id=run.id,
+                    profile=profile,
+                    now_utc=now_utc,
+                )
             run.response_payload = _json(response)
             db.commit()
         return sanitize_kis_payload(response)
@@ -316,9 +350,20 @@ class ProfileAwareDryRunAutoBuyService:
         preview_override: dict[str, Any] | None,
         profile: dict[str, Any],
         trigger_source: str,
+        now_utc: datetime,
     ) -> dict[str, Any]:
         if preview_override is not None:
-            return _normalize_preview_payload(preview_override, status="override")
+            normalized = _normalize_preview_payload(
+                preview_override,
+                status="override",
+            )
+            if _is_canonical_profile_pipeline(
+                trigger_source,
+                request.scheduler_slot,
+            ):
+                normalized = _canonicalize_preview_override(normalized)
+                normalized["scheduler_slot"] = request.scheduler_slot
+            return normalized
         if self.preview_service is None:
             return _unavailable_preview_payload("preview_service_unavailable")
         if request.symbol:
@@ -336,7 +381,36 @@ class ProfileAwareDryRunAutoBuyService:
             }, status="disabled")
         try:
             min_price_krw, max_price_krw = profile_universe_bounds(profile)
+            canonical_profile_pipeline = _is_canonical_profile_pipeline(
+                trigger_source,
+                request.scheduler_slot,
+            )
+            profile_snapshot = None
+            if canonical_profile_pipeline:
+                owner_user_id = profile.get("owner_user_id")
+                profile_snapshot = self.profile_watchlists.build(
+                    db,
+                    profile=profile,
+                    owner_user_id=(
+                        int(owner_user_id)
+                        if owner_user_id is not None
+                        else None
+                    ),
+                    scheduler_slot=str(request.scheduler_slot),
+                    now=now_utc,
+                )
+            snapshot_max_price_krw = (
+                (profile_snapshot or {}).get("snapshot", {}).get("effective_max_candidate_price")
+                if profile_snapshot
+                else None
+            )
             try:
+                if snapshot_max_price_krw is not None and float(snapshot_max_price_krw) > 0:
+                    max_price_krw = (
+                        min(max_price_krw, float(snapshot_max_price_krw))
+                        if max_price_krw > 0
+                        else float(snapshot_max_price_krw)
+                    )
                 preview = self.preview_service.run_preview(
                     include_gpt=True,
                     db=db,
@@ -344,14 +418,40 @@ class ProfileAwareDryRunAutoBuyService:
                     trigger_source=trigger_source,
                     min_price_krw=min_price_krw,
                     max_price_krw=max_price_krw,
+                    profile_snapshot_items=(
+                        profile_snapshot.get("items")
+                        if profile_snapshot
+                        else None
+                    ),
+                    profile_snapshot_context=(
+                        profile_snapshot.get("snapshot")
+                        if profile_snapshot
+                        else None
+                    ),
+                    canonical_profile_pipeline=canonical_profile_pipeline,
+                    decision_timestamp=now_utc,
                 )
             except TypeError:
+                if canonical_profile_pipeline:
+                    raise
                 preview = self.preview_service.run_preview(include_gpt=True, db=db)
-            return _normalize_preview_payload(preview, status="ok")
+            normalized = _normalize_preview_payload(preview, status="ok")
+            if canonical_profile_pipeline:
+                normalized["canonical_profile_pipeline"] = True
+                normalized["profile_snapshot"] = (
+                    profile_snapshot.get("snapshot") if profile_snapshot else {}
+                )
+                normalized["snapshot_id"] = (
+                    (profile_snapshot or {}).get("snapshot", {}).get("id")
+                    if profile_snapshot
+                    else None
+                )
+                normalized["scheduler_slot"] = request.scheduler_slot
+            return normalized
         except Exception as exc:
             return _unavailable_preview_payload(
                 "preview_unavailable",
-                error=exc.__class__.__name__,
+                error=f"{exc.__class__.__name__}: {exc}",
                 note=f"Watchlist preview failed: {exc.__class__.__name__}",
             )
 
@@ -446,6 +546,24 @@ class ProfileAwareDryRunAutoBuyService:
             int(existing_filtered),
             len(excluded_symbols),
         )
+        if preview.get("canonical_profile_pipeline"):
+            final_candidates = preview.get("final_ranked_candidates")
+            if not isinstance(final_candidates, list):
+                final_candidates = []
+            for final_rank, item in enumerate(final_candidates, start=1):
+                if isinstance(item, dict):
+                    item["final_rank"] = final_rank
+                    item["final_selected"] = final_rank == 1
+            preview["final_best_candidate"] = (
+                final_candidates[0] if final_candidates else None
+            )
+            preview["final_candidate_symbols"] = [
+                str(item.get("symbol"))
+                for item in final_candidates
+                if isinstance(item, dict) and item.get("symbol")
+            ]
+            preview["final_ranked_top5"] = final_candidates[:5]
+            preview["gpt_top5_candidates"] = final_candidates[:5]
         preview['profile_exclusion_counts'] = exclusion_counts
         return _normalize_preview_payload(
             preview,
@@ -520,16 +638,21 @@ class ProfileAwareDryRunAutoBuyService:
         limit: int,
     ) -> list[dict[str, Any]]:
         values: list[Any] = []
-        for key in (
-            "final_ranked_candidates",
-            "researched_candidates",
-            "top_quant_candidates",
-        ):
-            raw = preview.get(key)
-            if isinstance(raw, list):
-                values.extend(raw)
-        if isinstance(preview.get("final_best_candidate"), dict):
-            values.insert(0, preview["final_best_candidate"])
+        if preview.get("canonical_profile_pipeline"):
+            final_values = preview.get("final_ranked_candidates")
+            if isinstance(final_values, list):
+                values.extend(final_values[:1])
+        else:
+            for key in (
+                "final_ranked_candidates",
+                "researched_candidates",
+                "top_quant_candidates",
+            ):
+                raw = preview.get(key)
+                if isinstance(raw, list):
+                    values.extend(raw)
+            if isinstance(preview.get("final_best_candidate"), dict):
+                values.insert(0, preview["final_best_candidate"])
         result: list[dict[str, Any]] = []
         seen: set[str] = set()
         for item in values:
@@ -874,6 +997,88 @@ class ProfileAwareDryRunAutoBuyService:
             "selected_symbol": selected.get("symbol") if selected else None,
             "selected_symbol_name": selected.get("name") if selected else None,
             "candidate_count": len(evaluated),
+            "profile_id": profile.get("id"),
+            "owner_user_id": profile.get("owner_user_id"),
+            "snapshot_id": preview.get("snapshot_id")
+            or (preview.get("profile_snapshot") or {}).get("id"),
+            "scheduler_slot": request.scheduler_slot
+            or (preview.get("scheduler_slot") or ""),
+            "canonical_profile_pipeline": bool(preview.get("canonical_profile_pipeline")),
+            "profile_snapshot_selected_symbols": [
+                value
+                for value in (preview.get("profile_snapshot_selected_symbols") or [])
+                if str(value).strip()
+            ],
+            "runtime_input_symbols": [
+                value
+                for value in (preview.get("runtime_input_symbols") or [])
+                if str(value).strip()
+            ],
+            "runtime_quant_candidate_symbols": [
+                value
+                for value in (preview.get("runtime_quant_candidate_symbols") or [])
+                if str(value).strip()
+            ],
+            "unaffordable_runtime_candidates": [
+                value
+                for value in (preview.get("unaffordable_runtime_candidates") or [])
+                if str(value).strip()
+            ],
+            "runtime_quant_candidate_count": int(
+                preview.get("runtime_quant_candidate_count")
+                or preview.get("quant_candidates_count")
+                or 0
+            ),
+            "runtime_quant_top5_symbols": [
+                str(value)
+                for value in (preview.get("runtime_quant_top5_symbols") or [])
+                if str(value).strip()
+            ],
+            "gpt_target_symbols": [
+                str(value)
+                for value in (preview.get("gpt_target_symbols") or [])
+                if str(value).strip()
+            ],
+            "gpt_requested_count": int(preview.get("gpt_requested_count") or 0),
+            "gpt_attempted_count": int(preview.get("gpt_attempted_count") or 0),
+            "gpt_attempted_symbols": [
+                str(value)
+                for value in (preview.get("gpt_attempted_symbols") or [])
+                if str(value).strip()
+            ],
+            "gpt_completed_symbols": [
+                str(value)
+                for value in (preview.get("gpt_completed_symbols") or [])
+                if str(value).strip()
+            ],
+            "gpt_failed_symbols": [
+                str(value)
+                for value in (preview.get("gpt_failed_symbols") or [])
+                if str(value).strip()
+            ],
+            "gpt_replacement_count": int(
+                preview.get("gpt_replacement_count") or 0
+            ),
+            "final_candidate_symbols": [
+                normalize_symbol_identity(item.get("symbol"))
+                for item in (preview.get("final_ranked_candidates") or [])
+                if isinstance(item, dict) and item.get("symbol")
+            ],
+            "final_ranked_top5": [
+                _pipeline_candidate(item)
+                for item in (preview.get("final_ranked_candidates") or [])[:5]
+                if isinstance(item, dict)
+            ],
+            "selected_final_symbol": (
+                (preview.get("final_best_candidate") or {}).get("symbol")
+                if isinstance(preview.get("final_best_candidate"), dict)
+                else None
+            ),
+            "gpt_top5_candidates": [
+                _pipeline_candidate(item)
+                for item in (preview.get("gpt_top5_candidates") or [])[:5]
+                if isinstance(item, dict)
+            ],
             **_preview_observability(
                 preview,
                 evaluated_count=len(evaluated),
@@ -986,6 +1191,118 @@ class ProfileAwareDryRunAutoBuyService:
             "created_at": now_utc.isoformat(),
         }
 
+    def _save_candidate_results(
+        self,
+        db: Session,
+        *,
+        response: dict[str, Any],
+        preview: dict[str, Any],
+        run_id: int,
+        profile: dict[str, Any],
+        now_utc: datetime,
+    ) -> None:
+        snapshot = preview.get("profile_snapshot")
+        snapshot = snapshot if isinstance(snapshot, dict) else {}
+        snapshot_id = preview.get("snapshot_id") or snapshot.get("id")
+        profile_id = profile.get("id")
+        if snapshot_id is None or profile_id is None:
+            return
+        owner_user_id = profile.get("owner_user_id")
+        snapshot_date = str(
+            snapshot.get("snapshot_date")
+            or now_utc.astimezone(_KST).date().isoformat()
+        )
+        scheduler_slot = str(
+            response.get("scheduler_slot")
+            or snapshot.get("scheduler_slot")
+            or "unknown"
+        )
+        items = preview.get("items")
+        if not isinstance(items, list):
+            items = preview.get("watchlist")
+        if not isinstance(items, list):
+            items = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            symbol = _symbol(item)
+            if not symbol:
+                continue
+            query = db.query(AutomationProfileAiCandidateResult).filter(
+                AutomationProfileAiCandidateResult.profile_id == int(profile_id),
+                AutomationProfileAiCandidateResult.snapshot_date == snapshot_date,
+                AutomationProfileAiCandidateResult.scheduler_slot == scheduler_slot,
+                AutomationProfileAiCandidateResult.symbol == symbol,
+            )
+            query = query.filter(
+                AutomationProfileAiCandidateResult.owner_user_id.is_(None)
+                if owner_user_id is None
+                else AutomationProfileAiCandidateResult.owner_user_id
+                == int(owner_user_id)
+            )
+            row = query.first()
+            values = {
+                "owner_user_id": (
+                    int(owner_user_id) if owner_user_id is not None else None
+                ),
+                "profile_id": int(profile_id),
+                "snapshot_id": int(snapshot_id),
+                "run_id": int(run_id),
+                "snapshot_date": snapshot_date,
+                "scheduler_slot": scheduler_slot,
+                "symbol": symbol,
+                "symbol_name": item.get("name"),
+                "snapshot_rank": _int_or_none(
+                    item.get("snapshot_rank") or item.get("rank")
+                ),
+                "runtime_quant_rank": _int_or_none(
+                    item.get("runtime_quant_rank")
+                ),
+                "runtime_quant_buy_score": _score(
+                    item, "runtime_quant_buy_score", "quant_buy_score"
+                ),
+                "runtime_quant_sell_score": _score(
+                    item, "runtime_quant_sell_score", "quant_sell_score"
+                ),
+                "gpt_target_rank": _int_or_none(item.get("gpt_target_rank")),
+                "gpt_used": bool(item.get("gpt_used")),
+                "gpt_analysis_status": str(
+                    item.get("gpt_analysis_status") or "not_run"
+                ).strip().lower(),
+                "ai_buy_score": _score(item, "ai_buy_score"),
+                "ai_sell_score": _score(item, "ai_sell_score"),
+                "confidence": _score(item, "confidence"),
+                "ai_reason": item.get("ai_reason") or item.get("gpt_reason"),
+                "final_buy_score": _score(item, "final_buy_score"),
+                "final_sell_score": _score(item, "final_sell_score"),
+                "final_rank": _int_or_none(item.get("final_rank")),
+                "final_selected": bool(item.get("final_selected")),
+                "diagnostics_json": _json({
+                    "canonical_profile_pipeline": True,
+                    "runtime_quant_candidate_count": response.get(
+                        "runtime_quant_candidate_count"
+                    ),
+                    "runtime_quant_top5_symbols": response.get(
+                        "runtime_quant_top5_symbols"
+                    ),
+                    "gpt_target_symbols": response.get("gpt_target_symbols"),
+                    "gpt_requested_count": response.get("gpt_requested_count"),
+                    "gpt_attempted_count": response.get("gpt_attempted_count"),
+                    "gpt_completed_symbols": response.get(
+                        "gpt_completed_symbols"
+                    ),
+                    "gpt_failed_symbols": response.get("gpt_failed_symbols"),
+                    "gpt_replacement_count": response.get(
+                        "gpt_replacement_count"
+                    ),
+                }),
+            }
+            if row is None:
+                db.add(AutomationProfileAiCandidateResult(**values))
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+        db.flush()
     def _save_signal(
         self,
         db: Session,
@@ -1155,8 +1472,9 @@ def _effective_trigger_source(
     # The canonical scheduler is the only caller allowed to change the
     # persisted identity. All compatibility/manual requests retain the
     # historical profile-aware trigger source.
-    if str(request.trigger_source or '').strip() == CANONICAL_TRIGGER_SOURCE:
-        return CANONICAL_TRIGGER_SOURCE
+    requested = str(request.trigger_source or "").strip()
+    if requested in {CANONICAL_TRIGGER_SOURCE, SHADOW_TRIGGER_SOURCE}:
+        return requested
     return TRIGGER_SOURCE
 
 
@@ -1194,6 +1512,39 @@ def _candidate_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
         str(item.get("symbol") or ""),
     )
 
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _pipeline_candidate(item: dict[str, Any]) -> dict[str, Any]:
+    """Small rank-explicit projection shared by API, UI, and audit output."""
+    return sanitize_kis_payload({
+        "symbol": item.get("symbol"),
+        "name": item.get("name"),
+        "snapshot_rank": item.get("snapshot_rank"),
+        "runtime_quant_rank": item.get("runtime_quant_rank"),
+        "runtime_quant_buy_score": item.get(
+            "runtime_quant_buy_score", item.get("quant_buy_score")
+        ),
+        "runtime_quant_sell_score": item.get(
+            "runtime_quant_sell_score", item.get("quant_sell_score")
+        ),
+        "gpt_target_rank": item.get("gpt_target_rank"),
+        "gpt_used": bool(item.get("gpt_used")),
+        "gpt_analysis_status": item.get("gpt_analysis_status") or "not_run",
+        "ai_buy_score": item.get("ai_buy_score"),
+        "ai_sell_score": item.get("ai_sell_score"),
+        "confidence": item.get("confidence"),
+        "ai_reason": item.get("ai_reason") or item.get("gpt_reason"),
+        "final_buy_score": item.get("final_buy_score"),
+        "final_sell_score": item.get("final_sell_score"),
+        "final_rank": item.get("final_rank"),
+        "final_selected": bool(item.get("final_selected")),
+    })
 
 def _public_candidate(
     item: dict[str, Any],
@@ -1294,7 +1645,7 @@ def _atr_risk(candidate: dict[str, Any], price: float | None) -> float | None:
 
 
 def _symbol(value: dict[str, Any]) -> str | None:
-    symbol = str(value.get("symbol") or "").strip().upper()
+    symbol = normalize_symbol_identity(value.get("symbol"))
     return symbol or None
 
 
@@ -1377,6 +1728,59 @@ def _normalize_preview_payload(
     payload.setdefault("preview_error", error)
     return sanitize_kis_payload(payload)
 
+
+def _canonicalize_preview_override(
+    preview: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply the canonical final gate to deterministic test/replay overrides."""
+    items = preview.get("items")
+    if not isinstance(items, list):
+        items = preview.get("final_ranked_candidates")
+    if not isinstance(items, list):
+        items = []
+    usable = [
+        item
+        for item in items
+        if isinstance(item, dict)
+        and bool(item.get("gpt_used"))
+        and str(item.get("gpt_analysis_status") or "").strip().lower()
+        == "completed"
+        and _score(item, "ai_buy_score") is not None
+        and _score(item, "ai_sell_score") is not None
+    ]
+    final_values = preview.get("final_ranked_candidates")
+    if isinstance(final_values, list):
+        ordered = [
+            item
+            for item in final_values
+            if isinstance(item, dict) and item in usable
+        ]
+        ordered.extend(item for item in usable if item not in ordered)
+        usable = ordered
+    for item in items:
+        if item not in usable:
+            item["final_buy_score"] = None
+            item["final_sell_score"] = None
+            item["final_entry_score"] = None
+            item["score"] = None
+            item["final_rank"] = None
+            item["final_selected"] = False
+    for rank, item in enumerate(usable, start=1):
+        item["final_rank"] = rank
+        item["final_selected"] = rank == 1
+    preview["canonical_profile_pipeline"] = True
+    preview["items"] = items
+    preview["final_ranked_candidates"] = usable
+    preview["researched_candidates"] = usable
+    preview["final_best_candidate"] = usable[0] if usable else None
+    preview["final_candidate_symbols"] = [
+        str(item.get("symbol"))
+        for item in usable
+        if item.get("symbol")
+    ]
+    preview["final_ranked_top5"] = usable[:5]
+    preview["gpt_top5_candidates"] = usable[:5]
+    return preview
 
 def _unavailable_preview_payload(
     reason: str,

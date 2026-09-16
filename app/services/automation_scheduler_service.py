@@ -140,7 +140,14 @@ class AutomationSchedulerService(SchedulerService):
         *,
         now: datetime | None = None,
     ) -> list[dict[str, object]]:
-        return self.user_auto_trading_scheduler_service.dispatcher_jobs(now=now)
+        db = SessionLocal()
+        try:
+            return self.user_auto_trading_scheduler_service.dispatcher_jobs(
+                db,
+                now=now,
+            )
+        finally:
+            db.close()
 
     def maintenance_jobs(
         self,
@@ -1258,6 +1265,7 @@ class AutomationSchedulerService(SchedulerService):
             market='KR',
             automation_profile_key=str(schedule.get('profile_key') or '') or None,
             automation_profile_name=str(profile.get('display_name') or '') or None,
+            scheduler_slot=slot,
             trigger_source=CANONICAL_TRIGGER_SOURCE,
             use_watchlist=True,
             save_logs=True,

@@ -8,6 +8,7 @@ import 'package:auto_invest_dashboard/features/dashboard/widgets/home_latest_ai_
 import 'package:auto_invest_dashboard/models/market_watchlist.dart';
 import 'package:auto_invest_dashboard/models/scheduler_status.dart';
 import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
+import 'package:auto_invest_dashboard/models/automation_today_decisions.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -134,6 +135,71 @@ void main() {
 
     expect(find.textContaining('AAPL'), findsWidgets);
     expect(find.textContaining('삼성전자'), findsNothing);
+    controller.dispose();
+  });
+  testWidgets('today card shows exact three slots, missing result, and KST',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..todayAiDecisions = AutomationTodayDecisions.fromJson({
+        'trade_date_kst': '2026-09-16',
+        'timezone': 'Asia/Seoul',
+        'profile_id': 8,
+        'profile_name': 'test01-01',
+        'owner_user_id': 2,
+        'slots': [
+          {
+            'scheduler_slot': '09:10',
+            'status': 'no_result',
+          },
+          {
+            'scheduler_slot': '11:30',
+            'status': 'result',
+            'signal_status': 'hold',
+            'symbol': '005930',
+            'symbol_name': '삼성전자',
+            'final_buy_score': 66,
+            'final_sell_score': 12,
+            'confidence': 0.8,
+            'reason': '오늘 판단',
+            'created_at_kst': '2026-09-16T11:30:12+09:00',
+          },
+          {
+            'scheduler_slot': '13:30',
+            'status': 'analysis_pending',
+          },
+        ],
+      })
+      ..todayAiDecisionsLoaded = true;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeLatestAiDecisionCard(
+            controller: controller,
+            userScoped: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('home-ai-slot-card-09:10')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('home-ai-slot-card-11:30')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('home-ai-slot-card-13:30')),
+      findsOneWidget,
+    );
+    expect(find.text('분석 결과 없음'), findsOneWidget);
+    expect(find.textContaining('13:30 · 분석 전'), findsOneWidget);
+    expect(find.textContaining('삼성전자 (005930)'), findsOneWidget);
+    expect(find.textContaining('11:30 KST'), findsOneWidget);
+    expect(find.textContaining('Final Buy 66'), findsOneWidget);
+    expect(find.textContaining('오늘 판단'), findsOneWidget);
     controller.dispose();
   });
 }

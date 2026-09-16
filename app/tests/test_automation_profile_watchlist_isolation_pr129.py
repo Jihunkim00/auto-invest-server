@@ -73,6 +73,11 @@ def _raw_snapshot(db):
             current_price=50.0, quant_buy_score=99.0, quant_sell_score=1.0,
             indicators_json='{}', captured_at=NOW,
         ),
+        WatchlistSnapshotItem(
+            run_id=run.id, symbol='000004', name='Third affordable', market='KOSPI',
+            current_price=200.0, quant_buy_score=60.0, quant_sell_score=25.0,
+            indicators_json='{}', captured_at=NOW,
+        ),
     ])
     db.commit()
     return run
@@ -112,6 +117,7 @@ def test_ranked_snapshot_is_profile_and_owner_scoped_with_profile_budget_filter(
     assert [item['symbol'] for item in cheap_snapshot['items']] == ['000001']
     assert [item['symbol'] for item in broad_snapshot['items']][:2] == ['000002', '000001']
     assert broad_snapshot['items'][0]['quant_rank'] == 1
+    assert [item['quant_rank'] for item in broad_snapshot['items']] == [1, 2, 3]
     assert broad_snapshot['items'][0]['ai_rank'] == 1
     assert 'FAVORITEONLY' not in {item['symbol'] for item in broad_snapshot['items']}
     assert other_snapshot['snapshot']['owner_user_id'] == other_owner.id

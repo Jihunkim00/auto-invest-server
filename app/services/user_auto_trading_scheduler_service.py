@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AutomationProfileAiCandidateResult,
     SignalLog,
     TradeRunLog,
     User,
@@ -41,9 +42,231 @@ _ACTIVE_ORDER_STATUSES = {
 class UserAutoTradingCandidateService:
     """Select only from the active profile's persisted ranked universe."""
 
-    def __init__(self, *, profile_watchlists: AutomationProfileWatchlistService | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        profile_watchlists: AutomationProfileWatchlistService | None = None,
+        runtime_preview_service: Any | None = None,
+    ) -> None:
         self.profile_watchlists = profile_watchlists or AutomationProfileWatchlistService()
+        self.runtime_preview_service = runtime_preview_service
+        self.last_pipeline_diagnostics: dict[str, Any] | None = None
+        self.last_pipeline_candidate: dict[str, Any] | None = None
 
+    def select_candidates(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        profile: dict[str, Any] | None = None,
+        scheduler_slot: str = 'manual',
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_provider = str(provider or '').strip().lower()
+        if normalized_provider != 'kis' or not profile:
+            return []
+        snapshot = self.profile_watchlists.build(
+            db,
+            profile=profile,
+            owner_user_id=int(user.id),
+            scheduler_slot=scheduler_slot,
+            now=now,
+        )
+        snapshot_data = snapshot.get("snapshot") or {}
+        runtime_preview = self.runtime_preview_service
+        if runtime_preview is not None:
+            preview = runtime_preview.run_preview(
+                include_gpt=True,
+                db=db,
+                record_run=False,
+                trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                min_price_krw=None,
+                max_price_krw=None,
+                profile_snapshot_items=snapshot.get("items") or [],
+                profile_snapshot_context=snapshot_data,
+                canonical_profile_pipeline=True,
+                decision_timestamp=now,
+            )
+            preview = preview if isinstance(preview, dict) else {}
+            self.last_pipeline_diagnostics = {
+                "canonical_profile_pipeline": True,
+                "profile_id": profile.get("id"),
+                "owner_user_id": int(user.id),
+                "snapshot_id": snapshot_data.get("id"),
+                "snapshot_date": snapshot_data.get("snapshot_date"),
+                "scheduler_slot": scheduler_slot,
+                "source_count": snapshot_data.get("source_count"),
+                "eligible_count": snapshot_data.get("eligible_count"),
+                "selected_count": snapshot_data.get("selected_count"),
+                "runtime_quant_candidate_count": preview.get(
+                    "runtime_quant_candidate_count", 0
+                ),
+                "runtime_quant_top5_symbols": preview.get(
+                    "runtime_quant_top5_symbols", []
+                ),
+                "gpt_target_symbols": preview.get("gpt_target_symbols", []),
+                "gpt_completed_symbols": preview.get(
+                    "gpt_completed_symbols", []
+                ),
+                "gpt_failed_symbols": preview.get("gpt_failed_symbols", []),
+                "gpt_replacement_count": preview.get(
+                    "gpt_replacement_count", 0
+                ),
+                "final_candidate_symbols": preview.get(
+                    "final_candidate_symbols",
+                    [
+                        item.get("symbol")
+                        for item in (preview.get("final_ranked_candidates") or [])
+                        if isinstance(item, dict)
+                    ],
+                ),
+                "final_ranked_top5": preview.get(
+                    "final_ranked_top5",
+                    (preview.get("final_ranked_candidates") or [])[:5],
+                ),
+                "selected_final_symbol": (
+                    (preview.get("final_best_candidate") or {}).get("symbol")
+                    if isinstance(preview.get("final_best_candidate"), dict)
+                    else None
+                ),
+            }
+            self.last_pipeline_candidate = {
+                "_pipeline_preview": preview,
+                "_pipeline_snapshot": snapshot,
+            }
+            final_candidates = preview.get("final_ranked_candidates")
+            if not isinstance(final_candidates, list) or not final_candidates:
+                return []
+            selected = dict(final_candidates[0])
+            selected["_pipeline_preview"] = preview
+            selected["_pipeline_snapshot"] = snapshot
+            selected["_analysis_override"] = _runtime_analysis_override(selected, profile=profile)
+            selected.update({
+                "candidate_source": "automation_profile_runtime_quant_gpt",
+                "automation_profile_id": int(profile["id"]),
+                "automation_profile_key": profile.get("profile_key"),
+                "profile_snapshot_id": snapshot_data.get("id"),
+                "profile_snapshot_date": snapshot_data.get("snapshot_date"),
+                "profile_quant_rank": selected.get("runtime_quant_rank"),
+                "profile_ai_rank": selected.get("gpt_target_rank"),
+            })
+            return [selected]
+        self.last_pipeline_diagnostics = None
+        self.last_pipeline_candidate = None
+        settings = profile.get('effective_settings')
+        settings = settings if isinstance(settings, dict) else profile.get('settings')
+        universe = settings.get('universe') if isinstance(settings, dict) else {}
+        universe = universe if isinstance(universe, dict) else {}
+        top_quant = max(0, int(_number(universe.get('top_quant_candidates'))))
+        top_ai = max(0, int(_number(universe.get('top_ai_candidates'))))
+        limit = min(top_quant, top_ai, len(snapshot.get("items") or []))
+        items = list(snapshot.get("items") or [])
+        return [
+            {
+                **item,
+                "candidate_source": "automation_profile_watchlist_snapshot",
+                "automation_profile_id": int(profile["id"]),
+                "automation_profile_key": profile.get("profile_key"),
+                "profile_snapshot_id": snapshot_data.get("id"),
+                "profile_snapshot_date": snapshot_data.get("snapshot_date"),
+                "profile_quant_rank": item.get("quant_rank"),
+                "profile_ai_rank": item.get("ai_rank"),
+            }
+            for item in items[:limit]
+        ]
+
+    def persist_results(
+        self,
+        db: Session,
+        *,
+        candidate: dict[str, Any],
+        run_id: int | None,
+        profile: dict[str, Any],
+        user: User,
+        scheduler_slot: str,
+        now: datetime,
+    ) -> None:
+        if run_id is None:
+            return
+        preview = candidate.get("_pipeline_preview")
+        snapshot = candidate.get("_pipeline_snapshot")
+        if not isinstance(preview, dict) or not isinstance(snapshot, dict):
+            return
+        snapshot_data = snapshot.get("snapshot") or {}
+        snapshot_id = snapshot_data.get("id")
+        if snapshot_id is None:
+            return
+        items = preview.get("items")
+        if not isinstance(items, list):
+            return
+        snapshot_date = str(
+            snapshot_data.get("snapshot_date")
+            or now.astimezone(_SCOPE["kis"][1]).date().isoformat()
+        )
+        for item in items:
+            if not isinstance(item, dict) or not item.get("symbol"):
+                continue
+            symbol = str(item.get("symbol")).strip().upper()
+            row = (
+                db.query(AutomationProfileAiCandidateResult)
+                .filter(
+                    AutomationProfileAiCandidateResult.profile_id == int(profile["id"]),
+                    AutomationProfileAiCandidateResult.owner_user_id == int(user.id),
+                    AutomationProfileAiCandidateResult.snapshot_date == snapshot_date,
+                    AutomationProfileAiCandidateResult.scheduler_slot == str(scheduler_slot),
+                    AutomationProfileAiCandidateResult.symbol == symbol,
+                )
+                .first()
+            )
+            values = {
+                "owner_user_id": int(user.id),
+                "profile_id": int(profile["id"]),
+                "snapshot_id": int(snapshot_id),
+                "run_id": int(run_id),
+                "snapshot_date": snapshot_date,
+                "scheduler_slot": str(scheduler_slot),
+                "symbol": symbol,
+                "symbol_name": item.get("name"),
+                "snapshot_rank": _int_or_none(
+                    item.get("snapshot_rank") or item.get("rank")
+                ),
+                "runtime_quant_rank": _int_or_none(item.get("runtime_quant_rank")),
+                "runtime_quant_buy_score": _optional_number(
+                    item.get("runtime_quant_buy_score")
+                    if item.get("runtime_quant_buy_score") is not None
+                    else item.get("quant_buy_score")
+                ),
+                "runtime_quant_sell_score": _optional_number(
+                    item.get("runtime_quant_sell_score")
+                    if item.get("runtime_quant_sell_score") is not None
+                    else item.get("quant_sell_score")
+                ),
+                "gpt_target_rank": _int_or_none(item.get("gpt_target_rank")),
+                "gpt_used": bool(item.get("gpt_used")),
+                "gpt_analysis_status": str(
+                    item.get("gpt_analysis_status") or "not_run"
+                ).strip().lower(),
+                "ai_buy_score": _optional_number(item.get("ai_buy_score")),
+                "ai_sell_score": _optional_number(item.get("ai_sell_score")),
+                "confidence": _optional_number(item.get("confidence")),
+                "ai_reason": item.get("ai_reason") or item.get("gpt_reason"),
+                "final_buy_score": _optional_number(item.get("final_buy_score")),
+                "final_sell_score": _optional_number(item.get("final_sell_score")),
+                "final_rank": _int_or_none(item.get("final_rank")),
+                "final_selected": bool(item.get("final_selected")),
+                "diagnostics_json": json.dumps(
+                    self.last_pipeline_diagnostics or {},
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            }
+            if row is None:
+                db.add(AutomationProfileAiCandidateResult(**values))
+            else:
+                for key, value in values.items():
+                    setattr(row, key, value)
+        db.flush()
     def select_candidate(
         self,
         db: Session,
@@ -54,16 +277,14 @@ class UserAutoTradingCandidateService:
         scheduler_slot: str = 'manual',
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
-        normalized_provider = str(provider or '').strip().lower()
-        if normalized_provider != 'kis' or not profile:
-            return None
-        return self.profile_watchlists.select_candidate(
+        return next(iter(self.select_candidates(
             db,
+            user=user,
+            provider=provider,
             profile=profile,
-            owner_user_id=int(user.id),
             scheduler_slot=scheduler_slot,
             now=now,
-        )
+        )), None)
 
 
 class UserPositionManagementService:
@@ -159,7 +380,17 @@ class UserAutoTradingSchedulerService:
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self.execution_service = execution_service or UserTradingExecutionService()
-        self.candidate_service = candidate_service or UserAutoTradingCandidateService()
+        self.candidate_service = (
+            candidate_service
+            if candidate_service is not None
+            else UserAutoTradingCandidateService(
+                runtime_preview_service=getattr(
+                    getattr(self.execution_service, "analysis_service", None),
+                    "kis_preview_service",
+                    None,
+                )
+            )
+        )
         self.position_management_service = position_management_service or UserPositionManagementService()
         self.account_service = account_service or self.execution_service.account_service
         self.session_service = session_service or self.execution_service.session_service
@@ -178,6 +409,14 @@ class UserAutoTradingSchedulerService:
         *,
         now: datetime | None = None,
     ) -> list[dict[str, Any]]:
+        if db is None:
+            from app.db.database import SessionLocal
+
+            owned_db = SessionLocal()
+            try:
+                return self.dispatcher_jobs(owned_db, now=now)
+            finally:
+                owned_db.close()
         current = _aware_utc(now or self.now_provider())
         result = []
         for provider in ('kis', 'alpaca'):
@@ -267,12 +506,36 @@ class UserAutoTradingSchedulerService:
             if str(user.role or '').strip().lower() == 'admin':
                 aggregate['ignored'] += 1
                 continue
-            settings = self._settings(db, user)
-            if not bool(settings.auto_trading_enabled):
+            settings = self._existing_settings(db, user)
+            if settings is None or not bool(settings.auto_trading_enabled):
                 aggregate['ignored'] += 1
                 continue
             if str(settings.auto_trading_provider or '').strip().lower() != normalized_provider:
                 aggregate['ignored'] += 1
+                continue
+            profile_schedule = self._owned_profile_schedule(
+                db,
+                user=user,
+                provider=normalized_provider,
+                market=market,
+                now=current,
+            )
+            profile_slots = self._profile_analysis_times(profile_schedule)
+            if profile_schedule is None or str(scheduler_slot) not in profile_slots:
+                aggregate['ignored'] += 1
+                aggregate['items'].append({
+                    'owner_user_id': int(user.id),
+                    'provider': normalized_provider,
+                    'market': market,
+                    'scheduler_slot': scheduler_slot,
+                    'result': 'SKIPPED',
+                    'reason': (
+                        'profile_slot_not_due'
+                        if profile_schedule is not None
+                        else 'automation_profile_missing'
+                    ),
+                    'trigger_source': USER_SCHEDULER_TRIGGER_SOURCE,
+                })
                 continue
             claim = self._claim(
                 db,
@@ -302,6 +565,7 @@ class UserAutoTradingSchedulerService:
                     scheduler_slot=scheduler_slot,
                     run_key=claim.run_key,
                     now=current,
+                    profile_schedule=profile_schedule,
                 )
                 self._finish_claim(db, claim, item)
                 aggregate['completed'] += 1
@@ -336,10 +600,13 @@ class UserAutoTradingSchedulerService:
         scheduler_slot: str,
         run_key: str,
         now: datetime,
+        profile_schedule: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        profile_schedule = self.automation_profiles.selected_owned_profile_schedule(
+        profile_schedule = profile_schedule or self._owned_profile_schedule(
             db,
-            owner_user_id=int(user.id),
+            user=user,
+            provider=provider,
+            market=market,
             now=now,
         )
         profile = (profile_schedule or {}).get('profile') or {}
@@ -357,25 +624,7 @@ class UserAutoTradingSchedulerService:
                 scheduler_slot=scheduler_slot,
                 run_key=run_key,
             )
-        if provider == 'kis':
-            effective = profile.get('effective_settings')
-            effective = effective if isinstance(effective, dict) else profile.get('settings')
-            entry = effective.get('entry') if isinstance(effective, dict) else {}
-            profile_slots = {
-                str(value) for value in (entry.get('analysis_times') or [])
-            } if isinstance(entry, dict) else set()
-            if profile_slots and str(scheduler_slot) not in profile_slots:
-                return self._record_result(
-                    db,
-                    user=user,
-                    provider=provider,
-                    market=market,
-                    scheduler_slot=scheduler_slot,
-                    run_key=run_key,
-                    result='SKIPPED',
-                    reason='profile_slot_not_due',
-                    symbol='NONE',
-                )
+
         gate_reason = self._live_gate_reason(settings, provider)
         if gate_reason:
             return self._record_result(
@@ -444,7 +693,7 @@ class UserAutoTradingSchedulerService:
                 symbol=str(position_result.get('symbol') or 'NONE'),
                 position_management=position_result,
             )
-        candidate = self._select_candidate(
+        candidates = self._select_candidates(
             db,
             user=user,
             provider=provider,
@@ -452,8 +701,19 @@ class UserAutoTradingSchedulerService:
             scheduler_slot=scheduler_slot,
             now=now,
         )
-        if not candidate or not candidate.get('symbol'):
-            return self._record_result(
+        pipeline_diagnostics = getattr(
+            self.candidate_service,
+            "last_pipeline_diagnostics",
+            None,
+        )
+        if not candidates:
+            profile_context = self._profile_context(
+                profile=profile,
+                scheduler_slot=scheduler_slot,
+                user=user,
+                pipeline_diagnostics=pipeline_diagnostics,
+            )
+            no_candidate_result = self._record_result(
                 db,
                 user=user,
                 provider=provider,
@@ -461,9 +721,54 @@ class UserAutoTradingSchedulerService:
                 scheduler_slot=scheduler_slot,
                 run_key=run_key,
                 result='HOLD',
-                reason='no_qualifying_candidate',
+                reason=(
+                    'no_completed_gpt_final_candidate'
+                    if pipeline_diagnostics
+                    else 'no_qualifying_candidate'
+                ),
                 symbol='NONE',
+                create_signal=not bool(pipeline_diagnostics),
+                profile_context=profile_context,
             )
+            persist = getattr(self.candidate_service, "persist_results", None)
+            pipeline_candidate = getattr(
+                self.candidate_service,
+                "last_pipeline_candidate",
+                None,
+            )
+            if (
+                pipeline_diagnostics
+                and callable(persist)
+                and isinstance(pipeline_candidate, dict)
+            ):
+                persist(
+                    db,
+                    candidate=pipeline_candidate,
+                    run_id=no_candidate_result.get("run_id"),
+                    profile=profile,
+                    user=user,
+                    scheduler_slot=scheduler_slot,
+                    now=now,
+                )
+                db.commit()
+            return no_candidate_result
+
+        candidate = candidates[0]
+        analysis_override = candidate.get("_analysis_override")
+        if analysis_override is None:
+            candidate, analysis_override = self._choose_profile_candidate(
+                db,
+                provider=provider,
+                candidates=candidates,
+                now=now,
+            )
+        profile_context = self._profile_context(
+            profile=profile,
+            candidate=candidate,
+            scheduler_slot=scheduler_slot,
+            user=user,
+            pipeline_diagnostics=pipeline_diagnostics,
+        )
         result = self.execution_service.run_once(
             db,
             user,
@@ -476,9 +781,134 @@ class UserAutoTradingSchedulerService:
             scheduler_slot=scheduler_slot,
             snapshot_override=snapshot,
             run_key=run_key,
+            analysis_override=analysis_override,
+            profile_context=profile_context,
         )
-        return {**result, 'candidate': candidate}
+        persist = getattr(self.candidate_service, "persist_results", None)
+        if callable(persist):
+            persist(
+                db,
+                candidate=candidate,
+                run_id=result.get("run_id"),
+                profile=profile,
+                user=user,
+                scheduler_slot=scheduler_slot,
+                now=now,
+            )
+            db.commit()
+        public_candidate = {
+            key: value
+            for key, value in candidate.items()
+            if not str(key).startswith("_")
+        }
+        return {
+            **result,
+            'candidate': public_candidate,
+            'profile_context': profile_context,
+            'pipeline_diagnostics': pipeline_diagnostics,
+            'candidate_count': len(candidates),
+        }
 
+    def _select_candidates(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        profile: dict[str, Any],
+        scheduler_slot: str,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        selector = self.candidate_service
+        if callable(selector):
+            value = selector(
+                db, user=user, provider=provider, profile=profile,
+                scheduler_slot=scheduler_slot, now=now,
+            )
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+            return [value] if isinstance(value, dict) else []
+        method = getattr(selector, 'select_candidates', None)
+        if callable(method):
+            value = method(
+                db, user=user, provider=provider, profile=profile,
+                scheduler_slot=scheduler_slot, now=now,
+            )
+            return [item for item in (value or []) if isinstance(item, dict)]
+        candidate = selector.select_candidate(
+            db, user=user, provider=provider, profile=profile,
+            scheduler_slot=scheduler_slot, now=now,
+        )
+        return [candidate] if isinstance(candidate, dict) else []
+
+    def _choose_profile_candidate(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        candidates: list[dict[str, Any]],
+        now: datetime,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        if len(candidates) <= 1:
+            return candidates[0], None
+        analyzer = getattr(self.execution_service, 'analysis_service', None)
+        analyze = getattr(analyzer, 'analyze', None)
+        if not callable(analyze):
+            return candidates[0], None
+        evaluated: list[tuple[int, dict[str, Any], dict[str, Any]]] = []
+        for index, candidate in enumerate(candidates):
+            try:
+                result = dict(analyze(
+                    db,
+                    provider=provider,
+                    symbol=str(candidate['symbol']),
+                    gate_level=2,
+                    now=now,
+                ) or {})
+            except Exception as exc:
+                result = {
+                    'action': 'hold',
+                    'reason': 'analysis_unavailable',
+                    'hard_blocked': True,
+                    'gating_notes': [f'{exc.__class__.__name__}: {str(exc)[:160]}'],
+                }
+            evaluated.append((index, candidate, result))
+        selected_index, selected_candidate, selected_analysis = max(
+            evaluated,
+            key=lambda item: (
+                _number(
+                    item[2].get('final_buy_score')
+                    or item[2].get('score')
+                    or item[1].get('quant_buy_score')
+                ),
+                -item[0],
+            ),
+        )
+        del selected_index
+        return selected_candidate, selected_analysis
+
+    @staticmethod
+    def _profile_context(
+        *,
+        profile: dict[str, Any],
+        candidate: dict[str, Any] | None = None,
+        scheduler_slot: str,
+        user: User,
+        pipeline_diagnostics: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            'profile_id': profile.get('id'),
+            'profile_key': profile.get('profile_key'),
+            'profile_name': profile.get('custom_name') or profile.get('display_name'),
+            'owner_user_id': int(user.id),
+            'scheduler_slot': scheduler_slot,
+            'profile_snapshot_id': (candidate or {}).get('profile_snapshot_id'),
+            'symbol_name': (candidate or {}).get('name'),
+            'quant_rank': (candidate or {}).get('quant_rank'),
+            'ai_rank': (candidate or {}).get('ai_rank'),
+            'pipeline': 'raw_universe->profile_eligibility->canonical_quant_top50->quant_top10->ai_top5->final_candidate',
+            'pipeline_diagnostics': pipeline_diagnostics or {},
+        }
     def _select_candidate(
         self,
         db: Session,
@@ -514,26 +944,24 @@ class UserAutoTradingSchedulerService:
     ) -> list[tuple[str, datetime]]:
         normalized_provider = str(provider).strip().lower()
         market, timezone = _SCOPE[normalized_provider]
-        values: list[str] = []
-        if normalized_provider == 'kis' and db is not None and self.automation_profiles is not None:
-            try:
-                schedule = self.automation_profiles.selected_profile_schedule(
-                    db,
-                    now=now.astimezone(timezone),
-                )
-                if schedule and schedule.get('status') == 'active':
-                    values = [str(value) for value in schedule.get('analysis_times') or []]
-            except Exception:
-                values = []
+        values: set[str] = set()
+        if db is not None and self.automation_profiles is not None:
+            for _user, _settings, profile_schedule in self._eligible_user_profiles(
+                db,
+                provider=normalized_provider,
+                market=market,
+                now=now,
+            ):
+                values.update(self._profile_analysis_times(profile_schedule))
         if not values:
-            values = [
+            values.update(
                 str(item.get('time'))
                 for item in self.session_service.get_entry_slots(market)
                 if isinstance(item, dict) and item.get('time')
-            ]
+            )
         local_now = now.astimezone(timezone)
         result = []
-        for value in sorted(set(values)):
+        for value in sorted(values):
             try:
                 hour, minute = (int(part) for part in value.split(':', 1))
             except (TypeError, ValueError):
@@ -543,6 +971,117 @@ class UserAutoTradingSchedulerService:
                 candidate += timedelta(days=1)
             result.append((value, candidate))
         return result
+
+    def _eligible_user_profiles(
+        self,
+        db: Session,
+        *,
+        provider: str,
+        market: str,
+        now: datetime,
+    ) -> list[tuple[User, UserTradingSettings, dict[str, Any]]]:
+        """Return active owner profiles that are allowed to drive dispatch slots."""
+        rows: list[tuple[User, UserTradingSettings, dict[str, Any]]] = []
+        users = (
+            db.query(User)
+            .filter(User.enabled.is_(True))
+            .order_by(User.id.asc())
+            .all()
+        )
+        for user in users:
+            if str(user.role or '').strip().lower() == 'admin':
+                continue
+            settings = self._existing_settings(db, user)
+            if settings is None or not bool(settings.auto_trading_enabled):
+                continue
+            if str(settings.auto_trading_provider or '').strip().lower() != provider:
+                continue
+            profile_schedule = self._owned_profile_schedule(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                now=now,
+            )
+            if profile_schedule is None:
+                continue
+            if not self._profile_analysis_times(profile_schedule):
+                continue
+            rows.append((user, settings, profile_schedule))
+        return rows
+
+    def _owned_profile_schedule(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        market: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Resolve only the active profile owned by this exact regular user."""
+        try:
+            schedule = self.automation_profiles.selected_owned_profile_schedule(
+                db,
+                owner_user_id=int(user.id),
+                now=now,
+            )
+        except Exception:
+            return None
+        if not isinstance(schedule, dict) or schedule.get('status') != 'active':
+            return None
+        profile = schedule.get('profile')
+        if not isinstance(profile, dict):
+            return None
+        try:
+            owner_user_id = int(profile.get('owner_user_id'))
+        except (TypeError, ValueError):
+            return None
+        if owner_user_id != int(user.id):
+            return None
+        if profile.get('enabled') is not True:
+            return None
+        if str(profile.get('custom_status') or '').strip().lower() != 'active':
+            return None
+        if str(profile.get('provider') or '').strip().lower() != provider:
+            return None
+        if str(profile.get('market') or '').strip().upper() != market:
+            return None
+        return schedule
+
+    @staticmethod
+    def _profile_analysis_times(
+        profile_schedule: dict[str, Any] | None,
+    ) -> set[str]:
+        if not isinstance(profile_schedule, dict):
+            return set()
+        profile = profile_schedule.get('profile')
+        if not isinstance(profile, dict):
+            return set()
+        effective = profile.get('effective_settings')
+        effective = effective if isinstance(effective, dict) else profile.get('settings')
+        entry = effective.get('entry') if isinstance(effective, dict) else None
+        if not isinstance(entry, dict):
+            return set()
+        values: set[str] = set()
+        for raw in entry.get('analysis_times') or []:
+            try:
+                hour, minute = (int(part) for part in str(raw).split(':', 1))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    values.add(f'{hour:02d}:{minute:02d}')
+            except (TypeError, ValueError):
+                continue
+        if 'analysis_times' in profile_schedule:
+            canonical: set[str] = set()
+            for raw in profile_schedule.get('analysis_times') or []:
+                try:
+                    hour, minute = (int(part) for part in str(raw).split(':', 1))
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        canonical.add(f'{hour:02d}:{minute:02d}')
+                except (TypeError, ValueError):
+                    continue
+            return values.intersection(canonical)
+        return values
 
     @staticmethod
     def _settings(db: Session, user: User) -> UserTradingSettings:
@@ -557,6 +1096,17 @@ class UserAutoTradingSchedulerService:
             db.commit()
             db.refresh(row)
         return row
+
+    @staticmethod
+    def _existing_settings(
+        db: Session,
+        user: User,
+    ) -> UserTradingSettings | None:
+        return (
+            db.query(UserTradingSettings)
+            .filter(UserTradingSettings.user_id == int(user.id))
+            .first()
+        )
 
     @staticmethod
     def _claim(db: Session, **values: Any) -> UserAutoTradingSlotClaim | None:
@@ -691,6 +1241,8 @@ class UserAutoTradingSchedulerService:
         reason: str,
         symbol: str,
         position_management: dict[str, Any] | None = None,
+        profile_context: dict[str, Any] | None = None,
+        create_signal: bool = True,
     ) -> dict[str, Any]:
         run = db.query(TradeRunLog).filter(
             TradeRunLog.owner_user_id == int(user.id),
@@ -712,6 +1264,7 @@ class UserAutoTradingSchedulerService:
                     'scheduler_slot': scheduler_slot,
                     'trigger_source': USER_SCHEDULER_TRIGGER_SOURCE,
                     'trading_mode': str(self._settings(db, user).trading_mode or 'paper'),
+                    'profile_context': profile_context,
                 }, ensure_ascii=False, default=str),
             )
             db.add(run)
@@ -722,19 +1275,21 @@ class UserAutoTradingSchedulerService:
             run.stage = 'done'
             run.result = result
             run.reason = reason
-        signal = SignalLog(
-            owner_user_id=int(user.id),
-            symbol=symbol[:20] or 'NONE',
-            action='hold' if result.upper() != 'SELL' else 'sell',
-            reason=reason,
-            signal_status=result,
-            trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
-            timeframe=scheduler_slot,
-            hard_blocked=result.lower() in {'blocked', 'failed'},
-        )
-        db.add(signal)
-        db.flush()
-        run.signal_id = signal.id
+        signal = None
+        if create_signal:
+            signal = SignalLog(
+                owner_user_id=int(user.id),
+                symbol=symbol[:20] or 'NONE',
+                action='hold' if result.upper() != 'SELL' else 'sell',
+                reason=reason,
+                signal_status=result,
+                trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                timeframe=scheduler_slot,
+                hard_blocked=result.lower() in {'blocked', 'failed'},
+            )
+            db.add(signal)
+            db.flush()
+        run.signal_id = signal.id if signal is not None else None
         run.response_payload = json.dumps({
             'owner_user_id': int(user.id),
             'provider': provider,
@@ -744,6 +1299,8 @@ class UserAutoTradingSchedulerService:
             'result': result,
             'reason': reason,
             'position_management': position_management,
+            'trading_signal_created': signal is not None,
+            'profile_context': profile_context,
         }, ensure_ascii=False, default=str)
         db.commit()
         return {
@@ -756,11 +1313,13 @@ class UserAutoTradingSchedulerService:
             'result': result,
             'reason': reason,
             'run_id': run.id,
-            'signal_id': signal.id,
+            'signal_id': signal.id if signal is not None else None,
             'order_id': None,
             'position_management': position_management,
+            'trading_signal_created': signal is not None,
             'real_order_submitted': False,
             'broker_submit_called': False,
+            'profile_context': profile_context,
         }
 
     def _safe_failure(self, db: Session, **kwargs: Any) -> dict[str, Any]:
@@ -799,6 +1358,81 @@ def _number(value: Any) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_number(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _runtime_analysis_override(
+    candidate: dict[str, Any],
+    *,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    settings = profile.get("effective_settings")
+    settings = settings if isinstance(settings, dict) else profile.get("settings")
+    settings = settings if isinstance(settings, dict) else {}
+    entry = settings.get("entry")
+    entry = entry if isinstance(entry, dict) else {}
+    threshold = max(65.0, _number(entry.get("min_final_score")))
+    score = _optional_number(candidate.get("final_buy_score"))
+    price = _optional_number(candidate.get("current_price"))
+    gpt_completed = (
+        bool(candidate.get("gpt_used"))
+        and str(candidate.get("gpt_analysis_status") or "").strip().lower()
+        == "completed"
+        and _optional_number(candidate.get("ai_buy_score")) is not None
+        and _optional_number(candidate.get("ai_sell_score")) is not None
+    )
+    data_sufficient = (
+        price is not None
+        and price > 0
+        and str(candidate.get("indicator_status") or "").strip().lower()
+        in {"ok", "partial"}
+    )
+    action = "buy" if gpt_completed and data_sufficient and score is not None and score >= threshold else "hold"
+    return {
+        "provider": "kis",
+        "market": "KR",
+        "symbol": candidate.get("symbol"),
+        "analyzed_symbol": candidate.get("symbol"),
+        "returned_symbol": candidate.get("symbol"),
+        "action": action,
+        "reason": (
+            "profile_final_candidate"
+            if action == "buy"
+            else "profile_final_candidate_below_entry_gate"
+        ),
+        "current_price": candidate.get("current_price"),
+        "final_buy_score": candidate.get("final_buy_score"),
+        "final_sell_score": candidate.get("final_sell_score"),
+        "quant_buy_score": candidate.get("quant_buy_score"),
+        "quant_sell_score": candidate.get("quant_sell_score"),
+        "ai_buy_score": candidate.get("ai_buy_score"),
+        "ai_sell_score": candidate.get("ai_sell_score"),
+        "confidence": candidate.get("confidence"),
+        "ai_reason": candidate.get("ai_reason") or candidate.get("gpt_reason"),
+        "quant_reason": candidate.get("quant_reason"),
+        "indicator_payload": candidate.get("indicator_payload") or {},
+        "indicator_status": candidate.get("indicator_status"),
+        "data_sufficient": data_sufficient,
+        "gpt_used": bool(candidate.get("gpt_used")),
+        "gpt_analysis_status": candidate.get("gpt_analysis_status") or "not_run",
+        "gpt_reason": candidate.get("gpt_reason"),
+        "risk_flags": candidate.get("risk_flags") or [],
+        "gating_notes": candidate.get("gating_notes") or [],
+        "hard_blocked": not gpt_completed or not data_sufficient,
+        "entry_ready": action == "buy",
+    }
 
 def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None:

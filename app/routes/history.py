@@ -15,6 +15,7 @@ from app.services.gpt_risk_context import (
     has_observed_gpt_context,
 )
 from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
+from app.services.automation_today_decision_service import AutomationTodayDecisionService
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
@@ -200,6 +201,82 @@ def _payload_candidate(response_payload: dict[str, Any]) -> dict[str, Any]:
     return candidate if isinstance(candidate, dict) else {}
 
 
+def _profile_payload_fields(
+    row: TradeRunLog | SignalLog,
+    request_payload: dict[str, Any],
+    response_payload: dict[str, Any],
+) -> dict[str, Any]:
+    candidate = _payload_candidate(response_payload)
+    context = {}
+    for payload in (response_payload, request_payload):
+        value = payload.get('profile_context')
+        if isinstance(value, dict):
+            context = value
+            break
+        value = payload.get('automation_profile')
+        if isinstance(value, dict):
+            context = value
+            break
+    profile_id = _first_present(
+        context.get('profile_id'),
+        context.get('automation_profile_id'),
+        response_payload.get('profile_id'),
+        response_payload.get('automation_profile_id'),
+        request_payload.get('profile_id'),
+        request_payload.get('automation_profile_id'),
+    )
+    profile_key = _first_present(
+        context.get('profile_key'),
+        context.get('automation_profile_key'),
+        response_payload.get('profile_key'),
+        response_payload.get('automation_profile_key'),
+        request_payload.get('profile_key'),
+        request_payload.get('automation_profile_key'),
+    )
+    return {
+        'profile_id': profile_id,
+        'profile_key': profile_key,
+        'profile_name': _first_present(
+            context.get('profile_name'),
+            response_payload.get('profile_name'),
+            candidate.get('profile_name'),
+        ),
+        'owner_user_id': row.owner_user_id,
+        'scheduler_slot': _first_present(
+            context.get('scheduler_slot'),
+            response_payload.get('scheduler_slot'),
+            request_payload.get('scheduler_slot'),
+            getattr(row, 'timeframe', None),
+        ),
+        'run_id': row.id if isinstance(row, TradeRunLog) else None,
+        'profile_snapshot_id': _first_present(
+            context.get('profile_snapshot_id'),
+            response_payload.get('profile_snapshot_id'),
+            candidate.get('profile_snapshot_id'),
+        ),
+        'symbol_name': _first_present(
+            context.get('symbol_name'),
+            response_payload.get('symbol_name'),
+            response_payload.get('selected_symbol_name'),
+            candidate.get('name'),
+            candidate.get('symbol_name'),
+        ),
+        'created_at_kst': _kst_iso(row.created_at),
+    }
+
+
+def _kst_iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        from datetime import UTC
+        from zoneinfo import ZoneInfo
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(ZoneInfo('Asia/Seoul')).isoformat()
+    except (AttributeError, TypeError, ValueError):
+        return None
+
 def _payload_gpt_context(*payloads: Any) -> dict[str, Any] | None:
     for payload in payloads:
         if not isinstance(payload, dict):
@@ -297,6 +374,7 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         or ("hold" if row.result in {"skipped", "rejected"} else row.result)
     )
     reason = row.reason or response_payload.get("reason") or trade_result.get("reason")
+    profile_fields = _profile_payload_fields(row, request_payload, response_payload)
 
     return {
         "id": row.id,
@@ -317,6 +395,7 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         "symbol_role": row.symbol_role,
         "parent_run_key": row.parent_run_key,
         "created_at": row.created_at,
+        **profile_fields,
         "dry_run": _bool_or_none(
             _first_present(
                 response_payload.get("dry_run"),
@@ -642,6 +721,7 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
             _infer_market(provider),
         )
     )
+    profile_fields = _profile_payload_fields(row, request_payload, response_payload)
     simulated = provider == "kis" and str(row.signal_status or "").lower() == "simulated"
     buy_shadow = (
         provider == "kis"
@@ -682,6 +762,7 @@ def _serialize_signal(row: SignalLog, db: Session) -> dict[str, Any]:
         "order_id": row.related_order_id,
         "gate_level": row.gate_level,
         "created_at": row.created_at,
+        **profile_fields,
         "dry_run": True if simulated or buy_shadow else None,
         "simulated": simulated or buy_shadow,
         "preview_only": buy_shadow,
@@ -711,6 +792,17 @@ def get_recent_runs(
     rows = query.order_by(TradeRunLog.created_at.desc()).limit(limit).all()
     return {"items": [_serialize_run(row) for row in rows]}
 
+
+@router.get('/runs/automation/ai-decisions/today')
+def get_today_system_ai_decisions(
+    db: Session = Depends(get_db),
+    _admin: User | None = Depends(require_admin_or_uninitialized_legacy_access),
+):
+    """Return today's slots for the selected Admin/system profile only."""
+    return AutomationTodayDecisionService().get_today(
+        db,
+        admin_user_id=int(_admin.id) if _admin is not None else None,
+    )
 
 @router.get('/runs/automation/recent')
 def get_recent_system_automation_runs(

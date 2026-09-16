@@ -358,6 +358,7 @@ class StrategyProfileService:
                 "automation_settings": effective,
                 "automation_settings_configured": custom_settings,
             })
+        payload["owner_user_id"] = row.owner_user_id
         return payload
 
     def _profile_or_raise(self, db: Session, profile_name: str) -> StrategyProfile:

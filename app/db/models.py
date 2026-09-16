@@ -235,7 +235,7 @@ class AutomationProfileWatchlistSnapshot(Base):
     __tablename__ = 'automation_profile_watchlist_snapshots'
     __table_args__ = (
         UniqueConstraint(
-            'profile_id', 'snapshot_date', 'scheduler_slot',
+            'owner_user_id', 'profile_id', 'snapshot_date', 'scheduler_slot',
             name='uq_profile_watchlist_snapshot_slot',
         ),
         Index(
@@ -290,6 +290,59 @@ class AutomationProfileWatchlistItem(Base):
     eligible = Column(Boolean, nullable=False, default=True)
     exclusion_reason = Column(String(120), nullable=True)
     indicators_json = Column(Text, nullable=False, default='{}')
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+class AutomationProfileAiCandidateResult(Base):
+    """Per-slot runtime/GPT/final audit rows for a profile-scoped run."""
+
+    __tablename__ = 'automation_profile_ai_candidate_results'
+    __table_args__ = (
+        UniqueConstraint(
+            'owner_user_id', 'profile_id', 'snapshot_date', 'scheduler_slot', 'symbol',
+            name='uq_automation_profile_ai_candidate_slot_symbol',
+        ),
+        Index(
+            'ix_automation_profile_ai_candidate_scope',
+            'owner_user_id', 'profile_id', 'snapshot_date', 'scheduler_slot',
+        ),
+        Index(
+            'ix_automation_profile_ai_candidate_run_rank',
+            'run_id', 'final_rank',
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    profile_id = Column(Integer, ForeignKey('strategy_profiles.id'), nullable=False, index=True)
+    snapshot_id = Column(
+        Integer,
+        ForeignKey('automation_profile_watchlist_snapshots.id'),
+        nullable=True,
+        index=True,
+    )
+    # TradeRunLog is declared later in this module; keep this audit link
+    # logical so existing databases can add the table without FK migration.
+    run_id = Column(Integer, nullable=True, index=True)
+    snapshot_date = Column(String(10), nullable=False, index=True)
+    scheduler_slot = Column(String(10), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    symbol_name = Column(String(200), nullable=True)
+    snapshot_rank = Column(Integer, nullable=True)
+    runtime_quant_rank = Column(Integer, nullable=True)
+    runtime_quant_buy_score = Column(Float, nullable=True)
+    runtime_quant_sell_score = Column(Float, nullable=True)
+    gpt_target_rank = Column(Integer, nullable=True)
+    gpt_used = Column(Boolean, nullable=False, default=False)
+    gpt_analysis_status = Column(String(30), nullable=False, default='not_run')
+    ai_buy_score = Column(Float, nullable=True)
+    ai_sell_score = Column(Float, nullable=True)
+    confidence = Column(Float, nullable=True)
+    ai_reason = Column(Text, nullable=True)
+    final_buy_score = Column(Float, nullable=True)
+    final_sell_score = Column(Float, nullable=True)
+    final_rank = Column(Integer, nullable=True)
+    final_selected = Column(Boolean, nullable=False, default=False)
+    diagnostics_json = Column(Text, nullable=False, default='{}')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 class BrokerAuthToken(Base):

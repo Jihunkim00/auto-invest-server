@@ -14,6 +14,7 @@ from app.schemas.user_data import UserTradingSettingsUpdateRequest
 from app.services.auth_dependencies import require_regular_user
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_trading_execution_service import UserTradingExecutionService
+from app.services.automation_today_decision_service import AutomationTodayDecisionService
 from app.services.user_auto_trading_scheduler_service import UserAutoTradingSchedulerService
 from app.services.user_watchlist_analysis_scheduler_service import (
     UserWatchlistAnalysisSchedulerService,
@@ -290,6 +291,18 @@ def get_my_trading_scheduler_status(
         'last_scheduler_run_id': latest.id if latest else None,
     }
 
+
+@router.get('/ai-decisions/today')
+def get_my_today_ai_decisions(
+    db: Session = Depends(get_db),
+    user: User = Depends(require_regular_user),
+):
+    """Return only this user's active-profile decisions for today's slots."""
+    return AutomationTodayDecisionService().get_today(
+        db,
+        owner_user_id=int(user.id),
+        now=datetime.now(UTC),
+    )
 
 @router.post('/run-once')
 def run_my_trading_once(

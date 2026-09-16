@@ -127,7 +127,7 @@ class AutomationProfileWatchlistService:
                     quant_buy_score=item['quant_buy_score'],
                     quant_sell_score=item['quant_sell_score'],
                     rank=index,
-                    quant_rank=index if index <= top_quant else 0,
+                    quant_rank=index,
                     ai_rank=index if index <= top_ai else None,
                     eligible=True,
                     indicators_json=json.dumps(item['indicators'], ensure_ascii=False, default=str),
@@ -317,8 +317,14 @@ class AutomationProfileWatchlistService:
 
 
 def _settings(profile: dict[str, Any]) -> dict[str, Any]:
-    effective = profile.get('effective_settings')
-    return effective if isinstance(effective, dict) else _object(profile.get('settings'))
+    # StrategyProfileService.serialize_profile exposes custom automation
+    # settings as automation_settings, while AutomationProfileService.serialize
+    # exposes them as effective_settings. Both are canonical profile payloads.
+    for key in ('effective_settings', 'automation_settings', 'settings'):
+        value = profile.get(key)
+        if isinstance(value, dict) and value:
+            return value
+    return {}
 
 
 def _object(value: Any) -> dict[str, Any]:

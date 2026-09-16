@@ -138,6 +138,10 @@ class KisWatchlistPreviewService:
         trigger_source: str = "manual_kis_preview",
         min_price_krw: float | None = None,
         max_price_krw: float | None = None,
+        profile_snapshot_items: list[dict[str, Any]] | None = None,
+        profile_snapshot_context: dict[str, Any] | None = None,
+        canonical_profile_pipeline: bool = False,
+        decision_timestamp: datetime | None = None,
     ) -> dict[str, Any]:
         db = db if db is not None else self.db
         settings = get_settings()
@@ -145,11 +149,38 @@ class KisWatchlistPreviewService:
         watchlist = self.profile_service.load_watchlist("KR")
         references = self.profile_service.load_reference_sites("KR")
         market_session = self.session_service.get_session_status("KR")
-        decision_timestamp = datetime.now(ZoneInfo("Asia/Seoul"))
+        decision_timestamp = (
+            decision_timestamp.astimezone(ZoneInfo("Asia/Seoul"))
+            if decision_timestamp is not None
+            else datetime.now(ZoneInfo("Asia/Seoul"))
+        )
         preview_started = time.perf_counter()
         self.market_data_snapshot_service.reset_run_stats()
         session_warnings = self._session_warnings(market_session)
-        configured_symbols = watchlist["symbols"][: self.limit]
+        canonical_profile_pipeline = bool(
+            canonical_profile_pipeline and profile_snapshot_items is not None
+        )
+        if profile_snapshot_items is not None:
+            configured_symbols = [
+                {
+                    **dict(raw),
+                    "snapshot_rank": (
+                        raw.get("snapshot_rank")
+                        or raw.get("rank")
+                        or raw.get("quant_rank")
+                    ),
+                }
+                for raw in profile_snapshot_items[: self.limit]
+                if isinstance(raw, dict) and raw.get("symbol")
+            ]
+        else:
+            configured_symbols = watchlist["symbols"][: self.limit]
+        profile_snapshot_selected_symbols = (
+            _candidate_symbols(profile_snapshot_items[: self.limit])
+            if canonical_profile_pipeline and isinstance(profile_snapshot_items, list)
+            else []
+        )
+        runtime_input_symbols = _candidate_symbols(configured_symbols)
         runtime_settings = self._runtime_settings(db)
         max_open_positions = max(1, _safe_int(runtime_settings.get("max_open_positions"), 3))
         per_slot_new_entry_limit = max(
@@ -183,6 +214,11 @@ class KisWatchlistPreviewService:
                 db=db,
                 market_data_snapshot=market_snapshot,
             )
+            item["snapshot_rank"] = (
+                raw.get("snapshot_rank")
+                or raw.get("rank")
+                or raw.get("quant_rank")
+            )
             symbol = str(item.get("symbol") or "").strip().upper()
             if symbol:
                 quote_snapshots[symbol] = item
@@ -208,14 +244,43 @@ class KisWatchlistPreviewService:
         )
         market_context_summary = self.market_context_service.summary(market_context)
         quant_ranked_candidates = self._rank_quant_candidates(quant_items)
+        runtime_quant_ranked_candidates = list(quant_ranked_candidates)
+        for runtime_rank, item in enumerate(runtime_quant_ranked_candidates, start=1):
+            item["runtime_quant_rank"] = runtime_rank
+            item["runtime_quant_buy_score"] = item.get("quant_buy_score")
+            item["runtime_quant_sell_score"] = item.get("quant_sell_score")
+        effective_max_candidate_price = to_float(
+            (profile_snapshot_context or {}).get("effective_max_candidate_price")
+        )
+        unaffordable_runtime_candidates = [
+            normalize_symbol_identity(item.get("symbol"))
+            for item in runtime_quant_ranked_candidates
+            if effective_max_candidate_price > 0
+            and to_float(item.get("current_price") or item.get("price")) > effective_max_candidate_price
+        ]
+        if canonical_profile_pipeline:
+            assert set(runtime_input_symbols) == set(profile_snapshot_selected_symbols), (
+                "runtime input symbols must equal profile snapshot selected symbols"
+            )
+            assert len(runtime_quant_ranked_candidates) <= len(profile_snapshot_selected_symbols), (
+                "runtime quant candidate count must not exceed snapshot selected count"
+            )
+            assert not unaffordable_runtime_candidates, (
+                "unaffordable symbols reached runtime quant candidates"
+            )
         a_quant_scan_finished = time.perf_counter()
         gpt_target_symbols = []
         if include_gpt and self.gpt_candidate_limit > 0:
             gpt_target_symbols = [
                 str(item.get("symbol"))
-                for item in quant_ranked_candidates[: self.gpt_candidate_limit]
+                for item in runtime_quant_ranked_candidates[: self.gpt_candidate_limit]
                 if item.get("symbol")
             ]
+        gpt_initial_target_symbols = list(gpt_target_symbols)
+        gpt_completed_symbols: list[str] = []
+        gpt_failed_symbols: list[str] = []
+        gpt_replacement_count = 0
+        gpt_target_rank_by_symbol: dict[str, int] = {}
 
         items_by_symbol = {
             str(item.get("symbol") or ""): item
@@ -234,33 +299,144 @@ class KisWatchlistPreviewService:
         gpt_used = False
         gpt_reuse_count = 0
         gpt_started = time.perf_counter()
-        for raw in configured_symbols:
-            symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
-            if symbol not in gpt_target_symbols:
-                continue
-            item = self._preview_symbol(
-                raw,
-                gate_level=gate_level,
-                market_session=market_session,
-                session_warnings=session_warnings,
-                reference_sources=references.get("sources") or [],
-                include_gpt=True,
-                db=db,
-                market_context=market_context,
-                market_data_snapshot=market_snapshots.get(symbol),
-                disclosure_context=self.market_context_service.get_disclosures(
-                    symbol,
-                    as_of=market_context.get("as_of"),
-                    limit=5,
-                ),
-            )
-            if market_snapshots.get(symbol) is not None:
-                gpt_reuse_count += 1
-            gpt_used = gpt_used or bool(item.get("gpt_used"))
-            shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
-            if isinstance(shadow_b, dict):
-                item["shadow_b"] = shadow_b
-            items_by_symbol[symbol] = item
+        raw_by_symbol = {
+            self.profile_service.normalize_symbol(raw.get("symbol"), "KR"): raw
+            for raw in configured_symbols
+            if isinstance(raw, dict) and raw.get("symbol")
+        }
+        if canonical_profile_pipeline:
+            queue = list(runtime_quant_ranked_candidates[: self.gpt_candidate_limit])
+            next_runtime_index = len(queue)
+            attempt_rank = 0
+            while queue and len(gpt_completed_symbols) < self.gpt_candidate_limit:
+                runtime_item = queue.pop(0)
+                symbol = str(runtime_item.get("symbol") or "").strip().upper()
+                if not symbol:
+                    continue
+                attempt_rank += 1
+                gpt_target_rank_by_symbol[symbol] = attempt_rank
+                raw = raw_by_symbol.get(symbol) or runtime_item
+                item = self._preview_symbol(
+                    raw,
+                    gate_level=gate_level,
+                    market_session=market_session,
+                    session_warnings=session_warnings,
+                    reference_sources=references.get("sources") or [],
+                    include_gpt=True,
+                    db=db,
+                    market_context=market_context,
+                    market_data_snapshot=market_snapshots.get(symbol),
+                    disclosure_context=self.market_context_service.get_disclosures(
+                        symbol,
+                        as_of=market_context.get("as_of"),
+                        limit=5,
+                    ),
+                )
+                item["snapshot_rank"] = (
+                    raw.get("snapshot_rank")
+                    or raw.get("rank")
+                    or raw.get("quant_rank")
+                )
+                item["runtime_quant_rank"] = runtime_item.get("runtime_quant_rank")
+                item["runtime_quant_buy_score"] = runtime_item.get("quant_buy_score")
+                item["runtime_quant_sell_score"] = runtime_item.get("quant_sell_score")
+                item["gpt_target_rank"] = attempt_rank
+                if market_snapshots.get(symbol) is not None:
+                    gpt_reuse_count += 1
+                completed = (
+                    str(item.get("gpt_analysis_status") or "").strip().lower()
+                    == "completed"
+                    and bool(item.get("gpt_used"))
+                    and _score_or_none(item.get("ai_buy_score")) is not None
+                    and _score_or_none(item.get("ai_sell_score")) is not None
+                )
+                if completed:
+                    gpt_completed_symbols.append(symbol)
+                    gpt_used = True
+                else:
+                    if str(item.get("gpt_analysis_status") or "").strip().lower() == "completed":
+                        item["gpt_analysis_status"] = "failed"
+                        item["gpt_analysis_reason"] = (
+                            item.get("gpt_analysis_reason")
+                            or "GPT scores were incomplete."
+                        )
+                    gpt_failed_symbols.append(symbol)
+                    if next_runtime_index < len(runtime_quant_ranked_candidates):
+                        replacement = runtime_quant_ranked_candidates[next_runtime_index]
+                        next_runtime_index += 1
+                        queue.append(replacement)
+                        gpt_replacement_count += 1
+                shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
+                if isinstance(shadow_b, dict):
+                    item["shadow_b"] = shadow_b
+                items_by_symbol[symbol] = item
+            gpt_target_symbols = [
+                symbol
+                for symbol, _rank in sorted(
+                    gpt_target_rank_by_symbol.items(),
+                    key=lambda pair: pair[1],
+                )
+            ]
+            # A quant-only or failed GPT row is audit data, never a canonical
+            # final candidate. Its quant score remains observable but its
+            # final score/rank are intentionally empty.
+            for item in items_by_symbol.values():
+                if not isinstance(item, dict):
+                    continue
+                symbol = str(item.get("symbol") or "").strip().upper()
+                if symbol not in gpt_completed_symbols:
+                    item["final_buy_score"] = None
+                    item["final_sell_score"] = None
+                    item["final_entry_score"] = None
+                    item["score"] = None
+                item["final_rank"] = None
+                item["final_selected"] = False
+            quant_ranked_candidates = [
+                items_by_symbol.get(str(item.get("symbol") or "").strip().upper(), item)
+                for item in runtime_quant_ranked_candidates
+                if str(item.get("symbol") or "").strip().upper() in items_by_symbol
+            ]
+        else:
+            for raw in configured_symbols:
+                symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
+                if symbol not in gpt_target_symbols:
+                    continue
+                item = self._preview_symbol(
+                    raw,
+                    gate_level=gate_level,
+                    market_session=market_session,
+                    session_warnings=session_warnings,
+                    reference_sources=references.get("sources") or [],
+                    include_gpt=True,
+                    db=db,
+                    market_context=market_context,
+                    market_data_snapshot=market_snapshots.get(symbol),
+                    disclosure_context=self.market_context_service.get_disclosures(
+                        symbol,
+                        as_of=market_context.get("as_of"),
+                        limit=5,
+                    ),
+                )
+                if market_snapshots.get(symbol) is not None:
+                    gpt_reuse_count += 1
+                gpt_used = gpt_used or bool(item.get("gpt_used"))
+                shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
+                if isinstance(shadow_b, dict):
+                    item["shadow_b"] = shadow_b
+                items_by_symbol[symbol] = item
+            gpt_completed_symbols = [
+                str(item.get("symbol"))
+                for item in items_by_symbol.values()
+                if isinstance(item, dict)
+                and str(item.get("gpt_analysis_status") or "").lower() == "completed"
+                and bool(item.get("gpt_used"))
+            ]
+            gpt_failed_symbols = [
+                str(item.get("symbol"))
+                for item in items_by_symbol.values()
+                if isinstance(item, dict)
+                and str(item.get("gpt_analysis_status") or "").lower() == "failed"
+            ]
         gpt_finished = time.perf_counter()
 
         items = [
@@ -281,13 +457,45 @@ class KisWatchlistPreviewService:
             if item.get("symbol") and str(item.get("symbol")) not in gpt_target_symbol_set
         ]
 
-        final_ranked_candidates = self._rank_final_candidates(items)
-        quant_candidates = self._rank_quant_candidates(items)
-        researched_candidates = [
-            item
-            for item in final_ranked_candidates
-            if item.get("gpt_used") and item.get("quant_buy_score") is not None
-        ]
+        if canonical_profile_pipeline:
+            final_ranked_candidates = self._rank_final_candidates([
+                item
+                for item in items
+                if (
+                    str(item.get("gpt_analysis_status") or "").strip().lower()
+                    == "completed"
+                    and bool(item.get("gpt_used"))
+                    and _score_or_none(item.get("ai_buy_score")) is not None
+                    and _score_or_none(item.get("ai_sell_score")) is not None
+                )
+            ])
+            for final_rank, item in enumerate(final_ranked_candidates, start=1):
+                item["final_rank"] = final_rank
+                item["final_selected"] = final_rank == 1
+            assert {
+                normalize_symbol_identity(symbol)
+                for symbol in gpt_completed_symbols
+            } == {
+                normalize_symbol_identity(item.get("symbol"))
+                for item in final_ranked_candidates
+                if item.get("final_rank") is not None
+            }
+            if final_ranked_candidates:
+                assert sum(
+                    bool(item.get("final_selected"))
+                    for item in final_ranked_candidates
+                ) == 1
+                assert final_ranked_candidates[0].get("final_selected") is True
+            quant_candidates = quant_ranked_candidates
+            researched_candidates = list(final_ranked_candidates)
+        else:
+            final_ranked_candidates = self._rank_final_candidates(items)
+            quant_candidates = self._rank_quant_candidates(items)
+            researched_candidates = [
+                item
+                for item in final_ranked_candidates
+                if item.get("gpt_used") and item.get("quant_buy_score") is not None
+            ]
         final_best_candidate = (
             final_ranked_candidates[0]
             if final_ranked_candidates
@@ -467,6 +675,21 @@ class KisWatchlistPreviewService:
             "trading_enabled": False,
             "gpt_analysis_included": gpt_used,
             "watchlist_source": watchlist.get("watchlist_file"),
+            "canonical_profile_pipeline": canonical_profile_pipeline,
+            "profile_snapshot": profile_snapshot_context or {},
+            "snapshot_id": (profile_snapshot_context or {}).get("id"),
+            "scheduler_slot": (profile_snapshot_context or {}).get("scheduler_slot"),
+            "snapshot_source_count": (profile_snapshot_context or {}).get("source_count"),
+            "snapshot_eligible_count": (profile_snapshot_context or {}).get("eligible_count"),
+            "snapshot_selected_count": (profile_snapshot_context or {}).get("selected_count"),
+            "profile_snapshot_selected_symbols": profile_snapshot_selected_symbols,
+            "runtime_input_symbols": runtime_input_symbols,
+            "runtime_quant_candidate_symbols": [
+                normalize_symbol_identity(item.get("symbol"))
+                for item in runtime_quant_ranked_candidates
+                if item.get("symbol")
+            ],
+            "unaffordable_runtime_candidates": unaffordable_runtime_candidates,
             "watchlist_file": watchlist.get("watchlist_file"),
             "reference_sites_file": references.get("reference_sites_file"),
             "configured_symbol_count": len(configured_symbols),
@@ -481,7 +704,23 @@ class KisWatchlistPreviewService:
                 if item.get("quant_buy_score") is not None
             ),
             "gpt_target_symbols": gpt_target_symbols,
-            "gpt_target_count": len(gpt_target_symbols),
+            "gpt_requested_count": len(gpt_initial_target_symbols),
+            "gpt_attempted_count": len(gpt_target_symbols),
+            "gpt_attempted_symbols": list(gpt_target_symbols),
+            "gpt_initial_target_symbols": gpt_initial_target_symbols,
+            "gpt_completed_symbols": gpt_completed_symbols,
+            "gpt_failed_symbols": gpt_failed_symbols,
+            "gpt_replacement_count": gpt_replacement_count,
+            "runtime_quant_candidate_count": len(runtime_quant_ranked_candidates),
+            "runtime_quant_top5_symbols": [
+                str(item.get("symbol"))
+                for item in runtime_quant_ranked_candidates[: self.gpt_candidate_limit]
+                if item.get("symbol")
+            ],
+            "gpt_top5_candidates": [
+                item for item in final_ranked_candidates[: self.gpt_candidate_limit]
+            ] if canonical_profile_pipeline else [],
+            "gpt_target_count": len(gpt_initial_target_symbols),
             "gpt_analyzed_symbol_count": len(gpt_analyzed_symbols),
             **gpt_counts,
             "quant_only_symbols": quant_only_symbols,
@@ -1651,10 +1890,17 @@ def _serialize_preview_run(row: TradeRunLog) -> dict[str, Any]:
     }
 
 
+def normalize_symbol_identity(value: Any) -> str:
+    """Return the stable identity used for KR pipeline comparisons."""
+    text = str(value or "").strip().upper()
+    if text.isdigit() and len(text) < 6:
+        return text.zfill(6)
+    return text
+
 def _candidate_symbol(value: Any) -> str | None:
     if isinstance(value, dict):
         value = value.get("symbol")
-    text = str(value or "").strip().upper()
+    text = normalize_symbol_identity(value)
     return text or None
 
 
