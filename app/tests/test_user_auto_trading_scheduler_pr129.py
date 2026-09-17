@@ -163,6 +163,103 @@ class FakeKisClient(FakeBroker):
     pass
 
 
+class CanonicalProfileWatchlists:
+    def __init__(self, items, *, cap=48000.0, owner_user_id=2, profile_id=1):
+        self.items = [dict(item) for item in items]
+        self.cap = cap
+        self.owner_user_id = owner_user_id
+        self.profile_id = profile_id
+        self.calls = []
+
+    def build(self, db, *, profile, owner_user_id, scheduler_slot, now=None):
+        self.calls.append({
+            'owner_user_id': owner_user_id,
+            'profile_id': profile.get('id'),
+            'scheduler_slot': scheduler_slot,
+        })
+        return {
+            'snapshot': {
+                'id': 9001,
+                'profile_id': int(profile['id']),
+                'owner_user_id': int(owner_user_id),
+                'provider': 'kis',
+                'market': 'KR',
+                'snapshot_date': '2026-09-11',
+                'scheduler_slot': scheduler_slot,
+                'source_count': len(self.items),
+                'eligible_count': len(self.items),
+                'selected_count': len(self.items),
+                'effective_max_candidate_price': self.cap,
+            },
+            'items': [dict(item) for item in self.items],
+        }
+
+
+class CanonicalRuntimePreview:
+    def __init__(self, latest_prices, *, final_score=70.0):
+        self.latest_prices = dict(latest_prices)
+        self.final_score = final_score
+        self.calls = []
+
+    def run_preview(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        snapshot_items = kwargs['profile_snapshot_items']
+        cap = float(kwargs['max_price_krw'])
+        runtime_items = []
+        for raw in snapshot_items:
+            symbol = str(raw['symbol']).upper()
+            latest_price = float(self.latest_prices[symbol])
+            if latest_price <= cap:
+                runtime_items.append({
+                    **raw,
+                    'symbol': symbol,
+                    'current_price': latest_price,
+                    'indicator_status': 'ok',
+                    'quant_buy_score': float(raw.get('quant_buy_score') or 80.0),
+                    'quant_sell_score': float(raw.get('quant_sell_score') or 10.0),
+                    'runtime_quant_buy_score': float(raw.get('quant_buy_score') or 80.0),
+                    'runtime_quant_sell_score': float(raw.get('quant_sell_score') or 10.0),
+                    'ai_buy_score': 75.0,
+                    'ai_sell_score': 15.0,
+                    'confidence': 0.8,
+                    'gpt_used': True,
+                    'gpt_analysis_status': 'completed',
+                    'final_buy_score': float(self.final_score),
+                    'final_sell_score': 10.0,
+                })
+        runtime_symbols = [item['symbol'] for item in runtime_items]
+        for rank, item in enumerate(runtime_items, start=1):
+            item['runtime_quant_rank'] = rank
+            item['gpt_target_rank'] = rank
+            item['final_rank'] = rank
+            item['final_selected'] = rank == 1
+        return {
+            'canonical_profile_pipeline': True,
+            'profile_snapshot_selected_symbols': [
+                str(item['symbol']).upper() for item in snapshot_items
+            ],
+            'runtime_input_symbols': [
+                str(item['symbol']).upper() for item in snapshot_items
+            ],
+            'runtime_quant_candidate_symbols': runtime_symbols,
+            'runtime_quant_top5_symbols': runtime_symbols[:5],
+            'gpt_target_symbols': runtime_symbols[:5],
+            'gpt_completed_symbols': runtime_symbols[:5],
+            'gpt_failed_symbols': [],
+            'gpt_replacement_count': 0,
+            'final_candidate_symbols': runtime_symbols[:5],
+            'selected_final_symbol': runtime_symbols[0] if runtime_symbols else None,
+            'final_ranked_candidates': runtime_items[:5],
+            'final_ranked_top5': runtime_items[:5],
+            'final_best_candidate': runtime_items[0] if runtime_items else None,
+            'items': runtime_items,
+            'runtime_quant_candidate_count': len(runtime_items),
+            'unaffordable_runtime_candidates': [],
+            'snapshot_id': kwargs['profile_snapshot_context']['id'],
+            'profile_snapshot': kwargs['profile_snapshot_context'],
+        }
+
+
 def _user(db, username, *, role='user'):
     row = User(
         username=username,
@@ -711,3 +808,191 @@ def test_personal_watchlist_cannot_override_shared_auto_candidate(db_session):
     assert candidate['symbol'] == '086790'
     assert candidate['candidate_source'] == 'automation_profile_watchlist_snapshot'
     assert candidate['automation_profile_id'] == profile['id']
+
+
+def _canonical_scheduler_setup(db, *, final_score=70.0):
+    _user(db, 'pr129-canonical-admin', role='admin')
+    user = _user(db, 'pr129-canonical-user')
+    _configure_user(db, user, provider='kis')
+    _set_profile_schedule(
+        db,
+        user,
+        ['09:10'],
+        fixed_budget=50000,
+        max_order_notional=48000,
+    )
+    account_snapshot = {
+        'provider': 'kis',
+        'environment': 'paper',
+        'connected': True,
+        'account': {
+            'currency': 'KRW',
+            'portfolio_value': 1000000.0,
+            'equity': 1000000.0,
+            'buying_power': 1000000.0,
+            'cash': 1000000.0,
+        },
+        'positions': [],
+        'open_orders': [],
+    }
+    scheduler, account, analysis, broker, kis_client = _harness(
+        snapshots={(user.id, 'kis'): account_snapshot},
+    )
+    profile = AutomationProfileService().selected_owned_profile_schedule(
+        db,
+        owner_user_id=user.id,
+        now=RUN_AT,
+    )['profile']
+    items = [
+        {
+            'symbol': '005930',
+            'name': 'Snapshot crossing candidate',
+            'market': 'KOSPI',
+            'current_price': 47900.0,
+            'quant_buy_score': 90.0,
+            'quant_sell_score': 10.0,
+            'snapshot_rank': 1,
+        },
+        {
+            'symbol': '000660',
+            'name': 'Affordable candidate',
+            'market': 'KOSPI',
+            'current_price': 47000.0,
+            'quant_buy_score': 80.0,
+            'quant_sell_score': 12.0,
+            'snapshot_rank': 2,
+        },
+    ]
+    watchlists = CanonicalProfileWatchlists(items, cap=48000.0)
+    preview = CanonicalRuntimePreview(
+        {'005930': 48300.0, '000660': 47000.0},
+        final_score=final_score,
+    )
+    scheduler.candidate_service = UserAutoTradingCandidateService(
+        profile_watchlists=watchlists,
+        runtime_preview_service=preview,
+    )
+    return scheduler, user, profile, preview, account, analysis, broker, kis_client
+
+
+def test_user_scheduler_canonical_lineage_applies_runtime_affordability_and_final_one(
+    db_session,
+):
+    scheduler, user, profile, preview, _account, _analysis, broker, kis_client = (
+        _canonical_scheduler_setup(db_session)
+    )
+
+    result = scheduler.run_provider_once(
+        db_session,
+        provider='kis',
+        scheduler_slot='09:10',
+        now=RUN_AT,
+    )
+    item = next(value for value in result['items'] if value.get('owner_user_id') == user.id)
+    diagnostics = item['pipeline_diagnostics']
+    snapshot_symbols = set(diagnostics['profile_snapshot_selected_symbols'])
+
+    assert item['profile_id'] == profile['id']
+    assert item['profile_snapshot']['owner_user_id'] == user.id
+    assert diagnostics['owner_user_id'] == user.id
+    assert set(diagnostics['runtime_input_symbols']) == snapshot_symbols
+    assert '005930' in snapshot_symbols
+    assert '005930' not in set(diagnostics['runtime_quant_candidate_symbols'])
+    assert '005930' not in set(diagnostics['runtime_quant_top5_symbols'])
+    assert '005930' not in set(diagnostics['gpt_target_symbols'])
+    assert '005930' not in set(diagnostics['final_candidate_symbols'])
+    assert diagnostics['runtime_quant_candidate_count'] == len(snapshot_symbols) - 1
+    assert diagnostics['runtime_quant_top5_symbols'] == diagnostics['gpt_target_symbols']
+    assert diagnostics['final_candidate_symbols'] == diagnostics['gpt_completed_symbols']
+    assert diagnostics['final_selected_count'] == 1
+    assert diagnostics['selected_symbol'] == diagnostics['final_rank_1_symbol']
+    assert diagnostics['selected_final_symbol'] == '000660'
+    assert preview.calls[0]['max_price_krw'] == 48000.0
+    assert preview.calls[0]['profile_snapshot_context']['owner_user_id'] == user.id
+    assert item['candidate']['symbol'] == '000660'
+    assert item['real_order_submitted'] is False
+    assert item['broker_submit_called'] is False
+    assert broker.buy_calls == []
+    assert kis_client.buy_calls == []
+
+
+class FailingCanonicalPreview:
+    def run_preview(self, **_kwargs):
+        raise RuntimeError(
+            'runtime quant failed appsecret=super-secret access_token=token-secret'
+        )
+
+
+def test_user_scheduler_failure_keeps_stage_and_redacts_broker_error(db_session):
+    scheduler, user, _profile, _preview, _account, _analysis, broker, kis_client = (
+        _canonical_scheduler_setup(db_session)
+    )
+    profile_watchlists = CanonicalProfileWatchlists(
+        [
+            {
+                'symbol': '000660',
+                'name': 'Failure candidate',
+                'market': 'KOSPI',
+                'current_price': 47000.0,
+                'quant_buy_score': 80.0,
+                'quant_sell_score': 10.0,
+            },
+        ],
+        cap=48000.0,
+    )
+    scheduler.candidate_service = UserAutoTradingCandidateService(
+        profile_watchlists=profile_watchlists,
+        runtime_preview_service=FailingCanonicalPreview(),
+    )
+
+    result = scheduler.run_provider_once(
+        db_session,
+        provider='kis',
+        scheduler_slot='09:10',
+        now=RUN_AT,
+    )
+    item = next(value for value in result['items'] if value.get('owner_user_id') == user.id)
+    run = db_session.query(TradeRunLog).filter_by(owner_user_id=user.id).one()
+    request_payload = json.loads(run.request_payload or '{}')
+    response_payload = json.loads(run.response_payload or '{}')
+
+    assert item['result'] == 'failed'
+    assert item['reason'] == 'user_scheduler_processing_failed'
+    assert item['failure_stage'] == 'runtime_quant'
+    assert item['exception_type'] == 'RuntimeError'
+    assert item['sanitized_error'] == 'sensitive broker error details redacted'
+    assert run.stage == 'runtime_quant'
+    assert response_payload['failure_stage'] == 'runtime_quant'
+    assert response_payload['exception_type'] == 'RuntimeError'
+    assert 'super-secret' not in json.dumps([request_payload, response_payload])
+    assert 'token-secret' not in json.dumps([request_payload, response_payload])
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert broker.buy_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_user_scheduler_canonical_hold_blocks_below_profile_threshold_without_order(
+    db_session,
+):
+    scheduler, user, _profile, _preview, _account, _analysis, broker, kis_client = (
+        _canonical_scheduler_setup(db_session, final_score=64.0)
+    )
+
+    result = scheduler.run_provider_once(
+        db_session,
+        provider='kis',
+        scheduler_slot='09:10',
+        now=RUN_AT,
+    )
+    item = next(value for value in result['items'] if value.get('owner_user_id') == user.id)
+
+    assert item['result'] == 'hold'
+    assert item['action'] == 'hold'
+    assert item['risk_result'] == 'block'
+    assert item['block_reason'] == 'below_profile_buy_threshold'
+    assert item['order_id'] is None
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert broker.buy_calls == []
+    assert kis_client.buy_calls == []

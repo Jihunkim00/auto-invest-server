@@ -197,6 +197,15 @@ class KisWatchlistPreviewService:
         market_snapshots: dict[str, dict[str, Any]] = {}
         profile_exclusion_counts: dict[str, int] = {}
         profile_filtered_symbols: set[str] = set()
+        effective_max_candidate_price = to_float(
+            (profile_snapshot_context or {}).get("effective_max_candidate_price")
+        )
+        if canonical_profile_pipeline and effective_max_candidate_price > 0:
+            max_price_krw = (
+                min(max_price_krw, effective_max_candidate_price)
+                if max_price_krw is not None and max_price_krw > 0
+                else effective_max_candidate_price
+            )
         for raw in configured_symbols:
             raw_symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
             market_snapshot = self.market_data_snapshot_service.snapshot(
@@ -249,9 +258,6 @@ class KisWatchlistPreviewService:
             item["runtime_quant_rank"] = runtime_rank
             item["runtime_quant_buy_score"] = item.get("quant_buy_score")
             item["runtime_quant_sell_score"] = item.get("quant_sell_score")
-        effective_max_candidate_price = to_float(
-            (profile_snapshot_context or {}).get("effective_max_candidate_price")
-        )
         unaffordable_runtime_candidates = [
             normalize_symbol_identity(item.get("symbol"))
             for item in runtime_quant_ranked_candidates
@@ -306,9 +312,8 @@ class KisWatchlistPreviewService:
         }
         if canonical_profile_pipeline:
             queue = list(runtime_quant_ranked_candidates[: self.gpt_candidate_limit])
-            next_runtime_index = len(queue)
             attempt_rank = 0
-            while queue and len(gpt_completed_symbols) < self.gpt_candidate_limit:
+            while queue:
                 runtime_item = queue.pop(0)
                 symbol = str(runtime_item.get("symbol") or "").strip().upper()
                 if not symbol:
@@ -361,11 +366,6 @@ class KisWatchlistPreviewService:
                             or "GPT scores were incomplete."
                         )
                     gpt_failed_symbols.append(symbol)
-                    if next_runtime_index < len(runtime_quant_ranked_candidates):
-                        replacement = runtime_quant_ranked_candidates[next_runtime_index]
-                        next_runtime_index += 1
-                        queue.append(replacement)
-                        gpt_replacement_count += 1
                 shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
                 if isinstance(shadow_b, dict):
                     item["shadow_b"] = shadow_b
@@ -486,6 +486,35 @@ class KisWatchlistPreviewService:
                     for item in final_ranked_candidates
                 ) == 1
                 assert final_ranked_candidates[0].get("final_selected") is True
+            runtime_quant_symbols = set(
+                _candidate_symbols(runtime_quant_ranked_candidates)
+            )
+            runtime_top5_symbols = set(
+                _candidate_symbols(
+                    runtime_quant_ranked_candidates[: self.gpt_candidate_limit]
+                )
+            )
+            assert runtime_quant_symbols <= set(runtime_input_symbols)
+            assert runtime_top5_symbols <= runtime_quant_symbols
+            assert {
+                normalize_symbol_identity(symbol)
+                for symbol in gpt_target_symbols
+            } <= runtime_top5_symbols
+            assert {
+                normalize_symbol_identity(symbol)
+                for symbol in gpt_completed_symbols
+            } <= {
+                normalize_symbol_identity(symbol)
+                for symbol in gpt_target_symbols
+            }
+            assert {
+                normalize_symbol_identity(item.get("symbol"))
+                for item in final_ranked_candidates
+                if item.get("symbol")
+            } <= {
+                normalize_symbol_identity(symbol)
+                for symbol in gpt_completed_symbols
+            }
             quant_candidates = quant_ranked_candidates
             researched_candidates = list(final_ranked_candidates)
         else:

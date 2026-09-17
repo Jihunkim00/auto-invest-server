@@ -1580,10 +1580,13 @@ class UserTradingExecutionService:
             order_id=None,
         )
         run.signal_id = signal.id
+        block_reason = analysis.get("block_reason")
         response = {
             **base,
             "result": "hold",
             "reason": reason or "hold_signal",
+            "block_reason": block_reason,
+            "risk_result": "block" if block_reason else "hold",
             "message": "주문 없음",
             "signal_id": signal.id,
             "order_id": None,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -20,6 +21,9 @@ from app.services.market_session_service import MarketSessionService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
+from app.services.kis_payload_sanitizer import sanitize_kis_text
+from app.services.kis_watchlist_preview_service import normalize_symbol_identity
+from app.services.profile_universe_service import profile_universe_bounds
 from app.services.user_trading_execution_service import UserTradingExecutionService
 
 
@@ -37,6 +41,23 @@ _SCOPE = {
 _ACTIVE_ORDER_STATUSES = {
     'REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED',
 }
+
+
+class _UserSchedulerProcessingError(RuntimeError):
+    def __init__(self, stage: str, cause: Exception) -> None:
+        self.failure_stage = str(stage or 'canonical_analysis')
+        self.cause = cause
+        super().__init__(str(cause))
+
+
+@contextmanager
+def _scheduler_stage(stage: str):
+    try:
+        yield
+    except _UserSchedulerProcessingError:
+        raise
+    except Exception as exc:
+        raise _UserSchedulerProcessingError(stage, exc) from exc
 
 
 class UserAutoTradingCandidateService:
@@ -63,32 +84,70 @@ class UserAutoTradingCandidateService:
         scheduler_slot: str = 'manual',
         now: datetime | None = None,
     ) -> list[dict[str, Any]]:
+        self.last_pipeline_diagnostics = None
+        self.last_pipeline_candidate = None
         normalized_provider = str(provider or '').strip().lower()
         if normalized_provider != 'kis' or not profile:
             return []
-        snapshot = self.profile_watchlists.build(
-            db,
-            profile=profile,
-            owner_user_id=int(user.id),
-            scheduler_slot=scheduler_slot,
-            now=now,
-        )
+        try:
+            snapshot = self.profile_watchlists.build(
+                db,
+                profile=profile,
+                owner_user_id=int(user.id),
+                scheduler_slot=scheduler_slot,
+                now=now,
+            )
+        except _UserSchedulerProcessingError:
+            raise
+        except Exception as exc:
+            raise _UserSchedulerProcessingError('profile_watchlist', exc) from exc
         snapshot_data = snapshot.get("snapshot") or {}
+        if (
+            _int_or_none(snapshot_data.get("profile_id")) != _int_or_none(profile.get("id"))
+            or _int_or_none(snapshot_data.get("owner_user_id")) != int(user.id)
+        ):
+            cause = ValueError('profile_snapshot_scope_mismatch')
+            raise _UserSchedulerProcessingError('profile_watchlist', cause) from cause
+
+        min_price_krw, max_price_krw = profile_universe_bounds(profile)
+        snapshot_max_price = _number(snapshot_data.get('effective_max_candidate_price'))
+        if snapshot_max_price > 0:
+            max_price_krw = (
+                min(max_price_krw, snapshot_max_price)
+                if max_price_krw is not None and max_price_krw > 0
+                else snapshot_max_price
+            )
         runtime_preview = self.runtime_preview_service
         if runtime_preview is not None:
-            preview = runtime_preview.run_preview(
-                include_gpt=True,
-                db=db,
-                record_run=False,
-                trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
-                min_price_krw=None,
-                max_price_krw=None,
-                profile_snapshot_items=snapshot.get("items") or [],
-                profile_snapshot_context=snapshot_data,
-                canonical_profile_pipeline=True,
-                decision_timestamp=now,
-            )
+            try:
+                preview = runtime_preview.run_preview(
+                    include_gpt=True,
+                    db=db,
+                    record_run=False,
+                    trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                    min_price_krw=min_price_krw,
+                    max_price_krw=max_price_krw,
+                    profile_snapshot_items=snapshot.get("items") or [],
+                    profile_snapshot_context=snapshot_data,
+                    canonical_profile_pipeline=True,
+                    decision_timestamp=now,
+                )
+            except _UserSchedulerProcessingError:
+                raise
+            except Exception as exc:
+                raise _UserSchedulerProcessingError(
+                    _infer_canonical_failure_stage(exc),
+                    exc,
+                ) from exc
             preview = preview if isinstance(preview, dict) else {}
+            lineage = _canonical_pipeline_lineage(
+                preview,
+                snapshot_items=snapshot.get("items") or [],
+            )
+            try:
+                _validate_canonical_pipeline_lineage(lineage)
+            except Exception as exc:
+                raise _UserSchedulerProcessingError('final_ranking', exc) from exc
             self.last_pipeline_diagnostics = {
                 "canonical_profile_pipeline": True,
                 "profile_id": profile.get("id"),
@@ -99,36 +158,26 @@ class UserAutoTradingCandidateService:
                 "source_count": snapshot_data.get("source_count"),
                 "eligible_count": snapshot_data.get("eligible_count"),
                 "selected_count": snapshot_data.get("selected_count"),
+                "effective_max_candidate_price": snapshot_data.get(
+                    "effective_max_candidate_price"
+                ),
+                "unaffordable_runtime_candidates": [
+                    normalize_symbol_identity(symbol)
+                    for symbol in (preview.get("unaffordable_runtime_candidates") or [])
+                    if normalize_symbol_identity(symbol)
+                ],
+                **lineage,
+                "selected_final_symbol": lineage.get("selected_symbol"),
                 "runtime_quant_candidate_count": preview.get(
                     "runtime_quant_candidate_count", 0
-                ),
-                "runtime_quant_top5_symbols": preview.get(
-                    "runtime_quant_top5_symbols", []
-                ),
-                "gpt_target_symbols": preview.get("gpt_target_symbols", []),
-                "gpt_completed_symbols": preview.get(
-                    "gpt_completed_symbols", []
                 ),
                 "gpt_failed_symbols": preview.get("gpt_failed_symbols", []),
                 "gpt_replacement_count": preview.get(
                     "gpt_replacement_count", 0
                 ),
-                "final_candidate_symbols": preview.get(
-                    "final_candidate_symbols",
-                    [
-                        item.get("symbol")
-                        for item in (preview.get("final_ranked_candidates") or [])
-                        if isinstance(item, dict)
-                    ],
-                ),
                 "final_ranked_top5": preview.get(
                     "final_ranked_top5",
                     (preview.get("final_ranked_candidates") or [])[:5],
-                ),
-                "selected_final_symbol": (
-                    (preview.get("final_best_candidate") or {}).get("symbol")
-                    if isinstance(preview.get("final_best_candidate"), dict)
-                    else None
                 ),
             }
             self.last_pipeline_candidate = {
@@ -138,7 +187,19 @@ class UserAutoTradingCandidateService:
             final_candidates = preview.get("final_ranked_candidates")
             if not isinstance(final_candidates, list) or not final_candidates:
                 return []
-            selected = dict(final_candidates[0])
+            selected_raw = next(
+                (
+                    item
+                    for item in final_candidates
+                    if isinstance(item, dict)
+                    and (
+                        _int_or_none(item.get("final_rank")) == 1
+                        or bool(item.get("final_selected"))
+                    )
+                ),
+                final_candidates[0],
+            )
+            selected = dict(selected_raw)
             selected["_pipeline_preview"] = preview
             selected["_pipeline_snapshot"] = snapshot
             selected["_analysis_override"] = _runtime_analysis_override(selected, profile=profile)
@@ -570,8 +631,13 @@ class UserAutoTradingSchedulerService:
                 self._finish_claim(db, claim, item)
                 aggregate['completed'] += 1
                 aggregate['items'].append(item)
-            except Exception:
+            except Exception as exc:
                 db.rollback()
+                failure_profile = (
+                    (profile_schedule or {}).get('profile')
+                    if isinstance(profile_schedule, dict)
+                    else None
+                )
                 item = self._safe_failure(
                     db,
                     user=user,
@@ -579,6 +645,16 @@ class UserAutoTradingSchedulerService:
                     market=market,
                     scheduler_slot=scheduler_slot,
                     run_key=claim.run_key,
+                    exception=exc,
+                    profile_context=(
+                        self._profile_context(
+                            profile=failure_profile,
+                            scheduler_slot=scheduler_slot,
+                            user=user,
+                        )
+                        if isinstance(failure_profile, dict)
+                        else None
+                    ),
                 )
                 self._finish_claim(db, claim, item)
                 aggregate['failed'] += 1
@@ -602,13 +678,15 @@ class UserAutoTradingSchedulerService:
         now: datetime,
         profile_schedule: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        profile_schedule = profile_schedule or self._owned_profile_schedule(
-            db,
-            user=user,
-            provider=provider,
-            market=market,
-            now=now,
-        )
+        if profile_schedule is None:
+            with _scheduler_stage('profile_resolution'):
+                profile_schedule = self._owned_profile_schedule(
+                    db,
+                    user=user,
+                    provider=provider,
+                    market=market,
+                    now=now,
+                )
         profile = (profile_schedule or {}).get('profile') or {}
         if (
             not profile_schedule
@@ -625,7 +703,8 @@ class UserAutoTradingSchedulerService:
                 run_key=run_key,
             )
 
-        gate_reason = self._live_gate_reason(settings, provider)
+        with _scheduler_stage('live_gate'):
+            gate_reason = self._live_gate_reason(settings, provider)
         if gate_reason:
             return self._record_result(
                 db,
@@ -638,7 +717,8 @@ class UserAutoTradingSchedulerService:
                 reason=gate_reason,
                 symbol='NONE',
             )
-        session = self.session_service.get_session_status(market, now=now)
+        with _scheduler_stage('market_session'):
+            session = self.session_service.get_session_status(market, now=now)
         if session.get('is_market_open') is not True:
             return self._record_result(
                 db,
@@ -651,34 +731,37 @@ class UserAutoTradingSchedulerService:
                 reason='market_closed',
                 symbol='NONE',
             )
-        snapshot = self.account_service.get_broker_snapshot(db, user, provider)
-        position_result = self._manage_positions(
-            db,
-            user=user,
-            provider=provider,
-            snapshot=snapshot,
-            scheduler_slot=scheduler_slot,
-            now=now,
-            profile=profile,
-        )
+        with _scheduler_stage('account_snapshot'):
+            snapshot = self.account_service.get_broker_snapshot(db, user, provider)
+        with _scheduler_stage('position_management'):
+            position_result = self._manage_positions(
+                db,
+                user=user,
+                provider=provider,
+                snapshot=snapshot,
+                scheduler_slot=scheduler_slot,
+                now=now,
+                profile=profile,
+            )
         action = str(position_result.get('action') or '').strip().lower()
         if action == 'sell':
             exit_method = getattr(self.execution_service, 'run_exit_once', None)
             if callable(exit_method):
-                result = exit_method(
-                    db,
-                    user,
-                    provider=provider,
-                    symbol=str(position_result.get('symbol') or ''),
-                    confirm_live=False,
-                    now=now,
-                    trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
-                    authorization_mode='automatic',
-                    scheduler_slot=scheduler_slot,
-                    snapshot_override=snapshot,
-                    run_key=run_key,
-                    exit_reason=str(position_result.get('reason') or 'position_exit'),
-                )
+                with _scheduler_stage('execution'):
+                    result = exit_method(
+                        db,
+                        user,
+                        provider=provider,
+                        symbol=str(position_result.get('symbol') or ''),
+                        confirm_live=False,
+                        now=now,
+                        trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                        authorization_mode='automatic',
+                        scheduler_slot=scheduler_slot,
+                        snapshot_override=snapshot,
+                        run_key=run_key,
+                        exit_reason=str(position_result.get('reason') or 'position_exit'),
+                    )
                 return {**result, 'position_management': position_result}
         if position_result.get('positions'):
             return self._record_result(
@@ -693,14 +776,15 @@ class UserAutoTradingSchedulerService:
                 symbol=str(position_result.get('symbol') or 'NONE'),
                 position_management=position_result,
             )
-        candidates = self._select_candidates(
-            db,
-            user=user,
-            provider=provider,
-            profile=profile,
-            scheduler_slot=scheduler_slot,
-            now=now,
-        )
+        with _scheduler_stage('canonical_analysis'):
+            candidates = self._select_candidates(
+                db,
+                user=user,
+                provider=provider,
+                profile=profile,
+                scheduler_slot=scheduler_slot,
+                now=now,
+            )
         pipeline_diagnostics = getattr(
             self.candidate_service,
             "last_pipeline_diagnostics",
@@ -751,9 +835,31 @@ class UserAutoTradingSchedulerService:
                     now=now,
                 )
                 db.commit()
+            pipeline_snapshot = (
+                pipeline_candidate.get('_pipeline_snapshot')
+                if isinstance(pipeline_candidate, dict)
+                else None
+            )
+            no_candidate_result.update({
+                'profile_id': profile.get('id'),
+                'profile_snapshot': (
+                    pipeline_snapshot.get('snapshot')
+                    if isinstance(pipeline_snapshot, dict)
+                    else None
+                ),
+                'pipeline_diagnostics': pipeline_diagnostics,
+            })
             return no_candidate_result
 
-        candidate = candidates[0]
+        candidate = next(
+            (
+                item
+                for item in candidates
+                if _int_or_none(item.get('final_rank')) == 1
+                or bool(item.get('final_selected'))
+            ),
+            candidates[0],
+        )
         analysis_override = candidate.get("_analysis_override")
         if analysis_override is None:
             candidate, analysis_override = self._choose_profile_candidate(
@@ -769,33 +875,35 @@ class UserAutoTradingSchedulerService:
             user=user,
             pipeline_diagnostics=pipeline_diagnostics,
         )
-        result = self.execution_service.run_once(
-            db,
-            user,
-            provider=provider,
-            symbol=str(candidate['symbol']),
-            confirm_live=False,
-            now=now,
-            trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
-            authorization_mode='automatic',
-            scheduler_slot=scheduler_slot,
-            snapshot_override=snapshot,
-            run_key=run_key,
-            analysis_override=analysis_override,
-            profile_context=profile_context,
-        )
+        with _scheduler_stage('execution'):
+            result = self.execution_service.run_once(
+                db,
+                user,
+                provider=provider,
+                symbol=str(candidate['symbol']),
+                confirm_live=False,
+                now=now,
+                trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                authorization_mode='automatic',
+                scheduler_slot=scheduler_slot,
+                snapshot_override=snapshot,
+                run_key=run_key,
+                analysis_override=analysis_override,
+                profile_context=profile_context,
+            )
         persist = getattr(self.candidate_service, "persist_results", None)
         if callable(persist):
-            persist(
-                db,
-                candidate=candidate,
-                run_id=result.get("run_id"),
-                profile=profile,
-                user=user,
-                scheduler_slot=scheduler_slot,
-                now=now,
-            )
-            db.commit()
+            with _scheduler_stage('result_persistence'):
+                persist(
+                    db,
+                    candidate=candidate,
+                    run_id=result.get("run_id"),
+                    profile=profile,
+                    user=user,
+                    scheduler_slot=scheduler_slot,
+                    now=now,
+                )
+                db.commit()
         public_candidate = {
             key: value
             for key, value in candidate.items()
@@ -803,8 +911,19 @@ class UserAutoTradingSchedulerService:
         }
         return {
             **result,
+            'action': (
+                analysis_override.get('action')
+                if isinstance(analysis_override, dict)
+                else (result.get('analysis') or {}).get('action')
+            ),
             'candidate': public_candidate,
             'profile_context': profile_context,
+            'profile_id': profile.get('id'),
+            'profile_snapshot': (
+                candidate.get('_pipeline_snapshot', {}).get('snapshot')
+                if isinstance(candidate.get('_pipeline_snapshot'), dict)
+                else None
+            ),
             'pipeline_diagnostics': pipeline_diagnostics,
             'candidate_count': len(candidates),
         }
@@ -1243,7 +1362,17 @@ class UserAutoTradingSchedulerService:
         position_management: dict[str, Any] | None = None,
         profile_context: dict[str, Any] | None = None,
         create_signal: bool = True,
+        failure_stage: str | None = None,
+        failure_diagnostics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        failure_payload = dict(failure_diagnostics or {})
+        if failure_stage:
+            failure_payload['failure_stage'] = str(failure_stage)
+        result_stage = (
+            str(failure_payload.get('failure_stage') or 'done')[:20]
+            if result.lower() == 'failed'
+            else 'done'
+        )
         run = db.query(TradeRunLog).filter(
             TradeRunLog.owner_user_id == int(user.id),
             TradeRunLog.run_key == run_key,
@@ -1255,7 +1384,7 @@ class UserAutoTradingSchedulerService:
                 trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
                 symbol=symbol[:20] or 'NONE',
                 mode='user_scheduler',
-                stage='done',
+                stage=result_stage,
                 result=result,
                 reason=reason,
                 request_payload=json.dumps({
@@ -1272,7 +1401,7 @@ class UserAutoTradingSchedulerService:
             run.trigger_source = USER_SCHEDULER_TRIGGER_SOURCE
             run.symbol = symbol[:20] or 'NONE'
             run.mode = 'user_scheduler'
-            run.stage = 'done'
+            run.stage = result_stage
             run.result = result
             run.reason = reason
         signal = None
@@ -1290,7 +1419,7 @@ class UserAutoTradingSchedulerService:
             db.add(signal)
             db.flush()
         run.signal_id = signal.id if signal is not None else None
-        run.response_payload = json.dumps({
+        response_payload = {
             'owner_user_id': int(user.id),
             'provider': provider,
             'market': market,
@@ -1301,7 +1430,13 @@ class UserAutoTradingSchedulerService:
             'position_management': position_management,
             'trading_signal_created': signal is not None,
             'profile_context': profile_context,
-        }, ensure_ascii=False, default=str)
+            **failure_payload,
+        }
+        run.response_payload = json.dumps(
+            response_payload,
+            ensure_ascii=False,
+            default=str,
+        )
         db.commit()
         return {
             'owner_user_id': int(user.id),
@@ -1320,15 +1455,27 @@ class UserAutoTradingSchedulerService:
             'real_order_submitted': False,
             'broker_submit_called': False,
             'profile_context': profile_context,
+            **failure_payload,
         }
 
-    def _safe_failure(self, db: Session, **kwargs: Any) -> dict[str, Any]:
+    def _safe_failure(
+        self,
+        db: Session,
+        *,
+        exception: Exception | None = None,
+        profile_context: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        details = _failure_details(exception)
         return self._record_result(
             db,
             **kwargs,
+            profile_context=profile_context,
             result='failed',
             reason='user_scheduler_processing_failed',
             symbol='NONE',
+            failure_stage=details['failure_stage'],
+            failure_diagnostics=details,
         )
 
 
@@ -1373,6 +1520,159 @@ def _optional_number(value: Any) -> float | None:
         return None
 
 
+def _symbol_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        raw = item.get('symbol') if isinstance(item, dict) else item
+        symbol = normalize_symbol_identity(raw)
+        if symbol and symbol not in seen:
+            seen.add(symbol)
+            result.append(symbol)
+    return result
+
+
+def _canonical_pipeline_lineage(
+    preview: dict[str, Any],
+    *,
+    snapshot_items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    snapshot_symbols = _symbol_list(snapshot_items)
+
+    def values_or(name: str, fallback: list[str]) -> list[str]:
+        values = preview.get(name)
+        return _symbol_list(values) if isinstance(values, list) else list(fallback)
+
+    runtime_input = values_or('runtime_input_symbols', snapshot_symbols)
+    runtime_quant = values_or(
+        'runtime_quant_candidate_symbols',
+        _symbol_list(
+            preview.get('quant_ranked_candidates')
+            or preview.get('top_quant_candidates')
+            or preview.get('items')
+        ),
+    )
+    runtime_top5 = values_or('runtime_quant_top5_symbols', runtime_quant[:5])
+    gpt_targets = values_or('gpt_target_symbols', runtime_top5)
+    gpt_completed = values_or('gpt_completed_symbols', [])
+
+    final_values = preview.get('final_ranked_candidates')
+    final_candidates = final_values if isinstance(final_values, list) else []
+    final_symbols = _symbol_list(
+        final_candidates
+        if final_candidates
+        else preview.get('final_candidate_symbols')
+    )
+    final_rank_1 = next(
+        (
+            normalize_symbol_identity(item.get('symbol'))
+            for item in final_candidates
+            if isinstance(item, dict)
+            and (
+                _int_or_none(item.get('final_rank')) == 1
+                or bool(item.get('final_selected'))
+            )
+        ),
+        final_symbols[0] if final_symbols else None,
+    )
+    selected_symbol = normalize_symbol_identity(preview.get('selected_final_symbol'))
+    if not selected_symbol:
+        selected_symbol = final_rank_1
+
+    return {
+        'profile_snapshot_selected_symbols': snapshot_symbols,
+        'runtime_input_symbols': runtime_input,
+        'runtime_quant_candidate_symbols': runtime_quant,
+        'runtime_quant_top5_symbols': runtime_top5,
+        'gpt_target_symbols': gpt_targets,
+        'gpt_completed_symbols': gpt_completed,
+        'final_candidate_symbols': final_symbols,
+        'selected_symbol': selected_symbol,
+        'final_rank_1_symbol': final_rank_1,
+        'final_selected_count': sum(
+            1
+            for item in final_candidates
+            if isinstance(item, dict) and bool(item.get('final_selected'))
+        ),
+    }
+
+
+def _validate_canonical_pipeline_lineage(lineage: dict[str, Any]) -> None:
+    snapshot = set(lineage.get('profile_snapshot_selected_symbols') or [])
+    runtime_input = set(lineage.get('runtime_input_symbols') or [])
+    runtime_quant = set(lineage.get('runtime_quant_candidate_symbols') or [])
+    runtime_top5 = set(lineage.get('runtime_quant_top5_symbols') or [])
+    gpt_targets = set(lineage.get('gpt_target_symbols') or [])
+    gpt_completed = set(lineage.get('gpt_completed_symbols') or [])
+    final_candidates = set(lineage.get('final_candidate_symbols') or [])
+
+    if runtime_input != snapshot:
+        raise ValueError('runtime_input_outside_profile_snapshot')
+    if not runtime_quant <= runtime_input:
+        raise ValueError('runtime_quant_outside_runtime_input')
+    if not runtime_top5 <= runtime_quant:
+        raise ValueError('runtime_top5_outside_runtime_quant')
+    if not gpt_targets <= runtime_top5:
+        raise ValueError('gpt_target_outside_runtime_top5')
+    if not gpt_completed <= gpt_targets:
+        raise ValueError('gpt_completed_outside_gpt_target')
+    if not final_candidates <= gpt_completed:
+        raise ValueError('final_candidate_outside_gpt_completed')
+    final_rank_1 = lineage.get('final_rank_1_symbol')
+    selected = lineage.get('selected_symbol')
+    if final_rank_1 is not None and selected != final_rank_1:
+        raise ValueError('selected_symbol_is_not_final_rank_one')
+
+
+def _infer_canonical_failure_stage(exc: Exception) -> str:
+    explicit = getattr(exc, 'failure_stage', None) or getattr(exc, 'stage', None)
+    if explicit:
+        return str(explicit)
+    text = f'{exc.__class__.__name__} {exc}'.lower()
+    for marker, stage in (
+        ('quant', 'runtime_quant'),
+        ('gpt', 'gpt_analysis'),
+        ('ai_', 'gpt_analysis'),
+        ('final', 'final_ranking'),
+    ):
+        if marker in text:
+            return stage
+    return 'canonical_analysis'
+
+
+def _failure_details(exception: Exception | None) -> dict[str, str]:
+    current = exception or RuntimeError('unknown_scheduler_failure')
+    stage = getattr(current, 'failure_stage', None)
+    cause = getattr(current, 'cause', None)
+    if isinstance(cause, Exception):
+        stage = stage or getattr(cause, 'failure_stage', None)
+        current = cause
+    failure_stage = str(stage or _infer_canonical_failure_stage(current))[:40]
+    raw = str(current).strip() or current.__class__.__name__
+    lowered = raw.lower()
+    sensitive_markers = (
+        'appkey',
+        'appsecret',
+        'access_token',
+        'approval_key',
+        'authorization header',
+        'broker credential',
+        'account number',
+    )
+    sanitized = (
+        'sensitive broker error details redacted'
+        if any(marker in lowered for marker in sensitive_markers)
+        else sanitize_kis_text(raw)
+    )
+    return {
+        'failure_stage': failure_stage,
+        'exception_type': current.__class__.__name__[:80],
+        'sanitized_error': sanitized[:240],
+    }
+
+
 def _runtime_analysis_override(
     candidate: dict[str, Any],
     *,
@@ -1400,6 +1700,15 @@ def _runtime_analysis_override(
         in {"ok", "partial"}
     )
     action = "buy" if gpt_completed and data_sufficient and score is not None and score >= threshold else "hold"
+    reason = (
+        "profile_final_candidate"
+        if action == "buy"
+        else (
+            "below_profile_buy_threshold"
+            if score is not None and score < threshold
+            else "profile_final_candidate_below_entry_gate"
+        )
+    )
     return {
         "provider": "kis",
         "market": "KR",
@@ -1407,11 +1716,8 @@ def _runtime_analysis_override(
         "analyzed_symbol": candidate.get("symbol"),
         "returned_symbol": candidate.get("symbol"),
         "action": action,
-        "reason": (
-            "profile_final_candidate"
-            if action == "buy"
-            else "profile_final_candidate_below_entry_gate"
-        ),
+        "reason": reason,
+        "block_reason": reason if action == "hold" else None,
         "current_price": candidate.get("current_price"),
         "final_buy_score": candidate.get("final_buy_score"),
         "final_sell_score": candidate.get("final_sell_score"),
