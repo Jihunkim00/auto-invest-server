@@ -851,16 +851,10 @@ class AutomationProfileService:
             and not 0 < float(capital['target_position_pct']) <= 100
         ):
             errors.append({'field': 'capital.target_position_pct', 'message': 'must be between 0 and 100'})
-        if (
-            capital['sizing_mode'] == 'equity_pct'
-            and float(capital['max_position_pct']) < float(capital['target_position_pct'])
-        ):
-            errors.append({'field': 'capital.max_position_pct', 'message': 'must be >= target_position_pct'})
-        if (
-            capital['sizing_mode'] == 'equity_pct'
-            and float(capital['max_total_exposure_pct']) < float(capital['max_position_pct'])
-        ):
-            errors.append({'field': 'capital.max_total_exposure_pct', 'message': 'must be >= max_position_pct'})
+        # target_position_pct is the per-position sizing authority. The
+        # historical max_position_pct/max_total_exposure_pct defaults remain
+        # valid diagnostics/caps, so they may be lower than the target and
+        # must not reject a profile before sizing can apply the new semantics.
         if float(capital['max_order_notional_krw']) <= 0:
             errors.append({'field': 'capital.max_order_notional_krw', 'message': 'must be positive'})
         if str(capital.get('compound_basis') or 'realized_pnl').strip().lower() not in {'realized_pnl'}:

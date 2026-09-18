@@ -22,6 +22,7 @@ class StrategyProfileSizingService:
         target_pct = max(0.0, float(capital.get('target_position_pct') or 0))
         max_position_pct = max(0.0, float(capital.get('max_position_pct') or 0))
         exposure_pct = max(0.0, float(capital.get('max_total_exposure_pct') or 0))
+        max_open_positions = max(1, int(settings.get('max_open_positions') or 1))
         configured_max_notional = max(
             0.0, float(capital.get('max_order_notional_krw') or 0)
         )
@@ -46,15 +47,37 @@ class StrategyProfileSizingService:
             for source, value in cap_components
             if abs(value - base_order_cap) <= 0.01
         )
+        derived_total_exposure_pct = min(100.0, target_pct * max_open_positions)
+        if (
+            mode != 'fixed_budget'
+            and derived_total_exposure_pct > exposure_pct
+            and abs(exposure_pct - 30.0) <= 0.01
+        ):
+            effective_total_exposure_pct = derived_total_exposure_pct
+            total_exposure_cap_source = 'derived_position_allocation'
+        elif exposure_pct > 0:
+            effective_total_exposure_pct = min(
+                derived_total_exposure_pct or exposure_pct,
+                exposure_pct,
+            )
+            total_exposure_cap_source = 'configured_total_exposure'
+        else:
+            effective_total_exposure_pct = derived_total_exposure_pct
+            total_exposure_cap_source = 'derived_position_allocation'
         max_position_value = max(0.0, float(equity)) * max_position_pct / 100.0
-        max_total_exposure = max(0.0, float(equity)) * exposure_pct / 100.0
+        max_total_exposure = max(0.0, float(equity)) * effective_total_exposure_pct / 100.0
         remaining_position = max(0.0, max_position_value - float(current_position_value))
         remaining_exposure = max(0.0, max_total_exposure - float(current_total_exposure))
-        estimated_notional = min(
-            base_order_cap,
-            remaining_position,
-            remaining_exposure,
-        )
+        if mode == 'fixed_budget':
+            estimated_notional = min(
+                base_order_cap,
+                max(0.0, float(equity) - float(current_total_exposure)),
+            )
+        else:
+            # Ratio sizing is per new position. Existing exposure only limits
+            # the derived total strategy cap; it never gets subtracted from
+            # this position's base target.
+            estimated_notional = min(base_order_cap, remaining_exposure)
         quantity = 0
         if current_price > 0:
             quantity = max(0, math.floor(estimated_notional / float(current_price)))
@@ -73,6 +96,10 @@ class StrategyProfileSizingService:
             'order_cap_source': order_cap_source,
             'max_position_value': round(max_position_value, 2),
             'max_total_exposure': round(max_total_exposure, 2),
+            'max_open_positions': max_open_positions,
+            'derived_total_exposure_pct': round(derived_total_exposure_pct, 4),
+            'effective_total_exposure_pct': round(effective_total_exposure_pct, 4),
+            'total_exposure_cap_source': total_exposure_cap_source,
             'remaining_position_capacity': round(remaining_position, 2),
             'remaining_exposure_capacity': round(remaining_exposure, 2),
             'orderable_cash': round(max(0.0, float(orderable_cash)), 2),

@@ -231,6 +231,7 @@ class UserAutoTradingCandidateService:
                 "automation_profile_key": profile.get("profile_key"),
                 "profile_snapshot_id": snapshot_data.get("id"),
                 "profile_snapshot_date": snapshot_data.get("snapshot_date"),
+                "_pipeline_snapshot": snapshot,
                 "profile_quant_rank": item.get("quant_rank"),
                 "profile_ai_rank": item.get("ai_rank"),
             }
@@ -1015,6 +1016,28 @@ class UserAutoTradingSchedulerService:
         user: User,
         pipeline_diagnostics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        settings = profile.get('effective_settings')
+        settings = settings if isinstance(settings, dict) else profile.get('settings')
+        settings = settings if isinstance(settings, dict) else {}
+        capital = settings.get('capital')
+        capital = capital if isinstance(capital, dict) else profile.get('capital')
+        capital = capital if isinstance(capital, dict) else {}
+        pipeline_snapshot = (candidate or {}).get('_pipeline_snapshot')
+        snapshot_data = (
+            pipeline_snapshot.get('snapshot')
+            if isinstance(pipeline_snapshot, dict)
+            else {}
+        )
+        snapshot_data = snapshot_data if isinstance(snapshot_data, dict) else {}
+        snapshot_diagnostics = snapshot_data.get('diagnostics')
+        snapshot_diagnostics = snapshot_diagnostics if isinstance(snapshot_diagnostics, dict) else {}
+        capital_state = snapshot_diagnostics.get('capital_state')
+        capital_state = capital_state if isinstance(capital_state, dict) else {}
+        effective_entry_budget = (
+            snapshot_data.get('effective_entry_budget_krw')
+            if snapshot_data.get('effective_entry_budget_krw') is not None
+            else capital_state.get('effective_next_entry_budget_krw')
+        )
         return {
             'profile_id': profile.get('id'),
             'profile_key': profile.get('profile_key'),
@@ -1022,9 +1045,20 @@ class UserAutoTradingSchedulerService:
             'owner_user_id': int(user.id),
             'scheduler_slot': scheduler_slot,
             'profile_snapshot_id': (candidate or {}).get('profile_snapshot_id'),
+            'symbol': (candidate or {}).get('symbol'),
             'symbol_name': (candidate or {}).get('name'),
             'quant_rank': (candidate or {}).get('quant_rank'),
             'ai_rank': (candidate or {}).get('ai_rank'),
+            'sizing_source': 'automation_profile',
+            'sizing_mode': str(capital.get('sizing_mode') or 'equity_pct').strip().lower(),
+            'effective_entry_budget_krw': effective_entry_budget,
+            'profile_budget_krw': effective_entry_budget,
+            'fixed_budget_krw': capital.get('fixed_budget'),
+            'target_position_pct': capital.get('target_position_pct'),
+            'max_position_pct': capital.get('max_position_pct'),
+            'max_total_exposure_pct': capital.get('max_total_exposure_pct'),
+            'max_order_notional_krw': capital.get('max_order_notional_krw'),
+            'max_open_positions': int(settings.get('max_open_positions') or 1),
             'pipeline': 'raw_universe->profile_eligibility->canonical_quant_top50->quant_top10->ai_top5->final_candidate',
             'pipeline_diagnostics': pipeline_diagnostics or {},
         }

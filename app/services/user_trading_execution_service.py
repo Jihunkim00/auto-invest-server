@@ -25,6 +25,7 @@ from app.db.models import (
 )
 from app.services.market_session_service import MarketSessionService
 from app.services.order_service import map_broker_status_to_internal, normalize_broker_status
+from app.services.automation_profile_safety import TEST4_HARD_SAFETY
 from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
@@ -356,7 +357,11 @@ class UserTradingExecutionService:
             risk_flags,
             snapshot=snapshot,
             symbol=requested_symbol,
-            max_open_positions=int(settings.max_open_positions or 0),
+            max_open_positions=(
+                int(profile_context.get("max_open_positions") or 1)
+                if is_automatic and isinstance(profile_context, dict) and profile_context.get("profile_id") is not None
+                else int(settings.max_open_positions or 0)
+            ),
             db=db,
             user=user,
         )
@@ -395,11 +400,18 @@ class UserTradingExecutionService:
             )
 
         price = _number(analysis.get("current_price") or (analysis.get("indicator_payload") or {}).get("price"))
-        sizing = self._size_order(
-            snapshot=snapshot,
-            price=price,
-            max_position_pct=float(settings.max_position_pct or 0),
-        )
+        if is_automatic and isinstance(profile_context, dict) and profile_context.get("profile_id") is not None:
+            sizing = self._size_profile_order(
+                snapshot=snapshot,
+                price=price,
+                profile_context=profile_context,
+            )
+        else:
+            sizing = self._size_order(
+                snapshot=snapshot,
+                price=price,
+                max_position_pct=float(settings.max_position_pct or 0),
+            )
         base["sizing"] = sizing
         if sizing.get("reason"):
             return self._finish_blocked(
@@ -850,6 +862,7 @@ class UserTradingExecutionService:
                 "scheduler_slot": base.get("scheduler_slot"),
                 "qty": sizing["quantity"],
                 "notional": sizing["notional"],
+                "sizing": sizing,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
                 "manual_submit_called": False,
@@ -929,6 +942,7 @@ class UserTradingExecutionService:
                 "scheduler_slot": base.get("scheduler_slot"),
                 "qty": sizing["quantity"],
                 "notional": sizing["notional"],
+                "sizing": sizing,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
                 "manual_submit_called": False,
@@ -1102,6 +1116,7 @@ class UserTradingExecutionService:
                 "symbol_match": base["symbol_match"],
                 "qty": sizing["quantity"],
                 "notional": sizing["notional"],
+                "sizing": sizing,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
                 "manual_submit_called": False,
@@ -1506,11 +1521,204 @@ class UserTradingExecutionService:
             return {"reason": "quantity_invalid", "target_notional": target_notional}
         notional = round(quantity * price, 2)
         return {
+            "sizing_source": "user_trading_settings",
+            "sizing_mode": "legacy_percentage",
             "portfolio_value": portfolio_value,
             "buying_power": buying_power,
             "current_exposure": current_exposure,
             "max_position_pct": max_position_pct,
             "target_notional": target_notional,
+            "quantity": int(quantity),
+            "price": price,
+            "notional": notional,
+        }
+
+    @staticmethod
+    def _size_profile_order(
+        *,
+        snapshot: dict[str, Any],
+        price: float | None,
+        profile_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Size an automatic entry from the active Automation Profile.
+
+        The profile watchlist snapshot is the canonical source for a fixed
+        budget. The execution service only applies runtime safety caps here;
+        it does not recalculate compound capital independently.
+        """
+        account = snapshot.get("account") if isinstance(snapshot, dict) else {}
+        account = account if isinstance(account, dict) else {}
+        portfolio_value = _number(
+            account.get("portfolio_value")
+            or account.get("equity")
+            or account.get("total_asset_value")
+        )
+        buying_power = _number(account.get("buying_power") or account.get("cash"))
+        if portfolio_value is None or portfolio_value <= 0:
+            return {"sizing_source": "automation_profile", "reason": "portfolio_value_unavailable"}
+        if buying_power is None or buying_power <= 0:
+            return {
+                "sizing_source": "automation_profile",
+                "portfolio_value": portfolio_value,
+                "buying_power": buying_power,
+                "reason": "buying_power_unavailable",
+            }
+        if price is None or price <= 0:
+            return {
+                "sizing_source": "automation_profile",
+                "portfolio_value": portfolio_value,
+                "buying_power": buying_power,
+                "reason": "current_price_unavailable",
+            }
+
+        mode = str(profile_context.get("sizing_mode") or "equity_pct").strip().lower()
+        if mode not in {"fixed_budget", "equity_pct"}:
+            return {
+                "sizing_source": "automation_profile",
+                "sizing_mode": mode,
+                "reason": "sizing_mode_invalid",
+            }
+
+        current_exposure = 0.0
+        current_symbol_value = 0.0
+        requested_symbol = str(profile_context.get("symbol") or "").strip().upper()
+        for position in snapshot.get("positions") or []:
+            if not isinstance(position, dict):
+                continue
+            market_value = _number(position.get("market_value")) or 0.0
+            if market_value <= 0:
+                quantity = _number(position.get("quantity") or position.get("qty")) or 0.0
+                average_price = _number(
+                    position.get("avg_entry_price")
+                    or position.get("avg_price")
+                    or position.get("average_price")
+                ) or 0.0
+                market_value = max(0.0, quantity * average_price)
+            current_exposure += market_value
+            if requested_symbol and str(position.get("symbol") or "").strip().upper() == requested_symbol:
+                current_symbol_value += market_value
+
+        profile_budget = _number(
+            profile_context.get("effective_entry_budget_krw")
+            or profile_context.get("profile_budget_krw")
+        ) or 0.0
+        fixed_budget = _number(profile_context.get("fixed_budget_krw")) or 0.0
+        target_pct = _number(profile_context.get("target_position_pct")) or 0.0
+        max_position_pct = _number(profile_context.get("max_position_pct")) or 0.0
+        max_total_exposure_pct = _number(profile_context.get("max_total_exposure_pct")) or 0.0
+        max_open_positions = max(1, int(_number(profile_context.get("max_open_positions")) or 1))
+        profile_max_order = _number(profile_context.get("max_order_notional_krw")) or 0.0
+        hard_max_order = float(TEST4_HARD_SAFETY["max_order_notional_krw"])
+        if profile_max_order <= 0:
+            profile_max_order = hard_max_order
+        profile_max_order = min(profile_max_order, hard_max_order)
+
+        # Fixed-budget mode deliberately does not apply the legacy
+        # UserTradingSettings.max_position_pct or the profile percentage
+        # target as a second sizing authority.
+        if mode == "fixed_budget":
+            target_notional = profile_budget or fixed_budget
+            if target_notional <= 0:
+                return {
+                    "sizing_source": "automation_profile",
+                    "sizing_mode": mode,
+                    "reason": "profile_budget_unavailable",
+                }
+            target_source = "effective_entry_budget_krw" if profile_budget > 0 else "fixed_budget_krw"
+        else:
+            if target_pct <= 0:
+                return {
+                    "sizing_source": "automation_profile",
+                    "sizing_mode": mode,
+                    "reason": "target_position_pct_invalid",
+                }
+            target_notional = portfolio_value * target_pct / 100.0
+            target_source = "target_position_pct"
+            # target_position_pct is the allocation for this position. It is
+            # intentionally not reduced by exposure already held in other
+            # symbols. Same-symbol add-ons remain blocked by the risk gates.
+
+        derived_total_exposure_pct = min(100.0, target_pct * max_open_positions)
+        configured_total_exposure_pct = max_total_exposure_pct
+        # 30% is the historical profile default, not an explicit user cap.
+        # Do not let that default turn 33% x 3 into a 30% strategy cap.
+        if (
+            mode == "equity_pct"
+            and derived_total_exposure_pct > configured_total_exposure_pct
+            and abs(configured_total_exposure_pct - 30.0) <= 0.01
+        ):
+            effective_total_exposure_pct = derived_total_exposure_pct
+            total_exposure_cap_source = "derived_position_allocation"
+        elif configured_total_exposure_pct > 0:
+            effective_total_exposure_pct = min(
+                derived_total_exposure_pct or configured_total_exposure_pct,
+                configured_total_exposure_pct,
+            )
+            total_exposure_cap_source = "configured_total_exposure"
+        else:
+            effective_total_exposure_pct = derived_total_exposure_pct
+            total_exposure_cap_source = "derived_position_allocation"
+
+        available_exposure_room = max(portfolio_value - current_exposure, 0.0)
+        cap_components = [
+            (target_source, max(0.0, target_notional)),
+            ("profile_max_order_notional", profile_max_order),
+            ("buying_power", max(0.0, buying_power)),
+            ("available_exposure_room", available_exposure_room),
+        ]
+        if mode == "equity_pct" and effective_total_exposure_pct > 0:
+            cap_components.append(
+                (
+                    total_exposure_cap_source,
+                    max(0.0, portfolio_value * effective_total_exposure_pct / 100.0 - current_exposure),
+                )
+            )
+        effective_target = min(value for _, value in cap_components)
+        cap_source = next(
+            source for source, value in cap_components
+            if abs(value - effective_target) <= 0.01
+        )
+        quantity = math.floor(effective_target / price)
+        if quantity <= 0:
+            return {
+                "sizing_source": "automation_profile",
+                "sizing_mode": mode,
+                "profile_id": profile_context.get("profile_id"),
+                "profile_budget_krw": round(profile_budget, 2),
+                "profile_max_order_notional_krw": round(profile_max_order, 2),
+                "portfolio_value": portfolio_value,
+                "buying_power": buying_power,
+                "available_exposure_room": available_exposure_room,
+                "derived_total_exposure_pct": derived_total_exposure_pct,
+                "effective_total_exposure_pct": effective_total_exposure_pct,
+                "target_notional": round(effective_target, 2),
+                "target_notional_before_runtime_caps": round(max(0.0, target_notional), 2),
+                "cap_source": cap_source,
+                "price": price,
+                "reason": "quantity_invalid",
+            }
+        notional = round(quantity * price, 2)
+        return {
+            "sizing_source": "automation_profile",
+            "sizing_mode": mode,
+            "profile_id": profile_context.get("profile_id"),
+            "profile_budget_krw": round(profile_budget, 2),
+            "fixed_budget_krw": round(fixed_budget, 2),
+            "target_position_pct": target_pct,
+            "max_position_pct": max_position_pct,
+            "max_total_exposure_pct": max_total_exposure_pct,
+            "max_open_positions": max_open_positions,
+            "derived_total_exposure_pct": derived_total_exposure_pct,
+            "effective_total_exposure_pct": effective_total_exposure_pct,
+            "total_exposure_cap_source": total_exposure_cap_source,
+            "profile_max_order_notional_krw": round(profile_max_order, 2),
+            "portfolio_value": portfolio_value,
+            "buying_power": buying_power,
+            "current_exposure": current_exposure,
+            "available_exposure_room": available_exposure_room,
+            "target_notional": round(effective_target, 2),
+            "target_notional_before_runtime_caps": round(max(0.0, target_notional), 2),
+            "cap_source": cap_source,
             "quantity": int(quantity),
             "price": price,
             "notional": notional,
