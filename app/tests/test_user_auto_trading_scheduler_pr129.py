@@ -370,7 +370,7 @@ def _raw_profile_snapshot(db):
         symbol='005930',
         name='Profile candidate',
         market='KOSPI',
-        current_price=100.0,
+        current_price=18000.0,
         quant_buy_score=90.0,
         quant_sell_score=5.0,
         indicators_json='{}',
@@ -468,7 +468,30 @@ def test_shared_profile_slot_runs_each_regular_user_with_its_own_snapshot(db_ses
         db_session, test02, ['13:30'], fixed_budget=70000, max_order_notional=65000,
     )
     _raw_profile_snapshot(db_session)
-    scheduler, account, _analysis, _broker, _kis_client = _harness()
+    scheduler, account, _analysis, _broker, _kis_client = _harness(
+        snapshots={
+            (test01.id, 'kis'): {
+                'account': {
+                    'portfolio_value': 50000.0,
+                    'equity': 50000.0,
+                    'buying_power': 50000.0,
+                    'cash': 50000.0,
+                },
+                'positions': [],
+                'open_orders': [],
+            },
+            (test02.id, 'kis'): {
+                'account': {
+                    'portfolio_value': 100000.0,
+                    'equity': 100000.0,
+                    'buying_power': 100000.0,
+                    'cash': 100000.0,
+                },
+                'positions': [],
+                'open_orders': [],
+            },
+        },
+    )
     scheduler.candidate_service = UserAutoTradingCandidateService()
 
     result = scheduler.run_provider_once(
@@ -496,6 +519,18 @@ def test_shared_profile_slot_runs_each_regular_user_with_its_own_snapshot(db_ses
         ),
     }
     assert {row.effective_entry_budget_krw for row in snapshots} == {48000.0, 65000.0}
+    orders = {
+        row.owner_user_id: row
+        for row in db_session.query(OrderLog).all()
+    }
+    assert orders[test01.id].qty == 480
+    assert orders[test01.id].notional == 48000.0
+    assert orders[test02.id].qty == 650
+    assert orders[test02.id].notional == 65000.0
+    for order in orders.values():
+        payload = json.loads(order.request_payload)
+        assert payload['sizing']['sizing_source'] == 'automation_profile'
+        assert payload['sizing']['profile_id'] is not None
     assert db_session.query(UserAutoTradingSlotClaim).filter_by(user_id=admin.id).count() == 0
 
 def test_kis_paper_scheduler_is_user_owned_and_slot_idempotent(db_session):

@@ -76,6 +76,22 @@ def test_three_positions_are_configurable_but_readiness_requires_pr109(db_sessio
     assert readiness['runtime_safety']['live_flags_unchanged'] is True
 
 
+def test_per_position_ratio_can_exceed_historical_cap_defaults(db_session):
+    service = AutomationProfileService()
+    created = service.create(
+        db_session,
+        _request(
+            profile_key='per-position-33',
+            capital={'sizing_mode': 'equity_pct', 'target_position_pct': 33.0},
+            max_open_positions=3,
+        ),
+    )
+
+    assert created['settings']['capital']['target_position_pct'] == 33.0
+    assert created['settings']['capital']['max_position_pct'] == 12.0
+    assert created['settings']['capital']['max_total_exposure_pct'] == 30.0
+
+
 def test_sizing_preview_is_read_only_and_respects_cash_and_price(db_session):
     service = AutomationProfileService()
     created = service.create(db_session, _request(profile_key='sizing-profile'))
