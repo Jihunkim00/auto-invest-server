@@ -1035,6 +1035,10 @@ class PositionLifecycle(Base):
     id = Column(Integer, primary_key=True, index=True)
     symbol = Column(String(20), nullable=False, index=True)
     entry_order_id = Column(Integer, nullable=False, unique=True, index=True)
+    entry_source = Column(String(40), nullable=False, default="order_log")
+    entry_time_source = Column(
+        String(80), nullable=False, default="order_timestamp_fallback"
+    )
     entry_price = Column(Float, nullable=False)
     cost_basis = Column(Float, nullable=False)
     quantity = Column(Float, nullable=False, default=1.0)

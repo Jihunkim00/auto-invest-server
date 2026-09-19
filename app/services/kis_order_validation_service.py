@@ -149,7 +149,7 @@ class KisOrderValidationService:
         if request.side == "buy" and not market_session["is_entry_allowed_now"]:
             warnings.append("after_no_new_entry_time")
             block_reasons.append("after_no_new_entry_time")
-        if market_session["is_near_close"]:
+        if request.side == "buy" and market_session["is_near_close"]:
             warnings.append("near_close")
             block_reasons.append("near_close")
 

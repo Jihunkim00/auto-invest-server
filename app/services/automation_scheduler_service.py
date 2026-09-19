@@ -32,6 +32,7 @@ from app.services.kis_watchlist_update_service import (
 
 from app.services.market_session_service import MarketSessionService
 from app.services.market_profile_service import MarketProfileService
+from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
 )
@@ -44,6 +45,8 @@ from app.services.user_watchlist_analysis_scheduler_service import (
 
 
 KST = ZoneInfo("Asia/Seoul")
+POSITION_EXIT_POSITION_CACHE_SECONDS = 300
+POSITION_EXIT_FRESH_READ_SECONDS = 5
 CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"}
 
 
@@ -77,6 +80,12 @@ class AutomationSchedulerService(SchedulerService):
         self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
         self._monitoring_due_at: datetime | None = None
+        self._position_exit_monitor_due_at: datetime | None = None
+        self._position_exit_positions_lock = threading.Lock()
+        self._position_exit_positions_cached_at: datetime | None = None
+        self._position_exit_positions_cache: list[dict[str, Any]] | None = None
+        self._last_position_exit_monitor_run_at: datetime | None = None
+        self._last_position_exit_monitor_result: str | None = None
         self._last_monitoring_run_at: datetime | None = None
         self._last_monitoring_result: str | None = None
         self._last_automatic_sync_at: datetime | None = None
@@ -204,6 +213,11 @@ class AutomationSchedulerService(SchedulerService):
                 'last_monitoring_run_at': self._last_monitoring_run_at.isoformat() if self._last_monitoring_run_at else None,
                 'last_monitoring_result': self._last_monitoring_result,
                 'monitoring_due_at': self._monitoring_due_at.isoformat() if self._monitoring_due_at else None,
+                'position_exit_monitor_interval_minutes': 30,
+                'position_exit_monitor_poll_seconds': 20,
+                'position_exit_monitor_due_at': self._position_exit_monitor_due_at.isoformat() if self._position_exit_monitor_due_at else None,
+                'last_position_exit_monitor_run_at': self._last_position_exit_monitor_run_at.isoformat() if self._last_position_exit_monitor_run_at else None,
+                'last_position_exit_monitor_result': self._last_position_exit_monitor_result,
                 'last_automatic_sync_at': self._last_automatic_sync_at.isoformat() if self._last_automatic_sync_at else None,
                 'automatic_sync_due_at': self._automatic_sync_due_at.isoformat() if self._automatic_sync_due_at else None,
                 'automatic_order_sync_enabled': True,
@@ -258,6 +272,12 @@ class AutomationSchedulerService(SchedulerService):
                 interval = self._monitoring_interval_seconds(schedule)
                 self._monitoring_due_at = now_kst + timedelta(seconds=interval)
                 self._safe_call(self._run_automation_monitoring_tick, now_kst)
+            if (
+                self._position_exit_monitor_due_at is None
+                or now_kst >= self._position_exit_monitor_due_at
+            ):
+                self._position_exit_monitor_due_at = now_kst + timedelta(seconds=20)
+                self._safe_call(self._run_position_exit_monitor_once, now_kst)
             if self._outcome_labeling_due_at is None or now_kst >= self._outcome_labeling_due_at:
                 self._outcome_labeling_due_at = now_kst + timedelta(minutes=1)
                 self._safe_call(self._schedule_quant_ab_labeling, now_kst)
@@ -1327,6 +1347,240 @@ class AutomationSchedulerService(SchedulerService):
                 return False
             self._slot_runs.add(run_key)
             return True
+
+    def _run_position_exit_monitor_once(
+        self,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Poll due held positions independently and delegate SELLs to guarded execution."""
+        now_kst = self._as_kst(now)
+        self._last_position_exit_monitor_run_at = datetime.now(UTC)
+        db = SessionLocal()
+        try:
+            runtime = self.runtime_settings.get_settings_read_only(db)
+            authority = AutomationExecutionAuthorityService(
+                self.runtime_settings
+            ).snapshot(db)
+            if not runtime.get("scheduler_enabled"):
+                result = {"status": "blocked", "reason": "scheduler_disabled", "items": []}
+            elif not runtime.get("position_management_scheduler_enabled"):
+                result = {
+                    "status": "blocked",
+                    "reason": "position_management_scheduler_disabled",
+                    "items": [],
+                }
+            elif not authority.get("scheduler_allowed"):
+                result = {"status": "blocked", "reason": "automation_mode_off", "items": []}
+            else:
+                settings_obj = get_settings()
+                kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+                lifecycle = KisPositionLifecycleService(
+                    kis_client,
+                    runtime_settings=self.runtime_settings,
+                    automation_profiles=self.automation_profiles,
+                    position_snapshot_loader=(
+                        lambda *, force_refresh=False: self._load_position_exit_positions(
+                            kis_client, now=now_kst, force_refresh=force_refresh
+                        )
+                    ),
+                )
+                slot = f"position_exit_{now_kst.strftime('%Y%m%d_%H%M')}"
+                result = lifecycle.run_due_management_once(
+                    db,
+                    trigger_source="position_exit_monitor",
+                    scheduler_slot=slot,
+                    now=now_kst,
+                )
+                result = self._route_position_exit_monitor_sells(
+                    db,
+                    lifecycle=lifecycle,
+                    result=result,
+                    scheduler_slot=slot,
+                    now=now_kst,
+                    dry_run=bool(runtime.get("dry_run", True)),
+                )
+                result["automation_mode"] = authority.get("automation_mode")
+                result["monitor_execution_mode"] = "guarded_live_exit"
+                result["monitor_independent_of_buy_scheduler"] = True
+                result["buy_execution_allowed"] = False
+            result["position_exit_monitor_interval_minutes"] = 30
+            result["poll_interval_seconds"] = 20
+            result["real_order_submitted"] = bool(
+                result.get("real_order_submitted")
+                or any(
+                    item.get("real_order_submitted") is True
+                    for item in result.get("items", [])
+                    if isinstance(item, dict)
+                )
+            )
+            result["broker_submit_called"] = bool(
+                result.get("broker_submit_called")
+                or any(
+                    item.get("broker_submit_called") is True
+                    for item in result.get("items", [])
+                    if isinstance(item, dict)
+                )
+            )
+            result.setdefault("buy_execution_allowed", False)
+            self._last_position_exit_monitor_result = str(
+                result.get("reason") or result.get("status") or "completed"
+            )
+            return result
+        finally:
+            db.close()
+
+    def _load_position_exit_positions(
+        self,
+        kis_client: Any,
+        *,
+        now: datetime,
+        force_refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Cache discovery reads; due strategy evaluations still require fresh data."""
+        now_utc = self._as_kst(now).astimezone(UTC)
+        with self._position_exit_positions_lock:
+            cached_at = self._position_exit_positions_cached_at
+            cached = self._position_exit_positions_cache
+            age = (now_utc - cached_at) if cached_at is not None else None
+            cache_fresh = (
+                age is not None
+                and timedelta(0) <= age
+                and age.total_seconds() < POSITION_EXIT_POSITION_CACHE_SECONDS
+            )
+            force_read_fresh = (
+                force_refresh
+                and (age is None or age < timedelta(0)
+                     or age.total_seconds() > POSITION_EXIT_FRESH_READ_SECONDS)
+            )
+            if cached is not None and cache_fresh and not force_read_fresh:
+                return [dict(item) for item in cached]
+            result = kis_client.list_positions()
+            if not isinstance(result, list) or any(not isinstance(item, dict) for item in result):
+                raise ValueError("kis_position_snapshot_invalid")
+            snapshot = [dict(item) for item in result]
+            self._position_exit_positions_cache = snapshot
+            self._position_exit_positions_cached_at = now_utc
+            return [dict(item) for item in snapshot]
+
+    def _route_position_exit_monitor_sells(
+        self,
+        db,
+        *,
+        lifecycle: KisPositionLifecycleService,
+        result: dict[str, Any],
+        scheduler_slot: str,
+        now: datetime,
+        dry_run: bool,
+    ) -> dict[str, Any]:
+        """Delegate due SELL recommendations to the existing guarded exit path."""
+        if not isinstance(result, dict):
+            return result
+        items = result.get("items")
+        if not isinstance(items, list):
+            return result
+
+        sell_items = [
+            item
+            for item in items
+            if isinstance(item, dict)
+            and str(item.get("action") or "").upper() == "SELL"
+            and item.get("exit_check_due") is True
+            and item.get("status") == "checked"
+        ]
+        if not sell_items:
+            result["real_order_submitted"] = any(
+                item.get("real_order_submitted") is True
+                for item in items
+                if isinstance(item, dict)
+            )
+            result["broker_submit_called"] = any(
+                item.get("broker_submit_called") is True
+                for item in items
+                if isinstance(item, dict)
+            )
+            return result
+
+        exit_service = self._profile_guarded_live_auto_exit_service(db)
+        for item in sell_items:
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            try:
+                exit_result = exit_service.run_scheduler_once(
+                    db,
+                    scheduler_slot=scheduler_slot,
+                    symbol=symbol,
+                    now=now,
+                )
+            except Exception as exc:
+                exit_result = {
+                    "status": "failed",
+                    "action": "blocked",
+                    "block_reason": "guarded_live_exit_exception",
+                    "reason": exc.__class__.__name__,
+                    "submitted": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                    "safety": {
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                        "manual_submit_called": False,
+                    },
+                }
+
+            submitted = bool(
+                exit_result.get("submitted") or exit_result.get("real_order_submitted")
+            )
+            safety = exit_result.get("safety")
+            broker_submit_called = bool(
+                exit_result.get("broker_submit_called")
+                or (safety.get("broker_submit_called") if isinstance(safety, dict) else False)
+            )
+            if dry_run:
+                execution_action = "BLOCKED_DRY_RUN"
+            elif submitted:
+                execution_action = "SUBMITTED"
+            elif broker_submit_called:
+                execution_action = "SUBMIT_ATTEMPTED"
+            else:
+                execution_action = "BLOCKED"
+            execution_reason = str(
+                exit_result.get("block_reason")
+                or exit_result.get("reason")
+                or exit_result.get("status")
+                or "guarded_exit_not_submitted"
+            )
+            lifecycle.record_monitor_execution_result(
+                db,
+                item,
+                execution_action=execution_action,
+                execution_reason=execution_reason,
+                execution_result=exit_result,
+            )
+
+        result["guarded_sell_recommendation_count"] = len(sell_items)
+        result["real_order_submitted"] = any(
+            item.get("real_order_submitted") is True
+            for item in items
+            if isinstance(item, dict)
+        )
+        result["broker_submit_called"] = any(
+            item.get("broker_submit_called") is True
+            for item in items
+            if isinstance(item, dict)
+        )
+        result["manual_submit_called"] = any(
+            item.get("manual_submit_called") is True
+            for item in items
+            if isinstance(item, dict)
+        )
+        result["guarded_sell_submitted_count"] = sum(
+            1
+            for item in items
+            if isinstance(item, dict) and item.get("real_order_submitted") is True
+        )
+        return result
 
     def _profile_guarded_live_auto_exit_service(self, db):
         if self.profile_aware_guarded_live_auto_exit_service is not None:

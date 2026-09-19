@@ -66,7 +66,7 @@ EXIT_PRIORITY = {
 
 
 class ProfileAwareGuardedLiveAutoExitService:
-    """Manual one-shot guarded live sell path for held KIS positions."""
+    """Guarded live SELL path for one-shot and scheduler-driven KIS exits."""
 
     def __init__(
         self,

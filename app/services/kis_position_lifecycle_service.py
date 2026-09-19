@@ -22,6 +22,7 @@ from app.services.kis_limited_auto_sell_service import KisLimitedAutoSellService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.runtime_setting_service import RuntimeSettingService
+from app.services.market_session_service import MarketSessionService
 
 
 MODE = "kis_position_management"
@@ -59,6 +60,7 @@ PROFILE_AUTO_BUY_SOURCE = "strategy_live_auto_buy"
 PROFILE_AUTO_BUY_SOURCE_TYPE = "profile_aware_guarded_live_auto_buy"
 PROFILE_AUTO_BUY_MODE = "strategy_live_auto_buy"
 KR_TZ = ZoneInfo("Asia/Seoul")
+EXIT_CHECK_INTERVAL_MINUTES = 30
 
 SUBMITTED_SELL_STATUSES = {
     InternalOrderStatus.SUBMITTED.value,
@@ -85,6 +87,8 @@ class KisPositionLifecycleService:
         automation_profiles: Any | None = None,
         limited_auto_sell_service: Any | None = None,
         now_provider: Any | None = None,
+        session_service: MarketSessionService | None = None,
+        position_snapshot_loader: Any | None = None,
     ) -> None:
         self.client = client
         self.runtime_settings = runtime_settings or RuntimeSettingService()
@@ -93,6 +97,8 @@ class KisPositionLifecycleService:
         )
         self.limited_auto_sell_service = limited_auto_sell_service
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+        self.session_service = session_service or MarketSessionService()
+        self.position_snapshot_loader = position_snapshot_loader
 
     def _active_profile_exit(self, db: Session) -> dict[str, Any] | None:
         reader = getattr(self.automation_profiles, 'get_active_profile', None)
@@ -125,6 +131,23 @@ class KisPositionLifecycleService:
             .all()
         )
         active = [row for row in lifecycles if row.status in {OPEN, CLOSING}]
+        now_utc = _aware_utc(self.now_provider())
+        monitored = [
+            _serialize_lifecycle_for_monitor(db, row, now_utc)
+            for row in active
+        ]
+        next_checks = [
+            _parse_datetime(item.get("next_exit_check_at"))
+            for item in monitored
+            if item.get("next_exit_check_at")
+        ]
+        next_checks = [value for value in next_checks if value is not None]
+        last_checks = [
+            _parse_datetime(item.get("last_exit_check_at"))
+            for item in monitored
+            if item.get("last_exit_check_at")
+        ]
+        last_checks = [value for value in last_checks if value is not None]
         return sanitize_kis_payload(
             {
                 "provider": PROVIDER,
@@ -141,9 +164,25 @@ class KisPositionLifecycleService:
                 ],
                 "blocking_reasons": scheduler_gate["blocking_reasons"],
                 "active_lifecycle_count": len(active),
-                "lifecycles": [_serialize_lifecycle(row) for row in lifecycles],
+                "position_exit_monitor_enabled": bool(
+                    runtime.get("position_management_scheduler_enabled", False)
+                ),
+                "position_exit_interval_minutes": EXIT_CHECK_INTERVAL_MINUTES,
+                "last_exit_check_at": _iso_kst(max(last_checks)) if last_checks else None,
+                "next_exit_check_at": _iso_kst(min(next_checks)) if next_checks else None,
+                "exit_check_due": any(item.get("exit_check_due") is True for item in monitored),
+                "lifecycles": [
+                    _serialize_lifecycle(row)
+                    | next(
+                        (item for item in monitored if item.get("id") == row.id),
+                        {},
+                    )
+                    for row in lifecycles
+                ],
                 "scheduler": {
-                    "slots_kst": ["10:00", "12:00", "14:30"],
+                    "slots_kst": ["09:00", "every 30 minutes from fill/check"],
+                    "interval_minutes": EXIT_CHECK_INTERVAL_MINUTES,
+                    "poll_interval_seconds": 20,
                     "sell_only": True,
                     "buy_scheduler_enabled": False,
                     "position_management_priority": "before_new_buy_candidates",
@@ -223,6 +262,7 @@ class KisPositionLifecycleService:
                 "reason": "filled_quantity_unavailable",
                 "order_id": row.id,
             }
+        timestamp_source = _order_entry_time_source(row)
         opened_at = _naive_utc(
             _aware_utc(
                 row.filled_at
@@ -236,6 +276,8 @@ class KisPositionLifecycleService:
         lifecycle = PositionLifecycle(
             symbol=str(row.symbol or "").strip().upper(),
             entry_order_id=int(row.id),
+            entry_source="order_log",
+            entry_time_source=timestamp_source,
             entry_price=float(entry_price),
             cost_basis=round(float(entry_price) * quantity, 2),
             quantity=quantity,
@@ -570,6 +612,317 @@ class KisPositionLifecycleService:
             order_id=None,
             position=position,
         )
+
+    def run_due_management_once(
+        self,
+        db: Session,
+        *,
+        trigger_source: str = "position_exit_monitor",
+        scheduler_slot: str | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Evaluate tracked held positions only when their KST cadence is due.
+
+        This monitor records preflight-only HOLD/SELL recommendations and does
+        not trigger broker submission. Existing live SELL execution remains in
+        the separate guarded execution flow.
+        """
+        now_utc = _aware_utc(now or self.now_provider())
+        now_kst = now_utc.astimezone(KR_TZ)
+        self._ensure_lifecycles_from_filled_buys(db, now=now_utc)
+        snapshot_error = None
+        try:
+            broker_positions = self._broker_positions()
+        except Exception as exc:
+            broker_positions = None
+            snapshot_error = exc.__class__.__name__
+        unmanaged_positions = (
+            self._ensure_lifecycles_from_broker_positions(
+                db, broker_positions, now=now_utc
+            )
+            if broker_positions is not None
+            else []
+        )
+        active = self._active_lifecycles(db)
+        if not active:
+            reason = (
+                "broker_position_snapshot_unavailable"
+                if broker_positions is None
+                else (
+                    "broker_position_entry_data_unavailable"
+                    if unmanaged_positions
+                    else "no_position"
+                )
+            )
+            return sanitize_kis_payload(
+                {
+                    "provider": PROVIDER,
+                    "market": MARKET,
+                    "mode": PREFLIGHT_MODE,
+                    "status": "skipped",
+                    "reason": reason,
+                    "snapshot_error": snapshot_error,
+                    "trigger_source": trigger_source,
+                    "scheduler_slot": scheduler_slot,
+                    "sell_only": True,
+                    "buy_execution_allowed": False,
+                    "managed_count": 0,
+                    "due_count": 0,
+                    "items": [],
+                    "unmanaged_positions": unmanaged_positions,
+                    "entry_cutoff_ignored_for_sell": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        schedules = [
+            (row, _position_exit_schedule(db, row, now_utc))
+            for row in active
+        ]
+        try:
+            market_session = self.session_service.get_session_status(
+                MARKET,
+                now=now_utc,
+            )
+        except Exception as exc:
+            market_session = {
+                "market": MARKET,
+                "is_market_open": False,
+                "session_unavailable": True,
+                "error": exc.__class__.__name__,
+            }
+        entry_cutoff_ignored = bool(
+            market_session.get("is_market_open") is True
+            and market_session.get("is_entry_allowed_now") is False
+        )
+
+        if market_session.get("is_market_open") is not True:
+            items = [
+                _monitor_skip_item(
+                    row,
+                    schedule,
+                    now_utc,
+                    reason=(
+                        "market_session_unavailable"
+                        if market_session.get("session_unavailable")
+                        else "market_closed"
+                    ),
+                )
+                for row, schedule in schedules
+            ]
+            return sanitize_kis_payload(
+                {
+                    "provider": PROVIDER,
+                    "market": MARKET,
+                    "mode": PREFLIGHT_MODE,
+                    "status": "skipped",
+                    "reason": (
+                        "market_session_unavailable"
+                        if market_session.get("session_unavailable")
+                        else "market_closed"
+                    ),
+                    "trigger_source": trigger_source,
+                    "scheduler_slot": scheduler_slot,
+                    "market_session": market_session,
+                    "sell_only": True,
+                    "buy_execution_allowed": False,
+                    "managed_count": len(items),
+                    "unmanaged_positions": unmanaged_positions,
+                    "due_count": sum(item["exit_check_due"] for item in items),
+                    "items": items,
+                    "entry_cutoff_ignored_for_sell": False,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        due_schedules = [
+            (row, schedule)
+            for row, schedule in schedules
+            if schedule["exit_check_due"]
+        ]
+        if not due_schedules:
+            items = [
+                _monitor_skip_item(row, schedule, now_utc, reason="not_due_yet")
+                for row, schedule in schedules
+            ]
+            return sanitize_kis_payload(
+                {
+                    "provider": PROVIDER,
+                    "market": MARKET,
+                    "mode": PREFLIGHT_MODE,
+                    "status": "skipped",
+                    "reason": "not_due_yet",
+                    "trigger_source": trigger_source,
+                    "scheduler_slot": scheduler_slot,
+                    "market_session": market_session,
+                    "sell_only": True,
+                    "buy_execution_allowed": False,
+                    "managed_count": len(items),
+                    "unmanaged_positions": unmanaged_positions,
+                    "due_count": 0,
+                    "items": items,
+                    "entry_cutoff_ignored_for_sell": entry_cutoff_ignored,
+                    "real_order_submitted": False,
+                    "broker_submit_called": False,
+                    "manual_submit_called": False,
+                }
+            )
+
+        positions = self._broker_positions(force_refresh=True)
+        open_orders = self._broker_open_orders()
+        due_rows = {row.id for row, _ in due_schedules}
+        items: list[dict[str, Any]] = []
+        for row, schedule in schedules:
+            if row.id not in due_rows:
+                items.append(
+                    _monitor_skip_item(row, schedule, now_utc, reason="not_due_yet")
+                )
+                continue
+            if row.status == CLOSING or self._has_open_or_unknown_sell_order(
+                db, row, open_orders
+            ):
+                items.append(
+                    _monitor_skip_item(
+                        row,
+                        schedule,
+                        now_utc,
+                        reason="duplicate_open_sell_order",
+                    )
+                )
+                continue
+
+            decision = self.evaluate_position(
+                db,
+                row,
+                now=now_utc,
+                positions=positions,
+                open_orders=open_orders,
+            )
+            strategy_action = str(decision.get("action") or HOLD).upper()
+            action = "SELL" if strategy_action == SELL_READY else HOLD
+            entry_time = schedule["entry_time"]
+            next_schedule = _position_exit_schedule(db, row, now_utc)
+            item = {
+                **decision,
+                "action": action,
+                "recommended_action": action,
+                "execution_action": "NOT_ATTEMPTED",
+                "strategy_action": strategy_action,
+                "status": "checked",
+                "result": "sell_ready" if action == "SELL" else "hold",
+                "reason": decision.get("reason") or "exit_condition_not_met",
+                "exit_reason": decision.get("reason") or "exit_condition_not_met",
+                "risk_reason": (
+                    decision.get("reason")
+                    if decision.get("result") in {"blocked", "error", MANUAL_REVIEW}
+                    else None
+                ),
+                "position_qty": row.quantity,
+                "entry_time": _iso_kst(entry_time),
+                "entry_time_source": schedule["entry_time_source"],
+                "current_time": now_kst.isoformat(),
+                "minutes_since_entry": max(
+                    0,
+                    int((now_utc - _aware_utc(entry_time)).total_seconds() // 60),
+                ),
+                "last_exit_check_at": now_kst.isoformat(),
+                "next_exit_check_at": _iso_kst(now_utc + timedelta(minutes=EXIT_CHECK_INTERVAL_MINUTES)),
+                "exit_check_due": True,
+                "entry_cutoff_ignored_for_sell": entry_cutoff_ignored,
+                "trigger_source": trigger_source,
+                "scheduler_slot": scheduler_slot,
+                "execute": False,
+                "preflight_only": True,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+            }
+            run = self._record_run(
+                db,
+                payload=item,
+                trigger_source=trigger_source,
+                mode=PREFLIGHT_MODE,
+                now=now_utc,
+            )
+            item["run"] = _serialize_run(run)
+            items.append(item)
+
+        checked = [item for item in items if item.get("exit_check_due") and item.get("status") == "checked"]
+        return sanitize_kis_payload(
+            {
+                "provider": PROVIDER,
+                "market": MARKET,
+                "mode": PREFLIGHT_MODE,
+                "status": "checked" if checked else "skipped",
+                "reason": "position_exit_checks_completed" if checked else "not_due_or_pending_sell",
+                "trigger_source": trigger_source,
+                "scheduler_slot": scheduler_slot,
+                "market_session": market_session,
+                "sell_only": True,
+                "buy_execution_allowed": False,
+                "managed_count": len(items),
+                "unmanaged_positions": unmanaged_positions,
+                "due_count": len(due_schedules),
+                "checked_count": len(checked),
+                "items": items,
+                "summary": _position_exit_monitor_summary(items),
+                "entry_cutoff_ignored_for_sell": entry_cutoff_ignored,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "manual_submit_called": False,
+            }
+        )
+
+    def record_monitor_execution_result(
+        self,
+        db: Session,
+        item: dict[str, Any],
+        *,
+        execution_action: str,
+        execution_reason: str | None,
+        execution_result: dict[str, Any],
+    ) -> None:
+        """Attach guarded SELL execution outcome to the eligible check log."""
+        item["execution_action"] = execution_action
+        item["execution_reason"] = execution_reason
+        item["guarded_live_exit"] = _guarded_exit_log_summary(execution_result)
+        item["real_order_submitted"] = bool(
+            execution_result.get("real_order_submitted")
+            or execution_result.get("submitted")
+        )
+        safety = execution_result.get("safety")
+        item["broker_submit_called"] = bool(
+            execution_result.get("broker_submit_called")
+            or (safety.get("broker_submit_called") if isinstance(safety, dict) else False)
+        )
+        item["manual_submit_called"] = bool(
+            execution_result.get("manual_submit_called")
+            or (safety.get("manual_submit_called") if isinstance(safety, dict) else False)
+        )
+
+        run_info = item.get("run") if isinstance(item.get("run"), dict) else {}
+        run_id = _int_or_none(run_info.get("run_id"))
+        run = db.get(TradeRunLog, run_id) if run_id is not None else None
+        if run is None:
+            return
+        response_payload = _parse_object(run.response_payload)
+        response_payload.update(
+            {
+                "recommended_action": item.get("recommended_action") or item.get("action"),
+                "execution_action": execution_action,
+                "execution_reason": execution_reason,
+                "guarded_live_exit": item["guarded_live_exit"],
+                "real_order_submitted": item["real_order_submitted"],
+                "broker_submit_called": item["broker_submit_called"],
+                "manual_submit_called": item["manual_submit_called"],
+            }
+        )
+        run.response_payload = _json(response_payload)
+        db.commit()
 
     def run_management_once(
         self,
@@ -908,6 +1261,89 @@ class KisPositionLifecycleService:
         for row in rows:
             self.sync_filled_buy(db, row, now=now)
 
+    def _ensure_lifecycles_from_broker_positions(
+        self,
+        db: Session,
+        positions: list[dict[str, Any]],
+        *,
+        now: datetime,
+    ) -> list[dict[str, Any]]:
+        """Track broker-held positions when no local entry order is available.
+
+        Broker average purchase price and cost basis are authoritative. KIS
+        balance snapshots do not provide the original fill timestamp, so the
+        first observed time is stored and explicitly labeled as a fallback.
+        """
+        active_symbols = {
+            str(row.symbol or "").strip().upper()
+            for row in self._active_lifecycles(db)
+        }
+        profile_exit = self._active_profile_exit(db)
+        unmanaged: list[dict[str, Any]] = []
+        for position in positions:
+            symbol = str(position.get("symbol") or "").strip().upper()
+            quantity = _safe_float(position.get("qty"), 0.0)
+            if not symbol or quantity <= 0 or symbol in active_symbols:
+                continue
+            entry_price = _safe_float_or_none(position.get("avg_entry_price"))
+            cost_basis = _safe_float_or_none(position.get("cost_basis"))
+            if entry_price is None or entry_price <= 0 or cost_basis is None or cost_basis <= 0:
+                unmanaged.append(
+                    {
+                        "symbol": symbol,
+                        "status": "skipped",
+                        "reason": "broker_position_entry_data_unavailable",
+                        "entry_source": "broker_position_snapshot",
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                    }
+                )
+                continue
+            current_price = _position_current_price(position)
+            unrealized_pl = _safe_float_or_none(position.get("unrealized_pl"))
+            if unrealized_pl is None and current_price is not None and current_price > 0:
+                unrealized_pl = current_price * quantity - cost_basis
+            existing_ids = [
+                int(value)
+                for (value,) in db.query(PositionLifecycle.entry_order_id).all()
+                if value is not None
+            ]
+            synthetic_entry_order_id = min([-1, *existing_ids]) - (1 if any(value < 0 for value in existing_ids) else 0)
+            lifecycle = PositionLifecycle(
+                symbol=symbol,
+                entry_order_id=synthetic_entry_order_id,
+                entry_source="broker_position_snapshot",
+                entry_time_source="broker_position_first_observed_at_fallback",
+                entry_price=float(entry_price),
+                cost_basis=float(cost_basis),
+                quantity=quantity,
+                status=OPEN,
+                opened_at=_naive_utc(_aware_utc(now)),
+                last_price=current_price if current_price is not None and current_price > 0 else None,
+                unrealized_pl=_round_money(unrealized_pl),
+                unrealized_pl_pct=(
+                    _round_ratio(unrealized_pl / cost_basis)
+                    if unrealized_pl is not None and cost_basis > 0
+                    else None
+                ),
+                max_price_since_entry=None,
+                stop_loss_threshold_pct=(
+                    profile_exit["stop_loss_pct"]
+                    if profile_exit is not None
+                    else DEFAULT_EXIT_STOP_LOSS_THRESHOLD_DECIMAL * 100.0
+                ),
+                take_profit_threshold_pct=(
+                    profile_exit["take_profit_pct"]
+                    if profile_exit is not None
+                    else DEFAULT_EXIT_TAKE_PROFIT_THRESHOLD_DECIMAL * 100.0
+                ),
+            )
+            db.add(lifecycle)
+            db.commit()
+            db.refresh(lifecycle)
+            active_symbols.add(symbol)
+        return unmanaged
+
     def _disable_new_buy_settings(self, db: Session) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
         payload = {
@@ -940,7 +1376,11 @@ class KisPositionLifecycleService:
             .all()
         )
 
-    def _broker_positions(self) -> list[dict[str, Any]]:
+    def _broker_positions(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
+        if self.position_snapshot_loader is not None:
+            return _held_positions(
+                self.position_snapshot_loader(force_refresh=force_refresh)
+            )
         if self.client is None:
             return []
         return _held_positions(self.client.list_positions())
@@ -992,7 +1432,13 @@ class KisPositionLifecycleService:
             "mode": MODE,
             "lifecycle_id": lifecycle.id if lifecycle is not None else None,
             "symbol": lifecycle.symbol if lifecycle is not None else "POSITIONS",
-            "entry_order_id": lifecycle.entry_order_id if lifecycle is not None else None,
+            "entry_order_id": (
+                lifecycle.entry_order_id
+                if lifecycle is not None and lifecycle.entry_source != "broker_position_snapshot"
+                else None
+            ),
+            "entry_source": lifecycle.entry_source if lifecycle is not None else None,
+            "entry_time_source": lifecycle.entry_time_source if lifecycle is not None else None,
             "entry_price": entry_price,
             "cost_basis": lifecycle.cost_basis if lifecycle is not None else None,
             "quantity": lifecycle.quantity if lifecycle is not None else None,
@@ -1192,6 +1638,13 @@ def _payload_has_reviewed_buy_marker(payload: dict[str, Any]) -> bool:
         if isinstance(nested, dict) and _payload_has_reviewed_buy_marker(nested):
             return True
     return False
+
+
+def _order_entry_time_source(order: OrderLog) -> str:
+    for field_name in ("filled_at", "last_synced_at", "submitted_at", "created_at"):
+        if getattr(order, field_name, None) is not None:
+            return f"order.{field_name}"
+    return "lifecycle_sync_observed_at_fallback"
 
 
 def _entry_price(order: OrderLog) -> float | None:
@@ -1444,11 +1897,196 @@ def _latest_sell_order(db: Session, symbol: str) -> OrderLog | None:
     )
 
 
+def _position_entry_time(db: Session, row: PositionLifecycle) -> tuple[datetime, str]:
+    """Prefer exact order fills and label broker-observation time fallbacks."""
+    opened_at = _aware_utc(row.opened_at)
+    if row.entry_source == "broker_position_snapshot":
+        return opened_at, (
+            row.entry_time_source or "broker_position_first_observed_at_fallback"
+        )
+    order = db.get(OrderLog, int(row.entry_order_id)) if row.entry_order_id else None
+    if order is not None and order.filled_at is not None:
+        return _aware_utc(order.filled_at), "order.filled_at"
+
+    if order is not None:
+        for field_name in ("last_synced_at", "submitted_at", "created_at"):
+            value = getattr(order, field_name, None)
+            if value is not None and _aware_utc(value) == opened_at:
+                return opened_at, f"order.{field_name}"
+        for field_name in ("last_synced_at", "submitted_at", "created_at"):
+            value = getattr(order, field_name, None)
+            if value is not None:
+                return _aware_utc(value), f"order.{field_name}"
+    return opened_at, "position_lifecycle.opened_at"
+
+
+def _guarded_exit_log_summary(result: dict[str, Any]) -> dict[str, Any]:
+    safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
+    return {
+        "status": result.get("status"),
+        "action": result.get("action"),
+        "block_reason": result.get("block_reason"),
+        "reason": result.get("reason"),
+        "submitted": bool(result.get("submitted") or result.get("real_order_submitted")),
+        "validation_called": bool(
+            result.get("validation_called") or safety.get("validation_called")
+        ),
+        "broker_submit_called": bool(
+            result.get("broker_submit_called") or safety.get("broker_submit_called")
+        ),
+        "manual_submit_called": bool(
+            result.get("manual_submit_called") or safety.get("manual_submit_called")
+        ),
+        "attempt_id": result.get("attempt_id"),
+        "trade_run_id": result.get("trade_run_id"),
+        "related_order_id": result.get("related_order_id"),
+        "broker_order_id": result.get("broker_order_id"),
+        "safety": safety,
+    }
+
+
+def _last_position_monitor_check(
+    db: Session,
+    row: PositionLifecycle,
+) -> datetime | None:
+    latest = (
+        db.query(TradeRunLog)
+        .filter(TradeRunLog.trigger_source == "position_exit_monitor")
+        .filter(TradeRunLog.symbol == str(row.symbol or "").upper())
+        .filter(TradeRunLog.mode == PREFLIGHT_MODE)
+        .filter(TradeRunLog.response_payload.contains(f'"lifecycle_id": {row.id}'))
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .first()
+    )
+    return _aware_utc(latest.created_at) if latest is not None else None
+
+
+def _position_exit_schedule(
+    db: Session,
+    row: PositionLifecycle,
+    now: datetime,
+) -> dict[str, Any]:
+    now_utc = _aware_utc(now)
+    now_kst = now_utc.astimezone(KR_TZ)
+    entry_time, entry_time_source = _position_entry_time(db, row)
+    entry_kst = entry_time.astimezone(KR_TZ)
+    last_check = _last_position_monitor_check(db, row)
+    interval = timedelta(minutes=EXIT_CHECK_INTERVAL_MINUTES)
+
+    if entry_kst.date() < now_kst.date():
+        market_open = datetime.combine(
+            now_kst.date(),
+            time(hour=9, minute=0),
+            tzinfo=KR_TZ,
+        )
+        if (
+            last_check is not None
+            and last_check.astimezone(KR_TZ).date() == now_kst.date()
+            and last_check.astimezone(KR_TZ) >= market_open
+        ):
+            next_check = last_check + interval
+        else:
+            next_check = market_open.astimezone(UTC)
+    else:
+        next_check = entry_time + interval
+        if last_check is not None and last_check > entry_time:
+            next_check = max(next_check, last_check + interval)
+
+    return {
+        "entry_time": entry_time,
+        "entry_time_source": entry_time_source,
+        "last_exit_check_at": last_check,
+        "next_exit_check_at": next_check,
+        "exit_check_due": next_check <= now_utc,
+        "minutes_since_entry": max(
+            0,
+            int((now_utc - entry_time).total_seconds() // 60),
+        ),
+        "position_exit_interval_minutes": EXIT_CHECK_INTERVAL_MINUTES,
+    }
+
+
+def _monitor_skip_item(
+    row: PositionLifecycle,
+    schedule: dict[str, Any],
+    now: datetime,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    return {
+        "lifecycle_id": row.id,
+        "symbol": row.symbol,
+        "position_qty": row.quantity,
+        "entry_time": _iso_kst(schedule["entry_time"]),
+        "entry_time_source": schedule["entry_time_source"],
+        "last_exit_check_at": _iso_kst(schedule["last_exit_check_at"]),
+        "current_time": _aware_utc(now).astimezone(KR_TZ).isoformat(),
+        "next_exit_check_at": _iso_kst(schedule["next_exit_check_at"]),
+        "exit_check_due": bool(schedule["exit_check_due"]),
+        "minutes_since_entry": schedule["minutes_since_entry"],
+        "action": HOLD,
+        "recommended_action": HOLD,
+        "execution_action": "NOT_ATTEMPTED",
+        "status": "skipped",
+        "result": "skipped",
+        "reason": reason,
+        "exit_reason": None,
+        "risk_reason": reason if reason == "duplicate_open_sell_order" else None,
+        "position_management_enabled": True,
+        "sell_only": True,
+        "buy_execution_allowed": False,
+        "real_order_submitted": False,
+        "broker_submit_called": False,
+        "manual_submit_called": False,
+    }
+
+
+def _serialize_lifecycle_for_monitor(
+    db: Session,
+    row: PositionLifecycle,
+    now: datetime,
+) -> dict[str, Any]:
+    schedule = _position_exit_schedule(db, row, now)
+    return {
+        **_serialize_lifecycle(row),
+        **{
+            "entry_time": _iso_kst(schedule["entry_time"]),
+            "entry_time_source": schedule["entry_time_source"],
+            "last_exit_check_at": _iso_kst(schedule["last_exit_check_at"]),
+            "next_exit_check_at": _iso_kst(schedule["next_exit_check_at"]),
+            "exit_check_due": schedule["exit_check_due"],
+            "minutes_since_entry": schedule["minutes_since_entry"],
+            "position_exit_interval_minutes": EXIT_CHECK_INTERVAL_MINUTES,
+        },
+    }
+
+
+def _parse_datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return _aware_utc(value)
+    if not value:
+        return None
+    try:
+        return _aware_utc(datetime.fromisoformat(str(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso_kst(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return _aware_utc(value).astimezone(KR_TZ).isoformat()
+
+
 def _serialize_lifecycle(row: PositionLifecycle) -> dict[str, Any]:
     return {
         "id": row.id,
         "symbol": row.symbol,
-        "entry_order_id": row.entry_order_id,
+        "entry_order_id": (
+            row.entry_order_id if row.entry_source != "broker_position_snapshot" else None
+        ),
+        "entry_source": row.entry_source,
+        "entry_time_source": row.entry_time_source,
         "entry_price": row.entry_price,
         "cost_basis": row.cost_basis,
         "quantity": row.quantity,
@@ -1478,6 +2116,19 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
         "order_id": row.order_id,
         "created_at": _iso(row.created_at),
     }
+
+
+def _position_exit_monitor_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
+    summary = _summary(items)
+    sell_count = sum(
+        1
+        for item in items
+        if str(item.get("recommended_action") or item.get("action") or "").upper()
+        == "SELL"
+    )
+    summary["sell_ready_count"] = sell_count
+    summary["sell_recommendation_count"] = sell_count
+    return summary
 
 
 def _summary(items: list[dict[str, Any]]) -> dict[str, Any]:

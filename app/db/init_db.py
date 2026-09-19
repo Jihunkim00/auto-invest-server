@@ -1127,6 +1127,8 @@ def _create_position_lifecycles_table_if_missing():
                     id INTEGER PRIMARY KEY,
                     symbol VARCHAR(20) NOT NULL,
                     entry_order_id INTEGER NOT NULL UNIQUE,
+                    entry_source VARCHAR(40) NOT NULL DEFAULT 'order_log',
+                    entry_time_source VARCHAR(80) NOT NULL DEFAULT 'order_timestamp_fallback',
                     entry_price FLOAT NOT NULL,
                     cost_basis FLOAT NOT NULL,
                     quantity FLOAT NOT NULL DEFAULT 1.0,
@@ -2635,6 +2637,8 @@ def init_db():
     }
 
     position_lifecycle_columns = {
+        "entry_source": "VARCHAR(40) NOT NULL DEFAULT 'order_log'",
+        "entry_time_source": "VARCHAR(80) NOT NULL DEFAULT 'order_timestamp_fallback'",
         "exit_order_status": "VARCHAR(40)",
         "manual_review_required": "BOOLEAN DEFAULT 0",
         "closed_at": "DATETIME",

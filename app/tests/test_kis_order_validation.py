@@ -344,7 +344,7 @@ def test_after_kr_no_new_entry_time_blocks_buy(monkeypatch, client):
             "regular_open": "09:00",
             "regular_close": "15:30",
             "effective_close": "15:30",
-            "no_new_entry_after": "15:00",
+            "no_new_entry_after": "14:00",
         },
     )
 
@@ -357,8 +357,39 @@ def test_after_kr_no_new_entry_time_blocks_buy(monkeypatch, client):
     assert "after_no_new_entry_time" in body["block_reasons"]
     assert "near_close" in body["warnings"]
     assert body["primary_block_reason"] == "buy_entry_not_allowed_now"
-    assert body["message"] == "New buy entries are blocked after 15:00."
+    assert body["message"] == "New buy entries are blocked after 14:00."
     assert body["detail"]["near_close"] is True
+
+
+def test_sell_validation_ignores_buy_cutoff_and_near_close_restriction(
+    monkeypatch,
+    client,
+):
+    monkeypatch.setattr(
+        "app.services.kis_order_validation_service.MarketSessionService.get_session_status",
+        lambda self, market, now=None: {
+            "market": "KR",
+            "timezone": "Asia/Seoul",
+            "is_market_open": True,
+            "is_entry_allowed_now": False,
+            "is_near_close": True,
+            "closure_reason": None,
+            "closure_name": None,
+            "regular_open": "09:00",
+            "regular_close": "15:30",
+            "effective_close": "15:30",
+            "no_new_entry_after": "14:00",
+        },
+    )
+
+    response = client.post("/kis/orders/validate", json=_sell_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validated_for_submission"] is True
+    assert "after_no_new_entry_time" not in body["block_reasons"]
+    assert "near_close" not in body["block_reasons"]
+    assert body["market_session"]["is_market_open"] is True
 
 
 def test_holiday_closure_reason_is_returned(monkeypatch, client):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 
 import pytest
@@ -19,9 +20,11 @@ from app.services.kis_position_lifecycle_service import (
 )
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.scheduler_service import SchedulerService
+from app.services.automation_scheduler_service import AutomationSchedulerService
 
 
 NOW = datetime(2026, 7, 30, 1, 0, tzinfo=UTC)
+KST = ZoneInfo("Asia/Seoul")
 
 
 class FakeClient:
@@ -58,6 +61,26 @@ class FakeClient:
     def submit_domestic_cash_order(self, **kwargs):
         self.submit_domestic_cash_order_calls.append(dict(kwargs))
         raise AssertionError("position lifecycle must not submit orders directly")
+
+
+class FakeSessionService:
+    def __init__(self, *, is_open: bool = True, entry_allowed: bool = True):
+        self.is_open = is_open
+        self.entry_allowed = entry_allowed
+
+    def get_session_status(self, market: str, *, now: datetime | None = None):
+        return {
+            "market": market,
+            "timezone": "Asia/Seoul",
+            "is_market_open": self.is_open,
+            "is_entry_allowed_now": self.entry_allowed,
+            "is_near_close": self.is_open and not self.entry_allowed,
+            "closure_reason": None if self.is_open else "outside_regular_hours",
+            "regular_open": "09:00",
+            "regular_close": "15:30",
+            "effective_close": "15:30",
+            "no_new_entry_after": "14:00",
+        }
 
 
 class FakeSellService:
@@ -698,6 +721,577 @@ def _open_lifecycle(db_session) -> PositionLifecycle:
     )
     lifecycle_id = result["lifecycle"]["id"]
     return db_session.get(PositionLifecycle, lifecycle_id)
+
+
+def _set_entry_kst(db_session, lifecycle: PositionLifecycle, value: datetime) -> None:
+    value_utc = value.astimezone(UTC).replace(tzinfo=None)
+    order = db_session.get(OrderLog, lifecycle.entry_order_id)
+    order.filled_at = value_utc
+    lifecycle.opened_at = value_utc
+    lifecycle.last_evaluated_at = None
+    db_session.commit()
+
+
+def _monitor_service(client: FakeClient, *, is_open: bool = True, entry_allowed: bool = True):
+    return KisPositionLifecycleService(
+        client,
+        session_service=FakeSessionService(
+            is_open=is_open,
+            entry_allowed=entry_allowed,
+        ),
+    )
+
+
+def test_position_exit_monitor_routes_sell_only_through_guarded_exit(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    runtime = RuntimeSettingService()
+    runtime.update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "position_management_scheduler_enabled": True,
+            "automation_profile_scheduler_enabled": False,
+            "dry_run": True,
+        },
+    )
+    db_session.close = lambda: None
+    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler_module, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr(scheduler_module, "KisClient", lambda *args, **kwargs: object())
+    monkeypatch.setattr(scheduler_module, "KisAuthManager", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        scheduler_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {"scheduler_allowed": True, "automation_mode": "test"},
+    )
+
+    class ReadOnlyMonitor:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run_due_management_once(self, db, **kwargs):
+            return {
+                "status": "checked",
+                "reason": "position_exit_checks_completed",
+                "items": [
+                    {
+                        "symbol": "005930",
+                        "action": "SELL",
+                        "status": "checked",
+                        "exit_check_due": True,
+                        "execution_action": "NOT_ATTEMPTED",
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                    },
+                    {
+                        "symbol": "000660",
+                        "action": "HOLD",
+                        "status": "checked",
+                        "exit_check_due": True,
+                        "execution_action": "NOT_ATTEMPTED",
+                        "real_order_submitted": False,
+                        "broker_submit_called": False,
+                    },
+                ],
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+            }
+
+        def record_monitor_execution_result(
+            self,
+            db,
+            item,
+            *,
+            execution_action,
+            execution_reason,
+            execution_result,
+        ):
+            item["recommended_action"] = "SELL"
+            item["execution_action"] = execution_action
+            item["execution_reason"] = execution_reason
+            item["guarded_live_exit"] = execution_result
+            item["real_order_submitted"] = bool(execution_result.get("submitted"))
+            item["broker_submit_called"] = bool(
+                execution_result.get("broker_submit_called")
+            )
+
+    class FakeGuardedExit:
+        def __init__(self):
+            self.calls = []
+
+        def run_scheduler_once(self, db, *, scheduler_slot, symbol, now):
+            self.calls.append(
+                {"scheduler_slot": scheduler_slot, "symbol": symbol, "now": now}
+            )
+            return {
+                "status": "blocked",
+                "action": "blocked",
+                "block_reason": "dry_run_enabled",
+                "submitted": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "safety": {"broker_submit_called": False},
+            }
+
+    monkeypatch.setattr(scheduler_module, "KisPositionLifecycleService", ReadOnlyMonitor)
+    scheduler = AutomationSchedulerService()
+    scheduler.runtime_settings = runtime
+    guarded = FakeGuardedExit()
+    monkeypatch.setattr(
+        scheduler,
+        "_profile_guarded_live_auto_exit_service",
+        lambda db: guarded,
+    )
+
+    result = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+    )
+
+    assert result["monitor_independent_of_buy_scheduler"] is True
+    assert result["monitor_execution_mode"] == "guarded_live_exit"
+    assert result["buy_execution_allowed"] is False
+    assert guarded.calls[0]["symbol"] == "005930"
+    assert len(guarded.calls) == 1
+    sell_item, hold_item = result["items"]
+    assert sell_item["action"] == "SELL"
+    assert sell_item["recommended_action"] == "SELL"
+    assert sell_item["execution_action"] == "BLOCKED_DRY_RUN"
+    assert sell_item["real_order_submitted"] is False
+    assert sell_item["broker_submit_called"] is False
+    assert hold_item["execution_action"] == "NOT_ATTEMPTED"
+    assert hold_item["real_order_submitted"] is False
+    assert hold_item["broker_submit_called"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+
+
+def test_position_exit_monitor_guarded_sell_is_not_retried_before_next_interval(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    lifecycle_row = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle_row,
+        datetime(2026, 7, 30, 13, 37, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=97.0)])
+    lifecycle = _monitor_service(client, entry_allowed=False)
+    runtime = RuntimeSettingService()
+    runtime.update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "position_management_scheduler_enabled": True,
+            "automation_profile_scheduler_enabled": False,
+            "dry_run": True,
+        },
+    )
+    db_session.close = lambda: None
+    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler_module, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr(scheduler_module, "KisClient", lambda *args, **kwargs: client)
+    monkeypatch.setattr(scheduler_module, "KisAuthManager", lambda *args, **kwargs: object())
+    monkeypatch.setattr(scheduler_module, "KisPositionLifecycleService", lambda *args, **kwargs: lifecycle)
+    monkeypatch.setattr(
+        scheduler_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {"scheduler_allowed": True, "automation_mode": "test"},
+    )
+
+    class FakeGuardedExit:
+        def __init__(self):
+            self.calls = []
+
+        def run_scheduler_once(self, db, *, scheduler_slot, symbol, now):
+            self.calls.append((scheduler_slot, symbol, now))
+            return {
+                "status": "blocked",
+                "block_reason": "dry_run_enabled",
+                "submitted": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "safety": {"broker_submit_called": False},
+            }
+
+    guarded = FakeGuardedExit()
+    scheduler = AutomationSchedulerService()
+    scheduler.runtime_settings = runtime
+    monkeypatch.setattr(
+        scheduler,
+        "_profile_guarded_live_auto_exit_service",
+        lambda db: guarded,
+    )
+
+    first = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 14, 7, tzinfo=KST),
+    )
+    second = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 14, 7, 20, tzinfo=KST),
+    )
+
+    assert first["items"][0]["recommended_action"] == "SELL"
+    assert first["summary"]["sell_ready_count"] == 1
+    assert first["summary"]["sell_recommendation_count"] == 1
+    assert first["items"][0]["entry_cutoff_ignored_for_sell"] is True
+    assert first["items"][0]["execution_action"] == "BLOCKED_DRY_RUN"
+    assert second["reason"] == "not_due_yet"
+    assert len(guarded.calls) == 1
+    assert guarded.calls[0][1] == "005930"
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+    log = (
+        db_session.query(TradeRunLog)
+        .filter(TradeRunLog.trigger_source == "position_exit_monitor")
+        .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
+        .first()
+    )
+    payload = json.loads(log.response_payload)
+    assert payload["recommended_action"] == "SELL"
+    assert payload["execution_action"] == "BLOCKED_DRY_RUN"
+    assert payload["guarded_live_exit"]["block_reason"] == "dry_run_enabled"
+    assert payload["broker_submit_called"] is False
+
+def test_broker_only_holding_bootstrap_uses_observation_time_fallback(db_session):
+    client = FakeClient(
+        positions=[
+            {
+                "symbol": "005930",
+                "qty": 5,
+                "avg_entry_price": 100.0,
+                "cost_basis": 500.0,
+                "current_price": 101.0,
+            }
+        ]
+    )
+    service = _monitor_service(client)
+    observed_at = datetime(2026, 7, 30, 10, 0, tzinfo=KST)
+
+    first = service.run_due_management_once(db_session, now=observed_at)
+
+    assert first["reason"] == "not_due_yet"
+    assert first["items"][0]["entry_time_source"] == (
+        "broker_position_first_observed_at_fallback"
+    )
+    assert first["items"][0]["next_exit_check_at"].startswith(
+        "2026-07-30T10:30:"
+    )
+    lifecycle = db_session.query(PositionLifecycle).one()
+    assert lifecycle.entry_source == "broker_position_snapshot"
+    assert lifecycle.entry_time_source == "broker_position_first_observed_at_fallback"
+    assert lifecycle.entry_order_id < 0
+    assert lifecycle.opened_at == observed_at.astimezone(UTC).replace(tzinfo=None)
+    assert lifecycle.entry_price == 100.0
+    assert lifecycle.cost_basis == 500.0
+    assert lifecycle.quantity == 5
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+    before_due = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 10, 29, 59, tzinfo=KST),
+    )
+    assert before_due["reason"] == "not_due_yet"
+    assert db_session.query(PositionLifecycle).count() == 1
+
+    due = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 10, 30, tzinfo=KST),
+    )
+    assert due["status"] == "checked"
+    assert due["items"][0]["action"] == HOLD
+    assert due["items"][0]["entry_time_source"] == (
+        "broker_position_first_observed_at_fallback"
+    )
+    assert db_session.query(PositionLifecycle).count() == 1
+    assert client.submit_order_calls == []
+
+
+def test_broker_only_holding_discovered_after_close_is_due_next_day_at_nine(db_session):
+    client = FakeClient(positions=[_position(current_price=100.0)])
+    after_close = KisPositionLifecycleService(
+        client, session_service=FakeSessionService(is_open=False)
+    )
+    discovered = after_close.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 29, 16, 0, tzinfo=KST),
+    )
+    assert discovered["reason"] == "market_closed"
+    lifecycle = db_session.query(PositionLifecycle).one()
+    assert lifecycle.entry_source == "broker_position_snapshot"
+    assert lifecycle.entry_time_source == "broker_position_first_observed_at_fallback"
+
+    next_session = _monitor_service(client).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 9, 0, tzinfo=KST),
+    )
+    assert next_session["status"] == "checked"
+    assert next_session["items"][0]["exit_check_due"] is True
+    assert next_session["items"][0]["current_time"].startswith(
+        "2026-07-30T09:00:"
+    )
+    assert next_session["items"][0]["entry_time_source"] == (
+        "broker_position_first_observed_at_fallback"
+    )
+    assert next_session["items"][0]["next_exit_check_at"].startswith(
+        "2026-07-30T09:30:"
+    )
+
+
+def test_broker_only_holding_without_entry_data_is_reported_and_skipped(db_session):
+    client = FakeClient(
+        positions=[
+            {
+                "symbol": "005930",
+                "qty": 5,
+                "current_price": 101.0,
+            }
+        ]
+    )
+    result = _monitor_service(client).run_due_management_once(
+        db_session, now=datetime(2026, 7, 30, 10, 0, tzinfo=KST)
+    )
+
+    assert result["reason"] == "broker_position_entry_data_unavailable"
+    assert result["unmanaged_positions"] == [
+        {
+            "symbol": "005930",
+            "status": "skipped",
+            "reason": "broker_position_entry_data_unavailable",
+            "entry_source": "broker_position_snapshot",
+            "real_order_submitted": False,
+            "broker_submit_called": False,
+        }
+    ]
+    assert db_session.query(PositionLifecycle).count() == 0
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_overnight_position_is_due_at_korean_market_open(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 29, 14, 0, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=100.0)])
+
+    result = _monitor_service(client).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+    )
+
+    item = result["items"][0]
+    assert result["status"] == "checked"
+    assert item["action"] == HOLD
+    assert item["exit_check_due"] is True
+    assert item["current_time"].startswith("2026-07-30T09:00:")
+    assert item["entry_time_source"] == "order.filled_at"
+    assert item["next_exit_check_at"].startswith("2026-07-30T09:30:")
+
+
+def test_same_day_fill_is_not_checked_before_thirty_minutes(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 30, 11, 17, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=100.0)])
+
+    result = _monitor_service(client).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 2, 46, tzinfo=UTC),
+    )
+
+    assert result["reason"] == "not_due_yet"
+    assert result["items"][0]["next_exit_check_at"].startswith("2026-07-30T11:47:")
+    assert client.list_positions_calls == 1
+    assert db_session.query(TradeRunLog).filter(
+        TradeRunLog.trigger_source == "position_exit_monitor"
+    ).count() == 0
+
+
+def test_same_day_fill_checks_at_thirty_minutes_and_keeps_fill_anchored_cadence(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 30, 11, 17, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=100.0)])
+    service = _monitor_service(client)
+
+    first = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 2, 47, tzinfo=UTC),
+    )
+    assert first["items"][0]["action"] == HOLD
+    assert first["items"][0]["minutes_since_entry"] == 30
+    assert first["items"][0]["next_exit_check_at"].startswith("2026-07-30T12:17:")
+
+    early = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 3, 16, tzinfo=UTC),
+    )
+    assert early["reason"] == "not_due_yet"
+
+    second = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 3, 17, tzinfo=UTC),
+    )
+    assert second["items"][0]["action"] == HOLD
+    assert second["items"][0]["next_exit_check_at"].startswith("2026-07-30T12:47:")
+    assert db_session.query(TradeRunLog).filter(
+        TradeRunLog.trigger_source == "position_exit_monitor"
+    ).count() == 2
+
+
+def test_position_monitor_holds_after_buy_cutoff_without_submission(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 30, 13, 30, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=100.0)])
+
+    result = _monitor_service(
+        client,
+        entry_allowed=False,
+    ).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 5, 0, tzinfo=UTC),
+    )
+
+    item = result["items"][0]
+    assert item["action"] == HOLD
+    assert item["entry_cutoff_ignored_for_sell"] is True
+    assert result["buy_execution_allowed"] is False
+    assert item["real_order_submitted"] is False
+    assert item["broker_submit_called"] is False
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_position_monitor_returns_sell_after_buy_cutoff_in_dry_run(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 30, 13, 30, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=97.0)])
+
+    result = _monitor_service(
+        client,
+        entry_allowed=False,
+    ).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 5, 0, tzinfo=UTC),
+    )
+
+    item = result["items"][0]
+    assert item["action"] == "SELL"
+    assert item["exit_reason"] == "stop_loss_triggered"
+    assert item["entry_cutoff_ignored_for_sell"] is True
+    assert item["real_order_submitted"] is False
+    assert item["broker_submit_called"] is False
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_market_closed_skips_due_position_without_order_reads_or_submit(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 29, 14, 0, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=97.0)])
+
+    result = _monitor_service(client, is_open=False).run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 0, 0, tzinfo=UTC),
+    )
+
+    assert result["reason"] == "market_closed"
+    assert result["items"][0]["reason"] == "market_closed"
+    assert client.list_positions_calls == 1
+    assert client.list_open_orders_calls == 0
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_no_position_returns_safe_skip(db_session):
+    client = FakeClient()
+
+    result = _monitor_service(client).run_due_management_once(
+        db_session,
+        now=NOW,
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_position"
+    assert result["buy_execution_allowed"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert client.submit_order_calls == []
+
+
+def test_monitor_duplicate_invocation_and_pending_partial_sell_do_not_submit_twice(db_session):
+    lifecycle = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle,
+        datetime(2026, 7, 30, 11, 17, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=97.0)])
+    service = _monitor_service(client)
+
+    first = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 2, 47, tzinfo=UTC),
+    )
+    duplicate = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 2, 47, tzinfo=UTC),
+    )
+    assert first["items"][0]["action"] == "SELL"
+    assert duplicate["reason"] == "not_due_yet"
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+    pending = OrderLog(
+        broker="kis",
+        market="KR",
+        symbol="005930",
+        side="sell",
+        order_type="market",
+        qty=1,
+        requested_qty=1,
+        filled_qty=0.5,
+        remaining_qty=0.5,
+        internal_status=InternalOrderStatus.PARTIALLY_FILLED.value,
+    )
+    db_session.add(pending)
+    lifecycle.status = "closing"
+    lifecycle.exit_order_id = pending.id
+    db_session.commit()
+    waiting = service.run_due_management_once(
+        db_session,
+        now=datetime(2026, 7, 30, 3, 17, tzinfo=UTC),
+    )
+    assert waiting["items"][0]["reason"] == "duplicate_open_sell_order"
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
 
 
 def _position(

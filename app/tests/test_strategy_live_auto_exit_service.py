@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+import pytest
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
@@ -170,6 +174,71 @@ def live_exit_request(**overrides) -> ProfileAwareGuardedLiveAutoExitRunRequest:
     return ProfileAwareGuardedLiveAutoExitRunRequest(**values)
 
 
+def trusted_scheduler_exit_service(
+    db_session,
+    monkeypatch,
+    *,
+    runtime_overrides=None,
+    kis_enabled=True,
+    kis_real_order_enabled=True,
+    positions=None,
+    open_orders=None,
+    market_open=True,
+):
+    from app.services import profile_aware_guarded_live_auto_exit_service as exit_module
+
+    enable_live_exit_settings(
+        db_session,
+        kis_limited_auto_sell_max_orders_per_day=1,
+        **(runtime_overrides or {}),
+    )
+    broker = FakeBroker()
+    validation = FakeValidationService()
+    service = ProfileAwareGuardedLiveAutoExitService(
+        runtime_settings=FakeRuntimeSettings(
+            global_dry_run=False,
+            kis_enabled=kis_enabled,
+            kis_real_order_enabled=kis_real_order_enabled,
+        ),
+        validation_service=validation,
+        broker=broker,
+        positions_loader=lambda db: list(
+            positions if positions is not None else [stop_loss_position()]
+        ),
+        open_orders_loader=lambda db: list(open_orders or []),
+    )
+    service._active_profile = lambda db: {
+        "profile_key": "safe",
+        "profile_name": "safe",
+        "display_name": "Safe",
+        "status": "active",
+        "enabled": True,
+        "provider": "kis",
+        "market": "KR",
+    }
+    service.session_service = type(
+        "FakeSession",
+        (),
+        {
+            "get_session_status": lambda self, market, now=None: {
+                "market": market,
+                "is_market_open": market_open,
+                "closure_reason": None if market_open else "market_session_closed",
+            }
+        },
+    )()
+    monkeypatch.setattr(
+        exit_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {
+            "automation_mode": "live",
+            "scheduler_allowed": True,
+            "broker_submit_allowed": True,
+        },
+    )
+    return service, broker, validation
+
+
 def test_default_readiness_is_blocked_read_only_and_does_not_validate_or_submit(db_session):
     validation = FakeValidationService()
     broker = FakeBroker()
@@ -268,3 +337,143 @@ def test_client_request_id_replays_without_second_submit(db_session):
     assert second["attempt_id"] == first["attempt_id"]
     assert second["safety"]["idempotent_replay"] is True
     assert broker.calls == [{"symbol": "005930", "qty": 3}]
+
+
+
+def test_trusted_scheduler_run_scheduler_once_reuses_guarded_sell_gates(
+    db_session,
+    monkeypatch,
+):
+    from app.services import profile_aware_guarded_live_auto_exit_service as exit_module
+
+    enable_live_exit_settings(
+        db_session,
+        kis_limited_auto_sell_max_orders_per_day=1,
+    )
+    validation = FakeValidationService()
+    broker = FakeBroker()
+    service = ProfileAwareGuardedLiveAutoExitService(
+        runtime_settings=FakeRuntimeSettings(global_dry_run=False),
+        validation_service=validation,
+        broker=broker,
+        order_sync_service=FakeOrderSyncService(),
+        positions_loader=lambda db: [stop_loss_position()],
+        open_orders_loader=lambda db: [],
+    )
+    service._active_profile = lambda db: {
+        "profile_key": "safe",
+        "profile_name": "safe",
+        "display_name": "Safe",
+        "status": "active",
+        "enabled": True,
+        "provider": "kis",
+        "market": "KR",
+    }
+    service.session_service = type(
+        "OpenSession",
+        (),
+        {
+            "get_session_status": lambda self, market, now=None: {
+                "market": market,
+                "is_market_open": True,
+                "is_entry_allowed_now": False,
+                "is_near_close": True,
+            }
+        },
+    )()
+    monkeypatch.setattr(
+        exit_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {
+            "automation_mode": "live",
+            "scheduler_allowed": True,
+            "broker_submit_allowed": True,
+        },
+    )
+    now = datetime(2026, 7, 30, 14, 7, tzinfo=ZoneInfo("Asia/Seoul"))
+
+    first = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="position_exit_20260730_1407",
+        symbol="005930",
+        now=now,
+    )
+    duplicate = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="position_exit_20260730_1407",
+        symbol="005930",
+        now=now,
+    )
+
+    assert first["status"] == "submitted"
+    assert first["real_order_submitted"] is True
+    assert first["safety"]["validation_called"] is True
+    assert first["safety"]["broker_submit_called"] is True
+    assert first["exit_trigger"] == "stop_loss"
+    assert validation.calls
+    assert validation.calls[0].side == "sell"
+    assert broker.calls == [{"symbol": "005930", "qty": 3}]
+    assert duplicate["attempt_id"] == first["attempt_id"]
+    assert duplicate["safety"]["idempotent_replay"] is True
+    assert broker.calls == [{"symbol": "005930", "qty": 3}]
+
+
+
+@pytest.mark.parametrize(
+    ("runtime_overrides", "service_overrides", "expected_block"),
+    [
+        ({"dry_run": True}, {}, "dry_run_enabled"),
+        ({"kill_switch": True}, {}, "kill_switch_enabled"),
+        ({}, {"kis_enabled": False}, "kis_disabled"),
+        ({}, {"kis_real_order_enabled": False}, "kis_real_order_disabled"),
+    ],
+)
+def test_trusted_scheduler_auto_exit_preserves_runtime_and_kis_gates(
+    db_session,
+    monkeypatch,
+    runtime_overrides,
+    service_overrides,
+    expected_block,
+):
+    service, broker, validation = trusted_scheduler_exit_service(
+        db_session,
+        monkeypatch,
+        runtime_overrides=runtime_overrides,
+        **service_overrides,
+    )
+
+    result = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="position_exit_20260730_1407",
+        symbol="005930",
+        now=datetime(2026, 7, 30, 14, 7, tzinfo=ZoneInfo("Asia/Seoul")),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["block_reason"] == expected_block
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert validation.calls == []
+    assert broker.calls == []
+
+
+def test_trusted_scheduler_auto_exit_blocks_when_market_is_closed(db_session, monkeypatch):
+    service, broker, validation = trusted_scheduler_exit_service(
+        db_session,
+        monkeypatch,
+        market_open=False,
+    )
+
+    result = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="position_exit_20260730_1407",
+        symbol="005930",
+        now=datetime(2026, 7, 30, 14, 7, tzinfo=ZoneInfo("Asia/Seoul")),
+    )
+
+    assert result["status"] == "blocked"
+    assert result["block_reason"] == "market_session_closed"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert validation.calls == []
+    assert broker.calls == []
