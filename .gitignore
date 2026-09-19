@@ -33,6 +33,8 @@ stage3_day2_*.json
 *watchlist*.yaml
 *watchlist*.yml
 *watchlist*.csv
+!config/watchlist_kr.yaml
+!config/watchlist_us.yaml
 
 # Local test artifacts
 .local_test_tmp/
