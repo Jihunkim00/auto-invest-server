@@ -16,6 +16,7 @@ from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
 from app.db.models import QuantABObservation, TradeRunLog
 from app.services.event_risk_service import EventRiskService
 from app.services.entry_timing_quant_service import EntryTimingQuantService
+from app.services.reversal_quant_service import ReversalQuantService
 from app.services.automation_observability import (
     candidate_gpt_quant_observability,
     gpt_result_counts,
@@ -99,6 +100,7 @@ class KisWatchlistPreviewService:
         market_context_service: KrMarketContextService | None = None,
         market_data_snapshot_service: MarketDataSnapshotService | None = None,
         entry_timing_quant_service: EntryTimingQuantService | None = None,
+        reversal_quant_service: ReversalQuantService | None = None,
         db=None,
         limit: int = KR_PREVIEW_LIMIT,
         gpt_candidate_limit: int = KR_PREVIEW_TOP_GPT_CANDIDATES,
@@ -121,6 +123,7 @@ class KisWatchlistPreviewService:
             ),
         )
         self.entry_timing_quant_service = entry_timing_quant_service or EntryTimingQuantService()
+        self.reversal_quant_service = reversal_quant_service or ReversalQuantService()
         self.runtime_setting_service = RuntimeSettingService()
         self.limit = max(1, min(int(limit), KR_PREVIEW_LIMIT))
         self.gpt_candidate_limit = max(
@@ -293,6 +296,7 @@ class KisWatchlistPreviewService:
             for item in quant_items
             if item.get("symbol")
         }
+        intraday_snapshots_by_symbol: dict[str, dict[str, Any]] = {}
         shadow_b_result = self._run_shadow_b(
             quant_ranked_candidates=quant_ranked_candidates,
             market_snapshots=market_snapshots,
@@ -300,8 +304,17 @@ class KisWatchlistPreviewService:
             runtime_settings=runtime_settings,
             decision_timestamp=decision_timestamp,
             market_session=market_session,
+            intraday_snapshots_by_symbol=intraday_snapshots_by_symbol,
         )
         b_shadow_scan_finished = time.perf_counter()
+        shadow_c_result = self._run_shadow_c(
+            quant_ranked_candidates=quant_ranked_candidates,
+            market_snapshots=market_snapshots,
+            items_by_symbol=items_by_symbol,
+            intraday_snapshots_by_symbol=intraday_snapshots_by_symbol,
+            decision_timestamp=decision_timestamp,
+        )
+        c_shadow_scan_finished = time.perf_counter()
         gpt_used = False
         gpt_reuse_count = 0
         gpt_started = time.perf_counter()
@@ -369,6 +382,9 @@ class KisWatchlistPreviewService:
                 shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
                 if isinstance(shadow_b, dict):
                     item["shadow_b"] = shadow_b
+                shadow_c = items_by_symbol.get(symbol, {}).get("shadow_c")
+                if isinstance(shadow_c, dict):
+                    item["shadow_c"] = shadow_c
                 items_by_symbol[symbol] = item
             gpt_target_symbols = [
                 symbol
@@ -423,6 +439,9 @@ class KisWatchlistPreviewService:
                 shadow_b = items_by_symbol.get(symbol, {}).get("shadow_b")
                 if isinstance(shadow_b, dict):
                     item["shadow_b"] = shadow_b
+                shadow_c = items_by_symbol.get(symbol, {}).get("shadow_c")
+                if isinstance(shadow_c, dict):
+                    item["shadow_c"] = shadow_c
                 items_by_symbol[symbol] = item
             gpt_completed_symbols = [
                 str(item.get("symbol"))
@@ -638,6 +657,7 @@ class KisWatchlistPreviewService:
             "scan_total_ms": round((time.perf_counter() - preview_started) * 1000.0, 2),
             "a_quant_scan_ms": round((a_quant_scan_finished - preview_started) * 1000.0, 2),
             "b_shadow_scan_ms": round((b_shadow_scan_finished - a_quant_scan_finished) * 1000.0, 2),
+            "c_shadow_scan_ms": round((c_shadow_scan_finished - b_shadow_scan_finished) * 1000.0, 2),
             "gpt_total_ms": round((gpt_finished - gpt_started) * 1000.0, 2),
             "price_request_count": snapshot_stats["price_request_count"],
             "daily_bars_request_count": snapshot_stats["daily_bars_request_count"],
@@ -677,6 +697,15 @@ class KisWatchlistPreviewService:
             "a_top_symbols": shadow_b_result["a_top_symbols"],
             "b_shadow_ranked_symbols": shadow_b_result["b_shadow_ranked_symbols"],
             "b_would_change_top_candidate": shadow_b_result["b_would_change_top_candidate"],
+            "shadow_c_enabled": shadow_c_result["enabled"],
+            "c_candidate_limit": shadow_c_result["candidate_limit"],
+            "c_analyzed_count": shadow_c_result["analyzed_count"],
+            "c_partial_count": shadow_c_result["partial_count"],
+            "c_failed_count": shadow_c_result["failed_count"],
+            "c_stale_count": shadow_c_result["stale_count"],
+            "c_disabled_reason": shadow_c_result.get("disabled_reason"),
+            "c_shadow_ranked_symbols": shadow_c_result["c_shadow_ranked_symbols"],
+            "c_would_change_top_candidate": shadow_c_result["c_would_change_top_candidate"],
             "decision_slot": decision_timestamp.isoformat(),
             "performance": performance,
         }
@@ -841,6 +870,7 @@ class KisWatchlistPreviewService:
         runtime_settings: dict[str, Any],
         decision_timestamp: datetime,
         market_session: dict[str, Any] | None = None,
+        intraday_snapshots_by_symbol: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         enabled = bool(runtime_settings.get('quant_shadow_b_enabled', True))
         candidate_limit = min(
@@ -897,6 +927,11 @@ class KisWatchlistPreviewService:
                         or '15:30'
                     ),
                 )
+                if intraday_snapshots_by_symbol is not None:
+                    intraday_snapshots_by_symbol[symbol] = {
+                        'bars': intraday_bars,
+                        'metadata': intraday_metadata,
+                    }
                 if intraday_metadata.get('validation_status') == 'stale_intraday':
                     b_result = _empty_shadow_b_result(
                         reason='B shadow intraday snapshot is stale or invalid.',
@@ -949,6 +984,88 @@ class KisWatchlistPreviewService:
         a_top = result['a_top_symbols'][0] if result['a_top_symbols'] else None
         b_top = result['b_shadow_ranked_symbols'][0] if result['b_shadow_ranked_symbols'] else None
         result['b_would_change_top_candidate'] = bool(a_top and b_top and a_top != b_top)
+        return result
+
+    def _run_shadow_c(
+        self,
+        *,
+        quant_ranked_candidates: list[dict[str, Any]],
+        market_snapshots: dict[str, dict[str, Any]],
+        items_by_symbol: dict[str, dict[str, Any]],
+        intraday_snapshots_by_symbol: dict[str, dict[str, Any]],
+        decision_timestamp: datetime,
+    ) -> dict[str, Any]:
+        candidates = quant_ranked_candidates[:5]
+        result = {
+            'enabled': True, 'candidate_limit': 5, 'analyzed_count': 0,
+            'partial_count': 0, 'failed_count': 0, 'stale_count': 0,
+            'c_shadow_ranked_symbols': [], 'c_would_change_top_candidate': False,
+        }
+        try:
+            kis_enabled = bool(getattr(get_settings(), 'kis_enabled', False))
+            disabled_reason = 'kis_disabled'
+        except Exception:
+            kis_enabled = False
+            disabled_reason = 'runtime_settings_unavailable'
+        if not kis_enabled:
+            for a_rank, item in enumerate(candidates, start=1):
+                symbol = str(item.get('symbol') or '').strip().upper()
+                shadow = _empty_shadow_c_result(reason='C shadow read path is disabled with KIS.')
+                shadow['c_status'] = 'failed_soft'
+                shadow['a_rank'] = a_rank
+                item['shadow_c'] = shadow
+                items_by_symbol[symbol] = item
+            result['failed_count'] = len(candidates)
+            result['disabled_reason'] = disabled_reason
+            return result
+
+        ranked = []
+        for a_rank, item in enumerate(candidates, start=1):
+            symbol = str(item.get('symbol') or '').strip().upper()
+            snapshot = market_snapshots.get(symbol) or {}
+            shared = intraday_snapshots_by_symbol.get(symbol) or {}
+            metadata = shared.get('metadata') or {}
+            try:
+                if metadata.get('validation_status') == 'stale_intraday':
+                    shadow = _empty_shadow_c_result(reason='C shared intraday snapshot is stale.')
+                    shadow['c_status'] = 'stale_intraday'
+                    shadow['intraday_snapshot_metadata'] = metadata
+                    result['stale_count'] += 1
+                else:
+                    shadow = self.reversal_quant_service.score(
+                        current_price=item.get('current_price'),
+                        daily_bars=snapshot.get('daily_bars') or [],
+                        intraday_bars=shared.get('bars') or [],
+                        decision_timestamp=decision_timestamp,
+                    )
+                    shadow['intraday_snapshot_metadata'] = metadata
+                    counts = shadow.get('timeframe_bar_counts') or {}
+                    partial = (
+                        metadata.get('validation_status') != 'ok'
+                        or _safe_float(shadow.get('data_quality_c'), 0.0) < 1.0
+                        or _safe_int(counts.get('15m'), 0) < 2
+                        or _safe_int(counts.get('30m'), 0) < 2
+                    )
+                    shadow['c_status'] = 'partial' if partial else 'analyzed'
+                    result['partial_count' if partial else 'analyzed_count'] += 1
+                    ranked.append((item, float(shadow.get('reversal_score_c') or 0.0), a_rank))
+            except Exception as exc:
+                shadow = _empty_shadow_c_result(
+                    reason='C shadow analysis failed softly.', error=_safe_error(exc)
+                )
+                shadow['c_status'] = 'failed_soft'
+                result['failed_count'] += 1
+            shadow['a_rank'] = a_rank
+            item['shadow_c'] = shadow
+            items_by_symbol[symbol] = item
+
+        ranked.sort(key=lambda row: (-row[1], -_safe_float(row[0].get('quant_buy_score'), 0.0), row[2]))
+        for c_rank, (item, _score, _a_rank) in enumerate(ranked, start=1):
+            item['shadow_c']['c_rank_within_shadow_pool'] = c_rank
+        result['c_shadow_ranked_symbols'] = [str(row[0].get('symbol')) for row in ranked]
+        a_top = str(candidates[0].get('symbol')) if candidates else None
+        c_top = result['c_shadow_ranked_symbols'][0] if result['c_shadow_ranked_symbols'] else None
+        result['c_would_change_top_candidate'] = bool(a_top and c_top and a_top != c_top)
         return result
 
     def _runtime_settings(self, db) -> dict[str, Any]:
@@ -1685,6 +1802,30 @@ def _record_preview_run(
     return run
 
 
+def _empty_shadow_c_result(*, reason: str, error: str | None = None) -> dict[str, Any]:
+    notes = ['c_failed_soft']
+    if error:
+        notes.append(error)
+    return {
+        'reversal_score_c': None,
+        'oversold_score_c': None,
+        'macd_reversal_score_c': None,
+        'price_stabilization_score_c': None,
+        'intraday_reversal_score_c': None,
+        'volume_confirmation_score_c': None,
+        'downtrend_continuation_risk_c': None,
+        'reversal_state_c': None,
+        'direction_c': None,
+        'confidence_c': 0.0,
+        'data_quality_c': 0.0,
+        'c_reason': reason,
+        'c_notes': notes,
+        'timeframe_bar_counts': {'daily': 0, '15m': 0, '30m': 0, '60m': 0},
+        'indicator_snapshot': {},
+        'intraday_snapshot_metadata': {},
+    }
+
+
 def _empty_shadow_b_result(
     *,
     reason: str,
@@ -1726,7 +1867,7 @@ def _record_quant_ab_observations(
     commit: bool = True,
 ) -> int:
     experiment = payload.get("quant_experiment") or {}
-    if not bool(experiment.get("shadow_b_enabled")):
+    if not (bool(experiment.get("shadow_b_enabled")) or bool(experiment.get("shadow_c_enabled"))):
         return 0
     observation_run_key = run_key or f"kis_ab_{uuid.uuid4().hex[:20]}"
     experiment_cohort_key = str(
@@ -1750,6 +1891,11 @@ def _record_quant_ab_observations(
         for index, symbol in enumerate(experiment.get("b_shadow_ranked_symbols") or [], start=1)
         if symbol
     }
+    c_rank_by_symbol = {
+        str(symbol).strip().upper(): index
+        for index, symbol in enumerate(experiment.get("c_shadow_ranked_symbols") or [], start=1)
+        if symbol
+    }
     decision_slot = str(experiment.get("decision_slot") or "")
     try:
         observed_at = datetime.fromisoformat(decision_slot) if decision_slot else None
@@ -1758,9 +1904,12 @@ def _record_quant_ab_observations(
     selected_a = _candidate_symbol(payload.get("final_best_candidate"))
     inserted = 0
     for symbol, item in a_by_symbol.items():
-        shadow = item.get("shadow_b")
-        if not isinstance(shadow, dict):
+        shadow_b = item.get("shadow_b")
+        shadow_c = item.get("shadow_c")
+        if not isinstance(shadow_b, dict) and not isinstance(shadow_c, dict):
             continue
+        shadow = shadow_b if isinstance(shadow_b, dict) else {}
+        c_shadow = shadow_c if isinstance(shadow_c, dict) else {}
         observation_key = f"{observation_run_key}:{symbol}"
         if db.query(QuantABObservation).filter_by(observation_key=observation_key).first():
             continue
@@ -1784,6 +1933,21 @@ def _record_quant_ab_observations(
             a_quant_sell_score=_score_or_none(item.get("quant_sell_score")),
             a_final_score=_score_or_none(item.get("final_buy_score")),
             b_rank_within_shadow_pool=b_rank_by_symbol.get(symbol),
+            c_rank_within_shadow_pool=c_rank_by_symbol.get(symbol),
+            c_reversal_score=_score_or_none(c_shadow.get("reversal_score_c")),
+            c_oversold_score=_score_or_none(c_shadow.get("oversold_score_c")),
+            c_macd_reversal_score=_score_or_none(c_shadow.get("macd_reversal_score_c")),
+            c_price_stabilization_score=_score_or_none(c_shadow.get("price_stabilization_score_c")),
+            c_intraday_reversal_score=_score_or_none(c_shadow.get("intraday_reversal_score_c")),
+            c_volume_confirmation_score=_score_or_none(c_shadow.get("volume_confirmation_score_c")),
+            c_downtrend_continuation_risk=_score_or_none(c_shadow.get("downtrend_continuation_risk_c")),
+            confidence_c=_confidence_or_none(c_shadow.get("confidence_c")),
+            data_quality_c=(
+                _safe_float(c_shadow.get("data_quality_c"), 0.0)
+                if isinstance(shadow_c, dict) else None
+            ),
+            reversal_state_c=c_shadow.get("reversal_state_c"),
+            direction_c=c_shadow.get("direction_c"),
             b_entry_score=_score_or_none(shadow.get("entry_score_b")),
             b_future_up_score=_score_or_none(shadow.get("future_up_score_b")),
             b_future_down_score=_score_or_none(shadow.get("future_down_score_b")),
@@ -1808,6 +1972,7 @@ def _record_quant_ab_observations(
                 {
                     "a": item.get("indicator_payload") or {},
                     "b": shadow.get("indicator_snapshot") or {},
+                    "c": c_shadow.get("indicator_snapshot") or {},
                 },
                 ensure_ascii=False,
                 default=str,
@@ -1819,15 +1984,28 @@ def _record_quant_ab_observations(
             ),
             b_reason=str(shadow.get("b_reason") or ""),
             b_notes_json=json.dumps(shadow.get("b_notes") or [], ensure_ascii=False, default=str),
+            c_reason=(str(c_shadow.get("c_reason") or "") if isinstance(shadow_c, dict) else None),
+            c_notes_json=(
+                json.dumps(c_shadow.get("c_notes") or [], ensure_ascii=False, default=str)
+                if isinstance(shadow_c, dict) else None
+            ),
             selected_by_a=symbol == selected_a,
             selected_by_b_shadow=b_rank_by_symbol.get(symbol) == 1,
+            selected_by_c_shadow=c_rank_by_symbol.get(symbol) == 1,
             gpt_selected_by_a=symbol in set(payload.get("gpt_target_symbols") or []),
             outcome_status=(
                 "invalid_stale_intraday"
-                if str(shadow.get("b_status") or "") == "stale_intraday"
+                if (
+                    (isinstance(shadow_b, dict) and str(shadow.get("b_status") or "") == "stale_intraday")
+                    or (not isinstance(shadow_b, dict) and str(c_shadow.get("c_status") or "") == "stale_intraday")
+                )
                 else (
                     "invalid_data_quality"
-                    if _safe_float(shadow.get("data_quality_b"), 0.0) <= 0.0
+                    if (
+                        (_safe_float(shadow.get("data_quality_b"), 0.0) <= 0.0)
+                        if isinstance(shadow_b, dict)
+                        else (_safe_float(c_shadow.get("data_quality_c"), 0.0) <= 0.0)
+                    )
                     else (
                         "invalid_missing_entry_price"
                         if _safe_float(item.get("current_price"), 0.0) <= 0.0
