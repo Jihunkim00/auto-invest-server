@@ -419,6 +419,86 @@ def test_trusted_scheduler_run_scheduler_once_reuses_guarded_sell_gates(
 
 
 
+def test_canonical_scheduler_and_position_monitor_share_open_sell_protection(
+    db_session,
+    monkeypatch,
+):
+    from app.services import profile_aware_guarded_live_auto_exit_service as exit_module
+
+    enable_live_exit_settings(
+        db_session,
+        kis_limited_auto_sell_max_orders_per_day=2,
+    )
+    validation = FakeValidationService()
+    broker = FakeBroker()
+
+    class PendingOrderSyncService:
+        def sync_order(self, db, order_id: int):
+            return db.get(OrderLog, order_id)
+
+    service = ProfileAwareGuardedLiveAutoExitService(
+        runtime_settings=FakeRuntimeSettings(global_dry_run=False),
+        validation_service=validation,
+        broker=broker,
+        order_sync_service=PendingOrderSyncService(),
+        positions_loader=lambda db: [stop_loss_position()],
+        open_orders_loader=lambda db: [],
+    )
+    service._active_profile = lambda db: {
+        "profile_key": "safe",
+        "profile_name": "safe",
+        "display_name": "Safe",
+        "status": "active",
+        "enabled": True,
+        "provider": "kis",
+        "market": "KR",
+    }
+    service.session_service = type(
+        "OpenSession",
+        (),
+        {
+            "get_session_status": lambda self, market, now=None: {
+                "market": market,
+                "is_market_open": True,
+                "is_entry_allowed_now": True,
+                "is_near_close": False,
+            }
+        },
+    )()
+    monkeypatch.setattr(
+        exit_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {
+            "automation_mode": "live",
+            "scheduler_allowed": True,
+            "broker_submit_allowed": True,
+        },
+    )
+    now = datetime(2026, 7, 30, 9, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+
+    canonical = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="automation_scheduler_20260730_0930",
+        symbol="005930",
+        now=now,
+    )
+    monitor = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="position_exit_20260730_0930",
+        symbol="005930",
+        now=now,
+    )
+
+    assert canonical["status"] == "submitted"
+    assert canonical["real_order_submitted"] is True
+    assert monitor["status"] == "blocked"
+    assert monitor["block_reason"] == "duplicate_open_sell_order"
+    assert monitor["real_order_submitted"] is False
+    assert monitor["broker_submit_called"] is False
+    assert broker.calls == [{"symbol": "005930", "qty": 3}]
+    assert db_session.query(OrderLog).filter(OrderLog.side == "sell").count() == 1
+
+
 @pytest.mark.parametrize(
     ("runtime_overrides", "service_overrides", "expected_block"),
     [

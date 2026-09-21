@@ -742,6 +742,37 @@ def _monitor_service(client: FakeClient, *, is_open: bool = True, entry_allowed:
     )
 
 
+
+def _scheduler_monitor_for_test(db_session, monkeypatch, client):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    runtime = RuntimeSettingService()
+    runtime.update_settings(
+        db_session,
+        {
+            "scheduler_enabled": True,
+            "position_management_scheduler_enabled": False,
+            "automation_profile_scheduler_enabled": False,
+            "dry_run": True,
+        },
+    )
+    db_session.close = lambda: None
+    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
+    monkeypatch.setattr(scheduler_module, "get_settings", lambda: SimpleNamespace())
+    monkeypatch.setattr(scheduler_module, "KisClient", lambda *args, **kwargs: client)
+    monkeypatch.setattr(
+        scheduler_module, "KisAuthManager", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr(
+        scheduler_module.AutomationExecutionAuthorityService,
+        "snapshot",
+        lambda self, db: {"scheduler_allowed": True, "automation_mode": "test"},
+    )
+    scheduler = AutomationSchedulerService()
+    scheduler.runtime_settings = runtime
+    return scheduler, runtime
+
+
 def test_position_exit_monitor_routes_sell_only_through_guarded_exit(
     db_session,
     monkeypatch,
@@ -753,15 +784,16 @@ def test_position_exit_monitor_routes_sell_only_through_guarded_exit(
         db_session,
         {
             "scheduler_enabled": True,
-            "position_management_scheduler_enabled": True,
+            "position_management_scheduler_enabled": False,
             "automation_profile_scheduler_enabled": False,
             "dry_run": True,
         },
     )
+    client = FakeClient(positions=[_position(current_price=100.0)])
     db_session.close = lambda: None
     monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler_module, "get_settings", lambda: SimpleNamespace())
-    monkeypatch.setattr(scheduler_module, "KisClient", lambda *args, **kwargs: object())
+    monkeypatch.setattr(scheduler_module, "KisClient", lambda *args, **kwargs: client)
     monkeypatch.setattr(scheduler_module, "KisAuthManager", lambda *args, **kwargs: object())
     monkeypatch.setattr(
         scheduler_module.AutomationExecutionAuthorityService,
@@ -854,6 +886,12 @@ def test_position_exit_monitor_routes_sell_only_through_guarded_exit(
     assert result["monitor_independent_of_buy_scheduler"] is True
     assert result["monitor_execution_mode"] == "guarded_live_exit"
     assert result["buy_execution_allowed"] is False
+    assert result["sell_only"] is True
+    assert result["position_exit_monitor_active"] is True
+    assert result["position_exit_monitor_state"] == "active"
+    assert result["held_position_count"] == 1
+    assert result["position_state_known"] is True
+    assert runtime.get_settings_read_only(db_session)["position_management_scheduler_enabled"] is False
     assert guarded.calls[0]["symbol"] == "005930"
     assert len(guarded.calls) == 1
     sell_item, hold_item = result["items"]
@@ -867,6 +905,194 @@ def test_position_exit_monitor_routes_sell_only_through_guarded_exit(
     assert hold_item["broker_submit_called"] is False
     assert result["real_order_submitted"] is False
     assert result["broker_submit_called"] is False
+
+
+def test_position_exit_monitor_ignores_legacy_switch_for_due_overnight_holding(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    lifecycle_row = _open_lifecycle(db_session)
+    _set_entry_kst(
+        db_session,
+        lifecycle_row,
+        datetime(2026, 7, 29, 13, 37, tzinfo=KST),
+    )
+    client = FakeClient(positions=[_position(current_price=97.0)])
+    scheduler, runtime = _scheduler_monitor_for_test(db_session, monkeypatch, client)
+
+    class FakeGuardedExit:
+        def __init__(self):
+            self.calls = []
+
+        def run_scheduler_once(self, db, *, scheduler_slot, symbol, now):
+            self.calls.append((scheduler_slot, symbol, now))
+            return {
+                "status": "blocked",
+                "block_reason": "dry_run_enabled",
+                "submitted": False,
+                "real_order_submitted": False,
+                "broker_submit_called": False,
+                "safety": {"broker_submit_called": False},
+            }
+
+    guarded = FakeGuardedExit()
+    monkeypatch.setattr(
+        scheduler,
+        "_profile_guarded_live_auto_exit_service",
+        lambda db: guarded,
+    )
+
+    result = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 9, 0, tzinfo=KST),
+    )
+
+    assert runtime.get_settings_read_only(db_session)[
+        "position_management_scheduler_enabled"
+    ] is False
+    assert result["status"] == "checked"
+    assert result["position_exit_monitor_active"] is True
+    assert result["held_position_count"] == 1
+    assert result["position_state_known"] is True
+    assert result["due_count"] == 1
+    assert result["items"][0]["action"] == "SELL"
+    assert result["items"][0]["execution_action"] == "BLOCKED_DRY_RUN"
+    assert guarded.calls and guarded.calls[0][1] == "005930"
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_position_exit_monitor_without_positions_is_idle_when_legacy_switch_is_off(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    client = FakeClient(positions=[])
+    scheduler, _runtime = _scheduler_monitor_for_test(db_session, monkeypatch, client)
+    lifecycle_calls = []
+
+    def forbidden_lifecycle(*args, **kwargs):
+        lifecycle_calls.append((args, kwargs))
+        raise AssertionError("no-position poll must not evaluate lifecycle strategies")
+
+    monkeypatch.setattr(
+        scheduler_module, "KisPositionLifecycleService", forbidden_lifecycle
+    )
+
+    result = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 9, 0, tzinfo=KST),
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_position"
+    assert result["position_exit_monitor_active"] is False
+    assert result["position_exit_monitor_state"] == "idle"
+    assert result["held_position_count"] == 0
+    assert result["position_state_known"] is True
+    assert result["sell_only"] is True
+    assert result["buy_execution_allowed"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert lifecycle_calls == []
+    assert client.list_positions_calls == 1
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+    status = scheduler.runtime_status()
+    assert status["position_exit_monitor_active"] is False
+    assert status["position_exit_monitor_state"] == "idle"
+    assert status["held_position_count"] == 0
+    assert status["position_state_known"] is True
+    assert status["position_exit_interval_minutes"] == 30
+    assert status["poll_interval_seconds"] == 20
+
+
+def test_position_exit_monitor_snapshot_failure_is_unknown_not_no_position(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    client = FakeClient()
+
+    def fail_position_snapshot():
+        client.list_positions_calls += 1
+        raise TimeoutError("KIS balance unavailable")
+
+    client.list_positions = fail_position_snapshot
+    scheduler, _runtime = _scheduler_monitor_for_test(db_session, monkeypatch, client)
+    monkeypatch.setattr(
+        scheduler_module,
+        "KisPositionLifecycleService",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("unavailable snapshot must not reach lifecycle evaluation")
+        ),
+    )
+
+    result = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 9, 0, tzinfo=KST),
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "broker_position_snapshot_unavailable"
+    assert result["position_exit_monitor_active"] is False
+    assert result["position_exit_monitor_state"] == "unknown"
+    assert result["held_position_count"] is None
+    assert result["position_state_known"] is False
+    assert result["real_order_submitted"] is False
+    assert result["broker_submit_called"] is False
+    assert result["reason"] != "no_position"
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
+
+
+def test_position_exit_monitor_returns_idle_on_next_poll_after_last_position_is_sold(
+    db_session,
+    monkeypatch,
+):
+    import app.services.automation_scheduler_service as scheduler_module
+
+    client = FakeClient(positions=[_position(current_price=100.0)])
+    scheduler, _runtime = _scheduler_monitor_for_test(db_session, monkeypatch, client)
+    evaluations = []
+
+    class NotDueLifecycle:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run_due_management_once(self, db, **kwargs):
+            evaluations.append(kwargs)
+            return {"status": "skipped", "reason": "not_due_yet", "items": []}
+
+    monkeypatch.setattr(
+        scheduler_module, "KisPositionLifecycleService", NotDueLifecycle
+    )
+    first = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 9, 0, tzinfo=KST),
+    )
+    assert first["position_exit_monitor_active"] is True
+    assert first["held_position_count"] == 1
+    assert len(evaluations) == 1
+
+    client.positions = []
+    second = scheduler._run_position_exit_monitor_once(
+        datetime(2026, 7, 30, 9, 0, 20, tzinfo=KST),
+    )
+
+    assert second["status"] == "skipped"
+    assert second["reason"] == "no_position"
+    assert second["position_exit_monitor_active"] is False
+    assert second["position_exit_monitor_state"] == "idle"
+    assert second["held_position_count"] == 0
+    assert second["position_state_known"] is True
+    assert len(evaluations) == 1
+    assert client.list_positions_calls == 2
+    assert client.submit_order_calls == []
+    assert client.submit_domestic_cash_order_calls == []
 
 
 def test_position_exit_monitor_guarded_sell_is_not_retried_before_next_interval(

@@ -274,3 +274,21 @@ def test_non_retryable_account_error_fails_closed_without_second_attempt():
     assert state["account_state_status"] == "unavailable"
     assert state["account_state_failed_component"] == "account_aggregation"
     assert state["account_state_retryable"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"output1": {}},
+        {"output1": [None]},
+        {"output1": [{"pdno": "005930"}]},
+        {"output1": [{"pdno": "005930", "hldg_qty": "unknown"}]},
+    ],
+)
+def test_kis_list_positions_rejects_malformed_snapshot(payload, monkeypatch):
+    client = KisClient()
+    monkeypatch.setattr(client, "_request_balance", lambda: payload)
+
+    with pytest.raises(ValueError, match="kis_position_snapshot_invalid"):
+        client.list_positions()

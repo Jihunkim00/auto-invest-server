@@ -6,6 +6,7 @@ Historical scheduler services remain callable through their compatibility
 routes, but are intentionally never started by the application.
 """
 
+import math
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -86,6 +87,11 @@ class AutomationSchedulerService(SchedulerService):
         self._position_exit_positions_cache: list[dict[str, Any]] | None = None
         self._last_position_exit_monitor_run_at: datetime | None = None
         self._last_position_exit_monitor_result: str | None = None
+        self._position_exit_monitor_active = False
+        self._position_exit_monitor_state = "unknown"
+        self._held_position_count: int | None = None
+        self._position_state_known = False
+        self._position_exit_monitor_reason: str | None = None
         self._last_monitoring_run_at: datetime | None = None
         self._last_monitoring_result: str | None = None
         self._last_automatic_sync_at: datetime | None = None
@@ -215,6 +221,13 @@ class AutomationSchedulerService(SchedulerService):
                 'monitoring_due_at': self._monitoring_due_at.isoformat() if self._monitoring_due_at else None,
                 'position_exit_monitor_interval_minutes': 30,
                 'position_exit_monitor_poll_seconds': 20,
+                'position_exit_interval_minutes': 30,
+                'poll_interval_seconds': 20,
+                'position_exit_monitor_active': self._position_exit_monitor_active,
+                'position_exit_monitor_state': self._position_exit_monitor_state,
+                'held_position_count': self._held_position_count,
+                'position_state_known': self._position_state_known,
+                'position_exit_monitor_reason': self._position_exit_monitor_reason,
                 'position_exit_monitor_due_at': self._position_exit_monitor_due_at.isoformat() if self._position_exit_monitor_due_at else None,
                 'last_position_exit_monitor_run_at': self._last_position_exit_monitor_run_at.isoformat() if self._last_position_exit_monitor_run_at else None,
                 'last_position_exit_monitor_result': self._last_position_exit_monitor_result,
@@ -1352,9 +1365,13 @@ class AutomationSchedulerService(SchedulerService):
         self,
         now: datetime | None = None,
     ) -> dict[str, Any]:
-        """Poll due held positions independently and delegate SELLs to guarded execution."""
+        """Poll held positions independently and delegate SELLs to guarded execution."""
         now_kst = self._as_kst(now)
         self._last_position_exit_monitor_run_at = datetime.now(UTC)
+        monitor_state = "unknown"
+        position_state_known = False
+        held_position_count: int | None = None
+        monitor_reason: str | None = None
         db = SessionLocal()
         try:
             runtime = self.runtime_settings.get_settings_read_only(db)
@@ -1363,48 +1380,93 @@ class AutomationSchedulerService(SchedulerService):
             ).snapshot(db)
             if not runtime.get("scheduler_enabled"):
                 result = {"status": "blocked", "reason": "scheduler_disabled", "items": []}
-            elif not runtime.get("position_management_scheduler_enabled"):
-                result = {
-                    "status": "blocked",
-                    "reason": "position_management_scheduler_disabled",
-                    "items": [],
-                }
             elif not authority.get("scheduler_allowed"):
                 result = {"status": "blocked", "reason": "automation_mode_off", "items": []}
             else:
                 settings_obj = get_settings()
                 kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
-                lifecycle = KisPositionLifecycleService(
-                    kis_client,
-                    runtime_settings=self.runtime_settings,
-                    automation_profiles=self.automation_profiles,
-                    position_snapshot_loader=(
-                        lambda *, force_refresh=False: self._load_position_exit_positions(
-                            kis_client, now=now_kst, force_refresh=force_refresh
+                try:
+                    broker_positions = self._load_position_exit_positions(
+                        kis_client,
+                        now=now_kst,
+                        force_refresh=True,
+                    )
+                    held_position_count = _position_exit_held_position_count(
+                        broker_positions
+                    )
+                except Exception as exc:
+                    monitor_reason = "broker_position_snapshot_unavailable"
+                    result = {
+                        "status": "skipped",
+                        "reason": monitor_reason,
+                        "snapshot_error": exc.__class__.__name__,
+                        "items": [],
+                    }
+                else:
+                    position_state_known = True
+                    if held_position_count == 0:
+                        monitor_state = "idle"
+                        monitor_reason = "no_position"
+                        result = {
+                            "status": "skipped",
+                            "reason": monitor_reason,
+                            "items": [],
+                        }
+                    else:
+                        monitor_state = "active"
+                        lifecycle = KisPositionLifecycleService(
+                            kis_client,
+                            runtime_settings=self.runtime_settings,
+                            automation_profiles=self.automation_profiles,
+                            position_snapshot_loader=(
+                                lambda *, force_refresh=False: self._load_position_exit_positions(
+                                    kis_client,
+                                    now=now_kst,
+                                    force_refresh=force_refresh,
+                                )
+                            ),
                         )
-                    ),
-                )
-                slot = f"position_exit_{now_kst.strftime('%Y%m%d_%H%M')}"
-                result = lifecycle.run_due_management_once(
-                    db,
-                    trigger_source="position_exit_monitor",
-                    scheduler_slot=slot,
-                    now=now_kst,
-                )
-                result = self._route_position_exit_monitor_sells(
-                    db,
-                    lifecycle=lifecycle,
-                    result=result,
-                    scheduler_slot=slot,
-                    now=now_kst,
-                    dry_run=bool(runtime.get("dry_run", True)),
-                )
-                result["automation_mode"] = authority.get("automation_mode")
-                result["monitor_execution_mode"] = "guarded_live_exit"
-                result["monitor_independent_of_buy_scheduler"] = True
-                result["buy_execution_allowed"] = False
+                        slot = f"position_exit_{now_kst.strftime('%Y%m%d_%H%M')}"
+                        try:
+                            result = lifecycle.run_due_management_once(
+                                db,
+                                trigger_source="position_exit_monitor",
+                                scheduler_slot=slot,
+                                now=now_kst,
+                            )
+                        except Exception as exc:
+                            result = {
+                                "status": "failed",
+                                "reason": "position_exit_monitor_failed",
+                                "error": exc.__class__.__name__,
+                                "items": [],
+                            }
+                        else:
+                            result = self._route_position_exit_monitor_sells(
+                                db,
+                                lifecycle=lifecycle,
+                                result=result,
+                                scheduler_slot=slot,
+                                now=now_kst,
+                                dry_run=bool(runtime.get("dry_run", True)),
+                            )
+                        if not isinstance(result, dict):
+                            result = {
+                                "status": "failed",
+                                "reason": "position_exit_monitor_failed",
+                                "items": [],
+                            }
+                        result["automation_mode"] = authority.get("automation_mode")
             result["position_exit_monitor_interval_minutes"] = 30
             result["poll_interval_seconds"] = 20
+            result["position_exit_interval_minutes"] = 30
+            result["position_exit_monitor_active"] = monitor_state == "active"
+            result["position_exit_monitor_state"] = monitor_state
+            result["held_position_count"] = held_position_count
+            result["position_state_known"] = position_state_known
+            result["sell_only"] = True
+            result["monitor_independent_of_buy_scheduler"] = True
+            result.setdefault("monitor_execution_mode", "guarded_live_exit")
             result["real_order_submitted"] = bool(
                 result.get("real_order_submitted")
                 or any(
@@ -1422,6 +1484,13 @@ class AutomationSchedulerService(SchedulerService):
                 )
             )
             result.setdefault("buy_execution_allowed", False)
+            if monitor_reason is not None:
+                result["reason"] = monitor_reason
+            self._position_exit_monitor_active = monitor_state == "active"
+            self._position_exit_monitor_state = monitor_state
+            self._held_position_count = held_position_count
+            self._position_state_known = position_state_known
+            self._position_exit_monitor_reason = monitor_reason or result.get("reason")
             self._last_position_exit_monitor_result = str(
                 result.get("reason") or result.get("status") or "completed"
             )
@@ -1436,7 +1505,7 @@ class AutomationSchedulerService(SchedulerService):
         now: datetime,
         force_refresh: bool = False,
     ) -> list[dict[str, Any]]:
-        """Cache discovery reads; due strategy evaluations still require fresh data."""
+        """Refresh discovery on each poll and reuse only a fresh snapshot for evaluation."""
         now_utc = self._as_kst(now).astimezone(UTC)
         with self._position_exit_positions_lock:
             cached_at = self._position_exit_positions_cached_at
@@ -1645,3 +1714,29 @@ class AutomationSchedulerService(SchedulerService):
             for item in (result or {}).get("items", [])
             if isinstance(item, dict)
         )
+
+def _position_exit_held_position_count(positions: Any) -> int:
+    if not isinstance(positions, list):
+        raise ValueError("kis_position_snapshot_invalid")
+
+    held_count = 0
+    for position in positions:
+        if not isinstance(position, dict):
+            raise ValueError("kis_position_snapshot_invalid")
+        symbol = str(
+            position.get("symbol") or position.get("pdno") or position.get("code") or ""
+        ).strip()
+        raw_qty = position.get("qty")
+        if raw_qty is None:
+            raw_qty = position.get("hldg_qty")
+        if not symbol or raw_qty is None:
+            raise ValueError("kis_position_snapshot_invalid")
+        try:
+            quantity = float(str(raw_qty).replace(",", ""))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("kis_position_snapshot_invalid") from exc
+        if not math.isfinite(quantity) or quantity < 0:
+            raise ValueError("kis_position_snapshot_invalid")
+        if quantity > 0:
+            held_count += 1
+    return held_count

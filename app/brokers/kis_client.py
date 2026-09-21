@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 import threading
@@ -706,12 +707,25 @@ class KisClient:
 
     def list_positions(self) -> list[dict]:
         response = self._request_balance()
-        rows = _as_list(response.get("output1"))
+        rows = response.get("output1")
+        if not isinstance(rows, list):
+            raise ValueError("kis_position_snapshot_invalid")
         positions = []
 
         for row in rows:
-            item = _as_dict(row)
-            qty = first_float(item, ["hldg_qty", "qty"])
+            if not isinstance(row, dict):
+                raise ValueError("kis_position_snapshot_invalid")
+            item = row
+            raw_qty = first_present(item, ["hldg_qty", "qty"])
+            symbol = str(item.get("pdno") or item.get("symbol") or "").strip()
+            if raw_qty is None or not symbol:
+                raise ValueError("kis_position_snapshot_invalid")
+            try:
+                qty = float(str(raw_qty).replace(",", ""))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("kis_position_snapshot_invalid") from exc
+            if not math.isfinite(qty) or qty < 0:
+                raise ValueError("kis_position_snapshot_invalid")
             if qty <= 0:
                 continue
 
@@ -732,7 +746,7 @@ class KisClient:
 
             positions.append(
                 {
-                    "symbol": item.get("pdno") or item.get("symbol") or "",
+                    "symbol": symbol,
                     "name": item.get("prdt_name") or item.get("name"),
                     "qty": qty,
                     "avg_entry_price": avg_entry_price,
