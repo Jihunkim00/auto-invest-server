@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.database import SessionLocal
 from app.db.models import (
     AutomationProfileAiCandidateResult,
     SignalLog,
@@ -25,6 +27,15 @@ from app.services.kis_payload_sanitizer import sanitize_kis_text
 from app.services.kis_watchlist_preview_service import normalize_symbol_identity
 from app.services.profile_universe_service import profile_universe_bounds
 from app.services.user_trading_execution_service import UserTradingExecutionService
+from app.services.account_snapshot_retry import (
+    MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+    RETRY_DELAY_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+    account_snapshot_failure_diagnostics,
+    account_snapshot_retry_coordinator,
+    retryable_kis_account_snapshot_error,
+)
+
+logger = logging.getLogger(__name__)
 
 
 USER_SCHEDULER_TRIGGER_SOURCE = 'user_scheduler'
@@ -440,6 +451,8 @@ class UserAutoTradingSchedulerService:
         session_service: MarketSessionService | None = None,
         automation_profiles: Any | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        retry_scheduler: Callable[..., bool] | None = None,
+        retry_service_factory: Callable[[], Any] | None = None,
     ) -> None:
         self.execution_service = execution_service or UserTradingExecutionService()
         self.candidate_service = (
@@ -458,6 +471,8 @@ class UserAutoTradingSchedulerService:
         self.session_service = session_service or self.execution_service.session_service
         self.automation_profiles = automation_profiles or AutomationProfileService()
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+        self.retry_scheduler = retry_scheduler or account_snapshot_retry_coordinator.schedule
+        self.retry_service_factory = retry_service_factory
         self._last_status: dict[str, Any] = {}
 
     @staticmethod
@@ -556,6 +571,7 @@ class UserAutoTradingSchedulerService:
             'ignored': 0,
             'completed': 0,
             'failed': 0,
+            'retry_pending': 0,
             'items': [],
         }
         users = (
@@ -569,7 +585,11 @@ class UserAutoTradingSchedulerService:
                 aggregate['ignored'] += 1
                 continue
             settings = self._existing_settings(db, user)
-            if settings is None or not bool(settings.auto_trading_enabled):
+            if (
+                settings is None
+                or not bool(settings.enabled)
+                or not bool(settings.auto_trading_enabled)
+            ):
                 aggregate['ignored'] += 1
                 continue
             if str(settings.auto_trading_provider or '').strip().lower() != normalized_provider:
@@ -634,6 +654,28 @@ class UserAutoTradingSchedulerService:
                 aggregate['items'].append(item)
             except Exception as exc:
                 db.rollback()
+                failure_stage = _failure_details(exc)['failure_stage']
+                retryable = (
+                    normalized_provider == 'kis'
+                    and failure_stage == 'account_snapshot'
+                    and retryable_kis_account_snapshot_error(exc)
+                )
+                if retryable:
+                    item = self._schedule_account_snapshot_retry(
+                        db,
+                        claim=claim,
+                        user_id=int(user.id),
+                        provider=normalized_provider,
+                        market=market,
+                        trading_date=trading_date,
+                        scheduler_slot=scheduler_slot,
+                        profile_schedule=profile_schedule,
+                        first_error=exc,
+                    )
+                    if item is not None:
+                        aggregate['retry_pending'] += 1
+                        aggregate['items'].append(item)
+                        continue
                 failure_profile = (
                     (profile_schedule or {}).get('profile')
                     if isinstance(profile_schedule, dict)
@@ -647,6 +689,15 @@ class UserAutoTradingSchedulerService:
                     scheduler_slot=scheduler_slot,
                     run_key=claim.run_key,
                     exception=exc,
+                    retry_diagnostics=(
+                        account_snapshot_failure_diagnostics(
+                            exc,
+                            attempt=1,
+                            retryable=retryable,
+                        )
+                        if failure_stage == 'account_snapshot'
+                        else None
+                    ),
                     profile_context=(
                         self._profile_context(
                             profile=failure_profile,
@@ -660,11 +711,403 @@ class UserAutoTradingSchedulerService:
                 self._finish_claim(db, claim, item)
                 aggregate['failed'] += 1
                 aggregate['items'].append(item)
-        aggregate['result'] = 'failed' if aggregate['failed'] and not aggregate['completed'] else 'completed'
+        aggregate['result'] = (
+            'failed'
+            if aggregate['failed'] and not aggregate['completed'] and not aggregate['retry_pending']
+            else ('retry_pending' if aggregate['retry_pending'] else 'completed')
+        )
         aggregate['last_scheduler_run_at'] = current.isoformat()
         aggregate['last_scheduler_result'] = aggregate['result']
         self._last_status[normalized_provider] = aggregate
         return aggregate
+
+    def _schedule_account_snapshot_retry(
+        self,
+        db: Session,
+        *,
+        claim: UserAutoTradingSlotClaim,
+        user_id: int,
+        provider: str,
+        market: str,
+        trading_date: str,
+        scheduler_slot: str,
+        profile_schedule: dict[str, Any] | None,
+        first_error: Exception,
+    ) -> dict[str, Any] | None:
+        claim_id = int(claim.id)
+        profile = (profile_schedule or {}).get('profile') or {}
+        profile_key = str(profile.get('profile_key') or '')
+        profile_id = _int_or_none(profile.get('id'))
+        row = db.get(UserAutoTradingSlotClaim, claim_id)
+        if row is None:
+            return None
+        row.status = 'retry_pending'
+        row.result = 'retry_pending'
+        row.reason = 'account_snapshot_retry_pending_1_of_3'
+        db.commit()
+
+        state = {'attempt': 2}
+
+        def retry_callback() -> int | None:
+            attempt = int(state['attempt'])
+            try:
+                retry_service = (
+                    self.retry_service_factory()
+                    if self.retry_service_factory is not None
+                    else UserAutoTradingSchedulerService()
+                )
+                outcome = retry_service._run_account_snapshot_retry_attempt(
+                    claim_id=claim_id,
+                    user_id=user_id,
+                    provider=provider,
+                    market=market,
+                    trading_date=trading_date,
+                    scheduler_slot=scheduler_slot,
+                    expected_profile_key=profile_key,
+                    expected_profile_id=profile_id,
+                    attempt=attempt,
+                )
+            except Exception as exc:
+                self._finalize_account_snapshot_retry_worker_failure(
+                    claim_id=claim_id,
+                    user_id=user_id,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    attempt=attempt,
+                    exception=exc,
+                )
+                return None
+            if outcome == 'retry_pending' and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS:
+                state['attempt'] = attempt + 1
+                return ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS
+            return None
+
+        key = ('user', user_id, provider, market, trading_date, scheduler_slot)
+        scheduled = self.retry_scheduler(
+            key,
+            retry_callback,
+            delay_seconds=ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+        )
+        if not scheduled:
+            return None
+        logger.warning(
+            'kis account snapshot retry scheduled scope=user owner_user_id=%s provider=%s market=%s slot=%s attempt=1 max_attempts=%s retry_in_seconds=%s retryable=true failure_stage=account_snapshot exception_type=%s',
+            user_id,
+            provider,
+            market,
+            scheduler_slot,
+            ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+            ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            _failure_details(first_error)['exception_type'],
+        )
+        return {
+            'owner_user_id': user_id,
+            'provider': provider,
+            'market': market,
+            'scheduler_slot': scheduler_slot,
+            'run_key': claim.run_key,
+            'result': 'retry_pending',
+            'reason': 'account_snapshot_retry_pending_1_of_3',
+            'attempt': 1,
+            'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+            'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            'failure_stage': 'account_snapshot',
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+        }
+
+    def _run_account_snapshot_retry_attempt(
+        self,
+        *,
+        claim_id: int,
+        user_id: int,
+        provider: str,
+        market: str,
+        trading_date: str,
+        scheduler_slot: str,
+        expected_profile_key: str,
+        expected_profile_id: int | None,
+        attempt: int,
+    ) -> str | None:
+        try:
+            return self._run_account_snapshot_retry_attempt_inner(
+                claim_id=claim_id,
+                user_id=user_id,
+                provider=provider,
+                market=market,
+                trading_date=trading_date,
+                scheduler_slot=scheduler_slot,
+                expected_profile_key=expected_profile_key,
+                expected_profile_id=expected_profile_id,
+                attempt=attempt,
+            )
+        except Exception as exc:
+            self._finalize_account_snapshot_retry_worker_failure(
+                claim_id=claim_id,
+                user_id=user_id,
+                provider=provider,
+                market=market,
+                scheduler_slot=scheduler_slot,
+                attempt=attempt,
+                exception=exc,
+            )
+            return None
+
+    @staticmethod
+    def _finalize_account_snapshot_retry_worker_failure(
+        *,
+        claim_id: int,
+        user_id: int,
+        provider: str,
+        market: str,
+        scheduler_slot: str,
+        attempt: int,
+        exception: Exception,
+    ) -> None:
+        """Fail closed if retry-worker setup breaks before snapshot processing."""
+        db = None
+        try:
+            db = SessionLocal()
+            claim = db.get(UserAutoTradingSlotClaim, int(claim_id))
+            if claim is not None and claim.status == 'retry_pending':
+                claim.status = 'failed'
+                claim.result = 'failed'
+                claim.reason = 'account_snapshot_retry_worker_failed'
+                db.commit()
+        except Exception as finalization_error:
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            logger.error(
+                'kis account snapshot retry worker finalization failed scope=user owner_user_id=%s provider=%s market=%s slot=%s attempt=%s max_attempts=%s exception_type=%s finalization_exception_type=%s',
+                user_id,
+                provider,
+                market,
+                scheduler_slot,
+                attempt,
+                ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                type(exception).__name__,
+                type(finalization_error).__name__,
+            )
+            return
+        finally:
+            if db is not None:
+                db.close()
+        logger.error(
+            'kis account snapshot retry worker failed scope=user owner_user_id=%s provider=%s market=%s slot=%s attempt=%s max_attempts=%s exception_type=%s',
+            user_id,
+            provider,
+            market,
+            scheduler_slot,
+            attempt,
+            ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+            type(exception).__name__,
+        )
+
+    def _run_account_snapshot_retry_attempt_inner(
+        self,
+        *,
+        claim_id: int,
+        user_id: int,
+        provider: str,
+        market: str,
+        trading_date: str,
+        scheduler_slot: str,
+        expected_profile_key: str,
+        expected_profile_id: int | None,
+        attempt: int,
+    ) -> str | None:
+        db = SessionLocal()
+        try:
+            claim = db.get(UserAutoTradingSlotClaim, int(claim_id))
+            if claim is None or claim.status != 'retry_pending':
+                return None
+            user = db.get(User, int(user_id))
+            now = _aware_utc(self.now_provider())
+            timezone = _SCOPE[provider][1]
+            current_date = now.astimezone(timezone).date().isoformat()
+
+            def finish_gate(reason: str, result: str = 'SKIPPED') -> None:
+                item = self._record_result(
+                    db,
+                    user=user,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    run_key=claim.run_key,
+                    result=result,
+                    reason=reason,
+                    symbol='NONE',
+                    create_signal=False,
+                )
+                self._finish_claim(db, claim, item)
+
+            if user is None or not bool(user.enabled) or str(user.role or '').lower() == 'admin':
+                if user is not None:
+                    finish_gate('user_disabled_before_account_snapshot_retry', 'blocked')
+                else:
+                    claim.status = 'failed'
+                    claim.result = 'failed'
+                    claim.reason = 'user_unavailable_before_account_snapshot_retry'
+                    db.commit()
+                return None
+            if current_date != trading_date:
+                finish_gate('scheduler_trading_date_expired_before_retry')
+                return None
+            settings = self._existing_settings(db, user)
+            if (
+                settings is None
+                or not bool(settings.enabled)
+                or not bool(settings.auto_trading_enabled)
+                or str(settings.auto_trading_provider or '').strip().lower() != provider
+            ):
+                finish_gate('auto_trading_disabled_before_account_snapshot_retry', 'blocked')
+                return None
+
+            profile_schedule = self._owned_profile_schedule(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                now=now,
+            )
+            profile = (profile_schedule or {}).get('profile') or {}
+            current_profile_key = str(profile.get('profile_key') or '')
+            current_profile_id = _int_or_none(profile.get('id'))
+            if (
+                not profile_schedule
+                or current_profile_key != expected_profile_key
+                or (
+                    expected_profile_id is not None
+                    and current_profile_id != expected_profile_id
+                )
+                or scheduler_slot not in self._profile_analysis_times(profile_schedule)
+            ):
+                finish_gate('automation_profile_changed_before_account_snapshot_retry')
+                return None
+
+            try:
+                item = self._process_user(
+                    db,
+                    user=user,
+                    settings=settings,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    run_key=claim.run_key,
+                    now=now,
+                    profile_schedule=profile_schedule,
+                )
+            except Exception as exc:
+                db.rollback()
+                failure_stage = _failure_details(exc)['failure_stage']
+                retryable = (
+                    failure_stage == 'account_snapshot'
+                    and provider == 'kis'
+                    and retryable_kis_account_snapshot_error(exc)
+                )
+                if retryable and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS:
+                    row = db.get(UserAutoTradingSlotClaim, int(claim_id))
+                    if row is not None:
+                        row.status = 'retry_pending'
+                        row.result = 'retry_pending'
+                        row.reason = f'account_snapshot_retry_pending_{attempt}_of_{ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS}'
+                        db.commit()
+                    logger.warning(
+                        'kis account snapshot retry scheduled scope=user owner_user_id=%s provider=%s market=%s slot=%s attempt=%s max_attempts=%s retry_in_seconds=%s retryable=true failure_stage=account_snapshot exception_type=%s',
+                        user_id,
+                        provider,
+                        market,
+                        scheduler_slot,
+                        attempt,
+                        ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                        ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                        _failure_details(exc)['exception_type'],
+                    )
+                    return 'retry_pending'
+                failure_profile = (
+                    (profile_schedule or {}).get('profile')
+                    if isinstance(profile_schedule, dict)
+                    else None
+                )
+                retry_diagnostics = (
+                    account_snapshot_failure_diagnostics(
+                        exc,
+                        attempt=attempt,
+                        retryable=retryable,
+                    )
+                    if failure_stage == 'account_snapshot'
+                    else None
+                )
+                item = self._safe_failure(
+                    db,
+                    user=user,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    run_key=claim.run_key,
+                    exception=exc,
+                    retry_diagnostics=retry_diagnostics,
+                    profile_context=(
+                        self._profile_context(
+                            profile=failure_profile,
+                            scheduler_slot=scheduler_slot,
+                            user=user,
+                        )
+                        if isinstance(failure_profile, dict)
+                        else None
+                    ),
+                )
+                self._finish_claim(db, claim, item)
+                event_name = (
+                    'kis account snapshot retry exhausted'
+                    if retryable and attempt >= ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS
+                    else 'kis account snapshot failed without retry'
+                )
+                logger.error(
+                    '%s scope=user owner_user_id=%s provider=%s market=%s slot=%s retry_policy=kis_account_snapshot attempts=%s max_attempts=%s retry_delay_seconds=%s retryable=%s failure_stage=account_snapshot final_failure_stage=account_snapshot exception_type=%s',
+                    event_name,
+                    user_id,
+                    provider,
+                    market,
+                    scheduler_slot,
+                    attempt,
+                    ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                    ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    retryable,
+                    _failure_details(exc)['exception_type'],
+                )
+                return None
+
+            retry_diagnostics = {
+                'retry_policy': 'kis_account_snapshot',
+                'attempts': attempt,
+                'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            }
+            item['account_snapshot_retry'] = retry_diagnostics
+            run_id = item.get('run_id')
+            run = db.get(TradeRunLog, int(run_id)) if run_id is not None else None
+            if run is not None:
+                response = _json_object(run.response_payload)
+                response['account_snapshot_retry'] = retry_diagnostics
+                run.response_payload = json.dumps(response, ensure_ascii=False, default=str)
+            self._finish_claim(db, claim, item)
+            logger.info(
+                'kis account snapshot retry recovered scope=user owner_user_id=%s provider=%s market=%s slot=%s attempt=%s max_attempts=%s',
+                user_id,
+                provider,
+                market,
+                scheduler_slot,
+                attempt,
+                ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+            )
+            return None
+        finally:
+            db.close()
 
     def _process_user(
         self,
@@ -775,6 +1218,25 @@ class UserAutoTradingSchedulerService:
                 result='HOLD',
                 reason=str(position_result.get('reason') or 'position_management_priority'),
                 symbol=str(position_result.get('symbol') or 'NONE'),
+                position_management=position_result,
+            )
+        effective_profile = profile.get('effective_settings')
+        effective_profile = effective_profile if isinstance(effective_profile, dict) else {}
+        entry_settings = effective_profile.get('entry')
+        entry_settings = entry_settings if isinstance(entry_settings, dict) else {}
+        cutoff = entry_settings.get('no_new_entry_after') or settings.no_new_entry_after
+        past_cutoff = self.execution_service._past_user_cutoff(cutoff, session)
+        if session.get('is_entry_allowed_now') is not True or past_cutoff:
+            return self._record_result(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                scheduler_slot=scheduler_slot,
+                run_key=run_key,
+                result='SKIPPED',
+                reason='entry_window_closed',
+                symbol='NONE',
                 position_management=position_result,
             )
         with _scheduler_stage('canonical_analysis'):
@@ -1145,7 +1607,11 @@ class UserAutoTradingSchedulerService:
             if str(user.role or '').strip().lower() == 'admin':
                 continue
             settings = self._existing_settings(db, user)
-            if settings is None or not bool(settings.auto_trading_enabled):
+            if (
+                settings is None
+                or not bool(settings.enabled)
+                or not bool(settings.auto_trading_enabled)
+            ):
                 continue
             if str(settings.auto_trading_provider or '').strip().lower() != provider:
                 continue
@@ -1498,9 +1964,12 @@ class UserAutoTradingSchedulerService:
         *,
         exception: Exception | None = None,
         profile_context: dict[str, Any] | None = None,
+        retry_diagnostics: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         details = _failure_details(exception)
+        if retry_diagnostics:
+            details.update(retry_diagnostics)
         return self._record_result(
             db,
             **kwargs,

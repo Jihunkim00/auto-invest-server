@@ -17,6 +17,7 @@ from app.core.enums import InternalOrderStatus
 from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, TradeRunLog
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.kis_account_state_cache_service import KisAccountStateCacheService
+from app.services.account_snapshot_retry import RETRY_SLOT_REPLAY_GRACE_SECONDS
 from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.services.kis_order_validation_service import KisOrderValidationRequest
 from app.services.kis_position_lifecycle_service import CLOSED, CLOSING, OPEN, KisPositionLifecycleService
@@ -299,6 +300,9 @@ class AutomationProfileBuySchedulerService:
         now: datetime | None = None,
         enforce_custom_profile_live_guard: bool = False,
         trusted_scheduler_authority: bool = False,
+        account_snapshot_override: dict[str, Any] | None = None,
+        allow_retry_slot_replay: bool = False,
+        retry_started_at: datetime | None = None,
     ) -> dict[str, Any]:
         now_utc = _utc(now)
         profile = self._active_profile(db, now=now_utc)
@@ -327,7 +331,23 @@ class AutomationProfileBuySchedulerService:
         if slot is None or slot not in configured:
             return self._blocked('scheduled_slot_not_configured', profile=profile)
         if now_utc.astimezone(KST).strftime('%H:%M') != slot:
-            return self._blocked('missed_slot_replay_forbidden', profile=profile)
+            retry_origin = _utc(retry_started_at) if retry_started_at is not None else None
+            retry_elapsed = (
+                (now_utc - retry_origin).total_seconds()
+                if retry_origin is not None
+                else -1
+            )
+            retry_slot_replay_allowed = bool(
+                trusted_scheduler_authority
+                and allow_retry_slot_replay
+                and retry_origin is not None
+                and retry_origin.astimezone(KST).strftime('%H:%M') == slot
+                and retry_origin.astimezone(KST).date()
+                == now_utc.astimezone(KST).date()
+                and 0 <= retry_elapsed <= RETRY_SLOT_REPLAY_GRACE_SECONDS
+            )
+            if not retry_slot_replay_allowed:
+                return self._blocked('missed_slot_replay_forbidden', profile=profile)
         if not gate.get('allowed'):
             return self._blocked((gate.get('blocking_reasons') or ['live_order_not_possible'])[0], profile=profile, live_order_gate=gate)
         existing_slot = (
@@ -398,7 +418,18 @@ class AutomationProfileBuySchedulerService:
                 profile_exclusion_counts=profile_exclusion_counts,
                 live_order_gate=gate,
             )
-        selected, target, plan, top_score = self._select_candidate(db, profile, values, self._account_snapshot(db))
+        account_snapshot = (
+            account_snapshot_override
+            if account_snapshot_override is not None
+            else self._account_snapshot(db)
+        )
+        selected, target, plan, top_score = self._select_candidate(
+            db,
+            profile,
+            values,
+            account_snapshot,
+            use_account_snapshot_override=account_snapshot_override is not None,
+        )
         if selected is None:
             reason = 'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
             return self._blocked(reason, profile=profile, final_buy_score=top_score, live_order_gate=gate)
@@ -610,7 +641,15 @@ class AutomationProfileBuySchedulerService:
             'entry_trade_date_kst': now.astimezone(KST).date().isoformat(),
         }
 
-    def _select_candidate(self, db: Session, profile: dict[str, Any], values: list[dict[str, Any]], account: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], float | None]:
+    def _select_candidate(
+        self,
+        db: Session,
+        profile: dict[str, Any],
+        values: list[dict[str, Any]],
+        account: dict[str, Any],
+        *,
+        use_account_snapshot_override: bool = False,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], float | None]:
         values.sort(key=lambda item: -(_score(item, 'final_buy_score', 'final_score', 'buy_score') or -1))
         top_score = _score(values[0], 'final_buy_score', 'final_score', 'buy_score') if values else None
         for candidate in values:
@@ -620,6 +659,13 @@ class AutomationProfileBuySchedulerService:
             price = _score(candidate, 'current_price', 'price', 'simulated_price')
             if price is None or price <= 0:
                 continue
+            risk_kwargs = {
+                'profile_name': str(
+                    profile.get('profile_key') or profile.get('profile_name') or 'safe'
+                ),
+            }
+            if use_account_snapshot_override:
+                risk_kwargs['account_snapshot'] = account
             target = self.target_risk_service.evaluate_entry(
                 db,
                 {
@@ -632,7 +678,7 @@ class AutomationProfileBuySchedulerService:
                     'trigger_source': TRIGGER_SOURCE,
                     'dry_run': False,
                 },
-                profile_name=str(profile.get('profile_key') or profile.get('profile_name') or 'safe'),
+                **risk_kwargs,
             )
             target = dict(target or {})
             if target.get('approved') is not True:

@@ -6,6 +6,7 @@ Historical scheduler services remain callable through their compatibility
 routes, but are intentionally never started by the application.
 """
 
+import logging
 import math
 import threading
 import time
@@ -13,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.brokers.base import KisApiError
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
@@ -20,6 +22,15 @@ from app.db.database import SessionLocal
 from app.db.models import PositionLifecycle
 from app.schemas.strategy_dry_run_auto_buy import ProfileAwareDryRunAutoBuyRequest
 from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
+from app.services.account_snapshot_retry import (
+    MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+    RETRY_DELAY_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+    AccountSnapshotReadError,
+    account_snapshot_failure_diagnostics,
+    account_snapshot_retry_coordinator,
+    retryable_kis_account_snapshot_error,
+)
+from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
 )
@@ -49,6 +60,7 @@ KST = ZoneInfo("Asia/Seoul")
 POSITION_EXIT_POSITION_CACHE_SECONDS = 300
 POSITION_EXIT_FRESH_READ_SECONDS = 5
 CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"}
+logger = logging.getLogger(__name__)
 
 
 CANONICAL_TRIGGER_SOURCE = 'automation_scheduler'
@@ -75,8 +87,17 @@ class AutomationSchedulerService(SchedulerService):
 
     _is_production_scheduler_authority = True
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        retry_scheduler=None,
+        retry_service_factory=None,
+        retry_now_provider=None,
+    ):
         super().__init__()
+        self.retry_scheduler = retry_scheduler or account_snapshot_retry_coordinator.schedule
+        self.retry_service_factory = retry_service_factory
+        self.retry_now_provider = retry_now_provider or (lambda: datetime.now(KST))
         self.profile_aware_dry_run_auto_buy_service = None
         self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
@@ -203,6 +224,13 @@ class AutomationSchedulerService(SchedulerService):
             self.user_watchlist_analysis_scheduler_service.dispatcher_jobs(now=now)
         )
         status.update({
+            'account_snapshot_retry': {
+                'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                'pending_count': account_snapshot_retry_coordinator.pending_count(),
+                'admin_pending_count': account_snapshot_retry_coordinator.pending_count('admin'),
+                'user_pending_count': account_snapshot_retry_coordinator.pending_count('user'),
+            },
             'user_auto_trading_jobs': user_jobs,
             'user_auto_trading_job_count': len(user_jobs),
             'user_watchlist_analysis_jobs': watchlist_analysis_jobs,
@@ -728,6 +756,11 @@ class AutomationSchedulerService(SchedulerService):
         slot_name: str,
         now: datetime | None = None,
         slot_claimed: bool = False,
+        *,
+        retry_attempt: int = 1,
+        retry_started_at: datetime | None = None,
+        expected_profile_key: str | None = None,
+        expected_profile_id: int | None = None,
     ) -> dict[str, Any]:
         db = SessionLocal()
         try:
@@ -755,8 +788,72 @@ class AutomationSchedulerService(SchedulerService):
                 return self._create_scheduler_skip_log(
                     db, slot_name, "active_profile_or_slot_unavailable", market="KR", provider="kis"
                 )
+            profile = (schedule.get('profile') or {})
+            profile_key = str(schedule.get('profile_key') or profile.get('profile_key') or '')
+            profile_id = _safe_int(profile.get('id'))
+            configured_slots = {
+                self._profile_scheduler_slot(str(value))
+                for value in (schedule.get('analysis_times') or [])
+            }
+            retry_slot_expired = (
+                retry_started_at is not None
+                and self._as_kst(retry_started_at).date() != now_kst.date()
+            )
+            if (
+                expected_profile_key is not None
+                and (
+                    profile_key != expected_profile_key
+                    or (expected_profile_id is not None and profile_id != expected_profile_id)
+                    or slot not in configured_slots
+                    or retry_slot_expired
+                )
+            ):
+                return {
+                    'scheduler': self.__class__.__name__,
+                    'status': 'skipped',
+                    'result': 'SKIPPED',
+                    'reason': 'automation_profile_changed_before_account_snapshot_retry',
+                    'slot': slot,
+                    'real_order_submitted': False,
+                    'broker_submit_called': False,
+                }
 
-            portfolio = self._manage_portfolio_first(db, slot=slot, now=now_kst)
+            market_session = MarketSessionService().get_session_status(
+                'KR',
+                now=now_kst,
+            )
+            if market_session.get('is_market_open') is not True:
+                return {
+                    'scheduler': self.__class__.__name__,
+                    'status': 'skipped',
+                    'result': 'SKIPPED',
+                    'reason': 'market_session_closed',
+                    'profile_key': profile_key,
+                    'slot': slot,
+                    'submission_eligible': False,
+                    'real_order_submitted': False,
+                    'broker_submit_called': False,
+                }
+
+            try:
+                account_snapshot = self._account_snapshot_preflight(db)
+            except AccountSnapshotReadError as exc:
+                return self._account_snapshot_retry_result(
+                    slot=slot,
+                    now_kst=now_kst,
+                    profile_key=profile_key,
+                    profile_id=profile_id,
+                    error=exc,
+                    attempt=retry_attempt,
+                    retry_started_at=retry_started_at or now_kst,
+                )
+
+            portfolio = self._manage_portfolio_first(
+                db,
+                slot=slot,
+                now=now_kst,
+                account_snapshot=account_snapshot,
+            )
             held_positions = list((portfolio or {}).get('broker_positions') or [])
             critical_item = next(
                 (
@@ -833,6 +930,47 @@ class AutomationSchedulerService(SchedulerService):
                     },
                 }
 
+            entry_settings = effective_profile.get('entry') or {}
+            cutoff = str(entry_settings.get('no_new_entry_after') or '').strip()
+            cutoff_reached = bool(
+                len(cutoff) == 5
+                and cutoff[2] == ':'
+                and now_kst.strftime('%H:%M') >= cutoff
+            )
+            if (
+                market_session.get('is_entry_allowed_now') is not True
+                or cutoff_reached
+            ):
+                return {
+                    'scheduler': self.__class__.__name__,
+                    'status': 'blocked',
+                    'mode': str(authority.get('automation_mode') or 'test'),
+                    'execution_mode': str(authority.get('automation_mode') or 'test'),
+                    'profile_key': schedule.get('profile_key'),
+                    'slot': slot,
+                    'result': 'blocked',
+                    'reason': 'entry_window_closed',
+                    'risk_decision': {
+                        'approved': False,
+                        'reason': 'entry_window_closed',
+                        'source': 'market_session_gate',
+                    },
+                    'submission_eligible': False,
+                    'real_order_submitted': False,
+                    'broker_submit_called': False,
+                    'manual_submit_called': False,
+                    'portfolio': portfolio,
+                    'dry_run': None,
+                    'profile_buy': {
+                        'status': 'blocked',
+                        'action': 'hold',
+                        'reason': 'entry_window_closed',
+                        'broker_submit_called': False,
+                        'broker_buy_call_count': 0,
+                        'real_external_kis_submit_count': 0,
+                    },
+                }
+
             mode = str(authority.get("automation_mode") or "test").strip().lower()
             execution_authority = str(
                 authority.get("execution_authority") or mode.upper()
@@ -861,6 +999,9 @@ class AutomationSchedulerService(SchedulerService):
                     now=now_kst,
                     enforce_custom_profile_live_guard=True,
                     trusted_scheduler_authority=True,
+                    account_snapshot_override=account_snapshot,
+                    allow_retry_slot_replay=retry_attempt > 1,
+                    retry_started_at=retry_started_at,
                 )
             elif mode == "live":
                 profile_buy = {
@@ -1671,8 +1812,297 @@ class AutomationSchedulerService(SchedulerService):
         )
         return self.profile_aware_guarded_live_auto_exit_service
 
-    def _manage_portfolio_first(self, db, *, slot: str, now: datetime) -> dict[str, Any] | None:
+    def _account_snapshot_preflight(self, db) -> dict[str, Any]:
         service = self._profile_buy_scheduler_service(db)
+        client = getattr(service, 'client', None)
+        positions_loader = getattr(service, 'positions_loader', None)
+        orders_loader = getattr(service, 'open_orders_loader', None)
+        balance_loader = getattr(service, 'balance_loader', None)
+        try:
+            if any(callable(loader) for loader in (positions_loader, orders_loader, balance_loader)):
+                positions = (
+                    positions_loader(db)
+                    if callable(positions_loader)
+                    else client.list_positions()
+                )
+                open_orders = (
+                    orders_loader(db)
+                    if callable(orders_loader)
+                    else client.list_open_orders()
+                )
+                balance = (
+                    balance_loader(db)
+                    if callable(balance_loader)
+                    else client.get_account_balance()
+                )
+                if (
+                    not isinstance(positions, list)
+                    or not all(isinstance(item, dict) for item in positions)
+                    or not isinstance(open_orders, list)
+                    or not all(isinstance(item, dict) for item in open_orders)
+                    or not isinstance(balance, dict)
+                ):
+                    raise ValueError('kis_account_snapshot_invalid')
+                return {
+                    'positions': [dict(item) for item in positions],
+                    'open_orders': [dict(item) for item in open_orders],
+                    'balance': dict(balance),
+                    'fetch_success': True,
+                    'account_state_live_verified': True,
+                    'read_at': datetime.now(UTC).isoformat(),
+                }
+
+            state = KisAccountStateCacheService.get_or_create(client).get_account_state(
+                read_only=True,
+                require_fresh=True,
+                max_attempts=1,
+            )
+            if (
+                not isinstance(state, dict)
+                or state.get('fetch_success') is not True
+                or state.get('account_state_status') != 'available'
+                or state.get('account_state_live_verified') is not True
+            ):
+                details = state.get('error_details') if isinstance(state, dict) else {}
+                details = details if isinstance(details, dict) else {}
+                cause = KisApiError(
+                    'KIS account snapshot unavailable',
+                    details={
+                        'account_state_retryable': (
+                            (
+                                state.get('account_state_retryable') is True
+                                or state.get('account_state_error_category') == 'invalid_response'
+                            )
+                            if isinstance(state, dict)
+                            else False
+                        ),
+                        'error_type': (
+                            state.get('account_state_error_category')
+                            if isinstance(state, dict)
+                            else 'unknown'
+                        ),
+                        'http_status': (
+                            state.get('account_state_http_status')
+                            if isinstance(state, dict)
+                            else None
+                        ),
+                        'msg_cd': details.get('error_code'),
+                    },
+                )
+                raise AccountSnapshotReadError(
+                    cause,
+                    diagnostics={
+                        'failed_component': (
+                            state.get('account_state_failed_component')
+                            if isinstance(state, dict)
+                            else 'unknown'
+                        ),
+                        'error_category': (
+                            state.get('account_state_error_category')
+                            if isinstance(state, dict)
+                            else 'unknown'
+                        ),
+                    },
+                )
+            return state
+        except AccountSnapshotReadError:
+            raise
+        except Exception as exc:
+            raise AccountSnapshotReadError(exc) from exc
+
+    def _account_snapshot_retry_result(
+        self,
+        *,
+        slot: str,
+        now_kst: datetime,
+        profile_key: str,
+        profile_id: int | None,
+        error: AccountSnapshotReadError,
+        attempt: int,
+        retry_started_at: datetime,
+    ) -> dict[str, Any]:
+        retryable = retryable_kis_account_snapshot_error(error)
+        diagnostics = account_snapshot_failure_diagnostics(
+            error,
+            attempt=attempt,
+            retryable=retryable,
+        )
+        if retryable and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS:
+            if attempt == 1:
+                accepted = self._schedule_admin_account_snapshot_retry(
+                    slot=slot,
+                    trading_date=now_kst.date().isoformat(),
+                    profile_key=profile_key,
+                    profile_id=profile_id,
+                    retry_started_at=retry_started_at,
+                )
+                if not accepted:
+                    retryable = False
+                    diagnostics['retryable'] = False
+            if retryable:
+                logger.warning(
+                    'kis account snapshot retry scheduled scope=admin provider=kis market=KR profile_id=%s profile_key=%s slot=%s attempt=%s max_attempts=%s retry_in_seconds=%s retryable=true failure_stage=account_snapshot exception_type=%s',
+                    profile_id,
+                    profile_key,
+                    slot,
+                    attempt,
+                    ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                    ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    diagnostics['exception_type'],
+                )
+                return {
+                    'scheduler': self.__class__.__name__,
+                    'status': 'retry_pending',
+                    'result': 'retry_pending',
+                    'reason': f'account_snapshot_retry_pending_{attempt}_of_{ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS}',
+                    'profile_id': profile_id,
+                    'profile_key': profile_key,
+                    'slot': slot,
+                    'retry_policy': 'kis_account_snapshot',
+                    'attempts': attempt,
+                    'max_attempts': ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                    'retry_delay_seconds': ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+                    'failure_stage': 'account_snapshot',
+                    'real_order_submitted': False,
+                    'broker_submit_called': False,
+                }
+        reason = (
+            'account_snapshot_retry_exhausted'
+            if attempt >= ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS and retryable
+            else 'account_snapshot_unavailable'
+        )
+        event_name = (
+            'kis account snapshot retry exhausted'
+            if retryable and attempt >= ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS
+            else 'kis account snapshot failed without retry'
+        )
+        logger.error(
+            '%s scope=admin provider=kis market=KR profile_id=%s profile_key=%s slot=%s attempts=%s max_attempts=%s retry_delay_seconds=%s retryable=%s failure_stage=account_snapshot final_failure_stage=account_snapshot exception_type=%s',
+            event_name,
+            profile_id,
+            profile_key,
+            slot,
+            attempt,
+            ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+            ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            retryable,
+            diagnostics['exception_type'],
+        )
+        return {
+            'scheduler': self.__class__.__name__,
+            'status': 'failed',
+            'result': 'failed',
+            'reason': reason,
+            'profile_id': profile_id,
+            'profile_key': profile_key,
+            'slot': slot,
+            **diagnostics,
+            'real_order_submitted': False,
+            'broker_submit_called': False,
+        }
+
+    def _schedule_admin_account_snapshot_retry(
+        self,
+        *,
+        slot: str,
+        trading_date: str,
+        profile_key: str,
+        profile_id: int | None,
+        retry_started_at: datetime,
+    ) -> bool:
+        state = {'attempt': 2}
+
+        def retry_callback() -> int | None:
+            attempt = int(state['attempt'])
+            try:
+                retry_service = (
+                    self.retry_service_factory()
+                    if self.retry_service_factory is not None
+                    else self._new_account_snapshot_retry_service()
+                )
+                retry_now = retry_service.retry_now_provider()
+                result = retry_service._run_automation_tick(
+                    slot,
+                    retry_now,
+                    True,
+                    retry_attempt=attempt,
+                    retry_started_at=retry_started_at,
+                    expected_profile_key=profile_key,
+                    expected_profile_id=profile_id,
+                )
+            except Exception as exc:
+                logger.error(
+                    'kis account snapshot retry worker failed scope=admin provider=kis market=KR profile_id=%s profile_key=%s slot=%s attempt=%s max_attempts=%s exception_type=%s',
+                    profile_id,
+                    profile_key,
+                    slot,
+                    attempt,
+                    ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                    type(exc).__name__,
+                )
+                return None
+            if (
+                isinstance(result, dict)
+                and result.get('status') == 'retry_pending'
+                and attempt < ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS
+            ):
+                state['attempt'] = attempt + 1
+                return ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS
+            if (
+                isinstance(result, dict)
+                and result.get('status') != 'failed'
+                and result.get('status') != 'skipped'
+                and result.get('result') != 'failed'
+            ):
+                logger.info(
+                    'kis account snapshot retry recovered scope=admin provider=kis market=KR profile_id=%s profile_key=%s slot=%s attempt=%s max_attempts=%s',
+                    profile_id,
+                    profile_key,
+                    slot,
+                    attempt,
+                    ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
+                )
+            return None
+
+        retry_key = (
+            'admin',
+            profile_id if profile_id is not None else profile_key,
+            trading_date,
+            slot,
+        )
+        return bool(
+            self.retry_scheduler(
+                retry_key,
+                retry_callback,
+                delay_seconds=ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
+            )
+        )
+
+    def _new_account_snapshot_retry_service(self):
+        retry_service = AutomationSchedulerService(
+            retry_scheduler=self.retry_scheduler,
+            retry_now_provider=self.retry_now_provider,
+        )
+        retry_service.runtime_settings = self.runtime_settings
+        retry_service.automation_profiles = self.automation_profiles
+        return retry_service
+
+    def _manage_portfolio_first(
+        self,
+        db,
+        *,
+        slot: str,
+        now: datetime,
+        account_snapshot: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        service = self._profile_buy_scheduler_service(db)
+        positions = account_snapshot.get('positions') or []
+        held_positions = [
+            item
+            for item in (positions if isinstance(positions, list) else [])
+            if isinstance(item, dict)
+            and float(item.get('qty') or item.get('quantity') or item.get('hold_qty') or 0) > 0
+        ]
         lifecycle = getattr(service, "lifecycle_service", None)
         if lifecycle is not None and db.query(PositionLifecycle).filter(
             PositionLifecycle.status.in_(["open", "closing"])
@@ -1690,17 +2120,6 @@ class AutomationSchedulerService(SchedulerService):
                 'items': [],
                 'reason': 'no_open_lifecycle',
             }
-        positions_loader = getattr(service, 'positions_loader', None)
-        try:
-            positions = positions_loader(db) if callable(positions_loader) else service.client.list_positions()
-        except Exception:
-            positions = []
-        held_positions = [
-            item
-            for item in (positions if isinstance(positions, list) else [])
-            if isinstance(item, dict)
-            and float(item.get('qty') or item.get('quantity') or item.get('hold_qty') or 0) > 0
-        ]
         return {
             **(result or {}),
             'broker_positions': held_positions,
@@ -1714,6 +2133,13 @@ class AutomationSchedulerService(SchedulerService):
             for item in (result or {}).get("items", [])
             if isinstance(item, dict)
         )
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
 
 def _position_exit_held_position_count(positions: Any) -> int:
     if not isinstance(positions, list):

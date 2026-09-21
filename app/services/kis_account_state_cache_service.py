@@ -53,7 +53,13 @@ class KisAccountStateCacheService:
         with self._lock:
             self._cache = None
 
-    def get_account_state(self, *, read_only: bool = True, require_fresh: bool = False) -> dict[str, Any]:
+    def get_account_state(
+        self,
+        *,
+        read_only: bool = True,
+        require_fresh: bool = False,
+        max_attempts: int | None = None,
+    ) -> dict[str, Any]:
         del read_only
         now = datetime.now(UTC)
         ttl = float(getattr(self.settings, "kis_account_state_cache_ttl_seconds", 2.0))
@@ -64,7 +70,14 @@ class KisAccountStateCacheService:
             if age <= ttl:
                 cached.update({"source": "cache", "cache_age_seconds": age})
                 return cached
-        attempts = max(1, min(int(getattr(self.settings, "kis_account_state_max_attempts", 2) or 2), 3))
+        configured_attempts = getattr(self.settings, "kis_account_state_max_attempts", 2)
+        attempts = max(
+            1,
+            min(
+                int(configured_attempts if max_attempts is None else max_attempts),
+                3,
+            ),
+        )
         backoff = max(0.0, min(float(getattr(self.settings, "kis_account_state_retry_backoff_seconds", 0.2) or 0.2), 2.0))
         try:
             state = self._read_fresh_account_state(attempts=attempts, backoff=backoff, now=now)
@@ -317,9 +330,19 @@ def _account_error_diagnostics(exc: Exception) -> dict[str, Any]:
         category = "rate_limit"
     elif details.get("token_expired") or "token expired" in text:
         category = "token_expired"
-    elif isinstance(exc, TimeoutError) or "timeout" in text:
+    elif (
+        isinstance(exc, TimeoutError)
+        or "timeout" in text
+        or str(details.get("error_type") or "").lower()
+        in {"readtimeout", "connecttimeout", "timeout"}
+    ):
         category = "timeout"
-    elif isinstance(exc, (ConnectionError, OSError)) or "connection reset" in text:
+    elif (
+        isinstance(exc, (ConnectionError, OSError))
+        or "connection reset" in text
+        or str(details.get("error_type") or "").lower()
+        in {"connectionerror", "connectionreseterror", "chunkedencodingerror"}
+    ):
         category = "connection_error"
     elif status is not None and status >= 400:
         category = "http_error"

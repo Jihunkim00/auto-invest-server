@@ -54,6 +54,7 @@ class StrategyRiskBudgetService:
         market: str = "KR",
         profile_name: str | None = None,
         symbol: str | None = None,
+        account_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_provider = str(provider or "kis").strip().lower() or "kis"
         normalized_market = str(market or "KR").strip().upper() or "KR"
@@ -83,16 +84,28 @@ class StrategyRiskBudgetService:
             limit=100,
         )
         settings = self.runtime_settings.get_settings_read_only(db)
-        positions, position_notes = self._positions(
-            db,
-            normalized_provider,
-            normalized_market,
-        )
-        balance, balance_notes = self._balance(
-            db,
-            normalized_provider,
-            normalized_market,
-        )
+        if account_snapshot is None:
+            positions, position_notes = self._positions(
+                db,
+                normalized_provider,
+                normalized_market,
+            )
+            balance, balance_notes = self._balance(
+                db,
+                normalized_provider,
+                normalized_market,
+            )
+        else:
+            raw_positions = account_snapshot.get("positions")
+            raw_balance = account_snapshot.get("balance")
+            positions = (
+                [dict(item) for item in raw_positions if isinstance(item, dict)]
+                if isinstance(raw_positions, list)
+                else []
+            )
+            balance = dict(raw_balance) if isinstance(raw_balance, dict) else {}
+            position_notes = []
+            balance_notes = []
 
         monthly_return = _float(monthly.get("current_month_return_pct"))
         daily_return = _float(daily.get("pnl_pct"))

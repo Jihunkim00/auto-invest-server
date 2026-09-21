@@ -37,6 +37,7 @@ class TargetAwareRiskService:
         request: StrategyEntryRiskEvaluationRequest | dict[str, Any],
         *,
         profile_name: str | None = None,
+        account_snapshot: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = (
             request
@@ -49,6 +50,7 @@ class TargetAwareRiskService:
             market=payload.market,
             profile_name=profile_name,
             symbol=payload.symbol,
+            account_snapshot=account_snapshot,
         )
         profile = snapshot["_profile"]
         flags = list(snapshot["risk_flags"])

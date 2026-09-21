@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+
+from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
     AutomationProfileWatchlistSnapshot,
@@ -19,10 +21,16 @@ from app.db.models import (
 from app.services.market_session_service import MarketSessionService
 from app.schemas.automation_profile import AutomationProfileWriteRequest
 from app.services.automation_profile_service import AutomationProfileService
-from app.services.user_broker_account_service import UserBrokerAccountService
+from app.services.user_broker_account_service import (
+    UserBrokerAccountService,
+    UserBrokerAuthenticationError,
+    UserBrokerUnavailableError,
+)
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 from app.services.user_trading_execution_service import UserTradingExecutionService
+import app.services.user_auto_trading_scheduler_service as user_scheduler_module
+
 from app.services.user_auto_trading_scheduler_service import (
     USER_SCHEDULER_TRIGGER_SOURCE,
     UserAutoTradingCandidateService,
@@ -1031,3 +1039,339 @@ def test_user_scheduler_canonical_hold_blocks_below_profile_threshold_without_or
     assert item['real_order_submitted'] is False
     assert broker.buy_calls == []
     assert kis_client.buy_calls == []
+
+
+class DeferredAccountSnapshotRetries:
+    def __init__(self):
+        self.pending = []
+
+    def schedule(self, key, callback, *, delay_seconds):
+        if any(item[0] == key for item in self.pending):
+            return False
+        self.pending.append((key, callback, delay_seconds))
+        return True
+
+    def run_next(self, clock):
+        key, callback, delay_seconds = self.pending.pop(0)
+        clock[0] += timedelta(seconds=delay_seconds)
+        next_delay = callback()
+        if next_delay:
+            self.pending.append((key, callback, next_delay))
+        return next_delay
+
+
+def _retry_user_setup(db_session, monkeypatch, *, failures, permanent_error=None):
+    user = _user(db_session, f'retry-user-{id(db_session)}')
+    _configure_user(db_session, user, provider='kis')
+    _set_profile_schedule(db_session, user, ['09:10'])
+    scheduler, account, analysis, broker, kis_client = _harness()
+    retries = DeferredAccountSnapshotRetries()
+    clock = [datetime(2026, 9, 11, 0, 10, tzinfo=UTC)]
+    scheduler.retry_scheduler = retries.schedule
+    scheduler.retry_service_factory = lambda: scheduler
+    scheduler.now_provider = lambda: clock[0]
+
+    original = account.get_broker_snapshot
+    calls = {'count': 0}
+
+    def snapshot(db, requested_user, provider):
+        calls['count'] += 1
+        if permanent_error is not None:
+            raise permanent_error
+        if calls['count'] <= failures:
+            raise UserBrokerUnavailableError(
+                'temporary KIS account read failure',
+                details={'error_type': 'ReadTimeout'},
+            )
+        return original(db, requested_user, provider)
+
+    account.get_broker_snapshot = snapshot
+    monkeypatch.setattr(
+        user_scheduler_module,
+        'SessionLocal',
+        sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    return user, scheduler, account, analysis, broker, kis_client, retries, clock, calls
+
+
+def test_kis_snapshot_retry_recovers_on_second_attempt_without_new_claim(
+    db_session, monkeypatch
+):
+    user, scheduler, account, _analysis, broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=1)
+    )
+    management_calls = []
+    manage_positions = scheduler.position_management_service.manage
+
+    def track_management(*args, **kwargs):
+        management_calls.append(True)
+        return manage_positions(*args, **kwargs)
+
+    scheduler.position_management_service.manage = track_management
+
+    first = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    run_key = claim.run_key
+
+    assert first['result'] == 'retry_pending'
+    assert first['retry_pending'] == 1
+    assert claim.status == 'retry_pending'
+    assert claim.reason == 'account_snapshot_retry_pending_1_of_3'
+    assert len(retries.pending) == 1
+    assert retries.pending[0][2] == 30
+    assert calls['count'] == 1
+
+    retries.run_next(clock)
+    db_session.commit()
+    db_session.refresh(claim)
+
+    assert calls['count'] == 2
+    assert claim.status == 'completed'
+    assert claim.run_key == run_key
+    run = db_session.query(TradeRunLog).filter_by(
+        owner_user_id=user.id, run_key=run_key,
+    ).one()
+    retry_details = json.loads(run.response_payload)['account_snapshot_retry']
+    assert retry_details['attempts'] == 2
+    assert retry_details['max_attempts'] == 3
+    assert retries.pending == []
+    assert management_calls == [True]
+    assert len(broker.buy_calls) + len(broker.sell_calls) <= 1
+
+
+def test_kis_snapshot_retry_recovers_on_third_attempt(db_session, monkeypatch):
+    user, scheduler, _account, _analysis, broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=2)
+    )
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+
+    assert result['result'] == 'retry_pending'
+    assert len(retries.pending) == 1
+    assert retries.run_next(clock) == 30
+    assert len(retries.pending) == 1
+    assert retries.run_next(clock) is None
+    db_session.commit()
+
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    run = db_session.query(TradeRunLog).filter_by(
+        owner_user_id=user.id, run_key=claim.run_key,
+    ).one()
+    retry_details = json.loads(run.response_payload)['account_snapshot_retry']
+    assert calls['count'] == 3
+    assert claim.status == 'completed'
+    assert retry_details['attempts'] == 3
+    assert retries.pending == []
+    assert len(broker.buy_calls) + len(broker.sell_calls) <= 1
+
+
+def test_kis_snapshot_retry_exhausts_after_three_attempts_with_diagnostics(
+    db_session, monkeypatch
+):
+    user, scheduler, _account, _analysis, broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=3)
+    )
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+
+    assert result['result'] == 'retry_pending'
+    assert retries.run_next(clock) == 30
+    assert retries.run_next(clock) is None
+    db_session.commit()
+
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    run = db_session.query(TradeRunLog).filter_by(
+        owner_user_id=user.id, run_key=claim.run_key,
+    ).one()
+    response = json.loads(run.response_payload)
+    assert calls['count'] == 3
+    assert claim.status == 'failed'
+    assert claim.result == 'failed'
+    assert claim.reason == 'user_scheduler_processing_failed'
+    assert response['failure_stage'] == 'account_snapshot'
+    assert response['retry_policy'] == 'kis_account_snapshot'
+    assert response['attempts'] == 3
+    assert response['max_attempts'] == 3
+    assert response['retry_delay_seconds'] == 30
+    assert response['final_failure_stage'] == 'account_snapshot'
+    assert retries.pending == []
+    assert len(broker.buy_calls) + len(broker.sell_calls) == 0
+
+
+def test_kis_authentication_failure_is_not_retried(db_session, monkeypatch):
+    user, scheduler, _account, _analysis, _broker, _kis, retries, clock, calls = (
+        _retry_user_setup(
+            db_session,
+            monkeypatch,
+            failures=0,
+            permanent_error=UserBrokerAuthenticationError('authentication rejected'),
+        )
+    )
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    assert result['result'] == 'failed'
+    assert result['failed'] == 1
+    assert calls['count'] == 1
+    assert claim.status == 'failed'
+    assert retries.pending == []
+
+
+def test_kis_retry_pending_user_does_not_block_another_users_slot(
+    db_session, monkeypatch
+):
+    first_user = _user(db_session, 'retry-isolated-user-1')
+    second_user = _user(db_session, 'retry-isolated-user-2')
+    for user in (first_user, second_user):
+        _configure_user(db_session, user, provider='kis')
+        _set_profile_schedule(db_session, user, ['09:10'])
+    scheduler, account, _analysis, _broker, _kis = _harness()
+    retries = DeferredAccountSnapshotRetries()
+    scheduler.retry_scheduler = retries.schedule
+    scheduler.retry_service_factory = lambda: scheduler
+    clock = [datetime(2026, 9, 11, 0, 10, tzinfo=UTC)]
+    scheduler.now_provider = lambda: clock[0]
+    original = account.get_broker_snapshot
+    calls = {int(first_user.id): 0, int(second_user.id): 0}
+
+    def snapshot(db, user, provider):
+        calls[int(user.id)] += 1
+        if int(user.id) == int(first_user.id) and calls[int(user.id)] == 1:
+            raise UserBrokerUnavailableError(
+                'temporary KIS account read failure',
+                details={'error_type': 'ConnectionError'},
+            )
+        return original(db, user, provider)
+
+    account.get_broker_snapshot = snapshot
+    monkeypatch.setattr(
+        user_scheduler_module,
+        'SessionLocal',
+        sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+
+    first_claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=first_user.id, scheduler_slot='09:10',
+    ).one()
+    second_claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=second_user.id, scheduler_slot='09:10',
+    ).one()
+    assert result['retry_pending'] == 1
+    assert result['completed'] == 1
+    assert first_claim.status == 'retry_pending'
+    assert second_claim.status == 'completed'
+    assert calls[int(second_user.id)] == 1
+    assert len(retries.pending) == 1
+
+
+def test_post_snapshot_analysis_failure_does_not_enter_snapshot_retry(
+    db_session, monkeypatch
+):
+    user, scheduler, _account, analysis, _broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=0)
+    )
+    def fail_after_snapshot(*_args, **_kwargs):
+        raise RuntimeError('post_snapshot_candidate_failure')
+
+    scheduler._select_candidates = fail_after_snapshot
+
+    result = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+
+    assert result['result'] == 'failed'
+    assert calls['count'] == 1
+    assert retries.pending == []
+
+
+def test_kis_retry_worker_exception_finalizes_existing_claim(
+    db_session, monkeypatch
+):
+    user, scheduler, _account, _analysis, broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=1)
+    )
+    first = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+    assert first['result'] == 'retry_pending'
+
+    def fail_retry_setup(*_args, **_kwargs):
+        raise RuntimeError('retry_setup_failed')
+
+    scheduler._existing_settings = fail_retry_setup
+    assert retries.run_next(clock) is None
+    db_session.expire_all()
+
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    assert claim.status == 'failed'
+    assert claim.result == 'failed'
+    assert claim.reason == 'account_snapshot_retry_worker_failed'
+    assert calls['count'] == 1
+    assert broker.buy_calls == []
+    assert broker.sell_calls == []
+    assert retries.pending == []
+
+
+def test_kis_retry_rechecks_user_trading_enabled_before_snapshot(
+    db_session, monkeypatch
+):
+    user, scheduler, _account, _analysis, broker, _kis, retries, clock, calls = (
+        _retry_user_setup(db_session, monkeypatch, failures=1)
+    )
+    manage_calls = []
+    scheduler.position_management_service.manage = (
+        lambda *_args, **_kwargs: manage_calls.append(True)
+    )
+    first = scheduler.run_provider_once(
+        db_session, provider='kis', scheduler_slot='09:10', now=clock[0],
+    )
+    db_session.commit()
+    assert first['result'] == 'retry_pending'
+
+    settings = db_session.query(UserTradingSettings).filter_by(
+        user_id=user.id,
+    ).one()
+    settings.enabled = False
+    db_session.commit()
+
+    assert retries.run_next(clock) is None
+    db_session.expire_all()
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id, scheduler_slot='09:10',
+    ).one()
+    assert claim.status == 'completed'
+    assert claim.result == 'blocked'
+    assert claim.reason == 'auto_trading_disabled_before_account_snapshot_retry'
+    assert calls['count'] == 1
+    assert manage_calls == []
+    assert broker.buy_calls == []
+    assert broker.sell_calls == []

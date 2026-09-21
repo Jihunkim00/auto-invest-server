@@ -24,9 +24,12 @@ from app.services.user_broker_account_service import (
     KIS_TOKEN_PATH,
     UserBrokerAccountService,
     UserBrokerAuthenticationError,
+    UserBrokerUnavailableError,
+    UserKisReadOnlyClient,
     UserKisTokenManager,
     get_user_kis_token_manager,
 )
+from app.services.account_snapshot_retry import retryable_kis_account_snapshot_error
 from app.services.user_broker_credential_service import (
     UserBrokerCredentialService,
 )
@@ -480,3 +483,53 @@ def test_encryption_and_decrypt_failures_are_safe_account_errors(db_session):
         assert 'storage-secret' not in invalid.text
     finally:
         app.dependency_overrides.clear()
+
+
+def test_malformed_user_kis_snapshot_is_a_retryable_read_failure():
+    class TokenManager:
+        def get_token(self, **_kwargs):
+            return 'fake-token'
+
+        def invalidate(self, **_kwargs):
+            return None
+
+    class MalformedBalanceHttp:
+        def get(self, url, **_kwargs):
+            assert url.endswith(KIS_BALANCE_PATH)
+            return FakeResponse({
+                'rt_cd': '0',
+                'output1': {},
+                'output2': [],
+            })
+
+    client = UserKisReadOnlyClient(
+        user_id=7,
+        credentials={
+            'environment': 'live',
+            'app_key': 'fake-key',
+            'app_secret': 'fake-secret',
+            'account_no': '12345678',
+            'account_product_code': '01',
+        },
+        credential_identity='test-credential',
+        http_client=MalformedBalanceHttp(),
+        token_manager=TokenManager(),
+    )
+
+    with pytest.raises(UserBrokerUnavailableError) as raised:
+        client.get_snapshot()
+
+    assert raised.value.details['error_type'] == 'unexpected_shape'
+    assert retryable_kis_account_snapshot_error(raised.value) is True
+
+
+def test_permanent_user_kis_account_rejection_is_not_retryable():
+    error = UserBrokerUnavailableError(
+        'user KIS account request failed',
+        details={
+            'msg_cd': 'PERMANENT_ACCOUNT_REJECTION',
+            'msg1': 'account information rejected',
+        },
+    )
+
+    assert retryable_kis_account_snapshot_error(error) is False

@@ -40,6 +40,10 @@ class UserBrokerAuthenticationError(RuntimeError):
 class UserBrokerUnavailableError(RuntimeError):
     '''A user broker read failed for a non-authentication reason.'''
 
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None):
+        self.details = dict(details or {})
+        super().__init__(message)
+
 
 class UserBrokerEncryptionUnavailableError(RuntimeError):
     '''The user credential encryption key is unavailable.'''
@@ -155,11 +159,13 @@ class UserKisReadOnlyClient:
             tr_id=KIS_BALANCE_TR_IDS[self.environment],
             params=self._balance_params(),
         )
+        _require_kis_balance_shape(balance_response)
         orders_response = self._get(
             KIS_OPEN_ORDERS_PATH,
             tr_id=KIS_OPEN_ORDERS_TR_ID,
             params=self._open_orders_params(),
         )
+        _require_kis_open_orders_shape(orders_response)
         return _normalize_kis_snapshot(balance_response, orders_response)
 
     def _get(self, path: str, *, tr_id: str, params: dict[str, str]) -> dict[str, Any]:
@@ -212,7 +218,10 @@ class UserKisReadOnlyClient:
                 url, params=params, headers=headers, timeout=self.timeout_seconds
             )
         except Exception as exc:
-            raise UserBrokerUnavailableError('user KIS account request failed') from exc
+            raise UserBrokerUnavailableError(
+                'user KIS account request failed',
+                details={'error_type': type(exc).__name__},
+            ) from exc
 
     def _balance_params(self) -> dict[str, str]:
         return {
@@ -662,18 +671,61 @@ def _require_kis_read_response(response) -> dict[str, Any]:
     if status in {401, 403}:
         raise UserBrokerAuthenticationError('user KIS authentication failed')
     if status >= 400:
-        raise UserBrokerUnavailableError('user KIS account request failed')
+        raise UserBrokerUnavailableError(
+            'user KIS account request failed',
+            details={'http_status': status, 'error_type': 'http_error'},
+        )
     try:
         payload = response.json()
     except Exception as exc:
-        raise UserBrokerUnavailableError('user KIS response was invalid') from exc
+        raise UserBrokerUnavailableError(
+            'user KIS response was invalid',
+            details={'error_type': 'invalid_json'},
+        ) from exc
     if not isinstance(payload, dict):
-        raise UserBrokerUnavailableError('user KIS response had an unexpected shape')
+        raise UserBrokerUnavailableError(
+            'user KIS response had an unexpected shape',
+            details={'error_type': 'unexpected_shape'},
+        )
     if str(payload.get('rt_cd', '0') or '0') not in {'', '0'}:
         if _kis_auth_failure(payload):
             raise UserBrokerAuthenticationError('user KIS authentication failed')
-        raise UserBrokerUnavailableError('user KIS account request failed')
+        raise UserBrokerUnavailableError(
+            'user KIS account request failed',
+            details={
+                'msg_cd': str(payload.get('msg_cd') or ''),
+                'msg1': str(payload.get('msg1') or ''),
+            },
+        )
     return payload
+
+
+def _require_kis_balance_shape(payload: Mapping[str, Any]) -> None:
+    summary = payload.get('output2')
+    positions = payload.get('output1')
+    summary_rows = summary if isinstance(summary, list) else [summary]
+    if (
+        not isinstance(positions, list)
+        or not isinstance(summary, (list, dict))
+        or any(not isinstance(row, dict) for row in positions)
+        or any(not isinstance(row, dict) for row in summary_rows)
+    ):
+        raise UserBrokerUnavailableError(
+            'user KIS account response had an unexpected shape',
+            details={'error_type': 'unexpected_shape'},
+        )
+
+
+def _require_kis_open_orders_shape(payload: Mapping[str, Any]) -> None:
+    orders = payload.get('output')
+    if (
+        not isinstance(orders, list)
+        or any(not isinstance(row, dict) for row in orders)
+    ):
+        raise UserBrokerUnavailableError(
+            'user KIS open orders response had an unexpected shape',
+            details={'error_type': 'unexpected_shape'},
+        )
 
 
 def _require_kis_order_response(response) -> dict[str, Any]:

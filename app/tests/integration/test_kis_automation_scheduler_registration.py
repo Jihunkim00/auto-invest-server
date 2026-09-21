@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy.orm import sessionmaker
+
+from app.brokers.base import KisApiError
+from app.db.models import UserAutoTradingSlotClaim, User, TradeRunLog
 
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, TradeRunLog
@@ -24,6 +28,12 @@ from app.tests.integration.test_kis_automation_scheduler_replay import (
     candidate,
 )
 import app.services.automation_scheduler_service as automation_scheduler_module
+from app.tests.test_user_auto_trading_scheduler_pr129 import (
+    _configure_user,
+    _harness as _user_harness,
+    _set_profile_schedule,
+    _user,
+)
 
 
 def _canonical_scheduler(harness, monkeypatch):
@@ -330,4 +340,246 @@ def test_live_retained_hard_gate_failure_never_submits(
     assert result['reason']
     assert result['submission_eligible'] is False
     assert len(harness.broker.buy_calls) == 0
+    assert harness.client.external_kis_submit_count == 0
+
+
+class _DeferredRetryQueue:
+    def __init__(self):
+        self.pending = []
+
+    def schedule(self, key, callback, *, delay_seconds):
+        if any(item[0] == key for item in self.pending):
+            return False
+        self.pending.append((key, callback, delay_seconds))
+        return True
+
+    def run_next(self, clock):
+        key, callback, delay_seconds = self.pending.pop(0)
+        clock.current += timedelta(seconds=delay_seconds)
+        next_delay = callback()
+        if next_delay:
+            self.pending.append((key, callback, next_delay))
+        return next_delay
+
+
+def _admin_retry_service_factory(harness, queue):
+    def create():
+        service = AutomationSchedulerService(
+            retry_scheduler=queue.schedule,
+            retry_now_provider=harness.clock.now,
+        )
+        service.runtime_settings = harness.runtime
+        service.automation_profiles = harness.profiles
+        service.profile_aware_dry_run_auto_buy_service = (
+            harness.strategy_scheduler.dry_run_service
+        )
+        service.automation_profile_buy_scheduler_service = harness.profile_buy
+        return service
+    return create
+
+
+def _configure_admin_retry_scheduler(db_session, harness, monkeypatch, queue):
+    maker = sessionmaker(bind=db_session.get_bind(), expire_on_commit=False)
+    monkeypatch.setattr(automation_scheduler_module, 'SessionLocal', maker)
+    scheduler = AutomationSchedulerService(
+        retry_scheduler=queue.schedule,
+        retry_service_factory=_admin_retry_service_factory(harness, queue),
+        retry_now_provider=harness.clock.now,
+    )
+    scheduler.runtime_settings = harness.runtime
+    scheduler.automation_profiles = harness.profiles
+    scheduler.profile_aware_dry_run_auto_buy_service = (
+        harness.strategy_scheduler.dry_run_service
+    )
+    scheduler.automation_profile_buy_scheduler_service = harness.profile_buy
+    return scheduler
+
+
+def test_admin_kis_snapshot_retry_reuses_slot_and_submits_at_most_once(
+    db_session, monkeypatch,
+):
+    harness = build_harness(db_session, monkeypatch, mode='live')
+    queue = _DeferredRetryQueue()
+    scheduler = _configure_admin_retry_scheduler(
+        db_session, harness, monkeypatch, queue,
+    )
+    original_positions = harness.profile_buy.positions_loader
+    calls = {'count': 0}
+
+    def fail_once(db):
+        calls['count'] += 1
+        if calls['count'] == 1:
+            raise KisApiError(
+                'temporary KIS account read failure',
+                details={'error_type': 'ReadTimeout'},
+            )
+        return original_positions(db)
+
+    harness.profile_buy.positions_loader = fail_once
+
+    first = scheduler.run_once(slot='09:10', now=harness.clock.now())
+    duplicate = scheduler.run_once(slot='09:10', now=harness.clock.now())
+    assert first is not None, scheduler._last_scheduler_error
+    assert first['status'] == 'retry_pending'
+    assert first['slot'] == '09:10'
+    assert duplicate['reason'] == 'scheduler_slot_already_run'
+    assert calls['count'] == 1
+    assert harness.preview.calls == []
+    assert harness.validation.calls == []
+    assert harness.broker.buy_calls == []
+    assert len(queue.pending) == 1
+    assert queue.pending[0][2] == 30
+
+    assert queue.run_next(harness.clock) is None
+    assert calls['count'] == 2
+    assert len(harness.preview.calls) == 1
+    assert len(harness.broker.buy_calls) == 1
+    assert harness.client.external_kis_submit_count == 0
+    assert queue.pending == []
+
+
+def test_admin_kis_snapshot_retry_exhausts_after_three_attempts(
+    db_session, monkeypatch, caplog,
+):
+    harness = build_harness(db_session, monkeypatch, mode='live')
+    queue = _DeferredRetryQueue()
+    scheduler = _configure_admin_retry_scheduler(
+        db_session, harness, monkeypatch, queue,
+    )
+    calls = {'count': 0}
+
+    def always_fail(_db):
+        calls['count'] += 1
+        raise KisApiError(
+            'temporary KIS account read failure',
+            details={'error_type': 'ConnectionError'},
+        )
+
+    harness.profile_buy.positions_loader = always_fail
+
+    first = scheduler.run_once(slot='09:10', now=harness.clock.now())
+    assert first['status'] == 'retry_pending'
+    assert queue.run_next(harness.clock) == 30
+    assert queue.run_next(harness.clock) is None
+
+    assert calls['count'] == 3
+    assert len(queue.pending) == 0
+    exhausted = next(
+        record.getMessage()
+        for record in caplog.records
+        if 'kis account snapshot retry exhausted scope=admin' in record.getMessage()
+    )
+    assert 'profile_id=' in exhausted
+    assert 'slot=09:10' in exhausted
+    assert 'attempts=3' in exhausted
+    assert 'max_attempts=3' in exhausted
+    assert 'retry_delay_seconds=30' in exhausted
+    assert 'final_failure_stage=account_snapshot' in exhausted
+    assert harness.validation.calls == []
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0
+
+
+def test_admin_retry_pending_does_not_block_regular_user_slot(
+    db_session, monkeypatch,
+):
+    harness = build_harness(db_session, monkeypatch, mode='live')
+    queue = _DeferredRetryQueue()
+    scheduler = _configure_admin_retry_scheduler(
+        db_session, harness, monkeypatch, queue,
+    )
+    harness.profile_buy.positions_loader = lambda _db: (_ for _ in ()).throw(
+        KisApiError(
+            'temporary KIS account read failure',
+            details={'error_type': 'ReadTimeout'},
+        )
+    )
+
+    pending = scheduler.run_once(slot='09:10', now=harness.clock.now())
+    assert pending['status'] == 'retry_pending'
+    assert len(queue.pending) == 1
+
+    user = _user(db_session, 'admin-retry-does-not-block-user')
+    _configure_user(db_session, user, provider='kis')
+    _set_profile_schedule(db_session, user, ['09:10'])
+    user_scheduler, _account, _analysis, _broker, _kis = _user_harness()
+    user_result = user_scheduler.run_provider_once(
+        db_session,
+        provider='kis',
+        scheduler_slot='09:10',
+        now=UTC_NOW,
+    )
+
+    claim = db_session.query(UserAutoTradingSlotClaim).filter_by(
+        user_id=user.id,
+        provider='kis',
+        scheduler_slot='09:10',
+    ).one()
+    assert user_result['completed'] == 1
+    assert claim.status == 'completed'
+    assert len(queue.pending) == 1
+
+
+
+def test_admin_malformed_account_snapshot_retries_before_analysis(
+    db_session, monkeypatch,
+):
+    harness = build_harness(db_session, monkeypatch, mode='live')
+    queue = _DeferredRetryQueue()
+    scheduler = _configure_admin_retry_scheduler(
+        db_session, harness, monkeypatch, queue,
+    )
+    original_positions = harness.profile_buy.positions_loader
+    calls = {'count': 0}
+
+    def malformed_once(db):
+        calls['count'] += 1
+        if calls['count'] == 1:
+            return {'unexpected': 'shape'}
+        return original_positions(db)
+
+    harness.profile_buy.positions_loader = malformed_once
+    first = scheduler.run_once(slot='09:10', now=harness.clock.now())
+
+    assert first['status'] == 'retry_pending'
+    assert calls['count'] == 1
+    assert harness.preview.calls == []
+    assert harness.validation.calls == []
+    assert queue.run_next(harness.clock) is None
+    assert calls['count'] == 2
+    assert len(harness.preview.calls) == 1
+    assert len(harness.broker.buy_calls) == 1
+    assert harness.client.external_kis_submit_count == 0
+
+
+def test_admin_third_retry_allows_bounded_account_read_latency(
+    db_session, monkeypatch,
+):
+    harness = build_harness(db_session, monkeypatch, mode='live')
+    queue = _DeferredRetryQueue()
+    scheduler = _configure_admin_retry_scheduler(
+        db_session, harness, monkeypatch, queue,
+    )
+    original_positions = harness.profile_buy.positions_loader
+    calls = {'count': 0}
+
+    def slow_fail_twice(db):
+        calls['count'] += 1
+        if calls['count'] <= 2:
+            harness.clock.current += timedelta(seconds=20)
+            raise KisApiError(
+                'temporary KIS account read failure',
+                details={'error_type': 'ReadTimeout'},
+            )
+        return original_positions(db)
+
+    harness.profile_buy.positions_loader = slow_fail_twice
+    first = scheduler.run_once(slot='09:10', now=harness.clock.now())
+
+    assert first['status'] == 'retry_pending'
+    assert queue.run_next(harness.clock) == 30
+    assert queue.run_next(harness.clock) is None
+    assert calls['count'] == 3
+    assert len(harness.preview.calls) == 1
+    assert len(harness.broker.buy_calls) == 1
     assert harness.client.external_kis_submit_count == 0
