@@ -582,3 +582,31 @@ def test_ops_settings_blocks_direct_operation_test3_real_orders_enable(client):
 
     settings = client.get("/ops/settings").json()
     assert settings["operation_test3_allow_real_orders"] is False
+
+
+def test_ops_settings_persists_selectable_c_entry_mode(client):
+    selected = client.put(
+        "/ops/settings",
+        json={"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+    assert selected.status_code == 200
+    assert selected.json()["settings"]["quant_selection_mode"] == "A_TOP5_C_GPT"
+
+    current = client.get("/ops/settings")
+    assert current.status_code == 200
+    assert current.json()["quant_selection_mode"] == "A_TOP5_C_GPT"
+
+    restored = client.put(
+        "/ops/settings",
+        json={"quant_selection_mode": "A_ONLY"},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["settings"]["quant_selection_mode"] == "A_ONLY"
+
+
+def test_ops_settings_rejects_invalid_quant_selection_mode(client):
+    response = client.put(
+        "/ops/settings",
+        json={"quant_selection_mode": "A_THEN_B"},
+    )
+    assert response.status_code == 422

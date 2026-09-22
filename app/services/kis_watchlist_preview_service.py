@@ -329,7 +329,11 @@ class KisWatchlistPreviewService:
                 c = item.get("shadow_c") if isinstance(item.get("shadow_c"), dict) else {}
                 c_score = _score_or_none(c.get("reversal_score_c"))
                 c_status = str(c.get("c_status") or "unavailable")
-                c_passed = c_status == "analyzed" and c_score is not None and c_score >= C_MIN_ENTRY_SCORE
+
+                c_ready = c_status == "analyzed" and c_score is not None
+                c_passed = c_ready and c_score >= C_MIN_ENTRY_SCORE
+
+
                 item["quant_c_score"] = c_score
                 item["quant_c_status"] = c_status
                 item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
@@ -346,6 +350,11 @@ class KisWatchlistPreviewService:
                 if c_passed:
                     active_c_candidates.append(item)
             runtime_quant_ranked_candidates = active_c_candidates
+            gpt_target_symbols = [
+                str(item.get("symbol"))
+                for item in runtime_quant_ranked_candidates
+                if item.get("symbol")
+            ]
 
         gpt_used = False
         gpt_reuse_count = 0
@@ -493,6 +502,24 @@ class KisWatchlistPreviewService:
                 shadow_c = items_by_symbol.get(symbol, {}).get("shadow_c")
                 if isinstance(shadow_c, dict):
                     item["shadow_c"] = shadow_c
+                if active_c_mode:
+                    active_item = next((row for row in runtime_quant_ranked_candidates if str(row.get("symbol")) == symbol), {})
+                    item["quant_a_score"] = active_item.get("quant_a_score")
+                    item["quant_a_rank"] = active_item.get("quant_a_rank")
+                    item["selected_by_a_top5"] = True
+                    item["quant_c_score"] = active_item.get("quant_c_score")
+                    item["quant_c_status"] = active_item.get("quant_c_status", "unavailable")
+                    item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
+                    item["quant_c_gate_passed"] = True
+                    item["entry_quant_score"] = active_item.get("entry_quant_score")
+                    item["final_buy_score"] = self._blend_score(item["entry_quant_score"], item.get("ai_buy_score"))
+                    item["final_entry_score"] = item["final_buy_score"]
+                    item["final_entry_threshold"] = FINAL_ENTRY_MIN_SCORE
+                    item["final_entry_gate_passed"] = bool(item["final_buy_score"] is not None and item["final_buy_score"] >= FINAL_ENTRY_MIN_SCORE)
+                    item["score"] = item["final_buy_score"]
+                    if not item["final_entry_gate_passed"]:
+                        item["reason"] = "final_score_below_threshold"
+                        item["block_reason"] = "final_score_below_threshold"
                 items_by_symbol[symbol] = item
             gpt_completed_symbols = [
                 str(item.get("symbol"))
@@ -548,14 +575,19 @@ class KisWatchlistPreviewService:
             for final_rank, item in enumerate(final_ranked_candidates, start=1):
                 item["final_rank"] = final_rank
                 item["final_selected"] = final_rank == 1
-            assert {
+            completed_symbols = {
                 normalize_symbol_identity(symbol)
                 for symbol in gpt_completed_symbols
-            } == {
+            }
+            final_symbols = {
                 normalize_symbol_identity(item.get("symbol"))
                 for item in final_ranked_candidates
                 if item.get("final_rank") is not None
             }
+            if active_c_mode:
+                assert final_symbols <= completed_symbols
+            else:
+                assert completed_symbols == final_symbols
             if final_ranked_candidates:
                 assert sum(
                     bool(item.get("final_selected"))
@@ -594,7 +626,24 @@ class KisWatchlistPreviewService:
             quant_candidates = quant_ranked_candidates
             researched_candidates = list(final_ranked_candidates)
         else:
-            final_ranked_candidates = self._rank_final_candidates(items)
+            if active_c_mode:
+                final_ranked_candidates = self._rank_final_candidates([
+                    item
+                    for item in items
+                    if item.get("selected_by_a_top5")
+                    and item.get("quant_c_gate_passed")
+                    and str(item.get("gpt_analysis_status") or "").lower() == "completed"
+                    and bool(item.get("gpt_used"))
+                    and _score_or_none(item.get("ai_buy_score")) is not None
+                    and _score_or_none(item.get("ai_sell_score")) is not None
+                    and _score_or_none(item.get("final_entry_score")) is not None
+                    and _score_or_none(item.get("final_entry_score")) >= FINAL_ENTRY_MIN_SCORE
+                ])
+                for final_rank, item in enumerate(final_ranked_candidates, start=1):
+                    item["final_rank"] = final_rank
+                    item["final_selected"] = final_rank == 1
+            else:
+                final_ranked_candidates = self._rank_final_candidates(items)
             quant_candidates = self._rank_quant_candidates(items)
             researched_candidates = [
                 item

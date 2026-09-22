@@ -1085,3 +1085,117 @@ def test_kis_preview_shares_one_market_context_snapshot_with_gpt_candidates(
     assert all(limit == 5 for _, _, limit in disclosure_symbols)
     assert body["market_context"] == context
     assert body["market_context_summary"]["market_context_as_of"] == context["as_of"]
+
+
+def _install_active_c_preview_fakes(monkeypatch, *, c_score):
+    monkeypatch.setattr(
+        "app.services.runtime_setting_service.RuntimeSettingService.get_settings_read_only",
+        lambda self, db: {"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.get_domestic_daily_bars",
+        lambda self, symbol, limit=120: _daily_bars(60),
+    )
+
+    def fake_shadow_c(
+        self,
+        *,
+        quant_ranked_candidates,
+        market_snapshots,
+        items_by_symbol,
+        intraday_snapshots_by_symbol,
+        decision_timestamp,
+    ):
+        for index, item in enumerate(quant_ranked_candidates[:5]):
+            score = c_score(index)
+            item["shadow_c"] = {
+                "c_status": "analyzed" if score is not None else "failed_soft",
+                "reversal_score_c": score,
+            }
+            items_by_symbol[str(item["symbol"])] = item
+        return {
+            "enabled": True,
+            "candidate_limit": 5,
+            "analyzed_count": sum(c_score(i) is not None for i in range(5)),
+            "partial_count": 0,
+            "failed_count": sum(c_score(i) is None for i in range(5)),
+            "stale_count": 0,
+            "c_shadow_ranked_symbols": [],
+            "c_would_change_top_candidate": False,
+        }
+
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisWatchlistPreviewService._run_shadow_c",
+        fake_shadow_c,
+    )
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        lambda self, **kwargs: KisGptPreview(
+            gpt_used=True,
+            action_hint="candidate",
+            gpt_reason="怨듯넻 ?쒖옣 而⑦뀓?ㅽ듃",
+            warnings=[],
+            ai_buy_score=75.0,
+            ai_sell_score=18.0,
+            confidence=0.8,
+        ),
+    )
+
+
+def test_kis_preview_active_c_noncanonical_gates_before_gpt(monkeypatch, client):
+    gpt_calls = []
+    _install_active_c_preview_fakes(monkeypatch, c_score=lambda index: 72.0 if index == 0 else 69.0)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        lambda self, **kwargs: (
+            gpt_calls.append(kwargs["symbol"])
+            or KisGptPreview(
+                gpt_used=True,
+                action_hint="candidate",
+                gpt_reason="怨듯넻 ?쒖옣 而⑦뀓?ㅽ듃",
+                warnings=[],
+                ai_buy_score=75.0,
+                ai_sell_score=18.0,
+                confidence=0.8,
+            )
+        ),
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(gpt_calls) == 1
+    assert body["quant_experiment"]["selection_mode"] == "A_TOP5_C_GPT"
+    assert len(body["final_ranked_candidates"]) == 1
+    candidate = body["final_ranked_candidates"][0]
+    assert candidate["selected_by_a_top5"] is True
+    assert candidate["quant_c_score"] == 72.0
+    assert candidate["quant_c_status"] == "analyzed"
+    assert candidate["quant_c_gate_passed"] is True
+    assert candidate["final_entry_score"] == 72.75
+    assert candidate["final_entry_gate_passed"] is True
+    assert body["preview_only"] is True
+    assert body["real_order_submitted"] is False
+    assert body["broker_submit_called"] is False
+    assert body["manual_submit_called"] is False
+
+
+def test_kis_preview_active_c_unavailable_fails_closed_before_gpt(monkeypatch, client):
+    gpt_calls = []
+    _install_active_c_preview_fakes(monkeypatch, c_score=lambda index: None)
+    monkeypatch.setattr(
+        "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
+        lambda self, **kwargs: gpt_calls.append(kwargs["symbol"]),
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert gpt_calls == []
+    assert body["final_ranked_candidates"] == []
+    top5 = [item for item in body["items"] if item.get("selected_by_a_top5")]
+    assert len(top5) == 5
+    assert all(item["quant_c_gate_passed"] is False for item in top5)
+    assert all(item["reason"] == "c_quant_unavailable" for item in top5)
