@@ -1058,7 +1058,7 @@ class RuntimeSettingService:
     def _finalize_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         selection_mode = str(settings.get('quant_selection_mode') or 'A_ONLY').strip().upper()
         settings['quant_selection_mode'] = (
-            selection_mode if selection_mode in {'A_ONLY', 'A_THEN_B'} else 'A_ONLY'
+            selection_mode if selection_mode in {'A_ONLY', 'A_TOP5_C_GPT'} else 'A_ONLY'
         )
         settings['quant_shadow_b_enabled'] = bool(
             settings.get('quant_shadow_b_enabled', True)
@@ -3071,7 +3071,9 @@ class RuntimeSettingService:
             value = payload[key]
             if key == 'quant_selection_mode':
                 mode = str(value or '').strip().upper()
-                value = mode if mode in {'A_ONLY', 'A_THEN_B'} else 'A_ONLY'
+                if mode not in {'A_ONLY', 'A_TOP5_C_GPT'}:
+                    raise ValueError('quant_selection_mode must be A_ONLY or A_TOP5_C_GPT')
+                value = mode
             if key == 'quant_shadow_b_enabled':
                 value = bool(value)
             if key == 'quant_shadow_b_candidate_limit':

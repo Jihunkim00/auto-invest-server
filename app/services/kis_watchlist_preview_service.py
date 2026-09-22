@@ -17,6 +17,9 @@ from app.db.models import QuantABObservation, TradeRunLog
 from app.services.event_risk_service import EventRiskService
 from app.services.entry_timing_quant_service import EntryTimingQuantService
 from app.services.reversal_quant_service import ReversalQuantService
+
+C_MIN_ENTRY_SCORE = 70.0
+FINAL_ENTRY_MIN_SCORE = 65.0
 from app.services.automation_observability import (
     candidate_gpt_quant_observability,
     gpt_result_counts,
@@ -315,6 +318,35 @@ class KisWatchlistPreviewService:
             decision_timestamp=decision_timestamp,
         )
         c_shadow_scan_finished = time.perf_counter()
+        selection_mode = str(runtime_settings.get("quant_selection_mode") or "A_ONLY").strip().upper()
+        active_c_mode = selection_mode == "A_TOP5_C_GPT"
+        if active_c_mode:
+            active_c_candidates = []
+            for a_rank, item in enumerate(runtime_quant_ranked_candidates[:5], start=1):
+                item["quant_a_score"] = item.get("quant_buy_score")
+                item["quant_a_rank"] = a_rank
+                item["selected_by_a_top5"] = True
+                c = item.get("shadow_c") if isinstance(item.get("shadow_c"), dict) else {}
+                c_score = _score_or_none(c.get("reversal_score_c"))
+                c_status = str(c.get("c_status") or "unavailable")
+                c_passed = c_status == "analyzed" and c_score is not None and c_score >= C_MIN_ENTRY_SCORE
+                item["quant_c_score"] = c_score
+                item["quant_c_status"] = c_status
+                item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
+                item["quant_c_gate_passed"] = bool(c_passed)
+                item["entry_quant_score"] = c_score if c_passed else None
+                if not c_ready:
+                    item["action"] = "hold"
+                    item["reason"] = "c_quant_unavailable"
+                    item["block_reason"] = "c_quant_unavailable"
+                elif not c_passed:
+                    item["action"] = "hold"
+                    item["reason"] = "c_score_below_threshold"
+                    item["block_reason"] = "c_score_below_threshold"
+                if c_passed:
+                    active_c_candidates.append(item)
+            runtime_quant_ranked_candidates = active_c_candidates
+
         gpt_used = False
         gpt_reuse_count = 0
         gpt_started = time.perf_counter()
@@ -358,6 +390,25 @@ class KisWatchlistPreviewService:
                 item["runtime_quant_rank"] = runtime_item.get("runtime_quant_rank")
                 item["runtime_quant_buy_score"] = runtime_item.get("quant_buy_score")
                 item["runtime_quant_sell_score"] = runtime_item.get("quant_sell_score")
+                if active_c_mode:
+                    item["quant_a_score"] = runtime_item.get("quant_a_score")
+                    item["quant_a_rank"] = runtime_item.get("quant_a_rank")
+                    item["selected_by_a_top5"] = True
+                    item["quant_c_score"] = runtime_item.get("quant_c_score")
+                    item["quant_c_status"] = runtime_item.get("quant_c_status")
+                    item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
+                    item["quant_c_gate_passed"] = True
+                    item["entry_quant_score"] = runtime_item.get("entry_quant_score")
+                    item["final_buy_score"] = self._blend_score(item["entry_quant_score"], item.get("ai_buy_score"))
+                    item["final_entry_score"] = item["final_buy_score"]
+                    item["final_entry_threshold"] = FINAL_ENTRY_MIN_SCORE
+                    item["final_entry_gate_passed"] = bool(item["final_buy_score"] is not None and item["final_buy_score"] >= FINAL_ENTRY_MIN_SCORE)
+                    if not item["final_entry_gate_passed"]:
+                        item["action"] = "hold"
+                        item["reason"] = "final_score_below_threshold"
+                        item["block_reason"] = "final_score_below_threshold"
+                    item["score"] = item["final_buy_score"]
+
                 item["gpt_target_rank"] = attempt_rank
                 if market_snapshots.get(symbol) is not None:
                     gpt_reuse_count += 1
@@ -488,6 +539,12 @@ class KisWatchlistPreviewService:
                     and _score_or_none(item.get("ai_sell_score")) is not None
                 )
             ])
+            if active_c_mode:
+                for item in final_ranked_candidates:
+                    score = _score_or_none(item.get("final_entry_score"))
+                    item["final_entry_threshold"] = FINAL_ENTRY_MIN_SCORE
+                    item["final_entry_gate_passed"] = bool(score is not None and score >= FINAL_ENTRY_MIN_SCORE)
+                final_ranked_candidates = [item for item in final_ranked_candidates if item.get("final_entry_gate_passed")]
             for final_rank, item in enumerate(final_ranked_candidates, start=1):
                 item["final_rank"] = final_rank
                 item["final_selected"] = final_rank == 1

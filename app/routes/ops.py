@@ -27,6 +27,7 @@ router = APIRouter(prefix="/ops", tags=["ops"])
 
 
 class RuntimeSettingsUpdateRequest(BaseModel):
+    quant_selection_mode: Literal["A_ONLY", "A_TOP5_C_GPT"] | None = None
     bot_enabled: bool | None = None
     dry_run: bool | None = None
     kill_switch: bool | None = None
