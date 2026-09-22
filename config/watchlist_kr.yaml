@@ -5,9 +5,7 @@ symbols:
 - symbol: 005930
   name: 삼성전자
   market: KOSPI
-- symbol: '000660'
-  name: SK하이닉스
-  market: KOSPI
+-
 - symbol: '105560'
   name: KB금융
   market: KOSPI
