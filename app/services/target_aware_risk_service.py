@@ -122,26 +122,33 @@ class TargetAwareRiskService:
         approved_notional = max(0.0, base_notional * multiplier)
         if requested_krw is not None and cap > 0 and requested_krw > cap:
             flags.append("notional_capped_by_profile")
-            notes.append(
-                f"요청 주문금액을 profile 한도 {cap:,.0f}원으로 제한했습니다."
+            cap_note, cap_check = _order_cap_messages(
+                snapshot.get("order_cap_source"),
+                cap,
+                capped=True,
             )
+            notes.append(cap_note)
             checks.append(
                 _check(
                     "profile_notional_cap",
                     True,
-                    f"요청금액이 profile 한도를 초과해 {cap:,.0f}원으로 축소됩니다.",
+                    cap_check,
                     severity="warning",
                 )
             )
         else:
+            _, cap_check = _order_cap_messages(
+                snapshot.get("order_cap_source"),
+                cap,
+                capped=False,
+            )
             checks.append(
                 _check(
                     "profile_notional_cap",
                     True,
-                    f"profile 기준 유효 주문 한도는 {cap:,.0f}원입니다.",
+                    cap_check,
                 )
             )
-
         approved = block_reason is None
         if not approved:
             approved_notional = 0.0
@@ -316,6 +323,75 @@ def _check(
         "severity": severity,
         "message": message,
     }
+
+
+def _order_cap_messages(
+    source: Any,
+    amount: float,
+    *,
+    capped: bool,
+) -> tuple[str, str]:
+    normalized_source = str(source or "").strip().lower()
+    amount_text = f"{amount:,.0f}"
+    if normalized_source == "cash_limited":
+        if capped:
+            return (
+                f"cash-only 주문 가능 한도 {amount_text}원으로 주문금액을 제한했습니다.",
+                f"요청금액이 cash-only 주문 가능 한도를 초과해 {amount_text}원으로 축소됩니다.",
+            )
+        return (
+            "",
+            f"cash-only 기준 유효 주문 한도는 {amount_text}원입니다.",
+        )
+    if normalized_source == "fixed_budget":
+        if capped:
+            return (
+                f"프로필 고정 운용예산 한도 {amount_text}원으로 주문금액을 제한했습니다.",
+                f"요청금액이 프로필 고정 운용예산 한도를 초과해 {amount_text}원으로 축소됩니다.",
+            )
+        return (
+            "",
+            f"프로필 고정 운용예산 기준 유효 주문 한도는 {amount_text}원입니다.",
+        )
+    if normalized_source == "configured_order_cap_limited":
+        if capped:
+            return (
+                f"프로필 최대 주문금액 한도 {amount_text}원으로 주문금액을 제한했습니다.",
+                f"요청금액이 프로필 최대 주문금액을 초과해 {amount_text}원으로 축소됩니다.",
+            )
+        return (
+            "",
+            f"프로필 최대 주문금액은 {amount_text}원입니다.",
+        )
+    if normalized_source == "hard_cap_limited":
+        if capped:
+            return (
+                f"시스템 안전 주문한도 {amount_text}원으로 주문금액을 제한했습니다.",
+                f"요청금액이 시스템 안전 주문한도를 초과해 {amount_text}원으로 축소됩니다.",
+            )
+        return (
+            "",
+            f"시스템 안전 기준 유효 주문 한도는 {amount_text}원입니다.",
+        )
+    if normalized_source == "equity_pct":
+        if capped:
+            return (
+                f"프로필 자산비중 기준 주문한도 {amount_text}원으로 주문금액을 제한했습니다.",
+                f"요청금액이 프로필 자산비중 기준 주문한도를 초과해 {amount_text}원으로 축소됩니다.",
+            )
+        return (
+            "",
+            f"프로필 자산비중 기준 유효 주문 한도는 {amount_text}원입니다.",
+        )
+    if capped:
+        return (
+            f"유효 주문 한도 {amount_text}원으로 주문금액을 제한했습니다.",
+            f"요청금액이 유효 주문 한도를 초과해 {amount_text}원으로 축소됩니다.",
+        )
+    return (
+        "",
+        f"유효 주문 한도는 {amount_text}원입니다.",
+    )
 
 
 def _float(value: Any) -> float:

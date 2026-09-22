@@ -282,3 +282,149 @@ def test_fixed_budget_quantity_is_computed_normally_without_forcing_one_share():
     assert can_buy["base_order_cap_krw"] == 500_000
     assert can_buy["quantity"] == 1
     assert too_expensive["quantity"] == 0
+
+
+def _notional_cap_check_message(result):
+    return next(
+        check["message"]
+        for check in result["checks"]
+        if check["key"] == "profile_notional_cap"
+    )
+
+
+def test_cash_limited_cap_messages_are_source_aware(db_session):
+    _, created = _profile(
+        db_session,
+        key="pr110-cash-message",
+        fixed_budget=280_000,
+        max_order=280_000,
+    )
+    result = _risk(
+        db_session,
+        balance={"cash": 42_270, "orderable_cash": 42_270, "total_asset_value": 1_000_000},
+    ).evaluate_entry(
+        db_session,
+        _request(requested_notional_krw=280_000),
+        profile_name=created["profile_key"],
+    )
+
+    assert result["approved"] is True
+    assert result["action"] == "reduce"
+    assert result["approved_notional_krw"] == 42_270
+    assert result["recommended_notional_krw"] == 42_270
+    assert result["effective_max_order_notional_krw"] == 42_270
+    assert result["order_cap_source"] == "cash_limited"
+    assert "cash-only 주문 가능 한도 42,270원으로 주문금액을 제한했습니다." in result[
+        "gating_notes"
+    ]
+    assert _notional_cap_check_message(result) == (
+        "요청금액이 cash-only 주문 가능 한도를 초과해 42,270원으로 축소됩니다."
+    )
+    assert "profile 한도 42,270원" not in " ".join(result["gating_notes"])
+
+
+def test_fixed_budget_cap_message_is_source_aware(db_session):
+    _, created = _profile(db_session, key="pr110-fixed-message")
+    result = _risk(
+        db_session,
+        balance={"cash": 601_456, "orderable_cash": 601_456, "total_asset_value": 601_456},
+    ).evaluate_entry(
+        db_session,
+        _request(requested_notional_krw=600_000),
+        profile_name=created["profile_key"],
+    )
+
+    assert result["approved"] is True
+    assert result["action"] == "reduce"
+    assert result["approved_notional_krw"] == 500_000
+    assert result["recommended_notional_krw"] == 500_000
+    assert result["effective_max_order_notional_krw"] == 500_000
+    assert result["order_cap_source"] == "fixed_budget"
+    assert "프로필 고정 운용예산 한도 500,000원으로 주문금액을 제한했습니다." in result[
+        "gating_notes"
+    ]
+    assert _notional_cap_check_message(result) == (
+        "요청금액이 프로필 고정 운용예산 한도를 초과해 500,000원으로 축소됩니다."
+    )
+
+
+def test_configured_order_cap_message_is_source_aware(db_session):
+    _, created = _profile(
+        db_session,
+        key="pr110-configured-message",
+        fixed_budget=500_000,
+        max_order=280_000,
+    )
+    result = _risk(
+        db_session,
+        balance={"cash": 601_456, "orderable_cash": 601_456, "total_asset_value": 601_456},
+    ).evaluate_entry(
+        db_session,
+        _request(requested_notional_krw=500_000),
+        profile_name=created["profile_key"],
+    )
+
+    assert result["approved"] is True
+    assert result["action"] == "reduce"
+    assert result["approved_notional_krw"] == 280_000
+    assert result["recommended_notional_krw"] == 280_000
+    assert result["effective_max_order_notional_krw"] == 280_000
+    assert result["order_cap_source"] == "configured_order_cap_limited"
+    assert "프로필 최대 주문금액 한도 280,000원으로 주문금액을 제한했습니다." in result[
+        "gating_notes"
+    ]
+    assert _notional_cap_check_message(result) == (
+        "요청금액이 프로필 최대 주문금액을 초과해 280,000원으로 축소됩니다."
+    )
+
+
+def test_hard_cap_message_is_source_aware(db_session):
+    _, created = _profile(
+        db_session,
+        key="pr110-hard-message",
+        fixed_budget=2_000_000,
+        max_order=2_000_000,
+    )
+    result = _risk(
+        db_session,
+        balance={"cash": 2_000_000, "orderable_cash": 2_000_000, "total_asset_value": 2_000_000},
+    ).evaluate_entry(
+        db_session,
+        _request(requested_notional_krw=2_000_000),
+        profile_name=created["profile_key"],
+    )
+
+    assert result["approved"] is True
+    assert result["action"] == "reduce"
+    assert result["approved_notional_krw"] == 1_000_000
+    assert result["recommended_notional_krw"] == 1_000_000
+    assert result["effective_max_order_notional_krw"] == 1_000_000
+    assert result["order_cap_source"] == "hard_cap_limited"
+    assert "시스템 안전 주문한도 1,000,000원으로 주문금액을 제한했습니다." in result[
+        "gating_notes"
+    ]
+    assert _notional_cap_check_message(result) == (
+        "요청금액이 시스템 안전 주문한도를 초과해 1,000,000원으로 축소됩니다."
+    )
+
+
+def test_uncapped_message_is_source_aware(db_session):
+    _, created = _profile(
+        db_session,
+        key="pr110-hard-uncapped-message",
+        fixed_budget=2_000_000,
+        max_order=2_000_000,
+    )
+    result = _risk(
+        db_session,
+        balance={"cash": 2_000_000, "orderable_cash": 2_000_000, "total_asset_value": 2_000_000},
+    ).evaluate_entry(
+        db_session,
+        _request(requested_notional_krw=1_000_000),
+        profile_name=created["profile_key"],
+    )
+
+    assert result["order_cap_source"] == "hard_cap_limited"
+    assert _notional_cap_check_message(result) == (
+        "시스템 안전 기준 유효 주문 한도는 1,000,000원입니다."
+    )
