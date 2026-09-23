@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import (
+    AutomationProfileAiCandidateResult,
     AutomationProfileWatchlistSnapshot,
+    PositionLifecycle,
     OrderLog,
     SignalLog,
     TradeRunLog,
@@ -145,13 +147,29 @@ class FakeBroker:
     def __init__(self):
         self.buy_calls = []
         self.sell_calls = []
+        self.possible_order_calls = []
+        self.possible_orders = {}
+        self.possible_order_failures = set()
+        self.submit_failures = set()
 
     def get_possible_buy_order(self, *, symbol, order_type='market'):
         assert order_type == 'market'
-        return {'symbol': symbol, 'order_type': 'market', 'nrcvb_buy_amt': 1000000.0, 'nrcvb_buy_qty': 10000, 'psbl_qty_calc_unpr': 100.0, 'raw_status': 'ok'}
+        self.possible_order_calls.append((symbol, order_type))
+        if symbol in self.possible_order_failures:
+            raise RuntimeError('fake_possible_order_failure')
+        return self.possible_orders.get(symbol, {
+            'symbol': symbol,
+            'order_type': order_type,
+            'nrcvb_buy_amt': 1000000.0,
+            'nrcvb_buy_qty': 10000,
+            'psbl_qty_calc_unpr': 100.0,
+            'raw_status': 'ok',
+        })
 
     def submit_market_buy_qty(self, *, symbol, qty):
         self.buy_calls.append((symbol, qty))
+        if symbol in self.submit_failures:
+            raise RuntimeError('fake_submit_failure')
         return SimpleNamespace(
             id=f'fake-buy-{len(self.buy_calls)}',
             status='filled',
@@ -222,31 +240,49 @@ class CanonicalRuntimePreview:
             symbol = str(raw['symbol']).upper()
             latest_price = float(self.latest_prices[symbol])
             if latest_price <= cap:
+                c_score = float(raw.get('quant_c_score', raw.get('quant_buy_score', 80.0)))
                 runtime_items.append({
                     **raw,
                     'symbol': symbol,
                     'current_price': latest_price,
-                    'indicator_status': 'ok',
-                    'quant_buy_score': float(raw.get('quant_buy_score') or 80.0),
+                    'indicator_status': raw.get('indicator_status', 'ok'),
+                    'quant_buy_score': float(raw.get('quant_buy_score') or c_score),
                     'quant_sell_score': float(raw.get('quant_sell_score') or 10.0),
-                    'runtime_quant_buy_score': float(raw.get('quant_buy_score') or 80.0),
+                    'runtime_quant_buy_score': float(raw.get('quant_buy_score') or c_score),
                     'runtime_quant_sell_score': float(raw.get('quant_sell_score') or 10.0),
-                    'ai_buy_score': 75.0,
-                    'ai_sell_score': 15.0,
+                    'quant_c_score': c_score,
+                    'quant_c_gate_passed': raw.get('quant_c_gate_passed', c_score >= 70.0),
+                    'entry_quant_score': float(raw.get('entry_quant_score', c_score)),
+                    'selected_by_a_top5': True,
+                    'ai_buy_score': float(raw.get('ai_buy_score', 75.0)),
+                    'ai_sell_score': float(raw.get('ai_sell_score', 15.0)),
                     'confidence': 0.8,
-                    'gpt_used': True,
-                    'gpt_analysis_status': 'completed',
-                    'final_buy_score': float(self.final_score),
+                    'gpt_used': bool(raw.get('gpt_used', True)),
+                    'gpt_analysis_status': raw.get('gpt_analysis_status', 'completed'),
+                    'final_buy_score': float(raw.get('final_buy_score', self.final_score)),
                     'final_sell_score': 10.0,
+                    'hard_blocked': bool(raw.get('hard_blocked', False)),
                 })
         runtime_symbols = [item['symbol'] for item in runtime_items]
         for rank, item in enumerate(runtime_items, start=1):
             item['runtime_quant_rank'] = rank
             item['gpt_target_rank'] = rank
+        completed_items = [
+            item for item in runtime_items
+            if item['gpt_used'] and item['gpt_analysis_status'] == 'completed'
+        ]
+        final_candidates = sorted(
+            completed_items,
+            key=lambda item: -float(item.get('final_buy_score') or 0.0),
+        )[:5]
+        for rank, item in enumerate(final_candidates, start=1):
             item['final_rank'] = rank
             item['final_selected'] = rank == 1
+        completed_symbols = [item['symbol'] for item in completed_items]
+        final_symbols = [item['symbol'] for item in final_candidates]
         return {
             'canonical_profile_pipeline': True,
+            'selection_mode': 'A_TOP5_C_GPT',
             'profile_snapshot_selected_symbols': [
                 str(item['symbol']).upper() for item in snapshot_items
             ],
@@ -256,14 +292,17 @@ class CanonicalRuntimePreview:
             'runtime_quant_candidate_symbols': runtime_symbols,
             'runtime_quant_top5_symbols': runtime_symbols[:5],
             'gpt_target_symbols': runtime_symbols[:5],
-            'gpt_completed_symbols': runtime_symbols[:5],
-            'gpt_failed_symbols': [],
+            'gpt_completed_symbols': completed_symbols,
+            'gpt_failed_symbols': [
+                item['symbol'] for item in runtime_items
+                if item['gpt_analysis_status'] != 'completed'
+            ],
             'gpt_replacement_count': 0,
-            'final_candidate_symbols': runtime_symbols[:5],
-            'selected_final_symbol': runtime_symbols[0] if runtime_symbols else None,
-            'final_ranked_candidates': runtime_items[:5],
-            'final_ranked_top5': runtime_items[:5],
-            'final_best_candidate': runtime_items[0] if runtime_items else None,
+            'final_candidate_symbols': final_symbols,
+            'selected_final_symbol': final_symbols[0] if final_symbols else None,
+            'final_ranked_candidates': final_candidates,
+            'final_ranked_top5': final_candidates,
+            'final_best_candidate': final_candidates[0] if final_candidates else None,
             'items': runtime_items,
             'runtime_quant_candidate_count': len(runtime_items),
             'unaffordable_runtime_candidates': [],
@@ -857,7 +896,7 @@ def test_personal_watchlist_cannot_override_shared_auto_candidate(db_session):
     assert candidate['automation_profile_id'] == profile['id']
 
 
-def _canonical_scheduler_setup(db, *, final_score=70.0):
+def _canonical_scheduler_setup(db, *, final_score=70.0, candidate_items=None, fixed_budget=50000, max_order_notional=48000):
     _user(db, 'pr129-canonical-admin', role='admin')
     user = _user(db, 'pr129-canonical-user')
     _configure_user(db, user, provider='kis')
@@ -865,8 +904,8 @@ def _canonical_scheduler_setup(db, *, final_score=70.0):
         db,
         user,
         ['09:10'],
-        fixed_budget=50000,
-        max_order_notional=48000,
+        fixed_budget=fixed_budget,
+        max_order_notional=max_order_notional,
     )
     account_snapshot = {
         'provider': 'kis',
@@ -890,7 +929,7 @@ def _canonical_scheduler_setup(db, *, final_score=70.0):
         owner_user_id=user.id,
         now=RUN_AT,
     )['profile']
-    items = [
+    items = candidate_items or [
         {
             'symbol': '005930',
             'name': 'Snapshot crossing candidate',
@@ -911,15 +950,83 @@ def _canonical_scheduler_setup(db, *, final_score=70.0):
         },
     ]
     watchlists = CanonicalProfileWatchlists(items, cap=48000.0)
-    preview = CanonicalRuntimePreview(
-        {'005930': 48300.0, '000660': 47000.0},
-        final_score=final_score,
-    )
+    latest_prices = {
+        str(item['symbol']).upper(): float(item.get('current_price') or 47000.0)
+        for item in items
+    }
+    if candidate_items is None:
+        latest_prices['005930'] = 48300.0
+    preview = CanonicalRuntimePreview(latest_prices, final_score=final_score)
     scheduler.candidate_service = UserAutoTradingCandidateService(
         profile_watchlists=watchlists,
         runtime_preview_service=preview,
     )
     return scheduler, user, profile, preview, account, analysis, broker, kis_client
+
+
+def _final_candidate(symbol, *, final_score=70.0, c_score=76.0, price=47000.0, **values):
+    return {
+        'symbol': symbol,
+        'name': f'Candidate {symbol}',
+        'market': 'KOSPI',
+        'current_price': price,
+        'quant_buy_score': c_score,
+        'quant_sell_score': 10.0,
+        'quant_c_score': c_score,
+        'final_buy_score': final_score,
+        'snapshot_rank': 1,
+        **values,
+    }
+
+
+def _enable_live_canonical_user(db, user, account, *, kill_switch=False):
+    settings = db.query(UserTradingSettings).filter_by(user_id=user.id).one()
+    settings.trading_mode = 'live'
+    settings.live_trading_enabled = True
+    settings.kill_switch = kill_switch
+    settings.auto_live_confirmed_at = RUN_AT
+    db.commit()
+    snapshot = dict(account.snapshots[(user.id, 'kis')])
+    snapshot['environment'] = 'live'
+    account.snapshots[(user.id, 'kis')] = snapshot
+
+
+def _set_possible_order(client, symbol, quantity, *, price=47000.0):
+    client.possible_orders[symbol] = {
+        'symbol': symbol,
+        'order_type': 'market',
+        'nrcvb_buy_amt': 48000.0,
+        'nrcvb_buy_qty': quantity,
+        'psbl_qty_calc_unpr': price,
+        'raw_status': 'ok',
+    }
+
+
+def _canonical_live_harness(db, *, candidates, kill_switch=False, fixed_budget=50000, max_order_notional=48000):
+    scheduler, user, profile, preview, account, analysis, broker, kis_client = (
+        _canonical_scheduler_setup(db, candidate_items=candidates, fixed_budget=fixed_budget, max_order_notional=max_order_notional)
+    )
+    _enable_live_canonical_user(
+        db,
+        user,
+        account,
+        kill_switch=kill_switch,
+    )
+    return scheduler, user, profile, preview, account, analysis, broker, kis_client
+
+
+def _run_user_scheduler_slot(db, scheduler, user, *, slot='09:10'):
+    result = scheduler.run_provider_once(
+        db,
+        provider='kis',
+        scheduler_slot=slot,
+        now=RUN_AT,
+    )
+    return next(
+        value
+        for value in result['items']
+        if value.get('owner_user_id') == user.id
+    )
 
 
 def test_user_scheduler_canonical_lineage_applies_runtime_affordability_and_final_one(
@@ -1043,6 +1150,362 @@ def test_user_scheduler_canonical_hold_blocks_below_profile_threshold_without_or
     assert item['real_order_submitted'] is False
     assert broker.buy_calls == []
     assert kis_client.buy_calls == []
+
+
+def test_canonical_fallback_buys_next_ranked_candidate_and_persists_both_outcomes(
+    db_session,
+):
+    # Input order is lower score first; canonical final score rank must lead.
+    candidates = [
+        _final_candidate('000002', final_score=66.0),
+        _final_candidate('000001', final_score=68.0),
+    ]
+    scheduler, user, _profile, preview, _account, analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 0)
+    _set_possible_order(kis_client, '000002', 1)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+    diagnostics = item['pipeline_diagnostics']
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000002'
+    assert item['fallback_attempted'] is True
+    assert item['fallback_selected_rank'] == 2
+    assert item['fallback_selected_symbol'] == '000002'
+    assert diagnostics['eligible_candidate_count'] == 2
+    assert diagnostics['evaluated_candidate_count'] == 2
+    assert diagnostics['affordability_blocked_count'] == 1
+    assert diagnostics['submitted_count'] == 1
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000002']
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == [
+        '000001', '000002',
+    ]
+    assert preview.calls[0]['include_gpt'] is True
+    assert len(preview.calls) == 1
+    assert analysis.calls == []
+
+    persisted = {
+        row.symbol: json.loads(row.diagnostics_json)
+        for row in db_session.query(AutomationProfileAiCandidateResult)
+        .filter_by(owner_user_id=user.id)
+        .all()
+    }
+    assert persisted['000001']['candidate_execution']['execution_status'] == 'skipped'
+    assert persisted['000001']['candidate_execution']['skip_reason'] == (
+        'kis_market_buy_qty_unavailable'
+    )
+    assert persisted['000001']['candidate_execution']['broker_submit_called'] is False
+    assert persisted['000002']['candidate_execution']['execution_status'] == 'selected'
+    assert persisted['000002']['candidate_execution']['final_quantity'] == 1
+
+
+def test_canonical_fallback_excludes_final_score_below_65_even_if_affordable(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=66.0),
+        _final_candidate('000002', final_score=64.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 0)
+    _set_possible_order(kis_client, '000002', 5)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'HOLD'
+    assert item['action'] == 'hold'
+    assert item['reason'] == 'no_affordable_final_candidate'
+    assert item['pipeline_diagnostics']['eligible_candidate_count'] == 1
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert item['pipeline_diagnostics']['affordability_blocked_count'] == 1
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000001']
+    assert kis_client.buy_calls == []
+
+
+def test_quantity_invalid_candidate_falls_through_to_affordable_candidate(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0, price=47000.0),
+        _final_candidate('000002', final_score=67.0, price=500.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=candidates,
+            fixed_budget=1000,
+            max_order_notional=1000,
+        )
+    )
+    _set_possible_order(kis_client, '000002', 2, price=500.0)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000002'
+    assert item['pipeline_diagnostics']['fallback_attempted'] is True
+    assert item['pipeline_diagnostics']['affordability_blocked_count'] == 1
+    assert item['pipeline_diagnostics']['fallback_candidate_results_by_symbol'][
+        '000001'
+    ]['skip_reason'] == 'quantity_invalid'
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000002']
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000002']
+
+
+def test_canonical_fallback_excludes_c_score_below_70(db_session):
+    candidates = [_final_candidate('000001', final_score=70.0, c_score=69.0)]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'HOLD'
+    assert item['action'] == 'hold'
+    assert item['reason'] == 'no_qualifying_candidate'
+    assert item['pipeline_diagnostics']['eligible_candidate_count'] == 0
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 0
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_global_kill_switch_blocks_before_candidate_fallback(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, preview, account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=candidates,
+            kill_switch=True,
+        )
+    )
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['reason'] == 'user_kill_switch_enabled'
+    assert account.calls == []
+    assert preview.calls == []
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_possible_order_api_failure_stops_before_next_candidate(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    kis_client.possible_order_failures.add('000001')
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['reason'] == 'kis_possible_order_unavailable'
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert item['pipeline_diagnostics']['fallback_attempted'] is False
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000001']
+    assert kis_client.buy_calls == []
+    assert item['pipeline_diagnostics'][
+        'fallback_candidate_results_by_symbol'
+    ]['000002']['skip_reason'] == 'global_safe_block'
+
+
+def test_submit_failure_stops_without_submitting_next_candidate(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 1)
+    kis_client.submit_failures.add('000001')
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['reason'] == 'kis_live_submit_failed'
+    assert item['pipeline_diagnostics']['submitted_count'] == 1
+    assert item['pipeline_diagnostics']['fallback_attempted'] is False
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000001']
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000001']
+    assert item['pipeline_diagnostics'][
+        'fallback_candidate_results_by_symbol'
+    ]['000002']['skip_reason'] == 'broker_submit_attempted'
+
+
+def test_all_affordability_blocked_candidates_return_final_hold(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 0)
+    _set_possible_order(kis_client, '000002', 0)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+    diagnostics = item['pipeline_diagnostics']
+
+    assert item['result'] == 'HOLD'
+    assert item['action'] == 'hold'
+    assert item['reason'] == 'no_affordable_final_candidate'
+    assert diagnostics['fallback_attempted'] is True
+    assert diagnostics['eligible_candidate_count'] == 2
+    assert diagnostics['evaluated_candidate_count'] == 2
+    assert diagnostics['affordability_blocked_count'] == 2
+    assert diagnostics['submitted_count'] == 0
+    assert kis_client.buy_calls == []
+
+
+def test_daily_trade_cap_stops_fallback_before_possible_order(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    settings = db_session.query(UserTradingSettings).filter_by(user_id=user.id).one()
+    settings.max_daily_trades = 0
+    db_session.commit()
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['reason'] == 'max_daily_trades_reached'
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert item['pipeline_diagnostics']['fallback_attempted'] is False
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_max_positions_gate_stops_fallback_before_possible_order(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    order = OrderLog(
+        owner_user_id=user.id,
+        broker='kis',
+        market='KR',
+        symbol='000099',
+        side='buy',
+        order_type='market',
+        internal_status='CANCELED',
+        qty=1,
+        notional=100.0,
+    )
+    db_session.add(order)
+    db_session.commit()
+    db_session.add(PositionLifecycle(
+        owner_user_id=user.id,
+        symbol='000099',
+        entry_order_id=order.id,
+        entry_price=100.0,
+        cost_basis=100.0,
+        quantity=1.0,
+        status='open',
+        opened_at=RUN_AT,
+    ))
+    db_session.commit()
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['reason'] == 'max_open_positions_reached'
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_candidate_duplicate_order_is_skipped_without_duplicate_submit(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    snapshot = dict(account.snapshots[(user.id, 'kis')])
+    snapshot['open_orders'] = [{
+        'symbol': '000001',
+        'side': 'buy',
+        'status': 'SUBMITTED',
+    }]
+    account.snapshots[(user.id, 'kis')] = snapshot
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+    outcomes = item['pipeline_diagnostics']['fallback_candidate_results_by_symbol']
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000002'
+    assert outcomes['000001']['skip_reason'] == 'duplicate_open_order'
+    assert outcomes['000001']['broker_submit_called'] is False
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000002']
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000002']
+
+
+def test_first_success_stops_loop_and_actual_buy_submit_count_is_one(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0),
+        _final_candidate('000002', final_score=67.0),
+        _final_candidate('000003', final_score=66.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 1)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000001'
+    assert len(kis_client.buy_calls) == 1
+    assert item['pipeline_diagnostics']['submitted_count'] == 1
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000001']
+
+
+def test_hard_blocked_candidate_is_excluded_before_risk_or_kis_checks(db_session):
+    candidates = [
+        _final_candidate('000001', final_score=68.0, hard_blocked=True),
+        _final_candidate('000002', final_score=67.0),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000002'
+    assert item['pipeline_diagnostics']['eligible_candidate_count'] == 1
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert item['pipeline_diagnostics'][
+        'fallback_candidate_results_by_symbol'
+    ]['000001']['skip_reason'] == 'candidate_hard_blocked'
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000002']
+
+
+def test_single_canonical_candidate_keeps_success_behavior(db_session):
+    candidates = [_final_candidate('000001', final_score=68.0)]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 1)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000001'
+    assert item['fallback_attempted'] is False
+    assert item['fallback_selected_rank'] is None
+    assert len(kis_client.buy_calls) == 1
 
 
 class DeferredAccountSnapshotRetries:

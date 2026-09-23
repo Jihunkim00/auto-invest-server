@@ -166,6 +166,7 @@ class UserAutoTradingCandidateService:
                 "snapshot_id": snapshot_data.get("id"),
                 "snapshot_date": snapshot_data.get("snapshot_date"),
                 "scheduler_slot": scheduler_slot,
+                "selection_mode": preview.get("selection_mode"),
                 "source_count": snapshot_data.get("source_count"),
                 "eligible_count": snapshot_data.get("eligible_count"),
                 "selected_count": snapshot_data.get("selected_count"),
@@ -198,32 +199,42 @@ class UserAutoTradingCandidateService:
             final_candidates = preview.get("final_ranked_candidates")
             if not isinstance(final_candidates, list) or not final_candidates:
                 return []
-            selected_raw = next(
-                (
-                    item
-                    for item in final_candidates
-                    if isinstance(item, dict)
-                    and (
-                        _int_or_none(item.get("final_rank")) == 1
-                        or bool(item.get("final_selected"))
-                    )
-                ),
-                final_candidates[0],
-            )
-            selected = dict(selected_raw)
-            selected["_pipeline_preview"] = preview
-            selected["_pipeline_snapshot"] = snapshot
-            selected["_analysis_override"] = _runtime_analysis_override(selected, profile=profile)
-            selected.update({
-                "candidate_source": "automation_profile_runtime_quant_gpt",
-                "automation_profile_id": int(profile["id"]),
-                "automation_profile_key": profile.get("profile_key"),
-                "profile_snapshot_id": snapshot_data.get("id"),
-                "profile_snapshot_date": snapshot_data.get("snapshot_date"),
-                "profile_quant_rank": selected.get("runtime_quant_rank"),
-                "profile_ai_rank": selected.get("gpt_target_rank"),
-            })
-            return [selected]
+            ranked_candidates = [
+                (index, item)
+                for index, item in enumerate(final_candidates[:5])
+                if isinstance(item, dict)
+            ]
+
+            def candidate_order(indexed):
+                index, item = indexed
+                score = _optional_number(item.get("final_buy_score"))
+                return (
+                    -(score if score is not None else float("-inf")),
+                    _int_or_none(item.get("final_rank")) or index + 1,
+                    index,
+                )
+
+            ranked_candidates.sort(key=candidate_order)
+            result = []
+            for _index, raw in ranked_candidates:
+                candidate = dict(raw)
+                candidate["_pipeline_preview"] = preview
+                candidate["_pipeline_snapshot"] = snapshot
+                candidate["_analysis_override"] = _runtime_analysis_override(
+                    candidate,
+                    profile=profile,
+                )
+                candidate.update({
+                    "candidate_source": "automation_profile_runtime_quant_gpt",
+                    "automation_profile_id": int(profile["id"]),
+                    "automation_profile_key": profile.get("profile_key"),
+                    "profile_snapshot_id": snapshot_data.get("id"),
+                    "profile_snapshot_date": snapshot_data.get("snapshot_date"),
+                    "profile_quant_rank": candidate.get("runtime_quant_rank"),
+                    "profile_ai_rank": candidate.get("gpt_target_rank"),
+                })
+                result.append(candidate)
+            return result
         self.last_pipeline_diagnostics = None
         self.last_pipeline_candidate = None
         settings = profile.get('effective_settings')
@@ -329,7 +340,21 @@ class UserAutoTradingCandidateService:
                 "final_rank": _int_or_none(item.get("final_rank")),
                 "final_selected": bool(item.get("final_selected")),
                 "diagnostics_json": json.dumps(
-                    self.last_pipeline_diagnostics or {},
+                    {
+                        **(self.last_pipeline_diagnostics or {}),
+                        "candidate_execution": (
+                            (self.last_pipeline_diagnostics or {}).get(
+                                "fallback_candidate_results_by_symbol", {}
+                            ).get(symbol)
+                            if isinstance(
+                                (self.last_pipeline_diagnostics or {}).get(
+                                    "fallback_candidate_results_by_symbol", {}
+                                ),
+                                dict,
+                            )
+                            else None
+                        ),
+                    },
                     ensure_ascii=False,
                     default=str,
                 ),
@@ -1254,6 +1279,8 @@ class UserAutoTradingSchedulerService:
             None,
         )
         if not candidates:
+            if isinstance(pipeline_diagnostics, dict):
+                pipeline_diagnostics.update(_empty_fallback_diagnostics())
             profile_context = self._profile_context(
                 profile=profile,
                 scheduler_slot=scheduler_slot,
@@ -1313,6 +1340,25 @@ class UserAutoTradingSchedulerService:
                 'pipeline_diagnostics': pipeline_diagnostics,
             })
             return no_candidate_result
+
+        if _is_canonical_fallback_pipeline(
+            provider=provider,
+            pipeline_diagnostics=pipeline_diagnostics,
+            candidates=candidates,
+        ):
+            return self._process_canonical_final_candidates(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                profile=profile,
+                scheduler_slot=scheduler_slot,
+                run_key=run_key,
+                now=now,
+                snapshot=snapshot,
+                candidates=candidates,
+                pipeline_diagnostics=pipeline_diagnostics,
+            )
 
         candidate = next(
             (
@@ -1390,6 +1436,352 @@ class UserAutoTradingSchedulerService:
             'pipeline_diagnostics': pipeline_diagnostics,
             'candidate_count': len(candidates),
         }
+
+    def _process_canonical_final_candidates(
+        self,
+        db: Session,
+        *,
+        user: User,
+        provider: str,
+        market: str,
+        profile: dict[str, Any],
+        scheduler_slot: str,
+        run_key: str,
+        now: datetime,
+        snapshot: dict[str, Any],
+        candidates: list[dict[str, Any]],
+        pipeline_diagnostics: dict[str, Any],
+    ) -> dict[str, Any]:
+        indexed = list(enumerate(candidates))
+        indexed.sort(
+            key=lambda item: (
+                -(
+                    _optional_number(item[1].get("final_buy_score"))
+                    if _optional_number(item[1].get("final_buy_score")) is not None
+                    else float("-inf")
+                ),
+                _int_or_none(item[1].get("final_rank")) or item[0] + 1,
+                item[0],
+            )
+        )
+        ranked_candidates = [candidate for _index, candidate in indexed]
+        eligible_candidates: list[dict[str, Any]] = []
+        results_by_symbol: dict[str, dict[str, Any]] = {}
+
+        for candidate in ranked_candidates:
+            symbol = str(candidate.get("symbol") or "").strip().upper()
+            analysis_override = candidate.get("_analysis_override")
+            if not isinstance(analysis_override, dict):
+                analysis_override = _runtime_analysis_override(candidate, profile=profile)
+                candidate["_analysis_override"] = analysis_override
+            exclusion_reason = _fallback_eligibility_reason(
+                candidate,
+                analysis_override=analysis_override,
+            )
+            if exclusion_reason:
+                results_by_symbol[symbol] = {
+                    "symbol": symbol,
+                    "final_rank": _int_or_none(candidate.get("final_rank")),
+                    "fallback_rank": None,
+                    "execution_status": "excluded",
+                    "skip_reason": exclusion_reason,
+                    "broker_submit_called": False,
+                }
+                continue
+            eligible_candidates.append(candidate)
+
+        for fallback_rank, candidate in enumerate(eligible_candidates, start=1):
+            candidate["fallback_rank"] = fallback_rank
+            symbol = str(candidate.get("symbol") or "").strip().upper()
+            results_by_symbol[symbol] = {
+                "symbol": symbol,
+                "final_rank": _int_or_none(candidate.get("final_rank")),
+                "fallback_rank": fallback_rank,
+                "final_buy_score": _optional_number(candidate.get("final_buy_score")),
+                "execution_status": "not_attempted",
+                "skip_reason": None,
+                "broker_submit_called": False,
+            }
+
+        pipeline_diagnostics.update({
+            **_empty_fallback_diagnostics(),
+            "eligible_candidate_count": len(eligible_candidates),
+            "fallback_candidate_results_by_symbol": results_by_symbol,
+            "fallback_candidate_results": list(results_by_symbol.values()),
+        })
+
+        compatibility_hold = None
+        if not eligible_candidates:
+            compatibility_hold = next(
+                (
+                    candidate
+                    for candidate in ranked_candidates
+                    if _fallback_is_below_threshold_hold(candidate)
+                ),
+                None,
+            )
+
+        attempt_candidates = (
+            eligible_candidates
+            if eligible_candidates
+            else ([compatibility_hold] if compatibility_hold is not None else [])
+        )
+        selected_candidate: dict[str, Any] | None = None
+        selected_result: dict[str, Any] | None = None
+        last_candidate: dict[str, Any] | None = None
+        last_result: dict[str, Any] | None = None
+        fatal_stop = False
+
+        for attempt_index, candidate in enumerate(attempt_candidates):
+            last_candidate = candidate
+            symbol = str(candidate.get("symbol") or "").strip().upper()
+            fallback_rank = _int_or_none(candidate.get("fallback_rank"))
+            analysis_override = candidate.get("_analysis_override")
+            if not isinstance(analysis_override, dict):
+                analysis_override = _runtime_analysis_override(candidate, profile=profile)
+                candidate["_analysis_override"] = analysis_override
+            profile_context = self._profile_context(
+                profile=profile,
+                candidate=candidate,
+                scheduler_slot=scheduler_slot,
+                user=user,
+                pipeline_diagnostics=pipeline_diagnostics,
+            )
+            pipeline_diagnostics["evaluated_candidate_count"] = (
+                int(pipeline_diagnostics.get("evaluated_candidate_count") or 0) + 1
+            )
+            with _scheduler_stage("execution"):
+                result = self.execution_service.run_once(
+                    db,
+                    user,
+                    provider=provider,
+                    symbol=str(candidate["symbol"]),
+                    confirm_live=False,
+                    now=now,
+                    trigger_source=USER_SCHEDULER_TRIGGER_SOURCE,
+                    authorization_mode="automatic",
+                    scheduler_slot=scheduler_slot,
+                    snapshot_override=snapshot,
+                    run_key=run_key,
+                    analysis_override=analysis_override,
+                    profile_context=profile_context,
+                )
+            last_result = result
+            result_name = str(result.get("result") or "").strip().lower()
+            reason = str(result.get("reason") or "").strip()
+            broker_submit_called = bool(
+                result.get("broker_submit_called")
+                or (
+                    isinstance(result.get("execution"), dict)
+                    and result["execution"].get("broker_submit_called")
+                )
+            )
+            if broker_submit_called:
+                pipeline_diagnostics["submitted_count"] = (
+                    int(pipeline_diagnostics.get("submitted_count") or 0) + 1
+                )
+            order_created = result.get("order_id") is not None
+            order_completed = (
+                result_name in {"submitted", "simulated", "filled", "executed"}
+                or bool(result.get("real_order_submitted"))
+                or (order_created and result_name not in {"blocked", "failed", "hold"})
+            )
+            if order_completed:
+                selected_candidate = candidate
+                selected_result = result
+                outcome = results_by_symbol[symbol]
+                outcome.update({
+                    "execution_status": "selected",
+                    "skip_reason": None,
+                    "broker_submit_called": broker_submit_called,
+                    "final_quantity": _candidate_final_quantity(result),
+                })
+                if fallback_rank and fallback_rank > 1:
+                    pipeline_diagnostics["fallback_attempted"] = True
+                    pipeline_diagnostics["fallback_selected_rank"] = fallback_rank
+                    pipeline_diagnostics["fallback_selected_symbol"] = symbol
+                break
+
+            if candidate is compatibility_hold and result_name == "hold":
+                results_by_symbol[symbol].update({
+                    "execution_status": "hold",
+                    "skip_reason": reason or "below_profile_buy_threshold",
+                    "broker_submit_called": False,
+                })
+                break
+
+            if broker_submit_called:
+                results_by_symbol[symbol].update({
+                    "execution_status": "submit_failed",
+                    "skip_reason": reason or "broker_submit_failed",
+                    "broker_submit_called": True,
+                    "final_quantity": _candidate_final_quantity(result),
+                })
+                fatal_stop = True
+                break
+
+            block_kind = _fallback_candidate_block_kind(result)
+            if block_kind == "affordability":
+                pipeline_diagnostics["affordability_blocked_count"] = (
+                    int(pipeline_diagnostics.get("affordability_blocked_count") or 0) + 1
+                )
+                results_by_symbol[symbol].update({
+                    "execution_status": "skipped",
+                    "skip_reason": reason,
+                    "broker_submit_called": False,
+                    "final_quantity": _candidate_final_quantity(result),
+                })
+            elif block_kind == "risk":
+                pipeline_diagnostics["risk_blocked_count"] = (
+                    int(pipeline_diagnostics.get("risk_blocked_count") or 0) + 1
+                )
+                results_by_symbol[symbol].update({
+                    "execution_status": "skipped",
+                    "skip_reason": reason,
+                    "broker_submit_called": False,
+                })
+            else:
+                results_by_symbol[symbol].update({
+                    "execution_status": (
+                        "failed" if result_name == "failed" else "blocked"
+                    ),
+                    "skip_reason": reason or result_name or "candidate_execution_blocked",
+                    "broker_submit_called": False,
+                })
+                fatal_stop = True
+                break
+
+            if attempt_index + 1 < len(attempt_candidates):
+                pipeline_diagnostics["fallback_attempted"] = True
+
+        if fatal_stop:
+            for candidate in attempt_candidates:
+                symbol = str(candidate.get("symbol") or "").strip().upper()
+                outcome = results_by_symbol.get(symbol) or {}
+                if outcome.get("execution_status") == "not_attempted":
+                    outcome["skip_reason"] = (
+                        "broker_submit_attempted"
+                        if pipeline_diagnostics.get("submitted_count")
+                        else "global_safe_block"
+                    )
+        elif selected_candidate is not None:
+            for candidate in attempt_candidates:
+                symbol = str(candidate.get("symbol") or "").strip().upper()
+                outcome = results_by_symbol.get(symbol) or {}
+                if outcome.get("execution_status") == "not_attempted":
+                    outcome["skip_reason"] = "prior_candidate_selected"
+
+        pipeline_diagnostics["fallback_candidate_results"] = list(
+            results_by_symbol.values()
+        )
+        pipeline_diagnostics["fallback_candidate_results_by_symbol"] = results_by_symbol
+
+        final_candidate = (
+            selected_candidate
+            or last_candidate
+            or compatibility_hold
+            or (ranked_candidates[0] if ranked_candidates else None)
+        )
+        if selected_result is not None:
+            final_result = selected_result
+        elif fatal_stop and last_result is not None:
+            final_result = last_result
+        elif compatibility_hold is not None and last_result is not None:
+            final_result = last_result
+        else:
+            summary_profile_context = self._profile_context(
+                profile=profile,
+                candidate=final_candidate,
+                scheduler_slot=scheduler_slot,
+                user=user,
+                pipeline_diagnostics=pipeline_diagnostics,
+            )
+            summary_run_key = f"{run_key[:47]}_fallback_summary"
+            final_result = self._record_result(
+                db,
+                user=user,
+                provider=provider,
+                market=market,
+                scheduler_slot=scheduler_slot,
+                run_key=summary_run_key,
+                result="HOLD",
+                reason=(
+                    "no_affordable_final_candidate"
+                    if eligible_candidates
+                    else "no_qualifying_candidate"
+                ),
+                symbol="NONE",
+                profile_context=summary_profile_context,
+                create_signal=False,
+            )
+            final_result["action"] = "hold"
+
+        final_profile_context = self._profile_context(
+            profile=profile,
+            candidate=final_candidate,
+            scheduler_slot=scheduler_slot,
+            user=user,
+            pipeline_diagnostics=pipeline_diagnostics,
+        )
+        persist = getattr(self.candidate_service, "persist_results", None)
+        if callable(persist) and final_candidate is not None:
+            with _scheduler_stage("result_persistence"):
+                persist(
+                    db,
+                    candidate=final_candidate,
+                    run_id=final_result.get("run_id"),
+                    profile=profile,
+                    user=user,
+                    scheduler_slot=scheduler_slot,
+                    now=now,
+                )
+                db.commit()
+
+        analysis_override = (
+            final_candidate.get("_analysis_override")
+            if isinstance(final_candidate, dict)
+            else None
+        )
+        public_candidate = {
+            key: value
+            for key, value in (final_candidate or {}).items()
+            if not str(key).startswith("_")
+        }
+        selected_action = (
+            analysis_override.get("action")
+            if isinstance(analysis_override, dict)
+            else (final_result.get("analysis") or {}).get("action")
+        )
+        if selected_candidate is None and compatibility_hold is None and not fatal_stop:
+            selected_action = "hold"
+        pipeline_snapshot = (
+            final_candidate.get("_pipeline_snapshot")
+            if isinstance(final_candidate, dict)
+            else None
+        )
+        final_result.update({
+            "action": selected_action or final_result.get("action") or "hold",
+            "candidate": public_candidate or None,
+            "profile_context": final_profile_context,
+            "profile_id": profile.get("id"),
+            "profile_snapshot": (
+                pipeline_snapshot.get("snapshot")
+                if isinstance(pipeline_snapshot, dict)
+                else None
+            ),
+            "pipeline_diagnostics": pipeline_diagnostics,
+            "candidate_count": len(candidates),
+            "fallback_attempted": bool(
+                pipeline_diagnostics.get("fallback_attempted")
+            ),
+            "fallback_selected_rank": pipeline_diagnostics.get(
+                "fallback_selected_rank"
+            ),
+            "fallback_selected_symbol": pipeline_diagnostics.get(
+                "fallback_selected_symbol"
+            ),
+        })
+        return final_result
 
     def _select_candidates(
         self,
@@ -2035,6 +2427,181 @@ def _symbol_list(value: Any) -> list[str]:
             seen.add(symbol)
             result.append(symbol)
     return result
+
+
+def _empty_fallback_diagnostics() -> dict[str, Any]:
+    return {
+        "fallback_attempted": False,
+        "eligible_candidate_count": 0,
+        "evaluated_candidate_count": 0,
+        "affordability_blocked_count": 0,
+        "risk_blocked_count": 0,
+        "submitted_count": 0,
+        "fallback_selected_rank": None,
+        "fallback_selected_symbol": None,
+        "fallback_candidate_results": [],
+        "fallback_candidate_results_by_symbol": {},
+    }
+
+
+def _is_canonical_fallback_pipeline(
+    *,
+    provider: str,
+    pipeline_diagnostics: Any,
+    candidates: list[dict[str, Any]],
+) -> bool:
+    return (
+        str(provider or "").strip().lower() == "kis"
+        and isinstance(pipeline_diagnostics, dict)
+        and pipeline_diagnostics.get("canonical_profile_pipeline") is True
+        and str(pipeline_diagnostics.get("selection_mode") or "").strip().upper()
+        == "A_TOP5_C_GPT"
+        and any(
+            isinstance(candidate.get("_pipeline_preview"), dict)
+            and isinstance(candidate.get("_pipeline_snapshot"), dict)
+            for candidate in candidates
+        )
+    )
+
+
+def _canonical_c_score(candidate: dict[str, Any]) -> float | None:
+    score = _optional_number(candidate.get("quant_c_score"))
+    if score is None:
+        score = _optional_number(candidate.get("entry_quant_score"))
+    return score
+
+
+def _canonical_gpt_completed(candidate: dict[str, Any]) -> bool:
+    return (
+        bool(candidate.get("gpt_used"))
+        and str(candidate.get("gpt_analysis_status") or "").strip().lower()
+        == "completed"
+        and _optional_number(candidate.get("ai_buy_score")) is not None
+        and _optional_number(candidate.get("ai_sell_score")) is not None
+    )
+
+
+def _canonical_hard_blocked(
+    candidate: dict[str, Any],
+    *,
+    analysis_override: dict[str, Any],
+) -> bool:
+    gpt_context = candidate.get("gpt_context")
+    gpt_context = gpt_context if isinstance(gpt_context, dict) else {}
+    analysis = candidate.get("analysis")
+    analysis = analysis if isinstance(analysis, dict) else {}
+    event_risk = candidate.get("event_risk")
+    event_risk = event_risk if isinstance(event_risk, dict) else {}
+    candidate_risk_flags = {
+        str(flag).strip()
+        for flag in (candidate.get("risk_flags") or [])
+        if str(flag).strip()
+    }
+    override_block_reason = str(
+        analysis_override.get("block_reason") or ""
+    ).strip()
+    soft_score_blocks = {
+        "below_profile_buy_threshold",
+        "profile_final_candidate_below_entry_gate",
+        "final_score_below_threshold",
+    }
+    return bool(
+        candidate.get("hard_blocked")
+        or candidate.get("analysis_blocked")
+        or candidate.get("hard_block_reason")
+        or gpt_context.get("hard_block_reason")
+        or event_risk.get("entry_blocked")
+        or "event_risk_entry_block" in candidate_risk_flags
+        or analysis.get("hard_blocked")
+        or analysis.get("block_reason")
+        or analysis_override.get("hard_blocked")
+        or (
+            override_block_reason
+            and override_block_reason not in soft_score_blocks
+        )
+    )
+
+
+def _fallback_eligibility_reason(
+    candidate: dict[str, Any],
+    *,
+    analysis_override: dict[str, Any],
+) -> str | None:
+    c_score = _canonical_c_score(candidate)
+    if (
+        c_score is None
+        or c_score < 70.0
+        or candidate.get("quant_c_gate_passed") is False
+    ):
+        return "below_c_score_threshold"
+    if not _canonical_gpt_completed(candidate):
+        return "gpt_not_completed"
+    final_score = _optional_number(candidate.get("final_buy_score"))
+    if final_score is None or final_score < 65.0:
+        return "below_final_score_threshold"
+    if _canonical_hard_blocked(candidate, analysis_override=analysis_override):
+        return "candidate_hard_blocked"
+    if str(analysis_override.get("action") or "").strip().lower() != "buy":
+        return str(
+            analysis_override.get("reason")
+            or analysis_override.get("block_reason")
+            or "analysis_blocked"
+        )
+    return None
+
+
+def _fallback_is_below_threshold_hold(candidate: dict[str, Any]) -> bool:
+    analysis_override = candidate.get("_analysis_override")
+    analysis_override = analysis_override if isinstance(analysis_override, dict) else {}
+    final_score = _optional_number(candidate.get("final_buy_score"))
+    return (
+        _canonical_c_score(candidate) is not None
+        and _canonical_c_score(candidate) >= 70.0
+        and candidate.get("quant_c_gate_passed") is not False
+        and _canonical_gpt_completed(candidate)
+        and not _canonical_hard_blocked(
+            candidate,
+            analysis_override=analysis_override,
+        )
+        and str(analysis_override.get("action") or "").strip().lower() == "hold"
+        and (
+            final_score is None
+            or final_score < 65.0
+            or str(analysis_override.get("reason") or "").strip()
+            in {
+                "below_profile_buy_threshold",
+                "profile_final_candidate_below_entry_gate",
+            }
+        )
+    )
+
+
+def _fallback_candidate_block_kind(result: dict[str, Any]) -> str | None:
+    reason = str(result.get("reason") or "").strip()
+    if reason in {"quantity_invalid", "kis_market_buy_qty_unavailable"}:
+        return "affordability"
+    if reason not in {"duplicate_position", "duplicate_open_order"}:
+        return None
+    risk = result.get("risk")
+    risk = risk if isinstance(risk, dict) else {}
+    flags = {
+        str(flag).strip()
+        for flag in (risk.get("risk_flags") or [])
+        if str(flag).strip()
+    }
+    if flags and flags <= {"duplicate_position", "duplicate_open_order"}:
+        return "risk"
+    return None
+
+
+def _candidate_final_quantity(result: dict[str, Any]) -> int | None:
+    sizing = result.get("sizing")
+    sizing = sizing if isinstance(sizing, dict) else {}
+    for key in ("final_quantity", "quantity"):
+        value = _int_or_none(sizing.get(key))
+        if value is not None:
+            return value
+    return None
 
 
 def _canonical_pipeline_lineage(
