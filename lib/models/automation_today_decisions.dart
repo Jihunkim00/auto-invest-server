@@ -143,6 +143,12 @@ class AutomationTodayDecisionSlot {
 
   bool get hasResult =>
       status == 'result' && (symbol?.trim().isNotEmpty ?? false);
+  bool get hasAnalysisResult =>
+      status == 'result' || status == 'analysis_complete';
+  bool get isQuantHold =>
+      status == 'analysis_complete' &&
+      gptTargetSymbols.isEmpty &&
+      finalCandidateSymbols.isEmpty;
   bool get isPending => status == 'analysis_pending';
 
   factory AutomationTodayDecisionSlot.fromJson(Map<String, dynamic> json) {

@@ -202,6 +202,51 @@ void main() {
     expect(find.textContaining('오늘 판단'), findsOneWidget);
     controller.dispose();
   });
+
+  testWidgets('analysis_complete quant hold is not shown as no result',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..todayAiDecisions = AutomationTodayDecisions.fromJson({
+        'trade_date_kst': '2026-09-16',
+        'timezone': 'Asia/Seoul',
+        'profile_id': 8,
+        'slots': [
+          {
+            'scheduler_slot': '09:30',
+            'status': 'analysis_complete',
+            'action': 'hold',
+            'reason': 'no_completed_gpt_final_candidate',
+            'snapshot_selected_count': 50,
+            'runtime_quant_candidate_count': 0,
+            'gpt_target_symbols': [],
+            'gpt_completed_symbols': [],
+            'final_candidate_symbols': [],
+          },
+        ],
+      })
+      ..todayAiDecisionsLoaded = true
+      ..schedulerStatus = _schedulerStatus();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeLatestAiDecisionCard(
+            controller: controller,
+            userScoped: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.textContaining('09:30'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('home-ai-slot-card-09:30')), findsOneWidget);
+    expect(find.textContaining('HOLD'), findsOneWidget);
+    expect(find.text('정상 분석 완료'), findsOneWidget);
+    expect(find.text('C 기준 정량 통과 후보 없음 · GPT 분석 미실행'), findsOneWidget);
+    expect(find.text('분석 결과 없음'), findsNothing);
+    controller.dispose();
+  });
 }
 
 WatchlistRunResult _runResult() {

@@ -206,24 +206,30 @@ class _TodayDecisionSlot extends StatelessWidget {
     final status = slot.hasResult
         ? (slot.signalStatus ?? slot.action ?? 'HOLD').toUpperCase()
         : slot.isPending
-            ? '분석 전'
-            : '분석 결과 없음';
+            ? '\uBD84\uC11D \uC804'
+            : slot.hasAnalysisResult
+                ? 'HOLD'
+                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
     final symbol = slot.symbol?.trim() ?? '';
     final display = slot.hasResult
         ? _displaySymbol(controller, symbol, slot.symbolName)
         : slot.isPending
-            ? '분석 대기'
-            : '분석 결과 없음';
+            ? '\uBD84\uC11D \uB300\uAE30'
+            : slot.hasAnalysisResult
+                ? '\uC815\uC0C1 \uBD84\uC11D \uC644\uB8CC'
+                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
     final score = slot.hasResult
         ? [
             if (slot.finalBuyScore != null) 'Final Buy ${slot.finalBuyScore!}',
             if (slot.finalSellScore != null) 'Sell ${slot.finalSellScore!}',
             if (slot.confidence != null)
               'Confidence ${_number(slot.confidence!)}',
-          ].join(' · ')
+          ].join(' \u00B7 ')
         : slot.isPending
-            ? '이 슬롯은 분석 대기 중입니다.'
-            : '이 슬롯의 분석 결과가 없습니다.';
+            ? '\uC774 \uC2AC\uB86F\uC740 \uBD84\uC11D \uB300\uAE30 \uC911\uC785\uB2C8\uB2E4.'
+            : slot.isQuantHold
+                ? 'C \uAE30\uC900 \uC815\uB7C9 \uD1B5\uACFC \uD6C4\uBCF4 \uC5C6\uC74C \u00B7 GPT \uBD84\uC11D \uBBF8\uC2E4\uD589'
+                : '\uBD84\uC11D \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.';
     final reason = (slot.aiReason ?? slot.reason ?? '').trim();
     final timestamp = parseTimestampToKst(slot.createdAtKst ?? slot.createdAt);
     final timeText = timestamp == null

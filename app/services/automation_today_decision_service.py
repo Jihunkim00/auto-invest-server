@@ -130,7 +130,6 @@ class AutomationTodayDecisionService:
         query = db.query(TradeRunLog).filter(
             TradeRunLog.created_at >= start,
             TradeRunLog.created_at < end,
-            TradeRunLog.symbol.notin_(_INVALID_SYMBOLS),
         )
         if owner_user_id is not None:
             query = query.filter(
@@ -258,7 +257,23 @@ class AutomationTodayDecisionService:
             or run.symbol
         )
         if symbol in _INVALID_SYMBOLS:
-            return base
+            # A completed scheduler run may have no executable symbol when the
+            # C gate produces no GPT/final candidate. This is not no_result.
+            if pipeline.get('profile_snapshot_id') is None:
+                return base
+            created_at = _aware_utc(run.created_at)
+            return {
+                **base,
+                'status': 'analysis_complete',
+                'signal_status': run.result,
+                'run_id': run.id,
+                'run_key': run.run_key,
+                'signal_id': run.signal_id,
+                'action': 'hold',
+                'reason': 'no_completed_gpt_final_candidate',
+                'created_at': created_at.isoformat().replace('+00:00', 'Z'),
+                'created_at_kst': created_at.astimezone(KST).isoformat(),
+            }
         signal = db.get(SignalLog, run.signal_id) if run.signal_id else None
         if (signal is not None and admin_user_id is None and owner is not None
                 and signal.owner_user_id != owner):
@@ -368,6 +383,27 @@ class AutomationTodayDecisionService:
         }
         if profile_id is None:
             return empty
+        snapshot_query = db.query(AutomationProfileWatchlistSnapshot).filter(
+            AutomationProfileWatchlistSnapshot.profile_id == int(profile_id),
+            AutomationProfileWatchlistSnapshot.snapshot_date == local_date.isoformat(),
+            AutomationProfileWatchlistSnapshot.scheduler_slot == str(slot),
+        )
+        if admin_user_id is not None:
+            snapshot_query = snapshot_query.filter(or_(
+                AutomationProfileWatchlistSnapshot.owner_user_id.is_(None),
+                AutomationProfileWatchlistSnapshot.owner_user_id == int(admin_user_id),
+            ))
+        elif owner_user_id is None:
+            snapshot_query = snapshot_query.filter(
+                AutomationProfileWatchlistSnapshot.owner_user_id.is_(None)
+            )
+        else:
+            snapshot_query = snapshot_query.filter(
+                AutomationProfileWatchlistSnapshot.owner_user_id == int(owner_user_id)
+            )
+        snapshot = snapshot_query.order_by(
+            AutomationProfileWatchlistSnapshot.id.desc()
+        ).first()
         query = db.query(AutomationProfileAiCandidateResult).filter(
             AutomationProfileAiCandidateResult.profile_id == int(profile_id),
             AutomationProfileAiCandidateResult.snapshot_date == local_date.isoformat(),
@@ -391,7 +427,15 @@ class AutomationTodayDecisionService:
             AutomationProfileAiCandidateResult.id.asc(),
         ).all()
         if not rows:
-            return empty
+            if snapshot is None:
+                return empty
+            return {
+                **empty,
+                'profile_snapshot_id': snapshot.id,
+                'snapshot_source_count': snapshot.source_count,
+                'snapshot_eligible_count': snapshot.eligible_count,
+                'snapshot_selected_count': snapshot.selected_count,
+            }
 
         def candidate(row: AutomationProfileAiCandidateResult) -> dict[str, Any]:
             final_score = row.final_buy_score
@@ -441,7 +485,7 @@ class AutomationTodayDecisionService:
         snapshot = (
             db.get(AutomationProfileWatchlistSnapshot, int(rows[0].snapshot_id))
             if rows[0].snapshot_id is not None
-            else None
+            else snapshot
         )
         final_items = [candidate(row) for row in final_rows[:5]]
         return {

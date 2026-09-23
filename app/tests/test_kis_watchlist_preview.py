@@ -146,7 +146,7 @@ def _safe_preview(monkeypatch):
     )
 
 
-def test_kis_watchlist_preview_returns_items(client, db_session):
+def test_kis_watchlist_preview_returns_items(client, db_session, kr_watchlist_fixture):
     response = client.post("/kis/watchlist/preview")
 
     assert response.status_code == 200
@@ -393,7 +393,7 @@ def test_kis_preview_market_closed_warns_but_still_previews(monkeypatch, client)
     assert "market_closed" in body["items"][0]["warnings"]
 
 
-def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
+def test_kis_preview_per_symbol_failure_continues(monkeypatch, client, kr_watchlist_fixture):
     def fake_price(self, symbol):
         if symbol == "005930":
             raise RuntimeError("price unavailable")
@@ -422,7 +422,7 @@ def test_kis_preview_per_symbol_failure_continues(monkeypatch, client):
     assert other_item["current_price"] == 50000.0
 
 
-def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, client):
+def test_kis_preview_with_enough_bars_returns_grounded_scores(monkeypatch, client, kr_watchlist_fixture):
     captured_payloads = []
     captured_symbols = []
     bar_symbols = []

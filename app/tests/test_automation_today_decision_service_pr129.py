@@ -237,7 +237,10 @@ def test_today_decisions_are_exact_owner_profile_slot_scoped_and_kst(db_session)
     assert [slot['scheduler_slot'] for slot in result['slots']] == [
         '09:10', '11:30', '13:30',
     ]
-    assert result['slots'][0]['status'] == 'no_result'
+    assert result['slots'][0]['status'] == 'analysis_complete'
+    assert result['slots'][0]['action'] == 'hold'
+    assert result['slots'][0]['reason'] == 'no_completed_gpt_final_candidate'
+    assert result['slots'][0]['snapshot_selected_count'] == 50
     assert result['slots'][0]['symbol'] is None
     assert result['slots'][1]['symbol'] == '010170'
     assert result['slots'][1]['symbol_name'] == '스냅샷 이름'

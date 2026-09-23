@@ -167,7 +167,7 @@ def test_existing_watchlist_loading_without_market_still_uses_us_default():
     assert service._settings.watchlist_config_path == "config/watchlist.yaml"
 
 
-def test_kr_watchlist_loading_returns_six_digit_symbols():
+def test_kr_watchlist_loading_returns_six_digit_symbols(kr_watchlist_fixture):
     payload = MarketProfileService().load_watchlist("KR")
 
     symbols = [item["symbol"] for item in payload["symbols"]]
@@ -175,8 +175,6 @@ def test_kr_watchlist_loading_returns_six_digit_symbols():
     assert payload["currency"] == "KRW"
     assert payload["count"] == 50
     assert "005930" in symbols
-    assert "105560" in symbols
-    assert "000660" not in symbols
     assert "035420" in symbols
     assert symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
@@ -188,13 +186,11 @@ def test_kr_watchlist_loading_returns_six_digit_symbols():
     assert all(item["market"] == "KR" for item in payload["symbols"])
 
 
-def test_kr_watchlist_service_can_load_profile_symbols_without_analysis():
+def test_kr_watchlist_service_can_load_profile_symbols_without_analysis(kr_watchlist_fixture):
     service = WatchlistService(market="KR")
 
     assert len(service.symbols) == 50
     assert "005930" in service.symbols
-    assert "105560" in service.symbols
-    assert "000660" not in service.symbols
     assert "035420" in service.symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in service.symbols)
 
@@ -293,7 +289,7 @@ def test_kr_market_profile_endpoint_returns_kr_config():
     assert body["enabled_for_trading"] is True
 
 
-def test_kr_watchlist_endpoint_returns_six_digit_symbols():
+def test_kr_watchlist_endpoint_returns_six_digit_symbols(kr_watchlist_fixture):
     client = TestClient(app)
 
     response = client.get("/market-profiles/KR/watchlist")
@@ -304,10 +300,22 @@ def test_kr_watchlist_endpoint_returns_six_digit_symbols():
     assert body["market"] == "KR"
     assert body["count"] == 50
     assert "005930" in symbols
-    assert "105560" in symbols
-    assert "000660" not in symbols
     assert "035420" in symbols
     assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
+
+
+def test_kr_production_watchlist_is_structurally_valid():
+    payload = MarketProfileService().load_watchlist("KR")
+
+    symbols = [item["symbol"] for item in payload["symbols"]]
+
+    assert symbols
+    assert len(symbols) == len(set(symbols))
+    assert all(re.fullmatch(r"\d{6}", symbol) for symbol in symbols)
+    assert all(
+        item.get("listing_market") in {"KOSPI", "KOSDAQ"}
+        for item in payload["symbols"]
+    )
 
 
 def test_kr_reference_sites_endpoint_returns_official_sources():

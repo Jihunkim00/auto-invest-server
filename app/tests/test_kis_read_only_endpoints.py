@@ -361,6 +361,7 @@ def test_kis_current_price_matches_across_preview_endpoints(
     monkeypatch,
     client,
     db_session,
+    kr_watchlist_fixture,
 ):
     _add_access_token(db_session)
     settings = _settings(openai_api_key=None)
@@ -441,6 +442,7 @@ def test_kis_preview_uses_normalized_price_not_raw_quote_fields(
     monkeypatch,
     client,
     db_session,
+    kr_watchlist_fixture,
 ):
     _add_access_token(db_session)
     monkeypatch.setattr("app.routes.kis.get_settings", lambda: _settings())
@@ -704,6 +706,7 @@ def test_kis_read_only_refreshes_expired_token_lazily(
     monkeypatch,
     client,
     db_session,
+    kr_watchlist_fixture,
 ):
     _add_access_token(
         db_session,

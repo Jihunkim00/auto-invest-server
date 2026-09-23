@@ -122,6 +122,7 @@ def test_kis_preview_includes_event_risk_and_never_creates_order(
     monkeypatch,
     client,
     db_session,
+    kr_watchlist_fixture,
 ):
     _seed_kr_event(db_session)
     captured_event_contexts = []

@@ -103,3 +103,16 @@ def db_session():
         session.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+@pytest.fixture()
+def kr_watchlist_fixture(monkeypatch, tmp_path):
+    fixture_path = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "watchlist_kr_test.yaml"
+    )
+    target = tmp_path / "watchlist_kr.yaml"
+    shutil.copyfile(fixture_path, target)
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "watchlist_kr_path", str(target))
+    return target
