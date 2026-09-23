@@ -27,6 +27,7 @@ from app.services.market_session_service import MarketSessionService
 from app.services.order_service import map_broker_status_to_internal, normalize_broker_status
 from app.services.automation_profile_safety import TEST4_HARD_SAFETY
 from app.services.user_broker_account_service import UserBrokerAccountService
+from app.services.user_broker_account_service import UserBrokerUnavailableError
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
@@ -445,6 +446,9 @@ class UserTradingExecutionService:
                             'risk_flags': [automatic_reason],
                         },
                     )
+                preflight = self._preflight_kis_automatic_buy(db, user=user, credentials=credentials or {}, symbol=base['requested_symbol'], sizing=sizing)
+                if preflight.get('reason'):
+                    return self._finish_blocked(db, run, user=user, base=base, reason=preflight['reason'], analysis=analysis, risk=risk)
             return self._submit_kis_live(
                 db,
                 run,
@@ -917,14 +921,16 @@ class UserTradingExecutionService:
         now,
         authorization_mode,
     ):
+        submit_quantity = int(sizing.get('final_quantity') or sizing['quantity']) if str(authorization_mode or '').strip().lower() == 'automatic' else int(sizing['quantity'])
+        submit_notional = round(submit_quantity * float(sizing.get('price') or 0), 2)
         order = self._create_order(
             db,
             user=user,
             provider="kis",
             market="KR",
             symbol=base["requested_symbol"],
-            qty=sizing["quantity"],
-            notional=sizing["notional"],
+            qty=submit_quantity,
+            notional=submit_notional,
             internal_status=InternalOrderStatus.REQUESTED.value,
             request_payload={
                 "provider": "kis",
@@ -940,8 +946,8 @@ class UserTradingExecutionService:
                 "trigger_source": base.get("trigger_source"),
                 "authorization_mode": base.get("authorization_mode"),
                 "scheduler_slot": base.get("scheduler_slot"),
-                "qty": sizing["quantity"],
-                "notional": sizing["notional"],
+                "qty": submit_quantity,
+                "notional": submit_notional,
                 "sizing": sizing,
                 "real_order_submitted": False,
                 "broker_submit_called": False,
@@ -964,7 +970,7 @@ class UserTradingExecutionService:
             broker_called = True
             broker_order = client.submit_market_buy_qty(
                 symbol=base["requested_symbol"],
-                qty=sizing["quantity"],
+                qty=submit_quantity,
             )
             self._apply_broker_order(db, order, broker_order)
             status_value = str(order.internal_status or "").upper()
@@ -1012,7 +1018,7 @@ class UserTradingExecutionService:
                 "execution": response_payload,
             }
             return self._finish_run(db, run, response)
-        except Exception:
+        except Exception as exc:
             order.internal_status = InternalOrderStatus.FAILED.value
             order.error_message = "user_broker_submit_failed"
             order.response_payload = json.dumps(
@@ -1020,6 +1026,7 @@ class UserTradingExecutionService:
                     "reason": "kis_live_submit_failed",
                     "broker_submit_called": broker_called,
                     "real_order_submitted": False,
+                    "error": self._safe_broker_diagnostics(exc),
                 },
                 ensure_ascii=False,
             )
@@ -1046,12 +1053,79 @@ class UserTradingExecutionService:
                     "type": "kis_live",
                     "status": "failed",
                     "real_order_submitted": False,
+                    "error": self._safe_broker_diagnostics(exc),
                     "broker_submit_called": broker_called,
                     "manual_submit_called": False,
                 },
             }
             return self._finish_run(db, run, response)
 
+    def _preflight_kis_automatic_buy(self, db, *, user, credentials, symbol, sizing):
+        try:
+            client = self.kis_live_client_factory(db, user, credentials)
+            get_possible = getattr(client, 'get_possible_buy_order', None)
+            if not callable(get_possible):
+                raise UserBrokerUnavailableError('user KIS possible-order request unavailable', details={'error_type': 'possible_order_method_unavailable'})
+            possible = get_possible(symbol=symbol, order_type='market')
+            if not isinstance(possible, dict):
+                raise UserBrokerUnavailableError('user KIS possible-order response had an unexpected shape', details={'error_type': 'unexpected_shape'})
+        except Exception as exc:
+            diagnostics = self._safe_broker_diagnostics(exc)
+            sizing['kis_possible_order'] = {'raw_status': 'error', **diagnostics}
+            sizing['internal_quantity'] = self._safe_nonnegative_int(sizing.get('quantity'))
+            sizing['kis_profile_quantity'] = 0
+            sizing['final_quantity'] = 0
+            sizing['preflight_reason'] = 'kis_possible_order_unavailable'
+            return {'reason': 'kis_possible_order_unavailable'}
+
+        target = self._safe_nonnegative_number(sizing.get('target_notional'))
+        internal_quantity = self._safe_nonnegative_int(sizing.get('quantity'))
+        possible_amount = self._safe_nonnegative_number(possible.get('nrcvb_buy_amt'))
+        possible_quantity = self._safe_nonnegative_int(possible.get('nrcvb_buy_qty'))
+        calculation_price = self._safe_positive_number(possible.get('psbl_qty_calc_unpr'))
+        sizing['internal_quantity'] = internal_quantity
+        sizing['kis_possible_order'] = self._safe_possible_order(possible)
+        if target is None or calculation_price is None:
+            sizing['kis_profile_quantity'] = 0
+            sizing['final_quantity'] = 0
+            sizing['preflight_reason'] = 'kis_possible_order_unavailable'
+            return {'reason': 'kis_possible_order_unavailable'}
+        budget_cap = min(target, possible_amount or 0.0)
+        kis_profile_quantity = math.floor(budget_cap / calculation_price)
+        final_quantity = min(internal_quantity, kis_profile_quantity, possible_quantity)
+        sizing['kis_profile_quantity'] = int(max(kis_profile_quantity, 0))
+        sizing['final_quantity'] = int(max(final_quantity, 0))
+        sizing['preflight_budget_cap'] = budget_cap
+        sizing['preflight_reason'] = 'kis_market_buy_qty_unavailable' if final_quantity <= 0 else None
+        return {'reason': sizing['preflight_reason']}
+
+    @staticmethod
+    def _safe_possible_order(possible):
+        keys = ('symbol', 'order_type', 'ord_psbl_cash', 'nrcvb_buy_amt', 'nrcvb_buy_qty', 'max_buy_amt', 'max_buy_qty', 'psbl_qty_calc_unpr', 'raw_status', 'error_type', 'http_status', 'rt_cd', 'msg_cd', 'msg1')
+        return {key: possible.get(key) for key in keys if key in possible}
+
+    @staticmethod
+    def _safe_broker_diagnostics(exc):
+        details = getattr(exc, 'details', {})
+        allowed = {'error_type', 'http_status', 'rt_cd', 'msg_cd', 'msg1'}
+        result = {key: details.get(key) for key in allowed if details.get(key) is not None}
+        result.setdefault('error_type', type(exc).__name__)
+        return result
+
+    @staticmethod
+    def _safe_nonnegative_number(value):
+        number = _number(value)
+        return None if number is None else max(number, 0.0)
+
+    @classmethod
+    def _safe_nonnegative_int(cls, value):
+        number = cls._safe_nonnegative_number(value)
+        return 0 if number is None else max(0, math.floor(number))
+
+    @staticmethod
+    def _safe_positive_number(value):
+        number = _number(value)
+        return number if number is not None and number > 0 else None
     @staticmethod
     def _automatic_block_reason(settings: UserTradingSettings, provider: str) -> str | None:
         if not bool(settings.auto_trading_enabled):

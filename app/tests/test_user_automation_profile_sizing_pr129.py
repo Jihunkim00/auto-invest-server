@@ -1,3 +1,4 @@
+import pytest
 from app.services.user_trading_execution_service import UserTradingExecutionService
 
 
@@ -170,3 +171,110 @@ def test_manual_legacy_sizing_keeps_user_trading_settings_source():
     assert sizing['sizing_mode'] == 'legacy_percentage'
     assert sizing['quantity'] == 50
     assert sizing['notional'] == 5000.0
+
+def _preflight_service(possible):
+    service = UserTradingExecutionService.__new__(UserTradingExecutionService)
+    service.kis_live_client_factory = lambda _db, _user, _credentials: type(
+        'FakePossibleOrderClient',
+        (),
+        {'get_possible_buy_order': lambda self, **kwargs: possible},
+    )()
+    return service
+
+
+def test_kis_possible_order_blocks_test01_market_buy_without_submit():
+    sizing = {'quantity': 1, 'price': 46475.0, 'target_notional': 48000.0}
+    result = _preflight_service({
+        'symbol': '067310',
+        'order_type': 'market',
+        'nrcvb_buy_amt': 49751,
+        'nrcvb_buy_qty': 0,
+        'psbl_qty_calc_unpr': 59300,
+        'raw_status': 'ok',
+    })._preflight_kis_automatic_buy(None, user=None, credentials={}, symbol='067310', sizing=sizing)
+    assert result['reason'] == 'kis_market_buy_qty_unavailable'
+    assert sizing['internal_quantity'] == 1
+    assert sizing['kis_profile_quantity'] == 0
+    assert sizing['final_quantity'] == 0
+
+
+def test_kis_possible_order_allows_one_share():
+    sizing = {'quantity': 1, 'price': 46475.0, 'target_notional': 48000.0}
+    result = _preflight_service({
+        'nrcvb_buy_amt': 49751,
+        'nrcvb_buy_qty': 1,
+        'psbl_qty_calc_unpr': 46475,
+        'raw_status': 'ok',
+    })._preflight_kis_automatic_buy(None, user=None, credentials={}, symbol='067310', sizing=sizing)
+    assert result['reason'] is None
+    assert sizing['final_quantity'] == 1
+
+
+def test_kis_possible_order_never_expands_internal_risk_quantity():
+    sizing = {'quantity': 1, 'price': 10000.0, 'target_notional': 10000.0}
+    result = _preflight_service({
+        'nrcvb_buy_amt': 100000,
+        'nrcvb_buy_qty': 5,
+        'psbl_qty_calc_unpr': 10000,
+        'raw_status': 'ok',
+    })._preflight_kis_automatic_buy(None, user=None, credentials={}, symbol='067310', sizing=sizing)
+    assert result['reason'] is None
+    assert sizing['final_quantity'] == 1
+
+
+def test_kis_possible_order_failure_is_fail_safe():
+    service = UserTradingExecutionService.__new__(UserTradingExecutionService)
+    service.kis_live_client_factory = lambda _db, _user, _credentials: type(
+        'UnavailableClient',
+        (),
+        {'get_possible_buy_order': lambda self, **kwargs: (_ for _ in ()).throw(RuntimeError('secret-value'))},
+    )()
+    sizing = {'quantity': 1, 'price': 10000.0, 'target_notional': 10000.0}
+    result = service._preflight_kis_automatic_buy(None, user=None, credentials={}, symbol='067310', sizing=sizing)
+    assert result['reason'] == 'kis_possible_order_unavailable'
+    assert sizing['final_quantity'] == 0
+    assert sizing['kis_possible_order']['error_type'] == 'RuntimeError'
+    assert 'secret-value' not in str(sizing)
+
+
+def test_kis_rejection_diagnostics_are_safe_and_preserved():
+    from app.services.user_broker_account_service import (
+        UserBrokerUnavailableError,
+        _require_kis_order_response,
+    )
+
+    class Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {'rt_cd': '1', 'msg_cd': 'SOME_CODE', 'msg1': 'safe rejection message'}
+
+    with pytest.raises(UserBrokerUnavailableError) as raised:
+        _require_kis_order_response(Response())
+    assert raised.value.details == {
+        'error_type': 'kis_order_rejected',
+        'http_status': 200,
+        'rt_cd': '1',
+        'msg_cd': 'SOME_CODE',
+        'msg1': 'safe rejection message',
+    }
+
+    diagnostics = UserTradingExecutionService._safe_broker_diagnostics(
+        UserBrokerUnavailableError(
+            'rejected',
+            details={
+                'error_type': 'kis_order_rejected',
+                'http_status': 200,
+                'rt_cd': '1',
+                'msg_cd': 'SOME_CODE',
+                'msg1': 'safe rejection message',
+                'app_key': 'secret',
+                'access_token': 'token',
+                'account_no': '12345678',
+            },
+        )
+    )
+    assert 'app_key' not in diagnostics
+    assert 'access_token' not in diagnostics
+    assert 'account_no' not in diagnostics

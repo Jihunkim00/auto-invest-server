@@ -26,6 +26,8 @@ KIS_BALANCE_PATH = '/uapi/domestic-stock/v1/trading/inquire-balance'
 KIS_BALANCE_TR_IDS = {'paper': 'VTTC8434R', 'live': 'TTTC8434R'}
 KIS_OPEN_ORDERS_PATH = '/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl'
 KIS_OPEN_ORDERS_TR_ID = 'TTTC0084R'
+KIS_POSSIBLE_ORDER_PATH = '/uapi/domestic-stock/v1/trading/inquire-psbl-order'
+KIS_POSSIBLE_ORDER_TR_ID = 'TTTC8908R'
 ALPACA_BASE_URLS = {
     'paper': 'https://paper-api.alpaca.markets',
     'live': 'https://api.alpaca.markets',
@@ -257,6 +259,38 @@ class UserKisLiveTradingClient(UserKisReadOnlyClient):
         if self.environment != 'live':
             raise ValueError('broker_environment_invalid')
 
+    def get_possible_buy_order(self, *, symbol: str, order_type: str = 'market') -> dict[str, Any]:
+        if str(order_type or '').strip().lower() != 'market':
+            raise ValueError('unsupported_kis_order_type')
+        normalized_symbol = str(symbol or '').strip()
+        if len(normalized_symbol) != 6 or not normalized_symbol.isdigit():
+            raise ValueError('invalid_kis_symbol')
+        payload = self._get(
+            KIS_POSSIBLE_ORDER_PATH,
+            tr_id=KIS_POSSIBLE_ORDER_TR_ID,
+            params={
+                'CANO': str(self.credentials.get('account_no') or ''),
+                'ACNT_PRDT_CD': str(self.credentials.get('account_product_code') or ''),
+                'PDNO': normalized_symbol,
+                'ORD_UNPR': '',
+                'ORD_DVSN': '01',
+                'CMA_EVLU_AMT_ICLD_YN': 'N',
+                'OVRS_ICLD_YN': 'N',
+            },
+        )
+        output = _first_dict(payload.get('output'))
+        return {
+            'symbol': normalized_symbol,
+            'order_type': 'market',
+            'ord_psbl_cash': _first_number(output, ('ord_psbl_cash',)),
+            'nrcvb_buy_amt': _first_number(output, ('nrcvb_buy_amt',)),
+            'nrcvb_buy_qty': _first_number(output, ('nrcvb_buy_qty',)),
+            'max_buy_amt': _first_number(output, ('max_buy_amt',)),
+            'max_buy_qty': _first_number(output, ('max_buy_qty',)),
+            'psbl_qty_calc_unpr': _first_number(output, ('psbl_qty_calc_unpr',)),
+            'raw_status': 'ok',
+        }
+
     def submit_market_buy_qty(self, *, symbol: str, qty: float) -> dict[str, Any]:
         quantity = int(qty)
         if quantity <= 0:
@@ -361,7 +395,7 @@ class UserKisLiveTradingClient(UserKisReadOnlyClient):
                 url, json=payload, headers=headers, timeout=self.timeout_seconds
             )
         except Exception as exc:
-            raise UserBrokerUnavailableError('user KIS order request failed') from exc
+            raise UserBrokerUnavailableError('user KIS order request failed', details={'error_type': 'http_error'}) from exc
 
 class UserAlpacaReadOnlyClient:
     '''Alpaca account reader using only one users decrypted credentials.'''
@@ -733,17 +767,35 @@ def _require_kis_order_response(response) -> dict[str, Any]:
     if status in {401, 403}:
         raise UserBrokerAuthenticationError('user KIS authentication failed')
     if status >= 400:
-        raise UserBrokerUnavailableError('user KIS order request failed')
+        raise UserBrokerUnavailableError(
+            'user KIS order request failed',
+            details={'error_type': 'http_error', 'http_status': status},
+        )
     try:
         payload = response.json()
     except Exception as exc:
-        raise UserBrokerUnavailableError('user KIS order response was invalid') from exc
+        raise UserBrokerUnavailableError(
+            'user KIS order response was invalid',
+            details={'error_type': 'invalid_json', 'http_status': status},
+        ) from exc
     if not isinstance(payload, dict):
-        raise UserBrokerUnavailableError('user KIS order response had an unexpected shape')
+        raise UserBrokerUnavailableError(
+            'user KIS order response had an unexpected shape',
+            details={'error_type': 'unexpected_shape', 'http_status': status},
+        )
     if str(payload.get('rt_cd', '0') or '0') not in {'', '0'}:
         if _kis_auth_failure(payload):
             raise UserBrokerAuthenticationError('user KIS authentication failed')
-        raise UserBrokerUnavailableError('user KIS order request rejected')
+        raise UserBrokerUnavailableError(
+            'user KIS order request rejected',
+            details={
+                'error_type': 'kis_order_rejected',
+                'http_status': status,
+                'rt_cd': payload.get('rt_cd'),
+                'msg_cd': payload.get('msg_cd'),
+                'msg1': payload.get('msg1'),
+            },
+        )
     return payload
 
 def _kis_auth_failure(value: Any) -> bool:

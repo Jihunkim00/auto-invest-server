@@ -146,6 +146,10 @@ class FakeBroker:
         self.buy_calls = []
         self.sell_calls = []
 
+    def get_possible_buy_order(self, *, symbol, order_type='market'):
+        assert order_type == 'market'
+        return {'symbol': symbol, 'order_type': 'market', 'nrcvb_buy_amt': 1000000.0, 'nrcvb_buy_qty': 10000, 'psbl_qty_calc_unpr': 100.0, 'raw_status': 'ok'}
+
     def submit_market_buy_qty(self, *, symbol, qty):
         self.buy_calls.append((symbol, qty))
         return SimpleNamespace(
