@@ -31,6 +31,8 @@ from app.services.user_broker_account_service import (
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 from app.services.user_trading_execution_service import UserTradingExecutionService
+from app.services.calendar_gap_risk_service import CalendarGapRiskService
+from app.services.market_calendar_service import MarketCalendarService
 import app.services.user_auto_trading_scheduler_service as user_scheduler_module
 
 from app.services.user_auto_trading_scheduler_service import (
@@ -49,7 +51,7 @@ class FakeSessionService(MarketSessionService):
             'market': market,
             'is_market_open': True,
             'is_entry_allowed_now': True,
-            'local_time': '2026-09-11T10:00:00+09:00',
+            'local_time': '2026-09-10T10:00:00+09:00',
         }
 
     def get_entry_slots(self, market=None):
@@ -214,7 +216,7 @@ class CanonicalProfileWatchlists:
                 'owner_user_id': int(owner_user_id),
                 'provider': 'kis',
                 'market': 'KR',
-                'snapshot_date': '2026-09-11',
+                'snapshot_date': '2026-09-10',
                 'scheduler_slot': scheduler_slot,
                 'source_count': len(self.items),
                 'eligible_count': len(self.items),
@@ -459,7 +461,9 @@ def _harness(*, snapshots=None, fail_user_ids=None, fail_symbols=None):
     return scheduler, account, analysis, broker, kis_client
 
 
-RUN_AT = datetime(2026, 9, 11, 1, 10, tzinfo=UTC)
+RUN_AT = datetime(2026, 9, 10, 1, 10, tzinfo=UTC)
+FRIDAY_RUN_AT = datetime(2026, 9, 11, 1, 10, tzinfo=UTC)
+FRIDAY_1300_RUN_AT = datetime(2026, 9, 11, 4, 0, tzinfo=UTC)
 
 
 def test_dispatcher_jobs_are_provider_scoped_and_have_separate_ids(db_session):
@@ -1015,12 +1019,12 @@ def _canonical_live_harness(db, *, candidates, kill_switch=False, fixed_budget=5
     return scheduler, user, profile, preview, account, analysis, broker, kis_client
 
 
-def _run_user_scheduler_slot(db, scheduler, user, *, slot='09:10'):
+def _run_user_scheduler_slot(db, scheduler, user, *, slot='09:10', now=RUN_AT):
     result = scheduler.run_provider_once(
         db,
         provider='kis',
         scheduler_slot=slot,
-        now=RUN_AT,
+        now=now,
     )
     return next(
         value
@@ -1250,6 +1254,128 @@ def test_quantity_invalid_candidate_falls_through_to_affordable_candidate(db_ses
     ]['skip_reason'] == 'quantity_invalid'
     assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000002']
     assert [symbol for symbol, _ in kis_client.buy_calls] == ['000002']
+
+
+def test_friday_calendar_fallback_uses_tightened_scores_and_half_user_sizing(
+    db_session,
+):
+    candidates = [
+        _final_candidate('000001', final_score=75.0, c_score=74.0, price=10000.0),
+        _final_candidate('000002', final_score=69.0, c_score=76.0, price=10000.0),
+        _final_candidate('000003', final_score=72.0, c_score=78.0, price=10000.0),
+    ]
+    scheduler, user, _profile, _preview, account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    account_snapshot = account.snapshots[(user.id, 'kis')]
+    account_snapshot['account'].update({
+        'portfolio_value': 1000000.0,
+        'equity': 1000000.0,
+        'buying_power': 1000000.0,
+        'cash': 1000000.0,
+    })
+    _set_possible_order(kis_client, '000003', 2, price=10000.0)
+
+    item = _run_user_scheduler_slot(
+        db_session,
+        scheduler,
+        user,
+        now=FRIDAY_RUN_AT,
+    )
+    diagnostics = item['pipeline_diagnostics']
+    results = diagnostics['fallback_candidate_results_by_symbol']
+    sizing = item['sizing']
+
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000003'
+    assert diagnostics['calendar_gap_risk']['calendar_gap_days'] == 3
+    assert diagnostics['calendar_gap_risk']['required_c_score'] == 75.0
+    assert diagnostics['calendar_gap_risk']['required_final_score'] == 70.0
+    assert diagnostics['calendar_gap_risk']['position_size_multiplier'] == 0.5
+    assert results['000001']['skip_reason'] == 'calendar_gap_c_below_threshold'
+    assert results['000002']['skip_reason'] == 'calendar_gap_final_below_threshold'
+    assert sizing['calendar_gap_position_size_multiplier'] == 0.5
+    assert sizing['target_notional'] == sizing['target_notional_before_calendar_gap'] * 0.5
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000003']
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000003']
+    assert len(kis_client.buy_calls) == 1
+
+
+def test_user_friday_after_cutoff_blocks_before_candidate_and_possible_order(db_session):
+    scheduler, user, _profile, preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=[_final_candidate('000001', final_score=80.0)],
+        )
+    )
+
+    item = _run_user_scheduler_slot(
+        db_session,
+        scheduler,
+        user,
+        now=FRIDAY_1300_RUN_AT,
+    )
+
+    assert item['result'] == 'blocked'
+    assert item['reason'] == 'weekend_gap_late_entry_block'
+    assert item['calendar_gap_days'] == 3
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert preview.calls == []
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_user_long_holiday_blocks_before_candidate_and_possible_order(db_session):
+    scheduler, user, _profile, preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=[_final_candidate('000001', final_score=80.0)],
+        )
+    )
+
+    item = _run_user_scheduler_slot(
+        db_session,
+        scheduler,
+        user,
+        now=datetime(2026, 10, 2, 1, 10, tzinfo=UTC),
+    )
+
+    assert item['result'] == 'blocked'
+    assert item['reason'] == 'long_market_closure_ahead'
+    assert item['calendar_gap_days'] == 4
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert preview.calls == []
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_user_calendar_config_failure_fails_closed_before_candidate(db_session, tmp_path):
+    scheduler, user, _profile, preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=[_final_candidate('000001', final_score=80.0)],
+        )
+    )
+    scheduler.calendar_gap_risk_service = CalendarGapRiskService(
+        MarketCalendarService(config_path=str(tmp_path / 'missing.yaml'))
+    )
+
+    item = _run_user_scheduler_slot(
+        db_session,
+        scheduler,
+        user,
+        now=FRIDAY_RUN_AT,
+    )
+
+    assert item['result'] == 'blocked'
+    assert item['reason'] == 'calendar_gap_risk_unavailable'
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert preview.calls == []
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
 
 
 def test_canonical_fallback_excludes_c_score_below_70(db_session):

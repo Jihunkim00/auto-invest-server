@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -70,6 +70,27 @@ class MarketCalendarService:
     def is_holiday(self, market: str, value: datetime | date) -> bool:
         return self.get_holiday(market, value) is not None
 
+    def is_trading_day(self, market: str, value: datetime | date) -> bool:
+        """Return whether a date is a weekday without a full-day holiday."""
+        calendar = self.get_calendar(market)
+        target_date = self._calendar_local_date(calendar, value)
+        if target_date.weekday() >= 5:
+            return False
+        return target_date not in self._full_day_holiday_dates(calendar)
+
+    def next_trading_date(self, market: str, value: datetime | date) -> date:
+        """Return the next weekday that is not a full-day holiday."""
+        calendar = self.get_calendar(market)
+        start_date = self._calendar_local_date(calendar, value)
+        holidays = self._full_day_holiday_dates(calendar)
+        for offset in range(1, 371):
+            candidate = start_date + timedelta(days=offset)
+            if candidate.weekday() < 5 and candidate not in holidays:
+                return candidate
+        raise MarketCalendarError(
+            f"No next trading date found for {self._normalize_market(market)}."
+        )
+
     def get_early_close(
         self,
         market: str,
@@ -126,11 +147,29 @@ class MarketCalendarService:
 
     def _local_date(self, market: str, value: datetime | date) -> date:
         if isinstance(value, datetime):
-            timezone = ZoneInfo(self.get_calendar(market)["timezone"])
+            return self._calendar_local_date(self.get_calendar(market), value)
+        return value
+
+    @staticmethod
+    def _calendar_local_date(calendar: dict[str, Any], value: datetime | date) -> date:
+        if isinstance(value, datetime):
+            timezone = ZoneInfo(calendar["timezone"])
             if value.tzinfo is None:
                 return value.replace(tzinfo=timezone).date()
             return value.astimezone(timezone).date()
         return value
+
+    @staticmethod
+    def _full_day_holiday_dates(calendar: dict[str, Any]) -> set[date]:
+        holidays: set[date] = set()
+        for holiday in calendar.get("holidays") or []:
+            if not holiday.get("full_day", True):
+                continue
+            try:
+                holidays.add(date.fromisoformat(str(holiday.get("date") or "")))
+            except ValueError as exc:
+                raise MarketCalendarError("Invalid full-day holiday date.") from exc
+        return holidays
 
     @staticmethod
     def _normalize_holiday(raw: Any) -> dict[str, Any]:

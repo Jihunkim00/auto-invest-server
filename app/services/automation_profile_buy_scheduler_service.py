@@ -30,6 +30,7 @@ from app.services.profile_universe_service import (
     profile_universe_bounds,
 )
 from app.services.automation_observability import candidate_gpt_quant_observability
+from app.services.calendar_gap_risk_service import CalendarGapRiskService
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -73,6 +74,7 @@ class AutomationProfileBuySchedulerService:
         open_orders_loader: Callable[[Session], list[dict[str, Any]]] | None = None,
         candidate_provider: Callable[..., Any] | None = None,
         execution_core: KisAutomationExecutionCore | None = None,
+        calendar_gap_risk_service: CalendarGapRiskService | None = None,
     ) -> None:
         self.client = client
         self.broker = broker
@@ -92,6 +94,7 @@ class AutomationProfileBuySchedulerService:
         )
         self.open_orders_loader = open_orders_loader
         self.candidate_provider = candidate_provider
+        self.calendar_gap_risk_service = calendar_gap_risk_service or CalendarGapRiskService()
         self.lifecycle_service = lifecycle_service or KisPositionLifecycleService(
             client,
             runtime_settings=self.runtime_settings,
@@ -366,6 +369,28 @@ class AutomationProfileBuySchedulerService:
                 profile=profile,
                 now=now_utc,
             )
+        selection_mode = str(runtime.get('quant_selection_mode') or 'A_ONLY').strip().upper()
+        calendar_gap_risk = self.calendar_gap_risk_service.evaluate(
+            MARKET,
+            now=now_utc,
+            existing_c_score=70.0 if selection_mode == 'A_TOP5_C_GPT' else None,
+            existing_final_score=_threshold(profile),
+        )
+        if calendar_gap_risk.get('entry_blocked') is True:
+            reason = str(calendar_gap_risk.get('block_reason') or 'calendar_gap_risk_unavailable')
+            blocked = self._blocked(
+                reason,
+                profile=profile,
+                live_order_gate=gate,
+                validation_called=False,
+                broker_submit_called=False,
+                real_order_submitted=False,
+                required_entry_score=calendar_gap_risk.get('required_final_score'),
+                calendar_gap_risk=calendar_gap_risk,
+                **calendar_gap_risk,
+            )
+            self._record_run(db, blocked, slot, now_utc)
+            return blocked
         entry_accounting = self._daily_new_entry_accounting(
             db,
             profile=profile,
@@ -423,16 +448,43 @@ class AutomationProfileBuySchedulerService:
             if account_snapshot_override is not None
             else self._account_snapshot(db)
         )
-        selected, target, plan, top_score = self._select_candidate(
+        selected, target, plan, top_score, candidate_diagnostics = self._select_candidate(
             db,
             profile,
             values,
             account_snapshot,
+            calendar_gap_risk=calendar_gap_risk,
+            selection_mode=selection_mode,
             use_account_snapshot_override=account_snapshot_override is not None,
         )
         if selected is None:
-            reason = 'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
-            return self._blocked(reason, profile=profile, final_buy_score=top_score, live_order_gate=gate)
+            calendar_skip = next(
+                (
+                    item.get('skip_reason')
+                    for item in candidate_diagnostics
+                    if str(item.get('skip_reason') or '').startswith('calendar_gap_')
+                ),
+                None,
+            )
+            reason = calendar_skip or (
+                'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
+            )
+            blocked = self._blocked(
+                reason,
+                profile=profile,
+                final_buy_score=top_score,
+                required_entry_score=calendar_gap_risk.get('required_final_score'),
+                validation_called=False,
+                broker_submit_called=False,
+                real_order_submitted=False,
+                live_order_gate=gate,
+                calendar_gap_risk=calendar_gap_risk,
+                calendar_gap_candidate_diagnostics=candidate_diagnostics,
+                **calendar_gap_risk,
+            )
+            if calendar_skip:
+                self._record_run(db, blocked, slot, now_utc)
+            return blocked
         symbol = _symbol(selected)
         key = ':'.join([str(profile.get('profile_key')), now_utc.astimezone(KST).date().isoformat(), slot, symbol])
         existing = db.query(AutomationProfileBuyReservation).filter(AutomationProfileBuyReservation.reservation_key == key).first()
@@ -456,6 +508,8 @@ class AutomationProfileBuySchedulerService:
             symbol=symbol,
             status='reserved',
         )
+        target = dict(target)
+        target['calendar_gap_risk'] = calendar_gap_risk
         order = self._buy_order(profile, selected, target, plan, slot, key)
         db.add(reservation)
         db.add(order)
@@ -520,7 +574,10 @@ class AutomationProfileBuySchedulerService:
                 selected
             ),
             'final_buy_score': _score(selected, 'final_buy_score', 'final_score', 'buy_score'),
-            'required_entry_score': _threshold(profile),
+            'required_entry_score': calendar_gap_risk.get('required_final_score'),
+            'calendar_gap_risk': calendar_gap_risk,
+            'calendar_gap_candidate_diagnostics': candidate_diagnostics,
+            **calendar_gap_risk,
             **entry_accounting,
             'quantity': actual_quantity,
             'approved_notional_krw': actual_notional,
@@ -648,16 +705,65 @@ class AutomationProfileBuySchedulerService:
         values: list[dict[str, Any]],
         account: dict[str, Any],
         *,
+        calendar_gap_risk: dict[str, Any],
+        selection_mode: str,
         use_account_snapshot_override: bool = False,
-    ) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], float | None]:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], float | None, list[dict[str, Any]]]:
         values.sort(key=lambda item: -(_score(item, 'final_buy_score', 'final_score', 'buy_score') or -1))
         top_score = _score(values[0], 'final_buy_score', 'final_score', 'buy_score') if values else None
+        candidate_diagnostics: list[dict[str, Any]] = []
+        base_final_threshold = _threshold(profile)
+        required_final_threshold = float(
+            calendar_gap_risk.get('required_final_score') or base_final_threshold
+        )
+        required_c_threshold = calendar_gap_risk.get('required_c_score')
+        c_score_mode = str(selection_mode or '').strip().upper() == 'A_TOP5_C_GPT'
         for candidate in values:
             score = _score(candidate, 'final_buy_score', 'final_score', 'buy_score')
-            if score is None or score < _threshold(profile):
+            symbol = _symbol(candidate)
+            if c_score_mode:
+                c_score = _score(candidate, 'quant_c_score', 'entry_quant_score')
+                if c_score is None or c_score < 70.0:
+                    candidate_diagnostics.append({
+                        'symbol': symbol,
+                        'final_buy_score': score,
+                        'quant_c_score': c_score,
+                        'skip_reason': 'below_c_score_threshold',
+                    })
+                    continue
+                if (
+                    calendar_gap_risk.get('pre_market_closure_risk') is True
+                    and required_c_threshold is not None
+                    and c_score < float(required_c_threshold)
+                ):
+                    candidate_diagnostics.append({
+                        'symbol': symbol,
+                        'final_buy_score': score,
+                        'quant_c_score': c_score,
+                        'skip_reason': 'calendar_gap_c_below_threshold',
+                    })
+                    continue
+            if score is None or score < base_final_threshold:
+                candidate_diagnostics.append({
+                    'symbol': symbol,
+                    'final_buy_score': score,
+                    'skip_reason': 'below_profile_buy_threshold',
+                })
+                continue
+            if score < required_final_threshold:
+                candidate_diagnostics.append({
+                    'symbol': symbol,
+                    'final_buy_score': score,
+                    'skip_reason': 'calendar_gap_final_below_threshold',
+                })
                 continue
             price = _score(candidate, 'current_price', 'price', 'simulated_price')
             if price is None or price <= 0:
+                candidate_diagnostics.append({
+                    'symbol': symbol,
+                    'final_buy_score': score,
+                    'skip_reason': 'current_price_unavailable',
+                })
                 continue
             risk_kwargs = {
                 'profile_name': str(
@@ -682,15 +788,26 @@ class AutomationProfileBuySchedulerService:
             )
             target = dict(target or {})
             if target.get('approved') is not True:
+                candidate_diagnostics.append({'symbol': symbol, 'skip_reason': target.get('reason') or 'target_risk_blocked'})
                 continue
             approved = _score(target, 'approved_notional_krw', 'recommended_notional_krw') or _score(candidate, 'approved_notional_krw', 'recommended_notional_krw')
             if approved is None or approved <= 0:
+                candidate_diagnostics.append({'symbol': symbol, 'skip_reason': 'approved_notional_unavailable'})
                 continue
+            multiplier = float(calendar_gap_risk.get('position_size_multiplier') or 1.0)
+            approved_before_calendar_gap = approved
+            approved = min(approved, approved * max(0.0, min(1.0, multiplier)))
+            target['calendar_gap_base_approved_notional_krw'] = round(approved_before_calendar_gap, 2)
+            target['approved_notional_krw'] = round(approved, 2)
+            target['recommended_notional_krw'] = round(approved, 2)
+            target['calendar_gap_position_size_multiplier'] = multiplier
             quantity = math.floor(approved / price)
             if quantity < 1:
+                candidate_diagnostics.append({'symbol': symbol, 'skip_reason': 'quantity_invalid'})
                 continue
-            return candidate, target, {'quantity': quantity, 'price': price, 'approved_notional_krw': round(approved, 2)}, top_score
-        return None, {}, {}, top_score
+            candidate_diagnostics.append({'symbol': symbol, 'final_buy_score': score, 'quant_c_score': _score(candidate, 'quant_c_score', 'entry_quant_score'), 'skip_reason': None, 'selected': True, 'approved_notional_krw': round(approved, 2), 'quantity': quantity})
+            return candidate, target, {'quantity': quantity, 'price': price, 'approved_notional_krw': round(approved, 2)}, top_score, candidate_diagnostics
+        return None, {}, {}, top_score, candidate_diagnostics
 
     def _buy_order(self, profile: dict[str, Any], candidate: dict[str, Any], target: dict[str, Any], plan: dict[str, Any], slot: str, key: str) -> OrderLog:
         exit_settings = _profile_settings(profile).get('exit') or {}
@@ -810,7 +927,7 @@ class AutomationProfileBuySchedulerService:
             result=str(result.get('status') or 'filled'),
             reason=str(result.get('reason') or ''),
             order_id=result.get('order_id'),
-            request_payload=_json({'scheduler_slot': slot, 'validation_called': True, 'manual_submit_called': False}),
+            request_payload=_json({'scheduler_slot': slot, 'validation_called': bool(result.get('validation_called')), 'manual_submit_called': False, 'calendar_gap_risk': result.get('calendar_gap_risk')}),
             response_payload=_json(result),
             created_at=now,
         ))

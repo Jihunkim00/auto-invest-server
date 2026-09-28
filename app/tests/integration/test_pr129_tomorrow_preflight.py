@@ -48,9 +48,9 @@ from app.tests.test_user_auto_trading_scheduler_pr129 import (
 
 
 KST = ZoneInfo('Asia/Seoul')
-TARGET_DATE = '2026-09-18'
-TARGET_UTC = datetime(2026, 9, 18, 0, 10, tzinfo=UTC)
-PREOPEN_UTC = datetime(2026, 9, 17, 23, 59, 59, tzinfo=UTC)
+TARGET_DATE = '2026-09-17'
+TARGET_UTC = datetime(2026, 9, 17, 0, 10, tzinfo=UTC)
+PREOPEN_UTC = datetime(2026, 9, 16, 23, 59, 59, tzinfo=UTC)
 SLOTS = ('09:10', '11:30', '13:30')
 BOUNDARY_SYMBOL = '100001'
 FAILED_GPT_SYMBOL = '100006'
@@ -211,7 +211,7 @@ def _update_profile(
                 'min_final_score': 65.0,
             },
             operation={
-                'start_date': '2026-09-16',
+                'start_date': '2026-09-15',
                 'end_date': TARGET_DATE,
                 'weekdays_only': True,
                 'timezone': 'Asia/Seoul',
@@ -361,7 +361,7 @@ def _build(db, monkeypatch, *, failing=False):
 def _at_slot(slot, *, second=0):
     hour, minute = (int(value) for value in slot.split(':', 1))
     return datetime(
-        2026, 9, 18, hour, minute, second, tzinfo=KST
+        2026, 9, 17, hour, minute, second, tzinfo=KST
     ).astimezone(UTC)
 
 
@@ -418,7 +418,7 @@ def test_pr129_tomorrow_preflight_smoke_no_submit(db_session, monkeypatch):
     assert regular_schedule['profile']['owner_user_id'] == 2
     assert regular_schedule['status'] == 'active'
     assert tuple(regular_schedule['analysis_times']) == SLOTS
-    assert regular_schedule['profile']['operation']['start_date'] == '2026-09-16'
+    assert regular_schedule['profile']['operation']['start_date'] == '2026-09-15'
     assert regular_schedule['profile']['operation']['end_date'] == TARGET_DATE
     assert regular_schedule['profile']['operation']['weekdays_only'] is True
     assert regular_schedule['profile']['effective_settings']['universe'][
@@ -554,22 +554,22 @@ def test_pr129_tomorrow_preflight_smoke_no_submit(db_session, monkeypatch):
     assert env['no_submit'].submit_calls == 0
 
     after_end = profiles.selected_owned_profile_schedule(
-        db, owner_user_id=2, now=datetime(2026, 9, 19, 9, 0, tzinfo=KST)
+        db, owner_user_id=2, now=datetime(2026, 9, 18, 9, 0, tzinfo=KST)
     )
     assert after_end['status'] == 'ended'
     assert after_end['profile']['status'] == 'ended'
     assert production._profile_slots(
-        datetime(2026, 9, 19, 9, 0, tzinfo=KST)
+        datetime(2026, 9, 18, 9, 0, tzinfo=KST)
     ) == []
     end_dispatch = production._run_user_auto_dispatcher(
-        'kis', SLOTS[0], datetime(2026, 9, 19, 0, 10, tzinfo=UTC)
+        'kis', SLOTS[0], datetime(2026, 9, 18, 0, 10, tzinfo=UTC)
     )
     assert end_dispatch['processed'] == 0
     assert end_dispatch['items'][0]['reason'] == 'automation_profile_missing'
     assert db.query(UserAutoTradingSlotClaim).filter_by(user_id=2).count() == 3
 
     print('=' * 60)
-    print('PR129 TOMORROW PREFLIGHT - 2026-09-18')
+    print('PR129 TOMORROW PREFLIGHT - 2026-09-17')
     print('=' * 60)
     print('ADMIN PROFILE 5')
     print('Profile Active                 PASS')
@@ -581,7 +581,7 @@ def test_pr129_tomorrow_preflight_smoke_no_submit(db_session, monkeypatch):
     print('Broker Submit Blocked         PASS')
     print('TEST01 PROFILE 8 / OWNER 2')
     print('Profile Active                 PASS')
-    print('Operation Date 2026-09-18     PASS')
+    print('Operation Date 2026-09-17     PASS')
     print('Schedule Registration         PASS')
     for slot in SLOTS:
         print(slot + ' Due Logic               PASS')

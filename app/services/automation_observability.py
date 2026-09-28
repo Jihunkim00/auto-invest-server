@@ -57,6 +57,11 @@ def candidate_gpt_quant_observability(
         "gpt_analysis_status": status,
         "gpt_used": bool(raw.get("gpt_used")),
         "quant_buy_score": raw.get("quant_buy_score"),
+        "quant_c_score": (
+            raw.get("quant_c_score")
+            if raw.get("quant_c_score") is not None
+            else raw.get("entry_quant_score")
+        ),
         "quant_sell_score": raw.get("quant_sell_score"),
         "ai_buy_score": raw.get("ai_buy_score"),
         "ai_sell_score": raw.get("ai_sell_score"),

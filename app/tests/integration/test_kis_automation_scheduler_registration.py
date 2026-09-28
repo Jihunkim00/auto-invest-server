@@ -91,6 +91,34 @@ def test_live_all_gpt_failures_block_before_profile_buy_or_broker_submit(
     assert harness.client.external_kis_submit_count == 0
 
 
+def test_canonical_scheduler_exposes_friday_effective_entry_requirement(
+    db_session,
+    monkeypatch,
+):
+    friday = datetime(2026, 9, 11, 0, 10, tzinfo=UTC)
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        now=friday,
+        candidates=[candidate(symbol="005930", score=68.0, price=10000.0)],
+    )
+    scheduler = _canonical_scheduler(harness, monkeypatch)
+
+    result = scheduler.run_once(slot="09:10", now=friday)
+
+    assert result["result"] == "blocked"
+    assert result["reason"] == "calendar_gap_final_below_threshold"
+    assert result["effective_min_entry_score"] == 70.0
+    assert result["calendar_gap_risk"]["calendar_gap_days"] == 3
+    assert result["calendar_gap_risk"]["required_c_score"] is None
+    assert result["risk_decision"]["calendar_gap_days"] == 3
+    assert result["profile_buy"]["broker_submit_called"] is False
+    assert result["profile_buy"]["real_order_submitted"] is False
+    assert harness.validation.calls == []
+    assert harness.client.possible_order_calls == 0
+    assert harness.broker.buy_calls == []
+
+
 def test_startup_registers_only_the_canonical_production_scheduler(
     monkeypatch,
 ):

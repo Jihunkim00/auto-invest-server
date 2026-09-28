@@ -17,6 +17,8 @@ from app.db.models import (
     TradeRunLog,
 )
 from app.schemas.automation_profile import AutomationProfileWriteRequest
+from app.services.calendar_gap_risk_service import CalendarGapRiskService
+from app.services.market_calendar_service import MarketCalendarService
 from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
 )
@@ -221,6 +223,7 @@ def candidate(
     score: float = 70.0,
     price: float = 80000.0,
     symbol: str = SYMBOL,
+    **values: Any,
 ) -> dict[str, Any]:
     return {
         "symbol": symbol,
@@ -240,6 +243,7 @@ def candidate(
         "data_sufficient": True,
         "risk_flags": [],
         "gating_notes": [],
+        **values,
     }
 
 
@@ -269,6 +273,7 @@ def build_harness(
     market_open: bool = True,
     no_new_entry_after: str = "14:00",
     now: datetime = UTC_NOW,
+    analysis_times: tuple[str, ...] = ("09:10",),
 ) -> ReplayHarness:
     clock = VirtualClock(now)
     values = candidates or [candidate()]
@@ -311,7 +316,7 @@ def build_harness(
             },
             universe={"manual_symbols": [SYMBOL]},
             entry={
-                "analysis_times": ["09:10"],
+                "analysis_times": list(analysis_times),
                 "no_new_entry_after": no_new_entry_after,
                 "min_final_score": 65.0,
                 "max_new_entries_per_day": 1,
@@ -494,6 +499,112 @@ def test_score_threshold_boundary_is_exact(db_session, monkeypatch, score, eligi
         assert len(harness.validation.calls) == 0
         assert len(harness.broker.buy_calls) == 0
     assert result["dry_run"]["dry_run_result"]["final_buy_score"] == score
+
+
+def test_friday_calendar_gate_falls_back_and_halves_admin_profile_sizing(
+    db_session, monkeypatch
+):
+    friday = datetime(2026, 9, 11, 0, 10, tzinfo=UTC)
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        now=friday,
+        candidates=[
+            candidate(score=75.0, price=10000.0, symbol="A", quant_c_score=74.0),
+            candidate(score=72.0, price=10000.0, symbol="B", quant_c_score=78.0),
+        ],
+    )
+    harness.runtime.update_settings(
+        db_session,
+        {"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+
+    result = run_scheduler(harness)
+    profile_result = result["profile_buy"]
+    calendar_risk = profile_result["calendar_gap_risk"]
+    target = profile_result["target_risk_result"]
+
+    assert calendar_risk["calendar_gap_days"] == 3
+    assert calendar_risk["required_c_score"] == 75.0
+    assert calendar_risk["required_final_score"] == 70.0
+    assert calendar_risk["position_size_multiplier"] == 0.5
+    assert profile_result["selected_symbol"] == "B"
+    assert profile_result["quantity"] >= 1
+    assert target["approved_notional_krw"] == target["calendar_gap_base_approved_notional_krw"] * 0.5
+    assert profile_result["calendar_gap_candidate_diagnostics"][0]["skip_reason"] == "calendar_gap_c_below_threshold"
+    assert len(harness.validation.calls) == 1
+    assert len(harness.broker.buy_calls) == 1
+    assert harness.broker.buy_calls[0]["symbol"] == "B"
+
+
+def test_admin_friday_after_cutoff_blocks_before_validation_or_submit(
+    db_session, monkeypatch
+):
+    after_cutoff = datetime(2026, 9, 11, 4, 0, tzinfo=UTC)
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        now=after_cutoff,
+        candidates=[candidate(score=75.0)],
+        analysis_times=("13:00",),
+    )
+
+    result = harness.profile_buy.run_once(
+        db_session,
+        [candidate(score=75.0)],
+        scheduler_slot="13:00",
+        trigger_source="automation_scheduler",
+        now=after_cutoff,
+        trusted_scheduler_authority=True,
+    )
+
+    assert result["reason"] == "weekend_gap_late_entry_block"
+    assert result["calendar_gap_days"] == 3
+    assert result["validation_called"] is False
+    assert result["broker_submit_called"] is False
+    assert result["real_order_submitted"] is False
+    assert harness.validation.calls == []
+    assert harness.client.possible_order_calls == 0
+    assert harness.broker.buy_calls == []
+
+
+def test_admin_long_holiday_blocks_before_validation_or_possible_order(
+    db_session, monkeypatch, tmp_path
+):
+    friday = datetime(2026, 9, 11, 0, 10, tzinfo=UTC)
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        now=friday,
+        candidates=[candidate(score=75.0)],
+    )
+    holidays = tmp_path / "market_holidays.yaml"
+    holidays.write_text(
+        'markets:\n  KR:\n    timezone: Asia/Seoul\n    holidays:\n'
+        '      - date: "2026-09-14"\n        name: "Test Holiday"\n'
+        '        reason: test_holiday\n        full_day: true\n',
+        encoding="utf-8",
+    )
+    harness.profile_buy.calendar_gap_risk_service = CalendarGapRiskService(
+        MarketCalendarService(config_path=str(holidays))
+    )
+
+    result = harness.profile_buy.run_once(
+        db_session,
+        [candidate(score=75.0)],
+        scheduler_slot="09:10",
+        trigger_source="automation_scheduler",
+        now=friday,
+        trusted_scheduler_authority=True,
+    )
+
+    assert result["reason"] == "long_market_closure_ahead"
+    assert result["calendar_gap_days"] == 4
+    assert result["broker_submit_called"] is False
+    assert result["real_order_submitted"] is False
+    assert harness.validation.calls == []
+    assert harness.client.possible_order_calls == 0
+    assert harness.broker.buy_calls == []
 
 
 def test_quantity_zero_candidate_falls_through_to_next_eligible_candidate(

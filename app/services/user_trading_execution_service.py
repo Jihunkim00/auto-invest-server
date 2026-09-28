@@ -29,6 +29,7 @@ from app.services.automation_profile_safety import TEST4_HARD_SAFETY
 from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_account_service import UserBrokerUnavailableError
 from app.services.user_broker_credential_service import UserBrokerCredentialService
+from app.services.calendar_gap_risk_service import CalendarGapRiskService
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 
@@ -68,6 +69,7 @@ class UserTradingExecutionService:
         alpaca_live_client_factory: Callable[[dict[str, Any]], Any] | None = None,
         kis_live_client_factory: Callable[[Session, User, dict[str, Any]], Any] | None = None,
         now_provider: Callable[[], datetime] | None = None,
+        calendar_gap_risk_service: CalendarGapRiskService | None = None,
     ) -> None:
         self.account_service = account_service or UserBrokerAccountService()
         self.credential_service = credential_service or UserBrokerCredentialService()
@@ -80,6 +82,7 @@ class UserTradingExecutionService:
         self.alpaca_live_client_factory = alpaca_live_client_factory or UserAlpacaLiveTradingClient
         self.kis_live_client_factory = kis_live_client_factory or self._default_kis_live_client
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
+        self.calendar_gap_risk_service = calendar_gap_risk_service or CalendarGapRiskService()
 
     def run_once(
         self,
@@ -97,6 +100,7 @@ class UserTradingExecutionService:
         run_key: str | None = None,
         analysis_override: dict[str, Any] | None = None,
         profile_context: dict[str, Any] | None = None,
+        calendar_gap_risk_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         now_utc = self._utc_now(now)
         normalized_provider, market, currency, _timezone = normalize_trading_scope(
@@ -236,6 +240,55 @@ class UserTradingExecutionService:
                 analysis={"action": "hold", "reason": "paper_trading_disabled"},
                 risk={"risk_allowed": False, "risk_flags": ["paper_trading_disabled"]},
             )
+
+        calendar_gap_risk = None
+        calendar_c_score_mode = False
+        if normalized_provider == "kis" and is_automatic:
+            calendar_c_score_mode = self._calendar_c_score_mode(
+                analysis_override=analysis_override,
+                profile_context=profile_context,
+            )
+            profile_final_threshold = self._profile_final_score_threshold(profile_context)
+            calendar_gap_risk = (
+                dict(calendar_gap_risk_override)
+                if isinstance(calendar_gap_risk_override, dict)
+                else self.calendar_gap_risk_service.evaluate(
+                    market,
+                    now=now_utc,
+                    existing_c_score=70.0 if calendar_c_score_mode else None,
+                    existing_final_score=profile_final_threshold,
+                )
+            )
+            base.update(calendar_gap_risk)
+            base["calendar_gap_risk"] = calendar_gap_risk
+            run.request_payload = self._json_merge(
+                run.request_payload,
+                {"calendar_gap_risk": calendar_gap_risk},
+            )
+            if calendar_gap_risk.get("entry_blocked") is True:
+                calendar_reason = str(
+                    calendar_gap_risk.get("block_reason")
+                    or "calendar_gap_risk_unavailable"
+                )
+                return self._finish_blocked(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    reason=calendar_reason,
+                    analysis={
+                        "action": "hold",
+                        "reason": calendar_reason,
+                        "block_reason": calendar_reason,
+                        "calendar_gap_risk": calendar_gap_risk,
+                    },
+                    risk={
+                        "risk_allowed": False,
+                        "risk_flags": list(calendar_gap_risk.get("risk_flags") or []),
+                        "gating_notes": list(calendar_gap_risk.get("gating_notes") or []),
+                        "calendar_gap_risk": calendar_gap_risk,
+                    },
+                )
 
         credentials: dict[str, Any] | None = None
         if normalized_provider == "alpaca" or is_live:
@@ -389,6 +442,38 @@ class UserTradingExecutionService:
                 risk=risk,
             )
 
+        calendar_score_reason = self._calendar_gap_score_reason(
+            analysis,
+            calendar_gap_risk=calendar_gap_risk,
+            c_score_mode=calendar_c_score_mode,
+            profile_context=profile_context,
+        )
+        if calendar_score_reason:
+            analysis["action"] = "hold"
+            analysis["reason"] = calendar_score_reason
+            analysis["block_reason"] = calendar_score_reason
+            analysis["calendar_gap_risk"] = calendar_gap_risk
+            analysis["required_entry_score"] = (
+                calendar_gap_risk.get("required_final_score")
+                if calendar_gap_risk
+                else MIN_ENTRY_SCORE
+            )
+            analysis["gating_notes"] = _dedupe(
+                list(analysis.get("gating_notes") or []) + [calendar_score_reason]
+            )
+            risk["gating_notes"] = _dedupe(
+                list(risk.get("gating_notes") or []) + [calendar_score_reason]
+            )
+            return self._finish_hold(
+                db,
+                run,
+                user=user,
+                base=base,
+                analysis=analysis,
+                risk=risk,
+                reason=calendar_score_reason,
+            )
+
         if self._is_hold(analysis):
             return self._finish_hold(
                 db,
@@ -412,6 +497,12 @@ class UserTradingExecutionService:
                 snapshot=snapshot,
                 price=price,
                 max_position_pct=float(settings.max_position_pct or 0),
+            )
+        if calendar_gap_risk and not sizing.get("reason"):
+            sizing = self._apply_calendar_gap_multiplier(
+                sizing,
+                multiplier=float(calendar_gap_risk.get("position_size_multiplier") or 1.0),
+                price=price,
             )
         base["sizing"] = sizing
         if sizing.get("reason"):
@@ -1797,6 +1888,91 @@ class UserTradingExecutionService:
             "price": price,
             "notional": notional,
         }
+
+    @staticmethod
+    def _calendar_c_score_mode(*, analysis_override, profile_context) -> bool:
+        context = profile_context if isinstance(profile_context, dict) else {}
+        pipeline = context.get("pipeline_diagnostics")
+        pipeline = pipeline if isinstance(pipeline, dict) else {}
+        analysis = analysis_override if isinstance(analysis_override, dict) else {}
+        mode = (
+            pipeline.get("selection_mode")
+            or context.get("quant_selection_mode")
+            or analysis.get("quant_selection_mode")
+        )
+        return str(mode or "").strip().upper() == "A_TOP5_C_GPT"
+
+    @staticmethod
+    def _profile_final_score_threshold(profile_context) -> float:
+        context = profile_context if isinstance(profile_context, dict) else {}
+        return max(
+            float(MIN_ENTRY_SCORE),
+            _number(context.get("min_final_score")) or float(MIN_ENTRY_SCORE),
+        )
+
+    @staticmethod
+    def _calendar_gap_score_reason(
+        analysis: dict[str, Any],
+        *,
+        calendar_gap_risk: dict[str, Any] | None,
+        c_score_mode: bool,
+        profile_context: dict[str, Any] | None,
+    ) -> str | None:
+        if not isinstance(calendar_gap_risk, dict):
+            return None
+        required_c = calendar_gap_risk.get("required_c_score")
+        if c_score_mode and required_c is not None:
+            c_value = next(
+                (
+                    analysis.get(key)
+                    for key in ("quant_c_score", "entry_quant_score", "quant_buy_score")
+                    if analysis.get(key) is not None
+                ),
+                None,
+            )
+            c_score = _number(c_value)
+            if c_score is None or c_score < float(required_c):
+                return "calendar_gap_c_below_threshold"
+        required_final = _number(calendar_gap_risk.get("required_final_score"))
+        score = _number(analysis.get("final_buy_score") or analysis.get("score"))
+        existing_final = UserTradingExecutionService._profile_final_score_threshold(
+            profile_context
+        )
+        if (
+            required_final is not None
+            and score is not None
+            and score >= existing_final
+            and score < required_final
+        ):
+            return "calendar_gap_final_below_threshold"
+        return None
+
+    @staticmethod
+    def _apply_calendar_gap_multiplier(
+        sizing: dict[str, Any],
+        *,
+        multiplier: float,
+        price: float | None,
+    ) -> dict[str, Any]:
+        target = _number(sizing.get("target_notional"))
+        if target is None or target <= 0 or price is None or price <= 0:
+            return sizing
+        safe_multiplier = max(0.0, min(1.0, float(multiplier)))
+        scaled_target = round(target * safe_multiplier, 2)
+        quantity = math.floor(scaled_target / price)
+        sizing = dict(sizing)
+        sizing["target_notional_before_calendar_gap"] = target
+        sizing["target_notional"] = scaled_target
+        sizing["calendar_gap_position_size_multiplier"] = safe_multiplier
+        sizing["calendar_gap_reduced_target_notional"] = round(
+            max(0.0, target - scaled_target),
+            2,
+        )
+        sizing["quantity"] = int(max(quantity, 0))
+        sizing["notional"] = round(max(quantity, 0) * price, 2)
+        if quantity <= 0:
+            sizing["reason"] = "quantity_invalid"
+        return sizing
 
     @staticmethod
     def _is_hold(analysis: dict[str, Any]) -> bool:

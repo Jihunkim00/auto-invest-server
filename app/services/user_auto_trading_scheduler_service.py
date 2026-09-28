@@ -20,6 +20,7 @@ from app.db.models import (
     UserTradingSettings,
 )
 from app.services.market_session_service import MarketSessionService
+from app.services.calendar_gap_risk_service import CalendarGapRiskService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
 from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
@@ -480,6 +481,10 @@ class UserAutoTradingSchedulerService:
         retry_service_factory: Callable[[], Any] | None = None,
     ) -> None:
         self.execution_service = execution_service or UserTradingExecutionService()
+        self.calendar_gap_risk_service = (
+            getattr(self.execution_service, "calendar_gap_risk_service", None)
+            or CalendarGapRiskService()
+        )
         self.candidate_service = (
             candidate_service
             if candidate_service is not None
@@ -1264,6 +1269,50 @@ class UserAutoTradingSchedulerService:
                 symbol='NONE',
                 position_management=position_result,
             )
+        calendar_gap_risk = None
+        if str(provider or '').strip().lower() == 'kis':
+            existing_final_threshold = max(
+                65.0,
+                _number(entry_settings.get('min_final_score')) or 65.0,
+            )
+            # The pre-analysis check is for global closure and calendar failures.
+            # The C threshold is resolved after the preview reports its mode.
+            calendar_gap_risk = self.calendar_gap_risk_service.evaluate(
+                market,
+                now=now,
+                existing_c_score=None,
+                existing_final_score=existing_final_threshold,
+            )
+            if calendar_gap_risk.get('entry_blocked') is True:
+                calendar_reason = str(
+                    calendar_gap_risk.get('block_reason')
+                    or 'calendar_gap_risk_unavailable'
+                )
+                profile_context = self._profile_context(
+                    profile=profile,
+                    scheduler_slot=scheduler_slot,
+                    user=user,
+                    calendar_gap_risk=calendar_gap_risk,
+                )
+                return self._record_result(
+                    db,
+                    user=user,
+                    provider=provider,
+                    market=market,
+                    scheduler_slot=scheduler_slot,
+                    run_key=run_key,
+                    result='blocked',
+                    reason=calendar_reason,
+                    symbol='NONE',
+                    position_management=position_result,
+                    profile_context=profile_context,
+                    failure_diagnostics={
+                        'calendar_gap_risk': calendar_gap_risk,
+                        **calendar_gap_risk,
+                        'risk_flags': list(calendar_gap_risk.get('risk_flags') or []),
+                        'gating_notes': list(calendar_gap_risk.get('gating_notes') or []),
+                    },
+                )
         with _scheduler_stage('canonical_analysis'):
             candidates = self._select_candidates(
                 db,
@@ -1278,14 +1327,39 @@ class UserAutoTradingSchedulerService:
             "last_pipeline_diagnostics",
             None,
         )
+        if str(provider or '').strip().lower() == 'kis':
+            selection_mode = (
+                pipeline_diagnostics.get('selection_mode')
+                if isinstance(pipeline_diagnostics, dict)
+                else None
+            )
+            existing_final_threshold = max(
+                65.0,
+                _number(entry_settings.get('min_final_score')) or 65.0,
+            )
+            calendar_gap_risk = self.calendar_gap_risk_service.evaluate(
+                market,
+                now=now,
+                existing_c_score=(
+                    70.0
+                    if str(selection_mode or '').strip().upper() == 'A_TOP5_C_GPT'
+                    else None
+                ),
+                existing_final_score=existing_final_threshold,
+            )
+            if isinstance(pipeline_diagnostics, dict):
+                pipeline_diagnostics['calendar_gap_risk'] = calendar_gap_risk
         if not candidates:
             if isinstance(pipeline_diagnostics, dict):
                 pipeline_diagnostics.update(_empty_fallback_diagnostics())
+                if calendar_gap_risk is not None:
+                    pipeline_diagnostics['calendar_gap_risk'] = calendar_gap_risk
             profile_context = self._profile_context(
                 profile=profile,
                 scheduler_slot=scheduler_slot,
                 user=user,
                 pipeline_diagnostics=pipeline_diagnostics,
+                calendar_gap_risk=calendar_gap_risk,
             )
             no_candidate_result = self._record_result(
                 db,
@@ -1303,6 +1377,10 @@ class UserAutoTradingSchedulerService:
                 symbol='NONE',
                 create_signal=not bool(pipeline_diagnostics),
                 profile_context=profile_context,
+                failure_diagnostics=(
+                    {'calendar_gap_risk': calendar_gap_risk, **calendar_gap_risk}
+                    if calendar_gap_risk is not None else None
+                ),
             )
             persist = getattr(self.candidate_service, "persist_results", None)
             pipeline_candidate = getattr(
@@ -1358,6 +1436,7 @@ class UserAutoTradingSchedulerService:
                 snapshot=snapshot,
                 candidates=candidates,
                 pipeline_diagnostics=pipeline_diagnostics,
+                calendar_gap_risk=calendar_gap_risk or {},
             )
 
         candidate = next(
@@ -1383,6 +1462,7 @@ class UserAutoTradingSchedulerService:
             scheduler_slot=scheduler_slot,
             user=user,
             pipeline_diagnostics=pipeline_diagnostics,
+            calendar_gap_risk=calendar_gap_risk,
         )
         with _scheduler_stage('execution'):
             result = self.execution_service.run_once(
@@ -1399,6 +1479,7 @@ class UserAutoTradingSchedulerService:
                 run_key=run_key,
                 analysis_override=analysis_override,
                 profile_context=profile_context,
+                calendar_gap_risk_override=calendar_gap_risk,
             )
         persist = getattr(self.candidate_service, "persist_results", None)
         if callable(persist):
@@ -1451,6 +1532,7 @@ class UserAutoTradingSchedulerService:
         snapshot: dict[str, Any],
         candidates: list[dict[str, Any]],
         pipeline_diagnostics: dict[str, Any],
+        calendar_gap_risk: dict[str, Any],
     ) -> dict[str, Any]:
         indexed = list(enumerate(candidates))
         indexed.sort(
@@ -1477,6 +1559,8 @@ class UserAutoTradingSchedulerService:
             exclusion_reason = _fallback_eligibility_reason(
                 candidate,
                 analysis_override=analysis_override,
+                required_c_score=calendar_gap_risk.get('required_c_score'),
+                required_final_score=calendar_gap_risk.get('required_final_score'),
             )
             if exclusion_reason:
                 results_by_symbol[symbol] = {
@@ -1485,6 +1569,8 @@ class UserAutoTradingSchedulerService:
                     "fallback_rank": None,
                     "execution_status": "excluded",
                     "skip_reason": exclusion_reason,
+                    "quant_c_score": _canonical_c_score(candidate),
+                    "final_buy_score": _optional_number(candidate.get("final_buy_score")),
                     "broker_submit_called": False,
                 }
                 continue
@@ -1565,6 +1651,7 @@ class UserAutoTradingSchedulerService:
                     run_key=run_key,
                     analysis_override=analysis_override,
                     profile_context=profile_context,
+                    calendar_gap_risk_override=calendar_gap_risk,
                 )
             last_result = result
             result_name = str(result.get("result") or "").strip().lower()
@@ -1697,6 +1784,14 @@ class UserAutoTradingSchedulerService:
                 pipeline_diagnostics=pipeline_diagnostics,
             )
             summary_run_key = f"{run_key[:47]}_fallback_summary"
+            calendar_skip_reason = next(
+                (
+                    item.get("skip_reason")
+                    for item in results_by_symbol.values()
+                    if str(item.get("skip_reason") or "").startswith("calendar_gap_")
+                ),
+                None,
+            )
             final_result = self._record_result(
                 db,
                 user=user,
@@ -1706,13 +1801,17 @@ class UserAutoTradingSchedulerService:
                 run_key=summary_run_key,
                 result="HOLD",
                 reason=(
-                    "no_affordable_final_candidate"
-                    if eligible_candidates
-                    else "no_qualifying_candidate"
+                    calendar_skip_reason
+                    or ("no_affordable_final_candidate" if eligible_candidates else "no_qualifying_candidate")
                 ),
                 symbol="NONE",
                 profile_context=summary_profile_context,
                 create_signal=False,
+                failure_diagnostics={
+                    'calendar_gap_risk': calendar_gap_risk,
+                    **calendar_gap_risk,
+                    'pipeline_diagnostics': pipeline_diagnostics,
+                },
             )
             final_result["action"] = "hold"
 
@@ -1722,6 +1821,7 @@ class UserAutoTradingSchedulerService:
             scheduler_slot=scheduler_slot,
             user=user,
             pipeline_diagnostics=pipeline_diagnostics,
+            calendar_gap_risk=calendar_gap_risk,
         )
         persist = getattr(self.candidate_service, "persist_results", None)
         if callable(persist) and final_candidate is not None:
@@ -1770,6 +1870,19 @@ class UserAutoTradingSchedulerService:
                 else None
             ),
             "pipeline_diagnostics": pipeline_diagnostics,
+            "calendar_gap_risk": calendar_gap_risk,
+            "calendar_gap_days": (calendar_gap_risk or {}).get("calendar_gap_days"),
+            "trade_date": (calendar_gap_risk or {}).get("trade_date"),
+            "next_trading_date": (calendar_gap_risk or {}).get("next_trading_date"),
+            "pre_market_closure_risk": (calendar_gap_risk or {}).get("pre_market_closure_risk"),
+            "long_market_closure_ahead": (calendar_gap_risk or {}).get("long_market_closure_ahead"),
+            "calendar_gap_required_c_score": (calendar_gap_risk or {}).get("calendar_gap_required_c_score"),
+            "calendar_gap_required_final_score": (calendar_gap_risk or {}).get("calendar_gap_required_final_score"),
+            "calendar_gap_position_size_multiplier": (calendar_gap_risk or {}).get("calendar_gap_position_size_multiplier"),
+            "calendar_gap_late_entry_cutoff": (calendar_gap_risk or {}).get("calendar_gap_late_entry_cutoff"),
+            "calendar_gap_block_reason": (calendar_gap_risk or {}).get("calendar_gap_block_reason"),
+            "calendar_gap_risk_flags": (calendar_gap_risk or {}).get("calendar_gap_risk_flags", []),
+            "calendar_gap_gating_notes": (calendar_gap_risk or {}).get("calendar_gap_gating_notes", []),
             "candidate_count": len(candidates),
             "fallback_attempted": bool(
                 pipeline_diagnostics.get("fallback_attempted")
@@ -1869,10 +1982,16 @@ class UserAutoTradingSchedulerService:
         scheduler_slot: str,
         user: User,
         pipeline_diagnostics: dict[str, Any] | None = None,
+        calendar_gap_risk: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         settings = profile.get('effective_settings')
         settings = settings if isinstance(settings, dict) else profile.get('settings')
         settings = settings if isinstance(settings, dict) else {}
+        entry_settings = settings.get('entry')
+        entry_settings = entry_settings if isinstance(entry_settings, dict) else {}
+        selected_calendar_risk = calendar_gap_risk
+        if selected_calendar_risk is None and isinstance(pipeline_diagnostics, dict):
+            selected_calendar_risk = pipeline_diagnostics.get('calendar_gap_risk')
         capital = settings.get('capital')
         capital = capital if isinstance(capital, dict) else profile.get('capital')
         capital = capital if isinstance(capital, dict) else {}
@@ -1913,6 +2032,9 @@ class UserAutoTradingSchedulerService:
             'max_total_exposure_pct': capital.get('max_total_exposure_pct'),
             'max_order_notional_krw': capital.get('max_order_notional_krw'),
             'max_open_positions': int(settings.get('max_open_positions') or 1),
+            'min_final_score': max(65.0, _number(entry_settings.get('min_final_score')) or 65.0),
+            'quant_selection_mode': (pipeline_diagnostics or {}).get('selection_mode') if isinstance(pipeline_diagnostics, dict) else None,
+            'calendar_gap_risk': selected_calendar_risk,
             'pipeline': 'raw_universe->profile_eligibility->canonical_quant_top50->quant_top10->ai_top5->final_candidate',
             'pipeline_diagnostics': pipeline_diagnostics or {},
         }
@@ -2526,6 +2648,8 @@ def _fallback_eligibility_reason(
     candidate: dict[str, Any],
     *,
     analysis_override: dict[str, Any],
+    required_c_score: float | None = None,
+    required_final_score: float | None = None,
 ) -> str | None:
     c_score = _canonical_c_score(candidate)
     if (
@@ -2534,11 +2658,15 @@ def _fallback_eligibility_reason(
         or candidate.get("quant_c_gate_passed") is False
     ):
         return "below_c_score_threshold"
+    if required_c_score is not None and c_score < float(required_c_score):
+        return "calendar_gap_c_below_threshold"
     if not _canonical_gpt_completed(candidate):
         return "gpt_not_completed"
     final_score = _optional_number(candidate.get("final_buy_score"))
     if final_score is None or final_score < 65.0:
         return "below_final_score_threshold"
+    if required_final_score is not None and final_score < float(required_final_score):
+        return "calendar_gap_final_below_threshold"
     if _canonical_hard_blocked(candidate, analysis_override=analysis_override):
         return "candidate_hard_blocked"
     if str(analysis_override.get("action") or "").strip().lower() != "buy":
@@ -2578,6 +2706,8 @@ def _fallback_is_below_threshold_hold(candidate: dict[str, Any]) -> bool:
 
 def _fallback_candidate_block_kind(result: dict[str, Any]) -> str | None:
     reason = str(result.get("reason") or "").strip()
+    if reason in {"calendar_gap_c_below_threshold", "calendar_gap_final_below_threshold"}:
+        return "risk"
     if reason in {"quantity_invalid", "kis_market_buy_qty_unavailable"}:
         return "affordability"
     if reason not in {"duplicate_position", "duplicate_open_order"}:
@@ -2792,6 +2922,7 @@ def _runtime_analysis_override(
         "final_buy_score": candidate.get("final_buy_score"),
         "final_sell_score": candidate.get("final_sell_score"),
         "quant_buy_score": candidate.get("quant_buy_score"),
+        "quant_c_score": _canonical_c_score(candidate),
         "quant_sell_score": candidate.get("quant_sell_score"),
         "ai_buy_score": candidate.get("ai_buy_score"),
         "ai_sell_score": candidate.get("ai_sell_score"),

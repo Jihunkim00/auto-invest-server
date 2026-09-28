@@ -1037,6 +1037,7 @@ class AutomationSchedulerService(SchedulerService):
                 )
                 canonical_reason = dry_result.get("reason") or "analysis_completed"
             risk_decision = dict(dry_run.get("risk_decision") or {})
+            calendar_gap_risk = profile_buy.get("calendar_gap_risk")
             if profile_buy_blocked:
                 risk_decision.update(
                     {
@@ -1044,6 +1045,12 @@ class AutomationSchedulerService(SchedulerService):
                         "reason": canonical_reason,
                         "source": "canonical_execution_gate",
                     }
+                )
+            if isinstance(calendar_gap_risk, dict):
+                risk_decision.update(calendar_gap_risk)
+                risk_decision["calendar_gap_risk"] = calendar_gap_risk
+                risk_decision["required_entry_score"] = calendar_gap_risk.get(
+                    "required_final_score"
                 )
             submission_eligible = bool(
                 mode == "live"
@@ -1061,11 +1068,20 @@ class AutomationSchedulerService(SchedulerService):
                 "reason": canonical_reason,
                 "risk_decision": risk_decision,
                 "submission_eligible": submission_eligible,
-                "effective_min_entry_score": dry_run.get(
-                    "effective_min_entry_score"
+                "effective_min_entry_score": (
+                    calendar_gap_risk.get("required_final_score")
+                    if isinstance(calendar_gap_risk, dict)
+                    else dry_run.get("effective_min_entry_score")
                 ),
-                "risk_flags": dry_run.get("risk_flags", []),
-                "gating_notes": dry_run.get("gating_notes", []),
+                "risk_flags": list(dict.fromkeys(
+                    list(dry_run.get("risk_flags") or [])
+                    + (list(calendar_gap_risk.get("risk_flags") or []) if isinstance(calendar_gap_risk, dict) else [])
+                )),
+                "gating_notes": list(dict.fromkeys(
+                    list(dry_run.get("gating_notes") or [])
+                    + (list(calendar_gap_risk.get("gating_notes") or []) if isinstance(calendar_gap_risk, dict) else [])
+                )),
+                "calendar_gap_risk": calendar_gap_risk,
                 "safety": dry_run.get("safety", {}),
                 "portfolio": portfolio,
                 "dry_run": dry_run,
