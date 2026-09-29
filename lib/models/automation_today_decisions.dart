@@ -91,6 +91,7 @@ class AutomationTodayDecisionSlot {
     required this.gptFailedSymbols,
     required this.finalCandidateSymbols,
     required this.finalRankedTop5,
+    required this.scoreGateCandidates,
     required this.finalSelectedSymbol,
     required this.symbol,
     required this.symbolName,
@@ -127,6 +128,7 @@ class AutomationTodayDecisionSlot {
   final List<String> gptFailedSymbols;
   final List<String> finalCandidateSymbols;
   final List<Candidate> finalRankedTop5;
+  final List<Candidate> scoreGateCandidates;
   final String? finalSelectedSymbol;
   final String? symbol;
   final String? symbolName;
@@ -200,6 +202,9 @@ class AutomationTodayDecisionSlot {
       ),
       finalRankedTop5: _candidates(
         json['final_ranked_top5'] ?? json['finalRankedTop5'],
+      ),
+      scoreGateCandidates: _candidates(
+        json['score_gate_candidates'] ?? json['scoreGateCandidates'],
       ),
       finalSelectedSymbol: _nullableString(
         json['final_selected_symbol'] ?? json['finalSelectedSymbol'],

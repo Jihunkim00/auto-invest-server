@@ -23,6 +23,14 @@ class Candidate {
     this.quantScore,
     this.quantBuyScore,
     this.quantSellScore,
+    this.quantCScore,
+    this.quantCStatus,
+    this.quantCThreshold,
+    this.quantCGatePassed,
+    this.gptBuyScoreThreshold,
+    this.gptBuyScoreGatePassed,
+    this.aTop5ScoreGatePassed,
+    this.aTop5ScoreGateReason,
     this.aiBuyScore,
     this.aiSellScore,
     this.gptBuyScore,
@@ -93,6 +101,14 @@ class Candidate {
   final double? quantScore;
   final double? quantBuyScore;
   final double? quantSellScore;
+  final double? quantCScore;
+  final String? quantCStatus;
+  final double? quantCThreshold;
+  final bool? quantCGatePassed;
+  final double? gptBuyScoreThreshold;
+  final bool? gptBuyScoreGatePassed;
+  final bool? aTop5ScoreGatePassed;
+  final String? aTop5ScoreGateReason;
   final double? aiBuyScore;
   final double? aiSellScore;
   final double? gptBuyScore;
@@ -146,6 +162,8 @@ class Candidate {
       quantScore != null ||
       quantBuyScore != null ||
       quantSellScore != null ||
+      quantCScore != null ||
+      gptBuyScoreThreshold != null ||
       aiBuyScore != null ||
       aiSellScore != null ||
       gptBuyScore != null ||
@@ -250,6 +268,18 @@ class Candidate {
       quantScore: _readNullableDouble(json['quant_score']),
       quantBuyScore: _readNullableDouble(json['quant_buy_score']),
       quantSellScore: _readNullableDouble(json['quant_sell_score']),
+      quantCScore: _readNullableDouble(json['quant_c_score']),
+      quantCStatus: _readNullableString(json['quant_c_status']),
+      quantCThreshold: _readNullableDouble(json['quant_c_threshold']),
+      quantCGatePassed: _readNullableBool(json['quant_c_gate_passed']),
+      gptBuyScoreThreshold:
+          _readNullableDouble(json['gpt_buy_score_threshold']),
+      gptBuyScoreGatePassed:
+          _readNullableBool(json['gpt_buy_score_gate_passed']),
+      aTop5ScoreGatePassed:
+          _readNullableBool(json['a_top5_score_gate_passed']),
+      aTop5ScoreGateReason:
+          _readNullableString(json['a_top5_score_gate_reason']),
       aiBuyScore: _readNullableDouble(json['ai_buy_score']),
       aiSellScore: _readNullableDouble(json['ai_sell_score']),
       gptBuyScore:

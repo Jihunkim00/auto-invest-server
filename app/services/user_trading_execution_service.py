@@ -14,6 +14,7 @@ from app.brokers.user_alpaca_client import (
     UserAlpacaTradingClient,
     UserAlpacaLiveTradingClient,
 )
+from app.core.constants import A_TOP5_C_MIN_SCORE
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
     OrderLog,
@@ -30,6 +31,11 @@ from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_account_service import UserBrokerUnavailableError
 from app.services.user_broker_credential_service import UserBrokerCredentialService
 from app.services.calendar_gap_risk_service import CalendarGapRiskService
+from app.services.kis_a_top5_score_gate import (
+    apply_a_top5_score_gate,
+    evaluate_a_top5_score_gate,
+    finite_score,
+)
 from app.services.user_risk_state_service import UserRiskStateService, normalize_trading_scope
 from app.services.user_symbol_analysis_service import UserSymbolAnalysisService
 
@@ -255,7 +261,7 @@ class UserTradingExecutionService:
                 else self.calendar_gap_risk_service.evaluate(
                     market,
                     now=now_utc,
-                    existing_c_score=70.0 if calendar_c_score_mode else None,
+                    existing_c_score=A_TOP5_C_MIN_SCORE if calendar_c_score_mode else None,
                     existing_final_score=profile_final_threshold,
                 )
             )
@@ -473,6 +479,56 @@ class UserTradingExecutionService:
                 risk=risk,
                 reason=calendar_score_reason,
             )
+
+        if is_automatic and normalized_provider == "kis" and calendar_c_score_mode:
+            score_gate_reason = apply_a_top5_score_gate(analysis)
+            has_severe_gpt_block = bool(
+                analysis.get("hard_blocked")
+                or analysis.get("hard_block_reason")
+                or analysis.get("hard_block_new_buy")
+            )
+            if score_gate_reason and not has_severe_gpt_block:
+                analysis["action"] = "hold"
+                analysis["reason"] = score_gate_reason
+                analysis["block_reason"] = score_gate_reason
+                analysis["score_gate"] = evaluate_a_top5_score_gate(analysis)
+                analysis["gating_notes"] = _dedupe(
+                    list(analysis.get("gating_notes") or []) + [score_gate_reason]
+                )
+                return self._finish_hold(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    analysis=analysis,
+                    risk=risk,
+                    reason=score_gate_reason,
+                )
+            entry_score = finite_score(
+                analysis.get("final_buy_score") or analysis.get("score")
+            )
+            required_profile_score = self._profile_final_score_threshold(profile_context)
+            if (
+                not has_severe_gpt_block
+                and (entry_score is None or entry_score < required_profile_score)
+            ):
+                profile_reason = "below_profile_buy_threshold"
+                analysis["action"] = "hold"
+                analysis["reason"] = profile_reason
+                analysis["block_reason"] = profile_reason
+                analysis["required_entry_score"] = required_profile_score
+                analysis["gating_notes"] = _dedupe(
+                    list(analysis.get("gating_notes") or []) + [profile_reason]
+                )
+                return self._finish_hold(
+                    db,
+                    run,
+                    user=user,
+                    base=base,
+                    analysis=analysis,
+                    risk=risk,
+                    reason=profile_reason,
+                )
 
         if self._is_hold(analysis):
             return self._finish_hold(

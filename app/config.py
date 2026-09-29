@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         return timedelta(seconds=max(60, self.session_ttl_seconds))
 
     openai_api_key: str | None = None
-    openai_model: str = "gpt-5.6-luna"
+    openai_model: str = "gpt-6-luna"
     openai_reasoning_effort: str = "xhigh"
     agent_chat_model: str = "gpt-5.6-luna"
     agent_chat_reasoning_effort: str = "low"

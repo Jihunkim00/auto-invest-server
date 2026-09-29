@@ -20,3 +20,18 @@ def test_config_dir_updates_default_runtime_paths(tmp_path):
     assert settings.market_profiles_config_path == (
         config_dir / "market_profiles.yaml"
     ).as_posix()
+
+
+def test_openai_market_defaults_are_luna_xhigh(monkeypatch):
+    for name in (
+        "OPENAI_MODEL",
+        "OPENAI_REASONING_EFFORT",
+        "AGENT_CHAT_MODEL",
+        "AGENT_CHAT_REASONING_EFFORT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.openai_model == "gpt-6-luna"
+    assert settings.openai_reasoning_effort == "xhigh"

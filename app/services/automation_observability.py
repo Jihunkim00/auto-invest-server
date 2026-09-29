@@ -62,8 +62,16 @@ def candidate_gpt_quant_observability(
             if raw.get("quant_c_score") is not None
             else raw.get("entry_quant_score")
         ),
+        "quant_c_status": raw.get("quant_c_status"),
+        "quant_c_threshold": raw.get("quant_c_threshold"),
+        "quant_c_gate_passed": raw.get("quant_c_gate_passed"),
         "quant_sell_score": raw.get("quant_sell_score"),
         "ai_buy_score": raw.get("ai_buy_score"),
+        "gpt_buy_score": raw.get("gpt_buy_score", raw.get("ai_buy_score")),
+        "gpt_buy_score_threshold": raw.get("gpt_buy_score_threshold"),
+        "gpt_buy_score_gate_passed": raw.get("gpt_buy_score_gate_passed"),
+        "a_top5_score_gate_passed": raw.get("a_top5_score_gate_passed"),
+        "a_top5_score_gate_reason": raw.get("a_top5_score_gate_reason"),
         "ai_sell_score": raw.get("ai_sell_score"),
         "final_buy_score": raw.get("final_buy_score"),
         "final_sell_score": raw.get("final_sell_score"),

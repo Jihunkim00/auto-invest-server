@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.core.constants import BUY_FINAL_MIN
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
     AutomationProfileAiCandidateResult,
@@ -20,6 +21,7 @@ from app.schemas.strategy_dry_run_auto_buy import (
     ProfileAwareDryRunAutoBuyRequest,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.kis_a_top5_score_gate import evaluate_a_top5_score_gate, finite_score
 from app.services.kis_watchlist_preview_service import (
     KisWatchlistPreviewService,
     normalize_symbol_identity,
@@ -887,6 +889,7 @@ class ProfileAwareDryRunAutoBuyService:
                 evaluated=selected,
             )
         effective_min_entry_score = _minimum_entry_score(profile)
+        score_gate_diagnostics = _preview_score_gate_diagnostics(preview)
         legacy_risk_flags = _strings(preview.get("risk_flags")) + _strings(
             selected.get("risk_flags") if selected else []
         )
@@ -1004,6 +1007,7 @@ class ProfileAwareDryRunAutoBuyService:
             "scheduler_slot": request.scheduler_slot
             or (preview.get("scheduler_slot") or ""),
             "canonical_profile_pipeline": bool(preview.get("canonical_profile_pipeline")),
+            "score_gate_diagnostics": score_gate_diagnostics,
             "profile_snapshot_selected_symbols": [
                 value
                 for value in (preview.get("profile_snapshot_selected_symbols") or [])
@@ -1222,6 +1226,11 @@ class ProfileAwareDryRunAutoBuyService:
             items = preview.get("watchlist")
         if not isinstance(items, list):
             items = []
+        score_gate_by_symbol = {
+            str(item.get("symbol")): item
+            for item in _preview_score_gate_diagnostics(preview)
+            if item.get("symbol")
+        }
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -1279,6 +1288,7 @@ class ProfileAwareDryRunAutoBuyService:
                 "final_selected": bool(item.get("final_selected")),
                 "diagnostics_json": _json({
                     "canonical_profile_pipeline": True,
+                    "candidate_score_gate": score_gate_by_symbol.get(symbol),
                     "runtime_quant_candidate_count": response.get(
                         "runtime_quant_candidate_count"
                     ),
@@ -1823,7 +1833,7 @@ def _get_live_execution_candidates(
 
 
 def _minimum_entry_score(profile: dict[str, Any]) -> float:
-    return max(65.0, float(profile.get("buy_score_threshold") or 0.0))
+    return max(BUY_FINAL_MIN, float(profile.get("buy_score_threshold") or 0.0))
 
 
 def _select_executable_candidate(evaluated: list[dict[str, Any]], *, profile: dict[str, Any]) -> dict[str, Any] | None:
@@ -1912,6 +1922,62 @@ def _preview_observability(
         "preview_status": str(preview.get("preview_status") or "unknown"),
         "preview_error": preview.get("preview_error"),
     }
+
+
+def _preview_score_gate_diagnostics(preview: dict[str, Any]) -> list[dict[str, Any]]:
+    quant_experiment = preview.get("quant_experiment")
+    quant_experiment = quant_experiment if isinstance(quant_experiment, dict) else {}
+    selection_mode = str(
+        preview.get("selection_mode")
+        or quant_experiment.get("selection_mode")
+        or "A_ONLY"
+    ).strip().upper()
+    if selection_mode != "A_TOP5_C_GPT":
+        return []
+
+    items = preview.get("items")
+    if not isinstance(items, list):
+        items = preview.get("watchlist")
+    if not isinstance(items, list):
+        return []
+
+    diagnostics: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("selected_by_a_top5") is not True:
+            continue
+        score_gate = evaluate_a_top5_score_gate(item)
+        final_raw = next(
+            (
+                item.get(key)
+                for key in ("final_entry_score", "final_buy_score", "final_score")
+                if item.get(key) is not None
+            ),
+            None,
+        )
+        final_score = finite_score(final_raw)
+        reason = score_gate.get("a_top5_score_gate_reason")
+        if reason is None:
+            if final_score is None:
+                reason = "final_score_unavailable"
+            elif final_score < BUY_FINAL_MIN:
+                reason = "final_score_below_threshold"
+        diagnostics.append({
+            "symbol": _symbol(item),
+            "quant_a_rank": item.get("quant_a_rank"),
+            "quant_c_status": item.get("quant_c_status"),
+            "quant_c_score": score_gate.get("quant_c_score"),
+            "quant_c_threshold": score_gate.get("quant_c_threshold"),
+            "quant_c_gate_passed": score_gate.get("quant_c_gate_passed"),
+            "gpt_analysis_status": item.get("gpt_analysis_status") or "not_run",
+            "gpt_buy_score": score_gate.get("gpt_buy_score"),
+            "gpt_buy_score_threshold": score_gate.get("gpt_buy_score_threshold"),
+            "gpt_buy_score_gate_passed": score_gate.get("gpt_buy_score_gate_passed"),
+            "final_buy_score": final_score,
+            **score_gate,
+            "skip_reason": reason,
+            "block_reason": reason,
+        })
+    return diagnostics
 
 
 def _preview_count(

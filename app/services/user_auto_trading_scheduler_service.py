@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.constants import A_TOP5_C_MIN_SCORE
+
 from app.db.database import SessionLocal
 from app.db.models import (
     AutomationProfileAiCandidateResult,
@@ -26,6 +28,11 @@ from app.services.automation_profile_watchlist_service import AutomationProfileW
 from app.services.kis_dry_run_risk_service import position_exit_threshold_reasons
 from app.services.kis_payload_sanitizer import sanitize_kis_text
 from app.services.kis_watchlist_preview_service import normalize_symbol_identity
+from app.services.kis_a_top5_score_gate import (
+    apply_a_top5_score_gate,
+    evaluate_a_top5_score_gate,
+    finite_score,
+)
 from app.services.profile_universe_service import profile_universe_bounds
 from app.services.user_trading_execution_service import UserTradingExecutionService
 from app.services.account_snapshot_retry import (
@@ -227,6 +234,7 @@ class UserAutoTradingCandidateService:
                 )
                 candidate.update({
                     "candidate_source": "automation_profile_runtime_quant_gpt",
+                    "quant_selection_mode": preview.get("selection_mode") or "A_ONLY",
                     "automation_profile_id": int(profile["id"]),
                     "automation_profile_key": profile.get("profile_key"),
                     "profile_snapshot_id": snapshot_data.get("id"),
@@ -304,6 +312,22 @@ class UserAutoTradingCandidateService:
                 )
                 .first()
             )
+            candidate_score_gate = None
+            if str(preview.get("selection_mode") or "").strip().upper() == "A_TOP5_C_GPT":
+                gate = evaluate_a_top5_score_gate(item)
+                candidate_score_gate = {
+                    "quant_c_score": gate.get("quant_c_score"),
+                    "quant_c_status": item.get("quant_c_status"),
+                    "quant_c_threshold": gate.get("quant_c_threshold"),
+                    "quant_c_gate_passed": gate.get("quant_c_gate_passed"),
+                    "gpt_buy_score": gate.get("gpt_buy_score"),
+                    "gpt_buy_score_threshold": gate.get("gpt_buy_score_threshold"),
+                    "gpt_buy_score_gate_passed": gate.get("gpt_buy_score_gate_passed"),
+                    "a_top5_score_gate_passed": gate.get("a_top5_score_gate_passed"),
+                    "a_top5_score_gate_reason": gate.get("a_top5_score_gate_reason"),
+                    "block_reason": item.get("block_reason") or item.get("reason"),
+                    "final_buy_score": item.get("final_buy_score"),
+                }
             values = {
                 "owner_user_id": int(user.id),
                 "profile_id": int(profile["id"]),
@@ -343,6 +367,10 @@ class UserAutoTradingCandidateService:
                 "diagnostics_json": json.dumps(
                     {
                         **(self.last_pipeline_diagnostics or {}),
+                        **(
+                            {"candidate_score_gate": candidate_score_gate}
+                            if candidate_score_gate is not None else {}
+                        ),
                         "candidate_execution": (
                             (self.last_pipeline_diagnostics or {}).get(
                                 "fallback_candidate_results_by_symbol", {}
@@ -1341,7 +1369,7 @@ class UserAutoTradingSchedulerService:
                 market,
                 now=now,
                 existing_c_score=(
-                    70.0
+                    A_TOP5_C_MIN_SCORE
                     if str(selection_mode or '').strip().upper() == 'A_TOP5_C_GPT'
                     else None
                 ),
@@ -1354,6 +1382,19 @@ class UserAutoTradingSchedulerService:
                 pipeline_diagnostics.update(_empty_fallback_diagnostics())
                 if calendar_gap_risk is not None:
                     pipeline_diagnostics['calendar_gap_risk'] = calendar_gap_risk
+            pipeline_candidate = getattr(
+                self.candidate_service,
+                "last_pipeline_candidate",
+                None,
+            )
+            preview_score_failure = _canonical_preview_score_gate_failure(
+                pipeline_candidate,
+                selection_mode=(
+                    pipeline_diagnostics.get("selection_mode")
+                    if isinstance(pipeline_diagnostics, dict)
+                    else None
+                ),
+            )
             profile_context = self._profile_context(
                 profile=profile,
                 scheduler_slot=scheduler_slot,
@@ -1370,24 +1411,33 @@ class UserAutoTradingSchedulerService:
                 run_key=run_key,
                 result='HOLD',
                 reason=(
-                    'no_completed_gpt_final_candidate'
-                    if pipeline_diagnostics
-                    else 'no_qualifying_candidate'
+                    preview_score_failure.get("reason")
+                    if preview_score_failure
+                    else (
+                        'no_completed_gpt_final_candidate'
+                        if pipeline_diagnostics
+                        else 'no_qualifying_candidate'
+                    )
                 ),
                 symbol='NONE',
                 create_signal=not bool(pipeline_diagnostics),
                 profile_context=profile_context,
-                failure_diagnostics=(
-                    {'calendar_gap_risk': calendar_gap_risk, **calendar_gap_risk}
-                    if calendar_gap_risk is not None else None
-                ),
+                failure_diagnostics={
+                    **(
+                        {'calendar_gap_risk': calendar_gap_risk, **calendar_gap_risk}
+                        if calendar_gap_risk is not None else {}
+                    ),
+                    **(
+                        {'pipeline_diagnostics': pipeline_diagnostics}
+                        if isinstance(pipeline_diagnostics, dict) else {}
+                    ),
+                    **(
+                        {'score_gate_candidate': preview_score_failure['candidate']}
+                        if preview_score_failure else {}
+                    ),
+                },
             )
             persist = getattr(self.candidate_service, "persist_results", None)
-            pipeline_candidate = getattr(
-                self.candidate_service,
-                "last_pipeline_candidate",
-                None,
-            )
             if (
                 pipeline_diagnostics
                 and callable(persist)
@@ -1552,6 +1602,10 @@ class UserAutoTradingSchedulerService:
 
         for candidate in ranked_candidates:
             symbol = str(candidate.get("symbol") or "").strip().upper()
+            candidate.setdefault(
+                "quant_selection_mode",
+                pipeline_diagnostics.get("selection_mode") or "A_ONLY",
+            )
             analysis_override = candidate.get("_analysis_override")
             if not isinstance(analysis_override, dict):
                 analysis_override = _runtime_analysis_override(candidate, profile=profile)
@@ -1570,6 +1624,11 @@ class UserAutoTradingSchedulerService:
                     "execution_status": "excluded",
                     "skip_reason": exclusion_reason,
                     "quant_c_score": _canonical_c_score(candidate),
+                    "quant_c_threshold": candidate.get("quant_c_threshold"),
+                    "quant_c_gate_passed": candidate.get("quant_c_gate_passed"),
+                    "gpt_buy_score": candidate.get("gpt_buy_score", candidate.get("ai_buy_score")),
+                    "gpt_buy_score_threshold": candidate.get("gpt_buy_score_threshold"),
+                    "gpt_buy_score_gate_passed": candidate.get("gpt_buy_score_gate_passed"),
                     "final_buy_score": _optional_number(candidate.get("final_buy_score")),
                     "broker_submit_called": False,
                 }
@@ -1792,6 +1851,24 @@ class UserAutoTradingSchedulerService:
                 ),
                 None,
             )
+            score_gate_skip_reason = next(
+                (
+                    item.get("skip_reason")
+                    for item in results_by_symbol.values()
+                    if item.get("skip_reason") in {
+                        "c_quant_unavailable",
+                        "c_score_invalid",
+                        "c_score_below_threshold",
+                        "gpt_analysis_failed",
+                        "gpt_analysis_not_completed",
+                        "gpt_analysis_incomplete",
+                        "gpt_buy_score_missing",
+                        "gpt_buy_score_invalid",
+                        "gpt_buy_score_below_threshold",
+                    }
+                ),
+                None,
+            )
             final_result = self._record_result(
                 db,
                 user=user,
@@ -1802,6 +1879,7 @@ class UserAutoTradingSchedulerService:
                 result="HOLD",
                 reason=(
                     calendar_skip_reason
+                    or score_gate_skip_reason
                     or ("no_affordable_final_candidate" if eligible_candidates else "no_qualifying_candidate")
                 ),
                 symbol="NONE",
@@ -2586,6 +2664,83 @@ def _is_canonical_fallback_pipeline(
     )
 
 
+def _canonical_preview_score_gate_failure(
+    pipeline_candidate: Any,
+    *,
+    selection_mode: Any,
+) -> dict[str, Any] | None:
+    if str(selection_mode or "").strip().upper() != "A_TOP5_C_GPT":
+        return None
+    pipeline_candidate = (
+        pipeline_candidate if isinstance(pipeline_candidate, dict) else {}
+    )
+    preview = pipeline_candidate.get("_pipeline_preview")
+    preview = preview if isinstance(preview, dict) else {}
+    rows = preview.get("items")
+    if not isinstance(rows, list):
+        rows = preview.get("quant_ranked_candidates")
+    if not isinstance(rows, list):
+        return None
+    active_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict) and row.get("selected_by_a_top5") is True
+    ]
+    active_rows.sort(
+        key=lambda row: _int_or_none(row.get("quant_a_rank")) or 10**9
+    )
+    score_gate_reasons = {
+        "c_quant_unavailable",
+        "c_score_invalid",
+        "c_score_below_threshold",
+        "gpt_analysis_failed",
+        "gpt_analysis_not_completed",
+        "gpt_analysis_incomplete",
+        "gpt_buy_score_missing",
+        "gpt_buy_score_invalid",
+        "gpt_buy_score_below_threshold",
+    }
+    for row in active_rows:
+        score_gate = evaluate_a_top5_score_gate(row)
+        reason = score_gate.get("a_top5_score_gate_reason")
+        if reason in score_gate_reasons:
+            diagnostic = {
+                key: row.get(key)
+                for key in (
+                    "symbol",
+                    "quant_c_status",
+                    "ai_buy_score",
+                    "gpt_analysis_status",
+                    "gpt_used",
+                    "final_buy_score",
+                )
+            }
+            diagnostic.update(score_gate)
+            diagnostic["skip_reason"] = reason
+            return {"reason": reason, "candidate": diagnostic}
+        final_score = finite_score(
+            row.get("final_buy_score", row.get("final_entry_score"))
+        )
+        if final_score is None or final_score < 65.0:
+            diagnostic = {
+                key: row.get(key)
+                for key in (
+                    "symbol",
+                    "quant_c_score",
+                    "quant_c_status",
+                    "ai_buy_score",
+                    "gpt_analysis_status",
+                    "gpt_used",
+                    "final_buy_score",
+                    "final_entry_score",
+                )
+            }
+            diagnostic.update(score_gate)
+            diagnostic["skip_reason"] = "final_score_below_threshold"
+            return {"reason": "final_score_below_threshold", "candidate": diagnostic}
+    return None
+
+
 def _canonical_c_score(candidate: dict[str, Any]) -> float | None:
     score = _optional_number(candidate.get("quant_c_score"))
     if score is None:
@@ -2651,18 +2806,33 @@ def _fallback_eligibility_reason(
     required_c_score: float | None = None,
     required_final_score: float | None = None,
 ) -> str | None:
+    is_a_top5_c_gpt = (
+        str(candidate.get("quant_selection_mode") or "").strip().upper()
+        == "A_TOP5_C_GPT"
+    )
     c_score = _canonical_c_score(candidate)
-    if (
+    if is_a_top5_c_gpt:
+        candidate.setdefault("quant_c_score", c_score)
+        gate_reason = apply_a_top5_score_gate(candidate)
+        if gate_reason:
+            return gate_reason
+    elif (
         c_score is None
         or c_score < 70.0
         or candidate.get("quant_c_gate_passed") is False
     ):
         return "below_c_score_threshold"
-    if required_c_score is not None and c_score < float(required_c_score):
+    if required_c_score is not None and (
+        c_score is None or c_score < float(required_c_score)
+    ):
         return "calendar_gap_c_below_threshold"
     if not _canonical_gpt_completed(candidate):
         return "gpt_not_completed"
-    final_score = _optional_number(candidate.get("final_buy_score"))
+    final_score = (
+        finite_score(candidate.get("final_buy_score"))
+        if is_a_top5_c_gpt
+        else _optional_number(candidate.get("final_buy_score"))
+    )
     if final_score is None or final_score < 65.0:
         return "below_final_score_threshold"
     if required_final_score is not None and final_score < float(required_final_score):
@@ -2682,16 +2852,30 @@ def _fallback_is_below_threshold_hold(candidate: dict[str, Any]) -> bool:
     analysis_override = candidate.get("_analysis_override")
     analysis_override = analysis_override if isinstance(analysis_override, dict) else {}
     final_score = _optional_number(candidate.get("final_buy_score"))
+    is_a_top5_c_gpt = (
+        str(candidate.get("quant_selection_mode") or "").strip().upper()
+        == "A_TOP5_C_GPT"
+    )
+    c_score = _canonical_c_score(candidate)
+    if is_a_top5_c_gpt:
+        score_gate_passed = apply_a_top5_score_gate(candidate) is None
+    else:
+        score_gate_passed = bool(
+            c_score is not None
+            and c_score >= 70.0
+            and candidate.get("quant_c_gate_passed") is not False
+        )
     return (
-        _canonical_c_score(candidate) is not None
-        and _canonical_c_score(candidate) >= 70.0
-        and candidate.get("quant_c_gate_passed") is not False
+        score_gate_passed
         and _canonical_gpt_completed(candidate)
         and not _canonical_hard_blocked(
             candidate,
             analysis_override=analysis_override,
         )
-        and str(analysis_override.get("action") or "").strip().lower() == "hold"
+        and (
+            is_a_top5_c_gpt
+            or str(analysis_override.get("action") or "").strip().lower() == "hold"
+        )
         and (
             final_score is None
             or final_score < 65.0
@@ -2884,14 +3068,23 @@ def _runtime_analysis_override(
     entry = settings.get("entry")
     entry = entry if isinstance(entry, dict) else {}
     threshold = max(65.0, _number(entry.get("min_final_score")))
-    score = _optional_number(candidate.get("final_buy_score"))
+    is_a_top5_c_gpt = (
+        str(candidate.get("quant_selection_mode") or "").strip().upper()
+        == "A_TOP5_C_GPT"
+    )
+    score = (
+        finite_score(candidate.get("final_buy_score"))
+        if is_a_top5_c_gpt
+        else _optional_number(candidate.get("final_buy_score"))
+    )
     price = _optional_number(candidate.get("current_price"))
+    gpt_score = finite_score if is_a_top5_c_gpt else _optional_number
     gpt_completed = (
         bool(candidate.get("gpt_used"))
         and str(candidate.get("gpt_analysis_status") or "").strip().lower()
         == "completed"
-        and _optional_number(candidate.get("ai_buy_score")) is not None
-        and _optional_number(candidate.get("ai_sell_score")) is not None
+        and gpt_score(candidate.get("ai_buy_score")) is not None
+        and gpt_score(candidate.get("ai_sell_score")) is not None
     )
     data_sufficient = (
         price is not None
@@ -2899,16 +3092,34 @@ def _runtime_analysis_override(
         and str(candidate.get("indicator_status") or "").strip().lower()
         in {"ok", "partial"}
     )
-    action = "buy" if gpt_completed and data_sufficient and score is not None and score >= threshold else "hold"
+    score_gate_reason = None
+    if is_a_top5_c_gpt:
+        score_gate_reason = apply_a_top5_score_gate(candidate)
+    action = (
+        "buy"
+        if score_gate_reason is None
+        and gpt_completed
+        and data_sufficient
+        and score is not None
+        and score >= threshold
+        else "hold"
+    )
     reason = (
         "profile_final_candidate"
         if action == "buy"
         else (
-            "below_profile_buy_threshold"
-            if score is not None and score < threshold
-            else "profile_final_candidate_below_entry_gate"
+            score_gate_reason
+            or (
+                "below_profile_buy_threshold"
+                if score is not None and score < threshold
+                else "profile_final_candidate_below_entry_gate"
+            )
         )
     )
+    score_gate = evaluate_a_top5_score_gate(candidate) if is_a_top5_c_gpt else {}
+    gating_notes = list(candidate.get("gating_notes") or [])
+    if score_gate_reason:
+        gating_notes.append(score_gate_reason)
     return {
         "provider": "kis",
         "market": "KR",
@@ -2923,8 +3134,17 @@ def _runtime_analysis_override(
         "final_sell_score": candidate.get("final_sell_score"),
         "quant_buy_score": candidate.get("quant_buy_score"),
         "quant_c_score": _canonical_c_score(candidate),
+        "quant_c_status": candidate.get("quant_c_status"),
+        "quant_c_threshold": score_gate.get("quant_c_threshold"),
+        "quant_c_gate_passed": score_gate.get("quant_c_gate_passed"),
         "quant_sell_score": candidate.get("quant_sell_score"),
         "ai_buy_score": candidate.get("ai_buy_score"),
+        "gpt_buy_score": candidate.get("ai_buy_score"),
+        "gpt_buy_score_threshold": score_gate.get("gpt_buy_score_threshold"),
+        "gpt_buy_score_gate_passed": score_gate.get("gpt_buy_score_gate_passed"),
+        "a_top5_score_gate_passed": score_gate.get("a_top5_score_gate_passed"),
+        "a_top5_score_gate_reason": score_gate_reason,
+        "score_gate": score_gate or None,
         "ai_sell_score": candidate.get("ai_sell_score"),
         "confidence": candidate.get("confidence"),
         "ai_reason": candidate.get("ai_reason") or candidate.get("gpt_reason"),
@@ -2936,7 +3156,7 @@ def _runtime_analysis_override(
         "gpt_analysis_status": candidate.get("gpt_analysis_status") or "not_run",
         "gpt_reason": candidate.get("gpt_reason"),
         "risk_flags": candidate.get("risk_flags") or [],
-        "gating_notes": candidate.get("gating_notes") or [],
+        "gating_notes": list(dict.fromkeys(gating_notes)),
         "hard_blocked": not gpt_completed or not data_sufficient,
         "entry_ready": action == "buy",
     }

@@ -379,6 +379,7 @@ class AutomationTodayDecisionService:
             'final_candidate_symbols': [],
             'final_candidate_count': 0,
             'final_ranked_top5': [],
+            'score_gate_candidates': [],
             'final_selected_symbol': None,
         }
         if profile_id is None:
@@ -439,6 +440,14 @@ class AutomationTodayDecisionService:
 
         def candidate(row: AutomationProfileAiCandidateResult) -> dict[str, Any]:
             final_score = row.final_buy_score
+            try:
+                diagnostics = json.loads(row.diagnostics_json or "{}")
+            except (TypeError, ValueError):
+                diagnostics = {}
+            if not isinstance(diagnostics, dict):
+                diagnostics = {}
+            score_gate = diagnostics.get("candidate_score_gate")
+            score_gate = score_gate if isinstance(score_gate, dict) else {}
             return {
                 'symbol': row.symbol,
                 'name': row.symbol_name,
@@ -463,6 +472,18 @@ class AutomationTodayDecisionService:
                 'entry_ready': False,
                 'action': 'watch',
                 'action_hint': 'watch',
+                'quant_c_score': score_gate.get('quant_c_score'),
+                'quant_c_status': score_gate.get('quant_c_status'),
+                'quant_c_threshold': score_gate.get('quant_c_threshold'),
+                'quant_c_gate_passed': score_gate.get('quant_c_gate_passed'),
+                'gpt_buy_score': score_gate.get('gpt_buy_score'),
+                'gpt_analysis_status': score_gate.get('gpt_analysis_status') or row.gpt_analysis_status,
+                'gpt_buy_score_threshold': score_gate.get('gpt_buy_score_threshold'),
+                'gpt_buy_score_gate_passed': score_gate.get('gpt_buy_score_gate_passed'),
+                'a_top5_score_gate_passed': score_gate.get('a_top5_score_gate_passed'),
+                'a_top5_score_gate_reason': score_gate.get('a_top5_score_gate_reason'),
+                'block_reason': score_gate.get('block_reason'),
+                'candidate_score_gate': score_gate,
             }
 
         runtime_rows = [row for row in rows if row.runtime_quant_rank is not None]
@@ -488,6 +509,12 @@ class AutomationTodayDecisionService:
             else snapshot
         )
         final_items = [candidate(row) for row in final_rows[:5]]
+        score_gate_items = [
+            item
+            for row in rows
+            for item in [candidate(row)]
+            if item.get('candidate_score_gate')
+        ][:5]
         return {
             'profile_snapshot_id': rows[0].snapshot_id,
             'snapshot_source_count': snapshot.source_count if snapshot else None,
@@ -509,6 +536,7 @@ class AutomationTodayDecisionService:
             'final_candidate_symbols': [row.symbol for row in final_rows],
             'final_candidate_count': len(final_rows),
             'final_ranked_top5': final_items,
+            'score_gate_candidates': score_gate_items,
             'final_selected_symbol': next(
                 (row.symbol for row in final_rows if row.final_selected),
                 final_rows[0].symbol if final_rows else None,

@@ -13,6 +13,7 @@ from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient
 from app.config import get_settings
+from app.core.constants import A_TOP5_C_MIN_SCORE
 from app.core.enums import InternalOrderStatus
 from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, TradeRunLog
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
@@ -31,6 +32,7 @@ from app.services.profile_universe_service import (
 )
 from app.services.automation_observability import candidate_gpt_quant_observability
 from app.services.calendar_gap_risk_service import CalendarGapRiskService
+from app.services.kis_a_top5_score_gate import apply_a_top5_score_gate, evaluate_a_top5_score_gate
 from app.services.target_aware_risk_service import TargetAwareRiskService
 
 KST = ZoneInfo('Asia/Seoul')
@@ -373,7 +375,7 @@ class AutomationProfileBuySchedulerService:
         calendar_gap_risk = self.calendar_gap_risk_service.evaluate(
             MARKET,
             now=now_utc,
-            existing_c_score=70.0 if selection_mode == 'A_TOP5_C_GPT' else None,
+            existing_c_score=A_TOP5_C_MIN_SCORE if selection_mode == 'A_TOP5_C_GPT' else None,
             existing_final_score=_threshold(profile),
         )
         if calendar_gap_risk.get('entry_blocked') is True:
@@ -434,6 +436,32 @@ class AutomationProfileBuySchedulerService:
                 )
         values = eligible_values
         if not values:
+            score_gate_diagnostics = (
+                [dict(item) for item in candidates.get('score_gate_diagnostics', []) if isinstance(item, dict)]
+                if isinstance(candidates, dict)
+                and isinstance(candidates.get('score_gate_diagnostics'), list)
+                else []
+            )
+            score_gate_failure = next(
+                (item for item in score_gate_diagnostics if item.get('skip_reason')),
+                None,
+            )
+            if selection_mode == 'A_TOP5_C_GPT' and score_gate_failure is not None:
+                reason = str(score_gate_failure['skip_reason'])
+                blocked = self._blocked(
+                    reason,
+                    profile=profile,
+                    block_reason=reason,
+                    score_gate_candidate=score_gate_failure,
+                    score_gate_diagnostics=score_gate_diagnostics,
+                    calendar_gap_candidate_diagnostics=score_gate_diagnostics,
+                    profile_eligible_symbol_count=0,
+                    profile_price_filtered_count=len(filtered_symbols),
+                    profile_exclusion_counts=profile_exclusion_counts,
+                    live_order_gate=gate,
+                )
+                self._record_run(db, blocked, slot, now_utc)
+                return blocked
             reason = next(iter(profile_exclusion_counts), 'no_buy_candidate')
             return self._blocked(
                 reason,
@@ -466,7 +494,17 @@ class AutomationProfileBuySchedulerService:
                 ),
                 None,
             )
-            reason = calendar_skip or (
+            score_gate_skip = next(
+                (
+                    item.get('skip_reason')
+                    for item in candidate_diagnostics
+                    if str(item.get('skip_reason') or '').startswith((
+                        'c_', 'below_c_', 'gpt_'
+                    ))
+                ),
+                None,
+            )
+            reason = calendar_skip or score_gate_skip or (
                 'below_profile_buy_threshold' if top_score is not None and top_score < 65 else 'no_executable_candidate'
             )
             blocked = self._blocked(
@@ -482,7 +520,7 @@ class AutomationProfileBuySchedulerService:
                 calendar_gap_candidate_diagnostics=candidate_diagnostics,
                 **calendar_gap_risk,
             )
-            if calendar_skip:
+            if calendar_skip or score_gate_skip:
                 self._record_run(db, blocked, slot, now_utc)
             return blocked
         symbol = _symbol(selected)
@@ -516,7 +554,9 @@ class AutomationProfileBuySchedulerService:
         db.flush()
         reservation.order_id = order.id
         db.commit()
-        validation = self._validate(db, symbol, int(plan['quantity']), profile, selected, 'buy')
+        validation = self._validate(
+            db, symbol, int(plan['quantity']), profile, selected, 'buy', selection_mode
+        )
         if validation.get('validated_for_submission') is not True:
             return self._validation_block(db, reservation, order, validation)
         execution = self.execution_core.submit_market_buy(
@@ -722,13 +762,15 @@ class AutomationProfileBuySchedulerService:
             score = _score(candidate, 'final_buy_score', 'final_score', 'buy_score')
             symbol = _symbol(candidate)
             if c_score_mode:
-                c_score = _score(candidate, 'quant_c_score', 'entry_quant_score')
-                if c_score is None or c_score < 70.0:
+                gate_reason = apply_a_top5_score_gate(candidate)
+                gate_fields = evaluate_a_top5_score_gate(candidate)
+                c_score = gate_fields.get('quant_c_score')
+                if gate_reason:
                     candidate_diagnostics.append({
                         'symbol': symbol,
                         'final_buy_score': score,
-                        'quant_c_score': c_score,
-                        'skip_reason': 'below_c_score_threshold',
+                        **gate_fields,
+                        'skip_reason': gate_reason,
                     })
                     continue
                 if (
@@ -740,7 +782,8 @@ class AutomationProfileBuySchedulerService:
                         'symbol': symbol,
                         'final_buy_score': score,
                         'quant_c_score': c_score,
-                        'skip_reason': 'calendar_gap_c_below_threshold',
+                        'quant_c_threshold': A_TOP5_C_MIN_SCORE,
+                    'skip_reason': 'calendar_gap_c_below_threshold',
                     })
                     continue
             if score is None or score < base_final_threshold:
@@ -805,7 +848,7 @@ class AutomationProfileBuySchedulerService:
             if quantity < 1:
                 candidate_diagnostics.append({'symbol': symbol, 'skip_reason': 'quantity_invalid'})
                 continue
-            candidate_diagnostics.append({'symbol': symbol, 'final_buy_score': score, 'quant_c_score': _score(candidate, 'quant_c_score', 'entry_quant_score'), 'skip_reason': None, 'selected': True, 'approved_notional_krw': round(approved, 2), 'quantity': quantity})
+            candidate_diagnostics.append({'symbol': symbol, 'final_buy_score': score, 'quant_c_score': _score(candidate, 'quant_c_score', 'entry_quant_score'), 'quant_c_threshold': A_TOP5_C_MIN_SCORE if c_score_mode else None, 'quant_c_gate_passed': candidate.get('quant_c_gate_passed') if c_score_mode else None, 'gpt_buy_score': candidate.get('ai_buy_score') if c_score_mode else None, 'gpt_buy_score_threshold': candidate.get('gpt_buy_score_threshold') if c_score_mode else None, 'gpt_buy_score_gate_passed': candidate.get('gpt_buy_score_gate_passed') if c_score_mode else None, 'skip_reason': None, 'selected': True, 'approved_notional_krw': round(approved, 2), 'quantity': quantity})
             return candidate, target, {'quantity': quantity, 'price': price, 'approved_notional_krw': round(approved, 2)}, top_score, candidate_diagnostics
         return None, {}, {}, top_score, candidate_diagnostics
 
@@ -841,7 +884,19 @@ class AutomationProfileBuySchedulerService:
             }),
         )
 
-    def _validate(self, db: Session, symbol: str, qty: int, profile: dict[str, Any], candidate: dict[str, Any], side: str) -> dict[str, Any]:
+    def _validate(self, db: Session, symbol: str, qty: int, profile: dict[str, Any], candidate: dict[str, Any], side: str, selection_mode: str = 'A_ONLY') -> dict[str, Any]:
+        if (
+            side == 'buy'
+            and str(selection_mode or '').strip().upper() == 'A_TOP5_C_GPT'
+        ):
+            gate_reason = apply_a_top5_score_gate(candidate)
+            if gate_reason:
+                return {
+                    'validated_for_submission': False,
+                    'primary_block_reason': gate_reason,
+                    'block_reasons': [gate_reason],
+                    'score_gate': evaluate_a_top5_score_gate(candidate),
+                }
         if self.validation_service is not None:
             self.execution_core.validation_service = self.validation_service
         return self.execution_core.validate_order(
@@ -921,13 +976,24 @@ class AutomationProfileBuySchedulerService:
         db.add(TradeRunLog(
             run_key=':'.join([MODE, uuid.uuid4().hex[:12]]),
             trigger_source=TRIGGER_SOURCE,
-            symbol=str(result.get('selected_symbol') or 'WATCHLIST'),
+            symbol=str(
+                result.get('selected_symbol')
+                or (result.get('score_gate_candidate') or {}).get('symbol')
+                or 'WATCHLIST'
+            ),
             mode=MODE,
             stage='done',
             result=str(result.get('status') or 'filled'),
             reason=str(result.get('reason') or ''),
             order_id=result.get('order_id'),
-            request_payload=_json({'scheduler_slot': slot, 'validation_called': bool(result.get('validation_called')), 'manual_submit_called': False, 'calendar_gap_risk': result.get('calendar_gap_risk')}),
+            request_payload=_json({
+                'scheduler_slot': slot,
+                'validation_called': bool(result.get('validation_called')),
+                'manual_submit_called': False,
+                'calendar_gap_risk': result.get('calendar_gap_risk'),
+                'score_gate_candidate': result.get('score_gate_candidate'),
+                'score_gate_diagnostics': result.get('score_gate_diagnostics'),
+            }),
             response_payload=_json(result),
             created_at=now,
         ))
