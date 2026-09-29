@@ -351,6 +351,12 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
     readiness_payload = response_payload.get("readiness")
     if not isinstance(readiness_payload, dict):
         readiness_payload = {}
+    score_gate_candidate = response_payload.get("score_gate_candidate")
+    if not isinstance(score_gate_candidate, dict):
+        score_gate_candidate = {}
+    score_gate = analysis_payload.get("score_gate")
+    if not isinstance(score_gate, dict):
+        score_gate = {}
 
     provider = str(
         _first_present(
@@ -516,7 +522,58 @@ def _serialize_run(row: TradeRunLog) -> dict[str, Any]:
             analysis_payload.get("final_buy_score"),
             analysis_payload.get("score"),
             candidate_payload.get("final_buy_score"),
+            score_gate_candidate.get("final_buy_score"),
             audit_metadata.get("final_score"),
+        ),
+        "quant_c_score": _first_present(
+            score_gate_candidate.get("quant_c_score"),
+            score_gate.get("quant_c_score"),
+            candidate_payload.get("quant_c_score"),
+            analysis_payload.get("quant_c_score"),
+        ),
+        "quant_c_threshold": _first_present(
+            score_gate_candidate.get("quant_c_threshold"),
+            score_gate.get("quant_c_threshold"),
+            candidate_payload.get("quant_c_threshold"),
+            analysis_payload.get("quant_c_threshold"),
+        ),
+        "quant_c_gate_passed": _first_present(
+            score_gate_candidate.get("quant_c_gate_passed"),
+            score_gate.get("quant_c_gate_passed"),
+            candidate_payload.get("quant_c_gate_passed"),
+            analysis_payload.get("quant_c_gate_passed"),
+        ),
+        "gpt_buy_score": _first_present(
+            score_gate_candidate.get("gpt_buy_score"),
+            analysis_payload.get("gpt_buy_score"),
+            candidate_payload.get("gpt_buy_score"),
+            analysis_payload.get("ai_buy_score"),
+        ),
+        "gpt_buy_score_threshold": _first_present(
+            score_gate_candidate.get("gpt_buy_score_threshold"),
+            score_gate.get("gpt_buy_score_threshold"),
+            analysis_payload.get("gpt_buy_score_threshold"),
+        ),
+        "gpt_buy_score_gate_passed": _first_present(
+            score_gate_candidate.get("gpt_buy_score_gate_passed"),
+            score_gate.get("gpt_buy_score_gate_passed"),
+            analysis_payload.get("gpt_buy_score_gate_passed"),
+        ),
+        "a_top5_score_gate_passed": _first_present(
+            score_gate_candidate.get("a_top5_score_gate_passed"),
+            score_gate.get("a_top5_score_gate_passed"),
+            analysis_payload.get("a_top5_score_gate_passed"),
+        ),
+        "a_top5_score_gate_reason": _first_present(
+            score_gate_candidate.get("a_top5_score_gate_reason"),
+            score_gate.get("a_top5_score_gate_reason"),
+            analysis_payload.get("a_top5_score_gate_reason"),
+        ),
+        "block_reason": _first_present(
+            response_payload.get("block_reason"),
+            score_gate_candidate.get("block_reason"),
+            analysis_payload.get("block_reason"),
+            candidate_payload.get("block_reason"),
         ),
         "effective_min_entry_score": _first_present(
             response_payload.get("effective_min_entry_score"),

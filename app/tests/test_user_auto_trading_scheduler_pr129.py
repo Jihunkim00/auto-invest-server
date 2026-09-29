@@ -253,7 +253,8 @@ class CanonicalRuntimePreview:
                     'runtime_quant_buy_score': float(raw.get('quant_buy_score') or c_score),
                     'runtime_quant_sell_score': float(raw.get('quant_sell_score') or 10.0),
                     'quant_c_score': c_score,
-                    'quant_c_gate_passed': raw.get('quant_c_gate_passed', c_score >= 70.0),
+                    'quant_c_status': raw.get('quant_c_status', 'analyzed'),
+                    'quant_c_gate_passed': raw.get('quant_c_gate_passed', c_score >= 65.0),
                     'entry_quant_score': float(raw.get('entry_quant_score', c_score)),
                     'selected_by_a_top5': True,
                     'ai_buy_score': float(raw.get('ai_buy_score', 75.0)),
@@ -977,6 +978,7 @@ def _final_candidate(symbol, *, final_score=70.0, c_score=76.0, price=47000.0, *
         'quant_buy_score': c_score,
         'quant_sell_score': 10.0,
         'quant_c_score': c_score,
+        'quant_c_status': 'analyzed',
         'final_buy_score': final_score,
         'snapshot_rank': 1,
         **values,
@@ -1201,8 +1203,182 @@ def test_canonical_fallback_buys_next_ranked_candidate_and_persists_both_outcome
         'kis_market_buy_qty_unavailable'
     )
     assert persisted['000001']['candidate_execution']['broker_submit_called'] is False
+    candidate_score_gate = persisted['000001']['candidate_score_gate']
+    assert candidate_score_gate['quant_c_threshold'] == 65.0
+    assert candidate_score_gate['gpt_buy_score'] == 75.0
+    assert candidate_score_gate['gpt_buy_score_threshold'] == 60.0
+    assert candidate_score_gate['gpt_buy_score_gate_passed'] is True
+    assert candidate_score_gate['a_top5_score_gate_reason'] is None
     assert persisted['000002']['candidate_execution']['execution_status'] == 'selected'
     assert persisted['000002']['candidate_execution']['final_quantity'] == 1
+
+
+
+def test_canonical_fallback_skips_gpt_below_60_and_uses_next_eligible(db_session):
+    candidates = [
+        _final_candidate(
+            '000001',
+            final_score=70.37,
+            c_score=76.16,
+            ai_buy_score=53.0,
+            ai_sell_score=47.0,
+        ),
+        _final_candidate(
+            '000002',
+            final_score=65.25,
+            c_score=67.0,
+            ai_buy_score=60.0,
+            ai_sell_score=40.0,
+        ),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000002', 1)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    outcomes = item['pipeline_diagnostics']['fallback_candidate_results_by_symbol']
+    assert item['result'] == 'submitted'
+    assert item['candidate']['symbol'] == '000002'
+    assert outcomes['000001']['skip_reason'] == 'gpt_buy_score_below_threshold'
+    assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 1
+    assert [symbol for symbol, _ in kis_client.possible_order_calls] == ['000002']
+    assert [symbol for symbol, _ in kis_client.buy_calls] == ['000002']
+    persisted = {
+        row.symbol: json.loads(row.diagnostics_json)
+        for row in db_session.query(AutomationProfileAiCandidateResult)
+        .filter_by(owner_user_id=user.id)
+        .all()
+    }
+    low_score_gate = persisted['000001']['candidate_score_gate']
+    assert low_score_gate['quant_c_score'] == 76.16
+    assert low_score_gate['quant_c_threshold'] == 65.0
+    assert low_score_gate['gpt_buy_score'] == 53.0
+    assert low_score_gate['gpt_buy_score_threshold'] == 60.0
+    assert low_score_gate['gpt_buy_score_gate_passed'] is False
+    assert low_score_gate['a_top5_score_gate_reason'] == (
+        'gpt_buy_score_below_threshold'
+    )
+
+
+def test_canonical_fallback_with_only_gpt_below_60_has_clear_hold_reason(db_session):
+    candidates = [
+        _final_candidate(
+            '000001',
+            final_score=70.37,
+            c_score=76.16,
+            ai_buy_score=53.0,
+            ai_sell_score=47.0,
+        ),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'HOLD'
+    assert item['reason'] == 'gpt_buy_score_below_threshold'
+    assert item['pipeline_diagnostics']['fallback_candidate_results_by_symbol'][
+        '000001'
+    ]['skip_reason'] == 'gpt_buy_score_below_threshold'
+    assert item['broker_submit_called'] is False
+    assert item['real_order_submitted'] is False
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_user_c65_gpt60_final_63_75_stays_below_final_entry_minimum(db_session):
+    candidates = [
+        _final_candidate(
+            '000001',
+            final_score=63.75,
+            c_score=65.0,
+            ai_buy_score=60.0,
+            ai_sell_score=40.0,
+        ),
+    ]
+    scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(db_session, candidates=candidates)
+    )
+    _set_possible_order(kis_client, '000001', 1)
+
+    item = _run_user_scheduler_slot(db_session, scheduler, user)
+
+    assert item['result'] == 'hold'
+    assert item['reason'] == 'below_profile_buy_threshold'
+    assert item['candidate']['quant_c_gate_passed'] is True
+    assert item['candidate']['gpt_buy_score_gate_passed'] is True
+    assert item['candidate']['final_buy_score'] == 63.75
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
+
+
+def test_user_execution_rechecks_gpt_minimum_before_possible_order(db_session):
+    scheduler, user, profile, _preview, account, _analysis, _broker, kis_client = (
+        _canonical_live_harness(
+            db_session,
+            candidates=[_final_candidate('000001')],
+        )
+    )
+    calendar_gap = scheduler.calendar_gap_risk_service.evaluate(
+        'KR',
+        now=RUN_AT,
+        existing_c_score=65.0,
+        existing_final_score=65.0,
+    )
+    candidate = {
+        'symbol': '000001',
+        'name': 'GPT-low candidate',
+        'current_price': 47000.0,
+        'quant_c_score': 76.16,
+        'quant_c_status': 'analyzed',
+        'entry_quant_score': 76.16,
+        'quant_c_gate_passed': True,
+        'quant_selection_mode': 'A_TOP5_C_GPT',
+        'ai_buy_score': 53.0,
+        'ai_sell_score': 47.0,
+        'gpt_used': True,
+        'gpt_analysis_status': 'completed',
+        'final_buy_score': 70.37,
+        'final_sell_score': 10.0,
+        'indicator_status': 'ok',
+        'risk_flags': [],
+        'hard_blocked': False,
+    }
+    profile_context = scheduler._profile_context(
+        profile=profile,
+        candidate=candidate,
+        scheduler_slot='09:10',
+        user=user,
+        pipeline_diagnostics={'selection_mode': 'A_TOP5_C_GPT'},
+        calendar_gap_risk=calendar_gap,
+    )
+
+    result = scheduler.execution_service.run_once(
+        db_session,
+        user,
+        provider='kis',
+        symbol='000001',
+        now=RUN_AT,
+        trigger_source='user_scheduler',
+        authorization_mode='automatic',
+        scheduler_slot='09:10',
+        snapshot_override=account.snapshots[(user.id, 'kis')],
+        analysis_override={**candidate, 'action': 'buy'},
+        profile_context=profile_context,
+        calendar_gap_risk_override=calendar_gap,
+    )
+
+    assert result['result'] == 'hold'
+    assert result['reason'] == 'gpt_buy_score_below_threshold'
+    assert result['analysis']['gpt_buy_score_threshold'] == 60.0
+    assert result['analysis']['gpt_buy_score_gate_passed'] is False
+    assert result['broker_submit_called'] is False
+    assert result['real_order_submitted'] is False
+    assert kis_client.possible_order_calls == []
+    assert kis_client.buy_calls == []
 
 
 def test_canonical_fallback_excludes_final_score_below_65_even_if_affordable(db_session):
@@ -1378,8 +1554,8 @@ def test_user_calendar_config_failure_fails_closed_before_candidate(db_session, 
     assert kis_client.buy_calls == []
 
 
-def test_canonical_fallback_excludes_c_score_below_70(db_session):
-    candidates = [_final_candidate('000001', final_score=70.0, c_score=69.0)]
+def test_canonical_fallback_excludes_c_score_below_65(db_session):
+    candidates = [_final_candidate('000001', final_score=70.0, c_score=64.99)]
     scheduler, user, _profile, _preview, _account, _analysis, _broker, kis_client = (
         _canonical_live_harness(db_session, candidates=candidates)
     )
@@ -1388,7 +1564,7 @@ def test_canonical_fallback_excludes_c_score_below_70(db_session):
 
     assert item['result'] == 'HOLD'
     assert item['action'] == 'hold'
-    assert item['reason'] == 'no_qualifying_candidate'
+    assert item['reason'] == 'c_score_below_threshold'
     assert item['pipeline_diagnostics']['eligible_candidate_count'] == 0
     assert item['pipeline_diagnostics']['evaluated_candidate_count'] == 0
     assert kis_client.possible_order_calls == []

@@ -12,13 +12,22 @@ from openai import OpenAI
 
 from app.brokers.kis_client import KisClient, to_float
 from app.config import get_settings
-from app.core.constants import AI_WEIGHT, DEFAULT_GATE_LEVEL, QUANT_WEIGHT
+from app.core.constants import (
+    A_TOP5_C_MIN_SCORE,
+    AI_WEIGHT,
+    DEFAULT_GATE_LEVEL,
+    QUANT_WEIGHT,
+)
 from app.db.models import QuantABObservation, TradeRunLog
 from app.services.event_risk_service import EventRiskService
 from app.services.entry_timing_quant_service import EntryTimingQuantService
 from app.services.reversal_quant_service import ReversalQuantService
+from app.services.kis_a_top5_score_gate import (
+    apply_a_top5_score_gate,
+    finite_score,
+)
 
-C_MIN_ENTRY_SCORE = 70.0
+C_MIN_ENTRY_SCORE = A_TOP5_C_MIN_SCORE
 FINAL_ENTRY_MIN_SCORE = 65.0
 from app.services.automation_observability import (
     candidate_gpt_quant_observability,
@@ -327,7 +336,7 @@ class KisWatchlistPreviewService:
                 item["quant_a_rank"] = a_rank
                 item["selected_by_a_top5"] = True
                 c = item.get("shadow_c") if isinstance(item.get("shadow_c"), dict) else {}
-                c_score = _score_or_none(c.get("reversal_score_c"))
+                c_score = finite_score(c.get("reversal_score_c"))
                 c_status = str(c.get("c_status") or "unavailable")
 
                 c_ready = c_status == "analyzed" and c_score is not None
@@ -406,7 +415,11 @@ class KisWatchlistPreviewService:
                     item["quant_c_score"] = runtime_item.get("quant_c_score")
                     item["quant_c_status"] = runtime_item.get("quant_c_status")
                     item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
-                    item["quant_c_gate_passed"] = True
+                    item["quant_c_gate_passed"] = bool(
+                        item.get("quant_c_status") == "analyzed"
+                        and finite_score(item.get("quant_c_score")) is not None
+                        and finite_score(item.get("quant_c_score")) >= C_MIN_ENTRY_SCORE
+                    )
                     item["entry_quant_score"] = runtime_item.get("entry_quant_score")
                     item["final_buy_score"] = self._blend_score(item["entry_quant_score"], item.get("ai_buy_score"))
                     item["final_entry_score"] = item["final_buy_score"]
@@ -417,6 +430,7 @@ class KisWatchlistPreviewService:
                         item["reason"] = "final_score_below_threshold"
                         item["block_reason"] = "final_score_below_threshold"
                     item["score"] = item["final_buy_score"]
+                    _apply_a_top5_candidate_score_gate(item)
 
                 item["gpt_target_rank"] = attempt_rank
                 if market_snapshots.get(symbol) is not None:
@@ -510,7 +524,11 @@ class KisWatchlistPreviewService:
                     item["quant_c_score"] = active_item.get("quant_c_score")
                     item["quant_c_status"] = active_item.get("quant_c_status", "unavailable")
                     item["quant_c_threshold"] = C_MIN_ENTRY_SCORE
-                    item["quant_c_gate_passed"] = True
+                    item["quant_c_gate_passed"] = bool(
+                        item.get("quant_c_status") == "analyzed"
+                        and finite_score(item.get("quant_c_score")) is not None
+                        and finite_score(item.get("quant_c_score")) >= C_MIN_ENTRY_SCORE
+                    )
                     item["entry_quant_score"] = active_item.get("entry_quant_score")
                     item["final_buy_score"] = self._blend_score(item["entry_quant_score"], item.get("ai_buy_score"))
                     item["final_entry_score"] = item["final_buy_score"]
@@ -520,6 +538,7 @@ class KisWatchlistPreviewService:
                     if not item["final_entry_gate_passed"]:
                         item["reason"] = "final_score_below_threshold"
                         item["block_reason"] = "final_score_below_threshold"
+                    _apply_a_top5_candidate_score_gate(item)
                 items_by_symbol[symbol] = item
             gpt_completed_symbols = [
                 str(item.get("symbol"))
@@ -564,6 +583,10 @@ class KisWatchlistPreviewService:
                     and bool(item.get("gpt_used"))
                     and _score_or_none(item.get("ai_buy_score")) is not None
                     and _score_or_none(item.get("ai_sell_score")) is not None
+                    and (
+                        not active_c_mode
+                        or item.get("a_top5_score_gate_passed") is True
+                    )
                 )
             ])
             if active_c_mode:
@@ -636,6 +659,7 @@ class KisWatchlistPreviewService:
                     and bool(item.get("gpt_used"))
                     and _score_or_none(item.get("ai_buy_score")) is not None
                     and _score_or_none(item.get("ai_sell_score")) is not None
+                    and item.get("a_top5_score_gate_passed") is True
                     and _score_or_none(item.get("final_entry_score")) is not None
                     and _score_or_none(item.get("final_entry_score")) >= FINAL_ENTRY_MIN_SCORE
                 ])
@@ -2264,6 +2288,20 @@ def _operator_decision_summary(
         f"{best_symbol} is ranked by quant preview only; GPT did not complete, "
         "so keep hold until a reviewed analysis is available."
     )
+
+
+def _apply_a_top5_candidate_score_gate(item: dict[str, Any]) -> str | None:
+    reason = apply_a_top5_score_gate(item)
+    if reason:
+        item["block_reason"] = reason
+        item["reason"] = reason
+        item["block_reasons"] = _dedupe(
+            [*_string_list(item.get("block_reasons")), reason]
+        )
+        item["why_not_buy"] = _dedupe(
+            [*_string_list(item.get("why_not_buy")), reason]
+        )
+    return reason
 
 
 def _candidate_why_not_buy(

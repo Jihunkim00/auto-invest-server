@@ -29,6 +29,7 @@ from app.services.automation_profile_service import AutomationProfileService
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
 from app.services.profile_aware_dry_run_auto_buy_service import (
     ProfileAwareDryRunAutoBuyService,
+    _preview_score_gate_diagnostics,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.scheduler_service import SchedulerService
@@ -237,7 +238,10 @@ def candidate(
         "indicator_status": "ok",
         "indicator_payload": {"atr": 800.0, "volume_ratio": 1.4},
         "quant_buy_score": score,
+        "quant_c_score": score,
+        "quant_c_status": "analyzed",
         "ai_buy_score": score,
+        "ai_sell_score": 100.0 - score,
         "gpt_analysis_status": "completed",
         "gpt_used": True,
         "data_sufficient": True,
@@ -499,6 +503,168 @@ def test_score_threshold_boundary_is_exact(db_session, monkeypatch, score, eligi
         assert len(harness.validation.calls) == 0
         assert len(harness.broker.buy_calls) == 0
     assert result["dry_run"]["dry_run_result"]["final_buy_score"] == score
+
+
+
+@pytest.mark.parametrize(
+    ("final_score", "c_score", "gpt_score", "expected_reason"),
+    [
+        (70.0, 64.99, 80.0, "c_score_below_threshold"),
+        (70.37, 76.16, 53.0, "gpt_buy_score_below_threshold"),
+    ],
+)
+def test_admin_a_top5_blocks_c_or_independent_gpt_score_failure(
+    db_session, monkeypatch, final_score, c_score, gpt_score, expected_reason
+):
+    row = candidate(
+        score=final_score,
+        quant_c_score=c_score,
+        ai_buy_score=gpt_score,
+        ai_sell_score=100.0 - gpt_score,
+    )
+    harness = build_harness(db_session, monkeypatch, candidates=[row])
+    harness.runtime.update_settings(
+        db_session,
+        {"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+
+    result = run_scheduler(harness)
+    profile_result = result["profile_buy"]
+
+    assert profile_result["reason"] == expected_reason
+    assert profile_result["validation_called"] is False
+    assert profile_result["broker_submit_called"] is False
+    assert profile_result["real_order_submitted"] is False
+    assert profile_result["calendar_gap_candidate_diagnostics"][0]["skip_reason"] == expected_reason
+    assert len(harness.validation.calls) == 0
+    assert harness.broker.buy_calls == []
+    assert harness.client.external_kis_submit_count == 0
+
+
+
+def test_profile_aware_preview_preserves_a_top5_score_gate_diagnostics():
+    diagnostics = _preview_score_gate_diagnostics({
+        "quant_experiment": {"selection_mode": "A_TOP5_C_GPT"},
+        "watchlist": [
+            {
+                "symbol": "A",
+                "selected_by_a_top5": True,
+                "quant_a_rank": 1,
+                "quant_c_status": "analyzed",
+                "quant_c_score": 76.16,
+                "gpt_used": True,
+                "gpt_analysis_status": "completed",
+                "ai_buy_score": 53.0,
+                "ai_sell_score": 47.0,
+                "final_entry_score": 70.37,
+            },
+            {
+                "symbol": "B",
+                "selected_by_a_top5": True,
+                "quant_a_rank": 2,
+                "quant_c_status": "analyzed",
+                "quant_c_score": 64.99,
+                "gpt_used": False,
+                "gpt_analysis_status": "not_run",
+            },
+        ],
+    })
+
+    assert [item["skip_reason"] for item in diagnostics] == [
+        "gpt_buy_score_below_threshold",
+        "c_score_below_threshold",
+    ]
+    assert diagnostics[0]["final_buy_score"] == 70.37
+    assert diagnostics[0]["gpt_buy_score_threshold"] == 60.0
+    assert diagnostics[1]["quant_c_threshold"] == 65.0
+
+
+def test_admin_scheduler_logs_preview_gate_reason_when_execution_pool_is_empty(
+    db_session, monkeypatch
+):
+    harness = build_harness(db_session, monkeypatch)
+    harness.runtime.update_settings(
+        db_session,
+        {"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+    diagnostics = _preview_score_gate_diagnostics({
+        "quant_experiment": {"selection_mode": "A_TOP5_C_GPT"},
+        "watchlist": [{
+            "symbol": "A",
+            "selected_by_a_top5": True,
+            "quant_a_rank": 1,
+            "quant_c_status": "analyzed",
+            "quant_c_score": 76.16,
+            "gpt_used": True,
+            "gpt_analysis_status": "completed",
+            "ai_buy_score": 53.0,
+            "ai_sell_score": 47.0,
+            "final_entry_score": 70.37,
+        }],
+    })
+
+    result = harness.profile_buy.run_once(
+        db_session,
+        {"execution_candidates": [], "score_gate_diagnostics": diagnostics},
+        scheduler_slot="09:10",
+        trigger_source="automation_scheduler",
+        now=UTC_NOW,
+        trusted_scheduler_authority=True,
+    )
+
+    assert result["reason"] == "gpt_buy_score_below_threshold"
+    assert result["block_reason"] == "gpt_buy_score_below_threshold"
+    assert result["score_gate_candidate"]["symbol"] == "A"
+    assert result["score_gate_candidate"]["gpt_buy_score"] == 53.0
+    assert result["validation_called"] is False
+    assert result["broker_submit_called"] is False
+    assert harness.validation.calls == []
+    assert harness.broker.buy_calls == []
+    log = db_session.query(TradeRunLog).filter(
+        TradeRunLog.mode == "automation_profile_scheduler_buy"
+    ).one()
+    assert log.symbol == "A"
+    assert log.reason == "gpt_buy_score_below_threshold"
+    logged_payload = json.loads(log.response_payload)
+    assert logged_payload["score_gate_candidate"]["gpt_buy_score_threshold"] == 60.0
+
+
+def test_admin_a_top5_selects_next_candidate_after_gpt_score_failure(db_session, monkeypatch):
+    harness = build_harness(
+        db_session,
+        monkeypatch,
+        candidates=[
+            candidate(
+                score=70.37,
+                symbol="A",
+                quant_c_score=76.16,
+                ai_buy_score=53.0,
+                ai_sell_score=47.0,
+            ),
+            candidate(
+                score=65.25,
+                symbol="B",
+                quant_c_score=67.0,
+                ai_buy_score=60.0,
+                ai_sell_score=40.0,
+            ),
+        ],
+    )
+    harness.runtime.update_settings(
+        db_session,
+        {"quant_selection_mode": "A_TOP5_C_GPT"},
+    )
+
+    result = run_scheduler(harness)
+    profile_result = result["profile_buy"]
+    diagnostics = profile_result["calendar_gap_candidate_diagnostics"]
+
+    assert profile_result["selected_symbol"] == "B"
+    assert diagnostics[0]["skip_reason"] == "gpt_buy_score_below_threshold"
+    assert diagnostics[-1]["selected"] is True
+    assert len(harness.validation.calls) == 1
+    assert [call["symbol"] for call in harness.broker.buy_calls] == ["B"]
+    assert harness.client.external_kis_submit_count == 0
 
 
 def test_friday_calendar_gate_falls_back_and_halves_admin_profile_sizing(

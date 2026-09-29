@@ -1087,7 +1087,9 @@ def test_kis_preview_shares_one_market_context_snapshot_with_gpt_candidates(
     assert body["market_context_summary"]["market_context_as_of"] == context["as_of"]
 
 
-def _install_active_c_preview_fakes(monkeypatch, *, c_score):
+def _install_active_c_preview_fakes(
+    monkeypatch, *, c_score, gpt_buy_score=75.0, gpt_sell_score=18.0
+):
     monkeypatch.setattr(
         "app.services.runtime_setting_service.RuntimeSettingService.get_settings_read_only",
         lambda self, db: {"quant_selection_mode": "A_TOP5_C_GPT"},
@@ -1135,8 +1137,8 @@ def _install_active_c_preview_fakes(monkeypatch, *, c_score):
             action_hint="candidate",
             gpt_reason="怨듯넻 ?쒖옣 而⑦뀓?ㅽ듃",
             warnings=[],
-            ai_buy_score=75.0,
-            ai_sell_score=18.0,
+            ai_buy_score=gpt_buy_score,
+            ai_sell_score=gpt_sell_score,
             confidence=0.8,
         ),
     )
@@ -1144,7 +1146,7 @@ def _install_active_c_preview_fakes(monkeypatch, *, c_score):
 
 def test_kis_preview_active_c_noncanonical_gates_before_gpt(monkeypatch, client):
     gpt_calls = []
-    _install_active_c_preview_fakes(monkeypatch, c_score=lambda index: 72.0 if index == 0 else 69.0)
+    _install_active_c_preview_fakes(monkeypatch, c_score=lambda index: 72.0 if index == 0 else 64.99)
     monkeypatch.setattr(
         "app.services.kis_watchlist_preview_service.KisPreviewGptAdvisor.analyze",
         lambda self, **kwargs: (
@@ -1169,6 +1171,16 @@ def test_kis_preview_active_c_noncanonical_gates_before_gpt(monkeypatch, client)
     assert body["quant_experiment"]["selection_mode"] == "A_TOP5_C_GPT"
     assert len(body["final_ranked_candidates"]) == 1
     candidate = body["final_ranked_candidates"][0]
+    c_blocked_candidate = next(
+        item
+        for item in body["items"]
+        if item.get("selected_by_a_top5")
+        and item.get("quant_c_score") == 64.99
+    )
+    assert c_blocked_candidate["quant_c_threshold"] == 65.0
+    assert c_blocked_candidate["quant_c_gate_passed"] is False
+    assert c_blocked_candidate["block_reason"] == "c_score_below_threshold"
+    assert c_blocked_candidate["gpt_used"] is False
     assert candidate["selected_by_a_top5"] is True
     assert candidate["quant_c_score"] == 72.0
     assert candidate["quant_c_status"] == "analyzed"
@@ -1179,6 +1191,82 @@ def test_kis_preview_active_c_noncanonical_gates_before_gpt(monkeypatch, client)
     assert body["real_order_submitted"] is False
     assert body["broker_submit_called"] is False
     assert body["manual_submit_called"] is False
+
+
+
+@pytest.mark.parametrize(
+    ("c_score", "gpt_score", "expected_final", "eligible", "block_reason"),
+    [
+        (65.0, 60.0, 63.75, False, "final_score_below_threshold"),
+        (65.0, 65.0, 65.0, True, None),
+        (67.0, 60.0, 65.25, True, None),
+        (76.16, 53.0, 70.37, False, "gpt_buy_score_below_threshold"),
+    ],
+)
+def test_kis_preview_active_c_gpt_numeric_score_boundaries(
+    monkeypatch, client, c_score, gpt_score, expected_final, eligible, block_reason
+):
+    _install_active_c_preview_fakes(
+        monkeypatch,
+        c_score=lambda index: c_score if index == 0 else None,
+        gpt_buy_score=gpt_score,
+    )
+
+    response = client.post("/kis/watchlist/preview")
+
+    assert response.status_code == 200
+    body = response.json()
+    candidate = next(
+        item
+        for item in body["items"]
+        if item.get("selected_by_a_top5") and item.get("quant_c_status") == "analyzed"
+    )
+    assert candidate["quant_c_threshold"] == 65.0
+    assert candidate["quant_c_gate_passed"] is True
+    assert candidate["gpt_buy_score"] == gpt_score
+    assert candidate["gpt_buy_score_threshold"] == 60.0
+    assert candidate["final_buy_score"] == expected_final
+    assert candidate["a_top5_score_gate_passed"] is (gpt_score >= 60.0)
+    if block_reason is not None:
+        assert candidate.get("block_reason") == block_reason
+    else:
+        assert candidate.get("block_reason") in {None, "kr_trading_disabled"}
+    assert bool(body["final_ranked_candidates"]) is eligible
+    if eligible:
+        assert body["final_ranked_candidates"][0]["symbol"] == candidate["symbol"]
+    else:
+        assert all(item["symbol"] != candidate["symbol"] for item in body["final_ranked_candidates"])
+    assert body["broker_submit_called"] is False
+    assert body["real_order_submitted"] is False
+
+
+def test_kis_preview_openai_env_model_and_reasoning_reach_responses_api(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-test-key")
+    monkeypatch.setenv("OPENAI_MODEL", "env-overridden-market-model")
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "max")
+    monkeypatch.setenv("AGENT_CHAT_MODEL", "preserved-chat-model")
+    monkeypatch.setenv("AGENT_CHAT_REASONING_EFFORT", "low")
+    settings = Settings(_env_file=None)
+    fake_client = _FakeOpenAIClient(
+        json.dumps({"ai_buy_score": 60, "ai_sell_score": 40, "action": "hold"})
+    )
+    advisor = KisPreviewGptAdvisor(settings=settings, client=fake_client)
+
+    advisor._call_openai(
+        symbol="005930",
+        name="Samsung Electronics",
+        current_price=72000.0,
+        indicator_status="ok",
+        indicator_payload=_scoreable_indicator_payload(),
+        market_session=_open_market_session(),
+        reference_sources=[],
+    )
+
+    request = fake_client.responses.calls[0]
+    assert request["model"] == "env-overridden-market-model"
+    assert request["reasoning"] == {"effort": "max"}
+    assert settings.agent_chat_model == "preserved-chat-model"
+    assert settings.agent_chat_reasoning_effort == "low"
 
 
 def test_kis_preview_active_c_unavailable_fails_closed_before_gpt(monkeypatch, client):

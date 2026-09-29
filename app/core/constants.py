@@ -10,6 +10,11 @@ DEFAULT_BARS_LIMIT = 120
 QUANT_WEIGHT = 0.75
 AI_WEIGHT = 0.25
 
+# A_TOP5_C_GPT entry gates. Keep these separate from generic strategy score
+# defaults because this mode has an independent C and GPT minimum.
+A_TOP5_C_MIN_SCORE = 65.0
+A_TOP5_GPT_MIN_BUY_SCORE = 60.0
+
 # Candidate thresholds (legacy defaults retained for compatibility)
 BUY_QUANT_MIN = 60.0
 BUY_AI_MIN = 55.0

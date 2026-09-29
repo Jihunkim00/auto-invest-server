@@ -41,6 +41,32 @@ String translateReason(Object? value,
   if (normalized == 'score_threshold_not_met') {
     return 'Score below entry threshold';
   }
+  if (normalized == 'c_score_below_threshold' ||
+      normalized == 'below_c_score_threshold' ||
+      normalized == 'calendar_gap_c_below_threshold') {
+    return 'C score below the required entry threshold';
+  }
+  if (normalized == 'c_quant_unavailable') {
+    return 'C score analysis is unavailable or incomplete';
+  }
+  if (normalized == 'c_score_invalid') {
+    return 'C score is invalid';
+  }
+  if (normalized == 'gpt_buy_score_below_threshold') {
+    return 'GPT buy score is below 60';
+  }
+  if (normalized == 'gpt_buy_score_missing') {
+    return 'GPT buy score was not returned';
+  }
+  if (normalized == 'gpt_buy_score_invalid') {
+    return 'GPT buy score is invalid';
+  }
+  if (normalized == 'gpt_analysis_failed' ||
+      normalized == 'gpt_analysis_not_completed' ||
+      normalized == 'gpt_analysis_incomplete' ||
+      normalized == 'gpt_not_completed') {
+    return 'GPT analysis did not complete successfully';
+  }
   if (normalized == 'sell_pressure_too_high') {
     return 'Sell pressure too high';
   }

@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.core.constants import A_TOP5_C_MIN_SCORE
 from app.services.market_calendar_service import MarketCalendarService
 
 
@@ -27,7 +28,7 @@ class CalendarGapRiskService:
         market: str = "KR",
         *,
         now: datetime | None = None,
-        existing_c_score: float | None = 70.0,
+        existing_c_score: float | None = A_TOP5_C_MIN_SCORE,
         existing_final_score: float = 65.0,
     ) -> dict[str, Any]:
         """Return deterministic calendar-gap gates and serializable diagnostics.

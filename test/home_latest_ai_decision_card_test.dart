@@ -203,6 +203,59 @@ void main() {
     controller.dispose();
   });
 
+  testWidgets('today card renders rejected A_TOP5 score-gate diagnostics',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..todayAiDecisions = AutomationTodayDecisions.fromJson({
+        'trade_date_kst': '2026-09-16',
+        'timezone': 'Asia/Seoul',
+        'profile_id': 8,
+        'slots': [
+          {
+            'scheduler_slot': '09:30',
+            'status': 'analysis_complete',
+            'action': 'hold',
+            'reason': 'no_completed_gpt_final_candidate',
+            'score_gate_candidates': [
+              {
+                'symbol': '005930',
+                'name': 'Samsung Electronics',
+                'gpt_buy_score': 53,
+                'gpt_buy_score_threshold': 60,
+                'quant_c_score': 76.16,
+                'quant_c_threshold': 65,
+                'final_buy_score': 70.37,
+                'block_reason': 'gpt_buy_score_below_threshold',
+              },
+            ],
+          },
+        ],
+      })
+      ..todayAiDecisionsLoaded = true
+      ..schedulerStatus = _schedulerStatus();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: HomeLatestAiDecisionCard(
+            controller: controller,
+            userScoped: true,
+          ),
+        ),
+      ),
+    );
+
+    final auditTile = find.byKey(
+      const ValueKey('home-ai-score-gates-09:30'),
+    );
+    expect(auditTile, findsOneWidget);
+    await tester.tap(auditTile);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('GPT 53'), findsOneWidget);
+    expect(find.text('GPT buy score below 60'), findsOneWidget);
+    controller.dispose();
+  });
+
   testWidgets('analysis_complete quant hold is not shown as no result',
       (tester) async {
     final controller = DashboardController(ApiClient(), autoload: false)

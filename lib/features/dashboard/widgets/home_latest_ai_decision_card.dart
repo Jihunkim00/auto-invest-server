@@ -301,6 +301,27 @@ class _TodayDecisionSlot extends StatelessWidget {
               ],
             ),
           ],
+          if (slot.scoreGateCandidates.isNotEmpty)
+            Material(
+              type: MaterialType.transparency,
+              child: ExpansionTile(
+                key: ValueKey('home-ai-score-gates-${slot.schedulerSlot}'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                title: const Text(
+                  'A Top5 C/GPT score gate audit',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
+                children: [
+                  for (var i = 0; i < slot.scoreGateCandidates.length; i++)
+                    _CandidateDetailRow(
+                      rank: i + 1,
+                      candidate: slot.scoreGateCandidates[i],
+                      controller: controller,
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -341,7 +362,9 @@ class _HomeAiDecisionDialogState extends State<_HomeAiDecisionDialog> {
       }
     }
     final candidates = todayFeedActive
-        ? (selectedTodaySlot?.finalRankedTop5 ?? const <Candidate>[])
+        ? (selectedTodaySlot?.finalRankedTop5.isNotEmpty == true
+            ? selectedTodaySlot!.finalRankedTop5
+            : selectedTodaySlot?.scoreGateCandidates ?? const <Candidate>[])
         : (selectedSlot == null
                 ? _latestCandidates(controller)
                 : _candidatesForSlot(
@@ -792,6 +815,15 @@ String _candidateScoreLine(Candidate candidate) {
       candidate.finalScore ??
       candidate.score;
   if (gpt != null) values.add('GPT ${_number(gpt)}');
+  if (candidate.gptBuyScoreThreshold != null) {
+    values.add('GPT min ${_number(candidate.gptBuyScoreThreshold!)}');
+  }
+  if (candidate.quantCScore != null) {
+    final threshold = candidate.quantCThreshold;
+    values.add(threshold == null
+        ? 'C ${_number(candidate.quantCScore!)}'
+        : 'C ${_number(candidate.quantCScore!)} / ${_number(threshold)}');
+  }
   if (quant != null) values.add('Quant ${_number(quant)}');
   if (finalScore != null) values.add('Final ${_number(finalScore)}');
   if (candidate.confidence != null) {
@@ -850,6 +882,16 @@ String? _latestTime(DashboardController controller) {
 String _translateBlockReason(String reason) {
   final normalized = reason.trim().toLowerCase();
   const labels = <String, String>{
+    'c_quant_unavailable': 'C score unavailable',
+    'c_score_invalid': 'C score invalid',
+    'c_score_below_threshold': 'C score below 65',
+    'gpt_analysis_failed': 'GPT analysis failed',
+    'gpt_analysis_not_completed': 'GPT analysis incomplete',
+    'gpt_analysis_incomplete': 'GPT analysis incomplete',
+    'gpt_buy_score_missing': 'GPT buy score missing',
+    'gpt_buy_score_invalid': 'GPT buy score invalid',
+    'gpt_buy_score_below_threshold': 'GPT buy score below 60',
+    'final_score_below_threshold': 'Final score below 65',
     'below_profile_buy_threshold': '프로필 최소 매수 점수 미달',
     'weak_final_score_gap': '최종 점수 차이가 부족함',
     'market_closed': '시장 운영 시간이 아님',

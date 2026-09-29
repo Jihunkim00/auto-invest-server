@@ -8,6 +8,7 @@ from app.db.models import (
     WatchlistSnapshotRun,
     AutomationProfileWatchlistItem,
     AutomationProfileWatchlistSnapshot,
+    AutomationProfileAiCandidateResult,
     SignalLog,
     TradeRunLog,
     User,
@@ -212,6 +213,39 @@ def test_today_decisions_are_exact_owner_profile_slot_scoped_and_kst(db_session)
 
     _snapshot(db_session, profile, owner.id, '09:10', '010170')
     _snapshot(db_session, profile, owner.id, '11:30', '010170')
+    audit_snapshot = db_session.query(AutomationProfileWatchlistSnapshot).filter_by(
+        profile_id=profile['id'], owner_user_id=owner.id, scheduler_slot='11:30'
+    ).one()
+    db_session.add(AutomationProfileAiCandidateResult(
+        owner_user_id=owner.id,
+        profile_id=profile['id'],
+        snapshot_id=audit_snapshot.id,
+        snapshot_date='2026-09-16',
+        scheduler_slot='11:30',
+        symbol='010170',
+        runtime_quant_rank=1,
+        runtime_quant_buy_score=80,
+        gpt_target_rank=1,
+        gpt_used=True,
+        gpt_analysis_status='completed',
+        ai_buy_score=53,
+        ai_sell_score=47,
+        final_buy_score=70.37,
+        diagnostics_json=json.dumps({
+            'candidate_score_gate': {
+                'quant_c_score': 76.16,
+                'quant_c_threshold': 65.0,
+                'quant_c_gate_passed': True,
+                'gpt_buy_score': 53.0,
+                'gpt_buy_score_threshold': 60.0,
+                'gpt_buy_score_gate_passed': False,
+                'a_top5_score_gate_passed': False,
+                'a_top5_score_gate_reason': 'gpt_buy_score_below_threshold',
+                'block_reason': 'gpt_buy_score_below_threshold',
+            },
+        }),
+    ))
+    db_session.commit()
     _snapshot(db_session, profile, owner.id, '13:30', '010170')
     _snapshot(db_session, other_profile, other.id, '11:30', '005930')
 
