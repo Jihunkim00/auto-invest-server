@@ -44,6 +44,7 @@ from app.services.kis_watchlist_update_service import (
 
 from app.services.market_session_service import MarketSessionService
 from app.services.market_profile_service import MarketProfileService
+from app.services.market_regime_service import MarketRegimeService
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
 from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
@@ -61,6 +62,13 @@ POSITION_EXIT_POSITION_CACHE_SECONDS = 300
 POSITION_EXIT_FRESH_READ_SECONDS = 5
 CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"}
 logger = logging.getLogger(__name__)
+
+
+def market_regime_scheduler_due(now: datetime) -> bool:
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("Market-regime scheduler requires an explicit timezone.")
+    local = now.astimezone(KST)
+    return (local.hour, local.minute) >= (8, 0)
 
 
 CANONICAL_TRIGGER_SOURCE = 'automation_scheduler'
@@ -123,6 +131,7 @@ class AutomationSchedulerService(SchedulerService):
         self._last_outcome_labeling_at: datetime | None = None
         self._last_outcome_labeling_result: str | None = None
         self.automation_watchlist_update_service = None
+        self.market_regime_service = MarketRegimeService()
         self.user_auto_trading_scheduler_service = UserAutoTradingSchedulerService(
             automation_profiles=self.automation_profiles,
         )
@@ -306,6 +315,10 @@ class AutomationSchedulerService(SchedulerService):
                 if value.startswith(f'{day_key}:')
             }
             schedule = self._selected_profile_schedule(now_kst)
+            market_regime_key = f"{day_key}:KR:market_regime:08:00"
+            if market_regime_scheduler_due(now_kst) and market_regime_key not in self._slot_runs:
+                self._slot_runs.add(market_regime_key)
+                self._safe_call(self._run_market_regime_scheduled_once, now_kst)
             if self._automatic_sync_due_at is None or now_kst >= self._automatic_sync_due_at:
                 self._automatic_sync_due_at = now_kst + timedelta(seconds=20)
                 self._safe_call(self._run_automatic_order_sync_once, now_kst)
@@ -381,6 +394,16 @@ class AutomationSchedulerService(SchedulerService):
                 )
             self._last_tick_at = datetime.now(UTC)
             time.sleep(20)
+
+    def _run_market_regime_scheduled_once(self, now_kst: datetime | None = None):
+        db = SessionLocal()
+        try:
+            return self.market_regime_service.calculate_and_persist(
+                db,
+                now=now_kst or datetime.now(KST),
+            )
+        finally:
+            db.close()
 
     def run_user_auto_once(
         self,

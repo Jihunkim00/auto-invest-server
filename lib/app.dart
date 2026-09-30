@@ -185,6 +185,7 @@ class _RegularUserHomeState extends State<_RegularUserHome> {
   @override
   void initState() {
     super.initState();
+    unawaited(widget.controller.restoreAuthenticatedProviderContext());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         unawaited(widget.controller.loadUserBrokerAccounts());

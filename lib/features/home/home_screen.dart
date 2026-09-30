@@ -8,6 +8,7 @@ import '../../models/user_broker_account_snapshot.dart';
 import '../dashboard/dashboard_controller.dart';
 import '../dashboard/widgets/broker_context_controls.dart';
 import '../dashboard/widgets/home_latest_ai_decision_card.dart';
+import 'widgets/market_regime_gauge_card.dart';
 
 /// User-facing Home surface. Advanced diagnostics and raw runtime controls stay
 /// behind Admin; this screen only reports the effective operation state.
@@ -67,6 +68,8 @@ class HomeScreen extends StatelessWidget {
                     await Future.wait([
                       controller.refreshUserBrokerAccounts(),
                       controller.loadUserHomeRecentActivity(),
+                      if (controller.isKisSelected)
+                        controller.loadMarketRegime(silent: true),
                     ]);
                   }
                 : controller.load,
@@ -113,6 +116,14 @@ class HomeScreen extends StatelessWidget {
                   loadingOverride: userLoading,
                   userError: userError,
                 ),
+                if (controller.isKisSelected) ...[
+                  const SizedBox(height: 12),
+                  MarketRegimeGaugeCard(
+                    regime: controller.marketRegime,
+                    loading: controller.marketRegimeLoading,
+                    error: controller.marketRegimeError,
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _PositionsCard(
                   controller: controller,

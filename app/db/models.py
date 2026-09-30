@@ -1590,3 +1590,57 @@ class AgentScheduleJob(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
+
+class MarketRegimeSnapshot(Base):
+    """Daily, read-only long-term KOSPI/NASDAQ regime calculation."""
+
+    __tablename__ = "market_regime_snapshots"
+    __table_args__ = (
+        UniqueConstraint("calculation_date", name="uq_market_regime_calculation_date"),
+        Index("ix_market_regime_calculated_at", "calculated_at"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    calculation_date = Column(Date, nullable=False, index=True)
+    calculated_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    calculation_timezone = Column(String(40), nullable=False, default="Asia/Seoul")
+
+    kospi_week_ending = Column(Date, nullable=True)
+    nasdaq_week_ending = Column(Date, nullable=True)
+    state_week_ending = Column(Date, nullable=True)
+
+    kospi_score = Column(Float, nullable=True)
+    nasdaq_score = Column(Float, nullable=True)
+    combined_score = Column(Float, nullable=True)
+    score_change_3w = Column(Float, nullable=True)
+
+    stage = Column(Integer, nullable=True)
+    stage_key = Column(String(40), nullable=True)
+    stage_label = Column(String(100), nullable=True)
+    status = Column(String(30), nullable=False, default="insufficient_data")
+    confirmed = Column(Boolean, nullable=False, default=False)
+    new_bullish_reversal = Column(Boolean, nullable=False, default=False)
+    new_bearish_reversal = Column(Boolean, nullable=False, default=False)
+    bullish_confirmation_streak = Column(Integer, nullable=False, default=0)
+    bearish_confirmation_streak = Column(Integer, nullable=False, default=0)
+
+    kospi_close = Column(Float, nullable=True)
+    kospi_ema20 = Column(Float, nullable=True)
+    kospi_ema40 = Column(Float, nullable=True)
+    kospi_ema20_4w_slope = Column(Float, nullable=True)
+    kospi_macd_histogram = Column(Float, nullable=True)
+    kospi_rsi14 = Column(Float, nullable=True)
+    kospi_atr14 = Column(Float, nullable=True)
+    kospi_drawdown_52w = Column(Float, nullable=True)
+
+    nasdaq_close = Column(Float, nullable=True)
+    nasdaq_ema20 = Column(Float, nullable=True)
+    nasdaq_ema40 = Column(Float, nullable=True)
+    nasdaq_ema20_4w_slope = Column(Float, nullable=True)
+    nasdaq_macd_histogram = Column(Float, nullable=True)
+    nasdaq_rsi14 = Column(Float, nullable=True)
+    nasdaq_atr14 = Column(Float, nullable=True)
+
+    bullish_conditions_json = Column(Text, nullable=False, default="{}")
+    bearish_conditions_json = Column(Text, nullable=False, default="{}")
+    data_source_json = Column(Text, nullable=False, default="{}")

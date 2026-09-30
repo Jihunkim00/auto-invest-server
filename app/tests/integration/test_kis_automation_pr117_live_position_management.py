@@ -14,6 +14,7 @@ from app.main import app
 from app.services.automation_profile_buy_scheduler_service import (
     AutomationProfileBuySchedulerService,
 )
+from app.services.automation_profile_service import AutomationProfileService
 import app.services.profile_aware_guarded_live_auto_exit_service as guarded_exit_module
 import app.routes.kis as kis_route
 import app.routes.scheduler as scheduler_route
@@ -486,6 +487,20 @@ def test_canonical_profile_schedule_is_effective_kr_schedule_and_legacy_is_diagn
     monkeypatch,
 ):
     harness = build_harness(db_session, monkeypatch, mode='live')
+    original_schedule_lookup = AutomationProfileService.selected_profile_schedule
+
+    def selected_schedule_at_replay_time(self, db, *, now=None):
+        return original_schedule_lookup(
+            self,
+            db,
+            now=UTC_NOW if now is None else now,
+        )
+
+    monkeypatch.setattr(
+        AutomationProfileService,
+        'selected_profile_schedule',
+        selected_schedule_at_replay_time,
+    )
     _set_profile_schedule(harness, db_session)
     settings = SimpleNamespace(kis_enabled=True, kis_real_order_enabled=True)
     harness.runtime.settings = settings

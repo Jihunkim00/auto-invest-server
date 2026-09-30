@@ -52,6 +52,7 @@ import '../../models/kis_manual_order_safety_status.dart';
 import '../../models/log_items.dart';
 import '../../models/managed_position.dart';
 import '../../models/market_watchlist.dart';
+import '../../models/market_regime.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/order_validation_result.dart';
 import '../../models/operator_alerts.dart';
@@ -519,6 +520,11 @@ class ApiClient {
   }
 
   Future<PortfolioSummary> fetchUsPortfolioSummary() => fetchPortfolioSummary();
+  Future<MarketRegime> fetchMarketRegime() async {
+    final payload = await _getJsonNoCache('/market-regime/current');
+    return MarketRegime.fromJson(payload);
+  }
+
   Future<PortfolioSummary> fetchPortfolioSummaryForMarket(String market) {
     return market.trim().toUpperCase() == 'KR'
         ? fetchKrPortfolioSummary()

@@ -56,6 +56,7 @@ import '../../models/kis_scheduler_simulation.dart';
 import '../../models/kis_scheduler_live.dart';
 import '../../models/log_items.dart';
 import '../../models/market_watchlist.dart';
+import '../../models/market_regime.dart';
 import '../../models/managed_position.dart';
 import '../../models/manual_trading_run_result.dart';
 import '../../models/ops_settings.dart';
@@ -187,6 +188,12 @@ class DashboardController extends ChangeNotifier {
   List<TradingLogItem> automationRecentRuns = const [];
   List<OrderLogItem> automationRecentOrders = const [];
   List<SignalLogItem> automationRecentSignals = const [];
+  MarketRegime? marketRegime;
+  bool marketRegimeLoading = false;
+  bool marketRegimeLoaded = false;
+  String? marketRegimeError;
+  int _marketRegimeRequestVersion = 0;
+
   bool homeRecentActivityLoaded = false;
   String? homeRecentActivityError;
   AutomationTodayDecisions todayAiDecisions = AutomationTodayDecisions.empty;
@@ -781,18 +788,98 @@ class DashboardController extends ChangeNotifier {
     return 'broker_unavailable';
   }
 
+  Future<void> loadMarketRegime({
+    bool silent = false,
+    int? contextVersion,
+  }) async {
+    if (!isKisSelected) {
+      _marketRegimeRequestVersion += 1;
+      marketRegime = null;
+      marketRegimeLoading = false;
+      marketRegimeLoaded = false;
+      marketRegimeError = null;
+      if (!silent) notifyListeners();
+      return;
+    }
+
+    final requestVersion = ++_marketRegimeRequestVersion;
+    marketRegimeLoading = true;
+    marketRegimeError = null;
+    if (!silent) notifyListeners();
+    try {
+      final result = await apiClient.fetchMarketRegime();
+      if (_disposed ||
+          requestVersion != _marketRegimeRequestVersion ||
+          (contextVersion != null &&
+              contextVersion != _providerContextVersion)) {
+        return;
+      }
+      marketRegime = result;
+      marketRegimeLoaded = true;
+    } catch (error) {
+      if (_disposed ||
+          requestVersion != _marketRegimeRequestVersion ||
+          (contextVersion != null &&
+              contextVersion != _providerContextVersion)) {
+        return;
+      }
+      marketRegime = null;
+      marketRegimeLoaded = true;
+      marketRegimeError = error.toString();
+    } finally {
+      if (!_disposed && requestVersion == _marketRegimeRequestVersion) {
+        marketRegimeLoading = false;
+        if (!silent) notifyListeners();
+      }
+    }
+  }
+
+  Future<void> ensureMarketRegimeLoaded({
+    bool silent = false,
+    int? contextVersion,
+  }) async {
+    if (!isKisSelected) return;
+    if ((marketRegime != null && marketRegimeError == null) ||
+        marketRegimeLoading) {
+      return;
+    }
+    await loadMarketRegime(
+      silent: silent,
+      contextVersion: contextVersion,
+    );
+  }
+
+  Future<void> restoreAuthenticatedProviderContext() async {
+    final restoreVersion = _providerContextVersion;
+    await _restoreProviderPreference(
+      expectedContextVersion: restoreVersion,
+    );
+    if (_disposed) return;
+    if (isKisSelected) {
+      unawaited(ensureMarketRegimeLoaded(
+        contextVersion: _providerContextVersion,
+      ));
+    }
+    notifyListeners();
+  }
+
   Future<void> load() async {
     loading = true;
 
     notifyListeners();
     try {
+      await _restoreProviderPreference(
+        expectedContextVersion: _providerContextVersion,
+      );
+      unawaited(ensureMarketRegimeLoaded(
+        contextVersion: _providerContextVersion,
+      ));
       try {
         await KrStockCatalog.shared.load();
       } catch (_) {
         // The lookup catalog is a UI convenience; automation loading remains
         // independent if the local asset is unavailable.
       }
-      await _restoreProviderPreference();
       settings = await apiClient.getOpsSettings();
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
@@ -924,6 +1011,7 @@ class DashboardController extends ChangeNotifier {
     _todayAiDecisionRequestVersion += 1;
     super.dispose();
   }
+
   Future<ActionResult> refreshSchedulerStatus({bool silent = false}) async {
     if (schedulerStatusLoading) {
       return const ActionResult(
@@ -1630,12 +1718,22 @@ class DashboardController extends ChangeNotifier {
   }
 
   void setProvider(SelectedProvider provider) {
-    if (selectedProvider == provider) return;
+    if (selectedProvider == provider) {
+      if (provider == SelectedProvider.kis) {
+        unawaited(ensureMarketRegimeLoaded(
+          contextVersion: _providerContextVersion,
+        ));
+      }
+      return;
+    }
     _applyProviderContext(provider);
     _clearProviderScopedState();
     final version = ++_providerContextVersion;
     unawaited(_saveProviderPreference());
     if (provider == SelectedProvider.kis) {
+      unawaited(ensureMarketRegimeLoaded(
+        contextVersion: version,
+      ));
       unawaited(refreshKisOrderMonitoring(silent: true));
     }
     notifyListeners();
@@ -1645,12 +1743,22 @@ class DashboardController extends ChangeNotifier {
   void _ensureProviderContext(SelectedProvider provider) {
     if (selectedProvider == provider) {
       _applyProviderContext(provider);
+      if (provider == SelectedProvider.kis) {
+        unawaited(ensureMarketRegimeLoaded(
+          contextVersion: _providerContextVersion,
+        ));
+      }
       return;
     }
     _applyProviderContext(provider);
     _clearProviderScopedState();
-    _providerContextVersion += 1;
+    final version = ++_providerContextVersion;
     unawaited(_saveProviderPreference());
+    if (provider == SelectedProvider.kis) {
+      unawaited(ensureMarketRegimeLoaded(
+        contextVersion: version,
+      ));
+    }
   }
 
   void _applyProviderContext(SelectedProvider provider) {
@@ -1664,6 +1772,11 @@ class DashboardController extends ChangeNotifier {
   }
 
   void _clearProviderScopedState() {
+    _marketRegimeRequestVersion += 1;
+    marketRegime = null;
+    marketRegimeLoading = false;
+    marketRegimeLoaded = false;
+    marketRegimeError = null;
     usPortfolioSummary = PortfolioSummary.empty(currency: 'USD');
     krPortfolioSummary = PortfolioSummary.empty(currency: 'KRW');
     usWatchlist = MarketWatchlist.empty('US');
@@ -1694,20 +1807,37 @@ class DashboardController extends ChangeNotifier {
     kisManualOrderErrorRaw = null;
   }
 
-  Future<void> _restoreProviderPreference() async {
+  Future<void> _restoreProviderPreference({
+    int? expectedContextVersion,
+  }) async {
     if (!_persistProvider) return;
+
+    void applyRestoredProvider(SelectedProvider provider) {
+      if (expectedContextVersion != null &&
+          expectedContextVersion != _providerContextVersion) {
+        return;
+      }
+      if (selectedProvider != provider) {
+        _applyProviderContext(provider);
+        _clearProviderScopedState();
+        _providerContextVersion += 1;
+      } else {
+        _applyProviderContext(provider);
+      }
+    }
+
     try {
       final saved =
           (await _providerPreferenceStore.read())?.trim().toLowerCase();
-      if (saved == 'kis') {
-        _applyProviderContext(SelectedProvider.kis);
-      } else if (saved == 'alpaca') {
-        _applyProviderContext(SelectedProvider.alpaca);
-      } else {
-        _applyProviderContext(SelectedProvider.kis);
+      if (expectedContextVersion != null &&
+          expectedContextVersion != _providerContextVersion) {
+        return;
       }
+      applyRestoredProvider(
+        saved == 'alpaca' ? SelectedProvider.alpaca : SelectedProvider.kis,
+      );
     } catch (_) {
-      _applyProviderContext(SelectedProvider.kis);
+      applyRestoredProvider(SelectedProvider.kis);
     }
   }
 
