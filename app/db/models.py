@@ -15,6 +15,10 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 
+def _account_limit_default(context, amount):
+    return None if context.get_current_parameters().get('role') == 'admin' else amount
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -22,6 +26,16 @@ class User(Base):
     username = Column(String(80), nullable=False, unique=True, index=True)
     password_hash = Column(Text, nullable=True)
     role = Column(String(30), nullable=False, default="admin", index=True)
+    # Canonical KIS account policy, independent of automation profiles.
+    # Explicit NULL persists as unlimited, including for regular accounts.
+    account_max_total_exposure_krw = Column(
+        Float().evaluates_none(), nullable=True,
+        default=lambda ctx: _account_limit_default(ctx, 10_000_000.0),
+    )
+    account_max_position_notional_krw = Column(
+        Float().evaluates_none(), nullable=True,
+        default=lambda ctx: _account_limit_default(ctx, 1_000_000.0),
+    )
     enabled = Column(Boolean, nullable=False, default=True, index=True)
     setup_completed = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -1679,3 +1693,27 @@ class MarketRegimeSnapshot(Base):
     bullish_conditions_json = Column(Text, nullable=False, default="{}")
     bearish_conditions_json = Column(Text, nullable=False, default="{}")
     data_source_json = Column(Text, nullable=False, default="{}")
+
+
+class AccountTradingLimitAudit(Base):
+    __tablename__ = 'account_trading_limit_audits'
+
+    id = Column(Integer, primary_key=True)
+    target_owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    broker_account_id = Column(String(120), nullable=False)
+    previous_max_total_exposure_krw = Column(Float, nullable=True)
+    new_max_total_exposure_krw = Column(Float, nullable=True)
+    previous_max_position_notional_krw = Column(Float, nullable=True)
+    new_max_position_notional_krw = Column(Float, nullable=True)
+    changed_by_user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class AccountBuyExecutionClaim(Base):
+    # A DB-unique account mutex, shared by both automation engines and workers.
+    # Crash/uncertain POST claims persist until broker/order reconciliation.
+    __tablename__ = 'account_buy_execution_claims'
+
+    broker_account_id = Column(String(120), primary_key=True)
+    token = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

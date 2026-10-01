@@ -178,6 +178,24 @@ class FakeMarketSessions:
         }
 
 
+class FakeKisClient:
+    def list_positions(self):
+        return []
+
+    def list_open_orders(self):
+        return []
+
+    def get_account_balance(self):
+        return {'cash': 1_000_000, 'orderable_cash': 1_000_000, 'total_asset_value': 2_000_000}
+
+    def get_domestic_stock_price(self, symbol):
+        return {'current_price': 10_000}
+
+    def get_domestic_possible_order(self, **kwargs):
+        return {'raw_status': 'ok', 'orderable_cash': 1_000_000,
+                'orderable_quantity': 100, 'queried_at': datetime.now(UTC).isoformat()}
+
+
 def live_service(
     *,
     runtime: FakeRuntimeSettings | None = None,
@@ -191,6 +209,7 @@ def live_service(
     open_orders=None,
 ):
     return ProfileAwareGuardedLiveAutoBuyService(
+        client=FakeKisClient(),
         runtime_settings=runtime or FakeRuntimeSettings(),
         target_risk_service=risk or FakeTargetRisk(),
         validation_service=validation or FakeValidationService(),

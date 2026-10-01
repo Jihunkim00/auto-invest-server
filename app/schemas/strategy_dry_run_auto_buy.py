@@ -151,7 +151,8 @@ class ProfileAwareDryRunAutoBuyResponse(BaseModel):
     available_cash_krw: float | None = None
     total_assets_krw: float | None = None
     configured_max_order_notional_krw: float = 0.0
-    hard_max_order_notional_krw: float = 1_000_000.0
+    hard_max_order_notional_krw: float | None = None
+    account_trading_limits: dict[str, Any] | None = None
     base_order_cap_krw: float = 0.0
     effective_max_order_notional_krw: float = 0.0
     order_cap_source: str = "equity_pct"

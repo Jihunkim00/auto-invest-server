@@ -61,7 +61,7 @@ def _service(
     balance: dict | None = None,
 ) -> TargetAwareRiskService:
     position_rows = positions if positions is not None else []
-    balance_payload = balance if balance is not None else {"total_asset_value": 1_000_000}
+    balance_payload = balance if balance is not None else {"total_asset_value": 1_000_000, "orderable_cash": 1_000_000}
     return TargetAwareRiskService(
         budget_service=StrategyRiskBudgetService(
             performance_service=performance or _Performance(),

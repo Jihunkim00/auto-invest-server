@@ -65,3 +65,10 @@ class UserTradingSettingsUpdateRequest(BaseModel):
         values = self.model_dump(exclude_none=True)
         values.pop('confirm_auto_live', None)
         return values
+
+
+class AdminAccountTradingLimitsRequest(BaseModel):
+    max_total_exposure_krw: float | None = Field(gt=0, allow_inf_nan=False, strict=True)
+    max_position_notional_krw: float | None = Field(gt=0, allow_inf_nan=False, strict=True)
+
+    model_config = {'extra': 'forbid'}

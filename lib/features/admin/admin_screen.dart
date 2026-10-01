@@ -35,7 +35,10 @@ class AdminScreen extends StatelessWidget {
             style: TextStyle(color: Colors.white70),
           ),
           const SizedBox(height: 14),
-          AdminUserManagementPanel(apiClient: controller.apiClient),
+          AdminUserManagementPanel(
+            apiClient: controller.apiClient,
+            canManageAccounts: !controller.regularUserHomeBootstrapStarted,
+          ),
           const SizedBox(height: 14),
           _AdminGroup(
             title: 'Analysis & trading',

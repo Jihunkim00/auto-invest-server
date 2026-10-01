@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from app.services.automation_profile_safety import TEST4_HARD_SAFETY
+from app.services.account_trading_limit_service import minimum_buy_cap
 
 
 class StrategyProfileSizingService:
@@ -26,8 +26,7 @@ class StrategyProfileSizingService:
         configured_max_notional = max(
             0.0, float(capital.get('max_order_notional_krw') or 0)
         )
-        hard_max_notional = float(TEST4_HARD_SAFETY['max_order_notional_krw'])
-        max_notional = configured_max_notional or hard_max_notional
+        max_notional = configured_max_notional
         if mode == 'fixed_budget':
             target_notional = max(0.0, float(capital.get('fixed_budget') or 0))
             if target_notional <= 0:
@@ -37,11 +36,13 @@ class StrategyProfileSizingService:
         cap_components = [
             ('fixed_budget' if mode == 'fixed_budget' else 'equity_pct', target_notional),
             ('configured_order_cap_limited', max_notional),
-            ('hard_cap_limited', hard_max_notional),
         ]
         if orderable_cash >= 0:
             cap_components.append(('cash_limited', max(0.0, float(orderable_cash))))
-        base_order_cap = min(value for _, value in cap_components)
+        base_order_cap = minimum_buy_cap(
+            profile_order_cap=max_notional, profile_pct_cap=target_notional,
+            available_cash=max(0.0, float(orderable_cash)),
+        )['base_order_cap_krw']
         order_cap_source = next(
             source
             for source, value in cap_components
@@ -90,7 +91,7 @@ class StrategyProfileSizingService:
             'available_cash_krw': round(max(0.0, float(orderable_cash)), 2),
             'total_assets_krw': round(max(0.0, float(equity)), 2),
             'configured_max_order_notional_krw': round(configured_max_notional, 2),
-            'hard_max_order_notional_krw': round(hard_max_notional, 2),
+            'hard_max_order_notional_krw': None,
             'base_order_cap_krw': round(base_order_cap, 2),
             'effective_max_order_notional_krw': round(base_order_cap, 2),
             'order_cap_source': order_cap_source,

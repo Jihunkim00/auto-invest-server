@@ -334,6 +334,12 @@ class _Calls:
 class _FakeKisClient:
     settings = _settings()
 
+    def list_positions(self):
+        return []
+
+    def get_account_balance(self):
+        return {'cash': 1_000_000, 'orderable_cash': 1_000_000, 'total_asset_value': 1_000_000}
+
     def get_domestic_stock_price(self, symbol: str):
         return {
             "symbol": symbol,

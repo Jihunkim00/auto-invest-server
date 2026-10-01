@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 
 from app.db.models import OrderLog
-from app.services.automation_profile_safety import TEST4_HARD_SAFETY
+from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService, minimum_buy_cap
 from app.services.compound_capital_service import CompoundCapitalService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_performance_service import StrategyPerformanceService
@@ -55,6 +55,8 @@ class StrategyRiskBudgetService:
         profile_name: str | None = None,
         symbol: str | None = None,
         account_snapshot: dict[str, Any] | None = None,
+        owner_user_id: int | None = None,
+        exclude_order_id: int | None = None,
     ) -> dict[str, Any]:
         normalized_provider = str(provider or "kis").strip().lower() or "kis"
         normalized_market = str(market or "KR").strip().upper() or "KR"
@@ -98,14 +100,10 @@ class StrategyRiskBudgetService:
         else:
             raw_positions = account_snapshot.get("positions")
             raw_balance = account_snapshot.get("balance")
-            positions = (
-                [dict(item) for item in raw_positions if isinstance(item, dict)]
-                if isinstance(raw_positions, list)
-                else []
-            )
+            positions = raw_positions if isinstance(raw_positions, list) else []
             balance = dict(raw_balance) if isinstance(raw_balance, dict) else {}
-            position_notes = []
-            balance_notes = []
+            position_notes = [] if isinstance(raw_positions, list) else ['positions_unavailable:invalid_payload']
+            balance_notes = [] if isinstance(raw_balance, dict) else ['balance_unavailable:invalid_payload']
 
         monthly_return = _float(monthly.get("current_month_return_pct"))
         daily_return = _float(daily.get("pnl_pct"))
@@ -159,7 +157,7 @@ class StrategyRiskBudgetService:
             broker_orderable_cash_krw=available_cash,
             configured_max_order_notional_krw=profile_max_krw,
         )
-        hard_max_krw = float(TEST4_HARD_SAFETY["max_order_notional_krw"])
+        hard_max_krw = None
         if sizing_mode == "fixed_budget":
             sizing_budget_krw = capital_state["current_strategy_budget_krw"] or profile_max_krw
         elif total_assets is not None and total_assets > 0:
@@ -171,12 +169,15 @@ class StrategyRiskBudgetService:
                 "fixed_budget" if sizing_mode == "fixed_budget" else "equity_pct",
                 max(0.0, sizing_budget_krw),
             ),
-            ("configured_order_cap_limited", profile_max_krw or hard_max_krw),
+            ("configured_order_cap_limited", profile_max_krw),
         ]
         if available_cash is not None:
             cap_components.append(("cash_limited", max(0.0, available_cash)))
-        cap_components.append(("hard_cap_limited", hard_max_krw))
-        effective_max_krw = min(value for _, value in cap_components)
+        effective_max_krw = (minimum_buy_cap(
+            profile_order_cap=profile_max_krw, profile_pct_cap=max(0.0, sizing_budget_krw),
+            available_cash=available_cash,
+        )['base_order_cap_krw'] if available_cash is not None
+            else min(value for _, value in cap_components))
         order_cap_source = next(
             source
             for source, value in cap_components
@@ -334,6 +335,28 @@ class StrategyRiskBudgetService:
                 "성과 데이터 품질이 제한되어 보수적인 주문 크기를 권장합니다."
             )
 
+        account_limits = None
+        if normalized_provider == 'kis' and normalized_market == 'KR':
+            try:
+                account_limits = AccountTradingLimitService().calculate(
+                    db, symbol=normalized_symbol or '', owner_user_id=owner_user_id,
+                    exclude_order_id=exclude_order_id,
+                    positions=None if position_notes or balance_notes else positions,
+                    profile_order_cap=profile_max_krw,
+                    profile_pct_cap=max(0.0, sizing_budget_krw) if sizing_mode != 'fixed_budget' else None,
+                    strategy_entry_budget_krw=max(0.0, sizing_budget_krw) if sizing_mode == 'fixed_budget' else None,
+                    available_cash=available_cash,
+                    risk_sizing_multiplier=sizing_multiplier,
+                )
+                effective_max_krw = account_limits['base_order_cap_krw']
+                if account_limits['base_cap_source'].startswith('account_'):
+                    order_cap_source = account_limits['base_cap_source']
+                if account_limits['reason']:
+                    block(account_limits['reason'], account_limits['reason'])
+            except AccountTradingLimitError as exc:
+                effective_max_krw = 0.0
+                block(str(exc), str(exc))
+
         recommended_pct = (
             max_order_pct * sizing_multiplier
             if sizing_mode == "equity_pct"
@@ -378,6 +401,7 @@ class StrategyRiskBudgetService:
             "sizing_mode": sizing_mode,
             "fixed_budget_krw": fixed_budget_krw,
             "capital_state": capital_state,
+            "account_trading_limits": account_limits,
             "target_position_pct": target_position_pct,
             "available_cash_krw": available_cash,
             "total_assets_krw": total_assets,
@@ -414,6 +438,7 @@ class StrategyRiskBudgetService:
             "_effective_max_order_notional_krw": effective_max_krw,
             "_sizing_multiplier": sizing_multiplier,
             "_sizing_mode": sizing_mode,
+            "_profile_sizing_budget_krw": max(0.0, sizing_budget_krw),
             "_order_cap_source": order_cap_source,
             "_consecutive_losses": global_consecutive_losses,
             "_global_consecutive_losses": global_consecutive_losses,
@@ -457,7 +482,9 @@ class StrategyRiskBudgetService:
             rows = loader(db, provider, market)
             if not isinstance(rows, list):
                 return [], ["positions_unavailable:invalid_payload"]
-            return [dict(item) for item in rows if isinstance(item, dict)], []
+            if any(not isinstance(item, dict) for item in rows):
+                return [], ['positions_unavailable:invalid_payload']
+            return [dict(item) for item in rows], []
         except Exception as exc:
             return [], [f"positions_unavailable:{exc.__class__.__name__}"]
 

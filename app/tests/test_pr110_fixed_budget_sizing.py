@@ -159,7 +159,7 @@ def test_fixed_budget_is_limited_by_cash(db_session):
     assert result["order_cap_source"] == "cash_limited"
 
 
-def test_fixed_budget_keeps_global_hard_cap(db_session):
+def test_admin_fixed_budget_has_no_hidden_global_hard_cap(db_session):
     _, created = _profile(
         db_session,
         key="pr110-hard-cap",
@@ -171,9 +171,9 @@ def test_fixed_budget_keeps_global_hard_cap(db_session):
         balance={"cash": 2_000_000, "orderable_cash": 2_000_000, "total_asset_value": 2_000_000},
     ).evaluate_entry(db_session, _request(requested_notional_krw=2_000_000), profile_name=created["profile_key"])
 
-    assert result["base_order_cap_krw"] == 1_000_000
-    assert result["hard_max_order_notional_krw"] == 1_000_000
-    assert result["order_cap_source"] == "hard_cap_limited"
+    assert result["base_order_cap_krw"] == 2_000_000
+    assert result["hard_max_order_notional_krw"] is None
+    assert result["order_cap_source"] == "fixed_budget"
 
 
 def test_empty_positions_and_no_history_are_valid_data_states(db_session):
@@ -378,7 +378,7 @@ def test_configured_order_cap_message_is_source_aware(db_session):
     )
 
 
-def test_hard_cap_message_is_source_aware(db_session):
+def test_admin_order_observability_reports_unlimited_account(db_session):
     _, created = _profile(
         db_session,
         key="pr110-hard-message",
@@ -394,18 +394,13 @@ def test_hard_cap_message_is_source_aware(db_session):
         profile_name=created["profile_key"],
     )
 
-    assert result["approved"] is True
-    assert result["action"] == "reduce"
-    assert result["approved_notional_krw"] == 1_000_000
-    assert result["recommended_notional_krw"] == 1_000_000
-    assert result["effective_max_order_notional_krw"] == 1_000_000
-    assert result["order_cap_source"] == "hard_cap_limited"
-    assert "시스템 안전 주문한도 1,000,000원으로 주문금액을 제한했습니다." in result[
-        "gating_notes"
-    ]
-    assert _notional_cap_check_message(result) == (
-        "요청금액이 시스템 안전 주문한도를 초과해 1,000,000원으로 축소됩니다."
-    )
+    assert result['approved'] is True
+    assert result['action'] == 'approve'
+    assert result['approved_notional_krw'] == 2_000_000
+    assert result['recommended_notional_krw'] == 2_000_000
+    assert result['effective_max_order_notional_krw'] == 2_000_000
+    assert result['order_cap_source'] == 'fixed_budget'
+    assert result['account_trading_limits']['account_total_exposure_unlimited'] is True
 
 
 def test_uncapped_message_is_source_aware(db_session):
@@ -424,7 +419,5 @@ def test_uncapped_message_is_source_aware(db_session):
         profile_name=created["profile_key"],
     )
 
-    assert result["order_cap_source"] == "hard_cap_limited"
-    assert _notional_cap_check_message(result) == (
-        "시스템 안전 기준 유효 주문 한도는 1,000,000원입니다."
-    )
+    assert result['order_cap_source'] == 'fixed_budget'
+    assert '2,000,000' in _notional_cap_check_message(result)

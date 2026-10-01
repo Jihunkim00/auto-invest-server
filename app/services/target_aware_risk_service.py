@@ -58,6 +58,12 @@ class TargetAwareRiskService:
         checks = self._base_checks(snapshot)
         block_reason = snapshot["primary_block_reason"]
         side = str(payload.side or "").strip().lower()
+        if side == 'sell' and block_reason in {
+            'account_total_exposure_limit_reached', 'account_position_limit_reached',
+            'account_exposure_state_unavailable', 'account_scope_unavailable',
+        }:
+            flags = [flag for flag in flags if flag != block_reason]
+            block_reason = None
         total_assets = snapshot.get("_total_assets")
         requested_krw = payload.requested_notional_krw
         if requested_krw is None and payload.requested_notional_pct is not None:
@@ -121,7 +127,8 @@ class TargetAwareRiskService:
         base_notional = cap if requested_krw is None else min(max(requested_krw, 0.0), cap)
         approved_notional = max(0.0, base_notional * multiplier)
         if requested_krw is not None and cap > 0 and requested_krw > cap:
-            flags.append("notional_capped_by_profile")
+            flags.append('notional_capped_by_account' if str(snapshot.get('order_cap_source') or '').startswith('account_')
+                         else 'notional_capped_by_profile')
             cap_note, cap_check = _order_cap_messages(
                 snapshot.get("order_cap_source"),
                 cap,
@@ -159,6 +166,7 @@ class TargetAwareRiskService:
             "symbol_consecutive_loss_size_reduced",
             "performance_data_quality_limited",
             "notional_capped_by_profile",
+            "notional_capped_by_account",
         }
         reduced = bool(reduction_flags.intersection(flags))
         action = "block" if not approved else ("reduce" if reduced else "approve")
@@ -191,6 +199,7 @@ class TargetAwareRiskService:
                 "configured_max_order_notional_krw"
             ],
             "hard_max_order_notional_krw": snapshot["hard_max_order_notional_krw"],
+            "account_trading_limits": snapshot.get("account_trading_limits"),
             "base_order_cap_krw": snapshot["base_order_cap_krw"],
             "effective_max_order_notional_krw": snapshot[
                 "effective_max_order_notional_krw"
@@ -363,16 +372,10 @@ def _order_cap_messages(
             "",
             f"프로필 최대 주문금액은 {amount_text}원입니다.",
         )
-    if normalized_source == "hard_cap_limited":
-        if capped:
-            return (
-                f"시스템 안전 주문한도 {amount_text}원으로 주문금액을 제한했습니다.",
-                f"요청금액이 시스템 안전 주문한도를 초과해 {amount_text}원으로 축소됩니다.",
-            )
-        return (
-            "",
-            f"시스템 안전 기준 유효 주문 한도는 {amount_text}원입니다.",
-        )
+    if normalized_source in {'account_position_cap', 'account_total_exposure_cap'}:
+        label = '계정 종목 한도' if normalized_source == 'account_position_cap' else '계정 총 투자 한도'
+        return (f'{label}의 남은 용량 {amount_text}원으로 제한했습니다.' if capped else '',
+                f'{label} 기준 유효 주문 한도는 {amount_text}원입니다.')
     if normalized_source == "equity_pct":
         if capped:
             return (

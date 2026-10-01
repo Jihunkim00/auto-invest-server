@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -282,6 +283,7 @@ class UserKisLiveTradingClient(UserKisReadOnlyClient):
         return {
             'symbol': normalized_symbol,
             'order_type': 'market',
+            'queried_at': _now().isoformat(),
             'ord_psbl_cash': _first_number(output, ('ord_psbl_cash',)),
             'nrcvb_buy_amt': _first_number(output, ('nrcvb_buy_amt',)),
             'nrcvb_buy_qty': _first_number(output, ('nrcvb_buy_qty',)),
@@ -514,6 +516,9 @@ class UserBrokerAccountService:
         snapshot = client.get_snapshot()
         snapshot.update({
             'provider': normalized_provider,
+            'owner_user_id': int(user.id),
+            'market': 'KR' if normalized_provider == 'kis' else 'US',
+            'broker_account_id': f'user:{user.id}:{normalized_provider}:{"KR" if normalized_provider == "kis" else "US"}',
             'environment': environment,
             'connected': True,
             'connection_status': 'connected',
@@ -647,6 +652,10 @@ def _normalize_kis_snapshot(
             'unrealized_pl_pct': _percentage(unrealized_pl, cost_basis),
         },
         'positions': positions,
+        'positions_reliable': all(
+            quantity is not None and math.isfinite(quantity) and quantity >= 0
+            for quantity in (_first_number(row, ('hldg_qty', 'qty')) for row in _as_list(balance_response.get('output1')))
+        ),
         'open_orders': orders,
     }
 

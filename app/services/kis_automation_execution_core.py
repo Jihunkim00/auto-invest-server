@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any, Callable
 
@@ -13,7 +14,8 @@ from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
 )
 from app.services.account_snapshot_retry import kis_exit_read_failure_diagnostics
-from app.db.models import OrderLog
+from app.db.models import OrderLog, StrategyProfile
+from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService
 from app.services.kis_manual_order_service import KisManualOrderSubmitRequest
 from app.services.kis_order_validation_service import (
     KisOrderValidationRequest,
@@ -25,7 +27,6 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 class KisAutomationExecutionCore:
     POSSIBLE_ORDER_MAX_AGE_SECONDS = 10.0
     HARD_MAX_POSITIONS = 1
-    HARD_MAX_NOTIONAL_KRW = 1_000_000.0
 
     OPEN_ORDER_INTERNAL_STATUSES = {
         InternalOrderStatus.REQUESTED.value,
@@ -136,7 +137,17 @@ class KisAutomationExecutionCore:
 
         return int(status_code), sanitize_kis_payload(payload)
 
-    def submit_market_buy(
+    def submit_market_buy(self, db: Session, **kwargs) -> dict[str, Any]:
+        order = kwargs['order']
+        try:
+            with AccountTradingLimitService().buy_execution_claim(
+                db, owner_user_id=order.owner_user_id,
+            ):
+                return self._submit_market_buy_with_claim(db, **kwargs)
+        except AccountTradingLimitError as exc:
+            return self._blocked(db, order, {'allowed': False, 'reason': str(exc)})
+
+    def _submit_market_buy_with_claim(
         self,
         db: Session,
         *,
@@ -551,6 +562,8 @@ class KisAutomationExecutionCore:
 
         now_utc = _aware_utc(now or self.now_provider())
 
+        if side == 'buy' and time.monotonic() - guard.get('possible_order_checked_clock', 0) > self.POSSIBLE_ORDER_MAX_AGE_SECONDS:
+            return self._blocked(db, order, {'allowed': False, 'reason': 'possible_order_snapshot_stale'})
         try:
             response = submitter()
 
@@ -709,11 +722,7 @@ class KisAutomationExecutionCore:
         now: datetime | None,
     ) -> dict[str, Any]:
         if self.client is None:
-            return {
-                "allowed": True,
-                "checks": [],
-                "current_price": expected_price,
-            }
+            return {'allowed': False, 'reason': 'account_exposure_state_unavailable'}
 
         try:
             positions = self._positions(db)
@@ -801,6 +810,7 @@ class KisAutomationExecutionCore:
                 "profile_min_price_krw": float(min_price_krw),
             }
 
+        possible_clock = time.monotonic()
         possible = self._possible_order(
             symbol,
             price,
@@ -873,14 +883,69 @@ class KisAutomationExecutionCore:
         # planned_qty = 8
         # available_qty = 6
         # effective_qty = 6
+        order = db.get(OrderLog, order_id) if order_id else None
+        owner_user_id = order.owner_user_id if order is not None else None
         strategy_budget = _number(max_order_notional_krw)
+        profile_pct_cap = None
+        strategy_entry_budget = None
+        sizing_multiplier = 1.0
+        profile = None
+        source = _source_metadata(order) if order is not None else {}
+        profile_key = (order.profile_key if order is not None else None) or source.get('automation_profile_key') or source.get('profile_key')
+        if order is not None and (order.profile_id or profile_key):
+            query = db.query(StrategyProfile).populate_existing()
+            profile = (query.filter(StrategyProfile.id == order.profile_id).one_or_none()
+                       if order.profile_id else query.filter(StrategyProfile.profile_key == profile_key).one_or_none())
+            if profile is None and not order.profile_id and profile_key:
+                profile = query.filter(StrategyProfile.profile_name == profile_key).one_or_none()
+            if profile is None or (owner_user_id is not None and profile.owner_user_id != owner_user_id):
+                return {'allowed': False, 'reason': 'account_scope_mismatch'}
+            if (str(profile.provider or 'kis').lower() != 'kis'
+                    or str(profile.market or 'KR').upper() != 'KR'):
+                return {'allowed': False, 'reason': 'account_scope_mismatch'}
+            if owner_user_id is None:
+                account_owner = AccountTradingLimitService.resolve_account(db)
+                if profile.owner_user_id not in {None, account_owner.owner_user_id}:
+                    return {'allowed': False, 'reason': 'account_scope_mismatch'}
+            from app.services.strategy_profile_service import StrategyProfileService
+            from app.services.strategy_risk_budget_service import StrategyRiskBudgetService
+            fresh_profile = StrategyProfileService().serialize_profile(profile)
+            strategy_budget = _number(fresh_profile.get('max_order_notional_krw'))
+            # Recompute compound/percentage/risk sizing with the freshly read
+            # positions and balance; UI and preview caps are only advisory.
+            balance_reader = getattr(self.client, 'get_account_balance', None)
+            if not callable(balance_reader):
+                return {'allowed': False, 'reason': 'account_exposure_state_unavailable'}
+            try:
+                balance = balance_reader()
+                if not isinstance(balance, dict):
+                    raise AccountTradingLimitError('account_exposure_state_unavailable')
+                risk_budget = StrategyRiskBudgetService(
+                    position_loader=lambda *_: positions,
+                    balance_loader=lambda *_: balance,
+                ).calculate(db, profile_name=profile.profile_key or profile.profile_name, symbol=symbol, owner_user_id=owner_user_id, exclude_order_id=order_id)
+                if risk_budget['_sizing_mode'] == 'fixed_budget':
+                    strategy_entry_budget = risk_budget['_profile_sizing_budget_krw']
+                else:
+                    profile_pct_cap = risk_budget['_profile_sizing_budget_krw']
+                sizing_multiplier = risk_budget['_sizing_multiplier']
+            except Exception:
+                return {'allowed': False, 'reason': 'account_exposure_state_unavailable'}
         if strategy_budget is None or strategy_budget <= 0:
-            strategy_budget = self.HARD_MAX_NOTIONAL_KRW
-        effective_budget = min(
-            max(0.0, strategy_budget),
-            max(0.0, cash),
-            self.HARD_MAX_NOTIONAL_KRW,
-        )
+            return {'allowed': False, 'reason': 'profile_order_cap_unavailable'}
+        try:
+            limits = AccountTradingLimitService().calculate(
+                db, symbol=symbol, positions=positions, owner_user_id=owner_user_id,
+                profile_order_cap=strategy_budget, profile_pct_cap=profile_pct_cap,
+                strategy_entry_budget_krw=strategy_entry_budget,
+                available_cash=cash, risk_sizing_multiplier=sizing_multiplier,
+                exclude_order_id=order_id,
+            )
+        except AccountTradingLimitError as exc:
+            return {'allowed': False, 'reason': str(exc)}
+        effective_budget = limits['effective_order_cap_krw']
+        if limits['reason']:
+            return {'allowed': False, 'reason': limits['reason'], 'account_trading_limits': limits}
         effective_qty = min(
             planned_qty,
             available_qty,
@@ -894,11 +959,7 @@ class KisAutomationExecutionCore:
                 "effective_budget_krw": effective_budget,
             }
 
-        cap = min(
-            self.HARD_MAX_NOTIONAL_KRW,
-            _number(max_order_notional_krw)
-            or self.HARD_MAX_NOTIONAL_KRW,
-        )
+        cap = effective_budget
 
         estimated = price * effective_qty
 
@@ -921,6 +982,8 @@ class KisAutomationExecutionCore:
             "current_price": price,
             "orderable_cash": cash,
             "strategy_budget_krw": strategy_budget,
+            "account_trading_limits": limits,
+            "possible_order_checked_clock": possible_clock,
             "effective_budget_krw": effective_budget,
             "orderable_quantity": available_qty,
             "planned_quantity": planned_qty,
@@ -1041,7 +1104,9 @@ class KisAutomationExecutionCore:
             else self.client.list_positions()
         )
 
-        return values if isinstance(values, list) else []
+        if not isinstance(values, list):
+            raise ValueError('positions_unavailable')
+        return values
 
     def _open_orders(
         self,
@@ -1053,7 +1118,9 @@ class KisAutomationExecutionCore:
             else self.client.list_open_orders()
         )
 
-        return values if isinstance(values, list) else []
+        if not isinstance(values, list):
+            raise ValueError('open_orders_unavailable')
+        return values
 
     def _current_price(
         self,

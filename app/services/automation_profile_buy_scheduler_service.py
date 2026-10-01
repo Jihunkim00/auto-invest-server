@@ -630,6 +630,7 @@ class AutomationProfileBuySchedulerService:
             'total_assets_krw': target.get('total_assets_krw'),
             'configured_max_order_notional_krw': target.get('configured_max_order_notional_krw'),
             'hard_max_order_notional_krw': target.get('hard_max_order_notional_krw'),
+            'account_trading_limits': target.get('account_trading_limits'),
             'base_order_cap_krw': target.get('base_order_cap_krw'),
             'effective_max_order_notional_krw': target.get('effective_max_order_notional_krw'),
             'order_cap_source': target.get('order_cap_source'),

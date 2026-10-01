@@ -52,6 +52,15 @@ ACCOUNT_FIELD_KEYS = {
 }
 
 ACCOUNT_PRODUCT_KEYS = {"acnt_prdt_cd"}
+# Only non-secret policy telemetry. Account numbers and unknown account keys
+# continue to use the existing masking rules.
+SAFE_ACCOUNT_POLICY_KEYS = {
+    'account_trading_limits', 'broker_account_id',
+    'account_max_total_exposure_krw', 'account_max_position_notional_krw',
+    'account_total_exposure_unlimited', 'account_position_unlimited',
+    'current_account_exposure_krw', 'remaining_account_exposure_krw',
+}
+
 SAFE_AUTH_DIAGNOSTIC_KEYS = {
     "token_expired",
     "refresh_guard_bypassed_for_token_expired",
@@ -92,6 +101,8 @@ def sanitize_kis_payload(
         return value
     if _is_secret_key(normalized_key):
         return SECRET_REDACTED if value is not None else None
+    if normalized_key == 'broker_account_id' and not re.fullmatch(r'(?:admin:kis:KR|user:[0-9]+:kis:KR)', str(value)):
+        return mask_kis_account_value(value)
     if _is_account_key(normalized_key):
         return mask_kis_account_value(value)
     if normalized_key in ACCOUNT_PRODUCT_KEYS:
@@ -189,7 +200,7 @@ def _is_secret_key(key: str) -> bool:
 
 
 def _is_account_key(key: str) -> bool:
-    return key in ACCOUNT_FIELD_KEYS or "account" in key
+    return key not in SAFE_ACCOUNT_POLICY_KEYS and (key in ACCOUNT_FIELD_KEYS or "account" in key)
 
 
 def _clean_known_secrets(known_secrets: Iterable[Any] | None) -> list[str]:

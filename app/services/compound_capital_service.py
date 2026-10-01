@@ -4,7 +4,6 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.services.automation_profile_safety import TEST4_HARD_SAFETY
 from app.services.strategy_performance_service import StrategyPerformanceService
 
 
@@ -58,13 +57,9 @@ class CompoundCapitalService:
         current = max(0.0, round(base + realized, 2)) if enabled else max(0.0, round(base, 2))
         cap_values = [
             ("strategy_budget", current),
-            (
-                "configured_order_cap_limited",
-                _money(configured_max_order_notional_krw)
-                or float(TEST4_HARD_SAFETY["max_order_notional_krw"]),
-            ),
-            ("hard_cap_limited", float(TEST4_HARD_SAFETY["max_order_notional_krw"])),
         ]
+        if configured_max_order_notional_krw is not None:
+            cap_values.append(('configured_order_cap_limited', _money(configured_max_order_notional_krw)))
         if broker_orderable_cash_krw is not None:
             cap_values.append(("broker_orderable_cash_limited", max(0.0, _money(broker_orderable_cash_krw))))
         effective = min(value for _, value in cap_values)

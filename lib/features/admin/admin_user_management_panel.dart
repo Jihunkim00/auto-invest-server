@@ -4,19 +4,21 @@ import 'package:flutter/material.dart';
 
 import '../../core/network/api_client.dart';
 import '../../models/auth_session.dart';
+import 'admin_account_detail_screen.dart';
 
 class AdminUserManagementPanel extends StatefulWidget {
-  const AdminUserManagementPanel({super.key, required this.apiClient});
+  const AdminUserManagementPanel(
+      {super.key, required this.apiClient, this.canManageAccounts = true});
 
   final ApiClient apiClient;
+  final bool canManageAccounts;
 
   @override
   State<AdminUserManagementPanel> createState() =>
       _AdminUserManagementPanelState();
 }
 
-class _AdminUserManagementPanelState
-    extends State<AdminUserManagementPanel> {
+class _AdminUserManagementPanelState extends State<AdminUserManagementPanel> {
   List<AuthUser> _users = const [];
   String? _error;
   bool _loading = true;
@@ -24,7 +26,7 @@ class _AdminUserManagementPanelState
   @override
   void initState() {
     super.initState();
-    unawaited(_load());
+    if (widget.canManageAccounts) unawaited(_load());
   }
 
   Future<void> _load() async {
@@ -102,6 +104,7 @@ class _AdminUserManagementPanelState
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.canManageAccounts) return const SizedBox.shrink();
     return Card(
       key: const ValueKey('admin-user-management'),
       child: Padding(
@@ -150,6 +153,15 @@ class _AdminUserManagementPanelState
                 (user) => ListTile(
                   key: ValueKey('admin-user-${user.id ?? user.username}'),
                   contentPadding: EdgeInsets.zero,
+                  onTap: user.id == null
+                      ? null
+                      : () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) => AdminAccountDetailScreen(
+                                      apiClient: widget.apiClient,
+                                      user: user,
+                                    )),
+                          ),
                   leading: Icon(
                     user.role == 'admin'
                         ? Icons.admin_panel_settings_outlined

@@ -209,7 +209,7 @@ def test_kis_profile_runtime_preserves_valid_stop_loss_while_using_other_hard_sa
     assert effective['entry']['min_final_score'] == 65
     assert effective['entry']['no_new_entry_after'] == '14:00'
     assert effective['max_open_positions'] == 1
-    assert effective['capital']['max_order_notional_krw'] == 1_000_000
+    assert effective['capital']['max_order_notional_krw'] == 2_000_000
     assert effective['capital']['cash_only'] is True
     assert effective['exit']['stop_loss_pct'] == 8
     assert effective['exit']['take_profit_pct'] == 10

@@ -7,8 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import User, UserSettings, UserWatchlist
+from app.db.models import AccountTradingLimitAudit, User, UserSettings, UserWatchlist
 from app.schemas.user_data import (
+    AdminAccountTradingLimitsRequest,
     AdminUserCreateRequest,
     AdminUserStatusRequest,
     UserSettingsUpdateRequest,
@@ -116,6 +117,106 @@ def update_admin_user_status(
     return _managed_user(user)
 
 
+def _account_limits_payload(user: User) -> dict[str, object]:
+    return {
+        'max_total_exposure_krw': user.account_max_total_exposure_krw,
+        'max_position_notional_krw': user.account_max_position_notional_krw,
+        'total_exposure_unlimited': user.account_max_total_exposure_krw is None,
+        'position_notional_unlimited': user.account_max_position_notional_krw is None,
+        'broker_account_id': ('admin:kis:KR' if user.role == 'admin' else f'user:{user.id}:kis:KR'),
+        'provider': 'kis', 'market': 'KR',
+    }
+
+
+def get_admin_user_detail(user_id: int, db: Session = Depends(get_db),
+                          _admin: User = Depends(require_admin)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail='User not found.')
+    return {**_managed_user(user), 'trading_limits': _account_limits_payload(user)}
+
+
+def update_admin_account_trading_limits(
+    user_id: int, payload: AdminAccountTradingLimitsRequest,
+    db: Session = Depends(get_db), admin: User = Depends(require_admin),
+):
+    from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail='User not found.')
+    try:
+        with AccountTradingLimitService().buy_execution_claim(
+            db, owner_user_id=None if user.role == 'admin' else user.id, allow_disabled=True,
+        ):
+            return _update_admin_account_trading_limits(user_id, payload, db, admin)
+    except AccountTradingLimitError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _update_admin_account_trading_limits(
+    user_id: int, payload: AdminAccountTradingLimitsRequest,
+    db: Session = Depends(get_db), admin: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).populate_existing().with_for_update().one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail='User not found.')
+    if (user.account_max_total_exposure_krw != payload.max_total_exposure_krw
+            or user.account_max_position_notional_krw != payload.max_position_notional_krw):
+        db.add(AccountTradingLimitAudit(
+            target_owner_user_id=user.id,
+            broker_account_id=_account_limits_payload(user)['broker_account_id'],
+            previous_max_total_exposure_krw=user.account_max_total_exposure_krw,
+            new_max_total_exposure_krw=payload.max_total_exposure_krw,
+            previous_max_position_notional_krw=user.account_max_position_notional_krw,
+            new_max_position_notional_krw=payload.max_position_notional_krw,
+            changed_by_user_id=admin.id,
+        ))
+        user.account_max_total_exposure_krw = payload.max_total_exposure_krw
+        user.account_max_position_notional_krw = payload.max_position_notional_krw
+        db.commit()
+        db.refresh(user)
+    return get_admin_user_detail(user_id, db, admin)
+
+
+def get_admin_account_limit_usage(user_id: int, db: Session = Depends(get_db),
+                                  _admin: User = Depends(require_admin)):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail='User not found.')
+    try:
+        from app.services.account_trading_limit_service import AccountTradingLimitService
+        if user.role == 'admin':
+            from app.brokers.kis_client import KisClient
+            positions = KisClient().list_positions()
+        else:
+            from app.services.user_broker_account_service import UserBrokerAccountService
+            snapshot = UserBrokerAccountService().get_broker_snapshot(db, user, 'kis')
+            if (snapshot.get('connected') is not True
+                    or snapshot.get('owner_user_id') != user.id
+                    or snapshot.get('provider') != 'kis'
+                    or snapshot.get('market') != 'KR'
+                    or snapshot.get('broker_account_id') != f'user:{user.id}:kis:KR'):
+                raise ValueError('account_scope_mismatch')
+            if snapshot.get('positions_reliable', True) is not True:
+                raise ValueError('account_exposure_state_unavailable')
+            positions = snapshot.get('positions')
+        exposure = AccountTradingLimitService.exposure(positions)
+        total = exposure['current_account_exposure_krw']
+        # Deduplicate reliable symbol values using the same canonical helper.
+        symbols = {str(p.get('symbol') or p.get('pdno') or '') for p in positions}
+        largest = max((AccountTradingLimitService.exposure(positions, symbol=symbol)['current_symbol_exposure_krw']
+                       for symbol in symbols), default=0.0)
+        return {
+            'available': True, **exposure,
+            'remaining_account_exposure_krw': (None if user.account_max_total_exposure_krw is None
+                                               else max(0.0, user.account_max_total_exposure_krw - total)),
+            'largest_position_exposure_krw': largest,
+        }
+    except Exception:
+        # Configuration survives transient broker failures; never expose secrets.
+        return {'available': False, 'reason': 'account_exposure_state_unavailable'}
+
+
 def get_my_settings(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -220,6 +321,9 @@ def remove_my_watchlist(
 
 admin_router.add_api_route('', list_admin_users, methods=['GET'])
 admin_router.add_api_route('', create_admin_user, methods=['POST'], status_code=201)
+admin_router.add_api_route('/{user_id}', get_admin_user_detail, methods=['GET'])
+admin_router.add_api_route('/{user_id}/trading-limits', update_admin_account_trading_limits, methods=['PUT'])
+admin_router.add_api_route('/{user_id}/trading-limits/usage', get_admin_account_limit_usage, methods=['GET'])
 admin_router.add_api_route('/{user_id}/status', update_admin_user_status, methods=['PUT'])
 user_router.add_api_route('/settings', get_my_settings, methods=['GET'])
 user_router.add_api_route('/settings', update_my_settings, methods=['PUT'])

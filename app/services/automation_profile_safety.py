@@ -8,7 +8,6 @@ TEST4_HARD_SAFETY = {
     'min_final_score': 65.0,
     'no_new_entry_after': '14:00',
     'max_open_positions': 1,
-    'max_order_notional_krw': 1_000_000.0,
     'cash_only': True,
     'take_profit_min_pct': 1.0,
     'take_profit_max_pct': 15.0,
@@ -41,10 +40,6 @@ def effective_profile_settings(
     effective['max_open_positions'] = min(
         TEST4_HARD_SAFETY['max_open_positions'],
         int(effective.get('max_open_positions') or TEST4_HARD_SAFETY['max_open_positions']),
-    )
-    capital['max_order_notional_krw'] = min(
-        TEST4_HARD_SAFETY['max_order_notional_krw'],
-        float(capital.get('max_order_notional_krw') or TEST4_HARD_SAFETY['max_order_notional_krw']),
     )
     capital['cash_only'] = True
     exit_settings['stop_loss_enabled'] = True

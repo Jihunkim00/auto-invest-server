@@ -1171,11 +1171,8 @@ class ProfileAwareDryRunAutoBuyService:
             )
             if isinstance(target, dict)
             else 0.0,
-            "hard_max_order_notional_krw": float(
-                (target or {}).get("hard_max_order_notional_krw") or 1_000_000
-            )
-            if isinstance(target, dict)
-            else 1_000_000.0,
+            "hard_max_order_notional_krw": None,
+            "account_trading_limits": (target or {}).get('account_trading_limits'),
             "base_order_cap_krw": float(
                 (target or {}).get("base_order_cap_krw") or 0
             )

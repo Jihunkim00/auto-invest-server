@@ -329,6 +329,21 @@ class ApiClient {
     return AuthUser.fromJson(payload);
   }
 
+  Future<Map<String, dynamic>> fetchAdminAccountDetail(int userId) =>
+      _getJsonNoCache('/admin/users/$userId');
+
+  Future<Map<String, dynamic>> fetchAdminAccountLimitUsage(int userId) =>
+      _getJsonNoCache('/admin/users/$userId/trading-limits/usage');
+
+  Future<Map<String, dynamic>> updateAdminAccountTradingLimits({
+    required int userId,
+    required double? maxTotalExposureKrw,
+    required double? maxPositionNotionalKrw,
+  }) => _putJsonBody('/admin/users/$userId/trading-limits', {
+    'max_total_exposure_krw': maxTotalExposureKrw,
+    'max_position_notional_krw': maxPositionNotionalKrw,
+  });
+
   Future<Map<String, dynamic>> fetchUserSettings() async {
     final payload = await _getJsonNoCache('/users/me/settings');
     final raw = payload['settings'] ?? payload['settings_json'];

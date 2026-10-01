@@ -22,6 +22,30 @@ def _add_column_if_missing(table_name: str, column_name: str, column_sql: str):
         conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}"))
 
 
+def _migrate_account_trading_limits_if_needed():
+    """Backfill only newly added dimensions; reruns preserve explicit NULLs."""
+    inspector = inspect(engine)
+    if 'users' not in inspector.get_table_names():
+        return
+    existing = {col['name'] for col in inspector.get_columns('users')}
+    defaults = {
+        'account_max_total_exposure_krw': 10_000_000.0,
+        'account_max_position_notional_krw': 1_000_000.0,
+    }
+    # DDL and backfill are one transaction, including on SQLite.
+    with engine.begin() as conn:
+        if conn.dialect.name == 'sqlite':
+            conn.exec_driver_sql('BEGIN IMMEDIATE')
+        for name, amount in defaults.items():
+            if name in existing:
+                continue
+            conn.execute(text(f'ALTER TABLE users ADD COLUMN {name} FLOAT'))
+            conn.execute(text(
+                f'UPDATE users SET {name} = CASE '
+                'WHEN LOWER(role) = :admin_role THEN NULL ELSE :amount END'
+            ), {'admin_role': 'admin', 'amount': amount})
+
+
 def _migrate_user_trading_ownership_columns_if_needed():
     '''Add nullable owner fields without rewriting historical admin rows.'''
 
@@ -2331,6 +2355,7 @@ def _ensure_admin_user_bootstrap():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_account_trading_limits_if_needed()
     _ensure_admin_user_bootstrap()
     _migrate_user_trading_ownership_columns_if_needed()
     _create_reference_site_cache_table_if_missing()

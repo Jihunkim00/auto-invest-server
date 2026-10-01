@@ -350,7 +350,7 @@ class StrategyProfileService:
                 "market": market,
                 "max_positions": int(effective.get("max_open_positions") or 1),
                 "buy_score_threshold": float(effective.get("entry", {}).get("min_final_score") or 65),
-                "max_order_notional_krw": float(effective.get("capital", {}).get("max_order_notional_krw") or 1_000_000),
+                "max_order_notional_krw": float(effective.get("capital", {}).get("max_order_notional_krw") or 0),
                 "stop_loss_pct": -float(effective.get("exit", {}).get("stop_loss_pct") or 2) / 100.0,
                 "take_profit_pct": float(effective.get("exit", {}).get("take_profit_pct") or 3) / 100.0,
                 "status": profile_status,

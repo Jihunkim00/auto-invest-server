@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from app.services.user_trading_execution_service import UserTradingExecutionService
 
@@ -135,8 +137,8 @@ def test_asset_ratio_is_per_position_and_allows_second_symbol_target():
 def test_asset_ratio_does_not_subtract_other_symbol_exposure_from_new_position():
     snapshot = _snapshot(portfolio_value=1_000_000.0, buying_power=340_000.0)
     snapshot['positions'] = [
-        {'symbol': '000001', 'market_value': 330_000.0},
-        {'symbol': '000002', 'market_value': 330_000.0},
+        {'symbol': '000001', 'quantity': 1, 'market_value': 330_000.0},
+        {'symbol': '000002', 'quantity': 1, 'market_value': 330_000.0},
     ]
     sizing = UserTradingExecutionService._size_profile_order(
         snapshot=snapshot,
@@ -174,6 +176,7 @@ def test_manual_legacy_sizing_keeps_user_trading_settings_source():
 
 def _preflight_service(possible):
     service = UserTradingExecutionService.__new__(UserTradingExecutionService)
+    service.now_provider = lambda: datetime.now(UTC)
     service.kis_live_client_factory = lambda _db, _user, _credentials: type(
         'FakePossibleOrderClient',
         (),
@@ -224,6 +227,7 @@ def test_kis_possible_order_never_expands_internal_risk_quantity():
 
 def test_kis_possible_order_failure_is_fail_safe():
     service = UserTradingExecutionService.__new__(UserTradingExecutionService)
+    service.now_provider = lambda: datetime.now(UTC)
     service.kis_live_client_factory = lambda _db, _user, _credentials: type(
         'UnavailableClient',
         (),

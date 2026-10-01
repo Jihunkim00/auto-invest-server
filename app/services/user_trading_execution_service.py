@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import math
 import re
 import uuid
@@ -26,7 +27,9 @@ from app.db.models import (
 )
 from app.services.market_session_service import MarketSessionService
 from app.services.order_service import map_broker_status_to_internal, normalize_broker_status
-from app.services.automation_profile_safety import TEST4_HARD_SAFETY
+from app.services.account_trading_limit_service import (
+    AccountTradingLimitError, AccountTradingLimitService, minimum_buy_cap,
+)
 from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_account_service import UserBrokerUnavailableError
 from app.services.user_broker_credential_service import UserBrokerCredentialService
@@ -554,12 +557,18 @@ class UserTradingExecutionService:
                 price=price,
                 max_position_pct=float(settings.max_position_pct or 0),
             )
+        if is_automatic and normalized_provider == 'kis' and not sizing.get('reason'):
+            sizing = self._apply_account_buy_limits(
+                db, user=user, snapshot=snapshot, sizing=sizing,
+                profile_context=profile_context, symbol=requested_symbol,
+            )
         if calendar_gap_risk and not sizing.get("reason"):
             sizing = self._apply_calendar_gap_multiplier(
                 sizing,
                 multiplier=float(calendar_gap_risk.get("position_size_multiplier") or 1.0),
                 price=price,
             )
+        base["profile_context"] = profile_context
         base["sizing"] = sizing
         if sizing.get("reason"):
             return self._finish_blocked(
@@ -593,9 +602,6 @@ class UserTradingExecutionService:
                             'risk_flags': [automatic_reason],
                         },
                     )
-                preflight = self._preflight_kis_automatic_buy(db, user=user, credentials=credentials or {}, symbol=base['requested_symbol'], sizing=sizing)
-                if preflight.get('reason'):
-                    return self._finish_blocked(db, run, user=user, base=base, reason=preflight['reason'], analysis=analysis, risk=risk)
             return self._submit_kis_live(
                 db,
                 run,
@@ -1054,7 +1060,137 @@ class UserTradingExecutionService:
         }
         return self._finish_run(db, run, response)
 
-    def _submit_kis_live(
+    def _submit_kis_live(self, db, run, **kwargs):
+        if str(kwargs.get('authorization_mode') or '').lower() != 'automatic':
+            return self._submit_kis_live_with_claim(db, run, **kwargs)
+        user = kwargs['user']
+        base = kwargs['base']
+        sizing = kwargs['sizing']
+        try:
+            with AccountTradingLimitService().buy_execution_claim(db, owner_user_id=int(user.id)):
+                db.refresh(user)
+                settings = self._settings(db, user)
+                db.refresh(settings)
+                reason = self._automatic_block_reason(settings, 'kis')
+                if reason:
+                    raise AccountTradingLimitError(reason)
+                credentials = self.credential_service.get_credentials(db, user, 'kis')
+                if credentials.get('environment') != 'live':
+                    raise AccountTradingLimitError('broker_environment_invalid')
+                fresh = self.account_service.get_broker_snapshot(db, user, 'kis')
+                if fresh.get('connected') is not True or fresh.get('environment') != 'live':
+                    raise AccountTradingLimitError('account_snapshot_unavailable')
+                if fresh.get('owner_user_id', int(user.id)) != int(user.id) or fresh.get('provider', 'kis') != 'kis':
+                    raise AccountTradingLimitError('account_scope_mismatch')
+                profile_context = base.get('profile_context')
+                if isinstance(profile_context, dict) and profile_context.get('profile_id'):
+                    from app.services.automation_profile_service import AutomationProfileService
+                    from app.db.models import StrategyProfile
+                    profile = db.query(StrategyProfile).filter(
+                        StrategyProfile.id == int(profile_context['profile_id']),
+                        StrategyProfile.owner_user_id == int(user.id),
+                    ).populate_existing().one_or_none()
+                    if profile is None or not profile.enabled or profile.custom_status in {'paused', 'disabled', 'archived'}:
+                        raise AccountTradingLimitError('automation_profile_unavailable')
+                    if str(profile.provider or '').lower() != 'kis' or str(profile.market or '').upper() != 'KR':
+                        raise AccountTradingLimitError('account_scope_mismatch')
+                    loaded = AutomationProfileService().serialize(profile)
+                    capital = loaded['effective_settings']['capital']
+                    profile_context = {**profile_context, **capital,
+                        'fixed_budget_krw': capital.get('fixed_budget'),
+                        'effective_entry_budget_krw': None, 'profile_budget_krw': None}
+                    if capital.get('sizing_mode') == 'fixed_budget':
+                        state = AutomationProfileService().capital_state(
+                            db, str(profile.id), owner_user_id=int(user.id),
+                        )
+                        profile_context['effective_entry_budget_krw'] = state['effective_next_entry_budget_krw']
+                    fresh_sizing = self._size_profile_order(
+                        snapshot=fresh, price=sizing.get('price'), profile_context=profile_context,
+                    )
+                else:
+                    fresh_sizing = self._size_order(snapshot=fresh, price=sizing.get('price'),
+                                                   max_position_pct=float(settings.max_position_pct or 0))
+                if fresh_sizing.get('reason'):
+                    raise AccountTradingLimitError(fresh_sizing['reason'])
+                # Re-run the existing held-position, max-position and duplicate
+                # gates using the fresh account, without weakening any gate.
+                flags = []
+                self._append_snapshot_risk_flags(
+                    flags, snapshot=fresh, symbol=base['requested_symbol'],
+                    max_open_positions=int(settings.max_open_positions or 0), db=db, user=user,
+                )
+                if flags:
+                    raise AccountTradingLimitError(flags[0])
+                fresh_risk = self.risk_service.get_user_risk_state(
+                    db, user, provider='kis', market='KR', as_of=kwargs['now'],
+                )
+                if fresh_risk.get('risk_flags'):
+                    raise AccountTradingLimitError(str(fresh_risk['risk_flags'][0]))
+                fresh_sizing = self._apply_account_buy_limits(
+                    db, user=user, snapshot=fresh, sizing=fresh_sizing,
+                    profile_context=profile_context, symbol=base['requested_symbol'],
+                )
+                if fresh_sizing.get('reason'):
+                    raise AccountTradingLimitError(fresh_sizing['reason'])
+                multiplier = sizing.get('calendar_gap_position_size_multiplier', 1.0)
+                fresh_sizing = self._apply_calendar_gap_multiplier(
+                    fresh_sizing, multiplier=multiplier, price=fresh_sizing.get('price'),
+                )
+                # Never increase a previously approved quantity after a recheck.
+                fresh_sizing['quantity'] = min(int(sizing['quantity']), int(fresh_sizing['quantity']))
+                sizing.clear()
+                sizing.update(fresh_sizing)
+                preflight = self._preflight_kis_automatic_buy(
+                    db, user=user, credentials=credentials, symbol=base['requested_symbol'], sizing=sizing,
+                    fresh_positions=fresh.get('positions') if fresh.get('positions_reliable', True) else None, profile_context=profile_context,
+                )
+                if preflight.get('reason'):
+                    raise AccountTradingLimitError(preflight['reason'])
+                kwargs['credentials'] = credentials
+                return self._submit_kis_live_with_claim(db, run, **kwargs)
+        except AccountTradingLimitError as exc:
+            return self._finish_blocked(db, run, user=user, base=base, reason=str(exc),
+                                        analysis=kwargs['analysis'], risk=kwargs['risk'])
+        except Exception:
+            return self._finish_blocked(db, run, user=user, base=base,
+                                        reason='account_exposure_state_unavailable',
+                                        analysis=kwargs['analysis'], risk=kwargs['risk'])
+
+    @staticmethod
+    def _apply_account_buy_limits(db, *, user, snapshot, sizing, profile_context, symbol):
+        result = dict(sizing)
+        try:
+            if (snapshot.get('owner_user_id', int(user.id)) != int(user.id)
+                    or snapshot.get('provider', 'kis') != 'kis' or snapshot.get('market', 'KR') != 'KR'):
+                raise AccountTradingLimitError('account_scope_mismatch')
+            account = snapshot.get('account') or {}
+            cash = account.get('buying_power')
+            if cash is None:
+                cash = account.get('cash')
+            context = profile_context or {}
+            limits = AccountTradingLimitService().calculate(
+                db, owner_user_id=int(user.id), symbol=symbol,
+                positions=snapshot.get('positions') if snapshot.get('positions_reliable', True) else None,
+                profile_order_cap=context.get('max_order_notional_krw', sizing['target_notional']),
+                profile_pct_cap=sizing['target_notional'] if context.get('sizing_mode') != 'fixed_budget' else None,
+                strategy_entry_budget_krw=sizing['target_notional'] if context.get('sizing_mode') == 'fixed_budget' else None,
+                available_cash=cash,
+                broker_account_id=snapshot.get('broker_account_id'),
+            )
+            result['account_trading_limits'] = limits
+            result['cap_source'] = limits['cap_source']
+            result['target_notional'] = limits['effective_order_cap_krw']
+            result['quantity'] = math.floor(result['target_notional'] / float(sizing['price']))
+            result['notional'] = result['quantity'] * float(sizing['price'])
+            if limits['reason']:
+                result['reason'] = limits['reason']
+            elif result['quantity'] <= 0:
+                result['reason'] = 'risk_adjusted_quantity_zero'
+        except AccountTradingLimitError as exc:
+            result['reason'] = str(exc)
+        return result
+
+    def _submit_kis_live_with_claim(
         self,
         db,
         run,
@@ -1114,6 +1250,11 @@ class UserTradingExecutionService:
         broker_called = False
         try:
             client = self.kis_live_client_factory(db, user, credentials)
+            if authorization_mode == 'automatic' and time.monotonic() - sizing.get('possible_order_checked_clock', 0) > 10:
+                order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+                db.commit()
+                return self._finish_blocked(db, run, user=user, base=base,
+                    reason='possible_order_snapshot_stale', analysis=analysis, risk=risk)
             broker_called = True
             broker_order = client.submit_market_buy_qty(
                 symbol=base["requested_symbol"],
@@ -1166,7 +1307,8 @@ class UserTradingExecutionService:
             }
             return self._finish_run(db, run, response)
         except Exception as exc:
-            order.internal_status = InternalOrderStatus.FAILED.value
+            order.internal_status = (InternalOrderStatus.UNKNOWN_STALE.value if broker_called and authorization_mode == 'automatic'
+                                     else InternalOrderStatus.FAILED.value)
             order.error_message = "user_broker_submit_failed"
             order.response_payload = json.dumps(
                 {
@@ -1207,7 +1349,10 @@ class UserTradingExecutionService:
             }
             return self._finish_run(db, run, response)
 
-    def _preflight_kis_automatic_buy(self, db, *, user, credentials, symbol, sizing):
+    def _preflight_kis_automatic_buy(self, db, *, user, credentials, symbol, sizing,
+                                     fresh_positions=None, profile_context=None):
+        query_started = self.now_provider()
+        query_clock = time.monotonic()
         try:
             client = self.kis_live_client_factory(db, user, credentials)
             get_possible = getattr(client, 'get_possible_buy_order', None)
@@ -1225,6 +1370,38 @@ class UserTradingExecutionService:
             sizing['preflight_reason'] = 'kis_possible_order_unavailable'
             return {'reason': 'kis_possible_order_unavailable'}
 
+        queried_at = possible.get('queried_at')
+        try:
+            timestamp = datetime.fromisoformat(str(queried_at).replace('Z', '+00:00')) if queried_at else query_started
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            if (query_started - timestamp).total_seconds() > 10 or time.monotonic() - query_clock > 10:
+                return {'reason': 'possible_order_snapshot_stale'}
+        except (TypeError, ValueError):
+            return {'reason': 'possible_order_snapshot_stale'}
+        sizing['possible_order_checked_clock'] = query_clock
+        if possible.get('raw_status') != 'ok':
+            return {'reason': 'kis_possible_order_unavailable'}
+        if fresh_positions is not None:
+            try:
+                multiplier = sizing.get('calendar_gap_position_size_multiplier', 1.0)
+                pct_cap = sizing.get('target_notional_before_calendar_gap', sizing['target_notional'])
+                context = profile_context or {}
+                limits = AccountTradingLimitService().calculate(
+                    db, owner_user_id=int(user.id), symbol=symbol, positions=fresh_positions,
+                    profile_order_cap=context.get('max_order_notional_krw', pct_cap),
+                    profile_pct_cap=pct_cap if context.get('sizing_mode') != 'fixed_budget' else None,
+                    strategy_entry_budget_krw=pct_cap if context.get('sizing_mode') == 'fixed_budget' else None,
+                    available_cash=possible.get('nrcvb_buy_amt'),
+                    risk_sizing_multiplier=multiplier,
+                )
+                sizing['account_trading_limits'] = limits
+                sizing['cap_source'] = limits['cap_source']
+                sizing['target_notional'] = limits['effective_order_cap_krw']
+                if limits['reason']:
+                    return {'reason': limits['reason']}
+            except AccountTradingLimitError as exc:
+                return {'reason': str(exc)}
         target = self._safe_nonnegative_number(sizing.get('target_notional'))
         internal_quantity = self._safe_nonnegative_int(sizing.get('quantity'))
         possible_amount = self._safe_nonnegative_number(possible.get('nrcvb_buy_amt'))
@@ -1248,7 +1425,7 @@ class UserTradingExecutionService:
 
     @staticmethod
     def _safe_possible_order(possible):
-        keys = ('symbol', 'order_type', 'ord_psbl_cash', 'nrcvb_buy_amt', 'nrcvb_buy_qty', 'max_buy_amt', 'max_buy_qty', 'psbl_qty_calc_unpr', 'raw_status', 'error_type', 'http_status', 'rt_cd', 'msg_cd', 'msg1')
+        keys = ('queried_at', 'symbol', 'order_type', 'ord_psbl_cash', 'nrcvb_buy_amt', 'nrcvb_buy_qty', 'max_buy_amt', 'max_buy_qty', 'psbl_qty_calc_unpr', 'raw_status', 'error_type', 'http_status', 'rt_cd', 'msg_cd', 'msg1')
         return {key: possible.get(key) for key in keys if key in possible}
 
     @staticmethod
@@ -1708,7 +1885,7 @@ class UserTradingExecutionService:
         if any(str(row.internal_status or "").upper() not in _TERMINAL_ORDER_STATUSES for row in local_rows):
             risk_flags.append("duplicate_open_order")
 
-        buying_power = _number(account.get("buying_power") or account.get("cash"))
+        buying_power = _number(account.get("buying_power") if account.get("buying_power") is not None else account.get("cash"))
         if buying_power is None or buying_power <= 0:
             risk_flags.append("buying_power_unavailable")
 
@@ -1721,7 +1898,7 @@ class UserTradingExecutionService:
             or account.get("equity")
             or account.get("total_asset_value")
         )
-        buying_power = _number(account.get("buying_power") or account.get("cash"))
+        buying_power = _number(account.get("buying_power") if account.get("buying_power") is not None else account.get("cash"))
         if portfolio_value is None or portfolio_value <= 0:
             return {"reason": "portfolio_value_unavailable"}
         if buying_power is None or buying_power <= 0:
@@ -1774,7 +1951,7 @@ class UserTradingExecutionService:
             or account.get("equity")
             or account.get("total_asset_value")
         )
-        buying_power = _number(account.get("buying_power") or account.get("cash"))
+        buying_power = _number(account.get("buying_power") if account.get("buying_power") is not None else account.get("cash"))
         if portfolio_value is None or portfolio_value <= 0:
             return {"sizing_source": "automation_profile", "reason": "portfolio_value_unavailable"}
         if buying_power is None or buying_power <= 0:
@@ -1800,24 +1977,14 @@ class UserTradingExecutionService:
                 "reason": "sizing_mode_invalid",
             }
 
-        current_exposure = 0.0
-        current_symbol_value = 0.0
-        requested_symbol = str(profile_context.get("symbol") or "").strip().upper()
-        for position in snapshot.get("positions") or []:
-            if not isinstance(position, dict):
-                continue
-            market_value = _number(position.get("market_value")) or 0.0
-            if market_value <= 0:
-                quantity = _number(position.get("quantity") or position.get("qty")) or 0.0
-                average_price = _number(
-                    position.get("avg_entry_price")
-                    or position.get("avg_price")
-                    or position.get("average_price")
-                ) or 0.0
-                market_value = max(0.0, quantity * average_price)
-            current_exposure += market_value
-            if requested_symbol and str(position.get("symbol") or "").strip().upper() == requested_symbol:
-                current_symbol_value += market_value
+        try:
+            exposure = AccountTradingLimitService.exposure(
+                snapshot.get('positions'), symbol=str(profile_context.get('symbol') or ''),
+            )
+        except AccountTradingLimitError as exc:
+            return {'sizing_source': 'automation_profile', 'reason': str(exc)}
+        current_exposure = exposure['current_account_exposure_krw']
+        current_symbol_value = exposure['current_symbol_exposure_krw']
 
         profile_budget = _number(
             profile_context.get("effective_entry_budget_krw")
@@ -1829,10 +1996,6 @@ class UserTradingExecutionService:
         max_total_exposure_pct = _number(profile_context.get("max_total_exposure_pct")) or 0.0
         max_open_positions = max(1, int(_number(profile_context.get("max_open_positions")) or 1))
         profile_max_order = _number(profile_context.get("max_order_notional_krw")) or 0.0
-        hard_max_order = float(TEST4_HARD_SAFETY["max_order_notional_krw"])
-        if profile_max_order <= 0:
-            profile_max_order = hard_max_order
-        profile_max_order = min(profile_max_order, hard_max_order)
 
         # Fixed-budget mode deliberately does not apply the legacy
         # UserTradingSettings.max_position_pct or the profile percentage
@@ -1894,7 +2057,11 @@ class UserTradingExecutionService:
                     max(0.0, portfolio_value * effective_total_exposure_pct / 100.0 - current_exposure),
                 )
             )
-        effective_target = min(value for _, value in cap_components)
+        effective_target = minimum_buy_cap(
+            profile_order_cap=profile_max_order, available_cash=buying_power,
+            profile_pct_cap=min(value for source, value in cap_components
+                                if source not in {'profile_max_order_notional', 'buying_power'}),
+        )['base_order_cap_krw']
         cap_source = next(
             source for source, value in cap_components
             if abs(value - effective_target) <= 0.01

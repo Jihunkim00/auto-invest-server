@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from app.core.enums import InternalOrderStatus
-from app.db.models import OrderLog, PositionLifecycle
+from app.db.models import OrderLog, PositionLifecycle, StrategyProfile
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore, _broker_order_id
 from app.services.runtime_setting_service import RuntimeSettingService
 
@@ -24,6 +24,9 @@ class FakeKisClient:
 
     def list_open_orders(self):
         return []
+
+    def get_account_balance(self):
+        return {'cash': 1_000_000, 'orderable_cash': 1_000_000, 'total_asset_value': 1_000_000}
 
     def get_domestic_stock_price(self, symbol):
         self.price_calls += 1
@@ -50,6 +53,14 @@ def _order(
     take_profit_pct=None,
 ):
     RuntimeSettingService().update_settings(db, {'automation_mode': 'live'})
+    if db.query(StrategyProfile).filter_by(profile_key='aut_test_profile').first() is None:
+        from app.schemas.automation_profile import AutomationProfileWriteRequest
+        from app.services.automation_profile_service import AutomationProfileService
+        AutomationProfileService().create(db, AutomationProfileWriteRequest(
+            profile_key='aut_test_profile', name='Execution core fake profile',
+            capital={'sizing_mode': 'fixed_budget', 'fixed_budget': 1_000_000,
+                     'max_order_notional_krw': 1_000_000},
+        ))
     payload = {
         "source": "strategy_live_auto_buy" if side == "buy" else "strategy_live_auto_exit",
         "source_type": "profile_aware_guarded_live_auto_buy" if side == "buy" else "guarded_profile_exit",
