@@ -63,6 +63,8 @@ class ProfileAwareGuardedLiveAutoExitRunRequest(BaseModel):
     confirm_operator_ack: bool
     trigger_source: str = Field(default="manual", min_length=1, max_length=80)
     client_request_id: str | None = Field(default=None, max_length=120)
+    exit_cycle_key: str | None = Field(default=None, max_length=180)
+    retry_index: int = Field(default=0, ge=0, le=3)
 
     @field_validator("provider")
     @classmethod

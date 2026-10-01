@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -207,7 +207,7 @@ def trusted_scheduler_exit_service(
         ),
         open_orders_loader=lambda db: list(open_orders or []),
     )
-    service._active_profile = lambda db: {
+    service._active_profile = lambda db, now=None: {
         "profile_key": "safe",
         "profile_name": "safe",
         "display_name": "Safe",
@@ -360,7 +360,7 @@ def test_trusted_scheduler_run_scheduler_once_reuses_guarded_sell_gates(
         positions_loader=lambda db: [stop_loss_position()],
         open_orders_loader=lambda db: [],
     )
-    service._active_profile = lambda db: {
+    service._active_profile = lambda db, now=None: {
         "profile_key": "safe",
         "profile_name": "safe",
         "display_name": "Safe",
@@ -444,7 +444,7 @@ def test_canonical_scheduler_and_position_monitor_share_open_sell_protection(
         positions_loader=lambda db: [stop_loss_position()],
         open_orders_loader=lambda db: [],
     )
-    service._active_profile = lambda db: {
+    service._active_profile = lambda db, now=None: {
         "profile_key": "safe",
         "profile_name": "safe",
         "display_name": "Safe",
@@ -557,3 +557,152 @@ def test_trusted_scheduler_auto_exit_blocks_when_market_is_closed(db_session, mo
     assert result["broker_submit_called"] is False
     assert validation.calls == []
     assert broker.calls == []
+
+
+
+def test_scheduler_retry_uses_fresh_position_state_and_a_distinct_request_id(
+    db_session,
+    monkeypatch,
+):
+    from app.brokers.base import KisApiError
+
+    held = [stop_loss_position(current_price=10500, current_value=31500)]
+    service, broker, validation = trusted_scheduler_exit_service(
+        db_session,
+        monkeypatch,
+        positions=held,
+    )
+    profile = {
+        "id": 27,
+        "owner_user_id": 41,
+        "profile_key": "admin_kis_primary",
+        "profile_name": "admin_kis_primary",
+        "display_name": "Current display label",
+        "status": "active",
+        "enabled": True,
+        "provider": "kis",
+        "market": "KR",
+        "effective_settings": {
+            "exit": {
+                "stop_loss_pct": 0.02,
+                "take_profit_pct": 0.05,
+                "stop_loss_enabled": True,
+                "take_profit_enabled": True,
+            }
+        },
+    }
+    service._active_profile = lambda db, now=None: profile
+    original_loader = service.positions_loader
+    state = {"fail": True}
+
+    def fresh_positions(db):
+        if state["fail"]:
+            raise KisApiError(
+                "temporary KIS balance read failure",
+                details={"http_status": 500, "tr_id": "TTTC8434R"},
+            )
+        return original_loader(db)
+
+    service.positions_loader = fresh_positions
+    cycle = "automation_scheduler:sell:admin_kis_primary:2026-07-30:09:30:005930"
+    now = datetime(2026, 7, 30, 9, 30, tzinfo=ZoneInfo("Asia/Seoul"))
+
+    original = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="09:30",
+        symbol="005930",
+        now=now,
+        exit_cycle_key=cycle,
+        retry_index=0,
+    )
+    assert original["block_reason"] == "positions_unavailable"
+    assert original["safety"]["read_failure"]["retryable"] is True
+
+    # Price has moved below the 5% take-profit rule by retry time. The retry
+    # must load this current position and resolve to HOLD without validation.
+    held[:] = [stop_loss_position(current_price=10400, current_value=31200)]
+    state["fail"] = False
+    retry = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="09:30",
+        symbol="005930",
+        now=now + timedelta(minutes=1),
+        exit_cycle_key=cycle,
+        retry_index=1,
+    )
+
+    assert original["client_request_id"] != retry["client_request_id"]
+    assert retry["client_request_id"].endswith(":retry1")
+    assert retry["status"] == "blocked"
+    assert retry["block_reason"] in {"no_exit_candidate", "no_exit_trigger"}
+    assert validation.calls == []
+    assert broker.calls == []
+    assert db_session.query(StrategyLiveAutoExitAttempt).count() == 2
+
+
+@pytest.mark.parametrize("reject_at_submit_guard", [False, True], ids=["submitted", "safety-rejected"])
+def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
+    db_session,
+    monkeypatch,
+    reject_at_submit_guard,
+):
+    service, broker, _validation = trusted_scheduler_exit_service(
+        db_session,
+        monkeypatch,
+        positions=[stop_loss_position()],
+    )
+    service._active_profile = lambda db, now=None: {
+        "id": 27,
+        "owner_user_id": 41,
+        "profile_key": "admin_kis_primary",
+        "profile_name": "legacy profile label",
+        "display_name": "Renamed display label",
+        "status": "active",
+        "enabled": True,
+        "provider": "kis",
+        "market": "KR",
+    }
+    if reject_at_submit_guard:
+        def reject_sell(db, **kwargs):
+            return {
+                "submitted": False,
+                "status": "blocked",
+                "reason": "positions_unavailable",
+                "broker_submit_called": False,
+                "real_order_submitted": False,
+                "guard": {
+                    "read_failure": {
+                        "read_operation": "positions",
+                        "http_status": 500,
+                        "retryable": True,
+                    }
+                },
+            }
+
+        service.execution_core.submit_market_sell = reject_sell
+
+    result = service.run_scheduler_once(
+        db_session,
+        scheduler_slot="09:30",
+        symbol="005930",
+        now=datetime(2026, 7, 30, 9, 30, tzinfo=ZoneInfo("Asia/Seoul")),
+        exit_cycle_key="automation_scheduler:sell:admin_kis_primary:2026-07-30:09:30:005930",
+        retry_index=2 if reject_at_submit_guard else 0,
+    )
+    order = db_session.query(OrderLog).filter(OrderLog.side == "sell").one()
+
+    assert order.owner_user_id == 41
+    assert order.profile_id == 27
+    assert order.profile_key == "admin_kis_primary"
+    assert order.profile_name == "Renamed display label"
+    if reject_at_submit_guard:
+        assert result["status"] == "blocked"
+        assert order.internal_status == InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
+        assert result["safety"]["read_failure"]["retry_index"] == 2
+        assert result["safety"]["read_failure"]["max_retries"] == 3
+        assert order.owner_user_id is not None
+        assert broker.calls == []
+    else:
+        assert result["status"] == "submitted"
+        assert order.client_order_id == result["client_request_id"]
+        assert broker.calls == [{"symbol": "005930", "qty": 3}]

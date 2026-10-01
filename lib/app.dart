@@ -185,12 +185,7 @@ class _RegularUserHomeState extends State<_RegularUserHome> {
   @override
   void initState() {
     super.initState();
-    unawaited(widget.controller.restoreAuthenticatedProviderContext());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        unawaited(widget.controller.loadUserBrokerAccounts());
-      }
-    });
+    unawaited(widget.controller.bootstrapRegularUserHome(widget.user));
   }
 
   @override
@@ -263,6 +258,7 @@ class _ExistingAutoInvestHomeState extends State<_ExistingAutoInvestHome> {
   @override
   void initState() {
     super.initState();
+    widget.controller.clearRegularUserHomeContext();
     if (widget.loadOnMount) {
       unawaited(widget.controller.load());
     }

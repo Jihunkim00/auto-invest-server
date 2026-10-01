@@ -367,6 +367,9 @@ class OrderLog(Base):
     broker = Column(String(20), nullable=False, default="alpaca")
     market = Column(String(10), nullable=True, index=True)
     symbol = Column(String(20), nullable=False, index=True)
+    profile_id = Column(Integer, nullable=True, index=True)
+    profile_key = Column(String(80), nullable=True, index=True)
+    profile_name = Column(String(80), nullable=True)
 
     side = Column(String(10), nullable=False)
     order_type = Column(String(20), nullable=False)
@@ -978,6 +981,12 @@ class StrategyLiveAutoExitAttempt(Base):
     id = Column(Integer, primary_key=True, index=True)
     provider = Column(String(20), nullable=False, default="kis", index=True)
     market = Column(String(10), nullable=False, default="KR", index=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    profile_id = Column(Integer, nullable=True, index=True)
+    profile_key = Column(String(80), nullable=True, index=True)
+    profile_name = Column(String(80), nullable=True)
+    exit_cycle_key = Column(String(180), nullable=True, index=True)
+    retry_index = Column(Integer, nullable=False, default=0)
     active_profile = Column(String(40), nullable=True, index=True)
     symbol = Column(String(20), nullable=True, index=True)
     symbol_name = Column(String(160), nullable=True)
@@ -1010,6 +1019,32 @@ class StrategyLiveAutoExitAttempt(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     synced_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class PositionExitRetryJob(Base):
+    """Durable, bounded retry state for transient KIS held-position read errors."""
+
+    __tablename__ = "position_exit_retry_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exit_cycle_key = Column(String(180), nullable=False, unique=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    profile_id = Column(Integer, nullable=True, index=True)
+    profile_key = Column(String(80), nullable=False, index=True)
+    profile_name = Column(String(80), nullable=True)
+    provider = Column(String(20), nullable=False, default="kis", index=True)
+    market = Column(String(10), nullable=False, default="KR", index=True)
+    scheduler_slot = Column(String(80), nullable=False)
+    symbol = Column(String(20), nullable=True, index=True)
+    retry_count = Column(Integer, nullable=False, default=0)
+    max_retries = Column(Integer, nullable=False, default=3)
+    next_retry_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(30), nullable=False, default="pending", index=True)
+    last_block_reason = Column(String(160), nullable=True)
+    diagnostics_json = Column(Text, nullable=True)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 

@@ -49,6 +49,7 @@ void main() {
         authenticated: true,
         setupRequired: false,
         user: AuthUser(
+          id: 33,
           username: 'test01',
           role: 'user',
           enabled: true,

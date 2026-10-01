@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import uuid
@@ -30,6 +31,10 @@ from app.services.kis_order_validation_service import (
 )
 from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.account_snapshot_retry import (
+    POSITION_EXIT_MAX_RETRIES,
+    kis_exit_read_failure_diagnostics,
+)
 from app.services.market_session_service import MarketSessionService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.strategy_profile_service import StrategyProfileService
@@ -63,6 +68,43 @@ EXIT_PRIORITY = {
     "manual_review": 5,
     "none": 99,
 }
+
+
+def build_scheduler_exit_cycle_key(
+    *,
+    profile: dict[str, Any],
+    now: datetime,
+    scheduler_slot: str,
+    symbol: str | None,
+) -> str:
+    """Use the stable profile key, never its mutable display name, for identity."""
+    profile_key = str(profile.get("profile_key") or "").strip()
+    if not profile_key:
+        profile_id = _safe_int(profile.get("id") or profile.get("profile_id"))
+        profile_key = f"profile_id_{profile_id}" if profile_id is not None else "unknown_profile"
+    local_date = _utc_now(now).astimezone(KR_TZ).date().isoformat()
+    symbol_key = str(symbol or "portfolio").strip().upper() or "PORTFOLIO"
+    value = (
+        f"automation_scheduler:sell:{profile_key}:{local_date}:"
+        f"{scheduler_slot}:{symbol_key}"
+    )
+    if len(value) <= 180:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    return f"{value[:167]}:{digest}"
+
+
+def scheduler_exit_client_request_id(exit_cycle_key: str, retry_index: int) -> str:
+    suffix = f":retry{int(retry_index)}" if int(retry_index) > 0 else ""
+    value = f"{exit_cycle_key}{suffix}"
+    # OrderLog.client_order_id is limited to 100 characters. Keep the
+    # retry suffix within that persisted identifier so long profile/slot keys
+    # cannot collapse original and retry identities after truncation.
+    if len(value) <= 100:
+        return value
+    digest = hashlib.sha256(exit_cycle_key.encode("utf-8")).hexdigest()[:12]
+    prefix_length = 100 - len(suffix) - len(digest) - 1
+    return f"{exit_cycle_key[:prefix_length]}:{digest}{suffix}"
 
 
 class ProfileAwareGuardedLiveAutoExitService:
@@ -112,30 +154,74 @@ class ProfileAwareGuardedLiveAutoExitService:
         scheduler_slot: str,
         symbol: str | None = None,
         now: datetime | None = None,
+        exit_cycle_key: str | None = None,
+        retry_index: int = 0,
     ) -> dict[str, Any]:
-        profile = self._active_profile(db)
-        profile_key = str(profile.get('profile_key') or profile.get('profile_name') or 'active')
         now_utc = _utc_now(now)
-        local_date = now_utc.astimezone(KR_TZ).date().isoformat()
-        symbol_key = str(symbol or 'portfolio').upper()
+        profile = self._active_profile(db, now=now_utc)
+        cycle_key = exit_cycle_key or build_scheduler_exit_cycle_key(
+            profile=profile,
+            now=now_utc,
+            scheduler_slot=scheduler_slot,
+            symbol=symbol,
+        )
         request = ProfileAwareGuardedLiveAutoExitRunRequest(
             provider=PROVIDER,
             market=MARKET,
             symbol=symbol,
             confirm_operator_ack=True,
             trigger_source='automation_scheduler',
-            client_request_id=(
-                f'automation_scheduler:sell:{profile_key}:{local_date}:'
-                f'{scheduler_slot}:{symbol_key}'
-            )[:120],
+            client_request_id=scheduler_exit_client_request_id(
+                cycle_key,
+                retry_index,
+            ),
+            exit_cycle_key=cycle_key,
+            retry_index=retry_index,
         )
-        return self.run_once(
+        response = self.run_once(
             db,
             request,
             now=now_utc,
             trusted_scheduler_authority=True,
             full_exit=True,
         )
+        profile_key = str(profile.get('profile_key') or '').strip()
+        profile_id = _safe_int(profile.get('id') or profile.get('profile_id'))
+        owner_user_id = _safe_int(profile.get('owner_user_id'))
+        profile_name = str(profile.get('display_name') or profile.get('profile_name') or profile_key)
+        response.update({
+            'exit_cycle_key': cycle_key,
+            'retry_index': int(retry_index),
+            'client_request_id': request.client_request_id,
+            'owner_user_id': owner_user_id,
+            'profile_id': profile_id,
+            'profile_key': profile_key or None,
+            'profile_name': profile_name or None,
+        })
+        attempt_id = _safe_int(response.get('attempt_id'))
+        if attempt_id is not None:
+            attempt = db.query(StrategyLiveAutoExitAttempt).filter(
+                StrategyLiveAutoExitAttempt.id == attempt_id
+            ).first()
+            if attempt is not None:
+                attempt.owner_user_id = owner_user_id
+                attempt.profile_id = profile_id
+                attempt.profile_key = profile_key or None
+                attempt.profile_name = profile_name or None
+                attempt.exit_cycle_key = cycle_key
+                attempt.retry_index = int(retry_index)
+                saved = _parse_object(attempt.response_payload)
+                saved.update({
+                    'exit_cycle_key': cycle_key,
+                    'retry_index': int(retry_index),
+                    'owner_user_id': owner_user_id,
+                    'profile_id': profile_id,
+                    'profile_key': profile_key or None,
+                    'profile_name': profile_name or None,
+                })
+                attempt.response_payload = _json(saved)
+                db.commit()
+        return sanitize_kis_payload(response)
 
     def readiness(
         self,
@@ -149,7 +235,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         now_utc = _utc_now(now)
         settings = self.runtime_settings.get_settings_read_only(db)
         global_settings = self._global_settings()
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now=now_utc)
         profile_name = _profile_name(profile) if profile else ""
         allowed_profiles = _allowed_profiles(settings)
         orders_used_today = self._orders_used_today(db, now_utc=now_utc)
@@ -316,7 +402,7 @@ class ProfileAwareGuardedLiveAutoExitService:
         safety = _safety()
         settings = self.runtime_settings.get_settings(db)
         global_settings = self._global_settings()
-        profile = self._active_profile(db)
+        profile = self._active_profile(db, now=now_utc)
         profile_name = _profile_name(profile)
         allowed_profiles = _allowed_profiles(settings)
         request_payload = payload.model_dump(mode="json")
@@ -384,7 +470,20 @@ class ProfileAwareGuardedLiveAutoExitService:
         try:
             positions, open_orders = self._account_snapshot(db)
         except ValueError as exc:
-            return self._blocked(db, request_payload=request_payload, status="blocked", block_reason=_account_block_reason(exc), safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
+            block_reason = _account_block_reason(exc)
+            read_operation = (
+                "positions"
+                if block_reason == "positions_unavailable"
+                else "open_orders"
+                if block_reason == "open_orders_unavailable"
+                else "account_snapshot"
+            )
+            safety["read_failure"] = kis_exit_read_failure_diagnostics(
+                exc,
+                read_operation=read_operation,
+                retry_index=payload.retry_index,
+            )
+            return self._blocked(db, request_payload=request_payload, status="blocked", block_reason=block_reason, safety=safety, active_profile=profile_name, trigger_source=payload.trigger_source, client_request_id=payload.client_request_id)
         candidates = self._evaluate_candidates(
             db,
             positions=_held_positions(positions, symbol=payload.symbol),
@@ -578,6 +677,8 @@ class ProfileAwareGuardedLiveAutoExitService:
             )
         except Exception as exc:
             raise ValueError(f"positions_unavailable: {_safe_error(exc)}") from exc
+        if not isinstance(positions, list) or any(not isinstance(item, dict) for item in positions):
+            raise ValueError("positions_invalid_response")
         try:
             open_orders = (
                 self.open_orders_loader(db)
@@ -586,10 +687,9 @@ class ProfileAwareGuardedLiveAutoExitService:
             )
         except Exception as exc:
             raise ValueError(f"open_orders_unavailable: {_safe_error(exc)}") from exc
-        return (
-            positions if isinstance(positions, list) else [],
-            open_orders if isinstance(open_orders, list) else [],
-        )
+        if not isinstance(open_orders, list) or any(not isinstance(item, dict) for item in open_orders):
+            raise ValueError("open_orders_invalid_response")
+        return positions, open_orders
 
     def _evaluate_candidates(
         self,
@@ -917,10 +1017,18 @@ class ProfileAwareGuardedLiveAutoExitService:
             > 0
         )
 
-    def _active_profile(self, db: Session) -> dict[str, Any]:
+    def _active_profile(
+        self,
+        db: Session,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
         active_reader = getattr(self.strategy_profiles, 'get_active_profile', None)
         if callable(active_reader):
-            profile = active_reader(db)
+            try:
+                profile = active_reader(db, now=now) if now is not None else active_reader(db)
+            except TypeError:
+                profile = active_reader(db)
             if isinstance(profile, dict) and profile:
                 return profile
         selected_reader = getattr(self.strategy_profiles, 'selected_profile', None)
@@ -932,10 +1040,16 @@ class ProfileAwareGuardedLiveAutoExitService:
             return {}
         serializer = getattr(self.strategy_profiles, 'serialize', None)
         if callable(serializer):
-            return serializer(row)
+            try:
+                return serializer(row, now=now) if now is not None else serializer(row)
+            except TypeError:
+                return serializer(row)
         serializer = getattr(self.strategy_profiles, 'serialize_profile', None)
         if callable(serializer):
-            return serializer(row)
+            try:
+                return serializer(row, now=now) if now is not None else serializer(row)
+            except TypeError:
+                return serializer(row)
         return {}
 
     def _global_settings(self) -> Any:
@@ -982,6 +1096,8 @@ class ProfileAwareGuardedLiveAutoExitService:
         attempt = StrategyLiveAutoExitAttempt(
             provider=PROVIDER,
             market=MARKET,
+            exit_cycle_key=request_payload.get("exit_cycle_key"),
+            retry_index=int(request_payload.get("retry_index") or 0),
             active_profile=response.get("active_profile"),
             symbol=response.get("symbol"),
             symbol_name=response.get("symbol_name"),
@@ -1030,6 +1146,10 @@ class ProfileAwareGuardedLiveAutoExitService:
         safety: dict[str, Any],
     ) -> OrderLog:
         row = OrderLog(
+            owner_user_id=_safe_int(profile.get("owner_user_id")),
+            profile_id=_safe_int(profile.get("id") or profile.get("profile_id")),
+            profile_key=str(profile.get("profile_key") or "").strip() or None,
+            profile_name=str(profile.get("display_name") or profile.get("profile_name") or "") or None,
             broker=PROVIDER,
             market=MARKET,
             symbol=str(candidate.get("symbol") or ""),
@@ -1040,6 +1160,7 @@ class ProfileAwareGuardedLiveAutoExitService:
             requested_qty=float(plan["quantity"]),
             remaining_qty=float(plan["quantity"]),
             notional=float(plan.get("approved_notional_krw") or 0),
+            client_order_id=(run_request.client_request_id or "")[:100] or None,
             internal_status=internal_status,
             request_payload=_json(
                 {
@@ -1053,7 +1174,7 @@ class ProfileAwareGuardedLiveAutoExitService:
                     "source_context": run_request.trigger_source,
                     "operator_trigger_source": run_request.trigger_source,
                     "active_profile": _profile_name(profile),
-                    "profile_key": profile.get("profile_key") or profile.get("profile_name"),
+                    "profile_key": profile.get("profile_key"),
                     "profile_name": profile.get("display_name") or profile.get("profile_name"),
                     "profile_provider": profile.get("provider") or PROVIDER,
                     "profile_market": profile.get("market") or MARKET,
@@ -1329,6 +1450,13 @@ class ProfileAwareGuardedLiveAutoExitService:
             now=now_utc,
         )
         execution_guard = execution.get('guard')
+        if isinstance(execution_guard, dict) and isinstance(
+            execution_guard.get("read_failure"), dict
+        ):
+            read_failure = dict(execution_guard["read_failure"])
+            read_failure["retry_index"] = int(run_request.retry_index)
+            read_failure["max_retries"] = POSITION_EXIT_MAX_RETRIES
+            safety["read_failure"] = read_failure
         effective_quantity = int(
             (execution_guard or {}).get('effective_quantity')
             or getattr(order, 'qty', 0)
@@ -1783,6 +1911,13 @@ def _positive_threshold(value: Any, default: float) -> float:
     if number > 1:
         number = number / 100
     return number
+
+
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _float(value: Any) -> float | None:

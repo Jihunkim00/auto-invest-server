@@ -243,7 +243,7 @@ def test_scheduler_passes_custom_identity_separately_from_legacy_profile(
             market="KR",
             operation={
                 "start_date": "2026-08-01",
-                "end_date": "2026-09-30",
+                "end_date": "2099-12-31",
                 "timezone": "Asia/Seoul",
             },
         ),
@@ -469,7 +469,7 @@ def _activate_custom_profile(db_session):
             entry={"analysis_times": ["09:10", "11:30", "13:30"]},
             operation={
                 "start_date": "2026-08-01",
-                "end_date": "2026-09-30",
+                "end_date": "2099-12-31",
                 "timezone": "Asia/Seoul",
             },
         ),

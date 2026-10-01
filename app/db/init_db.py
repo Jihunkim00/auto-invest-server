@@ -28,6 +28,9 @@ def _migrate_user_trading_ownership_columns_if_needed():
     columns = {
         'orders': {
             'owner_user_id': 'INTEGER',
+            'profile_id': 'INTEGER',
+            'profile_key': 'VARCHAR(80)',
+            'profile_name': 'VARCHAR(80)',
             'realized_pl': 'FLOAT',
             'currency': 'VARCHAR(10)',
         },
@@ -997,6 +1000,15 @@ def _create_strategy_live_auto_exit_attempts_table_if_missing():
                 """
             )
         )
+        for column_name, column_sql in {
+            "owner_user_id": "INTEGER",
+            "profile_id": "INTEGER",
+            "profile_key": "VARCHAR(80)",
+            "profile_name": "VARCHAR(80)",
+            "exit_cycle_key": "VARCHAR(180)",
+            "retry_index": "INTEGER NOT NULL DEFAULT 0",
+        }.items():
+            _add_column_if_missing("strategy_live_auto_exit_attempts", column_name, column_sql)
         for name, column in {
             "provider": "provider",
             "market": "market",

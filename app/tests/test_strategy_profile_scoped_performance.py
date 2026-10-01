@@ -46,7 +46,7 @@ def _create_profile(db_session, key: str, *, activate: bool = True):
             },
             operation={
                 "start_date": "2026-08-01",
-                "end_date": "2026-09-30",
+                "end_date": "2099-12-31",
                 "weekdays_only": False,
                 "timezone": "Asia/Seoul",
             },

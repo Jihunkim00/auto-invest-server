@@ -95,6 +95,7 @@ class _HomeBrokerFlowApi extends ApiClient {
         authenticated: true,
         setupRequired: false,
         user: AuthUser(
+          id: 32,
           username: 'regular-user',
           role: 'user',
           enabled: true,

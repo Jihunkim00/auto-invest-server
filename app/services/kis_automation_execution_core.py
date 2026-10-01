@@ -12,6 +12,7 @@ from app.core.automation_mode import automation_mode_authority
 from app.services.automation_execution_authority_service import (
     AutomationExecutionAuthorityService,
 )
+from app.services.account_snapshot_retry import kis_exit_read_failure_diagnostics
 from app.db.models import OrderLog
 from app.services.kis_manual_order_service import KisManualOrderSubmitRequest
 from app.services.kis_order_validation_service import (
@@ -952,13 +953,27 @@ class KisAutomationExecutionCore:
 
         try:
             positions = self._positions(db)
-            open_orders = self._open_orders(db)
-
         except Exception as exc:
             return {
                 "allowed": False,
-                "reason": "account_snapshot_unavailable",
-                "error": _error(exc),
+                "reason": "positions_unavailable",
+                "read_failure": kis_exit_read_failure_diagnostics(
+                    exc,
+                    read_operation="positions",
+                    retry_index=0,
+                ),
+            }
+        try:
+            open_orders = self._open_orders(db)
+        except Exception as exc:
+            return {
+                "allowed": False,
+                "reason": "open_orders_unavailable",
+                "read_failure": kis_exit_read_failure_diagnostics(
+                    exc,
+                    read_operation="open_orders",
+                    retry_index=0,
+                ),
             }
 
         held = next(

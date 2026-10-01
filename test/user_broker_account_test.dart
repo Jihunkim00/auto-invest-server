@@ -458,6 +458,7 @@ class _UserAccountApi extends ApiClient {
       authenticated: true,
       setupRequired: false,
       user: AuthUser(
+        id: 31,
         username: 'user01',
         role: 'user',
         enabled: true,

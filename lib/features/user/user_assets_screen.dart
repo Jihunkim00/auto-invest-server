@@ -16,21 +16,22 @@ class UserAssetsScreen extends StatefulWidget {
 }
 
 class _UserAssetsScreenState extends State<UserAssetsScreen> {
-  SelectedProvider _selectedProvider = SelectedProvider.kis;
+  SelectedProvider? _selectedProvider;
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
+    final selectedProvider = _selectedProvider ?? controller.selectedProvider;
     return AnimatedBuilder(
       animation: controller,
       builder: (context, _) {
-        final snapshot = controller.userBrokerAccountFor(_selectedProvider);
-        final summary = controller.userPortfolioSummaryFor(_selectedProvider);
+        final snapshot = controller.userBrokerAccountFor(selectedProvider);
+        final summary = controller.userPortfolioSummaryFor(selectedProvider);
         final configured = controller.userBrokerCredentials.any(
           (credential) =>
               credential.configured &&
               credential.provider.trim().toLowerCase() ==
-                  _providerCode(_selectedProvider),
+                  _providerCode(selectedProvider),
         );
         return SafeArea(
           child: RefreshIndicator(
@@ -50,7 +51,7 @@ class _UserAssetsScreenState extends State<UserAssetsScreen> {
                     ),
                     GlobalBrokerSelector(
                       controller: controller,
-                      selectedProvider: _selectedProvider,
+                      selectedProvider: selectedProvider,
                       onSelectionChanged: (provider) {
                         setState(() => _selectedProvider = provider);
                       },
@@ -60,7 +61,7 @@ class _UserAssetsScreenState extends State<UserAssetsScreen> {
                 const SizedBox(height: 12),
                 _UserBrokerStatusCard(
                   controller: controller,
-                  provider: _selectedProvider,
+                  provider: selectedProvider,
                   snapshot: snapshot,
                   configured: configured,
                 ),
@@ -69,17 +70,17 @@ class _UserAssetsScreenState extends State<UserAssetsScreen> {
                   PortfolioSnapshotSection(
                     controller: controller,
                     summaryOverride: summary,
-                    providerOverride: _selectedProvider,
+                    providerOverride: selectedProvider,
                     managementMode: false,
                     koreanLabels: true,
                   )
                 else
                   _UserAccountEmptyState(
                     loading: controller
-                        .userBrokerAccountLoadingFor(_selectedProvider),
+                        .userBrokerAccountLoadingFor(selectedProvider),
                     configured: configured,
                     error:
-                        controller.userBrokerAccountErrorFor(_selectedProvider),
+                        controller.userBrokerAccountErrorFor(selectedProvider),
                   ),
               ],
             ),

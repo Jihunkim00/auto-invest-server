@@ -328,7 +328,7 @@ def build_harness(
             },
             operation={
                 "start_date": "2026-08-01",
-                "end_date": "2026-09-30",
+                "end_date": "2099-12-31",
                 "weekdays_only": False,
                 "timezone": "Asia/Seoul",
             },

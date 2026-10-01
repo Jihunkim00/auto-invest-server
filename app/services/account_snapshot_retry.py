@@ -5,7 +5,9 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Hashable
 
-from app.brokers.base import KisApiError
+import requests
+
+from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
 
 MAX_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 30
@@ -109,6 +111,101 @@ class AccountSnapshotRetryCoordinator:
 
 
 account_snapshot_retry_coordinator = AccountSnapshotRetryCoordinator()
+
+# The exit orchestrator owns the one-minute operational retry policy. KisClient
+# has no additional immediate retry layer for these reads, keeping call volume bounded.
+POSITION_EXIT_RETRY_DELAY_SECONDS = 60
+POSITION_EXIT_MAX_RETRIES = 3
+POSITION_EXIT_RETRYABLE_HTTP_STATUSES = {500, 502, 503, 504}
+
+
+def retryable_kis_exit_read_error(error: Exception) -> bool:
+    """Classify only transient read transport failures for held-position exits."""
+    chain = _exception_chain(error)
+    if any(isinstance(item, (KisAuthError, KisConfigurationError)) for item in chain):
+        return False
+
+    for item in chain:
+        details = getattr(item, "details", None)
+        if isinstance(details, dict):
+            if details.get("token_expired") or details.get("authentication_error"):
+                return False
+            status = _http_status(details)
+            if status is not None:
+                return status in POSITION_EXIT_RETRYABLE_HTTP_STATUSES
+            error_type = str(details.get("error_type") or "").strip().lower()
+            if error_type in {"timeout", "readtimeout", "connecttimeout", "connectionerror"}:
+                return True
+        if isinstance(item, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+            return True
+        if isinstance(item, (TimeoutError, ConnectionError)):
+            return True
+    return False
+
+
+def kis_exit_read_failure_diagnostics(
+    error: Exception,
+    *,
+    read_operation: str,
+    retry_index: int,
+    max_retries: int = POSITION_EXIT_MAX_RETRIES,
+) -> dict[str, Any]:
+    """Return a strict allowlist of broker diagnostics; never include credentials."""
+    details: dict[str, Any] = {}
+    chain = _exception_chain(error)
+    for item in chain:
+        candidate = getattr(item, "details", None)
+        if isinstance(candidate, dict):
+            details = candidate
+            break
+        response = getattr(item, "response", None)
+        status = getattr(response, "status_code", None)
+        if status is not None:
+            details = {"http_status": status}
+            break
+
+    status = _http_status(details)
+    tr_id = _safe_diagnostic_text(details.get("tr_id"), limit=32)
+    path = _safe_diagnostic_text(details.get("path"), limit=200)
+    msg_cd = _safe_diagnostic_text(details.get("msg_cd"), limit=40)
+    error_type = _safe_diagnostic_text(
+        details.get("error_type") or (type(chain[-1]).__name__ if chain else "RuntimeError"),
+        limit=60,
+    )
+    return {
+        "read_operation": _safe_diagnostic_text(read_operation, limit=40),
+        "http_status": status,
+        "tr_id": tr_id,
+        "path": path,
+        "msg_cd": msg_cd,
+        "error_type": error_type,
+        "retryable": retryable_kis_exit_read_error(error),
+        "retry_index": max(0, int(retry_index)),
+        "max_retries": max(0, int(max_retries)),
+    }
+
+
+def _exception_chain(error: Exception) -> list[Exception]:
+    chain: list[Exception] = []
+    current: Exception | None = error
+    visited: set[int] = set()
+    while isinstance(current, Exception) and id(current) not in visited:
+        visited.add(id(current))
+        chain.append(current)
+        nested = getattr(current, "cause", None) or getattr(current, "original", None)
+        if not isinstance(nested, Exception):
+            nested = current.__cause__
+        if not isinstance(nested, Exception):
+            break
+        current = nested
+    return chain
+
+
+def _safe_diagnostic_text(value: Any, *, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:limit] if text else None
 
 
 def retryable_kis_account_snapshot_error(error: Exception) -> bool:

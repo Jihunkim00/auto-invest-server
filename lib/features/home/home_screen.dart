@@ -54,8 +54,11 @@ class HomeScreen extends StatelessWidget {
                   credential.provider.trim().toLowerCase() ==
                       controller.selectedProviderCode,
             );
+        final userState = controller
+            .userBrokerAccountLoadStateFor(controller.selectedProvider);
         final userLoading = readOnlyUser &&
-            (controller.userBrokerAccountsLoading ||
+            (controller.userHomeContextLoading ||
+                controller.userBrokerAccountsLoading ||
                 controller
                     .userBrokerAccountLoadingFor(controller.selectedProvider));
         final userError = readOnlyUser
@@ -89,6 +92,7 @@ class HomeScreen extends StatelessWidget {
                   userSnapshot: userSnapshot,
                   userLoading: userLoading,
                   userError: userError,
+                  userState: userState,
                   userBrokerConfigured: userBrokerConfigured,
                   onOpenSettings: readOnlyUser ? onOpenSettings : null,
                 ),
@@ -108,6 +112,7 @@ class HomeScreen extends StatelessWidget {
                 _PortfolioCard(
                   controller: controller,
                   summaryOverride: userSummary,
+                  readOnlyUser: readOnlyUser,
                   providerOverride: userSnapshot == null
                       ? null
                       : userSnapshot.provider.trim().toLowerCase() == 'kis'
@@ -128,7 +133,9 @@ class HomeScreen extends StatelessWidget {
                 _PositionsCard(
                   controller: controller,
                   summaryOverride: userSummary,
+                  readOnlyUser: readOnlyUser,
                   loadingOverride: userLoading,
+                  userError: userError,
                 ),
                 const SizedBox(height: 12),
                 _DecisionCard(
@@ -231,6 +238,7 @@ class _AccountConnectionCard extends StatelessWidget {
     this.userSnapshot,
     this.userLoading = false,
     this.userError,
+    this.userState = UserBrokerAccountLoadState.idle,
     this.userBrokerConfigured = true,
     this.onOpenSettings,
   });
@@ -240,6 +248,7 @@ class _AccountConnectionCard extends StatelessWidget {
   final UserBrokerAccountSnapshot? userSnapshot;
   final bool userLoading;
   final String? userError;
+  final UserBrokerAccountLoadState userState;
   final bool userBrokerConfigured;
   final VoidCallback? onOpenSettings;
 
@@ -247,26 +256,38 @@ class _AccountConnectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final strings = controller.strings;
     final broker = readOnlyUser
-        ? userSnapshot?.provider.trim().toLowerCase() == 'kis'
+        ? (userSnapshot?.provider.trim().toLowerCase() ??
+                    controller.selectedProviderCode) ==
+                'kis'
             ? 'KIS'
             : 'Alpaca'
         : controller.selectedProvider == SelectedProvider.kis
             ? strings.kisBroker
             : strings.alpacaBroker;
-    final notConfigured = readOnlyUser && !userLoading && !userBrokerConfigured;
+    final notConfigured = readOnlyUser &&
+        !userLoading &&
+        !userBrokerConfigured &&
+        (userError == null || userError == 'broker_credentials_not_configured');
+    final retrying = readOnlyUser &&
+        userState == UserBrokerAccountLoadState.transientRetrying;
     final failed = readOnlyUser
-        ? !notConfigured && userError != null && userSnapshot == null
+        ? !notConfigured &&
+            !userLoading &&
+            !retrying &&
+            userError != null &&
+            userSnapshot == null
         : controller.portfolioLoadError != null ||
             (!controller.portfolioLoaded &&
                 controller.selectedPortfolioUnavailable);
-    final loading =
-        readOnlyUser ? userLoading : !failed && !controller.portfolioLoaded;
+    final loading = readOnlyUser
+        ? userLoading || userState == UserBrokerAccountLoadState.loading
+        : !failed && !controller.portfolioLoaded;
     final connected = readOnlyUser
         ? userSnapshot?.connected == true
         : controller.portfolioLoaded && !failed;
     final color = notConfigured
         ? Colors.white54
-        : failed
+        : failed || retrying
             ? AppTheme.warning
             : loading
                 ? AppTheme.primaryAccent
@@ -277,20 +298,24 @@ class _AccountConnectionCard extends StatelessWidget {
             ? readOnlyUser
                 ? '\uC5F0\uACB0 \uC624\uB958'
                 : strings.connectionError
-            : loading
-                ? readOnlyUser
-                    ? '\uC5F0\uACB0 \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
-                    : strings.connectionLoading(broker)
-                : readOnlyUser
-                    ? connected
-                        ? '\uC5F0\uACB0\uB428'
-                        : '\uC870\uD68C \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
-                    : strings.connectionSuccess(broker);
+            : retrying
+                ? '\uC77C\uC2DC \uC624\uB958, \uB2E4\uC2DC \uC2DC\uB3C4 \uC911'
+                : loading
+                    ? readOnlyUser
+                        ? '\uC5F0\uACB0 \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                        : strings.connectionLoading(broker)
+                    : readOnlyUser
+                        ? userState == UserBrokerAccountLoadState.loaded
+                            ? connected
+                                ? '\uC5F0\uACB0\uB428'
+                                : '\uACC4\uC88C \uC815\uBCF4 \uB85C\uB4DC \uC644\uB8CC'
+                            : '\uC870\uD68C \uC0C1\uD0DC \uD655\uC778 \uC911\u2026'
+                        : strings.connectionSuccess(broker);
     final icon = notConfigured
         ? Icons.link_off
         : failed
             ? Icons.error_outline
-            : loading
+            : retrying || loading
                 ? Icons.sync
                 : Icons.check_circle_outline;
 
@@ -308,6 +333,7 @@ class _AccountConnectionCard extends StatelessWidget {
               children: [
                 Text(
                   label,
+                  key: ValueKey('home-account-state-${userState.name}'),
                   style: TextStyle(color: color, fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 3),
@@ -318,11 +344,13 @@ class _AccountConnectionCard extends StatelessWidget {
                           ? readOnlyUser
                               ? '\uACC4\uC88C \uC815\uBCF4 \uC870\uD68C\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4.'
                               : strings.connectionError
-                          : readOnlyUser
-                              ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
-                              : strings.isKorean
-                                  ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
-                                  : 'Connected means broker account and portfolio data was fetched successfully.',
+                          : retrying
+                              ? '\uC7A0\uC2DC \uD6C4 \uACC4\uC88C \uC815\uBCF4\uB97C \uD55C \uBC88 \uB354 \uC870\uD68C\uD569\uB2C8\uB2E4.'
+                              : readOnlyUser
+                                  ? '\uACC4\uC88C \uC815\uBCF4\uB294 \uC870\uD68C \uC804\uC6A9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4.'
+                                  : strings.isKorean
+                                      ? '브로커 계좌·자산 데이터를 성공적으로 조회해야 연결됨으로 표시됩니다.'
+                                      : 'Connected means broker account and portfolio data was fetched successfully.',
                   style: const TextStyle(color: Colors.white60, height: 1.35),
                 ),
                 if (!readOnlyUser &&
@@ -910,6 +938,7 @@ class _PortfolioCard extends StatelessWidget {
   const _PortfolioCard({
     required this.controller,
     this.summaryOverride,
+    this.readOnlyUser = false,
     this.providerOverride,
     this.loadingOverride = false,
     this.userError,
@@ -917,6 +946,7 @@ class _PortfolioCard extends StatelessWidget {
 
   final DashboardController controller;
   final PortfolioSummary? summaryOverride;
+  final bool readOnlyUser;
   final SelectedProvider? providerOverride;
   final bool loadingOverride;
   final String? userError;
@@ -924,15 +954,20 @@ class _PortfolioCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final summary = summaryOverride ?? controller.selectedPortfolioSummary;
     final isKis = providerOverride == null
         ? controller.isKisSelected
         : providerOverride == SelectedProvider.kis;
+    final summary = summaryOverride ??
+        (readOnlyUser
+            ? PortfolioSummary.empty(currency: isKis ? 'KRW' : 'USD')
+            : controller.selectedPortfolioSummary);
     final unavailable = summaryOverride == null
-        ? controller.selectedPortfolioUnavailable ||
+        ? !readOnlyUser && controller.selectedPortfolioUnavailable ||
             summary.hasUnavailableKisData
         : summary.hasUnavailableKisData;
-    final loaded = summaryOverride != null || controller.portfolioLoaded;
+    final loaded = readOnlyUser
+        ? summaryOverride != null
+        : summaryOverride != null || controller.portfolioLoaded;
     if (!loaded || loadingOverride) {
       return SectionCard(
         key: const ValueKey('home-portfolio-card'),
@@ -1078,20 +1113,28 @@ class _PositionsCard extends StatelessWidget {
   const _PositionsCard({
     required this.controller,
     this.summaryOverride,
+    this.readOnlyUser = false,
     this.loadingOverride = false,
+    this.userError,
   });
 
   final DashboardController controller;
   final PortfolioSummary? summaryOverride;
+  final bool readOnlyUser;
   final bool loadingOverride;
+  final String? userError;
 
   @override
   Widget build(BuildContext context) {
     final strings = controller.strings;
-    final summary = summaryOverride ?? controller.selectedPortfolioSummary;
-    final isKis = summaryOverride == null
+    final providedSummary = summaryOverride;
+    final isKis = providedSummary == null
         ? controller.isKisSelected
-        : summary.currency.toUpperCase() == 'KRW';
+        : providedSummary.currency.toUpperCase() == 'KRW';
+    final summary = providedSummary ??
+        (readOnlyUser
+            ? PortfolioSummary.empty(currency: isKis ? 'KRW' : 'USD')
+            : controller.selectedPortfolioSummary);
     final positions = summary.positions.take(3).toList(growable: false);
     return SectionCard(
       key: const ValueKey('home-positions-card'),
@@ -1102,11 +1145,18 @@ class _PositionsCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           if (loadingOverride ||
-              (summaryOverride == null && !controller.portfolioLoaded))
+              (!readOnlyUser &&
+                  summaryOverride == null &&
+                  !controller.portfolioLoaded))
             Text(
                 strings.connectionLoading(
                     isKis ? strings.kisBroker : strings.alpacaBroker),
                 style: const TextStyle(color: Colors.white70))
+          else if (readOnlyUser && summaryOverride == null && userError != null)
+            const Text(
+              '\uACC4\uC88C \uC815\uBCF4\uB97C \uC870\uD68C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
+              style: TextStyle(color: AppTheme.warning),
+            )
           else if (positions.isEmpty)
             Text(strings.noHeldPositions,
                 style: const TextStyle(color: Colors.white70))

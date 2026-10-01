@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/i18n/app_language.dart';
 import '../../core/i18n/app_strings.dart';
@@ -24,6 +25,8 @@ import '../../models/agent_run.dart';
 import '../../models/automation_mode_control.dart';
 import '../../models/automation_release.dart';
 import '../../models/automation_today_decisions.dart';
+import '../../models/auth_session.dart';
+import '../../models/automation_strategy_profile.dart';
 import '../../models/automation_runtime_monitor.dart';
 import '../../models/automation_soak_test.dart';
 import '../../models/auto_buy_live_phase1.dart';
@@ -125,6 +128,14 @@ enum PortfolioMarket { us, kr }
 
 enum SelectedProvider { alpaca, kis }
 
+enum UserBrokerAccountLoadState {
+  idle,
+  loading,
+  transientRetrying,
+  loaded,
+  error,
+}
+
 enum KisOrderHistoryFilter { open, filled, canceled, rejected, all }
 
 enum KisOrderHistorySort { newestFirst, oldestFirst }
@@ -152,7 +163,16 @@ class DashboardController extends ChangeNotifier {
   final ProviderPreferenceStore _providerPreferenceStore;
   int _providerContextVersion = 0;
   int _todayAiDecisionRequestVersion = 0;
+  int _userAccountContextVersion = 0;
   bool _disposed = false;
+  String? _authenticatedRegularUserScope;
+  String? _authenticatedRegularUserOwnerKey;
+  String? _regularUserBootstrapOwnerKey;
+  Future<void>? _regularUserBootstrapFuture;
+  Completer<void>? _regularUserContextReadyCompleter;
+  Future<void>? _userBrokerAccountsFuture;
+  bool _regularUserHomeContextReady = false;
+  bool _regularUserBootstrapComplete = false;
 
   AppStrings get strings => AppStrings(appLanguage);
 
@@ -677,6 +697,29 @@ class DashboardController extends ChangeNotifier {
   List<UserBrokerCredential> userBrokerCredentials = const [];
   bool userBrokerAccountsLoading = false;
   String? userBrokerAccountsError;
+  UserBrokerAccountLoadState kisUserAccountLoadState =
+      UserBrokerAccountLoadState.idle;
+  UserBrokerAccountLoadState alpacaUserAccountLoadState =
+      UserBrokerAccountLoadState.idle;
+  Map<String, dynamic> userTradingSettings = const {};
+  bool userTradingSettingsLoaded = false;
+  String? userTradingSettingsError;
+  AutomationStrategyProfileList? userHomeAutomationProfiles;
+  String? userHomeAutomationProfilesError;
+  bool userHomeContextLoading = false;
+  String? userHomeContextError;
+
+  int? get authenticatedRegularOwnerUserId => _authenticatedRegularUserId;
+  int? _authenticatedRegularUserId;
+
+  bool get regularUserHomeBootstrapStarted =>
+      _authenticatedRegularUserScope != null;
+
+  bool get regularUserHomeContextReady => _regularUserHomeContextReady;
+
+  Future<void> waitForRegularUserHomeContext() async {
+    await _regularUserContextReadyCompleter?.future;
+  }
 
   /// Presentation state for the account/portfolio connection indicator.
   /// This does not alter any broker or order authority.
@@ -697,82 +740,553 @@ class DashboardController extends ChangeNotifier {
   String? manualRunSymbol;
   ManualTradingRunResult? manualRunResult;
 
-  Future<void> loadUserBrokerAccounts({bool silent = false}) async {
-    if (userBrokerAccountsLoading) return;
-    userBrokerAccountsLoading = true;
+  void clearRegularUserHomeContext() {
+    if (_authenticatedRegularUserScope == null &&
+        _authenticatedRegularUserOwnerKey == null) {
+      return;
+    }
+    _userAccountContextVersion += 1;
+    _providerContextVersion += 1;
+    _marketRegimeRequestVersion += 1;
+    _authenticatedRegularUserScope = null;
+    _authenticatedRegularUserOwnerKey = null;
+    _authenticatedRegularUserId = null;
+    _regularUserBootstrapOwnerKey = null;
+    _regularUserBootstrapFuture = null;
+    _regularUserContextReadyCompleter?.complete();
+    _regularUserContextReadyCompleter = null;
+    _regularUserHomeContextReady = false;
+    _regularUserBootstrapComplete = false;
+    _userBrokerAccountsFuture = null;
+    userBrokerCredentials = const [];
+    kisUserAccount = null;
+    alpacaUserAccount = null;
+    kisUserAccountLoading = false;
+    alpacaUserAccountLoading = false;
+    kisUserAccountError = null;
+    alpacaUserAccountError = null;
+    kisUserAccountLoadState = UserBrokerAccountLoadState.idle;
+    alpacaUserAccountLoadState = UserBrokerAccountLoadState.idle;
+    userBrokerAccountsLoading = false;
     userBrokerAccountsError = null;
+    userTradingSettings = const {};
+    userTradingSettingsLoaded = false;
+    userTradingSettingsError = null;
+    userHomeAutomationProfiles = null;
+    userHomeAutomationProfilesError = null;
+    userHomeContextLoading = false;
+    userHomeContextError = null;
+    marketRegime = null;
+    marketRegimeLoading = false;
+    marketRegimeLoaded = false;
+    marketRegimeError = null;
+  }
+
+  Future<void> bootstrapRegularUserHome(AuthUser user) {
+    final username = user.username.trim().toLowerCase();
+    if (user.role.trim().toLowerCase() != 'user' || username.isEmpty) {
+      return Future<void>.value();
+    }
+    final ownerKey =
+        user.id == null ? 'username:$username' : 'id:${user.id}:$username';
+    if (_regularUserBootstrapOwnerKey == ownerKey) {
+      final running = _regularUserBootstrapFuture;
+      if (running != null) return running;
+      if (_regularUserBootstrapComplete) return Future<void>.value();
+    }
+
+    _userAccountContextVersion += 1;
+    final contextVersion = _userAccountContextVersion;
+    _authenticatedRegularUserOwnerKey = ownerKey;
+    _authenticatedRegularUserScope =
+        user.id == null ? 'username-$username' : 'id-${user.id}';
+    _authenticatedRegularUserId = user.id;
+    _regularUserBootstrapOwnerKey = ownerKey;
+    _regularUserBootstrapComplete = false;
+    _regularUserHomeContextReady = false;
+    _regularUserContextReadyCompleter = Completer<void>();
+    _userBrokerAccountsFuture = null;
+    _regularUserBootstrapFuture = null;
+
+    // A previous role's selection must not choose a regular user's account.
+    _applyProviderContext(SelectedProvider.kis);
+    _clearProviderScopedState();
+    _providerContextVersion += 1;
+    userBrokerCredentials = const [];
+    kisUserAccount = null;
+    alpacaUserAccount = null;
+    kisUserAccountError = null;
+    alpacaUserAccountError = null;
     kisUserAccountLoading = true;
     alpacaUserAccountLoading = true;
-    if (!silent) notifyListeners();
+    kisUserAccountLoadState = UserBrokerAccountLoadState.loading;
+    alpacaUserAccountLoadState = UserBrokerAccountLoadState.loading;
+    userBrokerAccountsLoading = false;
+    userBrokerAccountsError = null;
+    userTradingSettings = const {};
+    userTradingSettingsLoaded = false;
+    userTradingSettingsError = null;
+    userHomeAutomationProfiles = null;
+    userHomeAutomationProfilesError = null;
+    userHomeContextLoading = true;
+    userHomeContextError = null;
 
+    late final Future<void> tracked;
+    tracked = _bootstrapRegularUserHomeContext(
+      ownerKey: ownerKey,
+      contextVersion: contextVersion,
+    ).whenComplete(() {
+      if (identical(_regularUserBootstrapFuture, tracked)) {
+        _regularUserBootstrapFuture = null;
+        _regularUserBootstrapComplete = true;
+      }
+    });
+    _regularUserBootstrapFuture = tracked;
+    return tracked;
+  }
+
+  Future<void> _bootstrapRegularUserHomeContext({
+    required String ownerKey,
+    required int contextVersion,
+  }) async {
+    final providerSelectionVersion = _providerContextVersion;
     try {
-      userBrokerCredentials = await apiClient.fetchUserBrokers();
-      final configuredProviders = <String>{
-        for (final credential in userBrokerCredentials)
+      final restored = await Future.wait<Object?>([
+        _fetchRegularUserTradingSettings(),
+        _fetchRegularUserBrokers(),
+        _fetchRegularUserAutomationProfiles(),
+      ]);
+      if (!_isCurrentRegularUserContext(ownerKey, contextVersion)) return;
+
+      final settings = restored[0] as Map<String, dynamic>?;
+      final credentials = restored[1] as List<UserBrokerCredential>?;
+      userHomeAutomationProfiles =
+          restored[2] as AutomationStrategyProfileList?;
+      userTradingSettings = settings ?? const {};
+      userTradingSettingsLoaded = settings != null;
+      userTradingSettingsError =
+          settings == null ? 'user_trading_settings_unavailable' : null;
+      userHomeAutomationProfilesError =
+          restored[2] == null ? 'user_profile_context_unavailable' : null;
+      if (credentials != null) {
+        userBrokerCredentials = credentials;
+      } else {
+        userHomeContextError = 'user_broker_context_unavailable';
+      }
+
+      await _restoreRegularUserProviderContext(
+        ownerKey: ownerKey,
+        contextVersion: contextVersion,
+        providerSelectionVersion: providerSelectionVersion,
+        credentials: credentials ?? const [],
+      );
+      if (!_isCurrentRegularUserContext(ownerKey, contextVersion)) return;
+
+      _regularUserHomeContextReady = true;
+      userHomeContextLoading = false;
+      if (!(_regularUserContextReadyCompleter?.isCompleted ?? true)) {
+        _regularUserContextReadyCompleter!.complete();
+      }
+      notifyListeners();
+
+      if (credentials == null) {
+        _setUserBrokerContextFailure('user_broker_context_unavailable');
+      }
+
+      final independentLoads = <Future<void>>[];
+      if (selectedProvider == SelectedProvider.kis) {
+        independentLoads.add(ensureMarketRegimeLoaded(
+          contextVersion: _providerContextVersion,
+        ));
+      }
+      if (credentials != null) {
+        independentLoads.add(loadUserBrokerAccounts(
+          restoredCredentials: credentials,
+          provider: selectedProviderCode,
+        ));
+      }
+      await Future.wait(independentLoads);
+    } catch (_) {
+      if (_isCurrentRegularUserContext(ownerKey, contextVersion)) {
+        userHomeContextError = 'user_context_unavailable';
+        userHomeContextLoading = false;
+        _setUserBrokerContextFailure('user_context_unavailable');
+        if (selectedProvider == SelectedProvider.kis) {
+          unawaited(ensureMarketRegimeLoaded(
+            contextVersion: _providerContextVersion,
+          ));
+        }
+      }
+    } finally {
+      if (_isCurrentRegularUserContext(ownerKey, contextVersion)) {
+        userHomeContextLoading = false;
+        if (!(_regularUserContextReadyCompleter?.isCompleted ?? true)) {
+          _regularUserContextReadyCompleter!.complete();
+        }
+        notifyListeners();
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchRegularUserTradingSettings() async {
+    try {
+      return await apiClient.fetchUserTradingSettings();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<UserBrokerCredential>?> _fetchRegularUserBrokers() async {
+    try {
+      return await apiClient.fetchUserBrokers();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<AutomationStrategyProfileList?>
+      _fetchRegularUserAutomationProfiles() async {
+    try {
+      return await apiClient.fetchUserAutomationProfiles();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _restoreRegularUserProviderContext({
+    required String ownerKey,
+    required int contextVersion,
+    required int providerSelectionVersion,
+    required List<UserBrokerCredential> credentials,
+  }) async {
+    String? savedProvider;
+    final scope = _authenticatedRegularUserScope;
+    if (_persistProvider && scope != null) {
+      try {
+        savedProvider = (await _providerPreferenceStore.readForUser(scope))
+            ?.trim()
+            .toLowerCase();
+      } catch (_) {
+        savedProvider = null;
+      }
+    }
+    if (!_isCurrentRegularUserContext(ownerKey, contextVersion)) return;
+
+    // A deliberate user choice made while the bootstrap reads were in flight
+    // takes precedence over the persisted value.
+    if (providerSelectionVersion == _providerContextVersion) {
+      final configured = <String>{
+        for (final credential in credentials)
           if (credential.configured) credential.provider.trim().toLowerCase(),
       };
-      await Future.wait([
-        _loadUserBrokerAccount('kis', configuredProviders.contains('kis')),
-        _loadUserBrokerAccount(
-          'alpaca',
-          configuredProviders.contains('alpaca'),
-        ),
-      ]);
-    } catch (error) {
-      userBrokerAccountsError = _userBrokerErrorCode(error);
-      kisUserAccountError ??= userBrokerAccountsError;
-      alpacaUserAccountError ??= userBrokerAccountsError;
-      kisUserAccountLoading = false;
-      alpacaUserAccountLoading = false;
-    } finally {
-      userBrokerAccountsLoading = false;
-      if (!silent) notifyListeners();
+      final profileProvider = _validUserProfileProvider(
+        userHomeAutomationProfiles?.selectedProfile,
+      );
+      final settingsProvider = _normalizeUserProvider(
+        userTradingSettings['auto_trading_provider'],
+      );
+      final saved = _normalizeUserProvider(savedProvider);
+      final configuredProfile =
+          profileProvider != null && configured.contains(profileProvider)
+              ? profileProvider
+              : null;
+      final configuredSetting =
+          settingsProvider != null && configured.contains(settingsProvider)
+              ? settingsProvider
+              : null;
+      final onlyConfigured = configured.length == 1 ? configured.single : null;
+      final provider = saved ??
+          configuredProfile ??
+          configuredSetting ??
+          onlyConfigured ??
+          profileProvider ??
+          settingsProvider ??
+          'kis';
+      final resolved =
+          provider == 'alpaca' ? SelectedProvider.alpaca : SelectedProvider.kis;
+      if (resolved != selectedProvider) {
+        _applyProviderContext(resolved);
+        _clearProviderScopedState();
+        _providerContextVersion += 1;
+      } else {
+        _applyProviderContext(resolved);
+      }
     }
+  }
+
+  String? _validUserProfileProvider(AutomationStrategyProfile? profile) {
+    if (profile == null) return null;
+    final provider = _normalizeUserProvider(profile.provider);
+    if (provider == null) return null;
+    final expectedMarket = provider == 'kis' ? 'KR' : 'US';
+    return profile.market.trim().toUpperCase() == expectedMarket
+        ? provider
+        : null;
+  }
+
+  String? _normalizeUserProvider(Object? value) {
+    final provider = value?.toString().trim().toLowerCase();
+    return provider == 'kis' || provider == 'alpaca' ? provider : null;
+  }
+
+  bool _isCurrentRegularUserContext(String ownerKey, int contextVersion) =>
+      contextVersion == _userAccountContextVersion &&
+      _authenticatedRegularUserOwnerKey == ownerKey;
+
+  void _setUserBrokerContextFailure(String code) {
+    userBrokerAccountsError = code;
+    kisUserAccount = null;
+    alpacaUserAccount = null;
+    kisUserAccountError = code;
+    alpacaUserAccountError = code;
+    kisUserAccountLoading = false;
+    alpacaUserAccountLoading = false;
+    kisUserAccountLoadState = UserBrokerAccountLoadState.error;
+    alpacaUserAccountLoadState = UserBrokerAccountLoadState.error;
+  }
+
+  Future<void> loadUserBrokerAccounts({
+    bool silent = false,
+    String? provider,
+    List<UserBrokerCredential>? restoredCredentials,
+  }) {
+    final existing = _userBrokerAccountsFuture;
+    if (existing != null) return existing;
+    if (_authenticatedRegularUserScope != null &&
+        !_regularUserHomeContextReady) {
+      final contextReady = _regularUserContextReadyCompleter;
+      if (contextReady == null) return Future<void>.value();
+      return contextReady.future.then<void>((_) async {
+        if (!_regularUserHomeContextReady) return;
+        await loadUserBrokerAccounts(
+          silent: silent,
+          provider: provider,
+          restoredCredentials: restoredCredentials,
+        );
+      });
+    }
+    if (_authenticatedRegularUserScope == null) {
+      _setUserBrokerContextFailure('authenticated_user_context_unavailable');
+      if (!silent) notifyListeners();
+      return Future<void>.value();
+    }
+
+    final contextVersion = _userAccountContextVersion;
+    late final Future<void> tracked;
+    tracked = _loadUserBrokerAccounts(
+      silent: silent,
+      provider: provider,
+      restoredCredentials: restoredCredentials,
+      contextVersion: contextVersion,
+    ).whenComplete(() {
+      if (identical(_userBrokerAccountsFuture, tracked)) {
+        _userBrokerAccountsFuture = null;
+      }
+    });
+    _userBrokerAccountsFuture = tracked;
+    return tracked;
   }
 
   Future<void> refreshUserBrokerAccounts() => loadUserBrokerAccounts();
 
-  Future<void> _loadUserBrokerAccount(String provider, bool configured) async {
-    final isKis = provider == 'kis';
-    if (!configured) {
-      if (isKis) {
-        kisUserAccount = null;
-        kisUserAccountError = 'broker_credentials_not_configured';
-        kisUserAccountLoading = false;
-      } else {
-        alpacaUserAccount = null;
-        alpacaUserAccountError = 'broker_credentials_not_configured';
-        alpacaUserAccountLoading = false;
-      }
-      return;
+  Future<void> _loadUserBrokerAccounts({
+    required bool silent,
+    required String? provider,
+    required List<UserBrokerCredential>? restoredCredentials,
+    required int contextVersion,
+  }) async {
+    final providers = provider == null
+        ? const ['kis', 'alpaca']
+        : [provider.trim().toLowerCase()];
+    userBrokerAccountsLoading = true;
+    userBrokerAccountsError = null;
+    for (final item in providers) {
+      _setUserAccountLoading(item, true);
     }
+    if (!silent) notifyListeners();
 
     try {
-      final snapshot = await apiClient.getMyBrokerAccountSnapshot(provider);
-      if (isKis) {
-        kisUserAccount = snapshot;
-        kisUserAccountError = null;
-      } else {
-        alpacaUserAccount = snapshot;
-        alpacaUserAccountError = null;
+      final credentials =
+          restoredCredentials ?? await apiClient.fetchUserBrokers();
+      if (contextVersion != _userAccountContextVersion) return;
+      userBrokerCredentials = credentials;
+      final configuredProviders = <String>{
+        for (final credential in credentials)
+          if (credential.configured) credential.provider.trim().toLowerCase(),
+      };
+      if (provider != null) {
+        for (final other in const ['kis', 'alpaca']) {
+          if (other == provider.trim().toLowerCase()) continue;
+          if (configuredProviders.contains(other)) {
+            _setUserAccountState(other, UserBrokerAccountLoadState.idle);
+          } else {
+            _setUserAccountFailure(
+              other,
+              'broker_credentials_not_configured',
+            );
+          }
+        }
       }
+      await Future.wait([
+        for (final item in providers)
+          _loadUserBrokerAccount(
+            item,
+            configuredProviders.contains(item),
+            contextVersion: contextVersion,
+          ),
+      ]);
     } catch (error) {
-      final code = _userBrokerErrorCode(error);
-      if (isKis) {
-        kisUserAccount = null;
-        kisUserAccountError = code;
-      } else {
-        alpacaUserAccount = null;
-        alpacaUserAccountError = code;
+      if (contextVersion == _userAccountContextVersion) {
+        final code = _userBrokerErrorCode(error);
+        userBrokerAccountsError = code;
+        for (final item in providers) {
+          _setUserAccountFailure(item, code);
+        }
       }
     } finally {
-      if (isKis) {
-        kisUserAccountLoading = false;
-      } else {
-        alpacaUserAccountLoading = false;
+      if (contextVersion == _userAccountContextVersion) {
+        userBrokerAccountsLoading = false;
+        if (!silent) notifyListeners();
       }
     }
   }
+
+  Future<void> _loadUserBrokerAccount(
+    String provider,
+    bool configured, {
+    required int contextVersion,
+  }) async {
+    final normalizedProvider = provider.trim().toLowerCase();
+    if (normalizedProvider != 'kis' && normalizedProvider != 'alpaca') {
+      _setUserAccountFailure(normalizedProvider, 'unsupported_provider');
+      return;
+    }
+    if (!configured) {
+      _setUserAccountFailure(
+        normalizedProvider,
+        'broker_credentials_not_configured',
+      );
+      return;
+    }
+    if (_authenticatedRegularUserScope == null ||
+        _authenticatedRegularUserOwnerKey == null ||
+        _authenticatedRegularUserId == null) {
+      _setUserAccountFailure(
+        normalizedProvider,
+        'authenticated_user_context_unavailable',
+      );
+      return;
+    }
+    final market = normalizedProvider == 'kis' ? 'KR' : 'US';
+    if ((normalizedProvider == 'kis' && market != 'KR') ||
+        (normalizedProvider == 'alpaca' && market != 'US')) {
+      _setUserAccountFailure(normalizedProvider, 'account_scope_invalid');
+      return;
+    }
+
+    for (var attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        final request =
+            apiClient.getMyBrokerAccountSnapshot(normalizedProvider);
+        final snapshot = normalizedProvider == 'kis'
+            ? await request.timeout(const Duration(seconds: 15))
+            : await request;
+        if (contextVersion != _userAccountContextVersion) return;
+        if (normalizedProvider == 'kis') {
+          kisUserAccount = snapshot;
+          kisUserAccountError = null;
+        } else {
+          alpacaUserAccount = snapshot;
+          alpacaUserAccountError = null;
+        }
+        _setUserAccountState(
+            normalizedProvider, UserBrokerAccountLoadState.loaded);
+        return;
+      } catch (error) {
+        if (contextVersion != _userAccountContextVersion) return;
+        if (attempt == 0 &&
+            _isRetryableUserAccountRead(normalizedProvider, error)) {
+          _setUserAccountRetrying(normalizedProvider);
+          if (!_disposed) notifyListeners();
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+          if (contextVersion != _userAccountContextVersion) return;
+          continue;
+        }
+        _setUserAccountFailure(
+          normalizedProvider,
+          _userBrokerErrorCode(error),
+        );
+        return;
+      }
+    }
+  }
+
+  bool _isRetryableUserAccountRead(String provider, Object error) {
+    if (provider != 'kis') return false;
+    if (error is ApiRequestException) {
+      return const {500, 502, 503, 504}.contains(error.statusCode);
+    }
+    return error is TimeoutException || error is http.ClientException;
+  }
+
+  void _setUserAccountLoading(String provider, bool loading) {
+    if (provider == 'kis') {
+      kisUserAccountLoading = loading;
+      kisUserAccountLoadState = loading
+          ? UserBrokerAccountLoadState.loading
+          : kisUserAccountLoadState;
+      if (loading) kisUserAccountError = null;
+    } else if (provider == 'alpaca') {
+      alpacaUserAccountLoading = loading;
+      alpacaUserAccountLoadState = loading
+          ? UserBrokerAccountLoadState.loading
+          : alpacaUserAccountLoadState;
+      if (loading) alpacaUserAccountError = null;
+    }
+  }
+
+  void _setUserAccountRetrying(String provider) {
+    if (provider == 'kis') {
+      kisUserAccountLoading = true;
+      kisUserAccountError = null;
+      kisUserAccountLoadState = UserBrokerAccountLoadState.transientRetrying;
+    }
+  }
+
+  void _setUserAccountState(
+    String provider,
+    UserBrokerAccountLoadState state,
+  ) {
+    if (provider == 'kis') {
+      kisUserAccountLoading = state == UserBrokerAccountLoadState.loading ||
+          state == UserBrokerAccountLoadState.transientRetrying;
+      kisUserAccountLoadState = state;
+    } else if (provider == 'alpaca') {
+      alpacaUserAccountLoading = state == UserBrokerAccountLoadState.loading;
+      alpacaUserAccountLoadState = state;
+    }
+  }
+
+  void _setUserAccountFailure(String provider, String code) {
+    if (provider == 'kis') {
+      kisUserAccount = null;
+      kisUserAccountError = code;
+      kisUserAccountLoading = false;
+      kisUserAccountLoadState = UserBrokerAccountLoadState.error;
+    } else if (provider == 'alpaca') {
+      alpacaUserAccount = null;
+      alpacaUserAccountError = code;
+      alpacaUserAccountLoading = false;
+      alpacaUserAccountLoadState = UserBrokerAccountLoadState.error;
+    }
+  }
+
+  UserBrokerAccountLoadState userBrokerAccountLoadStateFor(
+    SelectedProvider provider,
+  ) =>
+      provider == SelectedProvider.kis
+          ? kisUserAccountLoadState
+          : alpacaUserAccountLoadState;
 
   String _userBrokerErrorCode(Object error) {
     if (error is ApiRequestException) {
@@ -792,6 +1306,10 @@ class DashboardController extends ChangeNotifier {
     bool silent = false,
     int? contextVersion,
   }) async {
+    if (_authenticatedRegularUserScope != null &&
+        !_regularUserHomeContextReady) {
+      return;
+    }
     if (!isKisSelected) {
       _marketRegimeRequestVersion += 1;
       marketRegime = null;
@@ -838,6 +1356,10 @@ class DashboardController extends ChangeNotifier {
     bool silent = false,
     int? contextVersion,
   }) async {
+    if (_authenticatedRegularUserScope != null &&
+        !_regularUserHomeContextReady) {
+      return;
+    }
     if (!isKisSelected) return;
     if ((marketRegime != null && marketRegimeError == null) ||
         marketRegimeLoading) {
@@ -850,6 +1372,10 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<void> restoreAuthenticatedProviderContext() async {
+    if (_authenticatedRegularUserScope != null) {
+      await waitForRegularUserHomeContext();
+      return;
+    }
     final restoreVersion = _providerContextVersion;
     await _restoreProviderPreference(
       expectedContextVersion: restoreVersion,
@@ -1719,7 +2245,9 @@ class DashboardController extends ChangeNotifier {
 
   void setProvider(SelectedProvider provider) {
     if (selectedProvider == provider) {
-      if (provider == SelectedProvider.kis) {
+      if (provider == SelectedProvider.kis &&
+          (_authenticatedRegularUserScope == null ||
+              _regularUserHomeContextReady)) {
         unawaited(ensureMarketRegimeLoaded(
           contextVersion: _providerContextVersion,
         ));
@@ -1730,20 +2258,36 @@ class DashboardController extends ChangeNotifier {
     _clearProviderScopedState();
     final version = ++_providerContextVersion;
     unawaited(_saveProviderPreference());
+    notifyListeners();
+
+    if (_authenticatedRegularUserScope != null) {
+      if (_regularUserHomeContextReady) {
+        if (provider == SelectedProvider.kis) {
+          unawaited(ensureMarketRegimeLoaded(contextVersion: version));
+        }
+        unawaited(loadUserBrokerAccounts(
+          provider: selectedProviderCode,
+          silent: true,
+        ));
+      }
+      return;
+    }
+
     if (provider == SelectedProvider.kis) {
       unawaited(ensureMarketRegimeLoaded(
         contextVersion: version,
       ));
       unawaited(refreshKisOrderMonitoring(silent: true));
     }
-    notifyListeners();
     unawaited(_reloadProviderContext(version));
   }
 
   void _ensureProviderContext(SelectedProvider provider) {
     if (selectedProvider == provider) {
       _applyProviderContext(provider);
-      if (provider == SelectedProvider.kis) {
+      if (provider == SelectedProvider.kis &&
+          (_authenticatedRegularUserScope == null ||
+              _regularUserHomeContextReady)) {
         unawaited(ensureMarketRegimeLoaded(
           contextVersion: _providerContextVersion,
         ));
@@ -1754,7 +2298,9 @@ class DashboardController extends ChangeNotifier {
     _clearProviderScopedState();
     final version = ++_providerContextVersion;
     unawaited(_saveProviderPreference());
-    if (provider == SelectedProvider.kis) {
+    if (provider == SelectedProvider.kis &&
+        (_authenticatedRegularUserScope == null ||
+            _regularUserHomeContextReady)) {
       unawaited(ensureMarketRegimeLoaded(
         contextVersion: version,
       ));
@@ -1844,7 +2390,15 @@ class DashboardController extends ChangeNotifier {
   Future<void> _saveProviderPreference() async {
     if (!_persistProvider) return;
     try {
-      await _providerPreferenceStore.write(selectedProviderCode);
+      final userScope = _authenticatedRegularUserScope;
+      if (userScope != null) {
+        await _providerPreferenceStore.writeForUser(
+          userScope,
+          selectedProviderCode,
+        );
+      } else {
+        await _providerPreferenceStore.write(selectedProviderCode);
+      }
     } catch (_) {
       // Provider persistence must never block dashboard loading or switching.
     }

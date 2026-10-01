@@ -933,6 +933,7 @@ class KisPositionLifecycleService:
         scheduler_slot: str | None = None,
         now: datetime | None = None,
         include_raw: bool = False,
+        positions_snapshot: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         now_utc = _aware_utc(now or self.now_provider())
         self._ensure_lifecycles_from_filled_buys(db, now=now_utc)
@@ -985,7 +986,14 @@ class KisPositionLifecycleService:
                 }
             )
 
-        positions = self._broker_positions()
+        if positions_snapshot is not None:
+            if not isinstance(positions_snapshot, list) or any(
+                not isinstance(item, dict) for item in positions_snapshot
+            ):
+                raise ValueError("kis_position_snapshot_invalid")
+            positions = [dict(item) for item in positions_snapshot]
+        else:
+            positions = self._broker_positions()
         open_orders = self._broker_open_orders()
         items: list[dict[str, Any]] = []
         sell_submitted = False

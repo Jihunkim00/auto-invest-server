@@ -35,10 +35,16 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
     unawaited(widget.controller.loadUserHomeRecentActivity());
   }
 
-  Future<bool> _loadTradingMode() async {
+  Future<bool> _loadTradingMode({bool forceFetch = false}) async {
     try {
-      final settings =
-          await widget.controller.apiClient.fetchUserTradingSettings();
+      late final Map<String, dynamic> settings;
+      if (!forceFetch && widget.controller.regularUserHomeBootstrapStarted) {
+        await widget.controller.waitForRegularUserHomeContext();
+        if (!widget.controller.userTradingSettingsLoaded) return false;
+        settings = widget.controller.userTradingSettings;
+      } else {
+        settings = await widget.controller.apiClient.fetchUserTradingSettings();
+      }
       if (!mounted) return false;
       setState(() => _mode =
           settings['trading_mode']?.toString() == 'live' ? 'live' : 'paper');
@@ -56,7 +62,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
       await widget.controller.apiClient.updateUserTradingSettings(
         tradingMode: mode,
       );
-      final reloaded = await _loadTradingMode();
+      final reloaded = await _loadTradingMode(forceFetch: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -67,7 +73,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         );
       }
     } catch (_) {
-      await _loadTradingMode();
+      await _loadTradingMode(forceFetch: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('거래 모드를 저장하지 못했습니다.')),

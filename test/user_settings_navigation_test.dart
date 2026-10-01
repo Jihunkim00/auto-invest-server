@@ -113,6 +113,7 @@ class _RegularUserSettingsApiClient extends ApiClient {
         authenticated: true,
         setupRequired: false,
         user: AuthUser(
+          id: 34,
           username: 'regular-user',
           role: 'user',
           enabled: true,

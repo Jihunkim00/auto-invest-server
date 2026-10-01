@@ -18,7 +18,7 @@ def _request(**overrides):
         'provider': 'kis',
         'market': 'KR',
         'capital': {'sizing_mode': 'equity_pct'},
-        'operation': {'start_date': '2026-08-01', 'end_date': '2026-09-30'},
+        'operation': {'start_date': '2026-08-01', 'end_date': '2099-12-31'},
     }
     payload.update(overrides)
     return AutomationProfileWriteRequest(**payload)
@@ -133,7 +133,7 @@ def test_profile_http_routes_cover_crud_validation_and_readiness(db_session):
             response = client.post('/strategy-profiles', json={
                 'profile_key': 'http-profile',
                 'name': 'HTTP profile',
-                'operation': {'start_date': '2026-08-01', 'end_date': '2026-09-30'},
+                'operation': {'start_date': '2026-08-01', 'end_date': '2099-12-31'},
             })
             assert response.status_code == 201, response.text
             profile_id = response.json()['id']
