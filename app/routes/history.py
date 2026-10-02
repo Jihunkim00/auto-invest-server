@@ -15,7 +15,9 @@ from app.services.gpt_risk_context import (
     has_observed_gpt_context,
 )
 from app.services.auth_dependencies import require_admin_or_uninitialized_legacy_access
-from app.services.automation_today_decision_service import AutomationTodayDecisionService
+from app.services.automation_today_decision_service import (
+    AutomationTodayDecisionService, SYSTEM_AUTOMATION_RUN_MODES,
+)
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     kis_order_source_metadata_from_payloads,
@@ -878,7 +880,7 @@ def get_recent_system_automation_runs(
             _admin_scope_filter(TradeRunLog, _admin),
             TradeRunLog.symbol.notin_(['', 'NONE', 'UNKNOWN']),
             TradeRunLog.trigger_source == 'automation_scheduler',
-            TradeRunLog.mode == 'automation_scheduler_profile_analysis',
+            TradeRunLog.mode.in_(SYSTEM_AUTOMATION_RUN_MODES),
         )
         .order_by(TradeRunLog.created_at.desc(), TradeRunLog.id.desc())
         .limit(limit)

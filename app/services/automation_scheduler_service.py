@@ -6,6 +6,7 @@ Historical scheduler services remain callable through their compatibility
 routes, but are intentionally never started by the application.
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -30,6 +31,7 @@ from app.db.models import (
     PositionExitRetryJob,
     PositionLifecycle,
     StrategyLiveAutoExitAttempt,
+    TradeRunLog,
 )
 from app.schemas.strategy_dry_run_auto_buy import ProfileAwareDryRunAutoBuyRequest
 from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
@@ -79,6 +81,9 @@ POSITION_EXIT_POSITION_CACHE_SECONDS = 300
 POSITION_EXIT_FRESH_READ_SECONDS = 5
 CRITICAL_EXIT_ACTIONS = {"SELL_READY", "STOP_LOSS", "TAKE_PROFIT", "EXIT_SIGNAL"}
 POSITION_EXIT_JOB_ACTIVE_STATUSES = {"pending", "running"}
+ENTRY_SLOT_POSITION_GRACE_SECONDS = 120
+ENTRY_SLOT_POSITION_RETRY_SECONDS = 20
+ENTRY_SLOT_RECOVERY_MODE = "automation_entry_slot_recovery"
 POSITION_EXIT_SUBMITTED_ATTEMPT_STATUSES = {
     "submitting", "submitted", "accepted", "pending", "pending_sync",
     "sync_required", "partially_filled", "partial", "filled",
@@ -136,6 +141,7 @@ class AutomationSchedulerService(SchedulerService):
         self.profile_aware_dry_run_auto_buy_service = None
         self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
+        self._entry_slot_recovery_lock = threading.Lock()
         self._monitoring_due_at: datetime | None = None
         self._position_exit_monitor_due_at: datetime | None = None
         self._position_exit_positions_lock = threading.Lock()
@@ -431,10 +437,8 @@ class AutomationSchedulerService(SchedulerService):
             for slot, hour, minute in self._profile_slots(now_kst):
                 if now_kst.hour != hour or now_kst.minute != minute:
                     continue
-                run_key = f"{day_key}:KR:automation:{slot}"
-                if run_key in self._slot_runs:
+                if not self._claim_slot(slot, now_kst):
                     continue
-                self._slot_runs.add(run_key)
                 self._safe_call(self._run_automation_tick, slot, now_kst, True)
             market_regime_key = f"{day_key}:KR:market_regime:08:00"
             if market_regime_scheduler_due(now_kst) and market_regime_key not in self._slot_runs:
@@ -890,6 +894,42 @@ class AutomationSchedulerService(SchedulerService):
         return self._safe_call(self._run_automation_tick, resolved_slot, current)
 
     def _run_automation_tick(
+        self, slot_name: str, now: datetime | None = None,
+        slot_claimed: bool = False, **kwargs,
+    ) -> dict[str, Any]:
+        recovery: dict[str, Any] = {}
+        try:
+            result = self._run_automation_tick_impl(
+                slot_name, now, slot_claimed,
+                entry_recovery_context=recovery, **kwargs,
+            )
+        except Exception:
+            if recovery:
+                self._finish_entry_slot_recovery(
+                    recovery, self._entry_slot_position_block(
+                        "entry_slot_position_recovery_failed"
+                    ),
+                )
+            raise
+        if recovery:
+            result = self._finish_entry_slot_recovery(recovery, result)
+            if (
+                result.get("reason") == "position_state_refresh_pending"
+                and kwargs.get("entry_recovery_log_id") is None
+            ):
+                try:
+                    accepted = self._schedule_deferred_entry_slot_recovery(recovery)
+                except Exception:
+                    accepted = False
+                if not accepted:
+                    return self._finish_entry_slot_recovery(
+                        recovery, self._entry_slot_position_block(
+                            "entry_slot_position_recovery_unavailable"
+                        ),
+                    )
+        return result
+
+    def _run_automation_tick_impl(
         self,
         slot_name: str,
         now: datetime | None = None,
@@ -899,8 +939,11 @@ class AutomationSchedulerService(SchedulerService):
         retry_started_at: datetime | None = None,
         expected_profile_key: str | None = None,
         expected_profile_id: int | None = None,
+        entry_recovery_log_id: int | None = None,
+        entry_recovery_context: dict[str, Any],
     ) -> dict[str, Any]:
         db = SessionLocal()
+        owned_exit_retry = None
         try:
             now_kst = (now or datetime.now(KST)).astimezone(KST)
             slot = self._profile_scheduler_slot(slot_name)
@@ -966,13 +1009,43 @@ class AutomationSchedulerService(SchedulerService):
                 owner_user_id=_safe_int(profile.get('owner_user_id')),
                 profile_key=profile_key,
             )
+            recovery_log = self._find_entry_slot_recovery(db, profile, slot, now_kst)
+            recoverable_retry = bool(
+                pending_exit_retry is not None
+                and self._can_resume_entry_after_position_retry(pending_exit_retry)
+            )
+            if recovery_log is not None or recoverable_retry:
+                if not self._claim_entry_slot_recovery(
+                    db, profile, slot, now_kst, entry_recovery_context,
+                    existing=recovery_log, expected_log_id=entry_recovery_log_id,
+                    position_retry_job=pending_exit_retry,
+                ):
+                    return self._entry_slot_position_block("scheduler_slot_already_run", status="skipped")
+                source_job_id = entry_recovery_context["payload"].get("position_retry_job_id")
+                source_job = db.get(PositionExitRetryJob, source_job_id) if source_job_id else None
+                if source_job is not None and (
+                    self._exit_cycle_has_submit_progress(db, source_job.exit_cycle_key)
+                    or source_job.status not in {"pending", "running", "resolved_hold"}
+                ):
+                    return self._entry_slot_position_block("position_retry_exit_unresolved")
+                if now_kst >= entry_recovery_context["deadline"]:
+                    return self._entry_slot_position_block(
+                        "position_state_unavailable_after_entry_slot_grace"
+                    )
             if pending_exit_retry is not None:
-                return self._position_exit_retry_pending_result(pending_exit_retry)
+                if not recoverable_retry:
+                    return self._position_exit_retry_pending_result(pending_exit_retry)
+                if not self._claim_entry_position_retry(db, pending_exit_retry, now_kst):
+                    return self._entry_slot_position_block("position_state_refresh_pending", status="retry_pending")
+                owned_exit_retry = pending_exit_retry
 
             try:
                 positions = self._positions_first(db)
             except Exception as exc:
-                return self._position_snapshot_failure_result(
+                if owned_exit_retry is not None:
+                    self._release_entry_position_retry(db, owned_exit_retry)
+                    owned_exit_retry = None
+                failure = self._position_snapshot_failure_result(
                     db,
                     profile=profile,
                     profile_id=profile_id,
@@ -981,6 +1054,32 @@ class AutomationSchedulerService(SchedulerService):
                     now=now_kst,
                     error=exc,
                 )
+                if (failure.get("read_failure") or {}).get("retryable") is True:
+                    if not entry_recovery_context:
+                        self._claim_entry_slot_recovery(
+                            db, profile, slot, now_kst, entry_recovery_context,
+                            position_retry_job=self._active_position_exit_retry_job(
+                                db, profile_id=profile_id,
+                                owner_user_id=_safe_int(profile.get("owner_user_id")),
+                                profile_key=profile_key,
+                            ),
+                        )
+                    return {
+                        **failure,
+                        "reason": "position_state_refresh_pending",
+                        "owner_user_id": _safe_int(profile.get("owner_user_id")),
+                    }
+                return failure
+            if owned_exit_retry is not None:
+                if self._exit_cycle_has_submit_progress(db, owned_exit_retry.exit_cycle_key):
+                    return self._entry_slot_position_block("position_state_refresh_pending", status="retry_pending")
+                if _position_exit_held_position_count(positions) == 0:
+                    self._finish_position_exit_retry_job(
+                        db, owned_exit_retry,
+                        {"block_reason": "no_exit_candidate"},
+                        now=now_kst, retry_index=int(owned_exit_retry.retry_count or 0),
+                    )
+                    owned_exit_retry = None
             account_snapshot = {'positions': positions}
             try:
                 portfolio = self._manage_portfolio_first(
@@ -1027,11 +1126,15 @@ class AutomationSchedulerService(SchedulerService):
             retry_job = None
             if should_evaluate_guarded_exit:
                 exit_service = self._profile_guarded_live_auto_exit_service(db)
-                exit_cycle_key = build_scheduler_exit_cycle_key(
-                    profile=profile,
-                    now=now_kst,
-                    scheduler_slot=slot,
-                    symbol=exit_symbol,
+                exit_cycle_key = (
+                    owned_exit_retry.exit_cycle_key if owned_exit_retry is not None
+                    else build_scheduler_exit_cycle_key(
+                        profile=profile, now=now_kst, scheduler_slot=slot, symbol=exit_symbol,
+                    )
+                )
+                retry_kwargs = (
+                    {"retry_index": int(owned_exit_retry.retry_count or 0) + 1}
+                    if owned_exit_retry is not None else {}
                 )
                 exit_result = exit_service.run_scheduler_once(
                     db,
@@ -1039,7 +1142,14 @@ class AutomationSchedulerService(SchedulerService):
                     symbol=exit_symbol,
                     now=now_kst,
                     exit_cycle_key=exit_cycle_key,
+                    **retry_kwargs,
                 )
+                if owned_exit_retry is not None:
+                    self._finish_position_exit_retry_job(
+                        db, owned_exit_retry, exit_result,
+                        now=now_kst, retry_index=retry_kwargs["retry_index"],
+                    )
+                    owned_exit_retry = None
                 retry_job = self._schedule_position_exit_retry_from_result(
                     db,
                     result=exit_result,
@@ -1170,6 +1280,11 @@ class AutomationSchedulerService(SchedulerService):
                     positions_override=positions,
                 )
             except AccountSnapshotReadError as exc:
+                if entry_recovery_context:
+                    return {
+                        **self._entry_slot_position_block("account_snapshot_unavailable"),
+                        "position_state": "known", "position_state_known": True,
+                    }
                 return self._account_snapshot_retry_result(
                     slot=slot,
                     now_kst=now_kst,
@@ -1180,6 +1295,13 @@ class AutomationSchedulerService(SchedulerService):
                     retry_started_at=retry_started_at or now_kst,
                 )
 
+            if entry_recovery_context:
+                elapsed = time.monotonic() - entry_recovery_context["execution_started_monotonic"]
+                now_kst += timedelta(seconds=max(0, elapsed))
+                if now_kst >= entry_recovery_context["deadline"]:
+                    return self._entry_slot_position_block(
+                        "position_state_unavailable_after_entry_slot_grace"
+                    )
             entry_settings = effective_profile.get('entry') or {}
             cutoff = str(entry_settings.get('no_new_entry_after') or '').strip()
             cutoff_reached = bool(
@@ -1232,6 +1354,20 @@ class AutomationSchedulerService(SchedulerService):
                 now=now_kst,
                 execution_mode=mode,
             )
+            if entry_recovery_context:
+                recovery_metadata = {
+                    "recovered_from_position_retry": True,
+                    "original_scheduler_slot": slot,
+                }
+                dry_result.update(recovery_metadata)
+                analysis_log_id = _safe_int(dry_result.get("trade_run_id") or dry_result.get("id"))
+                analysis_log = db.get(TradeRunLog, analysis_log_id) if analysis_log_id else None
+                if analysis_log is not None:
+                    analysis_payload = json.loads(analysis_log.response_payload or "{}")
+                    analysis_log.response_payload = json.dumps(
+                        {**analysis_payload, **recovery_metadata}, ensure_ascii=False,
+                    )
+                    db.commit()
             dry_run = self._canonical_analysis_response(
                 dry_result,
                 schedule=schedule,
@@ -1338,7 +1474,214 @@ class AutomationSchedulerService(SchedulerService):
                 "profile_buy": profile_buy,
             }
         finally:
+            if owned_exit_retry is not None:
+                self._release_entry_position_retry(db, owned_exit_retry)
             db.close()
+
+    @staticmethod
+    def _can_resume_entry_after_position_retry(job: PositionExitRetryJob) -> bool:
+        try:
+            diagnostics = json.loads(job.diagnostics_json or "{}")
+        except (TypeError, ValueError):
+            return False
+        return bool(
+            isinstance(diagnostics, dict)
+            and diagnostics.get("read_operation") == "positions"
+            and diagnostics.get("retryable") is True
+        )
+
+    def _claim_entry_position_retry(self, db, job, now: datetime) -> bool:
+        if self._exit_cycle_has_submit_progress(db, job.exit_cycle_key):
+            return False
+        claimed = db.execute(
+            update(PositionExitRetryJob)
+            .where(PositionExitRetryJob.id == job.id)
+            .where(PositionExitRetryJob.status == "pending")
+            .values(status="running", claimed_at=now.astimezone(UTC))
+            .execution_options(synchronize_session=False)
+        )
+        db.commit()
+        db.refresh(job)
+        return claimed.rowcount == 1
+
+    def _release_entry_position_retry(self, db, job) -> None:
+        job_id, claimed_at = job.id, job.claimed_at
+        db.rollback()
+        db.execute(
+            update(PositionExitRetryJob)
+            .where(PositionExitRetryJob.id == job_id)
+            .where(PositionExitRetryJob.status == "running")
+            .where(PositionExitRetryJob.claimed_at == claimed_at)
+            .values(status="pending", claimed_at=None)
+            .execution_options(synchronize_session=False)
+        )
+        db.commit()
+
+    @staticmethod
+    def _entry_slot_position_block(reason: str, *, status: str = "blocked") -> dict[str, Any]:
+        return {
+            "status": status, "result": status, "reason": reason,
+            "position_state": "unknown", "position_state_known": False,
+            "buy_execution_allowed": False, "broker_submit_called": False,
+            "real_order_submitted": False,
+        }
+
+    @staticmethod
+    def _entry_slot_recovery_key(profile, slot: str, now: datetime) -> str:
+        scope = json.dumps([
+            profile.get("owner_user_id"), profile.get("id"),
+            profile.get("profile_key"), now.date().isoformat(), slot,
+        ], separators=(",", ":"))
+        return "entry_position_" + hashlib.sha256(scope.encode()).hexdigest()[:40]
+
+    def _find_entry_slot_recovery(self, db, profile, slot, now):
+        return db.query(TradeRunLog).filter_by(
+            run_key=self._entry_slot_recovery_key(profile, slot, now),
+            trigger_source=CANONICAL_TRIGGER_SOURCE,
+        ).first()
+
+    def _claim_entry_slot_recovery(
+        self, db, profile, slot, now, context, *,
+        existing=None, expected_log_id=None, position_retry_job=None,
+    ) -> bool:
+        # Production has one scheduler authority. Serialize record creation;
+        # callbacks additionally use a DB compare-and-set on the existing row.
+        with self._entry_slot_recovery_lock:
+            log = existing or self._find_entry_slot_recovery(db, profile, slot, now)
+            if log is None:
+                if expected_log_id is not None:
+                    return False
+                payload = {
+                    "scheduler_slot": slot, "original_scheduler_slot": slot,
+                    "profile_id": _safe_int(profile.get("id")),
+                    "profile_key": str(profile.get("profile_key") or ""),
+                    "owner_user_id": _safe_int(profile.get("owner_user_id")),
+                    "provider": "kis", "market": "KR",
+                    "position_retry_job_id": position_retry_job.id if position_retry_job is not None else None,
+                    "started_at": now.isoformat(),
+                    "grace_deadline": (now + timedelta(seconds=ENTRY_SLOT_POSITION_GRACE_SECONDS)).isoformat(),
+                    "position_state": "unknown", "buy_execution_allowed": False,
+                }
+                log = TradeRunLog(
+                    run_key=self._entry_slot_recovery_key(profile, slot, now),
+                    owner_user_id=payload["owner_user_id"],
+                    trigger_source=CANONICAL_TRIGGER_SOURCE, symbol="WATCHLIST",
+                    mode=ENTRY_SLOT_RECOVERY_MODE, stage="positions_first", result="running",
+                    reason="position_state_refresh_pending",
+                    request_payload=json.dumps(payload, separators=(",", ":")),
+                )
+                db.add(log)
+                db.commit()
+                db.refresh(log)
+            else:
+                if expected_log_id != log.id:
+                    return False
+                claimed = db.execute(
+                    update(TradeRunLog).where(TradeRunLog.id == log.id)
+                    .where(TradeRunLog.result == "retry_pending")
+                    .values(result="running")
+                    .execution_options(synchronize_session=False)
+                )
+                db.commit()
+                if claimed.rowcount != 1:
+                    return False
+                db.refresh(log)
+                payload = json.loads(log.request_payload)
+            context.update(
+                log_id=log.id, payload=payload,
+                started_at=self._as_kst(datetime.fromisoformat(payload["started_at"])),
+                deadline=self._as_kst(datetime.fromisoformat(payload["grace_deadline"])),
+                execution_started_monotonic=time.monotonic(),
+            )
+            return True
+
+    def _finish_entry_slot_recovery(self, context, result):
+        if not isinstance(result, dict):
+            result = self._entry_slot_position_block(
+                str(getattr(result, "reason", None) or "entry_slot_recovery_disabled")
+            )
+        pending = result.get("reason") == "position_state_refresh_pending"
+        recovered = result.get("position_state_known") is True or result.get("dry_run") is not None
+        payload = context["payload"]
+        result = {
+            **result,
+            **{key: payload[key] for key in (
+                "scheduler_slot", "original_scheduler_slot",
+                "profile_id", "profile_key", "owner_user_id",
+            )},
+            "recovered_from_position_retry": recovered,
+        }
+        profile_buy = result.get("profile_buy") or {}
+        result.setdefault("broker_submit_called", profile_buy.get("broker_submit_called") is True)
+        result.setdefault("real_order_submitted", profile_buy.get("real_order_submitted") is True)
+        # Only persist slot diagnostics, never broker snapshots or credentials.
+        public = {
+            key: result.get(key) for key in (
+                "scheduler_slot", "original_scheduler_slot", "profile_id",
+                "profile_key", "owner_user_id", "result", "reason",
+                "recovered_from_position_retry", "broker_submit_called",
+                "real_order_submitted",
+            )
+        }
+        public.update(
+            position_state="known" if recovered else "unknown",
+            buy_execution_allowed=bool(
+                result.get("buy_execution_allowed") is True
+                or (recovered and result.get("mode") == "live"
+                    and result.get("result") == "LIVE_READY"
+                    and profile_buy.get("status") != "blocked")
+            ),
+        )
+        result.setdefault("position_state", public["position_state"])
+        result.setdefault("position_state_known", recovered)
+        result.setdefault("buy_execution_allowed", public["buy_execution_allowed"])
+        db = SessionLocal()
+        try:
+            db.query(TradeRunLog).filter(
+                TradeRunLog.id == context["log_id"],
+                TradeRunLog.result.in_(["running", "retry_pending"]),
+            ).update({
+                TradeRunLog.result: "retry_pending" if pending else str(result.get("result") or result.get("status") or "blocked"),
+                TradeRunLog.reason: str(result.get("reason") or ""),
+                TradeRunLog.stage: "positions_first" if pending else "done",
+                TradeRunLog.response_payload: json.dumps(public, separators=(",", ":")),
+            }, synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+        return result
+
+    def _schedule_deferred_entry_slot_recovery(self, context) -> bool:
+        payload = context["payload"]
+        def recover() -> int | None:
+            now = self._as_kst(self.retry_now_provider())
+            result = self._run_automation_tick(
+                payload["scheduler_slot"], now, True,
+                retry_attempt=2, retry_started_at=context["started_at"],
+                expected_profile_key=payload["profile_key"],
+                expected_profile_id=payload["profile_id"],
+                entry_recovery_log_id=context["log_id"],
+            )
+            if isinstance(result, dict) and result.get("reason") == "scheduler_slot_already_run":
+                return None
+            if isinstance(result, dict) and result.get("reason") == "position_state_refresh_pending":
+                return max(1, min(
+                    ENTRY_SLOT_POSITION_RETRY_SECONDS,
+                    int((context["deadline"] - now).total_seconds()),
+                ))
+            self._finish_entry_slot_recovery(context, result)
+            return None
+
+        accepted = bool(self.retry_scheduler(
+            ("admin-position-slot", payload["owner_user_id"], payload["profile_id"],
+             payload["profile_key"], context["started_at"].date().isoformat(), payload["scheduler_slot"]),
+            recover, delay_seconds=ENTRY_SLOT_POSITION_RETRY_SECONDS,
+        ))
+        if not accepted:
+            self._finish_entry_slot_recovery(
+                context, self._entry_slot_position_block("entry_slot_position_recovery_unavailable"),
+            )
+        return accepted
 
     def run_automation_watchlist_refresh_once(
         self,
@@ -2674,6 +3017,7 @@ class AutomationSchedulerService(SchedulerService):
                     self._position_exit_retry_executor.submit(
                         self._run_claimed_position_exit_retry_job,
                         job_id,
+                        expected_claimed_at=now_utc,
                     )
                     output.append({"job_id": job_id, "status": "running"})
                 except RuntimeError:
@@ -2681,7 +3025,9 @@ class AutomationSchedulerService(SchedulerService):
                     output.append({"job_id": job_id, "status": "pending"})
             else:
                 output.append(
-                    self._run_claimed_position_exit_retry_job(job_id, now_utc)
+                    self._run_claimed_position_exit_retry_job(
+                        job_id, now_utc, expected_claimed_at=now_utc,
+                    )
                 )
         return output
 
@@ -2781,12 +3127,16 @@ class AutomationSchedulerService(SchedulerService):
         )
         db.commit()
         if claimed.rowcount == 1:
-            self._run_claimed_position_exit_retry_job(int(job.id), now_utc)
+            self._run_claimed_position_exit_retry_job(
+                int(job.id), now_utc, expected_claimed_at=now_utc,
+            )
 
     def _run_claimed_position_exit_retry_job(
         self,
         job_id: int,
         now: datetime | None = None,
+        *,
+        expected_claimed_at: datetime | None = None,
     ) -> dict[str, Any]:
         # The asynchronous worker may start after its job was claimed. Re-evaluate
         # market/session gates against execution time, never the stale tick time.
@@ -2796,7 +3146,13 @@ class AutomationSchedulerService(SchedulerService):
             job = db.query(PositionExitRetryJob).filter(
                 PositionExitRetryJob.id == job_id
             ).first()
-            if job is None or job.status != "running":
+            if (
+                job is None or job.status != "running"
+                or (expected_claimed_at is not None and (
+                    job.claimed_at is None
+                    or self._retry_datetime_to_kst(job.claimed_at) != self._as_kst(expected_claimed_at)
+                ))
+            ):
                 return {"job_id": job_id, "status": "skipped", "reason": "retry_job_not_running"}
             if self._exit_cycle_has_submit_progress(db, job.exit_cycle_key):
                 job.status = "resolved_existing_order"
@@ -2870,154 +3226,161 @@ class AutomationSchedulerService(SchedulerService):
                 )
                 return {"job_id": job_id, "status": job.status, "reason": job.last_block_reason}
 
-            safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
-            read_failure = safety.get("read_failure")
-            submit_called = bool(
-                result.get("broker_submit_called") is True
-                or safety.get("broker_submit_called") is True
+            return self._finish_position_exit_retry_job(
+                db, job, result, now=now, retry_index=retry_index,
             )
-            submitted = bool(
-                result.get("submitted") is True
-                or result.get("real_order_submitted") is True
-            )
-            now_utc = self._as_kst(now).astimezone(UTC)
-            if submitted:
-                job.status = "resolved_submitted"
-                job.last_block_reason = None
-                if isinstance(read_failure, dict):
-                    read_failure["retry_succeeded"] = True
-                job.diagnostics_json = json.dumps(
-                    {
-                        **(read_failure or {}),
-                        "retry_succeeded": True,
-                        "exit_cycle_key": job.exit_cycle_key,
-                        "owner_user_id": job.owner_user_id,
-                        "profile_id": job.profile_id,
-                        "profile_key": job.profile_key,
-                        "symbol": result.get("symbol") or job.symbol,
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-            elif submit_called:
-                job.status = "hard_blocked"
-                job.last_block_reason = str(result.get("block_reason") or result.get("reason") or "broker_submit_attempted")[:160]
-            elif isinstance(read_failure, dict) and read_failure.get("retryable") is True:
-                job.retry_count = retry_index
-                job.last_block_reason = str(result.get("block_reason") or "account_snapshot_unavailable")[:160]
-                if retry_index >= int(job.max_retries or POSITION_EXIT_MAX_RETRIES):
-                    job.status = "exhausted"
-                    job.next_retry_at = now_utc
-                    read_failure["retry_succeeded"] = False
-                    job.diagnostics_json = json.dumps(
-                        {
-                            **read_failure,
-                            "block_reason": job.last_block_reason,
-                            "exit_cycle_key": job.exit_cycle_key,
-                            "owner_user_id": job.owner_user_id,
-                            "profile_id": job.profile_id,
-                            "profile_key": job.profile_key,
-                            "symbol": job.symbol,
-                        },
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    logger.error(
-                        "KIS held-position exit retry exhausted job_id=%s profile_id=%s profile_key=%s retry_index=%s max_retries=%s block_reason=%s read_operation=%s http_status=%s",
-                        job.id,
-                        job.profile_id,
-                        job.profile_key,
-                        retry_index,
-                        job.max_retries,
-                        job.last_block_reason,
-                        read_failure.get("read_operation"),
-                        read_failure.get("http_status"),
-                    )
-                else:
-                    job.status = "pending"
-                    job.next_retry_at = now_utc + timedelta(seconds=POSITION_EXIT_RETRY_DELAY_SECONDS)
-                    read_failure["retry_succeeded"] = False
-                    job.diagnostics_json = json.dumps(
-                        {
-                            **read_failure,
-                            "block_reason": job.last_block_reason,
-                            "retry_scheduled_for": self._retry_datetime_to_kst(job.next_retry_at).isoformat(),
-                            "exit_cycle_key": job.exit_cycle_key,
-                            "owner_user_id": job.owner_user_id,
-                            "profile_id": job.profile_id,
-                            "profile_key": job.profile_key,
-                            "symbol": job.symbol,
-                        },
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    logger.warning(
-                        "KIS held-position exit retry failed; next retry scheduled job_id=%s profile_id=%s profile_key=%s symbol=%s retry_index=%s max_retries=%s retry_scheduled_for=%s read_operation=%s http_status=%s tr_id=%s path=%s",
-                        job.id,
-                        job.profile_id,
-                        job.profile_key,
-                        job.symbol,
-                        retry_index,
-                        job.max_retries,
-                        self._retry_datetime_to_kst(job.next_retry_at).isoformat(),
-                        read_failure.get("read_operation"),
-                        read_failure.get("http_status"),
-                        read_failure.get("tr_id"),
-                        read_failure.get("path"),
-                    )
-            else:
-                reason = str(result.get("block_reason") or result.get("reason") or "exit_retry_no_sell")
-                job.last_block_reason = reason[:160]
-                job.claimed_at = None
-                if reason in {
-                    "duplicate_open_sell_order",
-                    "no_exit_candidate",
-                    "no_exit_trigger",
-                    "position_not_found",
-                    "insufficient_holdings",
-                }:
-                    job.status = (
-                        "resolved_existing_order"
-                        if reason == "duplicate_open_sell_order"
-                        else "resolved_hold"
-                    )
-                else:
-                    job.status = "hard_blocked"
-                job.diagnostics_json = json.dumps(
-                    {
-                        "block_reason": job.last_block_reason,
-                        "retry_succeeded": True,
-                        "exit_cycle_key": job.exit_cycle_key,
-                        "owner_user_id": job.owner_user_id,
-                        "profile_id": job.profile_id,
-                        "profile_key": job.profile_key,
-                        "symbol": result.get("symbol") or job.symbol,
-                    },
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-            job.claimed_at = None
-            job.updated_at = now_utc
-            db.commit()
-            logger.info(
-                "KIS held-position exit retry completed job_id=%s profile_id=%s profile_key=%s retry_index=%s status=%s block_reason=%s broker_submit_called=%s",
-                job.id,
-                job.profile_id,
-                job.profile_key,
-                retry_index,
-                job.status,
-                job.last_block_reason,
-                submit_called,
-            )
-            return {
-                "job_id": job_id,
-                "status": job.status,
-                "retry_index": retry_index,
-                "reason": job.last_block_reason,
-                "broker_submit_called": submit_called,
-            }
         finally:
             db.close()
+
+    def _finish_position_exit_retry_job(
+        self, db, job, result, *, now: datetime, retry_index: int,
+    ) -> dict[str, Any]:
+        safety = result.get("safety") if isinstance(result.get("safety"), dict) else {}
+        read_failure = safety.get("read_failure")
+        submit_called = bool(
+            result.get("broker_submit_called") is True
+            or safety.get("broker_submit_called") is True
+        )
+        submitted = bool(
+            result.get("submitted") is True
+            or result.get("real_order_submitted") is True
+        )
+        now_utc = self._as_kst(now).astimezone(UTC)
+        if submitted:
+            job.status = "resolved_submitted"
+            job.last_block_reason = None
+            if isinstance(read_failure, dict):
+                read_failure["retry_succeeded"] = True
+            job.diagnostics_json = json.dumps(
+                {
+                    **(read_failure or {}),
+                    "retry_succeeded": True,
+                    "exit_cycle_key": job.exit_cycle_key,
+                    "owner_user_id": job.owner_user_id,
+                    "profile_id": job.profile_id,
+                    "profile_key": job.profile_key,
+                    "symbol": result.get("symbol") or job.symbol,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        elif submit_called:
+            job.status = "hard_blocked"
+            job.last_block_reason = str(result.get("block_reason") or result.get("reason") or "broker_submit_attempted")[:160]
+        elif isinstance(read_failure, dict) and read_failure.get("retryable") is True:
+            job.retry_count = retry_index
+            job.last_block_reason = str(result.get("block_reason") or "account_snapshot_unavailable")[:160]
+            if retry_index >= int(job.max_retries or POSITION_EXIT_MAX_RETRIES):
+                job.status = "exhausted"
+                job.next_retry_at = now_utc
+                read_failure["retry_succeeded"] = False
+                job.diagnostics_json = json.dumps(
+                    {
+                        **read_failure,
+                        "block_reason": job.last_block_reason,
+                        "exit_cycle_key": job.exit_cycle_key,
+                        "owner_user_id": job.owner_user_id,
+                        "profile_id": job.profile_id,
+                        "profile_key": job.profile_key,
+                        "symbol": job.symbol,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                logger.error(
+                    "KIS held-position exit retry exhausted job_id=%s profile_id=%s profile_key=%s retry_index=%s max_retries=%s block_reason=%s read_operation=%s http_status=%s",
+                    job.id,
+                    job.profile_id,
+                    job.profile_key,
+                    retry_index,
+                    job.max_retries,
+                    job.last_block_reason,
+                    read_failure.get("read_operation"),
+                    read_failure.get("http_status"),
+                )
+            else:
+                job.status = "pending"
+                job.next_retry_at = now_utc + timedelta(seconds=POSITION_EXIT_RETRY_DELAY_SECONDS)
+                read_failure["retry_succeeded"] = False
+                job.diagnostics_json = json.dumps(
+                    {
+                        **read_failure,
+                        "block_reason": job.last_block_reason,
+                        "retry_scheduled_for": self._retry_datetime_to_kst(job.next_retry_at).isoformat(),
+                        "exit_cycle_key": job.exit_cycle_key,
+                        "owner_user_id": job.owner_user_id,
+                        "profile_id": job.profile_id,
+                        "profile_key": job.profile_key,
+                        "symbol": job.symbol,
+                    },
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+                logger.warning(
+                    "KIS held-position exit retry failed; next retry scheduled job_id=%s profile_id=%s profile_key=%s symbol=%s retry_index=%s max_retries=%s retry_scheduled_for=%s read_operation=%s http_status=%s tr_id=%s path=%s",
+                    job.id,
+                    job.profile_id,
+                    job.profile_key,
+                    job.symbol,
+                    retry_index,
+                    job.max_retries,
+                    self._retry_datetime_to_kst(job.next_retry_at).isoformat(),
+                    read_failure.get("read_operation"),
+                    read_failure.get("http_status"),
+                    read_failure.get("tr_id"),
+                    read_failure.get("path"),
+                )
+        else:
+            reason = str(result.get("block_reason") or result.get("reason") or "exit_retry_no_sell")
+            job.last_block_reason = reason[:160]
+            job.claimed_at = None
+            if reason in {
+                "duplicate_open_sell_order",
+                "no_exit_candidate",
+                "no_exit_trigger",
+                "position_not_found",
+                "insufficient_holdings",
+            }:
+                job.status = (
+                    "resolved_existing_order"
+                    if reason == "duplicate_open_sell_order"
+                    else "resolved_hold"
+                )
+            else:
+                job.status = "hard_blocked"
+            job.diagnostics_json = json.dumps(
+                {
+                    "block_reason": job.last_block_reason,
+                    "retry_succeeded": True,
+                    "exit_cycle_key": job.exit_cycle_key,
+                    "owner_user_id": job.owner_user_id,
+                    "profile_id": job.profile_id,
+                    "profile_key": job.profile_key,
+                    "symbol": result.get("symbol") or job.symbol,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        job.claimed_at = None
+        job.updated_at = now_utc
+        db.commit()
+        logger.info(
+            "KIS held-position exit retry completed job_id=%s profile_id=%s profile_key=%s retry_index=%s status=%s block_reason=%s broker_submit_called=%s",
+            job.id,
+            job.profile_id,
+            job.profile_key,
+            retry_index,
+            job.status,
+            job.last_block_reason,
+            submit_called,
+        )
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "retry_index": retry_index,
+            "reason": job.last_block_reason,
+            "broker_submit_called": submit_called,
+        }
 
     def _exit_cycle_has_submit_progress(
         self,

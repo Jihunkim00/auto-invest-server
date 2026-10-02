@@ -11,6 +11,39 @@ import 'package:auto_invest_dashboard/models/watchlist_run_result.dart';
 import 'package:auto_invest_dashboard/models/automation_today_decisions.dart';
 
 void main() {
+  testWidgets(
+      'position recovery slots display retry and blocked without missing analysis',
+      (tester) async {
+    final controller = DashboardController(ApiClient(), autoload: false)
+      ..todayAiDecisionsLoaded = true
+      ..todayAiDecisions = AutomationTodayDecisions.fromJson({
+        'trade_date_kst': '2026-10-02',
+        'profile_id': 1,
+        'slots': [
+          {
+            'scheduler_slot': '09:50',
+            'status': 'retry_pending',
+            'reason': 'position_state_refresh_pending'
+          },
+          {
+            'scheduler_slot': '13:30',
+            'status': 'blocked',
+            'reason': 'position_state_unavailable_after_entry_slot_grace'
+          },
+        ],
+      });
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+      body: HomeLatestAiDecisionCard(controller: controller),
+    )));
+    expect(find.textContaining('09:50 · RETRY_PENDING'), findsOneWidget);
+    expect(find.textContaining('13:30 · BLOCKED'), findsOneWidget);
+    expect(find.text('포지션 확인 중'), findsOneWidget);
+    expect(find.text('매수 진입 차단'), findsOneWidget);
+    expect(find.text('분석 결과 없음'), findsNothing);
+    controller.dispose();
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {

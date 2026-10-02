@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/i18n/app_language.dart';
+
 import '../../../core/utils/kr_stock_catalog.dart';
 import '../../../core/utils/kr_symbol.dart';
 import '../../../core/utils/timestamp_formatter.dart';
@@ -203,33 +205,52 @@ class _TodayDecisionSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = slot.hasResult
-        ? (slot.signalStatus ?? slot.action ?? 'HOLD').toUpperCase()
-        : slot.isPending
-            ? '\uBD84\uC11D \uC804'
-            : slot.hasAnalysisResult
-                ? 'HOLD'
-                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
+    final english = controller.appLanguage.languageCode == 'en';
+    final status = slot.isPositionRefreshPending
+        ? 'RETRY_PENDING'
+        : slot.isEntryRecoveryBlocked
+            ? 'BLOCKED'
+            : slot.hasResult
+                ? (slot.signalStatus ?? slot.action ?? 'HOLD').toUpperCase()
+                : slot.isPending
+                    ? '\uBD84\uC11D \uC804'
+                    : slot.hasAnalysisResult
+                        ? 'HOLD'
+                        : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
     final symbol = slot.symbol?.trim() ?? '';
-    final display = slot.hasResult
-        ? _displaySymbol(controller, symbol, slot.symbolName)
-        : slot.isPending
-            ? '\uBD84\uC11D \uB300\uAE30'
-            : slot.hasAnalysisResult
-                ? '\uC815\uC0C1 \uBD84\uC11D \uC644\uB8CC'
-                : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
-    final score = slot.hasResult
-        ? [
-            if (slot.finalBuyScore != null) 'Final Buy ${slot.finalBuyScore!}',
-            if (slot.finalSellScore != null) 'Sell ${slot.finalSellScore!}',
-            if (slot.confidence != null)
-              'Confidence ${_number(slot.confidence!)}',
-          ].join(' \u00B7 ')
-        : slot.isPending
-            ? '\uC774 \uC2AC\uB86F\uC740 \uBD84\uC11D \uB300\uAE30 \uC911\uC785\uB2C8\uB2E4.'
-            : slot.isQuantHold
-                ? 'C \uAE30\uC900 \uC815\uB7C9 \uD1B5\uACFC \uD6C4\uBCF4 \uC5C6\uC74C \u00B7 GPT \uBD84\uC11D \uBBF8\uC2E4\uD589'
-                : '\uBD84\uC11D \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.';
+    final display = slot.isPositionRefreshPending
+        ? (english ? 'Checking positions' : '포지션 확인 중')
+        : slot.isEntryRecoveryBlocked
+            ? (english ? 'Entry blocked' : '매수 진입 차단')
+            : slot.hasResult
+                ? _displaySymbol(controller, symbol, slot.symbolName)
+                : slot.isPending
+                    ? '\uBD84\uC11D \uB300\uAE30'
+                    : slot.hasAnalysisResult
+                        ? '\uC815\uC0C1 \uBD84\uC11D \uC644\uB8CC'
+                        : '\uBD84\uC11D \uACB0\uACFC \uC5C6\uC74C';
+    final score = slot.isPositionRefreshPending
+        ? (english
+            ? 'This slot resumes after positions are confirmed.'
+            : '포지션 확인 후 이 슬롯의 분석을 재개합니다.')
+        : slot.isEntryRecoveryBlocked
+            ? (english
+                ? 'Position or exit checks did not complete. BUY is blocked.'
+                : '포지션 또는 청산 확인이 완료되지 않아 매수를 차단했습니다.')
+            : slot.hasResult
+                ? [
+                    if (slot.finalBuyScore != null)
+                      'Final Buy ${slot.finalBuyScore!}',
+                    if (slot.finalSellScore != null)
+                      'Sell ${slot.finalSellScore!}',
+                    if (slot.confidence != null)
+                      'Confidence ${_number(slot.confidence!)}',
+                  ].join(' \u00B7 ')
+                : slot.isPending
+                    ? '\uC774 \uC2AC\uB86F\uC740 \uBD84\uC11D \uB300\uAE30 \uC911\uC785\uB2C8\uB2E4.'
+                    : slot.isQuantHold
+                        ? 'C \uAE30\uC900 \uC815\uB7C9 \uD1B5\uACFC \uD6C4\uBCF4 \uC5C6\uC74C \u00B7 GPT \uBD84\uC11D \uBBF8\uC2E4\uD589'
+                        : '\uBD84\uC11D \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.';
     final reason = (slot.aiReason ?? slot.reason ?? '').trim();
     final timestamp = parseTimestampToKst(slot.createdAtKst ?? slot.createdAt);
     final timeText = timestamp == null

@@ -152,6 +152,9 @@ class AutomationTodayDecisionSlot {
       gptTargetSymbols.isEmpty &&
       finalCandidateSymbols.isEmpty;
   bool get isPending => status == 'analysis_pending';
+  bool get isPositionRefreshPending =>
+      status == 'retry_pending' || status == 'deferred';
+  bool get isEntryRecoveryBlocked => status == 'blocked';
 
   factory AutomationTodayDecisionSlot.fromJson(Map<String, dynamic> json) {
     return AutomationTodayDecisionSlot(

@@ -616,3 +616,27 @@ def test_admin_home_automation_feed_excludes_newer_regular_user_runs(client, db_
     assert [item['symbol'] for item in items] == ['086790', '086790', '086790']
     assert all(item['owner_user_id'] is None for item in items)
     assert all(item['trigger_source'] == 'automation_scheduler' for item in items)
+
+def test_admin_automation_feed_includes_position_recovery_without_user_leakage(client, db_session):
+    for index, (owner, result) in enumerate([
+        (None, "retry_pending"), (None, "blocked"),
+        (2, "retry_pending"), (2, "blocked"),
+    ]):
+        db_session.add(TradeRunLog(
+            owner_user_id=owner, run_key=f"slot-recovery-{index}",
+            trigger_source="automation_scheduler", symbol="WATCHLIST",
+            mode="automation_entry_slot_recovery", stage="positions_first",
+            result=result, reason="position_state_refresh_pending" if result == "retry_pending" else
+                "position_state_unavailable_after_entry_slot_grace",
+            request_payload=json.dumps({"provider": "kis", "market": "KR", "scheduler_slot": "09:50"}),
+            response_payload=json.dumps({
+                "position_state": "unknown", "buy_execution_allowed": False,
+                "broker_submit_called": False, "real_order_submitted": False,
+            }),
+        ))
+    db_session.commit()
+    items = client.get("/runs/automation/recent").json()["items"]
+    assert len(items) == 2
+    assert {item["result"] for item in items} == {"retry_pending", "blocked"}
+    assert all(item["owner_user_id"] is None for item in items)
+    assert all(item["broker_submit_called"] is False for item in items)

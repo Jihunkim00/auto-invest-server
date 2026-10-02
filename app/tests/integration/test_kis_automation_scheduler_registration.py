@@ -465,7 +465,10 @@ def test_admin_kis_positions_failure_persists_one_minute_retry_and_blocks_buy(
     assert harness.validation.calls == []
     assert harness.broker.buy_calls == []
     assert harness.client.external_kis_submit_count == 0
-    assert queue.pending == []
+    assert len(queue.pending) == 1
+    assert queue.pending[0][0][0] == 'admin-position-slot'
+    assert queue.pending[0][2] == 20
+    # Entry remains blocked now; this bounded callback preserves the slot.
 
 def test_admin_kis_positions_retry_keeps_original_plus_three_retry_budget(
     db_session, monkeypatch,
@@ -498,7 +501,10 @@ def test_admin_kis_positions_retry_keeps_original_plus_three_retry_budget(
     assert scheduler._retry_datetime_to_kst(job.next_retry_at).astimezone(UTC) == (
         harness.clock.now() + timedelta(minutes=1)
     )
-    assert queue.pending == []
+    assert len(queue.pending) == 1
+    assert queue.pending[0][0][0] == 'admin-position-slot'
+    assert queue.pending[0][2] == 20
+    # Entry remains blocked now; this bounded callback preserves the slot.
     assert harness.validation.calls == []
     assert harness.broker.buy_calls == []
     assert harness.client.external_kis_submit_count == 0
@@ -521,7 +527,10 @@ def test_admin_exit_retry_does_not_block_regular_user_slot(
     pending = scheduler.run_once(slot='09:10', now=harness.clock.now())
     assert pending['status'] == 'retry_pending'
     assert db_session.query(PositionExitRetryJob).count() == 1
-    assert queue.pending == []
+    assert len(queue.pending) == 1
+    assert queue.pending[0][0][0] == 'admin-position-slot'
+    assert queue.pending[0][2] == 20
+    # Entry remains blocked now; this bounded callback preserves the slot.
 
     user = _user(db_session, 'admin-retry-does-not-block-user')
     _configure_user(db_session, user, provider='kis')
@@ -602,7 +611,10 @@ def test_admin_transient_positions_failure_uses_one_minute_durable_retry(
     assert scheduler._retry_datetime_to_kst(job.next_retry_at).astimezone(UTC) == (
         initial_now + timedelta(minutes=1)
     )
-    assert queue.pending == []
+    assert len(queue.pending) == 1
+    assert queue.pending[0][0][0] == 'admin-position-slot'
+    assert queue.pending[0][2] == 20
+    # Entry remains blocked now; this bounded callback preserves the slot.
     assert harness.preview.calls == []
     assert harness.broker.buy_calls == []
     assert harness.client.external_kis_submit_count == 0

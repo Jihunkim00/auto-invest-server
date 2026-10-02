@@ -19,6 +19,9 @@ from app.services.automation_profile_service import AutomationProfileService
 
 
 KST = ZoneInfo('Asia/Seoul')
+SYSTEM_AUTOMATION_RUN_MODES = (
+    'automation_scheduler_profile_analysis', 'automation_entry_slot_recovery',
+)
 _INVALID_SYMBOLS = {'', 'NONE', 'NULL', 'UNKNOWN'}
 
 
@@ -143,7 +146,7 @@ class AutomationTodayDecisionService:
                     TradeRunLog.owner_user_id == int(admin_user_id),
                 ),
                 TradeRunLog.trigger_source == 'automation_scheduler',
-                TradeRunLog.mode == 'automation_scheduler_profile_analysis',
+                TradeRunLog.mode.in_(SYSTEM_AUTOMATION_RUN_MODES),
             )
         else:
             return []
@@ -251,6 +254,23 @@ class AutomationTodayDecisionService:
         context_key = str(context.get('profile_key') or '').strip().lower()
         if profile_key and context_key and profile_key != context_key:
             return base
+        if run.mode == 'automation_entry_slot_recovery':
+            created_at = _aware_utc(run.created_at)
+            return {
+                **base,
+                'status': 'retry_pending' if run.result in {'running', 'retry_pending', 'deferred'} else 'blocked',
+                'signal_status': run.result,
+                'run_id': run.id,
+                'run_key': run.run_key,
+                'action': 'hold',
+                'reason': run.reason,
+                'created_at': created_at.isoformat().replace('+00:00', 'Z'),
+                'created_at_kst': created_at.astimezone(KST).isoformat(),
+                'position_state': response.get('position_state', 'unknown'),
+                'buy_execution_allowed': response.get('buy_execution_allowed') is True,
+                'broker_submit_called': response.get('broker_submit_called') is True,
+                'real_order_submitted': response.get('real_order_submitted') is True,
+            }
         symbol = _normalize_symbol(
             response.get('returned_symbol')
             or response.get('analyzed_symbol')

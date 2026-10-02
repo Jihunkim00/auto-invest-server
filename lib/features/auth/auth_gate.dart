@@ -24,11 +24,13 @@ class AuthGate extends StatefulWidget {
     required this.apiClient,
     required this.authenticatedBuilder,
     this.roleAuthenticatedBuilder,
+    this.onAuthenticatedUserChanged,
   });
 
   final ApiClient apiClient;
   final AuthenticatedAppBuilder authenticatedBuilder;
   final AuthenticatedRoleAppBuilder? roleAuthenticatedBuilder;
+  final void Function(AuthUser? user)? onAuthenticatedUserChanged;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -38,6 +40,7 @@ class _AuthGateState extends State<AuthGate> {
   AuthSessionState? _authState;
   String? _error;
   bool _loading = true;
+  int _authRequestGeneration = 0;
 
   @override
   void initState() {
@@ -46,6 +49,7 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _refresh() async {
+    final generation = ++_authRequestGeneration;
     if (mounted) {
       setState(() {
         _loading = true;
@@ -54,13 +58,16 @@ class _AuthGateState extends State<AuthGate> {
     }
     try {
       final state = await widget.apiClient.fetchAuthMe();
-      if (!mounted) return;
+      if (!mounted || generation != _authRequestGeneration) return;
+      widget.onAuthenticatedUserChanged?.call(
+        state.authenticated ? state.user : null,
+      );
       setState(() {
         _authState = state;
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _authRequestGeneration) return;
       setState(() {
         _loading = false;
         _error = error.toString();
@@ -69,13 +76,22 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   Future<void> _logout(BuildContext originContext) async {
+    final navigator = Navigator.of(originContext);
+    // Retire account state and in-flight reads before the logout API completes.
+    ++_authRequestGeneration;
+    widget.onAuthenticatedUserChanged?.call(null);
+    setState(() {
+      _authState = null;
+      _loading = true;
+    });
     try {
       await widget.apiClient.logout();
     } catch (_) {
+      await _refresh();
       return;
     }
-    if (originContext.mounted) {
-      Navigator.of(originContext).popUntil((route) => route.isFirst);
+    if (navigator.mounted) {
+      navigator.popUntil((route) => route.isFirst);
     }
     await _refresh();
   }
@@ -104,7 +120,11 @@ class _AuthGateState extends State<AuthGate> {
     }
     final roleBuilder = widget.roleAuthenticatedBuilder;
     if (roleBuilder != null && state.user != null) {
-      return roleBuilder(context, _logout, state.user!);
+      final user = state.user!;
+      return KeyedSubtree(
+        key: ValueKey('auth-session-${user.role}-${user.id}-${user.username}'),
+        child: roleBuilder(context, _logout, user),
+      );
     }
     return widget.authenticatedBuilder(context, _logout);
   }

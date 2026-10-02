@@ -11,7 +11,7 @@ import requests
 from sqlalchemy.orm import sessionmaker
 
 from app.brokers.base import KisApiError, KisAuthError, KisConfigurationError
-from app.db.models import PositionExitRetryJob, StrategyLiveAutoExitAttempt
+from app.db.models import PositionExitRetryJob, StrategyLiveAutoExitAttempt, TradeRunLog
 from app.services.account_snapshot_retry import retryable_kis_exit_read_error
 from app.services.scheduler_service import AutomationSchedulerService
 from app.services.runtime_setting_service import RuntimeSettingService
@@ -425,7 +425,7 @@ def _canonical_scheduler_for_tick(db_session, monkeypatch, *, positions_loader, 
             }
         ),
     )
-    scheduler = AutomationSchedulerService()
+    scheduler = AutomationSchedulerService(retry_scheduler=lambda *args, **kwargs: True)
     scheduler.runtime_settings = runtime
     scheduler.automation_profiles = profiles
     scheduler._profile_buy_scheduler_service = lambda db: SimpleNamespace(
@@ -514,3 +514,342 @@ def test_unknown_positions_state_persists_retry_and_blocks_entry_analysis(db_ses
     assert job.status == "pending"
     assert job.last_block_reason == "positions_unavailable"
     assert events == []
+
+
+def _entry_recovery_scheduler(db_session, monkeypatch, *, slot="09:50", positions=None):
+    events, deferred = [], []
+    clock = [datetime(2026, 7, 30, *map(int, slot.split(":")), tzinfo=KST)]
+    scheduler = _canonical_scheduler_for_tick(
+        db_session, monkeypatch,
+        positions_loader=lambda db: positions or [], events=events,
+    )
+    scheduler.retry_now_provider = lambda: clock[0]
+    scheduler.retry_scheduler = lambda key, callback, **kwargs: (
+        deferred.append((key, callback, kwargs)) or True
+    )
+    schedule = scheduler.automation_profiles.selected_profile_schedule(db_session)
+    schedule["analysis_times"] = [slot]
+    scheduler._manage_portfolio_first = lambda db, **kwargs: (
+        events.append(("position_management", kwargs)) or
+        {"broker_positions": kwargs["account_snapshot"]["positions"], "items": []}
+    )
+    scheduler._account_snapshot_preflight = lambda db, **kwargs: (
+        events.append(("account_preflight", kwargs)) or
+        {"positions": kwargs["positions_override"], "balance": {"cash": 100000}, "open_orders": []}
+    )
+    scheduler._run_profile_analysis = lambda db, **kwargs: (
+        events.append(("entry_analysis", kwargs)) or
+        {"action": "would_buy", "submission_eligible": True, "risk_decision": {"approved": True}}
+    )
+    def fake_buy(db, analysis, **kwargs):
+        events.append(("fake_buy_safety_pipeline", kwargs))
+        return {"status": "submitted", "action": "buy", "broker_submit_called": True,
+                "broker_buy_call_count": 1, "real_external_kis_submit_count": 0}
+    scheduler._profile_buy_scheduler_service = lambda db: SimpleNamespace(
+        positions_loader=lambda db: positions or [], run_once=fake_buy,
+    )
+    return scheduler, events, deferred, clock
+
+
+@pytest.mark.parametrize("slot", ["09:50", "13:30"])
+def test_entry_slot_position_retry_fresh_empty_recovers_exactly_once(db_session, monkeypatch, slot):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(
+        db_session, monkeypatch, slot=slot,
+    )
+    job = _schedule_unknown_position_retry(db_session, scheduler, clock[0] - timedelta(minutes=1))
+    result = scheduler._run_automation_tick(slot, clock[0])
+    repeated = scheduler._run_automation_tick(slot, clock[0], True)
+
+    db_session.expire_all()
+    assert db_session.get(PositionExitRetryJob, job.id).status == "resolved_hold"
+    assert [event[0] for event in events] == [
+        "position_management", "account_preflight", "entry_analysis", "fake_buy_safety_pipeline",
+    ]
+    assert result["recovered_from_position_retry"] is True
+    assert result["original_scheduler_slot"] == slot
+    assert repeated["reason"] == "scheduler_slot_already_run"
+    assert deferred == []
+    log = db_session.query(TradeRunLog).filter(TradeRunLog.mode == scheduler_module.ENTRY_SLOT_RECOVERY_MODE).one()
+    payload = json.loads(log.response_payload)
+    assert payload["recovered_from_position_retry"] is True
+    assert payload["owner_user_id"] == PROFILE["owner_user_id"]
+    assert payload["profile_id"] == PROFILE["id"]
+
+
+def test_entry_slot_position_retry_held_positions_manage_before_entry(db_session, monkeypatch):
+    held = {"symbol": "005930", "qty": 1, "avg_entry_price": 10000}
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(
+        db_session, monkeypatch, positions=[held],
+    )
+    _schedule_unknown_position_retry(db_session, scheduler, clock[0] - timedelta(minutes=1))
+    result = scheduler._run_automation_tick("09:50", clock[0])
+    assert [event[0] for event in events] == ["position_management", "guarded_sell"]
+    assert result["buy_execution_allowed"] is False
+    assert not any(event[0] == "entry_analysis" for event in events)
+    assert deferred == []
+
+
+@pytest.mark.parametrize("slot", ["09:50", "13:30"])
+def test_entry_slot_position_retry_grace_exhaustion_logs_blocked_without_submit(db_session, monkeypatch, slot):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch, slot=slot)
+    def fail(db):
+        raise _error(500)
+    scheduler._positions_first = fail
+    _schedule_unknown_position_retry(db_session, scheduler, clock[0] - timedelta(minutes=1))
+    pending = scheduler._run_automation_tick(slot, clock[0])
+    assert pending["reason"] == "position_state_refresh_pending"
+    assert len(deferred) == 1
+    callback = deferred[0][1]
+    for seconds in (20, 40, 60, 80, 100):
+        clock[0] = datetime(2026, 7, 30, *map(int, slot.split(":")), tzinfo=KST) + timedelta(seconds=seconds)
+        assert callback() == 20
+    clock[0] += timedelta(seconds=20)
+    assert callback() is None
+    db_session.expire_all()
+    log = db_session.query(TradeRunLog).filter(TradeRunLog.mode == scheduler_module.ENTRY_SLOT_RECOVERY_MODE).one()
+    assert log.result == "blocked"
+    assert log.reason == "position_state_unavailable_after_entry_slot_grace"
+    public = json.loads(log.response_payload)
+    assert public["buy_execution_allowed"] is False
+    assert public["broker_submit_called"] is False
+    assert public["real_order_submitted"] is False
+    assert public["scheduler_slot"] == slot
+    assert events == []
+    assert len(deferred) == 1
+    assert callback() is None
+
+
+@pytest.mark.parametrize("slot", ["09:50", "13:30"])
+def test_original_entry_slot_catches_up_after_background_resolved_hold(db_session, monkeypatch, slot):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch, slot=slot)
+    job = _schedule_unknown_position_retry(db_session, scheduler, clock[0] - timedelta(minutes=1))
+    def fail(db):
+        raise _error(500)
+    scheduler._positions_first = fail
+    assert scheduler._run_automation_tick(slot, clock[0])["buy_execution_allowed"] is False
+    assert scheduler._run_automation_tick(slot, clock[0])["reason"] == "scheduler_slot_already_run"
+    assert len(deferred) == 1
+    job = db_session.get(PositionExitRetryJob, job.id)
+    job.status = "resolved_hold"
+    job.last_block_reason = "no_exit_candidate"
+    db_session.commit()
+    scheduler._positions_first = lambda db: []
+    clock[0] += timedelta(minutes=1)
+    assert deferred[0][1]() is None
+    assert deferred[0][1]() is None
+    assert sum(event[0] == "entry_analysis" for event in events) == 1
+    assert sum(event[0] == "fake_buy_safety_pipeline" for event in events) == 1
+    buy = next(event[1] for event in events if event[0] == "fake_buy_safety_pipeline")
+    assert buy["scheduler_slot"] == slot
+    assert buy["allow_retry_slot_replay"] is True
+    assert buy["retry_started_at"].strftime("%H:%M") == slot
+
+
+@pytest.mark.parametrize("operation", ["account_snapshot", "open_orders"])
+def test_non_position_exit_retry_keeps_fail_closed_entry_policy(db_session, monkeypatch, operation):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch)
+    job = _schedule_unknown_position_retry(db_session, scheduler, clock[0])
+    job.diagnostics_json = json.dumps({"read_operation": operation, "retryable": True})
+    db_session.commit()
+    result = scheduler._run_automation_tick("09:50", clock[0])
+    assert result["reason"] == "kis_exit_read_retry_pending"
+    assert result["buy_execution_allowed"] is False
+    assert events == []
+    assert deferred == []
+
+
+@pytest.mark.parametrize("status", ["running", "pending"])
+def test_entry_recovery_does_not_resolve_running_or_submitted_exit(db_session, monkeypatch, status):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch)
+    job = _schedule_unknown_position_retry(db_session, scheduler, clock[0])
+    if status == "running":
+        job.status = "running"
+        job.claimed_at = clock[0].astimezone(scheduler_module.UTC)
+    else:
+        db_session.add(StrategyLiveAutoExitAttempt(
+            exit_cycle_key=job.exit_cycle_key,
+            retry_index=1, profile_key=PROFILE["profile_key"], symbol="005930",
+            status="submitted", block_reason=None, safety_flags='{"broker_submit_called":true}',
+        ))
+    db_session.commit()
+    result = scheduler._run_automation_tick("09:50", clock[0])
+    db_session.expire_all()
+    assert db_session.get(PositionExitRetryJob, job.id).status == status
+    assert result["buy_execution_allowed"] is False
+    assert result["broker_submit_called"] is False
+    assert events == []
+
+
+def test_no_active_retry_normal_entry_path_is_unchanged(db_session, monkeypatch):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch)
+    result = scheduler._run_automation_tick("09:50", clock[0])
+    assert result["result"] == "LIVE_READY"
+    assert "recovered_from_position_retry" not in result
+    assert sum(event[0] == "entry_analysis" for event in events) == 1
+    assert db_session.query(TradeRunLog).count() == 0
+    assert deferred == []
+
+
+@pytest.mark.parametrize("slot", ["09:50", "13:30"])
+@pytest.mark.parametrize("deferred_recovery", [False, True])
+def test_entry_slot_recovery_replays_actual_fake_broker_safety_pipeline(
+    db_session, monkeypatch, slot, deferred_recovery,
+):
+    from app.tests.integration.test_kis_automation_scheduler_replay import build_harness
+    now = datetime(2026, 8, 25, *map(int, slot.split(":")), tzinfo=KST)
+    harness = build_harness(db_session, monkeypatch, now=now, analysis_times=(slot,))
+    deferred = []
+    scheduler = AutomationSchedulerService(
+        retry_scheduler=lambda key, callback, **kwargs: deferred.append(callback) or True,
+        retry_now_provider=harness.clock.now,
+    )
+    scheduler.runtime_settings = harness.runtime
+    scheduler.automation_profiles = harness.profiles
+    scheduler.automation_profile_buy_scheduler_service = harness.profile_buy
+    scheduler.profile_aware_dry_run_auto_buy_service = harness.strategy_scheduler.dry_run_service
+    monkeypatch.setattr(
+        scheduler_module, "SessionLocal",
+        sessionmaker(bind=db_session.get_bind(), expire_on_commit=False),
+    )
+    monkeypatch.setattr(scheduler_module, "MarketSessionService", lambda: harness.market_sessions)
+    profile = harness.profiles.selected_profile_schedule(db_session, now=now)["profile"]
+    job = scheduler._schedule_position_exit_retry(
+        db_session, profile=profile, profile_id=profile["id"],
+        profile_key=profile["profile_key"], scheduler_slot="position_exit_monitor",
+        symbol=None, exit_cycle_key=f"monitor:{profile['profile_key']}:{slot}",
+        block_reason="positions_unavailable",
+        read_failure={"read_operation": "positions", "retryable": True, "http_status": 500},
+        now=now - timedelta(minutes=1),
+    )
+    if deferred_recovery:
+        def fail(db):
+            raise _error(500)
+        monkeypatch.setattr(scheduler, "_positions_first", fail)
+    result = scheduler._run_automation_tick(slot, now)
+    if deferred_recovery:
+        assert result["buy_execution_allowed"] is False
+        assert harness.broker.buy_calls == []
+        monkeypatch.setattr(scheduler, "_positions_first", lambda db: harness.client.list_positions())
+        harness.clock.current += timedelta(minutes=1)
+        # Both workers are ready. Whichever claims the exit read owns it; a
+        # stale queued worker cannot run after entry recovery resolves the job.
+        assert deferred[0]() is None
+        assert deferred[0]() is None
+        assert scheduler._run_claimed_position_exit_retry_job(job.id, harness.clock.now())["status"] == "skipped"
+    db_session.expire_all()
+    assert db_session.get(PositionExitRetryJob, job.id).status == "resolved_hold"
+    assert len(harness.preview.calls) == 1
+    assert len(harness.validation.calls) == 1
+    assert len(harness.broker.buy_calls) == 1
+    assert harness.broker.sell_calls == []
+    assert harness.client.external_kis_submit_count == 0
+    assert harness.client.possible_order_calls == 1
+    assert (harness.clock.now() - harness.client.last_possible_order_queried_at).total_seconds() <= 10
+    from app.db.models import AutomationProfileBuyReservation
+    assert db_session.query(AutomationProfileBuyReservation).count() == 1
+    recovered = db_session.query(TradeRunLog).filter(TradeRunLog.mode == scheduler_module.ENTRY_SLOT_RECOVERY_MODE).one()
+    assert json.loads(recovered.response_payload)["recovered_from_position_retry"] is True
+    analysis = db_session.query(TradeRunLog).filter(
+        TradeRunLog.mode == "automation_scheduler_profile_analysis",
+    ).one()
+    assert json.loads(analysis.response_payload)["original_scheduler_slot"] == slot
+
+
+def test_background_exit_worker_and_two_entry_recoveries_race_without_duplicate_orders(
+    tmp_path, monkeypatch,
+):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlalchemy import create_engine
+    from app.db.database import Base
+    from app.tests.integration.test_kis_automation_scheduler_replay import build_harness
+
+    engine = create_engine(f"sqlite:///{(tmp_path / 'entry_slot_race.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine, expire_on_commit=False)
+    db = sessions()
+    entered, release = threading.Event(), threading.Event()
+    executor = ThreadPoolExecutor(max_workers=2)
+    try:
+        now = datetime(2026, 8, 25, 9, 50, tzinfo=KST)
+        harness = build_harness(db, monkeypatch, now=now, analysis_times=("09:50",))
+        callbacks = []
+        scheduler = AutomationSchedulerService(
+            retry_scheduler=lambda key, callback, **kwargs: callbacks.append(callback) or True,
+            retry_now_provider=harness.clock.now,
+        )
+        scheduler.runtime_settings = harness.runtime
+        scheduler.automation_profiles = harness.profiles
+        scheduler.automation_profile_buy_scheduler_service = harness.profile_buy
+        scheduler.profile_aware_dry_run_auto_buy_service = harness.strategy_scheduler.dry_run_service
+        monkeypatch.setattr(scheduler_module, "SessionLocal", sessions)
+        monkeypatch.setattr(scheduler_module, "MarketSessionService", lambda: harness.market_sessions)
+        monkeypatch.setattr(scheduler_module, "KisAuthManager", lambda *args: object())
+        monkeypatch.setattr(scheduler_module, "KisClient", lambda *args: harness.client)
+        monkeypatch.setattr(scheduler_module, "KisBroker", lambda *args: harness.broker)
+        monkeypatch.setattr(scheduler_module, "KisOrderValidationService", lambda *args: harness.validation)
+        monkeypatch.setattr(scheduler_module, "KisOrderSyncService", lambda *args: harness.sync)
+        class FakeGuardedExit:
+            def __init__(self, **kwargs):
+                pass
+            def run_scheduler_once(self, db, **kwargs):
+                entered.set()
+                assert release.wait(timeout=5)
+                return {"status": "blocked", "block_reason": "no_exit_candidate",
+                        "broker_submit_called": False, "real_order_submitted": False}
+        monkeypatch.setattr(scheduler_module, "ProfileAwareGuardedLiveAutoExitService", FakeGuardedExit)
+        profile = harness.profiles.selected_profile_schedule(db, now=now)["profile"]
+        job = scheduler._schedule_position_exit_retry(
+            db, profile=profile, profile_id=profile["id"], profile_key=profile["profile_key"],
+            scheduler_slot="position_exit_monitor", symbol=None, exit_cycle_key="background-race",
+            block_reason="positions_unavailable",
+            read_failure={"read_operation": "positions", "retryable": True, "http_status": 500},
+            now=now - timedelta(minutes=1),
+        )
+        job.status = "running"
+        job.claimed_at = now.astimezone(scheduler_module.UTC)
+        db.commit()
+        worker = executor.submit(
+            scheduler._run_claimed_position_exit_retry_job, job.id, now,
+            expected_claimed_at=now.astimezone(scheduler_module.UTC),
+        )
+        assert entered.wait(timeout=5)
+        pending = scheduler._run_automation_tick("09:50", now)
+        assert pending["buy_execution_allowed"] is False
+        assert harness.preview.calls == []
+        assert len(callbacks) == 1
+        release.set()
+        assert worker.result(timeout=5)["status"] == "resolved_hold"
+        harness.clock.current += timedelta(minutes=1)
+        first = executor.submit(callbacks[0])
+        second = executor.submit(callbacks[0])
+        assert first.result(timeout=10) is None
+        assert second.result(timeout=10) is None
+        assert len(harness.preview.calls) == 1
+        assert len(harness.broker.buy_calls) == 1
+        assert harness.broker.sell_calls == []
+        assert harness.client.external_kis_submit_count == 0
+        db.expire_all()
+        assert db.get(PositionExitRetryJob, job.id).status == "resolved_hold"
+        assert db.query(TradeRunLog).filter(TradeRunLog.mode == scheduler_module.ENTRY_SLOT_RECOVERY_MODE).count() == 1
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+        db.close()
+        engine.dispose()
+
+
+def test_stale_exit_worker_claim_token_cannot_execute_entry_owned_retry(db_session, monkeypatch):
+    scheduler, events, deferred, clock = _entry_recovery_scheduler(db_session, monkeypatch)
+    job = _schedule_unknown_position_retry(db_session, scheduler, clock[0])
+    job.status = "running"
+    job.claimed_at = clock[0].astimezone(scheduler_module.UTC)
+    db_session.commit()
+    result = scheduler._run_claimed_position_exit_retry_job(
+        job.id, clock[0],
+        expected_claimed_at=(clock[0] - timedelta(minutes=1)).astimezone(scheduler_module.UTC),
+    )
+    assert result["reason"] == "retry_job_not_running"
+    assert events == []
+    db_session.expire_all()
+    assert db_session.get(PositionExitRetryJob, job.id).status == "running"

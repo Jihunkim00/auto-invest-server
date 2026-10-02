@@ -40,12 +40,23 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
       widget.authenticationEnabled ?? widget.controller == null;
 
   late final ApiClient _apiClient = widget.controller?.apiClient ?? ApiClient();
-  late final DashboardController _controller = widget.controller ??
+  late DashboardController _controller = widget.controller ??
       DashboardController(
         _apiClient,
         autoload: !_authEnabled,
         persistProvider: true,
       );
+
+  void _onAuthenticatedUserChanged(AuthUser? user) {
+    final previous = _controller;
+    final next = user == null
+        ? previous.clearAuthenticatedSession()
+        : previous.beginAuthenticatedSession(user);
+    if (identical(previous, next)) return;
+    setState(() => _controller = next);
+    // Detach the old AnimatedBuilder/subtree before disposing its notifier.
+    WidgetsBinding.instance.addPostFrameCallback((_) => previous.dispose());
+  }
 
   @override
   void dispose() {
@@ -72,6 +83,7 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
           home: _authEnabled
               ? AuthGate(
                   apiClient: _apiClient,
+                  onAuthenticatedUserChanged: _onAuthenticatedUserChanged,
                   authenticatedBuilder: (context, onLogout) =>
                       _ExistingAutoInvestHome(
                     controller: _controller,
@@ -80,6 +92,8 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
                   ),
                   roleAuthenticatedBuilder: (context, onLogout, user) =>
                       _RoleAwareAuthenticatedHome(
+                    key: ValueKey(
+                        'auth-session-${user.role}-${user.id}-${user.username}'),
                     controller: _controller,
                     apiClient: _apiClient,
                     user: user,
@@ -98,6 +112,7 @@ class _AutoInvestAppState extends State<AutoInvestApp> {
 
 class _RoleAwareAuthenticatedHome extends StatelessWidget {
   const _RoleAwareAuthenticatedHome({
+    super.key,
     required this.controller,
     required this.apiClient,
     required this.user,
@@ -258,9 +273,10 @@ class _ExistingAutoInvestHomeState extends State<_ExistingAutoInvestHome> {
   @override
   void initState() {
     super.initState();
-    widget.controller.clearRegularUserHomeContext();
     if (widget.loadOnMount) {
-      unawaited(widget.controller.load());
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(widget.controller.load());
+      });
     }
   }
 

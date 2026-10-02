@@ -281,3 +281,41 @@ def test_today_decisions_are_exact_owner_profile_slot_scoped_and_kst(db_session)
     assert result['slots'][1]['created_at_kst'] == '2026-09-16T14:00:00+09:00'
     assert result['slots'][2]['status'] == 'no_result'
     assert all(slot['symbol'] != '005930' for slot in result['slots'])
+
+
+def test_admin_today_position_recovery_is_visible_without_gpt_or_snapshot(db_session):
+    from types import SimpleNamespace
+    admin = _user(db_session, "slot-recovery-admin")
+    admin.role = "admin"
+    db_session.commit()
+    profile = {"id": 99, "owner_user_id": admin.id, "profile_key": "admin-recovery",
+               "provider": "kis", "market": "KR"}
+    for slot, result in [("09:50", "retry_pending"), ("13:30", "blocked")]:
+        reason = "position_state_refresh_pending" if result == "retry_pending" else "position_state_unavailable_after_entry_slot_grace"
+        db_session.add(TradeRunLog(
+            owner_user_id=admin.id, run_key=f"today-recovery-{slot}",
+            trigger_source="automation_scheduler", symbol="WATCHLIST",
+            mode="automation_entry_slot_recovery", stage="positions_first",
+            result=result, reason=reason, created_at=NOW,
+            request_payload=json.dumps({**profile, "profile_id": 99, "scheduler_slot": slot}),
+            response_payload=json.dumps({
+                "scheduler_slot": slot, "position_state": "unknown",
+                "buy_execution_allowed": False, "broker_submit_called": False,
+                "real_order_submitted": False,
+            }),
+        ))
+    db_session.commit()
+    profiles = SimpleNamespace(selected_profile_schedule=lambda db, now: {
+        "profile": profile, "status": "active", "timezone": "Asia/Seoul",
+        "analysis_times": ["09:50", "13:30"],
+    })
+    slots = AutomationTodayDecisionService(profiles=profiles).get_today(
+        db_session, admin_user_id=admin.id, now=NOW,
+    )["slots"]
+    assert [slot["status"] for slot in slots] == ["retry_pending", "blocked"]
+    assert slots[0]["reason"] == "position_state_refresh_pending"
+    assert slots[1]["reason"] == "position_state_unavailable_after_entry_slot_grace"
+    assert all(slot["buy_execution_allowed"] is False for slot in slots)
+    assert all(slot["broker_submit_called"] is False for slot in slots)
+    assert all(slot["real_order_submitted"] is False for slot in slots)
+    assert all(slot["symbol"] is None for slot in slots)

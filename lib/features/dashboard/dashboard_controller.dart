@@ -165,6 +165,9 @@ class DashboardController extends ChangeNotifier {
   int _todayAiDecisionRequestVersion = 0;
   int _userAccountContextVersion = 0;
   bool _disposed = false;
+  String? _authenticatedSessionIdentity;
+  int _authSessionGeneration = 0;
+  bool _authenticatedSessionInvalidated = false;
   String? _authenticatedRegularUserScope;
   String? _authenticatedRegularUserOwnerKey;
   String? _regularUserBootstrapOwnerKey;
@@ -173,6 +176,60 @@ class DashboardController extends ChangeNotifier {
   Future<void>? _userBrokerAccountsFuture;
   bool _regularUserHomeContextReady = false;
   bool _regularUserBootstrapComplete = false;
+
+  /// A controller belongs to one authenticated identity. Returning a fresh
+  /// instance isolates every account/result field and every in-flight request.
+  /// Same-identity refreshes retain the existing controller and its state.
+  DashboardController beginAuthenticatedSession(AuthUser user) {
+    final identity = '${user.role}:${user.id}:${user.username}';
+    if (!_authenticatedSessionInvalidated &&
+        _authenticatedSessionIdentity == identity) {
+      return this;
+    }
+    if (!_authenticatedSessionInvalidated &&
+        _authenticatedSessionIdentity == null) {
+      _authenticatedSessionIdentity = identity;
+      return this;
+    }
+    final next = clearAuthenticatedSession();
+    next._authenticatedSessionIdentity = identity;
+    return next;
+  }
+
+  DashboardController clearAuthenticatedSession() {
+    final next = DashboardController(
+      apiClient,
+      autoload: false,
+      initialLanguage: appLanguage,
+      persistProvider: _persistProvider,
+      providerPreferenceStore: _providerPreferenceStore,
+    );
+    next._authSessionGeneration = _authSessionGeneration + 1;
+    _authenticatedSessionInvalidated = true;
+    _authSessionGeneration += 1;
+    _userAccountContextVersion += 1;
+    _providerContextVersion += 1;
+    _todayAiDecisionRequestVersion += 1;
+    _marketRegimeRequestVersion += 1;
+    clearRegularUserHomeContext();
+    _clearProviderScopedState();
+    // The caller replaces this instance before the next authenticated frame.
+    // The replacement's constructor resets all account, strategy and agent
+    // state; late completions only retain this retired instance.
+    return next;
+  }
+
+  bool _isCurrentAuthSession(int generation) =>
+      !_disposed &&
+      !_authenticatedSessionInvalidated &&
+      generation == _authSessionGeneration;
+
+  @override
+  void notifyListeners() {
+    if (!_disposed && !_authenticatedSessionInvalidated) {
+      super.notifyListeners();
+    }
+  }
 
   AppStrings get strings => AppStrings(appLanguage);
 
@@ -753,7 +810,9 @@ class DashboardController extends ChangeNotifier {
     _authenticatedRegularUserId = null;
     _regularUserBootstrapOwnerKey = null;
     _regularUserBootstrapFuture = null;
-    _regularUserContextReadyCompleter?.complete();
+    if (!(_regularUserContextReadyCompleter?.isCompleted ?? true)) {
+      _regularUserContextReadyCompleter!.complete();
+    }
     _regularUserContextReadyCompleter = null;
     _regularUserHomeContextReady = false;
     _regularUserBootstrapComplete = false;
@@ -1390,6 +1449,7 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<void> load() async {
+    final sessionGeneration = _authSessionGeneration;
     loading = true;
 
     notifyListeners();
@@ -1397,28 +1457,41 @@ class DashboardController extends ChangeNotifier {
       await _restoreProviderPreference(
         expectedContextVersion: _providerContextVersion,
       );
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       unawaited(ensureMarketRegimeLoaded(
         contextVersion: _providerContextVersion,
       ));
       try {
         await KrStockCatalog.shared.load();
+        if (!_isCurrentAuthSession(sessionGeneration)) return;
       } catch (_) {
+        if (!_isCurrentAuthSession(sessionGeneration)) return;
         // The lookup catalog is a UI convenience; automation loading remains
         // independent if the local asset is unavailable.
       }
-      settings = await apiClient.getOpsSettings();
+      final loadedSettings = await apiClient.getOpsSettings();
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
+      settings = loadedSettings;
       kisSafetyStatus = kisSafetyStatusFromSettings();
       await refreshKisSafetyStatus(silent: true);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       selectedGateLevel = _safeGateLevel(settings.defaultGateLevel);
       await refreshOperationMode(silent: true);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       await refreshSchedulerStatus(silent: true);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       await refreshAgentChatLiveOrderReadiness(silent: true);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       await refreshKisSchedulerStatus(silent: true);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       await loadMarketWatchlists();
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       await _refreshPortfolioSummaries();
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       _rebuildPortfolioManagementItems();
       try {
         final latestRun = await apiClient.fetchLatestWatchlistRunResult();
+        if (!_isCurrentAuthSession(sessionGeneration)) return;
         if (latestRun == null) {
           runResult = _emptyRunResult;
           hasLatestRunResult = false;
@@ -1430,6 +1503,7 @@ class DashboardController extends ChangeNotifier {
         }
         error = null;
       } catch (_) {
+        if (!_isCurrentAuthSession(sessionGeneration)) return;
         if (!hasLatestRunResult) {
           runResult = apiClient.getMockRunResult();
           showingOfflineFallback = true;
@@ -1439,28 +1513,35 @@ class DashboardController extends ChangeNotifier {
             : 'Backend latest watchlist run unavailable; keeping current result.';
       }
       await _loadHomeRecentActivity();
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       _rebuildAutomationRuntimeMonitorFromCurrentState();
       _rebuildPortfolioManagementItems();
     } catch (e) {
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       error = e.toString();
     } finally {
-      loading = false;
-      notifyListeners();
+      if (_isCurrentAuthSession(sessionGeneration)) {
+        loading = false;
+        notifyListeners();
+      }
     }
   }
 
   /// Regular-user Home calls the server-owned route; it never receives the
   /// global operations feed or another account's activity.
   Future<void> loadUserHomeRecentActivity() async {
+    final sessionGeneration = _authSessionGeneration;
     var hadError = false;
     // User Home never reuses the Admin operations signal feed.
     automationRecentSignals = const [];
     _startTodayAiDecisionLoad(userScoped: true);
     try {
       final runs = await apiClient.fetchUserTradingRuns(limit: 50);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       automationRecentRuns = runs;
       recentRuns = runs.map(_tradingRunFromLog).toList();
     } catch (_) {
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       automationRecentRuns = const [];
       recentRuns = const [];
       hadError = true;
@@ -1473,21 +1554,27 @@ class DashboardController extends ChangeNotifier {
   }
 
   Future<void> _loadHomeRecentActivity() async {
+    final sessionGeneration = _authSessionGeneration;
     var hadError = false;
     _startTodayAiDecisionLoad(userScoped: false);
     try {
       final runs = await apiClient.fetchAdminAutomationRecentRuns(limit: 3);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       automationRecentRuns = runs;
       recentRuns = runs.map(_tradingRunFromLog).toList();
     } catch (_) {
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       hadError = true;
       automationRecentRuns = const [];
       recentRuns = const [];
     }
 
     try {
-      automationRecentOrders = await apiClient.fetchRecentOrders(limit: 3);
+      final orders = await apiClient.fetchRecentOrders(limit: 3);
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
+      automationRecentOrders = orders;
     } catch (_) {
+      if (!_isCurrentAuthSession(sessionGeneration)) return;
       hadError = true;
       automationRecentOrders = const [];
     }
