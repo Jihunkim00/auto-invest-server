@@ -2061,6 +2061,15 @@ def _record_quant_ab_observations(
             a_rank=a_rank_by_symbol.get(symbol),
             a_quant_buy_score=_score_or_none(item.get("quant_buy_score")),
             a_quant_sell_score=_score_or_none(item.get("quant_sell_score")),
+            # Failed/incomplete GPT calls must not persist a stale score.
+            # Legacy completed items may carry gpt_used without an explicit status.
+            a_gpt_buy_score=(
+                _score_or_none(finite_score(item.get("ai_buy_score")))
+                if item.get("gpt_used") is True
+                and str(item.get("gpt_analysis_status") or "").strip().lower()
+                in {"", "completed"}
+                else None
+            ),
             a_final_score=_score_or_none(item.get("final_buy_score")),
             b_rank_within_shadow_pool=b_rank_by_symbol.get(symbol),
             c_rank_within_shadow_pool=c_rank_by_symbol.get(symbol),
@@ -2108,7 +2117,8 @@ def _record_quant_ab_observations(
                 default=str,
             ),
             intraday_snapshot_metadata_json=json.dumps(
-                shadow.get("intraday_snapshot_metadata") or {},
+                shadow.get("intraday_snapshot_metadata")
+                or c_shadow.get("intraday_snapshot_metadata") or {},
                 ensure_ascii=False,
                 default=str,
             ),

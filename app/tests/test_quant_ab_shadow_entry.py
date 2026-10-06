@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.brokers.kis_client import (
     KIS_INTRADAY_BARS_PATH,
     KIS_INTRADAY_BARS_TR_ID,
@@ -532,3 +534,113 @@ def test_quant_ab_recent_serializer_preserves_confidence_and_legacy_null(db_sess
     assert items["SERIALIZE"]["confidence_b"] == 0.6191
     assert items["LEGACY"]["observation"]["confidence_b"] is None
     assert items["LEGACY"]["confidence_b"] is None
+
+
+@pytest.mark.parametrize(
+    "gpt_used,status,score,expected",
+    [
+        (True, "completed", 63, 63.0),
+        (True, None, 63, 63.0),
+        (False, "not_run", None, None),
+        (False, "not_run", 63, None),
+        (False, "failed", 63, None),
+        (True, "failed", 63, None),
+        (True, "incomplete", 63, None),
+        (True, "not_run", 63, None),
+        (True, "completed", None, None),
+        (True, "completed", "invalid", None),
+        (True, "completed", float("nan"), None),
+        (True, "completed", float("inf"), None),
+        (True, "completed", True, None),
+        (True, "completed", -1, None),
+        (True, "completed", 101, None),
+        (True, "completed", 0, 0.0),
+    ],
+)
+def test_quant_ab_gpt_score_persistence_preserves_null_and_final(
+    db_session, gpt_used, status, score, expected
+):
+    from app.services.quant_ab_evaluation_service import QuantABEvaluationService
+
+    item = {
+        "symbol": "005930", "current_price": 70000,
+        "quant_buy_score": 72, "final_buy_score": 67,
+        "gpt_used": gpt_used, "ai_buy_score": score,
+        "shadow_c": {
+            "reversal_score_c": 68, "data_quality_c": 1.0,
+            "intraday_snapshot_metadata": {"validation_status": "ok"},
+        },
+    }
+    if status is not None:
+        item["gpt_analysis_status"] = status
+    targeted = gpt_used or status == "failed"
+    payload = {
+        "quant_experiment": {
+            "shadow_c_enabled": True,
+            "decision_slot": "2026-10-01T09:10:00+09:00",
+        },
+        "quant_ranked_candidates": [{"symbol": "005930", "rank": 2}],
+        "watchlist": [item],
+        "gpt_target_symbols": ["005930"] if targeted else [],
+    }
+    assert _record_quant_ab_observations(
+        db_session, payload=payload, gate_level=2, trigger_source="test", run_key="gpt-log"
+    ) == 1
+    # A repeat never rewrites the original observation, even with a different score.
+    item["ai_buy_score"] = 99
+    assert _record_quant_ab_observations(
+        db_session, payload=payload, gate_level=2, trigger_source="test", run_key="gpt-log"
+    ) == 0
+    row = db_session.query(QuantABObservation).one()
+    assert row.a_gpt_buy_score == expected
+    assert row.a_quant_buy_score == 72
+    assert row.a_final_score == 67
+    assert row.gpt_selected_by_a is targeted
+    assert row.intraday_snapshot_metadata_json == '{"validation_status": "ok"}'
+    serialized = QuantABEvaluationService._serialize_record(row, None)
+    assert serialized["observation"]["a_gpt_buy_score"] == expected
+    assert serialized["observation"]["a_final_score"] == 67
+
+
+def test_quant_ab_gpt_score_startup_migration_preserves_history(monkeypatch):
+    from sqlalchemy import create_engine, inspect, text
+    from sqlalchemy.orm import sessionmaker
+    from app.db import init_db as migration
+
+    engine = create_engine("sqlite:///:memory:")
+    QuantABObservation.__table__.create(engine)
+    QuantABOutcome.__table__.create(engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE quant_ab_observations DROP COLUMN a_gpt_buy_score"))
+        connection.execute(text("""
+            INSERT INTO quant_ab_observations
+            (id, observation_key, run_key, trigger_source, provider, market, symbol,
+             authoritative_variant, shadow_variant, selected_by_a, selected_by_b_shadow,
+             selected_by_c_shadow, gpt_selected_by_a, outcome_status, a_final_score)
+            VALUES (77, 'historical', 'september-replay', 'replay', 'kis', 'KR', '005930',
+                    'A', 'B', 1, 0, 0, 0, 'complete', 72.0)
+        """))
+        connection.execute(text("""
+            INSERT INTO quant_ab_outcomes
+            (id, observation_id, cohort_key, symbol, tp_hit, sl_hit, outcome_status, label_version)
+            VALUES (88, 77, 'historical-cohort', '005930', 1, 0, 'complete', 'pr120-v1')
+        """))
+        before = dict(connection.execute(text("SELECT * FROM quant_ab_observations")).mappings().one())
+        outcome_before = dict(connection.execute(text("SELECT * FROM quant_ab_outcomes")).mappings().one())
+    indexes_before = {item["name"] for item in inspect(engine).get_indexes("quant_ab_observations")}
+    monkeypatch.setattr(migration, "engine", engine)
+    monkeypatch.setattr(migration, "SessionLocal", sessionmaker(bind=engine))
+    try:
+        migration.init_db()
+        migration.init_db()
+        columns = {column["name"]: column for column in inspect(engine).get_columns("quant_ab_observations")}
+        assert columns["a_gpt_buy_score"]["nullable"] is True
+        with engine.connect() as connection:
+            after = dict(connection.execute(text("SELECT * FROM quant_ab_observations")).mappings().one())
+            assert after.pop("a_gpt_buy_score") is None
+            assert after == before
+            assert dict(connection.execute(text("SELECT * FROM quant_ab_outcomes")).mappings().one()) == outcome_before
+        indexes_after = {item["name"] for item in inspect(engine).get_indexes("quant_ab_observations")}
+        assert indexes_before <= indexes_after
+    finally:
+        engine.dispose()

@@ -1539,6 +1539,7 @@ def _create_quant_ab_observations_table_if_missing():
                     a_rank INTEGER,
                     a_quant_buy_score FLOAT,
                     a_quant_sell_score FLOAT,
+                    a_gpt_buy_score FLOAT,
                     a_final_score FLOAT,
                     b_rank_within_shadow_pool INTEGER,
                     b_entry_score FLOAT,
@@ -1570,6 +1571,7 @@ def _create_quant_ab_observations_table_if_missing():
         conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_symbol ON quant_ab_observations (symbol)'))
         conn.execute(text('CREATE INDEX IF NOT EXISTS ix_quant_ab_observations_observed_at ON quant_ab_observations (observed_at)'))
     _add_column_if_missing('quant_ab_observations', 'experiment_cohort_key', 'VARCHAR(180)')
+    _add_column_if_missing('quant_ab_observations', 'a_gpt_buy_score', 'FLOAT')
     _add_column_if_missing('quant_ab_observations', 'confidence_b', 'FLOAT')
     _add_column_if_missing('quant_ab_observations', 'c_rank_within_shadow_pool', 'INTEGER')
     _add_column_if_missing('quant_ab_observations', 'c_reversal_score', 'FLOAT')

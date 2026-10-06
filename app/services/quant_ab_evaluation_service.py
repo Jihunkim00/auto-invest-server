@@ -302,6 +302,7 @@ class QuantABEvaluationService:
                 "decision_slot": observation.decision_slot,
                 "a_rank": observation.a_rank,
                 "a_quant_buy_score": observation.a_quant_buy_score,
+                "a_gpt_buy_score": observation.a_gpt_buy_score,
                 "a_final_score": observation.a_final_score,
                 "b_rank_within_shadow_pool": observation.b_rank_within_shadow_pool,
                 "b_entry_score": observation.b_entry_score,

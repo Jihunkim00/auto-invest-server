@@ -1249,6 +1249,7 @@ class QuantABObservation(Base):
     a_rank = Column(Integer, nullable=True)
     a_quant_buy_score = Column(Float, nullable=True)
     a_quant_sell_score = Column(Float, nullable=True)
+    a_gpt_buy_score = Column(Float, nullable=True)
     a_final_score = Column(Float, nullable=True)
     b_rank_within_shadow_pool = Column(Integer, nullable=True)
     b_entry_score = Column(Float, nullable=True)
