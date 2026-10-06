@@ -14,6 +14,7 @@ from app.db.models import KisOrderValidationLog
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_session_service import MarketSessionService
 from app.services.kis_order_messages import concise_order_block
+from app.services.kis_buy_cash import buy_cash_diagnostics
 from app.services.kis_order_audit import (
     kis_order_source_fields,
     normalize_kis_order_source_metadata,
@@ -135,6 +136,7 @@ class KisOrderValidationService:
         warnings: list[str] = []
         block_reasons: list[str] = []
         available_cash: float | None = None
+        cash_diagnostics: dict[str, Any] = {}
         held_qty: float | None = None
         source_metadata = normalize_kis_order_source_metadata(request.source_metadata)
         company_name = _company_name_from_sources(source_metadata, symbol)
@@ -178,7 +180,8 @@ class KisOrderValidationService:
         if request.side == "buy":
             try:
                 balance = self.client.get_account_balance()
-                available_cash = _optional_float(balance.get("cash"))
+                cash_diagnostics = buy_cash_diagnostics(balance, estimated_amount)
+                available_cash = cash_diagnostics["cash_check_amount_krw"]
                 if available_cash is None:
                     warnings.append("available_cash_unavailable")
                     block_reasons.append("available_cash_unavailable")
@@ -250,7 +253,10 @@ class KisOrderValidationService:
             source_metadata=source_metadata or None,
             primary_block_reason=concise.get("primary_block_reason"),
             message=concise.get("message"),
-            detail=concise.get("detail"),
+            detail=(
+                {**(concise.get("detail") or {}), "cash_diagnostics": cash_diagnostics}
+                if cash_diagnostics else concise.get("detail")
+            ),
         )
 
     def _build_preview(

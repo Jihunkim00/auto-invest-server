@@ -30,6 +30,7 @@ from app.services.kis_order_validation_service import (
     record_kis_order_validation,
 )
 from app.services.kis_payload_sanitizer import sanitize_kis_payload
+from app.services.kis_buy_cash import buy_cash_diagnostics, orderable_cash as _orderable_cash
 from app.services.market_session_service import MarketSessionService
 from app.services.profile_universe_service import profile_universe_bounds
 from app.services.profile_aware_dry_run_auto_buy_service import (
@@ -214,6 +215,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
         )
 
         plan: dict[str, Any] = {}
+        cash_diagnostics: dict[str, Any] = {}
         if primary is None and dry_run.get("accepted"):
             try:
                 account = self._account_snapshot(db)
@@ -266,10 +268,12 @@ class ProfileAwareGuardedLiveAutoBuyService:
                         str(plan.get("block_reason") or "quantity_zero"),
                         "Calculated live order quantity must be greater than zero.",
                     )
-                    cash = _cash(account["balance"])
+                    cash_diagnostics = buy_cash_diagnostics(
+                        account["balance"], float(plan.get("estimated_notional_krw") or 0),
+                    )
                     gate(
                         "cash_sufficient",
-                        cash is not None and cash >= float(plan.get("estimated_notional_krw") or 0),
+                        cash_diagnostics["cash_sufficient"],
                         "insufficient_cash",
                         "Available KIS cash must cover the guarded live buy estimate.",
                     )
@@ -312,6 +316,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     settings.get("strategy_live_auto_buy_max_notional_pct") or 0
                 ),
                 "primary_block_reason": primary,
+                "cash_diagnostics": cash_diagnostics,
                 "checks": checks,
                 "risk_flags": _dedupe(risk_flags),
                 "gating_notes": _dedupe(gating_notes),
@@ -596,7 +601,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             except ValueError as exc:
                 gate("account_snapshot", False, _account_block_reason(exc), str(exc))
             else:
-                available_cash = _cash(account["balance"])
+                available_cash = _orderable_cash(account["balance"])["amount"]
                 selected_symbol = str(dry_run["payload"].get("selected_symbol") or "")
                 max_positions = int(profile.get("max_positions") or 0)
                 position_count = len(
@@ -639,6 +644,9 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     )
                     estimated_quantity = int(plan.get("quantity") or 0) or None
                     proposed_notional = _float(plan.get("estimated_notional_krw"))
+                    plan["cash_diagnostics"] = buy_cash_diagnostics(
+                        account["balance"], proposed_notional,
+                    )
                     gate(
                         "order_plan_quantity",
                         bool((plan.get("quantity") or 0) > 0),
@@ -647,9 +655,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     )
                     gate(
                         "cash_sufficient",
-                        available_cash is not None
-                        and available_cash
-                        >= float(plan.get("estimated_notional_krw") or 0),
+                        plan["cash_diagnostics"]["cash_sufficient"],
                         "insufficient_cash",
                         "Available KIS cash covers the estimated notional.",
                     )
@@ -725,6 +731,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                     settings.get("strategy_live_auto_buy_max_notional_krw")
                 ),
                 "available_cash_krw": available_cash,
+                "cash_diagnostics": plan.get("cash_diagnostics", {}),
                 "estimated_quantity": estimated_quantity,
                 "checklist": [],
                 "primary_block_reason": primary,
@@ -938,8 +945,10 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 plan=plan,
             )
 
-        cash = _cash(account["balance"])
-        if cash is None or cash < float(plan.get("estimated_notional_krw") or 0):
+        plan["cash_diagnostics"] = buy_cash_diagnostics(
+            account["balance"], float(plan.get("estimated_notional_krw") or 0),
+        )
+        if not plan["cash_diagnostics"]["cash_sufficient"]:
             return block(
                 status="blocked",
                 block_reason="insufficient_cash",
@@ -1110,6 +1119,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             quantity=int((plan or {}).get("quantity") or 0) or None,
             estimated_price=(plan or {}).get("estimated_price"),
             submitted_notional_krw=(plan or {}).get("estimated_notional_krw"),
+            cash_diagnostics=(plan or {}).get("cash_diagnostics", {}),
             block_reason=block_reason,
             risk_flags=_dedupe([block_reason, *_strings((target_risk or {}).get("risk_flags"))]),
             gating_notes=_dedupe(_strings((target_risk or {}).get("gating_notes")) + [block_reason]),
@@ -1197,6 +1207,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             quantity=int(plan["quantity"]),
             estimated_price=plan.get("estimated_price"),
             submitted_notional_krw=plan.get("estimated_notional_krw"),
+            cash_diagnostics=plan.get("cash_diagnostics", {}),
             related_order_id=order.id,
             internal_status=order.internal_status,
             risk_flags=_strings(target_risk.get("risk_flags")),
@@ -1275,6 +1286,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
                 quantity=int(plan["quantity"]),
                 estimated_price=plan.get("estimated_price"),
                 submitted_notional_krw=plan.get("estimated_notional_krw"),
+                cash_diagnostics=plan.get("cash_diagnostics", {}),
                 related_order_id=order.id,
                 internal_status=order.internal_status,
                 block_reason=block_reason,
@@ -1344,6 +1356,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             quantity=int(plan["quantity"]),
             estimated_price=plan.get("estimated_price"),
             submitted_notional_krw=plan.get("estimated_notional_krw"),
+            cash_diagnostics=plan.get("cash_diagnostics", {}),
             related_order_id=order.id,
             broker_order_id=broker_order_id,
             broker_status=broker_status,
@@ -1848,6 +1861,7 @@ class ProfileAwareGuardedLiveAutoBuyService:
             "quantity": kwargs.get("quantity"),
             "estimated_price": kwargs.get("estimated_price"),
             "submitted_notional_krw": kwargs.get("submitted_notional_krw"),
+            "cash_diagnostics": kwargs.get("cash_diagnostics") or {},
             "related_order_id": kwargs.get("related_order_id"),
             "broker_order_id": kwargs.get("broker_order_id"),
             "broker_status": kwargs.get("broker_status"),
@@ -2181,14 +2195,6 @@ def _has_position(positions: list[dict[str, Any]], symbol: str) -> bool:
 
 def _position_qty(item: dict[str, Any]) -> float:
     return _float(item.get("qty") or item.get("quantity") or item.get("hldg_qty")) or 0.0
-
-
-def _cash(balance: dict[str, Any]) -> float | None:
-    for key in ("cash", "available_cash", "dnca_tot_amt", "ord_psbl_cash"):
-        value = _float(balance.get(key))
-        if value is not None:
-            return value
-    return None
 
 
 def _extract_broker_order_id(value: Any) -> str | None:

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.constants import A_TOP5_C_MIN_SCORE
+from app.core.constants import A_TOP5_C_MIN_SCORE, A_TOP5_GPT_MIN_BUY_SCORE, BUY_FINAL_MIN
 
 from app.db.database import SessionLocal
 from app.db.models import (
@@ -1394,7 +1394,12 @@ class UserAutoTradingSchedulerService:
                     if isinstance(pipeline_diagnostics, dict)
                     else None
                 ),
+                required_c_score=(calendar_gap_risk or {}).get('required_c_score'),
+                required_final_score=(calendar_gap_risk or {}).get('required_final_score'),
+                profile=profile,
             )
+            if preview_score_failure and isinstance(pipeline_diagnostics, dict):
+                pipeline_diagnostics.update(_candidate_rejection_payload(preview_score_failure))
             profile_context = self._profile_context(
                 profile=profile,
                 scheduler_slot=scheduler_slot,
@@ -1414,7 +1419,7 @@ class UserAutoTradingSchedulerService:
                     preview_score_failure.get("reason")
                     if preview_score_failure
                     else (
-                        'no_completed_gpt_final_candidate'
+                        'no_gpt_completed_candidate'
                         if pipeline_diagnostics
                         else 'no_qualifying_candidate'
                     )
@@ -1432,7 +1437,7 @@ class UserAutoTradingSchedulerService:
                         if isinstance(pipeline_diagnostics, dict) else {}
                     ),
                     **(
-                        {'score_gate_candidate': preview_score_failure['candidate']}
+                        _candidate_rejection_payload(preview_score_failure)
                         if preview_score_failure else {}
                     ),
                 },
@@ -1822,6 +1827,16 @@ class UserAutoTradingSchedulerService:
         )
         pipeline_diagnostics["fallback_candidate_results_by_symbol"] = results_by_symbol
 
+        preview_rejections = _canonical_preview_score_gate_failure(
+            ranked_candidates[0] if ranked_candidates else None,
+            selection_mode=pipeline_diagnostics.get('selection_mode'),
+            required_c_score=calendar_gap_risk.get('required_c_score'),
+            required_final_score=calendar_gap_risk.get('required_final_score'),
+            profile=profile,
+        )
+        if preview_rejections:
+            pipeline_diagnostics.update(_candidate_rejection_payload(preview_rejections))
+
         final_candidate = (
             selected_candidate
             or last_candidate
@@ -1878,7 +1893,8 @@ class UserAutoTradingSchedulerService:
                 run_key=summary_run_key,
                 result="HOLD",
                 reason=(
-                    calendar_skip_reason
+                    (preview_rejections['reason'] if preview_rejections and not eligible_candidates else None)
+                    or calendar_skip_reason
                     or score_gate_skip_reason
                     or ("no_affordable_final_candidate" if eligible_candidates else "no_qualifying_candidate")
                 ),
@@ -1892,6 +1908,40 @@ class UserAutoTradingSchedulerService:
                 },
             )
             final_result["action"] = "hold"
+
+        if preview_rejections:
+            # Keep selection, execution attempts and HOLD semantics intact. Only
+            # refine the reason of a run that had no eligible execution candidate.
+            rejection_payload = _candidate_rejection_payload(preview_rejections)
+            if (
+                not eligible_candidates
+                and str(final_result.get('result') or '').lower() == 'hold'
+                and not final_result.get('broker_submit_called')
+            ):
+                final_result['reason'] = preview_rejections['reason']
+                if final_result.get('block_reason') is not None:
+                    final_result['block_reason'] = preview_rejections['reason']
+            rejection_payload['primary_block_reason'] = (
+                None if selected_result is not None else final_result.get('reason')
+            )
+            pipeline_diagnostics.update(rejection_payload)
+            final_result.update(rejection_payload)
+            run_id = final_result.get('run_id')
+            run = db.get(TradeRunLog, run_id) if run_id is not None else None
+            if run is not None and run.owner_user_id == int(user.id):
+                persisted = json.loads(run.response_payload or '{}')
+                persisted.update({
+                    **rejection_payload,
+                    'reason': final_result['reason'],
+                    'pipeline_diagnostics': pipeline_diagnostics,
+                })
+                if 'block_reason' in persisted and final_result.get('block_reason') is not None:
+                    persisted['block_reason'] = final_result['block_reason']
+                run.reason = final_result['reason']
+                run.response_payload = json.dumps(persisted, ensure_ascii=False, default=str)
+                signal = db.get(SignalLog, run.signal_id) if run.signal_id else None
+                if signal is not None and signal.owner_user_id == int(user.id):
+                    signal.reason = final_result['reason']
 
         final_profile_context = self._profile_context(
             profile=profile,
@@ -2664,81 +2714,115 @@ def _is_canonical_fallback_pipeline(
     )
 
 
+def _candidate_rejection_payload(failure: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'primary_block_reason': failure['reason'],
+        'score_gate_candidate': failure['candidate'],
+        'candidate_rejection_summary': failure['summary'],
+        'candidate_rejections': failure['rejections'],
+    }
+
+
 def _canonical_preview_score_gate_failure(
     pipeline_candidate: Any,
     *,
     selection_mode: Any,
+    required_c_score: float | None = None,
+    required_final_score: float | None = None,
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    if str(selection_mode or "").strip().upper() != "A_TOP5_C_GPT":
-        return None
-    pipeline_candidate = (
-        pipeline_candidate if isinstance(pipeline_candidate, dict) else {}
-    )
-    preview = pipeline_candidate.get("_pipeline_preview")
+    """Explain retained preview rows without changing execution eligibility."""
+    pipeline_candidate = pipeline_candidate if isinstance(pipeline_candidate, dict) else {}
+    preview = pipeline_candidate.get('_pipeline_preview')
     preview = preview if isinstance(preview, dict) else {}
-    rows = preview.get("items")
+    rows = preview.get('items')
     if not isinstance(rows, list):
-        rows = preview.get("quant_ranked_candidates")
+        rows = preview.get('quant_ranked_candidates')
     if not isinstance(rows, list):
         return None
-    active_rows = [
-        row
-        for row in rows
-        if isinstance(row, dict) and row.get("selected_by_a_top5") is True
-    ]
-    active_rows.sort(
-        key=lambda row: _int_or_none(row.get("quant_a_rank")) or 10**9
-    )
-    score_gate_reasons = {
-        "c_quant_unavailable",
-        "c_score_invalid",
-        "c_score_below_threshold",
-        "gpt_analysis_failed",
-        "gpt_analysis_not_completed",
-        "gpt_analysis_incomplete",
-        "gpt_buy_score_missing",
-        "gpt_buy_score_invalid",
-        "gpt_buy_score_below_threshold",
-    }
+    rows = [row for row in rows if isinstance(row, dict)]
+    active_rows = [row for row in rows if row.get('selected_by_a_top5') is True]
+    if not active_rows:
+        active_rows = rows
+    mode = str(selection_mode or preview.get('selection_mode') or '').strip().upper()
+    settings = (profile or {}).get('effective_settings') or (profile or {}).get('settings') or {}
+    entry = settings.get('entry') or {}
+    profile_threshold = max(BUY_FINAL_MIN, _number(entry.get('min_final_score')))
+    final_threshold = max(profile_threshold, _optional_number(required_final_score) or profile_threshold)
+    rejections = []
+    seen = set()
     for row in active_rows:
-        score_gate = evaluate_a_top5_score_gate(row)
-        reason = score_gate.get("a_top5_score_gate_reason")
-        if reason in score_gate_reasons:
-            diagnostic = {
-                key: row.get(key)
-                for key in (
-                    "symbol",
-                    "quant_c_status",
-                    "ai_buy_score",
-                    "gpt_analysis_status",
-                    "gpt_used",
-                    "final_buy_score",
-                )
-            }
-            diagnostic.update(score_gate)
-            diagnostic["skip_reason"] = reason
-            return {"reason": reason, "candidate": diagnostic}
-        final_score = finite_score(
-            row.get("final_buy_score", row.get("final_entry_score"))
-        )
-        if final_score is None or final_score < 65.0:
-            diagnostic = {
-                key: row.get(key)
-                for key in (
-                    "symbol",
-                    "quant_c_score",
-                    "quant_c_status",
-                    "ai_buy_score",
-                    "gpt_analysis_status",
-                    "gpt_used",
-                    "final_buy_score",
-                    "final_entry_score",
-                )
-            }
-            diagnostic.update(score_gate)
-            diagnostic["skip_reason"] = "final_score_below_threshold"
-            return {"reason": "final_score_below_threshold", "candidate": diagnostic}
-    return None
+        symbol = normalize_symbol_identity(row.get('symbol'))
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        gate = evaluate_a_top5_score_gate(row)
+        is_a_top5 = mode == 'A_TOP5_C_GPT' or row.get('selected_by_a_top5') is True
+        status = str(row.get('gpt_analysis_status') or 'not_run').strip().lower()
+        used = bool(row.get('gpt_used'))
+        gpt_score = finite_score(row.get('ai_buy_score', row.get('gpt_buy_score')))
+        final_score = finite_score(row.get('final_buy_score', row.get('final_entry_score')))
+        reason = None
+        stage = 0
+        if is_a_top5 and not gate['quant_c_gate_passed']:
+            reason = gate['a_top5_score_gate_reason']
+        elif is_a_top5 and required_c_score is not None and gate['quant_c_score'] < float(required_c_score):
+            reason = 'calendar_gap_c_below_threshold'
+        elif status == 'failed':
+            reason, stage = 'gpt_analysis_failed', 1
+        elif not used or status == 'not_run':
+            reason, stage = 'no_gpt_completed_candidate', 1
+        elif status != 'completed':
+            reason, stage = 'gpt_analysis_incomplete', 1
+        elif gpt_score is None:
+            reason, stage = ('gpt_buy_score_missing' if row.get('ai_buy_score') is None else 'gpt_buy_score_invalid'), 1
+        elif gpt_score < A_TOP5_GPT_MIN_BUY_SCORE:
+            reason, stage = 'gpt_buy_score_below_threshold', 2
+        elif finite_score(row.get('ai_sell_score', row.get('gpt_sell_score'))) is None:
+            reason, stage = 'gpt_analysis_incomplete', 1
+        elif final_score is None:
+            reason, stage = 'final_score_unavailable', 3
+        elif final_score < final_threshold:
+            reason, stage = (
+                'below_profile_buy_threshold' if final_score < profile_threshold
+                else 'calendar_gap_final_below_threshold'
+            ), 3
+        elif (
+            row.get('data_sufficient') is False
+            or (_optional_number(row.get('current_price')) or 0) <= 0
+            or str(row.get('indicator_status') or '').strip().lower() not in {'ok', 'partial'}
+        ):
+            reason, stage = 'data_quality_blocked', 4
+        elif row.get('hard_blocked') or row.get('hard_block_reason') or row.get('analysis_blocked'):
+            reason, stage = str(row.get('hard_block_reason') or 'candidate_hard_blocked'), 5
+        if reason is None:
+            continue
+        diagnostic = {
+            'symbol': symbol,
+            **gate,
+            'quant_c_status': row.get('quant_c_status'),
+            'required_c_score': required_c_score if required_c_score is not None else gate['quant_c_threshold'],
+            'ai_buy_score': gpt_score,
+            'gpt_used': used,
+            'gpt_analysis_status': status,
+            'required_gpt_buy_score': A_TOP5_GPT_MIN_BUY_SCORE,
+            'final_buy_score': final_score,
+            'required_final_buy_score': final_threshold,
+            'data_sufficient': row.get('data_sufficient'),
+            'indicator_status': row.get('indicator_status'),
+            'skip_reason': reason,
+            'block_reason': reason,
+            'funnel_stage': stage,
+        }
+        rejections.append(diagnostic)
+    if not rejections:
+        return None
+    primary = max(rejections, key=lambda item: item['funnel_stage'])
+    summary = {}
+    for rejection in rejections:
+        reason = rejection['block_reason']
+        summary[reason] = summary.get(reason, 0) + 1
+    return {'reason': primary['block_reason'], 'candidate': primary, 'summary': summary, 'rejections': rejections}
 
 
 def _canonical_c_score(candidate: dict[str, Any]) -> float | None:

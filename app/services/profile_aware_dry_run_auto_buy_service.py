@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.core.constants import BUY_FINAL_MIN
+from app.core.constants import BUY_FINAL_MIN, A_TOP5_GPT_MIN_BUY_SCORE
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
     AutomationProfileAiCandidateResult,
@@ -182,11 +182,28 @@ class ProfileAwareDryRunAutoBuyService:
             profile=profile,
             preview=preview,
         )
+        live_rejections = (
+            _live_candidate_rejections(preview, evaluated, profile=profile)
+            if canonical_execution_mode == "live" else []
+        )
+        primary_rejection = max(
+            live_rejections, key=lambda item: item["funnel_stage"], default=None,
+        )
         if canonical_execution_mode == "live" and not execution_candidates:
             decision = {
                 **decision,
-                "reason": "no_gpt_completed_execution_candidate",
+                "reason": (
+                    primary_rejection["block_reason"] if primary_rejection
+                    else "no_gpt_completed_execution_candidate"
+                ),
             }
+        elif (
+            canonical_execution_mode == "live"
+            and decision["action"] != "would_buy"
+            and decision["reason"] != "market_closed"
+            and primary_rejection is not None
+        ):
+            decision = {**decision, "reason": primary_rejection["block_reason"]}
         preview_failure_reason = self._preview_failure_reason(preview)
         if preview_failure_reason is not None and not evaluated:
             decision = {
@@ -209,6 +226,22 @@ class ProfileAwareDryRunAutoBuyService:
             execution_mode=canonical_execution_mode,
             now_utc=now_utc,
         )
+
+        if canonical_execution_mode == "live":
+            rejection_summary: dict[str, int] = {}
+            for item in live_rejections:
+                reason = item["block_reason"]
+                rejection_summary[reason] = rejection_summary.get(reason, 0) + 1
+            response.update({
+                "primary_block_reason": (
+                    decision["reason"] if decision["action"] != "would_buy" else None
+                ),
+                "candidate_rejection_summary": rejection_summary,
+                "candidate_rejections": live_rejections,
+                "live_block_diagnostics": (
+                    primary_rejection if decision["action"] != "would_buy" else None
+                ),
+            })
 
         canonical_profile_pipeline = bool(preview.get("canonical_profile_pipeline"))
         if payload.save_logs:
@@ -1806,6 +1839,82 @@ def _unavailable_preview_payload(
         status="unavailable",
         error=error or reason,
     )
+
+
+def _live_candidate_rejections(
+    preview: dict[str, Any], evaluated: list[dict[str, Any]],
+    *, profile: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Explain existing funnel failures, including candidates filtered upstream.
+
+    This projection never adds candidates to the execution pool or changes gates.
+    """
+    candidates = list(evaluated)
+    seen = {item.get("symbol") for item in candidates}
+    for key in ("items", "watchlist", "final_ranked_candidates", "researched_candidates"):
+        for raw in preview.get(key) or []:
+            if not isinstance(raw, dict) or not _symbol(raw) or _symbol(raw) in seen:
+                continue
+            seen.add(_symbol(raw))
+            candidates.append(raw)
+    rejected: list[dict[str, Any]] = []
+    for item in candidates:
+        raw = item.get("raw") if isinstance(item.get("raw"), dict) else item
+        gpt_used = bool(item.get("gpt_used"))
+        status = str(item.get("gpt_analysis_status") or "not_run").strip().lower()
+        gpt_score = finite_score(item.get("ai_buy_score"))
+        final_score = finite_score(_score(item, "final_score", "final_entry_score", "final_buy_score"))
+        reason = None
+        stage = 0
+        if raw.get("selected_by_a_top5") is True:
+            gate = evaluate_a_top5_score_gate(raw)
+            if not gate["quant_c_gate_passed"]:
+                reason, stage = gate["a_top5_score_gate_reason"], -1
+        if reason is None:
+            if not gpt_used or status == "not_run":
+                reason = "no_gpt_completed_execution_candidate"
+            elif status != "completed":
+                reason, stage = (
+                    "gpt_analysis_failed" if status == "failed" else "gpt_analysis_incomplete"
+                ), 1
+            elif gpt_score is None:
+                reason, stage = (
+                    "gpt_buy_score_missing" if item.get("ai_buy_score") is None
+                    else "gpt_buy_score_invalid"
+                ), 1
+            elif gpt_score < A_TOP5_GPT_MIN_BUY_SCORE:
+                reason, stage = "gpt_buy_score_below_threshold", 2
+            elif final_score is None or final_score < _minimum_entry_score(profile):
+                reason, stage = (
+                    "final_score_unavailable" if final_score is None
+                    else "below_profile_buy_threshold"
+                ), 3
+            elif item.get("data_sufficient") is False or str(raw.get("indicator_status") or "").lower() in {"insufficient", "price_only", "error"}:
+                reason, stage = "data_quality_blocked", 4
+            elif item.get("target_risk_approved") is False:
+                reason, stage = str(
+                    (item.get("target_risk_result") or {}).get("block_reason") or "risk_blocked"
+                ), 5
+            elif "target_risk_result" in item:
+                target = item["target_risk_result"]
+                recommended = _score(target, "approved_notional_krw", "recommended_notional_krw") or 0
+                price = _score(item, "price") or 0
+                if price <= 0 or math.floor(recommended / price) <= 0:
+                    reason, stage = "simulated_quantity_zero", 6
+        if reason is not None:
+            rejected.append({
+                "symbol": _symbol(item),
+                "block_reason": reason,
+                "funnel_stage": stage,
+                "gpt_used": gpt_used,
+                "gpt_analysis_status": status,
+                "gpt_buy_score": gpt_score,
+                "required_gpt_buy_score": A_TOP5_GPT_MIN_BUY_SCORE,
+                "final_buy_score": final_score,
+                "required_final_buy_score": _minimum_entry_score(profile),
+                "data_sufficient": item.get("data_sufficient"),
+            })
+    return rejected
 
 
 def _get_live_execution_candidates(
