@@ -10,6 +10,11 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.services.market_regime_trading_context import (
+    get_run_market_regime_context,
+    market_regime_run,
+)
+from app.services.market_regime_trading_policy import market_regime_diagnostics
 from app.core.constants import A_TOP5_C_MIN_SCORE, A_TOP5_GPT_MIN_BUY_SCORE, BUY_FINAL_MIN
 
 from app.db.database import SessionLocal
@@ -168,6 +173,9 @@ class UserAutoTradingCandidateService:
             except Exception as exc:
                 raise _UserSchedulerProcessingError('final_ranking', exc) from exc
             self.last_pipeline_diagnostics = {
+                **{name: preview.get(name) for name in (
+                    "market_regime", "market_regime_shadow_policy", "market_regime_shadow_candidates",
+                )},
                 "canonical_profile_pipeline": True,
                 "profile_id": profile.get("id"),
                 "owner_user_id": int(user.id),
@@ -604,6 +612,7 @@ class UserAutoTradingSchedulerService:
                 due.append((slot, candidate))
         return due
 
+    @market_regime_run
     def run_provider_once(
         self,
         db: Session,
@@ -1167,6 +1176,7 @@ class UserAutoTradingSchedulerService:
         finally:
             db.close()
 
+    @market_regime_run
     def _process_user(
         self,
         db: Session,
@@ -2471,6 +2481,7 @@ class UserAutoTradingSchedulerService:
             'reason': 'automation_profile_missing',
             'trading_signal_created': False,
             'execution_service_called': False,
+            **market_regime_diagnostics(get_run_market_regime_context(db)),
         }, ensure_ascii=False, default=str)
         db.commit()
         return {
@@ -2573,6 +2584,7 @@ class UserAutoTradingSchedulerService:
             'trading_signal_created': signal is not None,
             'profile_context': profile_context,
             **failure_payload,
+            **market_regime_diagnostics(get_run_market_regime_context(db)),
         }
         run.response_payload = json.dumps(
             response_payload,

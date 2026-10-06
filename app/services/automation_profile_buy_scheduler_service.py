@@ -9,6 +9,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.services.market_regime_trading_context import (
+    get_run_market_regime_context,
+    market_regime_run,
+)
+from app.services.market_regime_trading_policy import market_regime_diagnostics
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_broker import KisBroker
 from app.brokers.kis_client import KisClient
@@ -295,6 +300,7 @@ class AutomationProfileBuySchedulerService:
             'safety': _safety(read_only=True),
         }
 
+    @market_regime_run
     def run_once(
         self,
         db: Session,
@@ -974,6 +980,7 @@ class AutomationProfileBuySchedulerService:
         }
 
     def _record_run(self, db: Session, result: dict[str, Any], slot: str, now: datetime) -> None:
+        result.update(market_regime_diagnostics(get_run_market_regime_context(db, now)))
         db.add(TradeRunLog(
             run_key=':'.join([MODE, uuid.uuid4().hex[:12]]),
             trigger_source=TRIGGER_SOURCE,

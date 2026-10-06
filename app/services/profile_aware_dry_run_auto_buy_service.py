@@ -9,6 +9,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
+from app.services.market_regime_trading_context import (
+    get_run_market_regime_context,
+    market_regime_run,
+)
+from app.services.market_regime_trading_policy import market_regime_diagnostics
 from app.core.constants import BUY_FINAL_MIN, A_TOP5_GPT_MIN_BUY_SCORE
 from app.core.enums import InternalOrderStatus
 from app.db.models import (
@@ -94,6 +99,7 @@ class ProfileAwareDryRunAutoBuyService:
         self.market_sessions = market_sessions or MarketSessionService()
         self.profile_watchlists = profile_watchlists or AutomationProfileWatchlistService()
 
+    @market_regime_run
     def run_once(
         self,
         db: Session,
@@ -243,6 +249,8 @@ class ProfileAwareDryRunAutoBuyService:
                 ),
             })
 
+        response.update(market_regime_diagnostics(get_run_market_regime_context(db, now_utc)))
+        response["market_regime_shadow_candidates"] = preview.get("market_regime_shadow_candidates") or []
         canonical_profile_pipeline = bool(preview.get("canonical_profile_pipeline"))
         if payload.save_logs:
             signal = (

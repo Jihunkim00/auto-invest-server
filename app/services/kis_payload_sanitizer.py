@@ -70,6 +70,8 @@ NON_SECRET_CONTEXT_KEYS = {
     "profile_key",
     "automation_profile_key",
     "scheduled_slot_key",
+    "stage_key",
+    "market_regime_key",
 }
 
 PHONE_RE = re.compile(

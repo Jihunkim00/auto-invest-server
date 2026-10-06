@@ -33,6 +33,17 @@ from app.services.automation_observability import (
     candidate_gpt_quant_observability,
     gpt_result_counts,
 )
+from app.services.market_regime_trading_context import (
+    MarketRegimeTradingContext,
+    get_run_market_regime_context,
+    market_regime_run,
+)
+from app.services.market_regime_trading_policy import (
+    evaluate_shadow_candidate,
+    get_market_regime_shadow_policy,
+    market_regime_diagnostics,
+    market_regime_observation_fields,
+)
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_data_snapshot_service import MarketDataSnapshotService
 from app.services.kr_market_context_service import KrMarketContextService
@@ -143,6 +154,7 @@ class KisWatchlistPreviewService:
             min(int(gpt_candidate_limit), KR_PREVIEW_LIMIT),
         )
 
+    @market_regime_run
     def run_preview(
         self,
         *,
@@ -169,6 +181,7 @@ class KisWatchlistPreviewService:
             if decision_timestamp is not None
             else datetime.now(ZoneInfo("Asia/Seoul"))
         )
+        market_regime_context = get_run_market_regime_context(db, decision_timestamp)
         preview_started = time.perf_counter()
         self.market_data_snapshot_service.reset_run_stats()
         session_warnings = self._session_warnings(market_session)
@@ -974,12 +987,14 @@ class KisWatchlistPreviewService:
             "items": items,
             "count": len(items),
         }
+        payload.update(market_regime_diagnostics(market_regime_context))
         if record_run and db is not None:
             run = _record_preview_run(
                 db,
                 payload=payload,
                 gate_level=gate_level,
                 trigger_source=trigger_source,
+                market_regime_context=market_regime_context,
             )
             payload["run"] = _serialize_preview_run(run)
         elif db is not None:
@@ -988,6 +1003,7 @@ class KisWatchlistPreviewService:
                 payload=payload,
                 gate_level=gate_level,
                 trigger_source=trigger_source,
+                market_regime_context=market_regime_context,
             )
         return payload
 
@@ -1878,12 +1894,15 @@ def _record_preview_run(
     payload: dict[str, Any],
     gate_level: int,
     trigger_source: str,
+    market_regime_context: MarketRegimeTradingContext | None = None,
 ) -> TradeRunLog:
     symbol = (
         _candidate_symbol(payload.get("entry_candidate_symbol"))
         or _candidate_symbol(payload.get("final_best_candidate"))
         or "WATCHLIST"
     )
+    market_regime_context = market_regime_context or _observation_market_regime_context(db, payload)
+    payload.update(market_regime_diagnostics(market_regime_context))
     run_key = f"kis_preview_{uuid.uuid4().hex[:12]}"
     response_payload = _preview_log_payload(payload, gate_level=gate_level, trigger_source=trigger_source)
     run = TradeRunLog(
@@ -1926,6 +1945,11 @@ def _record_preview_run(
         run_key=run_key,
         trade_run_id=run.id,
         commit=False,
+        market_regime_context=market_regime_context,
+    )
+    run.response_payload = json.dumps(
+        _preview_log_payload(payload, gate_level=gate_level, trigger_source=trigger_source),
+        ensure_ascii=False, default=str,
     )
     db.commit()
     db.refresh(run)
@@ -1986,6 +2010,16 @@ def _empty_shadow_b_result(
     }
 
 
+def _observation_market_regime_context(db, payload):
+    decision_slot = str((payload.get("quant_experiment") or {}).get("decision_slot") or "")
+    try:
+        decision_at = datetime.fromisoformat(decision_slot)
+    except ValueError:
+        # Unknown historical decision time must never receive today's snapshot.
+        return MarketRegimeTradingContext()
+    return get_run_market_regime_context(db, decision_at)
+
+
 def _record_quant_ab_observations(
     db,
     *,
@@ -1995,6 +2029,7 @@ def _record_quant_ab_observations(
     run_key: str | None = None,
     trade_run_id: int | None = None,
     commit: bool = True,
+    market_regime_context: MarketRegimeTradingContext | None = None,
 ) -> int:
     experiment = payload.get("quant_experiment") or {}
     if not (bool(experiment.get("shadow_b_enabled")) or bool(experiment.get("shadow_c_enabled"))):
@@ -2031,6 +2066,12 @@ def _record_quant_ab_observations(
         observed_at = datetime.fromisoformat(decision_slot) if decision_slot else None
     except ValueError:
         observed_at = None
+    # Resolve once before the candidate loop; keep the copied values immutable.
+    market_regime_context = market_regime_context or _observation_market_regime_context(db, payload)
+    regime_fields = market_regime_observation_fields(market_regime_context)
+    shadow_policy = get_market_regime_shadow_policy(market_regime_context)
+    payload.update(market_regime_diagnostics(market_regime_context))
+    shadow_candidates = payload.setdefault("market_regime_shadow_candidates", [])
     selected_a = _candidate_symbol(payload.get("final_best_candidate"))
     inserted = 0
     for symbol, item in a_by_symbol.items():
@@ -2154,6 +2195,13 @@ def _record_quant_ab_observations(
                 )
             ),
         )
+        shadow_diagnostics = evaluate_shadow_candidate(
+            shadow_policy, a_rank=row.a_rank, c_score=row.c_reversal_score,
+            gpt_score=row.a_gpt_buy_score, final_score=row.a_final_score,
+        )
+        for name, value in {**regime_fields, **shadow_diagnostics}.items():
+            setattr(row, name, value)
+        shadow_candidates.append({"symbol": symbol, **shadow_diagnostics})
         db.add(row)
         inserted += 1
     if commit and inserted:
@@ -2216,6 +2264,9 @@ def _preview_log_payload(
             "market_context": payload.get("market_context"),
             "market_context_summary": payload.get("market_context_summary"),
             "market_context_as_of": payload.get("market_context_as_of"),
+            "market_regime": payload.get("market_regime"),
+            "market_regime_shadow_policy": payload.get("market_regime_shadow_policy"),
+            "market_regime_shadow_candidates": payload.get("market_regime_shadow_candidates") or [],
         }
     )
 

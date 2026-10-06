@@ -1287,3 +1287,59 @@ def test_kis_preview_active_c_unavailable_fails_closed_before_gpt(monkeypatch, c
     assert len(top5) == 5
     assert all(item["quant_c_gate_passed"] is False for item in top5)
     assert all(item["reason"] == "c_quant_unavailable" for item in top5)
+
+
+
+@pytest.mark.parametrize("stage,c_score", [(1, 67), (4, 64)])
+def test_market_regime_actual_preview_keeps_gpt_targets_and_live_selection(
+    monkeypatch, client, db_session, stage, c_score,
+):
+    from datetime import UTC, datetime
+    from app.db.models import MarketRegimeSnapshot, QuantABObservation
+    from app.services.market_regime_service import STAGES
+    _install_active_c_preview_fakes(monkeypatch, c_score=lambda index: c_score, gpt_buy_score=61)
+    monkeypatch.setattr(
+        "app.brokers.kis_client.KisClient.submit_order",
+        lambda *args, **kwargs: pytest.fail("preview cannot submit orders"),
+    )
+    before = client.post("/kis/scheduler/run-preview-once").json()
+    db_session.add(MarketRegimeSnapshot(
+        calculation_date=date(2020, 1, 1), calculated_at=datetime(2020, 1, 1, tzinfo=UTC),
+        stage=stage, stage_key=STAGES[stage][0], stage_label=STAGES[stage][1],
+        confirmed=True, status="confirmed", combined_score=68, kospi_score=66, nasdaq_score=71,
+    ))
+    db_session.commit()
+    response = client.post("/kis/scheduler/run-preview-once")
+    assert response.status_code == 200
+    after = response.json()
+    # Market context timestamps naturally differ between the two runs. Compare
+    # every selection/score field, preserving candidate order and GPT targets.
+    score_fields = (
+        "symbol", "rank", "quant_a_rank", "quant_buy_score", "quant_sell_score",
+        "quant_c_score", "quant_c_status", "quant_c_threshold", "quant_c_gate_passed",
+        "ai_buy_score", "ai_sell_score", "gpt_used", "gpt_analysis_status",
+        "final_buy_score", "final_entry_score", "final_entry_gate_passed",
+        "final_rank", "final_selected", "action", "block_reason",
+    )
+    def selection_values(item):
+        return {name: item.get(name) for name in score_fields} if item else None
+    for field in ("gpt_target_symbols", "action", "should_trade", "broker_submit_called"):
+        assert after[field] == before[field]
+    for field in ("quant_ranked_candidates", "final_ranked_candidates"):
+        assert [selection_values(row) for row in after[field]] == [selection_values(row) for row in before[field]]
+    assert selection_values(after["final_best_candidate"]) == selection_values(before["final_best_candidate"])
+    run = db_session.query(TradeRunLog).order_by(TradeRunLog.id.desc()).first()
+    payload = json.loads(run.response_payload)
+    assert payload["market_regime"]["stage"] == stage
+    assert payload["market_regime"]["stage_key"] == STAGES[stage][0]
+    assert payload["market_regime_shadow_policy"]["applied_to_live_trading"] is False
+    rows = db_session.query(QuantABObservation).filter_by(trade_run_id=run.id).all()
+    assert rows and {row.market_regime_stage for row in rows} == {stage}
+    scored_rows = [row for row in rows if row.c_reversal_score is not None]
+    assert len(scored_rows) == 5
+    assert {row.base_c_pass for row in scored_rows} == {stage == 1}
+    assert {row.shadow_regime_c_pass for row in scored_rows} == {stage == 4}
+    assert all(not row.base_c_pass and not row.shadow_regime_c_pass for row in rows if row.c_reversal_score is None)
+    if stage == 4:
+        assert after["gpt_target_symbols"] == []
+        assert all(row.a_gpt_buy_score is None and not row.shadow_regime_entry_funnel_pass for row in rows)

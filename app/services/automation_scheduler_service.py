@@ -20,6 +20,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
+from app.services.market_regime_trading_context import (
+    begin_market_regime_run,
+    end_market_regime_run,
+    get_run_market_regime_context,
+)
+from app.services.market_regime_trading_policy import market_regime_diagnostics
 from app.brokers.base import KisApiError
 from app.brokers.kis_auth_manager import KisAuthManager
 from app.brokers.kis_broker import KisBroker
@@ -943,6 +949,7 @@ class AutomationSchedulerService(SchedulerService):
         entry_recovery_context: dict[str, Any],
     ) -> dict[str, Any]:
         db = SessionLocal()
+        regime_token = begin_market_regime_run(db, now or datetime.now(KST))
         owned_exit_retry = None
         try:
             now_kst = (now or datetime.now(KST)).astimezone(KST)
@@ -1444,6 +1451,7 @@ class AutomationSchedulerService(SchedulerService):
                 and dry_run.get("submission_eligible")
             )
             return {
+                **market_regime_diagnostics(get_run_market_regime_context(db, now_kst)),
                 "scheduler": "AutomationSchedulerService",
                 "mode": mode,
                 "execution_mode": mode,
@@ -1474,6 +1482,7 @@ class AutomationSchedulerService(SchedulerService):
                 "profile_buy": profile_buy,
             }
         finally:
+            end_market_regime_run(regime_token)
             if owned_exit_retry is not None:
                 self._release_entry_position_retry(db, owned_exit_retry)
             db.close()
@@ -2041,6 +2050,15 @@ class AutomationSchedulerService(SchedulerService):
             result.get('reason')
         )
 
+    def _create_scheduler_skip_log(self, db, *args, **kwargs):
+        # Keep the existing skip result/flow, enriching only its saved telemetry.
+        run = super()._create_scheduler_skip_log(db, *args, **kwargs)
+        response = json.loads(run.response_payload or "{}")
+        response.update(market_regime_diagnostics(get_run_market_regime_context(db)))
+        run.response_payload = json.dumps(response, ensure_ascii=False, default=str)
+        db.commit()
+        return run
+
     def _run_profile_analysis(
         self,
         db,
@@ -2108,6 +2126,9 @@ class AutomationSchedulerService(SchedulerService):
             'gating_notes': result.get('gating_notes', []),
             'dry_run_only': result.get('dry_run_only'),
             'preview_only': result.get('preview_only'),
+            'market_regime': result.get('market_regime'),
+            'market_regime_shadow_policy': result.get('market_regime_shadow_policy'),
+            'market_regime_shadow_candidates': result.get('market_regime_shadow_candidates') or [],
             'dry_run_result': result,
             'real_order_submitted': False,
             'validation_called': False,

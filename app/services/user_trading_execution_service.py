@@ -10,6 +10,11 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
+from app.services.market_regime_trading_context import (
+    get_run_market_regime_context,
+    market_regime_run,
+)
+from app.services.market_regime_trading_policy import market_regime_diagnostics
 from app.brokers.user_alpaca_client import (
     UserAlpacaLiveExecutionBlocked,
     UserAlpacaTradingClient,
@@ -93,6 +98,7 @@ class UserTradingExecutionService:
         self.now_provider = now_provider or (lambda: datetime.now(UTC))
         self.calendar_gap_risk_service = calendar_gap_risk_service or CalendarGapRiskService()
 
+    @market_regime_run
     def run_once(
         self,
         db: Session,
@@ -659,6 +665,7 @@ class UserTradingExecutionService:
             live=is_live,
             authorization_mode=authorization_mode,
         )
+    @market_regime_run
     def run_exit_once(
         self,
         db: Session,
@@ -2288,6 +2295,7 @@ class UserTradingExecutionService:
         run.stage = "done"
         run.result = str(response.get("result") or "blocked")
         run.reason = str(response.get("reason") or "")
+        response.update(market_regime_diagnostics(get_run_market_regime_context(db)))
         run.response_payload = json.dumps(response, ensure_ascii=False, default=str)
         db.commit()
         db.refresh(run)

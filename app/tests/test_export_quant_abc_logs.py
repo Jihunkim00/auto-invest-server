@@ -325,3 +325,61 @@ def test_csv_column_order_is_independent_of_sqlite_column_order(export_database,
     engine.dispose()
     _, _, reordered_fields, _ = _export(export_database, tmp_path / "reordered")
     assert original_fields == reordered_fields
+
+
+
+def test_market_regime_export_csv_json_and_configured_funnel_compatibility(export_database, tmp_path):
+    engine = create_engine(f"sqlite:///{export_database.as_posix()}")
+    with Session(engine) as db:
+        row = db.query(QuantABObservation).filter_by(symbol="PASS").one()
+        row.market_regime_snapshot_id = 15
+        row.market_regime_stage = 4
+        row.market_regime_key = "rising"
+        row.market_regime_label = "?? ??"
+        row.market_regime_status = "confirmed"
+        row.market_regime_confirmed = True
+        row.market_regime_score = 68.4
+        row.market_regime_kospi_score = 66.1
+        row.market_regime_nasdaq_score = 71.8
+        row.market_regime_policy_version = "shadow_v1"
+        row.base_c_min = 65
+        row.shadow_regime_c_min = 62.5
+        row.shadow_regime_size_multiplier = 1
+        row.c_reversal_score = 64
+        row.base_c_pass = False
+        row.shadow_regime_c_pass = True
+        row.base_entry_funnel_pass = False
+        row.shadow_regime_entry_funnel_pass = True
+        db.commit()
+    engine.dispose()
+    before = export_database.read_bytes()
+    rows, csv_rows, fields, _ = _export(export_database, tmp_path, "--month", "2026-10", "--c-min-score", "60")
+    row = next(row for row in rows if row["symbol"] == "PASS")
+    csv_row = next(row for row in csv_rows if row["symbol"] == "PASS")
+    assert (row["market_regime_stage"], row["market_regime_key"], row["market_regime_score"]) == (4, "rising", 68.4)
+    assert (row["market_regime_kospi_score"], row["market_regime_nasdaq_score"]) == (66.1, 71.8)
+    assert row["base_c_min"] == 65 and row["shadow_regime_c_min"] == 62.5
+    assert row["entry_funnel_pass"] is True  # Existing configured export threshold.
+    assert row["base_entry_funnel_pass"] is row["base_c_pass"] is False
+    assert row["shadow_regime_entry_funnel_pass"] is row["shadow_regime_c_pass"] is True
+    assert csv_row["base_c_pass"] == "false" and csv_row["shadow_regime_c_pass"] == "true"
+    assert {"a_gpt_buy_score", "a_final_score", "c_reversal_score", "entry_funnel_pass", "official_quality"} <= set(fields)
+    assert export_database.read_bytes() == before
+
+
+def test_market_regime_legacy_database_exports_null_without_backfill(export_database, tmp_path):
+    new_fields = [column.name for column in QuantABObservation.__table__.columns
+                  if column.name.startswith(("market_regime_", "shadow_regime_", "base_c_"))
+                  or column.name == "base_entry_funnel_pass"]
+    engine = create_engine(f"sqlite:///{export_database.as_posix()}")
+    with engine.begin() as conn:
+        for name in new_fields:
+            conn.execute(text(f"ALTER TABLE quant_ab_observations DROP COLUMN {name}"))
+    engine.dispose()
+    before = export_database.read_bytes()
+    rows, csv_rows, fields, _ = _export(export_database, tmp_path, "--month", "2026-10")
+    assert set(new_fields) <= set(fields)
+    for row, csv_row in zip(rows, csv_rows):
+        assert all(row[name] is None and csv_row[name] == "" for name in new_fields)
+    assert next(row for row in rows if row["symbol"] == "PASS")["entry_funnel_pass"] is True
+    assert export_database.read_bytes() == before
