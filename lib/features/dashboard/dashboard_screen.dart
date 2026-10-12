@@ -652,16 +652,14 @@ class _HomeAutomationProfileCard extends StatelessWidget {
             : status.profileAnalysisTimes.join(" · "));
     final tp = status.profileTakeProfitPct == null
         ? "-"
-        : status.profileTakeProfitPct!.toString() + "%";
+        : "${status.profileTakeProfitPct!}%";
     final sl = status.profileStopLossPct == null
         ? "-"
-        : status.profileStopLossPct!.toString() + "%";
+        : "${status.profileStopLossPct!}%";
     final dates = (status.selectedProfileStartDate == null &&
             status.selectedProfileEndDate == null)
         ? "-"
-        : (status.selectedProfileStartDate ?? "-") +
-            " ~ " +
-            (status.selectedProfileEndDate ?? "-");
+        : "${status.selectedProfileStartDate ?? "-"} ~ ${status.selectedProfileEndDate ?? "-"}";
     final heartbeat = status.schedulerHeartbeatHealthy ? "정상" : "확인 필요";
     return SectionCard(
       key: const ValueKey("home-automation-profile-status"),
@@ -682,16 +680,14 @@ class _HomeAutomationProfileCard extends StatelessWidget {
           ),
         ]),
         const SizedBox(height: 10),
-        Text("선택 프로필: " + profile,
+        Text("선택 프로필: $profile",
             style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           _CompactMetric(label: "상태", value: profileStatus),
           _CompactMetric(
               label: "브로커/시장",
-              value: status.selectedProfileProvider.toUpperCase() +
-                  " · " +
-                  status.selectedProfileMarket),
+              value: "${status.selectedProfileProvider.toUpperCase()} · ${status.selectedProfileMarket}"),
           _CompactMetric(label: "운용 기간", value: dates),
           _CompactMetric(label: "분석 스케줄(KST)", value: schedule),
           _CompactMetric(label: "Take Profit", value: tp),
@@ -712,7 +708,7 @@ class _HomeAutomationProfileCard extends StatelessWidget {
         ]),
         if (status.schedulerLastError?.trim().isNotEmpty == true) ...[
           const SizedBox(height: 8),
-          Text("엔진 오류: " + status.schedulerLastError!,
+          Text("엔진 오류: ${status.schedulerLastError!}",
               style: const TextStyle(color: Colors.orangeAccent)),
         ],
       ]),
@@ -1221,7 +1217,7 @@ class _OperationalReadinessCard extends StatelessWidget {
               _ReadinessSection(
                 title: 'Alpaca / US',
                 children: [
-                  _ReadinessField(
+                  const _ReadinessField(
                     label: 'Market',
                     value: 'US / Alpaca',
                   ),
@@ -1243,7 +1239,7 @@ class _OperationalReadinessCard extends StatelessWidget {
               _ReadinessSection(
                 title: 'KIS / KR',
                 children: [
-                  _ReadinessField(
+                  const _ReadinessField(
                     label: 'Market',
                     value: 'KR / KIS',
                   ),
@@ -1408,7 +1404,7 @@ class _SafetySummary extends StatelessWidget {
               color: safety.marketOpen ? Colors.greenAccent : Colors.white70,
             ),
           ] else ...[
-            _SafetyPill(
+            const _SafetyPill(
               text: 'Paper trading',
               color: Colors.greenAccent,
             ),
@@ -1688,7 +1684,7 @@ String _formatKisCompactMoney(String currency, double value) {
     return _formatMoney(currency, value);
   }
   final sign = value < 0 ? '-' : '';
-  return '${sign}₩${_formatGroupedWhole(value.abs())}';
+  return '$sign₩${_formatGroupedWhole(value.abs())}';
 }
 
 String _formatSignedKisCompactMoney(String currency, double value) {
@@ -1700,7 +1696,7 @@ String _formatSignedKisCompactMoney(String currency, double value) {
       : value < 0
           ? '-'
           : '';
-  return '${sign}₩${_formatGroupedWhole(value.abs())}';
+  return '$sign₩${_formatGroupedWhole(value.abs())}';
 }
 
 String _formatKisOrderableCash(
@@ -1804,8 +1800,9 @@ class _SafetyPill extends StatelessWidget {
 
 String _nextAction(DashboardController controller) {
   final run = controller.runResult;
-  if (controller.settings.killSwitch)
+  if (controller.settings.killSwitch) {
     return 'Kill switch is ON. Keep trading halted.';
+  }
   if (run.finalBestCandidate.isEmpty) return 'Run a watchlist scan.';
   if (!run.finalEntryReady) return 'Review the block reason before any ticket.';
   return 'Review ${run.finalBestCandidate} in Trading before any submit.';

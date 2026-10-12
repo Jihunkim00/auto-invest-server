@@ -290,7 +290,7 @@ void main() {
       supportedLocales: const [Locale('ko', 'KR'), Locale('en', 'US')],
       builder: (context, child) => MediaQuery(
         data:
-            MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(1.3)),
+            MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.3)),
         child: child!,
       ),
       home: AutomationProfileScreen(apiClient: ApiClient(client: client)),

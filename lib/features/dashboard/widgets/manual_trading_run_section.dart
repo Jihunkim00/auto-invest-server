@@ -55,7 +55,7 @@ class _ManualTradingRunSectionState extends State<ManualTradingRunSection> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final symbol = _normalizedSymbol;
-    final symbols = _usSymbols;
+    const symbols = _usSymbols;
     final dropdownValue = symbols.contains(symbol) ? symbol : null;
 
     return SectionCard(
@@ -195,7 +195,7 @@ class _SafetyBadge extends StatelessWidget {
         border: Border.all(color: color.withValues(alpha: 0.45)),
       ),
       child: Text(text,
-          style: TextStyle(
+          style: const TextStyle(
               color: color, fontWeight: FontWeight.w700, fontSize: 12)),
     );
   }
@@ -527,10 +527,12 @@ class _IndicatorDetails extends StatelessWidget {
     final numericValue = value is num
         ? value.toDouble()
         : double.tryParse(value?.toString() ?? '');
-    if (numericValue == null)
+    if (numericValue == null) {
       return _ResultRow(key, value?.toString() ?? 'n/a');
-    if (percent)
+    }
+    if (percent) {
       return _ResultRow(key, '${(numericValue * 100).toStringAsFixed(2)}%');
+    }
     return _ResultRow(key, numericValue.toStringAsFixed(decimals));
   }
 }

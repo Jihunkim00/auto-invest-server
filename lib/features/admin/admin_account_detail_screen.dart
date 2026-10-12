@@ -94,8 +94,9 @@ class _AdminAccountDetailScreenState extends State<AdminAccountDetailScreen> {
     } catch (_) {
       usage = {'available': false};
     }
-    if (mounted && generation == _loadGeneration)
+    if (mounted && generation == _loadGeneration) {
       setState(() => _usage = usage);
+    }
   }
 
   Future<void> _save() async {
@@ -207,8 +208,9 @@ class _AdminAccountDetailScreenState extends State<AdminAccountDetailScreen> {
                             unlimited: _totalUnlimited,
                             onUnlimited: (value) => setState(() {
                                   _totalUnlimited = value;
-                                  if (!value && _total.text.isEmpty)
+                                  if (!value && _total.text.isEmpty) {
                                     _total.text = '10,000,000';
+                                  }
                                 })),
                         _limitField(
                             keyName: 'position',
@@ -217,8 +219,9 @@ class _AdminAccountDetailScreenState extends State<AdminAccountDetailScreen> {
                             unlimited: _positionUnlimited,
                             onUnlimited: (value) => setState(() {
                                   _positionUnlimited = value;
-                                  if (!value && _position.text.isEmpty)
+                                  if (!value && _position.text.isEmpty) {
                                     _position.text = '1,000,000';
+                                  }
                                 })),
                         FilledButton(
                             key: const ValueKey('account-limit-save'),

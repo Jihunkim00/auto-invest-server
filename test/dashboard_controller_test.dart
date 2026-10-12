@@ -50,7 +50,7 @@ void main() {
   });
 
   test('Home activity uses the scoped Admin automation feed', () async {
-    final admin = TradingLogItem(
+    const admin = TradingLogItem(
       id: 1,
       runKey: 'admin',
       symbol: '086790',
@@ -76,7 +76,7 @@ void main() {
   });
 
   test('regular Home activity uses only the user-scoped run feed', () async {
-    final user = TradingLogItem(
+    const user = TradingLogItem(
       id: 2,
       runKey: 'user',
       symbol: '005930',
@@ -172,7 +172,7 @@ void main() {
   test('refreshPortfolioManagement builds sorted held-position items',
       () async {
     final api = _FakeApiClient(
-      krPortfolio: PortfolioSummary(
+      krPortfolio: const PortfolioSummary(
         currency: 'KRW',
         positionsCount: 3,
         pendingOrdersCount: 0,
@@ -181,7 +181,7 @@ void main() {
         totalUnrealizedPl: -100,
         totalUnrealizedPlpc: -0.03,
         cash: 0,
-        positions: const [
+        positions: [
           PositionSummary(
             symbol: '000003',
             name: 'Hold',
@@ -219,7 +219,7 @@ void main() {
             unrealizedPlpc: -0.3,
           ),
         ],
-        pendingOrders: const [],
+        pendingOrders: [],
       ),
       managedPositions: [
         _managedPosition(

@@ -82,10 +82,10 @@ class _AdminPasswordResetScreenState extends State<AdminPasswordResetScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextFormField(
-              key: ValueKey('auth-password-reset-username-field'),
+              key: const ValueKey('auth-password-reset-username-field'),
               initialValue: 'admin',
               readOnly: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'ID',
                 prefixIcon: Icon(Icons.person_outline),
               ),

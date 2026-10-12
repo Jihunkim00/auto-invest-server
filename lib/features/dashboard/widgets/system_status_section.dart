@@ -41,7 +41,7 @@ class SystemStatusSection extends StatelessWidget {
                 value: s.dryRun ? 'ENABLED' : 'OFF',
                 icon: Icons.science,
                 highlight: s.dryRun),
-            MetricCard(
+            const MetricCard(
                 label: 'Broker Mode',
                 value: 'ALPACA PAPER',
                 icon: Icons.account_balance,

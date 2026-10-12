@@ -666,14 +666,8 @@ class ApiClient {
       final message = _readNullableString(detail['msg1']);
       if (msgCd == null && code != null) msgCd = code;
       if (msg1 == null && message != null) msg1 = message;
-      if (nextRefreshAllowedAt == null) {
-        nextRefreshAllowedAt =
-            _readNullableString(detail['next_refresh_allowed_at']);
-      }
-      if (refreshGuardReason == null) {
-        refreshGuardReason =
-            _readNullableString(detail['refresh_guard_reason']);
-      }
+      nextRefreshAllowedAt ??= _readNullableString(detail['next_refresh_allowed_at']);
+      refreshGuardReason ??= _readNullableString(detail['refresh_guard_reason']);
       tokenExpired = tokenExpired ||
           code == 'EGW00123' ||
           _looksLikeTokenExpired(message) ||

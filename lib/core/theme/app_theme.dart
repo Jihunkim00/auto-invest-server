@@ -23,13 +23,13 @@ class AppTheme {
   static const pagePadding = 16.0;
 
   static ThemeData get darkTheme {
-    final scheme = ColorScheme.dark(
+    const scheme = ColorScheme.dark(
       surface: canvas,
       onSurface: Colors.white,
       primary: primaryAccent,
-      onPrimary: const Color(0xFF0B0D10),
-      secondary: const Color(0xFFB8C0CA),
-      onSecondary: const Color(0xFF0B0D10),
+      onPrimary: Color(0xFF0B0D10),
+      secondary: Color(0xFFB8C0CA),
+      onSecondary: Color(0xFF0B0D10),
       error: danger,
       onError: Colors.white,
     );

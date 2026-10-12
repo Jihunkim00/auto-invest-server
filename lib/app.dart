@@ -231,8 +231,8 @@ class _RegularUserHomeState extends State<_RegularUserHome> {
         onDestinationSelected: (value) => setState(() => _index = value),
         destinations: [
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
+            icon: const Icon(Icons.home_outlined),
+            selectedIcon: const Icon(Icons.home),
             label: widget.controller.strings.home,
           ),
           NavigationDestination(

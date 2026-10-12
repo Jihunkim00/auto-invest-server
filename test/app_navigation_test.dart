@@ -66,9 +66,22 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('home-open-admin')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Advanced / Admin'), findsOneWidget);
-    expect(find.byKey(const ValueKey('admin-open-logs')), findsOneWidget);
-    expect(find.byKey(const ValueKey('admin-open-settings')), findsOneWidget);
+    expect(find.text('관리자 도구'), findsOneWidget);
+    expect(find.byKey(const ValueKey('admin-open-test4')), findsNothing);
+    for (final key in [
+      'admin-open-logs',
+      'admin-open-settings',
+      'admin-advanced-tools'
+    ]) {
+      final entry = find.byKey(ValueKey(key));
+      await tester.scrollUntilVisible(entry, 350,
+          scrollable: find.byType(Scrollable).last);
+      expect(entry, findsOneWidget);
+    }
+    await tester.tap(find.byKey(const ValueKey('admin-advanced-tools')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('admin-open-test4')), findsOneWidget);
+    expect(find.byKey(const ValueKey('admin-open-decision-review')),
+        findsOneWidget);
   });
 }

@@ -496,7 +496,7 @@ class _AlpacaUsTradingCard extends StatelessWidget {
           value: _nextRun(status.us),
           scope: 'ALPACA / US',
         ),
-        _InfoRow(
+        const _InfoRow(
           label: 'US timezone',
           value: 'America/New_York',
           scope: 'ALPACA / US',
@@ -592,7 +592,7 @@ class _KisKrTradingCardState extends State<_KisKrTradingCard> {
           value: _nextRun(status.kr),
           scope: 'KIS / KR',
         ),
-        _InfoRow(
+        const _InfoRow(
           label: 'KR timezone',
           value: 'Asia/Seoul',
           scope: 'KIS / KR',

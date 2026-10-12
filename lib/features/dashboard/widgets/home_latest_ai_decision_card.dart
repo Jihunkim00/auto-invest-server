@@ -270,7 +270,7 @@ class _TodayDecisionSlot extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '${slot.schedulerSlot} · ${status}${timeText}',
+            '${slot.schedulerSlot} · $status$timeText',
             style: const TextStyle(
               color: Colors.white70,
               fontSize: 12,
@@ -717,7 +717,9 @@ Candidate? _candidateFromRun(TradingLogItem run) {
   final symbol = run.symbol.trim();
   if (symbol.isEmpty ||
       symbol.toUpperCase() == 'UNKNOWN' ||
-      symbol.toUpperCase() == 'NONE') return null;
+      symbol.toUpperCase() == 'NONE') {
+    return null;
+  }
   final action = run.action.trim().isEmpty ? 'hold' : run.action.trim();
   return Candidate(
     symbol: symbol,
@@ -740,7 +742,9 @@ Candidate? _candidateFromSignal(SignalLogItem signal) {
   final symbol = signal.symbol.trim();
   if (symbol.isEmpty ||
       symbol.toUpperCase() == 'UNKNOWN' ||
-      symbol.toUpperCase() == 'NONE') return null;
+      symbol.toUpperCase() == 'NONE') {
+    return null;
+  }
   final action = signal.action.trim().isEmpty ? 'hold' : signal.action.trim();
   return Candidate(
     symbol: symbol,

@@ -37,7 +37,7 @@ void main() {
         MarketRegimeGaugeCard(regime: _regime(stage)),
       ));
       expect(
-        find.text(stage.toString() + '단계 · ' + labels[stage - 1]),
+        find.text('$stage단계 · ${labels[stage - 1]}'),
         findsOneWidget,
       );
     }

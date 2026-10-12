@@ -360,7 +360,7 @@ class _KisAnalyzeAndBuyCardState extends State<_KisAnalyzeAndBuyCard> {
         ],
         if (result != null) ...[
           const SizedBox(height: 12),
-          _KisResultPanel(
+          KisSingleSymbolAnalysisResult(
             result: result,
             selectedSymbol: symbol,
           ),
@@ -571,8 +571,9 @@ class _KisSourceContextPanel extends StatelessWidget {
   }
 }
 
-class _KisResultPanel extends StatelessWidget {
-  const _KisResultPanel({
+class KisSingleSymbolAnalysisResult extends StatelessWidget {
+  const KisSingleSymbolAnalysisResult({
+    super.key,
     required this.result,
     required this.selectedSymbol,
   });
@@ -1135,8 +1136,9 @@ String _translateSingleSymbolReason(String reason) {
     reason,
     singleSymbolContext: true,
   );
-  if (_looksLikeRawReasonCode(translated))
+  if (_looksLikeRawReasonCode(translated)) {
     return _humanizeReasonCode(translated);
+  }
   return translated;
 }
 
@@ -1290,8 +1292,9 @@ String _recentReturnLabel(KisSingleSymbolTradingResult result) {
     }
     return 'Indicator not returned';
   }
-  if (recentReturn < 0)
+  if (recentReturn < 0) {
     return 'Recent return weak (${_formatPercent(recentReturn)})';
+  }
   if (recentReturn > 0) {
     return 'Recent return positive (${_formatPercent(recentReturn)})';
   }

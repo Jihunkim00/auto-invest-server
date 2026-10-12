@@ -25,7 +25,7 @@ void main() {
       home: Scaffold(body: PositionLifecyclePanel(controller: controller)),
     ));
 
-    final strings = AppStrings(AppLanguage.korean);
+    const strings = AppStrings(AppLanguage.korean);
     expect(
         find.byKey(const ValueKey('position-lifecycle-panel')), findsOneWidget);
     expect(find.text(strings.positionLifecycle), findsOneWidget);

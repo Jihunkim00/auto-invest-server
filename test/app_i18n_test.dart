@@ -11,8 +11,8 @@ void main() {
   });
 
   test('AppStrings maps brokers and statuses by language', () {
-    final ko = AppStrings(AppLanguage.korean);
-    final en = AppStrings(AppLanguage.english);
+    const ko = AppStrings(AppLanguage.korean);
+    const en = AppStrings(AppLanguage.english);
 
     expect(ko.brokerName('kis'), '한국투자증권');
     expect(ko.brokerName('alpaca'), '알파카');

@@ -30,7 +30,7 @@ class AssetsScreen extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(controller.strings.assets,
-                        style: TextStyle(
+                        style: const TextStyle(
                             fontSize: 28, fontWeight: FontWeight.w700)),
                   ),
                   GlobalBrokerSelector(controller: controller),
@@ -63,11 +63,7 @@ class AssetsScreen extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        controller.selectedPortfolioSummary.currency +
-                            ' · ' +
-                            controller.selectedPortfolioSummary.positionsCount
-                                .toString() +
-                            '개 보유',
+                        '${controller.selectedPortfolioSummary.currency} · ${controller.selectedPortfolioSummary.positionsCount}개 보유',
                         style: const TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
@@ -98,7 +94,7 @@ class AssetsScreen extends StatelessWidget {
     final amount = value.round().toString();
     final grouped = amount.replaceAllMapped(
       RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
-      (match) => match.group(1)! + ',',
+      (match) => '${match.group(1)!},',
     );
     return (currency == 'KRW' ? '₩' : '\$') + grouped;
   }

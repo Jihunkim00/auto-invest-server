@@ -79,20 +79,11 @@ class PortfolioSnapshotSection extends StatelessWidget {
         : summary.pendingOrdersCount.toString();
     final countText = isKr && summary.hasUnavailableKisData
         ? koreanLabels
-            ? heldCount +
-                '\uAC1C \uBCF4\uC720 / ' +
-                pendingCount +
-                '\uAC74 \uB300\uAE30'
-            : heldCount + ' held / ' + pendingCount + ' pending'
+            ? '$heldCount\uAC1C \uBCF4\uC720 / $pendingCount\uAC74 \uB300\uAE30'
+            : '$heldCount held / $pendingCount pending'
         : koreanLabels
-            ? summary.positionsCount.toString() +
-                '\uAC1C \uBCF4\uC720 / ' +
-                summary.pendingOrdersCount.toString() +
-                '\uAC74 \uB300\uAE30'
-            : summary.positionsCount.toString() +
-                ' held / ' +
-                summary.pendingOrdersCount.toString() +
-                ' pending';
+            ? '${summary.positionsCount}\uAC1C \uBCF4\uC720 / ${summary.pendingOrdersCount}\uAC74 \uB300\uAE30'
+            : '${summary.positionsCount} held / ${summary.pendingOrdersCount} pending';
     final plColor = _valueColor(summary.totalUnrealizedPl);
     final globalBrokerBadge = isKr
         ? strings.isKorean
@@ -566,9 +557,8 @@ class _PositionTile extends StatelessWidget {
                         color: Colors.white70),
                     _SoftBadge(
                         text: koreanLabels
-                            ? '\uBCF4\uC720\uC218\uB7C9 ' +
-                                _quantity(position.qty)
-                            : 'Qty ' + _quantity(position.qty),
+                            ? '\uBCF4\uC720\uC218\uB7C9 ${_quantity(position.qty)}'
+                            : 'Qty ${_quantity(position.qty)}',
                         color: Colors.white70),
                     _DataPair(
                         label: koreanLabels
@@ -896,12 +886,12 @@ class _PositionDetail extends StatelessWidget {
       ]),
       if (managed?.latestManualSellOrder != null) ...[
         const SizedBox(height: 12),
-        _StateNote(
+        const _StateNote(
             text: 'Latest manual sell order is available in KIS Orders.'),
       ],
       if (managementItem.positionOrderSyncWarning) ...[
         const SizedBox(height: 12),
-        _WarningNote(
+        const _WarningNote(
           text: 'Position/order state may need sync',
           detail:
               'Latest sell order appears filled, but the position still shows holdings.',

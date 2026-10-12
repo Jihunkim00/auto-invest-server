@@ -34,7 +34,7 @@ class MarketRegimeGaugeCard extends StatelessWidget {
                         ? '\uD655\uC815 \uBCF4\uB958'
                         : stage == null
                             ? '\uD655\uC778 \uD544\uC694'
-                            : '${stage}\uB2E8\uACC4 \u00B7 ${regime!.shortLabel ?? regime!.stageLabel ?? _stageName(stage)}';
+                            : '$stage\uB2E8\uACC4 \u00B7 ${regime!.shortLabel ?? regime!.stageLabel ?? _stageName(stage)}';
 
     return SectionCard(
       key: const ValueKey('home-market-regime-gauge-card'),
@@ -89,7 +89,7 @@ class MarketRegimeGaugeCard extends StatelessWidget {
                     width: 180,
                     height: 48,
                     child: CustomPaint(
-                      key: ValueKey('market-regime-gauge-stage-${stage}'),
+                      key: ValueKey('market-regime-gauge-stage-$stage'),
                       painter: _MarketRegimeGaugePainter(stage: stage),
                     ),
                   ),

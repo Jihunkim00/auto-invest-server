@@ -1292,7 +1292,7 @@ class _KisWatchlistGptAnalysisPanel extends StatelessWidget {
           ],
         ] else ...[
           Wrap(spacing: 14, runSpacing: 8, children: [
-            _ResultPair(label: 'Status', value: 'completed'),
+            const _ResultPair(label: 'Status', value: 'completed'),
             _ResultPair(
                 label: 'AI buy score',
                 value: presentation.compactScore(candidate.aiBuyScore)),
@@ -2164,7 +2164,7 @@ class _OperationsReadinessCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       key: const Key('kis_operations_readiness_card'),
       width: double.infinity,
       child: _OperationsReadinessCardBody(controller: controller),
@@ -8993,7 +8993,7 @@ double? _candidateSellScore(Candidate? candidate) {
 
 double? _candidateRequiredScore(Candidate candidate, int? fallbackThreshold) {
   return candidate.effectiveMinEntryScore ??
-      (fallbackThreshold == null ? null : fallbackThreshold.toDouble());
+      (fallbackThreshold?.toDouble());
 }
 
 String _candidateCompanyLabel(Candidate candidate) {
@@ -9458,7 +9458,7 @@ String _formatKrw(double? value) {
       buffer.write(',');
     }
   }
-  return '${sign}₩${buffer.toString()}';
+  return '$sign₩${buffer.toString()}';
 }
 
 String _formatKrwOrDash(double? value) {

@@ -138,8 +138,9 @@ class AppStrings {
 
   String decisionLabel(String action) {
     final normalized = action.trim().toLowerCase();
-    if (!isKorean)
+    if (!isKorean) {
       return normalized.isEmpty ? 'HOLD' : normalized.toUpperCase();
+    }
     return switch (normalized) {
       'buy' => '매수',
       'sell' => '매도',

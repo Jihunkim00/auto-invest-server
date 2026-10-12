@@ -31,6 +31,7 @@ class QuickActionsSection extends StatelessWidget {
                 : () async {
                     final result = await controller
                         .toggleKillSwitch(!controller.settings.killSwitch);
+                    if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(result.message),
                       backgroundColor:
@@ -58,6 +59,7 @@ class QuickActionsSection extends StatelessWidget {
                 ? null
                 : () async {
                     final result = await controller.runOnce();
+                    if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text(result.message),
                       backgroundColor:
@@ -83,6 +85,7 @@ class QuickActionsSection extends StatelessWidget {
                     : () async {
                         final result = await controller.toggleScheduler(
                             !controller.settings.schedulerEnabled);
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(result.message),
                           backgroundColor:
@@ -107,6 +110,7 @@ class QuickActionsSection extends StatelessWidget {
                     : () async {
                         final result = await controller
                             .toggleBot(!controller.settings.botEnabled);
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(result.message),
                           backgroundColor:

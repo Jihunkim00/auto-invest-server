@@ -143,7 +143,7 @@ class _HomeLightApiClient extends ApiClient {
   Future<List<TradingLogItem>> fetchRecentRuns({int limit = 20}) async {
     recentRunsLimit = limit;
     return [
-      TradingLogItem(
+      const TradingLogItem(
         id: 1,
         runKey: 'run-1',
         symbol: 'AAPL',
@@ -163,7 +163,7 @@ class _HomeLightApiClient extends ApiClient {
   Future<List<OrderLogItem>> fetchRecentOrders({int limit = 20}) async {
     recentOrdersLimit = limit;
     return [
-      OrderLogItem(
+      const OrderLogItem(
         id: 1,
         symbol: 'AAPL',
         side: 'buy',

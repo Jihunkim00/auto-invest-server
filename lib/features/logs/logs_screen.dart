@@ -104,10 +104,11 @@ class _LogsScreenState extends State<LogsScreen> {
         _error = e.toString();
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -1681,7 +1682,7 @@ class _LiveOrderAuditSection extends StatelessWidget {
           label: 'Source context',
           value: _fallback(audit.sourceContext ?? '', 'unknown_manual'),
         ),
-        _DetailRow(label: 'Label', value: 'KIS manual live'),
+        const _DetailRow(label: 'Label', value: 'KIS manual live'),
         _DetailRow(label: 'Symbol', value: symbolLabel),
         _DetailRow(
           label: 'Side / qty',

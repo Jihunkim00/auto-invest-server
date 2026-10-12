@@ -127,7 +127,7 @@ class _AiScreenState extends State<AiScreen> {
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Padding(
-                        padding: EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(8),
                         child: Text(strings.aiAnalyzing,
                             style:
                                 const TextStyle(color: AppTheme.primaryAccent)),
@@ -485,19 +485,36 @@ class _LocalQuote {
 }
 
 class _AiEntry {
-  const _AiEntry({
-    this.userText,
-    this.response,
-    this.error,
-    this.localText,
-    this.localQuote,
-  });
-
-  const _AiEntry.user(String value) : this(userText: value);
-  const _AiEntry.assistant(AgentChatV2Response value) : this(response: value);
-  const _AiEntry.error(String value) : this(error: value);
-  const _AiEntry.local(String value) : this(localText: value);
-  const _AiEntry.quote(_LocalQuote value) : this(localQuote: value);
+  const _AiEntry.user(String value)
+      : userText = value,
+        response = null,
+        error = null,
+        localText = null,
+        localQuote = null;
+  const _AiEntry.assistant(AgentChatV2Response value)
+      : userText = null,
+        response = value,
+        error = null,
+        localText = null,
+        localQuote = null;
+  const _AiEntry.error(String value)
+      : userText = null,
+        response = null,
+        error = value,
+        localText = null,
+        localQuote = null;
+  const _AiEntry.local(String value)
+      : userText = null,
+        response = null,
+        error = null,
+        localText = value,
+        localQuote = null;
+  const _AiEntry.quote(_LocalQuote value)
+      : userText = null,
+        response = null,
+        error = null,
+        localText = null,
+        localQuote = value;
 
   final String? userText;
   final AgentChatV2Response? response;
@@ -783,7 +800,7 @@ class _QuickActions extends StatelessWidget {
               child: MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: OutlinedButton(
-                  key: ValueKey('ai-quick-' + item.key),
+                  key: ValueKey('ai-quick-${item.key}'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 18),
                     foregroundColor: Colors.white,
@@ -814,16 +831,17 @@ class _WelcomeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SectionCard(
-      key: ValueKey('ai-v2-welcome-card'),
+      key: const ValueKey('ai-v2-welcome-card'),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(strings.aiWelcomeTitle,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          SizedBox(height: 8),
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
           Text(
             strings.aiWelcomeDescription,
-            style: TextStyle(color: Colors.white70, height: 1.35),
+            style: const TextStyle(color: Colors.white70, height: 1.35),
           ),
         ],
       ),
@@ -1133,14 +1151,12 @@ class _AnalysisCard extends StatelessWidget {
             : 'No additional risk';
     return _DataCard(
       key: const ValueKey('ai-v2-analysis-card'),
-      title: (response.symbol == null
-              ? (response.symbolName ?? '종목')
-              : formatKrStockDisplay(
-                  response.symbol!,
-                  name: response.symbolName ??
-                      KrStockCatalog.shared.displayName(response.symbol!),
-                )) +
-          ' ${strings.analysis}',
+      title:
+          '${response.symbol == null ? (response.symbolName ?? '종목') : formatKrStockDisplay(
+              response.symbol!,
+              name: response.symbolName ??
+                  KrStockCatalog.shared.displayName(response.symbol!),
+            )} ${strings.analysis}',
       primary: strings.decisionLabel(response.action ?? 'hold'),
       rows: [
         (
@@ -1196,10 +1212,7 @@ class _PortfolioCard extends StatelessWidget {
           (strings.isKorean ? '개 종목' : ' positions'),
       rows: [
         if (portfolio['cash'] != null)
-          (
-            strings.cash,
-            (portfolio['cash'].toString() + ' ' + (portfolio['currency'] ?? ''))
-          ),
+          (strings.cash, "${portfolio['cash']} ${portfolio['currency'] ?? ''}"),
         if (positions is List && positions.isNotEmpty)
           (
             strings.firstHeldPosition,

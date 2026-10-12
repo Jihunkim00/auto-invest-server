@@ -68,10 +68,10 @@ class _AdminSetupScreenState extends State<AdminSetupScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextFormField(
-              key: ValueKey('auth-setup-username-field'),
+              key: const ValueKey('auth-setup-username-field'),
               initialValue: 'admin',
               readOnly: true,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'ID',
                 prefixIcon: Icon(Icons.person_outline),
               ),

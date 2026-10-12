@@ -297,9 +297,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
   }
 
   String _formatTime(TimeOfDay value) =>
-      value.hour.toString().padLeft(2, "0") +
-      ":" +
-      value.minute.toString().padLeft(2, "0");
+      "${value.hour.toString().padLeft(2, "0")}:${value.minute.toString().padLeft(2, "0")}";
 
   String? _validateEditor() {
     final dateError = _dateRangeError();
@@ -1185,7 +1183,7 @@ class _AutomationProfileScreenState extends State<AutomationProfileScreen> {
                 if (query.trim().isEmpty) return;
                 final results =
                     await widget.apiClient.searchSymbols(query, market: 'KR');
-                if (!mounted) return;
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                       content: Text(results
@@ -1328,10 +1326,10 @@ class _DateField extends StatelessWidget {
       controller: controller,
       readOnly: true,
       onTap: onTap,
-      decoration: InputDecoration(
+      decoration: const InputDecoration(
         hintText: 'yyyy-MM-dd',
-        suffixIcon: const Icon(Icons.calendar_month_outlined),
-        suffixIconConstraints: const BoxConstraints(
+        suffixIcon: Icon(Icons.calendar_month_outlined),
+        suffixIconConstraints: BoxConstraints(
           minWidth: 48,
           minHeight: 48,
         ),

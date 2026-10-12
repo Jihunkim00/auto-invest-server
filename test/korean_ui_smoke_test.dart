@@ -42,7 +42,7 @@ void main() {
     expect(find.text('한국투자증권 안전 상태와 수동 실거래 상태입니다.'), findsOneWidget);
     expect(find.text('Paper'), findsWidgets);
 
-    final strings = AppStrings(AppLanguage.korean);
+    const strings = AppStrings(AppLanguage.korean);
     for (final value in [
       strings.brokerSyncWatchdog,
       strings.positionLifecycle,

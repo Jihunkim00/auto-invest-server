@@ -156,7 +156,7 @@ class _KrOrderTicket extends StatelessWidget {
         : 'Validate ${side == 'sell' ? 'Sell' : 'Buy'}';
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Wrap(spacing: 8, runSpacing: 8, children: const [
+      const Wrap(spacing: 8, runSpacing: 8, children: [
         _SoftBadge(text: 'REAL KIS LIVE', color: Colors.redAccent),
         _SoftBadge(text: 'MANUAL ONLY', color: Colors.lightBlueAccent),
         _SoftBadge(text: 'NO AUTO KIS ORDERS', color: Colors.amberAccent),
@@ -185,7 +185,7 @@ class _KrOrderTicket extends StatelessWidget {
           controller: qtyController,
           decoration: InputDecoration(
             labelText: 'Qty',
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
             errorText: controller.isOrderTicketQtyValid
                 ? null
                 : 'Enter quantity 1 or higher.',
@@ -370,7 +370,7 @@ class _KrOrderTicket extends StatelessWidget {
         ),
       ],
       const SizedBox(height: 12),
-      _KisOrderStatusPanel(
+      KisOrderStatusPanel(
         controller: controller,
         latest: controller.latestKisManualOrder,
         selected: controller.selectedKisOrder,
@@ -637,8 +637,9 @@ class _RawErrorSection extends StatelessWidget {
   }
 }
 
-class _KisOrderStatusPanel extends StatelessWidget {
-  const _KisOrderStatusPanel({
+class KisOrderStatusPanel extends StatelessWidget {
+  const KisOrderStatusPanel({
+    super.key,
     required this.controller,
     required this.latest,
     required this.selected,

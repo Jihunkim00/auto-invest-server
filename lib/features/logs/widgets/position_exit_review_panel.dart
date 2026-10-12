@@ -505,7 +505,7 @@ class _PreflightResult extends StatelessWidget {
             ),
             if (result.primaryBlockReason != null) ...[
               const SizedBox(height: 10),
-              Container(
+              SizedBox(
                 key: const ValueKey(
                   'position-exit-review-primary-block-reason',
                 ),

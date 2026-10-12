@@ -1783,7 +1783,7 @@ class DashboardController extends ChangeNotifier {
     notifyListeners();
 
     if (warnings.isNotEmpty) {
-      return ActionResult(
+      return const ActionResult(
         success: false,
         message: 'Automation monitor refreshed with partial data.',
       );
@@ -1842,7 +1842,7 @@ class DashboardController extends ChangeNotifier {
       showingOfflineFallback = false;
       recentRuns = await apiClient.getRecentTradingRuns();
       await _refreshPortfolioSummaries();
-      return ActionResult(
+      return const ActionResult(
           success: true, message: 'Watchlist analysis completed.');
     } catch (e) {
       error = 'Run request failed: $e';
@@ -6389,8 +6389,10 @@ class DashboardController extends ChangeNotifier {
 
   Future<ActionResult> prepareKisManualSellFromManagedPosition(
     ManagedPosition position,
-  ) async {
-    final symbol = normalizeKrSymbol(position.symbol);
+  ) => prepareKisManualSellFromSymbol(position.symbol);
+
+  Future<ActionResult> prepareKisManualSellFromSymbol(String rawSymbol) async {
+    final symbol = normalizeKrSymbol(rawSymbol);
     if (symbol.isEmpty) {
       return const ActionResult(
         success: false,

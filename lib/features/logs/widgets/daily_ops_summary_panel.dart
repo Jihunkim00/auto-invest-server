@@ -489,8 +489,7 @@ class _BadgeWrap extends StatelessWidget {
 }
 
 class _StatusPill extends StatelessWidget {
-  const _StatusPill({Key? key, required this.label, required this.color})
-      : super(key: key);
+  const _StatusPill({super.key, required this.label, required this.color});
 
   final String label;
   final Color color;

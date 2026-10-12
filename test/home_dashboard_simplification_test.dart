@@ -145,8 +145,8 @@ OrderLogItem _order(int id, String symbol) {
     brokerOrderId: 'broker-$id',
     brokerStatus: 'filled',
     internalStatus: 'FILLED',
-    createdAt: '2026-06-26T01:0${id}:00Z',
-    updatedAt: '2026-06-26T01:0${id}:00Z',
+    createdAt: '2026-06-26T01:0$id:00Z',
+    updatedAt: '2026-06-26T01:0$id:00Z',
   );
 }
 
