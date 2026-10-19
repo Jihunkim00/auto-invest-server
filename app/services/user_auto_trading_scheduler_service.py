@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
@@ -23,6 +24,7 @@ from app.db.models import (
     SignalLog,
     TradeRunLog,
     User,
+    UserBrokerCredential,
     UserAutoTradingSlotClaim,
     UserTradingSettings,
 )
@@ -40,6 +42,7 @@ from app.services.kis_a_top5_score_gate import (
 )
 from app.services.profile_universe_service import profile_universe_bounds
 from app.services.user_trading_execution_service import UserTradingExecutionService
+from app.services.kis_order_account_scope import position_management_block_reason
 from app.services.account_snapshot_retry import (
     MAX_ATTEMPTS as ACCOUNT_SNAPSHOT_RETRY_MAX_ATTEMPTS,
     RETRY_DELAY_SECONDS as ACCOUNT_SNAPSHOT_RETRY_DELAY_SECONDS,
@@ -64,6 +67,7 @@ _SCOPE = {
 }
 _ACTIVE_ORDER_STATUSES = {
     'REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED',
+    'UNKNOWN_STALE', 'SYNC_FAILED', 'PENDING_SUBMIT',
 }
 
 
@@ -1243,8 +1247,10 @@ class UserAutoTradingSchedulerService:
                 reason='market_closed',
                 symbol='NONE',
             )
+        position_started = time.monotonic()
         with _scheduler_stage('account_snapshot'):
             snapshot = self.account_service.get_broker_snapshot(db, user, provider)
+        snapshot_duration_ms = max(0.0, (time.monotonic() - position_started) * 1000)
         with _scheduler_stage('position_management'):
             position_result = self._manage_positions(
                 db,
@@ -1255,6 +1261,19 @@ class UserAutoTradingSchedulerService:
                 now=now,
                 profile=profile,
             )
+        held_count = sum(abs(_number(item.get('quantity') or item.get('qty'))) > 0
+                         for item in (snapshot.get('positions') or []) if isinstance(item, dict))
+        position_blocked = bool(position_result.get('entry_blocked') or position_result.get('positions'))
+        position_result.update({
+            'position_monitor_state': 'active' if held_count or position_blocked else 'idle',
+            'held_position_count': held_count,
+            'position_snapshot_duration_ms': snapshot_duration_ms,
+            'position_monitor_duration_ms': max(0.0, (time.monotonic() - position_started) * 1000),
+            'entry_slot_delay_ms': max(0.0, (self.now_provider().astimezone(now.tzinfo)
+                - now.replace(second=0, microsecond=0)).total_seconds() * 1000),
+            'entry_blocked_by_position_management': position_blocked,
+            'position_block_reason': position_result.get('reason') if position_blocked else None,
+        })
         action = str(position_result.get('action') or '').strip().lower()
         if action == 'sell':
             exit_method = getattr(self.execution_service, 'run_exit_once', None)
@@ -1275,7 +1294,7 @@ class UserAutoTradingSchedulerService:
                         exit_reason=str(position_result.get('reason') or 'position_exit'),
                     )
                 return {**result, 'position_management': position_result}
-        if position_result.get('positions'):
+        if position_result.get('positions') or position_result.get('entry_blocked'):
             return self._record_result(
                 db,
                 user=user,
@@ -2198,6 +2217,40 @@ class UserAutoTradingSchedulerService:
         )
 
     def _manage_positions(self, db: Session, **kwargs: Any) -> dict[str, Any]:
+        if kwargs.get('provider') == 'kis':
+            user = kwargs['user']
+            snapshot = kwargs.get('snapshot')
+            expected = f'user:{user.id}:kis:KR'
+            if (not isinstance(snapshot, dict) or snapshot.get('connected') is not True
+                    or snapshot.get('owner_user_id') != user.id
+                    or snapshot.get('provider') != 'kis' or snapshot.get('market') != 'KR'
+                    or snapshot.get('broker_account_id') != expected
+                    or snapshot.get('environment') not in {'paper', 'live'}):
+                raise ValueError('account_scope_mismatch')
+            credential = db.query(UserBrokerCredential.environment).filter_by(user_id=user.id, provider='kis').first()
+            if credential is not None and snapshot['environment'] != credential.environment:
+                raise ValueError('account_scope_mismatch')
+            positions = snapshot.get('positions')
+            open_orders = snapshot.get('open_orders')
+            if (snapshot.get('positions_reliable') is not True or not isinstance(positions, list)
+                    or any(not isinstance(item, dict) for item in positions)
+                    or not isinstance(open_orders, list)
+                    or any(not isinstance(item, dict) for item in open_orders)):
+                raise ValueError('account_snapshot_unavailable')
+            broker_sell_pending = any(
+                str(item.get('side') or '').lower() == 'sell'
+                and str(item.get('status') or '').upper() not in {'FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'}
+                for item in open_orders)
+            reason = 'duplicate_open_sell_order' if broker_sell_pending else position_management_block_reason(
+                # Existing user risk gates still count owned open lifecycles
+                # before possible-order reads or submission. Closing records
+                # and unresolved exits must stop entry analysis immediately.
+                db, owner_user_id=user.id, allow_own_open=True,
+            )
+            if reason:
+                return {'action': 'hold', 'reason': reason, 'positions': positions,
+                        'entry_blocked': True, 'position_monitor_state': 'active',
+                        'held_position_count': sum(abs(_number(item.get('quantity') or item.get('qty'))) > 0 for item in positions)}
         manager = self.position_management_service
         if callable(manager):
             return dict(manager(db, **kwargs) or {})

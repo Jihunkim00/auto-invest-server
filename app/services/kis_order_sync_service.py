@@ -59,6 +59,9 @@ class KisOrderSyncService:
             raise KisOrderSyncError("KIS order not found.")
         if str(order.broker or "").strip().lower() != "kis":
             raise KisOrderSyncError("Order is not a KIS order.")
+        if order.owner_user_id != getattr(self.client, 'user_id', None):
+            # Do not query an account or update sync timestamps for another owner.
+            raise KisOrderSyncError('account_scope_mismatch')
 
         order_no = _order_no(order)
         if not order_no:
@@ -149,6 +152,7 @@ class KisOrderSyncService:
         orders = (
             db.query(OrderLog)
             .filter(OrderLog.broker == "kis")
+            .filter(OrderLog.owner_user_id == getattr(self.client, 'user_id', None))
             .filter(OrderLog.internal_status.in_(sorted(OPEN_KIS_INTERNAL_STATUSES)))
             .order_by(OrderLog.created_at.desc(), OrderLog.id.desc())
             .all()
@@ -176,6 +180,7 @@ class KisOrderSyncService:
         orders = (
             db.query(OrderLog)
             .filter(OrderLog.broker == "kis")
+            .filter(OrderLog.owner_user_id == getattr(self.client, 'user_id', None))
             .filter(OrderLog.internal_status.in_(sorted(statuses)))
             .filter(
                 or_(

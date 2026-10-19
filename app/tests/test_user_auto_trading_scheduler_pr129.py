@@ -79,7 +79,7 @@ class FakeAccountService(UserBrokerAccountService):
         )
         environment = 'live' if settings and settings.trading_mode == 'live' else 'paper'
         default_currency = 'KRW' if provider == 'kis' else 'USD'
-        return self.snapshots.get((int(user.id), provider), {
+        snapshot = self.snapshots.get((int(user.id), provider), {
             'provider': provider,
             'environment': environment,
             'connected': True,
@@ -93,6 +93,10 @@ class FakeAccountService(UserBrokerAccountService):
             'positions': [],
             'open_orders': [],
         })
+        return {'owner_user_id': int(user.id), 'provider': provider, 'connected': True,
+                'environment': environment, 'market': 'KR' if provider == 'kis' else 'US',
+                'broker_account_id': f'user:{user.id}:{provider}:{"KR" if provider == "kis" else "US"}',
+                'positions_reliable': True, **snapshot}
 
 
 class FakeCredentialService(UserBrokerCredentialService):

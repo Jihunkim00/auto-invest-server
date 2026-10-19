@@ -186,6 +186,8 @@ class ProfileBuy:
 class UserAccount:
     def get_broker_snapshot(self, _db, _user, provider):
         return {"provider": provider, "market": "KR", "environment": "paper", "connected": True,
+                "owner_user_id": _user.id, "broker_account_id": f"user:{_user.id}:kis:KR",
+                "positions_reliable": True,
                 "account": {"currency": "KRW", "portfolio_value": 1_000_000.0,
                             "equity": 1_000_000.0, "buying_power": 1_000_000.0, "cash": 1_000_000.0},
                 "positions": [], "open_orders": []}

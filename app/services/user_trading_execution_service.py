@@ -38,6 +38,7 @@ from app.services.account_trading_limit_service import (
 from app.services.user_broker_account_service import UserBrokerAccountService
 from app.services.user_broker_account_service import UserBrokerUnavailableError
 from app.services.user_broker_credential_service import UserBrokerCredentialService
+from app.services.kis_order_account_scope import find_account_open_order
 from app.services.calendar_gap_risk_service import CalendarGapRiskService
 from app.services.kis_a_top5_score_gate import (
     apply_a_top5_score_gate,
@@ -422,7 +423,7 @@ class UserTradingExecutionService:
         )
         risk = dict(risk or {})
         risk_flags = [str(flag) for flag in risk.get("risk_flags") or []]
-        self._append_snapshot_risk_flags(
+        duplicate_check = self._append_snapshot_risk_flags(
             risk_flags,
             snapshot=snapshot,
             symbol=requested_symbol,
@@ -434,6 +435,8 @@ class UserTradingExecutionService:
             db=db,
             user=user,
         )
+        if duplicate_check:
+            risk.update(duplicate_check)
         if market_session.get("is_market_open") is not True:
             risk_flags.append("market_closed")
         if market_session.get("is_entry_allowed_now") is not True:
@@ -1122,10 +1125,12 @@ class UserTradingExecutionService:
                 # Re-run the existing held-position, max-position and duplicate
                 # gates using the fresh account, without weakening any gate.
                 flags = []
-                self._append_snapshot_risk_flags(
+                duplicate_check = self._append_snapshot_risk_flags(
                     flags, snapshot=fresh, symbol=base['requested_symbol'],
                     max_open_positions=int(settings.max_open_positions or 0), db=db, user=user,
                 )
+                if duplicate_check:
+                    kwargs['risk'].update(duplicate_check)
                 if flags:
                     raise AccountTradingLimitError(flags[0])
                 fresh_risk = self.risk_service.get_user_risk_state(
@@ -1849,7 +1854,8 @@ class UserTradingExecutionService:
         max_open_positions: int,
         db: Session,
         user: User,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        duplicate_check = None
         account = snapshot.get("account") if isinstance(snapshot, dict) else {}
         account = account if isinstance(account, dict) else {}
         positions = snapshot.get("positions") if isinstance(snapshot, dict) else []
@@ -1880,6 +1886,8 @@ class UserTradingExecutionService:
             status = str(item.get("status") or "").strip().upper()
             if status not in {"CANCELED", "CANCELLED", "REJECTED", "EXPIRED", "FILLED"}:
                 risk_flags.append("duplicate_open_order")
+                duplicate_check = {'duplicate_check_source': 'broker',
+                    'requested_order_owner_user_id': user.id, 'block_reason': 'duplicate_open_order'}
                 break
 
         local_rows = (
@@ -1892,9 +1900,23 @@ class UserTradingExecutionService:
         if any(str(row.internal_status or "").upper() not in _TERMINAL_ORDER_STATUSES for row in local_rows):
             risk_flags.append("duplicate_open_order")
 
+        if snapshot.get('provider') == 'kis' and snapshot.get('environment') == 'live':
+            try:
+                matched = find_account_open_order(db, owner_user_id=user.id, symbol=symbol)
+            except AccountTradingLimitError as exc:
+                risk_flags.append(str(exc))
+            else:
+                if matched is not None:
+                    risk_flags.append('duplicate_open_order')
+                    if duplicate_check is None:
+                        duplicate_check = {'duplicate_check_source': 'local_db', 'matched_order_id': matched.id,
+                            'matched_order_owner_user_id': matched.owner_user_id,
+                            'requested_order_owner_user_id': user.id, 'block_reason': 'duplicate_open_order'}
+
         buying_power = _number(account.get("buying_power") if account.get("buying_power") is not None else account.get("cash"))
         if buying_power is None or buying_power <= 0:
             risk_flags.append("buying_power_unavailable")
+        return duplicate_check
 
     @staticmethod
     def _size_order(*, snapshot: dict[str, Any], price: float | None, max_position_pct: float) -> dict[str, Any]:

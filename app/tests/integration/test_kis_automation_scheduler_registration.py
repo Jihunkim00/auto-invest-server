@@ -537,6 +537,17 @@ def test_admin_exit_retry_does_not_block_regular_user_slot(
 
     user = _user(db_session, 'admin-retry-does-not-block-user')
     _configure_user(db_session, user, provider='kis')
+    from cryptography.fernet import Fernet
+    from app.config import get_settings
+    from app.db.models import UserBrokerCredential
+    from app.services.broker_credential_crypto_service import BrokerCredentialCryptoService
+    monkeypatch.setattr(get_settings(), 'broker_credential_master_key', Fernet.generate_key().decode())
+    db_session.add(UserBrokerCredential(user_id=user.id, provider='kis', environment='paper',
+        encryption_version=1, encrypted_payload=BrokerCredentialCryptoService().encrypt({
+            'environment': 'paper', 'account_no': '33334444', 'account_product_code': '01',
+            'app_key': 'fake-user-key', 'app_secret': 'fake-user-secret',
+        })))
+    db_session.commit()
     _set_profile_schedule(db_session, user, ['09:10'])
     user_scheduler, _account, _analysis, _broker, _kis = _user_harness()
     user_result = user_scheduler.run_provider_once(

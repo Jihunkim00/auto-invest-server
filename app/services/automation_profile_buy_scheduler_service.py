@@ -22,6 +22,8 @@ from app.core.constants import A_TOP5_C_MIN_SCORE
 from app.core.enums import InternalOrderStatus
 from app.db.models import AutomationProfileBuyReservation, OrderLog, PositionLifecycle, TradeRunLog
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore
+from app.services.account_trading_limit_service import AccountTradingLimitError
+from app.services.kis_order_account_scope import assert_lifecycle_owner, resolve_position_account_scope, position_management_block_reason
 from app.services.kis_account_state_cache_service import KisAccountStateCacheService
 from app.services.account_snapshot_retry import RETRY_SLOT_REPLAY_GRACE_SECONDS
 from app.services.automation_execution_authority_service import AutomationExecutionAuthorityService
@@ -238,11 +240,10 @@ class AutomationProfileBuySchedulerService:
         return dict(profile) if isinstance(profile, dict) else {}
 
     def _position_priority(self, db: Session) -> bool:
-        return bool(
-            db.query(PositionLifecycle)
-            .filter(PositionLifecycle.status.in_([OPEN, CLOSING]))
-            .count()
-        )
+        scope = resolve_position_account_scope(db, client=self.client)
+        return position_management_block_reason(
+            db, owner_user_id=getattr(self.client, 'user_id', None), scope=scope,
+        ) is not None
 
     def readiness(self, db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         now_utc = _utc(now)
@@ -540,7 +541,11 @@ class AutomationProfileBuySchedulerService:
                 profile=profile,
                 now=now_utc,
             )
-        if self._position_priority(db):
+        try:
+            position_priority = self._position_priority(db)
+        except AccountTradingLimitError as exc:
+            return self._blocked(str(exc), profile=profile, selected_symbol=symbol)
+        if position_priority:
             return self._blocked('position_management_priority', profile=profile, selected_symbol=symbol)
         reservation = AutomationProfileBuyReservation(
             reservation_key=key,
@@ -745,7 +750,9 @@ class AutomationProfileBuySchedulerService:
             maximum = max(1, int(entry.get('max_new_entries_per_day') or 1))
         except (TypeError, ValueError):
             maximum = 1
-        used = _persisted_daily_new_entry_count(db, now=now)
+        used = _persisted_daily_new_entry_count(
+            db, now=now, owner_user_id=getattr(self.client, 'user_id', None),
+        )
         return {
             'max_new_entries_per_day': maximum,
             'new_entries_used': used,
@@ -1016,9 +1023,13 @@ class AutomationProfileBuySchedulerService:
         db.commit()
 
     def manage_exit_once(self, db: Session, *, current_price: float, now: datetime | None = None) -> dict[str, Any]:
-        lifecycle = db.query(PositionLifecycle).filter(PositionLifecycle.status == OPEN).order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc()).first()
+        lifecycle = db.query(PositionLifecycle).filter(
+            PositionLifecycle.owner_user_id == getattr(self.client, 'user_id', None),
+            PositionLifecycle.status == OPEN,
+        ).order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc()).first()
         if lifecycle is None:
             return {'status': 'hold', 'reason': 'no_open_lifecycle', 'broker_sell_call_count': 0}
+        assert_lifecycle_owner(db, lifecycle, getattr(self.client, 'user_id', None))
         if lifecycle.exit_order_id is not None:
             return {'status': 'hold', 'reason': 'exit_order_already_pending', 'broker_sell_call_count': 0}
         entry = float(lifecycle.entry_price)
@@ -1035,6 +1046,7 @@ class AutomationProfileBuySchedulerService:
             return {'status': 'blocked', 'reason': (gate.get('blocking_reasons') or ['live_order_not_possible'])[0], 'trigger': trigger, 'broker_sell_call_count': 0}
         qty = max(1, int(float(lifecycle.quantity or 0)))
         order = OrderLog(
+            owner_user_id=lifecycle.owner_user_id,
             broker=PROVIDER,
             market=MARKET,
             symbol=lifecycle.symbol,
@@ -1107,6 +1119,7 @@ def _persisted_daily_new_entry_count(
     db: Session,
     *,
     now: datetime,
+    owner_user_id: int | None = None,
 ) -> int:
     local_now = _utc(now).astimezone(KST)
     day_start = datetime.combine(
@@ -1121,6 +1134,7 @@ def _persisted_daily_new_entry_count(
     rows = (
         db.query(OrderLog)
         .filter(OrderLog.broker == PROVIDER)
+        .filter(OrderLog.owner_user_id == owner_user_id)
         .all()
     )
     for row in rows:
@@ -1146,6 +1160,7 @@ def _persisted_daily_new_entry_count(
     run_rows = (
         db.query(TradeRunLog)
         .filter(TradeRunLog.mode == MODE)
+        .filter(TradeRunLog.owner_user_id == owner_user_id)
         .filter(TradeRunLog.order_id.isnot(None))
         .all()
     )

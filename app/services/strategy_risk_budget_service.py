@@ -117,6 +117,7 @@ class StrategyRiskBudgetService:
             db,
             provider=normalized_provider,
             market=normalized_market,
+            owner_user_id=owner_user_id,
         )
         max_trades = max(0, int(profile.get("max_trades_per_day") or 0))
         current_positions = self._position_count(positions)
@@ -560,6 +561,7 @@ class StrategyRiskBudgetService:
         *,
         provider: str,
         market: str,
+        owner_user_id: int | None = None,
     ) -> int:
         today = datetime.now(_KST).date()
         start = datetime.combine(today, time.min, tzinfo=_KST).astimezone(UTC)
@@ -567,6 +569,7 @@ class StrategyRiskBudgetService:
         rows = (
             db.query(OrderLog)
             .filter(OrderLog.broker == provider)
+            .filter(OrderLog.owner_user_id == owner_user_id)
             .filter(OrderLog.side == "buy")
             .all()
         )

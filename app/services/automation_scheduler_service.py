@@ -70,6 +70,7 @@ from app.services.market_session_service import MarketSessionService
 from app.services.market_profile_service import MarketProfileService
 from app.services.market_regime_service import MarketRegimeService
 from app.services.kis_position_lifecycle_service import KisPositionLifecycleService
+from app.services.kis_order_account_scope import kis_client_cache_scope
 from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
     build_scheduler_exit_cycle_key,
@@ -151,8 +152,8 @@ class AutomationSchedulerService(SchedulerService):
         self._monitoring_due_at: datetime | None = None
         self._position_exit_monitor_due_at: datetime | None = None
         self._position_exit_positions_lock = threading.Lock()
-        self._position_exit_positions_cached_at: datetime | None = None
-        self._position_exit_positions_cache: list[dict[str, Any]] | None = None
+        self._position_exit_positions_cache: dict[str, tuple[datetime, list[dict[str, Any]]]] = {}
+        self._position_exit_scope_locks: dict[str, Any] = {}
         self._last_position_exit_monitor_run_at: datetime | None = None
         self._last_position_exit_monitor_result: str | None = None
         self._position_exit_monitor_active = False
@@ -160,6 +161,10 @@ class AutomationSchedulerService(SchedulerService):
         self._held_position_count: int | None = None
         self._position_state_known = False
         self._position_exit_monitor_reason: str | None = None
+        self._position_monitor_duration_ms = 0.0
+        self._position_snapshot_duration_ms = 0.0
+        self._entry_position_snapshot_duration_ms = 0.0
+        self._last_entry_position_diagnostics: dict[str, Any] = {}
         self._position_exit_retry_executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="kis-position-exit-retry",
@@ -308,6 +313,9 @@ class AutomationSchedulerService(SchedulerService):
                 'poll_interval_seconds': 20,
                 'position_exit_monitor_active': self._position_exit_monitor_active,
                 'position_exit_monitor_state': self._position_exit_monitor_state,
+                'position_monitor_duration_ms': self._position_monitor_duration_ms,
+                'position_snapshot_duration_ms': self._position_snapshot_duration_ms,
+                'last_entry_position_diagnostics': dict(self._last_entry_position_diagnostics),
                 'held_position_count': self._held_position_count,
                 'position_state_known': self._position_state_known,
                 'position_exit_monitor_reason': self._position_exit_monitor_reason,
@@ -903,6 +911,13 @@ class AutomationSchedulerService(SchedulerService):
         self, slot_name: str, now: datetime | None = None,
         slot_claimed: bool = False, **kwargs,
     ) -> dict[str, Any]:
+        entry_started_at = self._as_kst(self.retry_now_provider())
+        nominal = self._as_kst(now or entry_started_at).replace(second=0, microsecond=0)
+        scheduled_slot = self._profile_scheduler_slot(slot_name)
+        if scheduled_slot:
+            hour, minute = map(int, scheduled_slot.split(':'))
+            nominal = nominal.replace(hour=hour, minute=minute)
+        self._entry_position_snapshot_duration_ms = 0.0
         recovery: dict[str, Any] = {}
         try:
             result = self._run_automation_tick_impl(
@@ -933,7 +948,24 @@ class AutomationSchedulerService(SchedulerService):
                             "entry_slot_position_recovery_unavailable"
                         ),
                     )
-        return result
+        if not isinstance(result, dict):
+            return result
+        reason = str(result.get('reason') or '')
+        held = (result.get('portfolio') or {}).get('broker_held_count')
+        blocked = bool('position' in reason or 'exit_read_retry' in reason)
+        diagnostics = {
+            'position_monitor_state': ('active' if held else 'idle') if held is not None else 'unknown',
+            'held_position_count': held,
+            'position_snapshot_duration_ms': self._entry_position_snapshot_duration_ms,
+            'position_monitor_duration_ms': self._position_monitor_duration_ms,
+            'entry_slot_delay_ms': max(0.0, (entry_started_at - nominal).total_seconds() * 1000),
+            'entry_started_at': entry_started_at.isoformat(),
+            'entry_finished_at': self._as_kst(self.retry_now_provider()).isoformat(),
+            'entry_blocked_by_position_management': blocked,
+            'position_block_reason': reason if blocked else None,
+        }
+        self._last_entry_position_diagnostics = diagnostics
+        return {**result, **diagnostics}
 
     def _run_automation_tick_impl(
         self,
@@ -2150,6 +2182,8 @@ class AutomationSchedulerService(SchedulerService):
     ) -> dict[str, Any]:
         """Poll held positions independently and delegate SELLs to guarded execution."""
         now_kst = self._as_kst(now)
+        monitor_started = time.monotonic()
+        snapshot_duration_ms = 0.0
         self._last_position_exit_monitor_run_at = datetime.now(UTC)
         monitor_state = "unknown"
         position_state_known = False
@@ -2197,16 +2231,19 @@ class AutomationSchedulerService(SchedulerService):
                 settings_obj = get_settings()
                 kis_client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
                 slot = f"position_exit_{now_kst.strftime('%Y%m%d_%H%M')}"
+                snapshot_started = time.monotonic()
                 try:
                     broker_positions = self._load_position_exit_positions(
                         kis_client,
                         now=now_kst,
                         force_refresh=True,
                     )
+                    snapshot_duration_ms = max(0.0, (time.monotonic() - snapshot_started) * 1000)
                     held_position_count = _position_exit_held_position_count(
                         broker_positions
                     )
                 except Exception as exc:
+                    snapshot_duration_ms = max(0.0, (time.monotonic() - snapshot_started) * 1000)
                     retry_result = self._position_snapshot_failure_result(
                         db,
                         profile=monitor_profile,
@@ -2313,6 +2350,8 @@ class AutomationSchedulerService(SchedulerService):
             result["position_exit_monitor_active"] = monitor_state == "active"
             result["position_exit_monitor_state"] = monitor_state
             result["held_position_count"] = held_position_count
+            result['position_snapshot_duration_ms'] = snapshot_duration_ms
+            result['position_monitor_duration_ms'] = max(0.0, (time.monotonic() - monitor_started) * 1000)
             result["position_state_known"] = position_state_known
             result["sell_only"] = True
             result["monitor_independent_of_buy_scheduler"] = True
@@ -2341,6 +2380,8 @@ class AutomationSchedulerService(SchedulerService):
             self._held_position_count = held_position_count
             self._position_state_known = position_state_known
             self._position_exit_monitor_reason = monitor_reason or result.get("reason")
+            self._position_snapshot_duration_ms = snapshot_duration_ms
+            self._position_monitor_duration_ms = result['position_monitor_duration_ms']
             self._last_position_exit_monitor_result = str(
                 result.get("reason") or result.get("status") or "completed"
             )
@@ -2357,9 +2398,18 @@ class AutomationSchedulerService(SchedulerService):
     ) -> list[dict[str, Any]]:
         """Refresh discovery on each poll and reuse only a fresh snapshot for evaluation."""
         now_utc = self._as_kst(now).astimezone(UTC)
+        scope = kis_client_cache_scope(kis_client)
+        # Unidentifiable clients never reuse a cache populated by another read.
+        if scope is None:
+            result = kis_client.list_positions()
+            if not isinstance(result, list) or any(not isinstance(item, dict) for item in result):
+                raise ValueError('kis_position_snapshot_invalid')
+            return [dict(item) for item in result]
         with self._position_exit_positions_lock:
-            cached_at = self._position_exit_positions_cached_at
-            cached = self._position_exit_positions_cache
+            scope_lock = self._position_exit_scope_locks.setdefault(scope, threading.Lock())
+        # A slow account read must not hold a lock for unrelated accounts.
+        with scope_lock:
+            cached_at, cached = self._position_exit_positions_cache.get(scope, (None, None))
             age = (now_utc - cached_at) if cached_at is not None else None
             cache_fresh = (
                 age is not None
@@ -2377,8 +2427,7 @@ class AutomationSchedulerService(SchedulerService):
             if not isinstance(result, list) or any(not isinstance(item, dict) for item in result):
                 raise ValueError("kis_position_snapshot_invalid")
             snapshot = [dict(item) for item in result]
-            self._position_exit_positions_cache = snapshot
-            self._position_exit_positions_cached_at = now_utc
+            self._position_exit_positions_cache[scope] = (now_utc, snapshot)
             return [dict(item) for item in snapshot]
 
     def _route_position_exit_monitor_sells(
@@ -2538,11 +2587,37 @@ class AutomationSchedulerService(SchedulerService):
         service = self._profile_buy_scheduler_service(db)
         loader = getattr(service, 'positions_loader', None)
         client = getattr(service, 'client', None)
-        positions = loader(db) if callable(loader) else client.list_positions()
+        started = time.monotonic()
+        try:
+            # Reuse only a completed, credential-bound discovery read <= 5s
+            # old. A pending monitor never delays this entry-side read. The
+            # execution core still performs its separate fresh JIT checks.
+            cached = (self._fresh_position_exit_snapshot(client, now=self.retry_now_provider())
+                      if not callable(loader) else None)
+            positions = cached if cached is not None else loader(db) if callable(loader) else client.list_positions()
+        finally:
+            self._entry_position_snapshot_duration_ms = max(0.0, (time.monotonic() - started) * 1000)
         if not isinstance(positions, list) or any(not isinstance(item, dict) for item in positions):
             raise ValueError('kis_position_snapshot_invalid')
         _position_exit_held_position_count(positions)
         return [dict(item) for item in positions]
+
+    def _fresh_position_exit_snapshot(self, client: Any, *, now: datetime) -> list[dict[str, Any]] | None:
+        scope = kis_client_cache_scope(client)
+        if scope is None:
+            return None
+        with self._position_exit_positions_lock:
+            lock = self._position_exit_scope_locks.get(scope)
+        if lock is None or not lock.acquire(blocking=False):
+            return None
+        try:
+            cached_at, cached = self._position_exit_positions_cache.get(scope, (None, None))
+            age = (self._as_kst(now).astimezone(UTC) - cached_at).total_seconds() if cached_at else None
+            if cached is not None and age is not None and 0 <= age <= POSITION_EXIT_FRESH_READ_SECONDS:
+                return [dict(item) for item in cached]
+            return None
+        finally:
+            lock.release()
 
     def _account_snapshot_preflight(
         self,
@@ -3623,6 +3698,7 @@ class AutomationSchedulerService(SchedulerService):
         ]
         lifecycle = getattr(service, "lifecycle_service", None)
         if lifecycle is not None and db.query(PositionLifecycle).filter(
+            PositionLifecycle.owner_user_id == getattr(getattr(service, 'client', None), 'user_id', None),
             PositionLifecycle.status.in_(["open", "closing"])
         ).count():
             result = lifecycle.run_management_once(

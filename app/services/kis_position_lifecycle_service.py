@@ -23,6 +23,7 @@ from app.services.kis_payload_sanitizer import sanitize_kis_payload
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.runtime_setting_service import RuntimeSettingService
 from app.services.market_session_service import MarketSessionService
+from app.services.kis_order_account_scope import assert_lifecycle_owner
 
 
 MODE = "kis_position_management"
@@ -91,6 +92,7 @@ class KisPositionLifecycleService:
         position_snapshot_loader: Any | None = None,
     ) -> None:
         self.client = client
+        self.owner_user_id = getattr(client, 'user_id', None)
         self.runtime_settings = runtime_settings or RuntimeSettingService()
         self.automation_profiles = automation_profiles or AutomationProfileService(
             runtime_settings=self.runtime_settings,
@@ -101,8 +103,13 @@ class KisPositionLifecycleService:
         self.position_snapshot_loader = position_snapshot_loader
 
     def _active_profile_exit(self, db: Session) -> dict[str, Any] | None:
-        reader = getattr(self.automation_profiles, 'get_active_profile', None)
-        profile = reader(db) if callable(reader) else None
+        if self.owner_user_id is not None:
+            owned_reader = getattr(self.automation_profiles, 'selected_owned_profile_schedule', None)
+            schedule = owned_reader(db, owner_user_id=self.owner_user_id) if callable(owned_reader) else None
+            profile = (schedule or {}).get('profile')
+        else:
+            reader = getattr(self.automation_profiles, 'get_active_profile', None)
+            profile = reader(db) if callable(reader) else None
         if not isinstance(profile, dict) or not profile:
             return None
         effective = profile.get('effective_settings')
@@ -127,6 +134,7 @@ class KisPositionLifecycleService:
         scheduler_gate = position_lifecycle_scheduler_gate(runtime)
         lifecycles = (
             db.query(PositionLifecycle)
+            .filter(PositionLifecycle.owner_user_id == self.owner_user_id)
             .order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc())
             .all()
         )
@@ -219,6 +227,8 @@ class KisPositionLifecycleService:
         now_utc = _aware_utc(now or self.now_provider())
         if row is None:
             return {"created": False, "reason": "entry_order_not_found"}
+        if row.owner_user_id != self.owner_user_id:
+            return {'created': False, 'reason': 'account_scope_mismatch', 'order_id': row.id}
         if not _is_filled_kis_buy(row):
             return {
                 "created": False,
@@ -239,6 +249,7 @@ class KisPositionLifecycleService:
             .first()
         )
         if existing is not None:
+            assert_lifecycle_owner(db, existing, self.owner_user_id)
             if not _is_profile_auto_buy_order(row):
                 self._disable_new_buy_settings(db)
             return {
@@ -274,6 +285,7 @@ class KisPositionLifecycleService:
         )
         profile_exit = self._active_profile_exit(db)
         lifecycle = PositionLifecycle(
+            owner_user_id=self.owner_user_id,
             symbol=str(row.symbol or "").strip().upper(),
             entry_order_id=int(row.id),
             entry_source="order_log",
@@ -330,6 +342,7 @@ class KisPositionLifecycleService:
                 "position": None,
                 "lifecycle": None,
             }
+        assert_lifecycle_owner(db, row, self.owner_user_id)
 
         matched = _find_position(
             positions if positions is not None else self._broker_positions(),
@@ -397,8 +410,11 @@ class KisPositionLifecycleService:
         now_utc = _aware_utc(now or self.now_provider())
         if row is None or not _is_filled_kis_sell(row):
             return {"closed": False, "reason": "exit_order_not_filled_sell"}
+        if row.owner_user_id != self.owner_user_id:
+            return {'closed': False, 'reason': 'account_scope_mismatch', 'order_id': row.id}
         lifecycle = (
             db.query(PositionLifecycle)
+            .filter(PositionLifecycle.owner_user_id == self.owner_user_id)
             .filter(PositionLifecycle.symbol == str(row.symbol or "").strip().upper())
             .filter(PositionLifecycle.status.in_([OPEN, CLOSING]))
             .order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc())
@@ -406,6 +422,7 @@ class KisPositionLifecycleService:
         )
         if lifecycle is None:
             return {"closed": False, "reason": "open_lifecycle_not_found", "order_id": row.id}
+        assert_lifecycle_owner(db, lifecycle, self.owner_user_id)
         lifecycle.exit_order_id = row.id
         lifecycle.exit_order_status = InternalOrderStatus.FILLED.value
         lifecycle.last_evaluated_at = _naive_utc(now_utc)
@@ -1216,6 +1233,7 @@ class KisPositionLifecycleService:
         count = (
             db.query(OrderLog)
             .filter(OrderLog.broker == PROVIDER)
+            .filter(OrderLog.owner_user_id == self.owner_user_id)
             .filter(OrderLog.side == SELL)
             .filter(OrderLog.created_at >= start_utc)
             .filter(OrderLog.created_at < end_utc)
@@ -1244,6 +1262,7 @@ class KisPositionLifecycleService:
         row = (
             db.query(OrderLog)
             .filter(OrderLog.broker == PROVIDER)
+            .filter(OrderLog.owner_user_id == self.owner_user_id)
             .filter(OrderLog.symbol == symbol)
             .filter(OrderLog.side == SELL)
             .filter(OrderLog.internal_status.in_(sorted(OPEN_ORDER_STATUSES)))
@@ -1261,6 +1280,7 @@ class KisPositionLifecycleService:
         rows = (
             db.query(OrderLog)
             .filter(OrderLog.broker == PROVIDER)
+            .filter(OrderLog.owner_user_id == self.owner_user_id)
             .filter(OrderLog.side == BUY)
             .filter(OrderLog.internal_status == InternalOrderStatus.FILLED.value)
             .order_by(OrderLog.filled_at.desc(), OrderLog.id.desc())
@@ -1318,6 +1338,7 @@ class KisPositionLifecycleService:
             ]
             synthetic_entry_order_id = min([-1, *existing_ids]) - (1 if any(value < 0 for value in existing_ids) else 0)
             lifecycle = PositionLifecycle(
+                owner_user_id=self.owner_user_id,
                 symbol=symbol,
                 entry_order_id=synthetic_entry_order_id,
                 entry_source="broker_position_snapshot",
@@ -1354,6 +1375,8 @@ class KisPositionLifecycleService:
 
     def _disable_new_buy_settings(self, db: Session) -> dict[str, Any]:
         runtime = self.runtime_settings.get_settings_read_only(db)
+        if self.owner_user_id is not None:
+            return runtime
         payload = {
             "kis_live_auto_buy_enabled": False,
             "kis_limited_auto_buy_enabled": False,
@@ -1369,20 +1392,28 @@ class KisPositionLifecycleService:
         return self.runtime_settings.update_settings(db, payload)
 
     def _latest_active_lifecycle(self, db: Session) -> PositionLifecycle | None:
-        return (
+        row = (
             db.query(PositionLifecycle)
+            .filter(PositionLifecycle.owner_user_id == self.owner_user_id)
             .filter(PositionLifecycle.status.in_([OPEN, CLOSING]))
             .order_by(PositionLifecycle.opened_at.desc(), PositionLifecycle.id.desc())
             .first()
         )
+        if row is not None:
+            assert_lifecycle_owner(db, row, self.owner_user_id)
+        return row
 
     def _active_lifecycles(self, db: Session) -> list[PositionLifecycle]:
-        return (
+        rows = (
             db.query(PositionLifecycle)
+            .filter(PositionLifecycle.owner_user_id == self.owner_user_id)
             .filter(PositionLifecycle.status.in_([OPEN, CLOSING]))
             .order_by(PositionLifecycle.opened_at.asc(), PositionLifecycle.id.asc())
             .all()
         )
+        for row in rows:
+            assert_lifecycle_owner(db, row, self.owner_user_id)
+        return rows
 
     def _broker_positions(self, *, force_refresh: bool = False) -> list[dict[str, Any]]:
         if self.position_snapshot_loader is not None:
@@ -1516,6 +1547,7 @@ class KisPositionLifecycleService:
             "operation_log": required_log_fields,
         }
         run = TradeRunLog(
+            owner_user_id=self.owner_user_id,
             run_key=f"kis_position_mgmt_{uuid.uuid4().hex[:12]}",
             trigger_source=trigger_source,
             symbol=str(payload.get("symbol") or "POSITIONS"),

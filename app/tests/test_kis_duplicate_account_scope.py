@@ -56,7 +56,8 @@ def _guard(core, db, order):
 
 
 @pytest.mark.parametrize('side', ['buy', 'sell'])
-@pytest.mark.parametrize('status', ['UNKNOWN_STALE', 'SYNC_FAILED', 'SUBMITTED', 'PARTIALLY_FILLED'])
+@pytest.mark.parametrize('status', ['REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
+                                   'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED'])
 @pytest.mark.parametrize('requested,previous,blocked', [
     ('admin', 'first', False), ('first', 'admin', False),
     ('first', 'first', True), ('admin', 'admin', True), ('first', 'second', False),
@@ -119,7 +120,8 @@ def test_broker_open_orders_block_and_read_the_verified_client(db_session, accou
 
 
 @pytest.mark.parametrize('side', ['buy', 'sell'])
-@pytest.mark.parametrize('mutation', ['missing_client', 'missing_identity', 'wrong_account', 'wrong_key', 'wrong_user', 'invalid_orders', 'read_failure'])
+@pytest.mark.parametrize('mutation', ['missing_client', 'missing_identity', 'wrong_account', 'wrong_key',
+    'wrong_user', 'invalid_environment', 'wrong_product', 'invalid_orders', 'read_failure'])
 def test_untrusted_broker_scope_fails_closed_without_submit(db_session, accounts, side, mutation):
     _, first, _, credentials = accounts
     order = _order(db_session, owner=first.id, side=side)
@@ -136,6 +138,10 @@ def test_untrusted_broker_scope_fails_closed_without_submit(db_session, accounts
         client.credentials['app_key'] = 'different-secret-key'
     elif mutation == 'wrong_user':
         client.user_id += 1
+    elif mutation == 'invalid_environment':
+        client.credentials['environment'] = 'untrusted'
+    elif mutation == 'wrong_product':
+        client.credentials['account_product_code'] = '02'
     elif mutation == 'invalid_orders':
         client.list_open_orders = lambda: None
     else:

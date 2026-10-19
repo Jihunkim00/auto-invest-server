@@ -228,6 +228,10 @@ def _create_active_profile(db, runtime, *, key='aut_pr110_readiness'):
 
 
 def _build_service(db, *, client=None, runtime=None, key='aut_pr110_readiness'):
+    from app.db.models import User
+    from app.services.auth_service import ensure_admin_user
+    if db.query(User).filter_by(role='admin').first() is None:
+        ensure_admin_user(db)
     runtime = runtime or PR110RuntimeSettingService()
     RuntimeSettingService().update_settings(db, {'automation_mode': 'live', 'dry_run': False, 'kill_switch': False})
     profiles = _create_active_profile(db, runtime, key=key)

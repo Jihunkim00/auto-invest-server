@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from app.config import get_settings
-from app.db.models import OrderLog, StrategyProfile, User, UserBrokerCredential
+from app.db.models import OrderLog, PositionExitRetryJob, PositionLifecycle, StrategyProfile, User, UserBrokerCredential
 from app.services.account_trading_limit_service import (
     AccountLimitContext, AccountTradingLimitError, AccountTradingLimitService,
 )
@@ -136,3 +138,96 @@ def order_matches_account(db: Session, *, order: OrderLog, scope: KisOrderAccoun
         legacy = AccountTradingLimitService.resolve_account(db, require_enabled=False)
         _verify_order_owner(db, order, legacy)
     return _identity(_owner_credentials(db, order.owner_user_id)) == scope.identity
+
+
+def resolve_position_account_scope(db: Session, *, client: Any) -> KisOrderAccountScope:
+    # A transient context object; it is never added to the session or submitted.
+    context = OrderLog(owner_user_id=getattr(client, 'user_id', None), broker='kis',
+                       market='KR', request_payload='{}')
+    return resolve_order_account_scope(db, order=context, client=client)
+
+
+def assert_lifecycle_owner(db: Session, row: PositionLifecycle, owner_user_id: int | None) -> None:
+    if row.owner_user_id != owner_user_id:
+        raise AccountTradingLimitError('account_scope_mismatch')
+    entry = db.get(OrderLog, row.entry_order_id) if row.entry_order_id > 0 else None
+    if entry is not None and entry.owner_user_id != row.owner_user_id:
+        raise AccountTradingLimitError('account_scope_mismatch')
+
+
+def kis_client_cache_scope(client: Any) -> str | None:
+    """Opaque credential-bound cache key; never a user-visible diagnostic."""
+    owner = getattr(client, 'user_id', None)
+    credentials = (getattr(client, 'credentials', None) if owner is not None
+                   else _settings_credentials(getattr(client, 'settings', None)))
+    if not isinstance(credentials, dict):
+        return None
+    try:
+        identity = _identity(credentials)
+    except AccountTradingLimitError:
+        return None
+    if not credentials.get('app_key') or not credentials.get('app_secret'):
+        return None
+    value = (owner, *identity, credentials['app_key'], credentials['app_secret'],
+             credentials.get('base_url'), getattr(client, 'credential_identity', None))
+    return hashlib.sha256(json.dumps(value).encode()).hexdigest()
+
+
+def position_management_block_reason(
+    db: Session, *, owner_user_id: int | None,
+    scope: KisOrderAccountScope | None = None, allow_own_open: bool = False,
+) -> str | None:
+    """Account-wide unresolved exits take priority over new entries."""
+    def matches(owner: int | None, *, order: OrderLog | None = None) -> bool:
+        nonlocal scope
+        if owner == owner_user_id:
+            return True
+        if scope is None:
+            account = AccountTradingLimitService.resolve_account(db, owner_user_id=owner_user_id)
+            scope = KisOrderAccountScope(account, _identity(_owner_credentials(db, owner_user_id)))
+        context = order if order is not None else OrderLog(
+            owner_user_id=owner, broker='kis', market='KR', request_payload='{}')
+        return order_matches_account(db, order=context, scope=scope)
+
+    for row in db.query(PositionLifecycle).filter(PositionLifecycle.status.in_(['open', 'closing'])).all():
+        assert_lifecycle_owner(db, row, row.owner_user_id)
+        if matches(row.owner_user_id):
+            if allow_own_open and row.owner_user_id == owner_user_id and row.status == 'open':
+                continue
+            return 'position_management_priority'
+    for job in db.query(PositionExitRetryJob).filter(
+        PositionExitRetryJob.provider == 'kis', PositionExitRetryJob.market == 'KR',
+        PositionExitRetryJob.status.in_(['pending', 'running']),
+    ).all():
+        owner = job.owner_user_id
+        user = db.get(User, owner) if owner is not None else None
+        if user is not None and user.role == 'admin':
+            owner = None  # Retry metadata can use the verified admin profile ID.
+        if matches(owner):
+            return 'kis_exit_read_retry_pending'
+    for order in db.query(OrderLog).filter(
+        OrderLog.broker == 'kis', OrderLog.side == 'sell',
+        OrderLog.internal_status.in_(['REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
+            'PENDING_SUBMIT', 'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED']),
+    ).all():
+        if matches(order.owner_user_id, order=order):
+            return 'duplicate_open_sell_order'
+    return None
+
+
+def find_account_open_order(db: Session, *, owner_user_id: int | None, symbol: str) -> OrderLog | None:
+    scope = None
+    rows = db.query(OrderLog).filter(
+        OrderLog.broker == 'kis', func.upper(OrderLog.symbol) == symbol.strip().upper(),
+        OrderLog.internal_status.in_(['REQUESTED', 'SUBMITTED', 'ACCEPTED', 'PENDING',
+            'PENDING_SUBMIT', 'PARTIALLY_FILLED', 'UNKNOWN_STALE', 'SYNC_FAILED']),
+    ).order_by(OrderLog.id.desc()).all()
+    for row in rows:
+        if row.owner_user_id == owner_user_id:
+            return row
+        if scope is None:
+            account = AccountTradingLimitService.resolve_account(db, owner_user_id=owner_user_id)
+            scope = KisOrderAccountScope(account, _identity(_owner_credentials(db, owner_user_id)))
+        if order_matches_account(db, order=row, scope=scope):
+            return row
+    return None
