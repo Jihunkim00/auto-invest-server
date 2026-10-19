@@ -18,6 +18,9 @@ import app.services.automation_scheduler_service as automation_scheduler_module
 import app.services.kis_watchlist_update_service as watchlist_module
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 class FakePriceClient:
     def __init__(
         self,

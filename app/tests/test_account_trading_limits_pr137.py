@@ -15,6 +15,9 @@ from app.services.kis_automation_execution_core import KisAutomationExecutionCor
 from app.services.runtime_setting_service import RuntimeSettingService
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 NOW = datetime(2026, 9, 10, 1, tzinfo=UTC)
 
 
@@ -187,6 +190,8 @@ def test_database_claim_serializes_workers_without_cross_account_blocking(db_ses
 
 class FakeKisClient:
     def __init__(self):
+        from app.config import get_settings
+        self.settings = get_settings()
         self.positions = []
         self.cash = 5_000_000
         self.on_possible = None

@@ -773,7 +773,9 @@ class KisClient:
                 "CTX_AREA_NK100": "",
             },
         )
-        rows = _as_list(response.get("output"))
+        rows = response.get('output')
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise ValueError('open_orders_unavailable')
         orders = []
 
         for row in rows:

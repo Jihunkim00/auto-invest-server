@@ -17,6 +17,9 @@ from app.services.scheduler_service import AutomationSchedulerService
 from app.services.runtime_setting_service import RuntimeSettingService
 import app.services.automation_scheduler_service as scheduler_module
 
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
 KST = ZoneInfo("Asia/Seoul")
 PROFILE = {
     "id": 23,

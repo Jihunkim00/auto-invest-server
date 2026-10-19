@@ -87,6 +87,19 @@ def _isolate_file_backed_test_database():
 
 
 @pytest.fixture()
+def fake_kis_admin_credentials(monkeypatch):
+    # Account identity for FakeKisClient only; no real account or transport.
+    settings = get_settings()
+    for key, value in {
+        'kis_env': 'live', 'kis_account_no': '11112222',
+        'kis_account_product_code': '01', 'kis_app_key': 'fake-admin-key',
+        'kis_app_secret': 'fake-admin-secret',
+    }.items():
+        monkeypatch.setattr(settings, key, value)
+    return settings
+
+
+@pytest.fixture()
 def db_session():
     engine = create_engine(
         "sqlite:///:memory:",

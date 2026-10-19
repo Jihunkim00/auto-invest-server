@@ -30,6 +30,9 @@ from app.tests.integration.test_kis_automation_scheduler_replay import (
 )
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 def _canonical_position_harness(
     db_session,
     monkeypatch: pytest.MonkeyPatch,
@@ -93,7 +96,7 @@ def test_canonical_stop_loss_sells_current_broker_quantity_and_skips_buy(
     result = scheduler.run_once(slot='09:10', now=UTC_NOW)
     sell = result['position_management']['sell_result']
 
-    assert result['result'] == 'SELL_SUBMITTED'
+    assert result['result'] == 'SELL_SUBMITTED', result
     assert sell['exit_trigger'] == 'stop_loss'
     assert sell['stop_loss_pct'] == -0.02
     assert sell['take_profit_pct'] == 0.08

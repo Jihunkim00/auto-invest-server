@@ -36,6 +36,9 @@ from app.tests.test_user_auto_trading_scheduler_pr129 import (
 )
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 def _canonical_scheduler(harness, monkeypatch):
     scheduler = AutomationSchedulerService()
     scheduler.runtime_settings = harness.runtime

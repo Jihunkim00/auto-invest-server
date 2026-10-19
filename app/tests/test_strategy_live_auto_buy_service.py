@@ -4,6 +4,8 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.db.models import (
     KisOrderValidationLog,
     OrderLog,
@@ -22,6 +24,8 @@ from app.services.strategy_auto_buy_promotion_service import (
     StrategyAutoBuyPromotionService,
 )
 
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
 
 class FakeRuntimeSettings(RuntimeSettingService):
     def __init__(self, **overrides):
@@ -179,6 +183,10 @@ class FakeMarketSessions:
 
 
 class FakeKisClient:
+    def __init__(self):
+        from app.config import get_settings
+        self.settings = get_settings()
+
     def list_positions(self):
         return []
 

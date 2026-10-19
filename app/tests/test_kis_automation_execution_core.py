@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.core.enums import InternalOrderStatus
 from app.db.models import OrderLog, PositionLifecycle, StrategyProfile
 from app.services.kis_automation_execution_core import KisAutomationExecutionCore, _broker_order_id
 from app.services.runtime_setting_service import RuntimeSettingService
+
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
 
 
 NOW = datetime(2026, 8, 24, 3, 30, tzinfo=UTC)
@@ -14,6 +19,8 @@ NOW = datetime(2026, 8, 24, 3, 30, tzinfo=UTC)
 
 class FakeKisClient:
     def __init__(self, *, positions=None, possible_age_seconds=0):
+        from app.config import get_settings
+        self.settings = get_settings()
         self.positions = list(positions or [])
         self.possible_age_seconds = possible_age_seconds
         self.price_calls = 0
@@ -52,6 +59,8 @@ def _order(
     stop_loss_pct=None,
     take_profit_pct=None,
 ):
+    from app.services.auth_service import ensure_admin_user
+    ensure_admin_user(db)
     RuntimeSettingService().update_settings(db, {'automation_mode': 'live'})
     if db.query(StrategyProfile).filter_by(profile_key='aut_test_profile').first() is None:
         from app.schemas.automation_profile import AutomationProfileWriteRequest

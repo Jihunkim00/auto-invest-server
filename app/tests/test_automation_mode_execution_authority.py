@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+
 from app.db.database import get_db
 from app.db.models import PositionLifecycle
 from app.main import app
@@ -15,6 +16,9 @@ from app.tests.test_pr110_final_buy_readiness import (
     _build_service,
     _candidate,
 )
+
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
 
 
 LEGACY_FLAGS = {

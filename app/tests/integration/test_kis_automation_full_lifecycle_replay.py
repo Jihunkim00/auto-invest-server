@@ -49,6 +49,9 @@ from app.tests.integration.test_kis_automation_scheduler_replay import (
 )
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 KST = "Asia/Seoul"
 T_0910 = UTC_NOW
 T_1130 = datetime(2026, 8, 25, 2, 30, tzinfo=UTC)

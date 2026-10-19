@@ -42,6 +42,9 @@ from app.services.target_aware_risk_service import TargetAwareRiskService
 import app.services.scheduler_service as scheduler_module
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 KST = ZoneInfo("Asia/Seoul")
 UTC_NOW = datetime(2026, 8, 25, 0, 10, tzinfo=UTC)
 CUSTOM_PROFILE_KEY = "aut_pr110_replay"
@@ -100,6 +103,8 @@ class DeterministicPreviewService:
 
 class FakeKisClient:
     def __init__(self, clock: VirtualClock, candidates: list[dict[str, Any]]) -> None:
+        from app.config import get_settings
+        self.settings = get_settings()
         self.clock = clock
         self.candidates = candidates
         self.cash = 601456.0
@@ -279,6 +284,8 @@ def build_harness(
     now: datetime = UTC_NOW,
     analysis_times: tuple[str, ...] = ("09:10",),
 ) -> ReplayHarness:
+    from app.services.auth_service import ensure_admin_user
+    ensure_admin_user(db)
     clock = VirtualClock(now)
     values = candidates or [candidate()]
     market_sessions = FakeMarketSessions(clock, is_open=market_open)

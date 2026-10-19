@@ -16,6 +16,9 @@ from app.services.automation_execution_authority_service import (
 from app.services.account_snapshot_retry import kis_exit_read_failure_diagnostics
 from app.db.models import OrderLog, StrategyProfile
 from app.services.account_trading_limit_service import AccountTradingLimitError, AccountTradingLimitService
+from app.services.kis_order_account_scope import (
+    KisOrderAccountScope, order_matches_account, resolve_order_account_scope,
+)
 from app.services.kis_manual_order_service import KisManualOrderSubmitRequest
 from app.services.kis_order_validation_service import (
     KisOrderValidationRequest,
@@ -35,6 +38,7 @@ class KisAutomationExecutionCore:
         InternalOrderStatus.PENDING.value,
         InternalOrderStatus.PARTIALLY_FILLED.value,
         InternalOrderStatus.UNKNOWN_STALE.value,
+        InternalOrderStatus.SYNC_FAILED.value,
     }
 
     def __init__(
@@ -495,6 +499,8 @@ class KisAutomationExecutionCore:
         guard: dict[str, Any],
     ) -> dict[str, Any]:
         reason = guard.get("reason") or "execution_core_gate_blocked"
+        guard = {**guard, 'block_reason': reason,
+                 'requested_order_owner_user_id': order.owner_user_id}
 
         order.internal_status = (
             InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
@@ -507,6 +513,7 @@ class KisAutomationExecutionCore:
                 "execution_core": "kis_automation_execution_core",
                 "status": "blocked",
                 "reason": reason,
+                "order_id": order.id,
                 "source_metadata": _source_metadata(order),
                 "guard": guard,
             }
@@ -724,6 +731,14 @@ class KisAutomationExecutionCore:
         if self.client is None:
             return {'allowed': False, 'reason': 'account_exposure_state_unavailable'}
 
+        order = db.get(OrderLog, order_id) if order_id is not None else None
+        try:
+            if order is None:
+                raise AccountTradingLimitError('account_scope_unavailable')
+            scope = resolve_order_account_scope(db, order=order, client=self.client)
+        except AccountTradingLimitError as exc:
+            return {'allowed': False, 'reason': str(exc)}
+
         try:
             positions = self._positions(db)
             open_orders = self._open_orders(db)
@@ -759,26 +774,11 @@ class KisAutomationExecutionCore:
                 "reason": "position_already_exists",
             }
 
-        if _has_open_order(
-            open_orders,
-            symbol,
-            "buy",
-        ):
-            return {
-                "allowed": False,
-                "reason": "duplicate_open_order",
-            }
-
-        if _has_db_open_order(
-            db,
-            symbol=symbol,
-            side="buy",
-            exclude_order_id=order_id,
-        ):
-            return {
-                "allowed": False,
-                "reason": "duplicate_open_order",
-            }
+        duplicate = self._duplicate_guard(
+            db, open_orders=open_orders, order=order, scope=scope, symbol=symbol, side='buy',
+        )
+        if duplicate:
+            return duplicate
 
         price = self._current_price(symbol)
 
@@ -883,7 +883,6 @@ class KisAutomationExecutionCore:
         # planned_qty = 8
         # available_qty = 6
         # effective_qty = 6
-        order = db.get(OrderLog, order_id) if order_id else None
         owner_user_id = order.owner_user_id if order is not None else None
         strategy_budget = _number(max_order_notional_krw)
         profile_pct_cap = None
@@ -1009,10 +1008,15 @@ class KisAutomationExecutionCore:
         qty: int,
     ) -> dict[str, Any]:
         if self.client is None:
-            return {
-                "allowed": True,
-                "checks": [],
-            }
+            return {'allowed': False, 'reason': 'account_scope_unavailable'}
+
+        order = db.get(OrderLog, order_id) if order_id is not None else None
+        try:
+            if order is None:
+                raise AccountTradingLimitError('account_scope_unavailable')
+            scope = resolve_order_account_scope(db, order=order, client=self.client)
+        except AccountTradingLimitError as exc:
+            return {'allowed': False, 'reason': str(exc)}
 
         try:
             positions = self._positions(db)
@@ -1060,26 +1064,11 @@ class KisAutomationExecutionCore:
                 "reason": "insufficient_holdings",
             }
 
-        if _has_open_order(
-            open_orders,
-            symbol,
-            "sell",
-        ):
-            return {
-                "allowed": False,
-                "reason": "duplicate_open_sell_order",
-            }
-
-        if _has_db_open_order(
-            db,
-            symbol=symbol,
-            side="sell",
-            exclude_order_id=order_id,
-        ):
-            return {
-                "allowed": False,
-                "reason": "duplicate_open_sell_order",
-            }
+        duplicate = self._duplicate_guard(
+            db, open_orders=open_orders, order=order, scope=scope, symbol=symbol, side='sell',
+        )
+        if duplicate:
+            return duplicate
 
         return {
             "allowed": True,
@@ -1094,6 +1083,28 @@ class KisAutomationExecutionCore:
             ],
         }
 
+    def _duplicate_guard(
+        self, db: Session, *, open_orders: list[dict[str, Any]], order: OrderLog,
+        scope: KisOrderAccountScope, symbol: str, side: str,
+    ) -> dict[str, Any] | None:
+        reason = 'duplicate_open_order' if side == 'buy' else 'duplicate_open_sell_order'
+        diagnostics = {'requested_order_owner_user_id': order.owner_user_id}
+        if _has_open_order(open_orders, symbol, side):
+            return {'allowed': False, 'reason': reason, 'block_reason': reason,
+                    'duplicate_check_source': 'broker', **diagnostics}
+        try:
+            matched = _has_db_open_order(
+                db, symbol=symbol, side=side, scope=scope, exclude_order_id=order.id,
+            )
+        except AccountTradingLimitError as exc:
+            return {'allowed': False, 'reason': str(exc), 'block_reason': str(exc),
+                    'duplicate_check_source': 'local_db', **diagnostics}
+        if matched is not None:
+            return {'allowed': False, 'reason': reason, 'block_reason': reason,
+                    'duplicate_check_source': 'local_db', 'matched_order_id': matched.id,
+                    'matched_order_owner_user_id': matched.owner_user_id, **diagnostics}
+        return None
+
     def _positions(
         self,
         db: Session,
@@ -1104,7 +1115,7 @@ class KisAutomationExecutionCore:
             else self.client.list_positions()
         )
 
-        if not isinstance(values, list):
+        if not isinstance(values, list) or any(not isinstance(item, dict) for item in values):
             raise ValueError('positions_unavailable')
         return values
 
@@ -1118,7 +1129,8 @@ class KisAutomationExecutionCore:
             else self.client.list_open_orders()
         )
 
-        if not isinstance(values, list):
+        if (not isinstance(values, list)
+                or any(not isinstance(item, dict) or not _symbol(item) for item in values)):
             raise ValueError('open_orders_unavailable')
         return values
 
@@ -1387,10 +1399,11 @@ def _has_db_open_order(
     *,
     symbol: str,
     side: str,
+    scope: KisOrderAccountScope,
     exclude_order_id: int | None = None,
-) -> bool:
+) -> OrderLog | None:
     query = (
-        db.query(OrderLog.id)
+        db.query(OrderLog)
         .filter(
             OrderLog.broker == "kis"
         )
@@ -1416,7 +1429,10 @@ def _has_db_open_order(
             OrderLog.id != int(exclude_order_id)
         )
 
-    return query.first() is not None
+    for order in query.order_by(OrderLog.id).all():
+        if order_matches_account(db, order=order, scope=scope):
+            return order
+    return None
 
 
 def _number(
@@ -1529,6 +1545,8 @@ def _source_metadata(
         "automation_profile",
         "automation_profile_key",
         "profile_key",
+        "reservation_id",
+        "scheduler_slot",
     )
 
     return {

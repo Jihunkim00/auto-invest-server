@@ -559,6 +559,9 @@ class AutomationProfileBuySchedulerService:
         db.add(order)
         db.flush()
         reservation.order_id = order.id
+        request_payload = json.loads(order.request_payload or '{}')
+        request_payload['reservation_id'] = reservation.id
+        order.request_payload = _json(request_payload)
         db.commit()
         validation = self._validate(
             db, symbol, int(plan['quantity']), profile, selected, 'buy', selection_mode
@@ -581,11 +584,14 @@ class AutomationProfileBuySchedulerService:
             reservation.status = 'blocked'
             reservation.block_reason = execution.get('reason') or 'execution_core_gate_blocked'
             db.commit()
-            return self._blocked(
+            blocked = self._blocked(
                 reservation.block_reason,
                 profile=profile,
+                selected_symbol=symbol,
                 order_id=order.id,
                 reservation_id=reservation.id,
+                internal_status=order.internal_status,
+                guard=execution.get('guard'),
                 validation_called=True,
                 broker_submit_called=bool(execution.get('broker_submit_called')),
                 live_order_gate=gate,
@@ -595,6 +601,8 @@ class AutomationProfileBuySchedulerService:
                     now=now_utc,
                 ),
             )
+            self._record_run(db, blocked, slot, now_utc)
+            return blocked
         reservation.status = 'submitted'
         db.commit()
         if self.execution_core.order_sync_service is not None:

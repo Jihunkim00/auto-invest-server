@@ -24,6 +24,9 @@ from app.services.market_regime_trading_policy import (
     market_regime_diagnostics, market_regime_observation_fields,
 )
 
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
 KST = ZoneInfo("Asia/Seoul")
 DECISION = datetime(2026, 10, 6, 12, tzinfo=KST)
 

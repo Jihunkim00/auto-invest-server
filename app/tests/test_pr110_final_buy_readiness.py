@@ -18,6 +18,9 @@ from app.services.strategy_auto_buy_scheduler_service import StrategyAutoBuySche
 from app.services.strategy_profile_service import StrategyProfileService
 
 
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
+
+
 NOW = datetime(2026, 8, 25, 0, 10, tzinfo=UTC)
 SCHEDULED_1130 = datetime(2026, 8, 25, 2, 30, tzinfo=UTC)
 
@@ -42,6 +45,8 @@ class PR110RuntimeSettingService(RuntimeSettingService):
 
 class FakeKisClient:
     def __init__(self, *, possible_age_seconds=0, missing_possible=False, price=30000):
+        from app.config import get_settings
+        self.settings = get_settings()
         self.positions = []
         self.possible_age_seconds = possible_age_seconds
         self.missing_possible = missing_possible
@@ -643,7 +648,7 @@ def test_execution_core_fresh_possible_order_passes_without_real_kis_submit(db_s
         limit_price=30000,
         notional=60000,
         internal_status=InternalOrderStatus.REQUESTED.value,
-        request_payload='{automation_profile: true, source_type: profile_aware_guarded_live_auto_buy}',
+        request_payload=json.dumps({'automation_profile': True, 'source_type': 'profile_aware_guarded_live_auto_buy'}),
     )
     db_session.add(order)
     db_session.commit()

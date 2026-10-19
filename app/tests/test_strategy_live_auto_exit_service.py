@@ -16,7 +16,10 @@ from app.services.profile_aware_guarded_live_auto_exit_service import (
     ProfileAwareGuardedLiveAutoExitService,
 )
 from app.services.runtime_setting_service import RuntimeSettingService
-from app.tests.test_strategy_live_auto_buy_service import FakeRuntimeSettings
+from app.tests.test_strategy_live_auto_buy_service import FakeKisClient, FakeRuntimeSettings
+
+
+pytestmark = pytest.mark.usefixtures('fake_kis_admin_credentials')
 
 
 @dataclass(frozen=True)
@@ -131,6 +134,7 @@ def live_exit_service(
     open_orders=None,
 ):
     return ProfileAwareGuardedLiveAutoExitService(
+        client=FakeKisClient(),
         runtime_settings=runtime or FakeRuntimeSettings(),
         validation_service=validation or FakeValidationService(),
         broker=broker or FakeBroker(),
@@ -141,6 +145,10 @@ def live_exit_service(
 
 
 def enable_live_exit_settings(db_session, **overrides):
+    from app.services.auth_service import ensure_admin_user
+    from app.services.strategy_profile_service import StrategyProfileService
+    ensure_admin_user(db_session)
+    StrategyProfileService().ensure_seeded(db_session)
     values = {
         'automation_mode': 'live',
         "dry_run": False,
@@ -195,6 +203,7 @@ def trusted_scheduler_exit_service(
     broker = FakeBroker()
     validation = FakeValidationService()
     service = ProfileAwareGuardedLiveAutoExitService(
+        client=FakeKisClient(),
         runtime_settings=FakeRuntimeSettings(
             global_dry_run=False,
             kis_enabled=kis_enabled,
@@ -237,6 +246,31 @@ def trusted_scheduler_exit_service(
         },
     )
     return service, broker, validation
+
+
+def _bind_regular_exit_account(db_session, monkeypatch, service):
+    # This trace test uses a regular owner; supply the corresponding real
+    # ownership records and fake credentials instead of an unscoped client.
+    from cryptography.fernet import Fernet
+    from app.config import get_settings
+    from app.db.models import User, UserBrokerCredential, StrategyProfile
+    from app.schemas.automation_profile import AutomationProfileWriteRequest
+    from app.services.automation_profile_service import AutomationProfileService
+    from app.services.broker_credential_crypto_service import BrokerCredentialCryptoService
+    monkeypatch.setattr(get_settings(), 'broker_credential_master_key', Fernet.generate_key().decode())
+    db_session.add(User(id=41, username='exit-owner', role='user', enabled=True))
+    db_session.commit()
+    profile = AutomationProfileService().create(db_session,
+        AutomationProfileWriteRequest(profile_key='admin_kis_primary', name='Renamed display label'),
+        owner_user_id=41)
+    db_session.get(StrategyProfile, profile['id']).id = 27
+    credentials = dict(environment='live', account_no='33334444', account_product_code='01',
+                       app_key='fake-user-key', app_secret='fake-user-secret')
+    db_session.add(UserBrokerCredential(user_id=41, provider='kis', environment='live',
+        encrypted_payload=BrokerCredentialCryptoService().encrypt(credentials), encryption_version=1))
+    db_session.commit()
+    service.client.user_id = 41
+    service.client.credentials = credentials
 
 
 def test_default_readiness_is_blocked_read_only_and_does_not_validate_or_submit(db_session):
@@ -353,6 +387,7 @@ def test_trusted_scheduler_run_scheduler_once_reuses_guarded_sell_gates(
     validation = FakeValidationService()
     broker = FakeBroker()
     service = ProfileAwareGuardedLiveAutoExitService(
+        client=FakeKisClient(),
         runtime_settings=FakeRuntimeSettings(global_dry_run=False),
         validation_service=validation,
         broker=broker,
@@ -437,6 +472,7 @@ def test_canonical_scheduler_and_position_monitor_share_open_sell_protection(
             return db.get(OrderLog, order_id)
 
     service = ProfileAwareGuardedLiveAutoExitService(
+        client=FakeKisClient(),
         runtime_settings=FakeRuntimeSettings(global_dry_run=False),
         validation_service=validation,
         broker=broker,
@@ -572,6 +608,7 @@ def test_scheduler_retry_uses_fresh_position_state_and_a_distinct_request_id(
         monkeypatch,
         positions=held,
     )
+    _bind_regular_exit_account(db_session, monkeypatch, service)
     profile = {
         "id": 27,
         "owner_user_id": 41,
@@ -651,6 +688,7 @@ def test_scheduler_order_log_keeps_owner_and_canonical_profile_context(
         monkeypatch,
         positions=[stop_loss_position()],
     )
+    _bind_regular_exit_account(db_session, monkeypatch, service)
     service._active_profile = lambda db, now=None: {
         "id": 27,
         "owner_user_id": 41,
