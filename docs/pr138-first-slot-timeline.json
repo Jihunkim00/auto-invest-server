@@ -1,0 +1,1195 @@
+{
+  "incident_date": "2026-10-20",
+  "timezone": "Asia/Seoul",
+  "root_cause_status": "root_cause_unconfirmed",
+  "historical_0917_scheduler_stop_proven": false,
+  "historical_kis_500_causality_proven": false,
+  "simulation_only": true,
+  "production_database_opened": false,
+  "real_order_submitted": false,
+  "actual_kis_submit_count": 0,
+  "market_data": "synthetic_fixture_reconstruction",
+  "gpt": "GPT MOCKED",
+  "admin_first_analysis_slot": "11:20",
+  "test01_first_analysis_slot": "11:30",
+  "test_source": "app/tests/integration/test_pr138_first_buy_slot_timeline.py",
+  "verification": {
+    "additional_tests": 4,
+    "passed": 4,
+    "warnings": 1,
+    "isolated_database": true,
+    "real_scheduler_test_thread": true,
+    "real_profile_queries": true,
+    "real_slot_claims": true,
+    "real_user_dispatcher": true,
+    "real_trade_run_log_persistence": true,
+    "maintenance_input": "Fake KIS balance read probe in real supervisor lane"
+  },
+  "limitations": [
+    "Post-fix replay does not establish the historical root cause.",
+    "Ticks are forced at requested virtual timestamps; production retains 20-second polling.",
+    "No intermediate retry ticks within the faulted first-slot minutes are modeled.",
+    "No historical market data, live GPT or real KIS transport is used."
+  ],
+  "timeline_cases": [
+    {
+      "balance_0917_http500": false,
+      "injected_discovery_error": false,
+      "timeline": [
+        {
+          "at": "2026-10-20T09:17:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T00:17:00+00:00",
+          "tick_at": "2026-10-20T00:17:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T10:00:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T01:00:00+00:00",
+          "tick_at": "2026-10-20T01:00:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:19:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:19:50+00:00",
+          "tick_at": "2026-10-20T02:19:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:20:00+00:00",
+          "tick_at": "2026-10-20T02:20:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ]
+          ],
+          "user_dispatch_count": 0,
+          "claimed_slots": 1,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:29:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:29:50+00:00",
+          "tick_at": "2026-10-20T02:29:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ]
+          ],
+          "user_dispatch_count": 0,
+          "claimed_slots": 1,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:30:00+00:00",
+          "tick_at": "2026-10-20T02:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "11:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ]
+          ],
+          "user_dispatch_count": 1,
+          "claimed_slots": 2,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:20:00+00:00",
+          "tick_at": "2026-10-20T03:20:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ]
+          ],
+          "user_dispatch_count": 1,
+          "claimed_slots": 3,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:30:00+00:00",
+          "tick_at": "2026-10-20T03:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "12:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ]
+          ],
+          "user_dispatch_count": 2,
+          "claimed_slots": 4,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:30:00+00:00",
+          "tick_at": "2026-10-20T04:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "13:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 3,
+          "claimed_slots": 5,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:40:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:40:00+00:00",
+          "tick_at": "2026-10-20T04:40:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "admin",
+              "13:40"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 3,
+          "claimed_slots": 6,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "blocked"
+          }
+        }
+      ]
+    },
+    {
+      "balance_0917_http500": true,
+      "injected_discovery_error": false,
+      "timeline": [
+        {
+          "at": "2026-10-20T09:17:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T00:17:00+00:00",
+          "tick_at": "2026-10-20T00:17:00+00:00",
+          "health": "degraded",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T10:00:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T01:00:00+00:00",
+          "tick_at": "2026-10-20T01:00:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:19:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:19:50+00:00",
+          "tick_at": "2026-10-20T02:19:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:20:00+00:00",
+          "tick_at": "2026-10-20T02:20:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ]
+          ],
+          "user_dispatch_count": 0,
+          "claimed_slots": 1,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:29:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:29:50+00:00",
+          "tick_at": "2026-10-20T02:29:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ]
+          ],
+          "user_dispatch_count": 0,
+          "claimed_slots": 1,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:30:00+00:00",
+          "tick_at": "2026-10-20T02:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "11:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ]
+          ],
+          "user_dispatch_count": 1,
+          "claimed_slots": 2,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:20:00+00:00",
+          "tick_at": "2026-10-20T03:20:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ]
+          ],
+          "user_dispatch_count": 1,
+          "claimed_slots": 3,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:30:00+00:00",
+          "tick_at": "2026-10-20T03:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "12:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ]
+          ],
+          "user_dispatch_count": 2,
+          "claimed_slots": 4,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:30:00+00:00",
+          "tick_at": "2026-10-20T04:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "13:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 3,
+          "claimed_slots": 5,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:40:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:40:00+00:00",
+          "tick_at": "2026-10-20T04:40:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "11:20"
+            ],
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "admin",
+              "13:40"
+            ],
+            [
+              "test01",
+              "11:30"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 3,
+          "claimed_slots": 6,
+          "slot_states": {
+            "admin:kis:2026-10-20:11:20": "blocked",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "user-2:kis:2026-10-20:11:30": "HOLD",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:13:40": "blocked"
+          }
+        }
+      ]
+    },
+    {
+      "balance_0917_http500": true,
+      "injected_discovery_error": true,
+      "timeline": [
+        {
+          "at": "2026-10-20T09:17:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T00:17:00+00:00",
+          "tick_at": "2026-10-20T00:17:00+00:00",
+          "health": "degraded",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T10:00:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T01:00:00+00:00",
+          "tick_at": "2026-10-20T01:00:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:19:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:19:50+00:00",
+          "tick_at": "2026-10-20T02:19:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:20:00+00:00",
+          "tick_at": "2026-10-20T02:20:00+00:00",
+          "health": "degraded",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "pending",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:29:50+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:29:50+00:00",
+          "tick_at": "2026-10-20T02:29:50+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T11:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T02:30:00+00:00",
+          "tick_at": "2026-10-20T02:30:00+00:00",
+          "health": "degraded",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "11:30"
+          ],
+          "trade_run_slots": [],
+          "user_dispatch_count": 0,
+          "claimed_slots": 0,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "pending",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "pending",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:20:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:20:00+00:00",
+          "tick_at": "2026-10-20T03:20:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "12:20"
+            ]
+          ],
+          "user_dispatch_count": 0,
+          "claimed_slots": 1,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "missed",
+            "user-2:kis:2026-10-20:12:30": "pending",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T12:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T03:30:00+00:00",
+          "tick_at": "2026-10-20T03:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "12:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "12:30"
+            ]
+          ],
+          "user_dispatch_count": 1,
+          "claimed_slots": 2,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "missed",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "pending",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:30:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:30:00+00:00",
+          "tick_at": "2026-10-20T04:30:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [
+            "13:30"
+          ],
+          "trade_run_slots": [
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 2,
+          "claimed_slots": 3,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "missed",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "pending"
+          }
+        },
+        {
+          "at": "2026-10-20T13:40:00+09:00",
+          "engine_running": true,
+          "heartbeat_at": "2026-10-20T04:40:00+00:00",
+          "tick_at": "2026-10-20T04:40:00+00:00",
+          "health": "healthy",
+          "admin_profile_slots": [
+            "11:20",
+            "12:20",
+            "13:40"
+          ],
+          "user_profile_slots": [
+            "11:30",
+            "12:30",
+            "13:30"
+          ],
+          "calculated_user_due_slots": [],
+          "trade_run_slots": [
+            [
+              "admin",
+              "12:20"
+            ],
+            [
+              "admin",
+              "13:40"
+            ],
+            [
+              "test01",
+              "12:30"
+            ],
+            [
+              "test01",
+              "13:30"
+            ]
+          ],
+          "user_dispatch_count": 2,
+          "claimed_slots": 4,
+          "slot_states": {
+            "user-2:kis:2026-10-20:11:30": "missed",
+            "user-2:kis:2026-10-20:12:30": "HOLD",
+            "user-2:kis:2026-10-20:13:30": "HOLD",
+            "admin:kis:2026-10-20:11:20": "missed",
+            "admin:kis:2026-10-20:12:20": "blocked",
+            "admin:kis:2026-10-20:13:40": "blocked"
+          }
+        }
+      ]
+    }
+  ],
+  "recovered_first_slot_buy": {
+    "simulation_only": true,
+    "real_order_submitted": false,
+    "actual_kis_submit_count": 0,
+    "mock_submit_count": 1,
+    "simulated_order_status": "FILLED",
+    "symbol": "000100",
+    "quantity": 9.0,
+    "c_score": 74.24,
+    "gpt_score": 70.0,
+    "final_score": 73.18,
+    "gpt": "GPT MOCKED",
+    "watchlist_count": 200,
+    "runtime_a_count": 50,
+    "c_count": 5,
+    "gpt_count": 5,
+    "risk_validation_count": 1,
+    "open_lifecycle_count": 1
+  }
+}

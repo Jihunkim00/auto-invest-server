@@ -4,7 +4,7 @@
   "market_data": "synthetic_fixture_reconstruction",
   "gpt": "GPT MOCKED",
   "verification": {
-    "new_replay_tests": 13,
+    "new_replay_tests": 17,
     "targeted_tests": 55,
     "mandatory_replay_tests": 58,
     "backend": "passed",
@@ -12,9 +12,14 @@
     "flutter_analyze": "No issues found",
     "compileall": "passed",
     "git_diff_check": "passed",
-    "backend_tests": 2492,
+    "backend_tests": 2496,
     "backend_failures": 0,
-    "backend_warnings": 10
+    "backend_warnings": 10,
+    "existing_pr138_replay_tests": 13,
+    "first_slot_timeline_tests": 4,
+    "all_scheduler_replay_tests": 75,
+    "backend_duration_seconds": 1494.58,
+    "rechecked_at": "2026-10-20T09:39:10.588155+00:00"
   },
   "intraday_simulation": {
     "fixture_based_reconstruction": true,
@@ -41,5 +46,6 @@
     "reason": "market_session_closed",
     "mock_submit_count": 0,
     "actual_kis_submit_count": 0
-  }
+  },
+  "first_slot_validation_artifact": "pr138-first-slot-timeline.json"
 }

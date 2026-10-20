@@ -90,8 +90,9 @@ def synthetic_bars(now):
     return daily, intraday
 
 
-def setup_pipeline(db, monkeypatch, *, gpt_score=70, failure=False):
-    harness = build_harness(db, monkeypatch, now=VIRTUAL_NOW, analysis_times=('11:20',),
+def setup_pipeline(db, monkeypatch, *, gpt_score=70, failure=False,
+                   start_at=VIRTUAL_NOW, analysis_times=('11:20',)):
+    harness = build_harness(db, monkeypatch, now=start_at, analysis_times=analysis_times,
                             candidates=[candidate(price=10442.02)])
     install_real_lifecycle_wiring(harness, monkeypatch)
     settings = harness.client.settings

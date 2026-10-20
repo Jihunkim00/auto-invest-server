@@ -452,9 +452,10 @@ class AutomationSchedulerService(SchedulerService):
     def _run_loop(self) -> None:
         # Only dispatch here. Every slow lane is bounded and single-flight.
         while not self._stop_event.is_set():
-            self._last_heartbeat_at = datetime.now(UTC)
             try:
-                self._dispatch_scheduler_iteration(self._as_kst(self.retry_now_provider()))
+                now_kst = self._as_kst(self.retry_now_provider())
+                self._last_heartbeat_at = now_kst.astimezone(UTC)
+                self._dispatch_scheduler_iteration(now_kst)
                 self._iteration_failed = False
             except Exception as exc:
                 self._iteration_failed = True
@@ -480,7 +481,7 @@ class AutomationSchedulerService(SchedulerService):
                 profile_id=(schedule.get('profile') or {}).get('id'), slots=slots, now=now,
                 callback=self._run_scheduled_admin_slot)
         self._next_profile_run_at = self._next_automation_run_at(now)
-        self._last_tick_at = datetime.now(UTC)
+        self._last_tick_at = self._as_kst(self.retry_now_provider()).astimezone(UTC)
 
     def _run_scheduled_admin_slot(self, slot, started):
         try:
@@ -493,7 +494,7 @@ class AutomationSchedulerService(SchedulerService):
             self._last_profile_run_result = 'failed'
             raise
         finally:
-            self._last_profile_run_at = datetime.now(UTC)
+            self._last_profile_run_at = self._as_kst(self.retry_now_provider()).astimezone(UTC)
 
     def _plan_user_slots(self, now):
         # Discovery owns its DB session. Workers receive ids, never ORM objects.
@@ -520,7 +521,7 @@ class AutomationSchedulerService(SchedulerService):
                 profile_id=profile_id, slots=slots, now=now,
                 callback=lambda slot, started, user_id=user_id, provider=provider:
                     self._run_user_account_slot(user_id, provider, slot, started))
-        self._last_tick_at = datetime.now(UTC)
+        self._last_tick_at = self._as_kst(self.retry_now_provider()).astimezone(UTC)
 
     def _run_user_account_slot(self, user_id, provider, slot, now):
         # Candidate/analysis services hold mutable per-run diagnostics, so each

@@ -19,6 +19,8 @@
 
 해당 공백 구간에는 사고를 설명하는 traceback이나 스레드 덤프가 없다. KIS 500이 단독 원인인지, SQLite 경합인지, 스레드 종료인지, 특정 호출의 대기인지는 확정하지 못했다. 재시작 후의 정상 등록 상태도 오전 정상 실행의 증거로 사용하지 않았다. 운영 DB의 분석·주문 기록 0건은 사용자 제공 관측이며, 이번 작업에서 운영 DB를 열거나 수정하지 않았다.
 
+관리자 첫 매수 분석은 **11:20**, test01 첫 매수 분석은 **11:30 KST**다. 07:37~09:17의 Watchlist·KIS 조회는 사전 준비와 포지션 감시이며 매수 분석 슬롯이 아니다. 09:17 이후 로그가 없다는 이유로 해당 시각의 스케줄러 종료를 단정하지 않는다.
+
 기준 코드에서는 `_next_automation_run_at`, `_selected_profile_schedule`, `_dispatch_due_position_exit_retries`, 사용자 `due_slots`의 예외가 최상위 루프를 종료할 수 있었다. 주문 동기화, 포지션 감시, 관리자 분석, canonical Watchlist 유지 작업을 순차 실행해 다음 계정의 슬롯 확인을 지연시킬 수도 있었다. 마지막 tick은 전체 순차 작업 이후에만 갱신됐다. 이 경로들은 코드상 확인된 결함이며, 이번 사고의 직접 원인으로 확정한 것은 아니다.
 
 운영 로그의 200종목 **공유 스냅샷** 갱신은 기존에도 `WatchlistSnapshotScheduler`의 별도 스레드였다. 따라서 402초/202초 지연 자체가 canonical 루프를 직접 정지시켰다고 단정하지 않는다. canonical 프로필용 Watchlist 유지 작업과는 구분해야 한다.
@@ -64,6 +66,8 @@
 - C: DB/`due_slots` 예외의 traceback, heartbeat와 실제 tick의 분리, 실제 scheduler thread 종료 후 FastAPI `/scheduler/health`의 `stopped` 응답을 확인했다. 16:23 복구 시 여섯 과거 슬롯 모두 `missed`가 되고 실행 callback은 호출되지 않았다.
 - 같은 슬롯의 다른 dispatcher 재등록은 중복 실행하지 않았다. timeout worker가 남아 있으면 교체하지 않으며, 늦게 반환된 작업의 추가 read와 BUY도 차단했다. 전일 pending 슬롯 역시 다음 날 `missed`로 닫았다.
 
+추가 검증은 실제 테스트 scheduler thread로 `09:17 → 10:00 → 11:19:50 → 11:20 → 11:29:50 → 11:30 → 12:20 → 12:30 → 13:30 → 13:40`을 재현했다. 각 시점에 실제 프로필 계산, 영속 claim, 사용자 dispatcher, TradeRunLog를 확인했다. 09:17 Fake HTTP 500 단독 주입에도 여섯 분석이 실행됐다. 첫 두 슬롯에 별도의 프로필/`due_slots` DB 오류를 주입한 대조군에서는 두 슬롯만 `missed`, 이후 네 슬롯은 실행됐다. 이는 수정된 코드의 실패 격리 검증이며 실제 사고의 인과관계를 확정하지 않는다. 상세 시점표·전체 사이클과 30개 checkpoint 원본은 [첫 슬롯 추가 보고서](pr138-first-slot-validation.md)와 [JSON](pr138-first-slot-timeline.json)에 기록했다.
+
 ## 전체 자동매매 사이클
 
 **역사적 시장 데이터를 사용한 재현이 아니다.** 저장소의 KR 200종목 universe를 읽고, 날짜를 맞춘 합성 일봉·분봉을 FakeKisClient로 공급한 fixture 기반 복원 테스트다. 점수를 직접 주입하지 않고 기존 지표·A·C 계산과 기존 점수 결합 공식을 실행했다. GPT는 `GPT MOCKED`이며 실제 GPT/API 호출은 하지 않았다. 시장·공시·계좌 입력도 Fake/미제공 상태를 명시한 테스트 입력이다.
@@ -87,17 +91,20 @@ GPT 59점인 별도 테스트와 Fake GPT timeout 테스트는 정상 HOLD/차�
 
 ## 회귀 검증
 
-최종 Backend·필수 replay 결과는 검증 완료 후 이 표에 확정 기록한다.
+첫 슬롯 추가 검증을 포함해 전체 Backend와 필수 replay를 다시 실행했다. 아래 검증은 모두 통과했다.
 
 | 검증 | 결과 |
 |---|---|
 | 필수 scheduler + full lifecycle replay | 58 passed |
-| 신규 장애·전체 파이프라인 | 13 passed |
-| 전체 Backend pytest | 검증 중 |
+| 기존 PR138 장애·전체 파이프라인 | 13 passed |
+| 첫 매수 슬롯 시간순 추가 검증 | 4 passed |
+| 전체 Backend pytest | 2,496 passed, 10 warnings, 1494.58초 |
 | Flutter analyze | No issues found |
 | Flutter test | 773 passed |
 | python -m compileall -q app | 통과 |
 | git diff --check | 통과 |
+
+별도 replay 실행은 필수 58건과 기존 PR138 13건을 합해 71 passed였고, 시간순 추가 4건도 별도 실행 및 전체 Backend 실행에서 모두 통과했다. 총 replay는 75건이다. Backend 경고 10건은 websockets/FastAPI deprecation 및 기존 OpenAPI operation ID 중복 경고다.
 
 C65/GPT60/Final65, possible-order 10초, cash-only, max positions, 동일 실계좌 중복·예약·멱등성, daily cap, market session/cutoff, TP/SL, 실행 권한, 시장국면 shadow 정책을 완화하지 않았다. 운영 DB 쓰기·실주문·실서버 재시작·운영 설정 변경은 수행하지 않았다. 기존 사용자 변경 `.metadata`, `config/watchlist_kr.yaml`, `daily_ops_readonly.py`는 커밋 대상에서 제외한다.
 
