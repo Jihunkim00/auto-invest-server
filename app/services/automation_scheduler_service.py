@@ -78,6 +78,8 @@ from app.services.profile_aware_guarded_live_auto_exit_service import (
 from app.services.scheduler_service import SchedulerService
 from app.services.quant_ab_outcome_label_service import QuantABOutcomeLabelService
 from app.services.user_auto_trading_scheduler_service import UserAutoTradingSchedulerService
+from app.services.scheduler_task_supervisor import SchedulerTaskSupervisor, check_scheduler_watchlist_ready
+from app.services.scheduler_slot_dispatcher import SchedulerSlotDispatcher
 from app.services.user_watchlist_analysis_scheduler_service import (
     UserWatchlistAnalysisSchedulerService,
 )
@@ -145,6 +147,11 @@ class AutomationSchedulerService(SchedulerService):
         self.retry_scheduler = retry_scheduler or account_snapshot_retry_coordinator.schedule
         self.retry_service_factory = retry_service_factory
         self.retry_now_provider = retry_now_provider or (lambda: datetime.now(KST))
+        self._task_supervisor = SchedulerTaskSupervisor(now_provider=self.retry_now_provider)
+        self._iteration_failed = False
+        self._slot_dispatcher = SchedulerSlotDispatcher(
+            lambda: SessionLocal(), self._task_supervisor, self.retry_now_provider,
+        )
         self.profile_aware_dry_run_auto_buy_service = None
         self.profile_aware_guarded_live_auto_exit_service = None
         self._canonical_slot_lock = threading.Lock()
@@ -276,9 +283,15 @@ class AutomationSchedulerService(SchedulerService):
 
     def runtime_status(self, *, now: datetime | None = None) -> dict[str, object]:
         status = super().runtime_status()
-        user_jobs = self.user_auto_trading_jobs(now=now)
+        status.update(self.scheduler_health(now=now))
+        try:
+            status.update(self._slot_dispatcher.summary())
+        except Exception as exc:
+            status.update(scheduler_health_status='degraded' if self.is_running() else 'stopped',
+                          scheduler_last_error=f'slot_status:{type(exc).__name__}')
+        user_jobs = self._runtime_read('user_jobs', lambda: self.user_auto_trading_jobs(now=now), [], status)
         watchlist_analysis_jobs = (
-            self.user_watchlist_analysis_scheduler_service.dispatcher_jobs(now=now)
+            self._runtime_read('watchlist_jobs', lambda: self.user_watchlist_analysis_scheduler_service.dispatcher_jobs(now=now), [], status)
         )
         status.update({
             'account_snapshot_retry': {
@@ -294,16 +307,15 @@ class AutomationSchedulerService(SchedulerService):
             'user_watchlist_analysis_job_count': len(watchlist_analysis_jobs),
         })
         now_kst = self._as_kst(now)
-        status['position_exit_retry'] = self._position_exit_retry_runtime_status(
-            now=now_kst,
-        )
-        maintenance = self.maintenance_jobs(now=now_kst)
+        status['position_exit_retry'] = self._runtime_read('exit_retries',
+            lambda: self._position_exit_retry_runtime_status(now=now_kst), {}, status)
+        maintenance = self._runtime_read('maintenance_jobs', lambda: self.maintenance_jobs(now=now_kst), [], status)
         status.update(self._automation_watchlist_status)
         status.update(
             {
                 'maintenance_jobs': maintenance,
                 'maintenance_job_count': len(maintenance),
-                'next_watchlist_refresh_at': self._next_watchlist_refresh_at(now_kst),
+                'next_watchlist_refresh_at': self._runtime_read('next_refresh', lambda: self._next_watchlist_refresh_at(now_kst), None, status),
                 'last_monitoring_run_at': self._last_monitoring_run_at.isoformat() if self._last_monitoring_run_at else None,
                 'last_monitoring_result': self._last_monitoring_result,
                 'monitoring_due_at': self._monitoring_due_at.isoformat() if self._monitoring_due_at else None,
@@ -332,6 +344,27 @@ class AutomationSchedulerService(SchedulerService):
             }
         )
         return status
+
+    def _runtime_read(self, stage, callback, default, status):
+        try:
+            return callback()
+        except Exception as exc:
+            status['scheduler_last_error'] = f'{stage}:{type(exc).__name__}'
+            if status.get('scheduler_health_status') == 'healthy':
+                status['scheduler_health_status'] = 'degraded'
+            return default
+
+    def _profile_buy_scheduler_service(self, db, *, kis_client=None):
+        if self.automation_profile_buy_scheduler_service is not None:
+            return self.automation_profile_buy_scheduler_service
+        from app.services.automation_profile_buy_scheduler_service import AutomationProfileBuySchedulerService
+        settings = get_settings()
+        client = kis_client or KisClient(settings, KisAuthManager(settings, db))
+        return AutomationProfileBuySchedulerService(
+            client=client, broker=KisBroker(client), validation_service=KisOrderValidationService(client),
+            order_sync_service=KisOrderSyncService(client), runtime_settings=self.runtime_settings,
+            strategy_profiles=self.automation_profiles,
+        )
 
     def _position_exit_retry_runtime_status(
         self,
@@ -417,107 +450,156 @@ class AutomationSchedulerService(SchedulerService):
         return result
 
     def _run_loop(self) -> None:
-        # Deliberately do not start the former US/KR, phase, soak, release,
-        # dry-run, or lifecycle scheduler loops. They are diagnostics or
-        # compatibility entry points, not production execution authorities.
+        # Only dispatch here. Every slow lane is bounded and single-flight.
         while not self._stop_event.is_set():
-            now_kst = datetime.now(KST)
             self._last_heartbeat_at = datetime.now(UTC)
-            self._next_profile_run_at = self._next_automation_run_at(now_kst)
-            day_key = now_kst.date().isoformat()
-            ny_day_key = now_kst.astimezone(ZoneInfo('America/New_York')).date().isoformat()
-            self._slot_runs = {
-                key for key in self._slot_runs
-                if key.startswith(f'{day_key}:KR:') or key.startswith(f'{ny_day_key}:US:')
-            }
-            self._automation_watchlist_refresh_slots = {
-                value
-                for value in self._automation_watchlist_refresh_slots
-                if value.startswith(f'{day_key}:')
-            }
-            schedule = self._selected_profile_schedule(now_kst)
-            if self._automatic_sync_due_at is None or now_kst >= self._automatic_sync_due_at:
-                self._automatic_sync_due_at = now_kst + timedelta(seconds=20)
-                self._safe_call(self._run_automatic_order_sync_once, now_kst)
-            # A due KIS exit retry is claimed and dispatched before monitors,
-            # profile analytics, watchlist work, and all new entry dispatches.
-            self._dispatch_due_position_exit_retries(now_kst)
-            if (
-                self._position_exit_monitor_due_at is None
-                or now_kst >= self._position_exit_monitor_due_at
-            ):
-                self._position_exit_monitor_due_at = now_kst + timedelta(seconds=20)
-                self._safe_call(self._run_position_exit_monitor_once, now_kst)
-            for slot, hour, minute in self._profile_slots(now_kst):
-                if now_kst.hour != hour or now_kst.minute != minute:
-                    continue
-                if not self._claim_slot(slot, now_kst):
-                    continue
-                self._safe_call(self._run_automation_tick, slot, now_kst, True)
-            market_regime_key = f"{day_key}:KR:market_regime:08:00"
-            if market_regime_scheduler_due(now_kst) and market_regime_key not in self._slot_runs:
-                self._slot_runs.add(market_regime_key)
-                self._safe_call(self._run_market_regime_scheduled_once, now_kst)
-            if self._monitoring_due_at is None or now_kst >= self._monitoring_due_at:
-                interval = self._monitoring_interval_seconds(schedule)
-                self._monitoring_due_at = now_kst + timedelta(seconds=interval)
-                self._safe_call(self._run_automation_monitoring_tick, now_kst)
-            for context in self._derived_watchlist_refresh_slots(
-                schedule,
-                now_kst,
-                include_next_day=True,
-            ):
-                if not (
-                    context['refresh_at'] <= now_kst < context['analysis_at']
-                ):
-                    continue
-                if self._has_active_position_exit_retry_for_schedule(schedule):
-                    continue
-                self._safe_call(
-                    self._run_automation_watchlist_refresh_scheduled_once,
-                    context['analysis_slot'],
-                    now_kst,
-                )
-            if self._outcome_labeling_due_at is None or now_kst >= self._outcome_labeling_due_at:
-                self._outcome_labeling_due_at = now_kst + timedelta(minutes=1)
-                self._safe_call(self._schedule_quant_ab_labeling, now_kst)
-            dispatcher_db = SessionLocal()
             try:
-                for provider in ('kis', 'alpaca'):
-                    for slot, _scheduled_at in self.user_auto_trading_scheduler_service.due_slots(
-                        dispatcher_db,
-                        provider=provider,
-                        now=now_kst,
-                    ):
-                        provider_date = now_kst.astimezone(
-                            ZoneInfo('Asia/Seoul' if provider == 'kis' else 'America/New_York')
-                        ).date().isoformat()
-                        dispatch_key = f'{provider_date}:{provider}:user_auto:{slot}'
-                        if dispatch_key in self._slot_runs:
-                            continue
-                        self._slot_runs.add(dispatch_key)
-                        self._safe_call(
-                            self._run_user_auto_dispatcher,
-                            provider,
-                            slot,
-                            now_kst,
-                        )
-            finally:
-                dispatcher_db.close()
-            for slot in self.user_watchlist_analysis_scheduler_service.due_slots(
-                now=now_kst,
+                self._dispatch_scheduler_iteration(self._as_kst(self.retry_now_provider()))
+                self._iteration_failed = False
+            except Exception as exc:
+                self._iteration_failed = True
+                self._last_scheduler_error = f"dispatch:{type(exc).__name__}"
+                logger.exception("scheduler_iteration_failed stage=dispatch error_type=%s", type(exc).__name__)
+            self._stop_event.wait(20)
+
+    def _dispatch_scheduler_iteration(self, now_kst):
+        self._task_supervisor.snapshot(now_kst)
+        self._task_supervisor.launch('admin-planner', lambda: self._plan_admin_slots(now_kst),
+                                     timeout=30, critical=True)
+        self._task_supervisor.launch('user-planner', lambda: self._plan_user_slots(now_kst),
+                                     timeout=30, critical=True)
+        self._task_supervisor.launch('maintenance-planner', lambda: self._plan_maintenance(now_kst),
+                                     timeout=30)
+
+    def _plan_admin_slots(self, now):
+        self._slot_dispatcher.expire_overdue(now)
+        schedule = self._selected_profile_schedule(now)
+        if self._is_kis_kr_schedule(schedule):
+            slots = [context['analysis_at'] for context in self._derived_watchlist_analysis_slots(schedule, now)]
+            self._slot_dispatcher.reconcile(account='admin', provider='kis',
+                profile_id=(schedule.get('profile') or {}).get('id'), slots=slots, now=now,
+                callback=self._run_scheduled_admin_slot)
+        self._next_profile_run_at = self._next_automation_run_at(now)
+        self._last_tick_at = datetime.now(UTC)
+
+    def _run_scheduled_admin_slot(self, slot, started):
+        try:
+            result = self._run_automation_tick(slot, started)
+            self._last_profile_run_result = str(
+                result.get('result') or result.get('status') or 'completed'
+            ) if isinstance(result, dict) else str(getattr(result, 'status', 'skipped'))
+            return result
+        except Exception:
+            self._last_profile_run_result = 'failed'
+            raise
+        finally:
+            self._last_profile_run_at = datetime.now(UTC)
+
+    def _plan_user_slots(self, now):
+        # Discovery owns its DB session. Workers receive ids, never ORM objects.
+        plans = []
+        db = SessionLocal()
+        try:
+            for provider, market, timezone in (
+                ('kis', 'KR', KST), ('alpaca', 'US', ZoneInfo('America/New_York')),
             ):
-                analysis_key = f'{day_key}:KR:user_watchlist_analysis:{slot}'
-                if analysis_key in self._slot_runs:
-                    continue
-                self._slot_runs.add(analysis_key)
-                self._safe_call(
-                    self._run_user_watchlist_analysis_dispatcher,
-                    slot,
-                    now_kst,
-                )
-            self._last_tick_at = datetime.now(UTC)
-            time.sleep(20)
+                # Keep due_slots in discovery so its errors are visible and isolated.
+                self.user_auto_trading_scheduler_service.due_slots(db, provider=provider, now=now)
+                for user, _settings, schedule in self.user_auto_trading_scheduler_service._eligible_user_profiles(
+                    db, provider=provider, market=market, now=now,
+                ):
+                    slots = []
+                    for slot in sorted(self.user_auto_trading_scheduler_service._profile_analysis_times(schedule)):
+                        hour, minute = map(int, slot.split(':'))
+                        slots.append(now.astimezone(timezone).replace(hour=hour, minute=minute, second=0, microsecond=0))
+                    plans.append((int(user.id), provider, (schedule.get('profile') or {}).get('id'), slots))
+        finally:
+            db.close()
+        for user_id, provider, profile_id, slots in plans:
+            self._slot_dispatcher.reconcile(account=f'user-{user_id}', provider=provider,
+                profile_id=profile_id, slots=slots, now=now,
+                callback=lambda slot, started, user_id=user_id, provider=provider:
+                    self._run_user_account_slot(user_id, provider, slot, started))
+        self._last_tick_at = datetime.now(UTC)
+
+    def _run_user_account_slot(self, user_id, provider, slot, now):
+        # Candidate/analysis services hold mutable per-run diagnostics, so each
+        # account gets an independent service and an independent DB session.
+        with SessionLocal() as db:
+            service = UserAutoTradingSchedulerService(automation_profiles=self.automation_profiles)
+            return service.run_provider_once(db, provider=provider, scheduler_slot=slot,
+                                             now=now, owner_user_id=user_id)
+
+    def _plan_maintenance(self, now):
+        schedule = self._selected_profile_schedule(now)
+        self._task_supervisor.launch('order-sync', lambda: self._run_automatic_order_sync_once(now), timeout=60)
+        # Dispatch synchronously inside its single-flight lane: do not enqueue
+        # retry Futures every poll while the previous retry is still blocked.
+        self._task_supervisor.launch('exit-retries',
+            lambda: self._dispatch_due_position_exit_retries(now, asynchronous=False), timeout=120)
+        self._task_supervisor.launch('position-monitor', lambda: self._run_position_exit_monitor_once(now), timeout=120)
+        day_key = now.date().isoformat()
+        regime_key = f'{day_key}:KR:market_regime:08:00'
+        if market_regime_scheduler_due(now) and regime_key not in self._slot_runs:
+            def regime():
+                self._run_market_regime_scheduled_once(now)
+                self._slot_runs.add(regime_key)
+            self._task_supervisor.launch('market-regime', regime, timeout=120)
+        if self._monitoring_due_at is None or now >= self._monitoring_due_at:
+            self._monitoring_due_at = now + timedelta(seconds=self._monitoring_interval_seconds(schedule))
+            self._task_supervisor.launch('monitoring', lambda: self._run_automation_monitoring_tick(now), timeout=30)
+        for context in self._derived_watchlist_refresh_slots(schedule, now, include_next_day=True):
+            if context['refresh_at'] <= now < context['analysis_at']:
+                slot = context['analysis_slot']
+                self._task_supervisor.launch('watchlist-refresh',
+                    lambda slot=slot: self._run_automation_watchlist_refresh_scheduled_once(slot, now), timeout=600)
+        if self._outcome_labeling_due_at is None or now >= self._outcome_labeling_due_at:
+            self._outcome_labeling_due_at = now + timedelta(minutes=1)
+            self._task_supervisor.launch('outcome-labeling', lambda: self.run_quant_ab_labeling_once(now=now), timeout=60)
+        for slot in self.user_watchlist_analysis_scheduler_service.due_slots(now=now):
+            key = f'{day_key}:KR:user_watchlist_analysis:{slot}'
+            if key not in self._slot_runs:
+                if self._task_supervisor.launch('user-watchlist',
+                    lambda slot=slot: self._run_user_watchlist_analysis_dispatcher(slot, now), timeout=600):
+                    self._slot_runs.add(key)
+
+    def scheduler_health(self, *, now=None):
+        current = self._as_kst(now)
+        tasks = self._task_supervisor.snapshot(current)
+        heartbeat_age = None if self._last_heartbeat_at is None else max(
+            0, (current - self._last_heartbeat_at).total_seconds())
+        tick_age = None if self._last_tick_at is None else max(0, (current - self._last_tick_at).total_seconds())
+        expired = [task for task in tasks if task['expired']]
+        if not self.is_running():
+            health = 'stopped'
+        elif heartbeat_age is None or heartbeat_age >= 90 or (tick_age is None and heartbeat_age >= 30):
+            health = 'stalled'
+        elif any(task['critical'] for task in expired) or (tick_age is not None and tick_age >= 90):
+            health = 'stalled'
+        elif expired or self._task_supervisor.errors or self._iteration_failed:
+            health = 'degraded'
+        elif self._last_tick_at is None:
+            health = 'degraded'
+        else:
+            health = 'healthy'
+        stage = max(tasks, key=lambda task: task['duration_ms']) if tasks else None
+        return {'scheduler_health_status': health,
+                'scheduler_heartbeat_age_seconds': heartbeat_age,
+                'scheduler_tick_age_seconds': tick_age,
+                'scheduler_last_error': self._last_scheduler_error or self._task_supervisor.last_error,
+                'scheduler_current_stage': stage['lane'] if stage else 'idle',
+                'scheduler_stage_started_at': stage['started_at'] if stage else None,
+                'scheduler_stage_duration_ms': stage['duration_ms'] if stage else 0,
+                'scheduler_tasks': tasks}
+
+    def start(self):
+        self._task_supervisor.resume()
+        return super().start()
+
+    def stop(self):
+        self._stop_event.set()
+        self._task_supervisor.cancel_all()
+        super().stop()
 
     def _run_market_regime_scheduled_once(self, now_kst: datetime | None = None):
         db = SessionLocal()
@@ -1302,8 +1384,8 @@ class AutomationSchedulerService(SchedulerService):
             if market_session.get('is_market_open') is not True:
                 return {
                     'scheduler': self.__class__.__name__,
-                    'status': 'skipped',
-                    'result': 'SKIPPED',
+                    'status': 'blocked',
+                    'result': 'blocked',
                     'reason': 'market_session_closed',
                     'profile_key': profile_key,
                     'slot': slot,
@@ -1977,14 +2059,11 @@ class AutomationSchedulerService(SchedulerService):
         finally:
             db.close()
     def _automation_watchlist_updater(self, db):
-        if self.automation_watchlist_update_service is None:
-            settings_obj = get_settings()
-            client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
-            self.automation_watchlist_update_service = KisWatchlistUpdateService(
-                client,
-                profile_service=MarketProfileService(),
-            )
-        return self.automation_watchlist_update_service
+        if self.automation_watchlist_update_service is not None:
+            return self.automation_watchlist_update_service
+        settings_obj = get_settings()
+        client = KisClient(settings_obj, KisAuthManager(settings_obj, db))
+        return KisWatchlistUpdateService(client, profile_service=MarketProfileService())
 
     def _automation_watchlist_skip(
         self,
@@ -2100,10 +2179,10 @@ class AutomationSchedulerService(SchedulerService):
         now: datetime,
         execution_mode: str,
     ) -> dict[str, Any]:
+        check_scheduler_watchlist_ready(db, now)
         service = self.profile_aware_dry_run_auto_buy_service
         if service is None:
             service = build_profile_aware_dry_run_auto_buy_service(db)
-            self.profile_aware_dry_run_auto_buy_service = service
         profile = schedule.get('profile') or {}
         request = ProfileAwareDryRunAutoBuyRequest(
             provider='kis',
@@ -2567,7 +2646,7 @@ class AutomationSchedulerService(SchedulerService):
             return self.profile_aware_guarded_live_auto_exit_service
         profile_buy = self._profile_buy_scheduler_service(db)
         client = getattr(profile_buy, 'client', None)
-        self.profile_aware_guarded_live_auto_exit_service = (
+        service = (
             ProfileAwareGuardedLiveAutoExitService(
                 client=client,
                 broker=getattr(profile_buy, 'broker', None),
@@ -2580,7 +2659,7 @@ class AutomationSchedulerService(SchedulerService):
                 execution_core=getattr(profile_buy, 'execution_core', None),
             )
         )
-        return self.profile_aware_guarded_live_auto_exit_service
+        return service
 
     def _positions_first(self, db) -> list[dict[str, Any]]:
         """Read and validate held KIS positions before any entry-side account work."""

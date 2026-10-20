@@ -19,6 +19,24 @@ def _account_limit_default(context, amount):
     return None if context.get_current_parameters().get('role') == 'admin' else amount
 
 
+class AutomationSchedulerSlot(Base):
+    """Durable dispatch ledger; terminal slots are never replayed."""
+
+    __tablename__ = 'automation_scheduler_slots'
+
+    id = Column(Integer, primary_key=True)
+    slot_key = Column(String(240), nullable=False, unique=True)
+    account_key = Column(String(80), nullable=False, index=True)
+    provider = Column(String(20), nullable=False)
+    profile_id = Column(Integer, nullable=True)
+    scheduled_at = Column(DateTime, nullable=False, index=True)
+    status = Column(String(20), nullable=False, default='pending', index=True)
+    reason = Column(String(240), nullable=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    result_json = Column(Text, nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
 

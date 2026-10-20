@@ -20,6 +20,7 @@ from app.core.constants import DEFAULT_GATE_LEVEL
 from app.db.models import WatchlistSnapshotItem, WatchlistSnapshotRun
 from app.services.market_data_snapshot_service import MarketDataSnapshotService
 from app.services.quant_signal_service import QuantSignalService
+from app.services.scheduler_task_supervisor import check_scheduler_task_active
 from app.services.technical_indicator_service import (
     EMPTY_TECHNICAL_INDICATORS,
     TechnicalIndicatorService,
@@ -136,6 +137,7 @@ class WatchlistSnapshotService:
             market_data = self.market_data_service_factory(client)
 
             for source in universe:
+                check_scheduler_task_active()
                 item, scored, had_error = self._build_item(
                     source,
                     market_data=market_data,

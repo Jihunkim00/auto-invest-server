@@ -1,5 +1,6 @@
 from app.brokers.base import Broker, BrokerNotEnabledError
 from app.brokers.kis_client import KisClient
+from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed
 
 
 class KisBroker(Broker):
@@ -40,6 +41,7 @@ class KisBroker(Broker):
         notional: float | None = None,
         qty: int | None = None,
     ):
+        check_scheduler_buy_allowed()
         self._require_real_orders_enabled()
         if qty is None:
             raise ValueError("KIS market buy requires qty; notional buy is unsupported.")

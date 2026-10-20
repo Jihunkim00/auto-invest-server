@@ -29,6 +29,14 @@ from app.services.scheduler_service import scheduler_service
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
 
+@router.get('/health')
+def get_scheduler_health():
+    """Thread/progress health remains readable even when database reads fail."""
+    return {'scheduler_engine_running': scheduler_service.is_running(),
+            'scheduler_last_tick_at': scheduler_service._last_tick_at,
+            **scheduler_service.scheduler_health()}
+
+
 _CANONICAL_IGNORED_KIS_SCHEDULER_FLAGS = (
     "kis_scheduler_enabled",
     "kis_scheduler_live_enabled",
@@ -385,6 +393,12 @@ def get_scheduler_status(db: Session = Depends(get_db)):
             "canonical_scheduler_active": True,
             "legacy_readiness_diagnostic_only": True,
         }
+
+    scheduler_health = scheduler_runtime.get('scheduler_health_status')
+    if canonical_scheduler['active'] and scheduler_health in {'stalled', 'stopped', 'degraded'}:
+        warning_level = 'scheduler_unhealthy'
+        warning_message = f'Scheduler health: {scheduler_health}. Check scheduler progress and failed slots.'
+        user_friendly_summary = warning_message
 
     return {
         **scheduler_runtime,

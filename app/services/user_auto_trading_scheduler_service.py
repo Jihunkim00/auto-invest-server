@@ -29,6 +29,7 @@ from app.db.models import (
     UserTradingSettings,
 )
 from app.services.market_session_service import MarketSessionService
+from app.services.scheduler_task_supervisor import check_scheduler_watchlist_ready
 from app.services.calendar_gap_risk_service import CalendarGapRiskService
 from app.services.automation_profile_service import AutomationProfileService
 from app.services.automation_profile_watchlist_service import AutomationProfileWatchlistService
@@ -117,6 +118,7 @@ class UserAutoTradingCandidateService:
         normalized_provider = str(provider or '').strip().lower()
         if normalized_provider != 'kis' or not profile:
             return []
+        check_scheduler_watchlist_ready(db, now or datetime.now(UTC))
         try:
             snapshot = self.profile_watchlists.build(
                 db,
@@ -624,6 +626,7 @@ class UserAutoTradingSchedulerService:
         provider: str,
         scheduler_slot: str,
         now: datetime | None = None,
+        owner_user_id: int | None = None,
     ) -> dict[str, Any]:
         normalized_provider = str(provider or '').strip().lower()
         if normalized_provider not in _SCOPE:
@@ -652,6 +655,8 @@ class UserAutoTradingSchedulerService:
             .all()
         )
         for user in users:
+            if owner_user_id is not None and int(user.id) != owner_user_id:
+                continue
             if str(user.role or '').strip().lower() == 'admin':
                 aggregate['ignored'] += 1
                 continue

@@ -673,8 +673,10 @@ class _HomeAutomationProfileCard extends StatelessWidget {
                 style: Theme.of(context).textTheme.titleMedium),
           ),
           _SafetyPill(
-            text: status.schedulerEngineRunning ? "엔진 실행 중" : "엔진 중지",
-            color: status.schedulerEngineRunning
+            text: status.schedulerHeartbeatHealthy
+                ? "엔진 정상"
+                : "엔진 확인 필요 (${status.schedulerHealthStatus})",
+            color: status.schedulerHeartbeatHealthy
                 ? Colors.greenAccent
                 : Colors.orangeAccent,
           ),

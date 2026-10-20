@@ -1,0 +1,45 @@
+{
+  "incident_date": "2026-10-20",
+  "root_cause_status": "root_cause_unconfirmed",
+  "market_data": "synthetic_fixture_reconstruction",
+  "gpt": "GPT MOCKED",
+  "verification": {
+    "new_replay_tests": 13,
+    "targeted_tests": 55,
+    "mandatory_replay_tests": 58,
+    "backend": "passed",
+    "flutter_tests": 773,
+    "flutter_analyze": "No issues found",
+    "compileall": "passed",
+    "git_diff_check": "passed",
+    "backend_tests": 2492,
+    "backend_failures": 0,
+    "backend_warnings": 10
+  },
+  "intraday_simulation": {
+    "fixture_based_reconstruction": true,
+    "gpt": "GPT MOCKED",
+    "simulation_only": true,
+    "real_order_submitted": false,
+    "actual_kis_submit_count": 0,
+    "mock_submit_count": 1,
+    "simulated_order_status": "FILLED",
+    "watchlist_count": 200,
+    "runtime_a_count": 50,
+    "c_count": 5,
+    "gpt_count": 5,
+    "selected_symbol": "000100",
+    "c_score": 74.24,
+    "gpt_score": 70.0,
+    "final_score": 73.18,
+    "quantity": 9.0,
+    "slot_status": "completed"
+  },
+  "actual_post_close": {
+    "at": "2026-10-20T17:33:00.596201+09:00",
+    "status": "BLOCKED",
+    "reason": "market_session_closed",
+    "mock_submit_count": 0,
+    "actual_kis_submit_count": 0
+  }
+}

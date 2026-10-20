@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextvars import copy_context
+
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -54,7 +56,9 @@ class AccountSnapshotRetryCoordinator:
             if key in self._pending or not self._capacity.acquire(blocking=False):
                 return False
             self._pending.add(key)
-        self._start_timer(key, callback, delay_seconds)
+        context = copy_context()
+        original_callback = callback
+        self._start_timer(key, lambda: context.run(original_callback), delay_seconds)
         return True
 
     def pending_count(self, scope: str | None = None) -> int:

@@ -859,6 +859,9 @@ class KisClient:
         qty: int,
         order_type: str = "market",
     ) -> dict:
+        if str(side).lower() == 'buy':
+            from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed
+            check_scheduler_buy_allowed()
         if not bool(getattr(self.settings, "kis_enabled", False)):
             raise BrokerNotEnabledError(
                 "KIS domestic cash order submission requires KIS_ENABLED=true."
@@ -1038,6 +1041,9 @@ class KisClient:
         )
 
         def send_request(access_token: str | None = None) -> tuple[dict, int]:
+            from app.services.scheduler_task_supervisor import check_scheduler_task_active
+            if request_kind == 'read_only':
+                check_scheduler_task_active()
             headers = self.build_headers(
                 tr_id=tr_id,
                 include_auth=True,
@@ -1070,6 +1076,8 @@ class KisClient:
                     details=details,
                 ) from exc
 
+            if request_kind == 'read_only':
+                check_scheduler_task_active()
             try:
                 data = response.json()
             except ValueError as exc:

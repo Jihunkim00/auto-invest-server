@@ -17,6 +17,7 @@ class SchedulerStatus {
     this.activePositionCount = 0,
     this.warningMessage = '',
     this.schedulerEngineRunning = false,
+    this.schedulerHealthStatus = 'unknown',
     this.schedulerStartedAt,
     this.schedulerLastHeartbeatAt,
     this.schedulerLastTickAt,
@@ -93,6 +94,7 @@ class SchedulerStatus {
       activePositionCount: _readInt(json['active_position_count'], 0),
       warningMessage: _readString(json['warning_message'], ''),
       schedulerEngineRunning: _readBool(json['scheduler_engine_running']) ?? false,
+      schedulerHealthStatus: _readString(json['scheduler_health_status'], 'unknown'),
       schedulerStartedAt: _readNullableString(json['scheduler_started_at']),
       schedulerLastHeartbeatAt: _readNullableString(json['scheduler_last_heartbeat_at']),
       schedulerLastTickAt: _readNullableString(json['scheduler_last_tick_at']),
@@ -168,6 +170,7 @@ class SchedulerStatus {
   final int activePositionCount;
   final String warningMessage;
   final bool schedulerEngineRunning;
+  final String schedulerHealthStatus;
   final String? schedulerStartedAt;
   final String? schedulerLastHeartbeatAt;
   final String? schedulerLastTickAt;
@@ -205,7 +208,7 @@ class SchedulerStatus {
 
   bool get schedulerHeartbeatHealthy {
     final raw = schedulerLastHeartbeatAt;
-    if (!schedulerEngineRunning || raw == null) return false;
+    if (!schedulerEngineRunning || raw == null || schedulerHealthStatus != 'healthy') return false;
     final heartbeat = DateTime.tryParse(raw);
     if (heartbeat == null) return false;
     return DateTime.now().toUtc().difference(heartbeat.toUtc()).inSeconds < 90;

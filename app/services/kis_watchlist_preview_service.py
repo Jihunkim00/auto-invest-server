@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.scheduler_task_supervisor import check_scheduler_task_active
+
 import json
 import time
 import uuid
@@ -235,6 +237,7 @@ class KisWatchlistPreviewService:
                 else effective_max_candidate_price
             )
         for raw in configured_symbols:
+            check_scheduler_task_active()
             raw_symbol = self.profile_service.normalize_symbol(raw.get("symbol"), "KR")
             market_snapshot = self.market_data_snapshot_service.snapshot(
                 raw_symbol,
@@ -390,6 +393,7 @@ class KisWatchlistPreviewService:
             queue = list(runtime_quant_ranked_candidates[: self.gpt_candidate_limit])
             attempt_rank = 0
             while queue:
+                check_scheduler_task_active()
                 runtime_item = queue.pop(0)
                 symbol = str(runtime_item.get("symbol") or "").strip().upper()
                 if not symbol:
@@ -2455,7 +2459,7 @@ class KisPreviewGptAdvisor:
         self.client = client
         self.advisory_language = advisory_language
         if self.client is None and self.settings.openai_api_key:
-            self.client = OpenAI(api_key=self.settings.openai_api_key)
+            self.client = OpenAI(api_key=self.settings.openai_api_key, timeout=30, max_retries=0)
 
     def analyze(
         self,

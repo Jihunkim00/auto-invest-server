@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed, check_scheduler_watchlist_ready
+
 import json
 import time
 import math
@@ -1262,6 +1264,8 @@ class UserTradingExecutionService:
         broker_called = False
         try:
             client = self.kis_live_client_factory(db, user, credentials)
+            check_scheduler_buy_allowed()
+            check_scheduler_watchlist_ready(db, self.now_provider())
             if authorization_mode == 'automatic' and time.monotonic() - sizing.get('possible_order_checked_clock', 0) > 10:
                 order.internal_status = InternalOrderStatus.REJECTED_BY_SAFETY_GATE.value
                 db.commit()
@@ -1535,6 +1539,7 @@ class UserTradingExecutionService:
         broker_called = False
         try:
             client = client_factory(credentials)
+            check_scheduler_buy_allowed()
             broker_called = True
             broker_order = client.submit_market_buy_qty(
                 symbol=base["requested_symbol"],

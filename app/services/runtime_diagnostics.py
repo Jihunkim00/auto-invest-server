@@ -89,10 +89,13 @@ def log_startup_state(settings: Any, scheduler_service: Any) -> None:
     except Exception as exc:
         LOGGER.warning("startup runtime state unavailable: %s", exc)
 
+    health_reader = getattr(scheduler_service, 'scheduler_health', None)
+    health = health_reader() if callable(health_reader) else {}
     LOGGER.info(
         "startup app_env=%s database_url=%s scheduler_enabled=%s "
         "kis_scheduler_effective=%s scheduler_thread_alive=%s "
-        "scheduler_authority=%s production_trading_job_count=%s",
+        "scheduler_authority=%s production_trading_job_count=%s "
+        "scheduler_health_status=%s scheduler_current_stage=%s",
         getattr(settings, "app_env", None),
         sanitized_database_url(str(getattr(settings, "database_url", ""))),
         state["scheduler_enabled"],
@@ -100,6 +103,8 @@ def log_startup_state(settings: Any, scheduler_service: Any) -> None:
         _scheduler_thread_alive(scheduler_service),
         getattr(scheduler_service, "__class__", type(scheduler_service)).__name__,
         len(state["production_trading_jobs"]),
+        health.get('scheduler_health_status', 'unknown'),
+        health.get('scheduler_current_stage', 'unknown'),
     )
 
 

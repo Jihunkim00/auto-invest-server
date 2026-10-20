@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.scheduler_task_supervisor import check_scheduler_buy_allowed, check_scheduler_watchlist_ready
+
 import json
 import time
 from datetime import UTC, datetime
@@ -142,6 +144,8 @@ class KisAutomationExecutionCore:
         return int(status_code), sanitize_kis_payload(payload)
 
     def submit_market_buy(self, db: Session, **kwargs) -> dict[str, Any]:
+        check_scheduler_buy_allowed()
+        check_scheduler_watchlist_ready(db, self.now_provider())
         order = kwargs['order']
         try:
             with AccountTradingLimitService().buy_execution_claim(
@@ -571,6 +575,13 @@ class KisAutomationExecutionCore:
 
         if side == 'buy' and time.monotonic() - guard.get('possible_order_checked_clock', 0) > self.POSSIBLE_ORDER_MAX_AGE_SECONDS:
             return self._blocked(db, order, {'allowed': False, 'reason': 'possible_order_snapshot_stale'})
+        if side == 'buy':
+            from app.services.scheduler_task_supervisor import SchedulerTaskExpired
+            try:
+                check_scheduler_buy_allowed()
+                check_scheduler_watchlist_ready(db, self.now_provider())
+            except SchedulerTaskExpired as exc:
+                return self._blocked(db, order, {'allowed': False, 'reason': str(exc)})
         try:
             response = submitter()
 
